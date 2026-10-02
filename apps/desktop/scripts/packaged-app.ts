@@ -315,9 +315,8 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
  * (`docs/plans/electron-upstream-bugs.md` §1).
  *
  * Closing the window only hides it, so a mistake in that handler can keep
- * `app.quit()` from finishing. After 10 seconds the process is killed, by the
- * PID Playwright started, and this fails saying so: nothing is left running
- * (see `waitForExitOrKill`).
+ * `app.quit()` from finishing. The process is then killed, and this fails
+ * saying so: nothing is left running (see `quitAndWaitForExit`).
  *
  * A crash while quitting is checked here because nothing else would notice
  * it: the test or the measurement is already done, and only the crash report
@@ -329,15 +328,120 @@ export async function quitApp(app: ElectronApplication): Promise<void> {
   // Playwright emits `close` once the process has exited and Playwright has
   // finished with it.
   const closed = new Promise<void>((resolve) => app.once("close", () => resolve()));
-  await app.evaluate(({ app }) => {
-    setTimeout(() => app.quit(), 0);
-  });
   try {
-    await waitForExitOrKill(child.pid!, "the app", "app.quit()");
+    await quitAndWaitForExit(
+      child,
+      async () => {
+        await app.evaluate(REPORT_MAIN_EXIT);
+        await app.evaluate(({ app }) => {
+          setTimeout(() => app.quit(), 0);
+        });
+      },
+      "app.quit()",
+    );
   } finally {
     await closed;
   }
   assertExitedCleanly(child);
+}
+
+/**
+ * The line main writes to its standard output when its Node process emits
+ * `exit`, once `REPORT_MAIN_EXIT` has run in main.
+ */
+const MAIN_EXIT_LINE = "[e2e] main has finished quitting";
+
+/**
+ * An expression that makes main write `MAIN_EXIT_LINE` to its standard output
+ * when its Node process emits `exit`. The write is synchronous because
+ * nothing asynchronous runs after `exit`. The expression evaluates to
+ * `undefined`, so no object is sent back from main.
+ */
+const REPORT_MAIN_EXIT = `void process.once("exit", () => process.getBuiltinModule("fs").writeSync(1, ${JSON.stringify(`${MAIN_EXIT_LINE}\n`)}))`;
+
+/** How long main may take to finish quitting (see `quitAndWaitForExit`). */
+const MAIN_QUIT_LIMIT_MS = 10_000;
+
+/**
+ * How long the process may take to end once main has finished quitting (see
+ * `quitAndWaitForExit`).
+ */
+const TEARDOWN_LIMIT_MS = 30_000;
+
+/**
+ * Starts a quit of the app with `startQuit`, and waits until the app's
+ * process `child`, a child of this process, has ended. `startQuit` must run
+ * `REPORT_MAIN_EXIT` in main before it starts the quit, so that main reports
+ * when it has finished quitting. `since` names the quit in the failures.
+ *
+ * When `startQuit` fails, the process is killed and this fails with the same
+ * error. The wait has two parts, each with its own limit. When a limit
+ * passes, the process is killed, so nothing is left running, and this fails
+ * saying which part took too long:
+ *
+ * - Main's own quit: the window's `close` handler, `will-quit`, and the
+ *   shutdown of main's runtime, up to Node's `exit`. This is the app's code,
+ *   and it takes about 0.2 s, so 10 s means it is stuck.
+ * - Chromium's teardown after that: it stops its helper processes and writes
+ *   the databases in the user data directory to disk, waiting on fsync. That
+ *   is not the app's code, and it is as slow as the disk. With other builds
+ *   and test runs writing to the same disk, it took more than 10 s while main
+ *   had finished in 0.2 s.
+ *
+ * The wait ends on the child's `exit` event rather than on the process ID,
+ * so a child that has exited but that Node has not reaped yet counts as
+ * ended.
+ */
+async function quitAndWaitForExit(
+  child: ChildProcess,
+  startQuit: () => Promise<void>,
+  since: string,
+): Promise<void> {
+  const exited = new Promise<void>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else child.once("exit", () => resolve());
+  });
+  let output = "";
+  const mainFinished = new Promise<void>((resolve) => {
+    // Both callers start the app with its standard output on a pipe.
+    child.stdout!.on("data", (chunk: Buffer | string) => {
+      output += String(chunk);
+      if (output.includes(MAIN_EXIT_LINE)) resolve();
+    });
+  });
+  const waitOrKill = async (event: Promise<void>, limitMs: number, failure: string) => {
+    let timer: NodeJS.Timeout | undefined;
+    const late = await Promise.race([
+      event.then(() => false),
+      new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), limitMs))),
+    ]);
+    clearTimeout(timer);
+    if (!late) return;
+    child.kill("SIGKILL");
+    await exited;
+    throw new Error(failure);
+  };
+
+  try {
+    await startQuit();
+  } catch (error) {
+    // Main did not answer, so it cannot be quit: the callers stop the app
+    // after a test, and nothing may be left running.
+    child.kill("SIGKILL");
+    await exited;
+    throw error;
+  }
+  // A process that ends before it reports, as on a crash, has finished too.
+  await waitOrKill(
+    Promise.race([mainFinished, exited]),
+    MAIN_QUIT_LIMIT_MS,
+    `main was still quitting ${String(MAIN_QUIT_LIMIT_MS / 1000)} s after ${since}, so the app was killed`,
+  );
+  await waitOrKill(
+    exited,
+    TEARDOWN_LIMIT_MS,
+    `the app was still running ${String(TEARDOWN_LIMIT_MS / 1000)} s after main finished quitting, so it was killed`,
+  );
 }
 
 /**
@@ -565,13 +669,22 @@ export async function stopApp(pid: number): Promise<void> {
 }
 
 /**
- * Stops an app started by `launchPlainApp` if it is still running (see
- * `stopApp`). The PID of a process that has already exited may belong to
- * another process by now, so an app that has exited is left alone.
+ * Stops an app started by `launchPlainApp` if it is still running: sends it
+ * SIGTERM, which quits the app as `app.quit()` does, and waits until the
+ * process has ended (see `quitAndWaitForExit`). An app that has exited is
+ * left alone.
  */
 export async function stopPlainApp(app: PlainApp): Promise<void> {
   const child = app.process;
-  if (child.exitCode === null && child.signalCode === null) await stopApp(child.pid!);
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await quitAndWaitForExit(
+    child,
+    async () => {
+      await evaluateInMain(app.inspectorUrl, REPORT_MAIN_EXIT);
+      child.kill("SIGTERM");
+    },
+    "SIGTERM",
+  );
 }
 
 /** Formats a Markdown table. */
