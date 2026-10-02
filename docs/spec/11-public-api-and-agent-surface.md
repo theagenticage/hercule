@@ -347,6 +347,11 @@ Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
 | `connection.query` / `connection.read` | `{ type?, status? }` (`type` is the qualified id, `github/github`) / `{ connectionId }` (status, labels, credential *references*) | `connection.read` | `GET /connections[/{id}]` |
 | `connection.create` / `update` / `delete` | record fields incl. labels and default topic | `connection.manage` | `POST` / `PATCH` / `DELETE /connections[/{id}]` |
 | `connection.setCredentials` | `{ connectionId, ... }` (values in, references out) | `connection.manage` | `POST /connections/{id}/credentials` |
+| `connection.startOAuth` | `{ type, origin, label?, labels?, config?, connectionId? }` (`connectionId` on a reconnect) -> `{ authorizationUrl }`; `invalid_state` when the plugin has no OAuth client credentials | `connection.manage` | `POST /oauth/start` |
+| `connection.startDevice` | `{ type, label?, labels?, config?, connectionId? }` -> `{ setupId, userCode, verificationUri, interval, expiresAt }`; `invalid_state` when the provider refuses to start a device flow or cannot be reached | `connection.manage` | `POST /oauth/device/start` |
+| `connection.pollDevice` | `{ setupId }` -> `pending` / `slow-down` / `unreachable` with the interval to wait, `done` with the Connection, or `expired` / `denied` / `rejected` / `failed` with a message. Every ending is a status, not an error | `connection.manage` | `POST /oauth/device/poll` |
+
+*(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* `connection.startOAuth` was built without a row here; it is added with the two device flow operations. Their semantics are in [./05-plugins.md](./05-plugins.md) section 10.1.
 
 `connection.use` is a grant, not an operation: it is what a plugin-contributed action (`github/pr.merge`) requires when it names the Connection it acts as. In v1 nothing a session token calls directly requires it (sessions cannot invoke plugin actions outside a run), so it is dormant until the Hercule MCP server or the agent-tools extension point lands.
 
@@ -583,7 +588,7 @@ Spelling rules:
 
 - A command is `hercule <noun>... <verb>`, every word kebab-case. The first noun is the operation's entity in kebab-case, singular as the id is (`api-key`, `session`).
 - Standard verbs: `query` is `list`; `read`, `create`, `update` and `delete` keep their names. `hercule task list`, `hercule task read <id>`.
-- A custom verb is kebab-cased as a verb phrase: `hercule runner refresh-facts`, `hercule user set-password`, `hercule connection start-oauth`.
+- A custom verb is kebab-cased as a verb phrase: `hercule runner refresh-facts`, `hercule user set-password`, `hercule connection start-oauth`, `hercule connection start-device`.
 - A custom verb of the form `<action><Thing>`, where the things have ids and a listing of their own, becomes a nested noun with standard verbs: `runner.createJoinToken`, `runner.queryJoinTokens` and `runner.revokeJoinToken` are `hercule runner join-token create | list | revoke <id>`.
 - An owned sub-resource that is its own operation entity keeps its own root noun: `hercule input list <session-id>`, `hercule transcript read <session-id>`.
 - One spelling per command. No aliases, no second spelling; the operation id is not accepted as a command.

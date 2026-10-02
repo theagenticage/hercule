@@ -313,7 +313,7 @@ Failure handling:
 Connections are core-owned; plugins define types and drive setup. The full Connection model, credential kinds, setup flows and the labels/topic rule are in [./08-events-and-connections.md](./08-events-and-connections.md). The plugin-side facts ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md)):
 
 - A plugin **declares the connection types it services** through the `connections` capability. The plugin declares a bare word; the host mints the qualified id `<pluginId>/<word>` and that is the type everywhere downstream, so two plugins may declare the same word and both load ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). Two plugins wanting the same external service each define their own type and the user authenticates twice. Deduping on OAuth identity is post-v1.
-- The plugin **drives the flow that establishes a connection**: paste-a-token (GitHub PAT, Slack and Discord bot tokens) or a BYO-OAuth-client redirect flow to the controller's own origin (Google). Policy is pinned in [./13-security.md](./13-security.md): BYO OAuth client where the provider demands one, no Hercule-hosted relay, paste-a-token as the universal fallback. The controller displays the exact redirect URI derived from the origin the user's browser is using.
+- The plugin **drives the flow that establishes a connection**: paste-a-token (GitHub PAT, Slack and Discord bot tokens), ~~or~~ a BYO-OAuth-client redirect flow to the controller's own origin (Google), or a device flow through an OAuth App whose public client id the plugin ships (GitHub) *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*. A type may offer more than one, and the user picks one per connection (section 10.1). Policy is pinned in [./13-security.md](./13-security.md): BYO OAuth client where the provider demands ~~one~~ a client secret, no Hercule-hosted relay, no shipped client secret, paste-a-token as the universal fallback. The controller displays the exact redirect URI derived from the origin the user's browser is using.
 - The **core owns** storage, listing, status, the single connected-accounts UI, and the credential secrets. The plugin reads a connection's decoded credentials and per-connection config through the `connections` capability and reports status (for example "token expiring") back through it.
 - **Ingest is per connection**: one loop per enabled connection, every event stamped with its `connectionId`. Triggers select connections explicitly; outbound actions name their connection.
 - A Resource may reference the Connection used to reach it; the `resources` capability exposes that link to the plugin.
@@ -327,14 +327,16 @@ interface ConnectionTypeContribution {
   type: string                                 // the bare word: "github", "gmail", "discord", "slack"; the host qualifies it to `<pluginId>/<word>`. No `/` in the word
   displayName: string
   setup: SetupStep[]
-  validate(credentials: unknown, ctx: ValidateContext): Effect<{ displayName: string; detail?: string }>
+  validate(credentials: Record<string, string>): Effect<{ displayName: string; detail?: string }, ConnectionValidationFailed, HttpClient>  // the pasted fields, or { accessToken } from a redirect or device flow
   oauth?: OAuthDeclaration                     // required iff an oauth step appears
+  device?: DeviceDeclaration                   // required iff a device step appears
 }
 
 type SetupStep =
   | { kind: "checklist"; markdown: string }    // platform-side prep: Discord intents + invite URL; Slack Socket Mode + scopes; the Google recipe
   | { kind: "credentials"; fields: CredentialField[] }   // one or more secret fields (Slack: bot token + app-level token)
   | { kind: "oauth" }                          // run the core OAuth2 client against `oauth`
+  | { kind: "device" }                         // run the core device flow client against `device`
   | { kind: "pairing" }                        // core-owned: DM the bot a one-time code ([./12-assistants.md](./12-assistants.md) section 4.1); channels only
 
 interface OAuthDeclaration {
@@ -343,10 +345,32 @@ interface OAuthDeclaration {
   scopes: string[]
   extraParams?: Record<string, string>         // Google: { access_type: "offline", prompt: "consent" }
 }
+
+interface DeviceDeclaration {
+  clientId: string                             // public: a device flow needs no client secret, so the plugin ships the id
+  deviceCodeUrl: string
+  tokenUrl: string
+  scopes: string[]
+}
 ```
 
-- **The core runs the OAuth dance.** One generic authorization-code client (PKCE, token exchange, refresh) lives in the core, parameterised by the plugin's `OAuthDeclaration`; the plugin writes no OAuth code and never touches the client secret. Refreshed access tokens are what `ctx.connection.credentials` hands the plugin at poll or execute time; a refresh failure sets `needs-reauth` uniformly.
+*(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The `device` step and its `DeviceDeclaration` are new. The bullets from "Which flows a type offers" to "Token endpoint errors" below describe them, and the rules for a type that offers more than one flow.
+
+- **The core runs the OAuth dance.** One generic authorization-code client (PKCE, token exchange, refresh) lives in the core, parameterised by the plugin's `OAuthDeclaration`; the plugin writes no OAuth code and never touches the client secret. The device flow client (RFC 8628) sits beside it, parameterised by the plugin's `DeviceDeclaration`, and shares its token store and refresh *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*. Refreshed access tokens are what `ctx.connection.credentials` hands the plugin at poll or execute time; a refresh failure sets `needs-reauth` uniformly.
 - **Callback routing**: the core mints an opaque `state` referencing a pending-setup row `{type, connectionId?, expiresAt}` (the qualified type names its plugin) and serves `/oauth/callback` itself; the row, not the plugin, is what the callback resolves. The plugin is never routed a request.
+- **Which flows a type offers.** *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))* Three steps each obtain the credential in their own way: `credentials` (the user pastes it), `oauth` (a redirect flow) and `device` (a device flow). A type declares the steps it offers; when it declares more than one, the user picks one for each connection. GitHub declares `device` and `credentials`. Registration refuses a type when:
+  - it has an `oauth` or `device` step without the matching declaration, because the flow would have nowhere to go;
+  - it has a declaration with no step for it, because nothing could ever use it;
+  - it has both an `oauth` and a `device` step, because a refresh would not know which client issued the tokens a connection holds.
+- **The flow belongs to the connection, not its type.** *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))* The core reads it from the secrets the connection holds. A connection set up by a redirect flow or a device flow holds the `oauth.tokens` secret, and `credentials()` hands the plugin `{ accessToken }`. A connection set up by paste holds the declared credential fields, and `credentials()` hands the plugin those fields. `validate` receives the same shape, so a type that offers both reads whichever it was given. A reconnect offers the same choice as a first setup, and replaces whichever secrets the connection held.
+- **The device flow.** *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))* `connection.startDevice` asks the provider for a device code and writes a pending device setup row: `{setupId, type, connectionId?, label, labels, config, deviceCode, interval, nextPollAt, expiresAt}`. It returns the setup id, the user code, the verification page, the interval and the expiry. Unlike the redirect flow, whose `state` is the row's identity because the provider sends it back, the device flow's handle is an opaque `setupId` the controller mints: the device code never leaves the controller, because anyone holding it could collect the token once the user approves. Expired rows are deleted on the next start, as pending-setup rows are. Polling follows these rules:
+  - **The client drives it, the controller paces it.** There is no controller-side timer. The web app (or `hercule connection poll-device`) calls `connection.pollDevice` while the setup screen is open. A poll before `nextPollAt` answers `pending` without calling the provider, so no client can poll the provider faster than it allows.
+  - **A row is spent once.** Only one poll can turn a setup into a connection. A poll that ends the flow spends the row, and a poll on an unknown, spent or expired row answers `expired`.
+  - **The outcomes** are `pending`, `slow-down` (the provider asked for slower polling; the answer carries the new, longer interval), `unreachable` (the provider could not be reached this time; the flow stays open), `done` (with the connection), `expired`, `denied` (the user declined at the provider), `rejected` (the provider issued a token but `validate` refused the account) and `failed` (the provider refused the flow for another reason, such as a bad client id or device flow being disabled on its app). The last five end the flow.
+  - **On `done`** the token set is stored under `oauth.tokens`, so the refresh path of the redirect flow applies unchanged. A token set with no expiry and no refresh token, such as a GitHub OAuth App token, is never refreshed; when the provider rejects it, the plugin reports `needs-reauth` (section 8.1).
+- **Token endpoint errors.** *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))* Some providers, GitHub among them, answer a token request they refuse with HTTP 200 and an `error` field in the body. A body with an `error` field is never a success, whatever the status. What it means depends on the request:
+  - In a code exchange or a refresh, any `error` is a refusal. A refused refresh sets `needs-reauth`, never the retried `error` state, because waiting will not fix it.
+  - In a device flow poll, the RFC 8628 codes are the poll's outcomes: `authorization_pending` is `pending`, `slow_down` is `slow-down`, `expired_token` is `expired` and `access_denied` is `denied`. Any other code is `failed`.
 - **A pending setup is not a Connection.** The Connection record exists once `validate()` has passed; `validate` names the account (`displayName`: the GitHub login, the Gmail address) for the Connections screen. The status enum stays `connected | needs-reauth | error | disabled` ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.1).
 - **Reconnect reuses the Connection id**, so triggers and Resources stay attached ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.4).
 
@@ -366,7 +390,7 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 
 | Plugin | Contributions | Connection types | Notes |
 |---|---|---|---|
-| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (PAT paste; BYO OAuth app + device flow optional) | per-connection watch list seeded from repo Resources; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)) |
+| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (~~PAT paste; BYO OAuth app + device flow optional~~ device flow through Hercule's own OAuth App, PAT paste as the fallback *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*) | per-connection watch list seeded from repo Resources; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)) |
 | `gmail` | event source (`history.list` polling: headers, subject, snippet, ids); workflow actions (body fetch on demand) | `gmail/gmail` (BYO Google OAuth client, redirect flow) | emits `system` enrichment where a sender rule recognises the originating system |
 | `discord` | channel (+ notification sink) | `discord/discord` (bot token paste) | conversation container = channel or DM |
 | `slack` | channel (+ notification sink) | `slack/slack` (bot token paste) | conversation container = thread |
