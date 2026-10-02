@@ -65,8 +65,8 @@ export class BinaryNotFound extends Data.TaggedError("BinaryNotFound")<{
  * The error a command fails with when it exits with an error, prints output
  * that does not decode, or runs past its time limit. `line` is the reason, in
  * one line: usually the last line the binary wrote to stderr, without its
- * `hercule: ` prefix. Spec 15 §4 makes each of those one line that tells the
- * user what to do.
+ * `hercule: ` prefix. Spec 15 §4 makes each of those one line that names
+ * what the user should do.
  */
 export class BinaryCommandFailed extends Data.TaggedError("BinaryCommandFailed")<{
   readonly line: string;

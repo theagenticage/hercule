@@ -55,7 +55,7 @@ const isAllowedArgument = (arg: string): boolean =>
  *
  * - `packaged` is Electron's `app.isPackaged`. Development runs are never
  *   refused.
- * - `inspectorOpen` tells whether the Node inspector is open. Pass the
+ * - `inspectorOpen` is whether the Node inspector is open. Pass the
  *   inspector's real state, `inspector.url() !== undefined`, rather than
  *   whether `--inspect` is on the command line, so that `--inspect` passed to
  *   a release package, whose fuses ignore it, does not get around the check.

@@ -23,8 +23,8 @@ interface WebFrame {
 }
 
 /**
- * The error a check of an IPC message fails with. `message` says why main
- * refuses the message; it goes back to the renderer and into main's log.
+ * The error a check of an IPC message fails with. `message` is the reason
+ * main refuses the message; it goes back to the renderer and into main's log.
  */
 class IpcMessageRefused extends Data.TaggedError("IpcMessageRefused")<{
   readonly message: string;

@@ -2,8 +2,8 @@
  * Where the renderer lives. Main serves the renderer's files on its own `app`
  * scheme, under the one host `hercule`, so the page's origin is the contract's
  * `DESKTOP_APP_ORIGIN`, `app://hercule`, in development and in the packaged
- * app alike. Spec 17 (§Reaching the controller) says why the page needs a real
- * origin.
+ * app alike. Spec 17 (§Reaching the controller) gives the reason the page
+ * needs a real origin.
  *
  * This module imports nothing from Electron, so unit tests and every layer can
  * use it.

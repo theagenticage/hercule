@@ -67,7 +67,8 @@ const binaryPath =
 /** Opens `folder` in Finder. A folder Finder cannot open is logged as a warning. */
 const openFolder = (folder: string): Effect.Effect<void> =>
   Effect.promise(() => shell.openPath(folder)).pipe(
-    // `openPath` answers an empty string when it opened the folder.
+    // `openPath` resolves to an empty string when it opened the folder, and to
+    // an error message otherwise.
     Effect.flatMap((error) =>
       error === "" ? Effect.void : Effect.logWarning(`Could not open ${folder}: ${error}`),
     ),
@@ -151,8 +152,8 @@ if (refusedArgument !== undefined) {
   );
   app.exit(1);
 } else {
-  // Spec 17 (§Reaching the controller) says why the renderer needs each of
-  // these privileges.
+  // Spec 17 (§Reaching the controller) gives the reason the renderer needs
+  // each of these privileges.
   protocol.registerSchemesAsPrivileged([
     {
       scheme: APP_SCHEME,
