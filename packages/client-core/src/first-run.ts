@@ -58,6 +58,19 @@ export const decideFirstRunStep = (
 ): FirstRunStep | "done" =>
   FIRST_RUN_STEPS.find((step) => !done[step] && !putOff.includes(step)) ?? "done";
 
+/**
+ * Checks whether a controller's origin, such as `http://127.0.0.1:4937`, is
+ * on this machine: its host is `127.0.0.1`, `localhost` or `[::1]`. Returns
+ * false for an origin that does not parse.
+ *
+ * The first run's welcome greets a controller on this Mac as Hercule found
+ * running here, and a controller elsewhere goes straight to the account step.
+ */
+export const isLoopbackOrigin = (origin: string): boolean => {
+  if (!URL.canParse(origin)) return false;
+  return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname);
+};
+
 /** Triage's note in the room when no Connection brings it anything to read. */
 export const TRIAGE_WITHOUT_CONNECTIONS = "no Connections yet";
 

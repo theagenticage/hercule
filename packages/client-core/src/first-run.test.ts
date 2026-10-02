@@ -4,6 +4,7 @@ import {
   buildFirstRunFacts,
   buildRoomContents,
   decideFirstRunStep,
+  isLoopbackOrigin,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunFacts,
@@ -112,6 +113,20 @@ describe("decideFirstRunStep", () => {
         "github",
       ]),
     ).toBe("done");
+  });
+});
+
+describe("isLoopbackOrigin", () => {
+  it("accepts an origin on this machine", () => {
+    for (const origin of ["http://127.0.0.1:4937", "http://localhost:4937", "http://[::1]:4937"]) {
+      expect(isLoopbackOrigin(origin)).toBe(true);
+    }
+  });
+
+  it("refuses an origin on another machine, and one that does not parse", () => {
+    for (const origin of ["http://10.0.0.2:4937", "https://hercule.example", "not a url"]) {
+      expect(isLoopbackOrigin(origin)).toBe(false);
+    }
   });
 });
 

@@ -165,6 +165,7 @@ export {
   buildRoomContents,
   decideFirstRunStep,
   FIRST_RUN_STEPS,
+  isLoopbackOrigin,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunFacts,
