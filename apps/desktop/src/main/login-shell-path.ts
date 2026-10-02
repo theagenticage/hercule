@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { runProgram } from "./run-program";
@@ -17,8 +18,8 @@ export class LoginShellPathError extends Data.TaggedError("LoginShellPathError")
   readonly reason: string;
 }> {}
 
-/** How long the login shell may take to start and print `PATH`. */
-const SHELL_LIMIT = "5 seconds";
+/** How long the login shell may take to start and print its environment. */
+const SHELL_TIME_LIMIT = "5 seconds";
 
 /** The user's login shell. */
 export class LoginShell extends Context.Service<
@@ -45,29 +46,44 @@ export const findBetweenMarkers = (output: string, marker: string): string | nul
 };
 
 /**
+ * Returns the value of `PATH` in `environment`, the output of `env -0`: one
+ * `NAME=value` entry per variable, each ending with a NUL character. Returns
+ * null when `environment` holds no `PATH`.
+ *
+ * NUL is the one character no value can hold, so a value with a line break
+ * in it cannot pass for another variable.
+ */
+export const findPathVariable = (environment: string): string | null =>
+  environment
+    .split("\0")
+    .find((entry) => entry.startsWith("PATH="))
+    ?.slice("PATH=".length) ?? null;
+
+/**
  * Reads `PATH` from the shell at `shell`, run as a login, interactive shell:
  * `<shell> -ilc <command>`. Many `PATH` lines live in `.zshrc`, which only an
  * interactive zsh reads.
  *
- * The command prints `PATH` between two copies of a marker no startup file
- * prints, so whatever the startup files print, such as a greeting, is
- * dropped. The shell's stdin is closed, so a startup file that asks a
- * question gets no answer, and the shell is stopped after 5 seconds, so one
- * that hangs cannot hang the start.
+ * The command runs `/usr/bin/env -0`, which prints the environment the shell
+ * passes to programs, so `PATH` arrives as the colon-separated list every
+ * program reads. Printing `$PATH` itself would not do: fish expands it to a
+ * list separated by spaces. The environment is printed between two copies of
+ * a marker no startup file prints, so whatever the startup files print, such
+ * as a greeting, is dropped. The shell's stdin is closed, so a startup file
+ * that asks a question gets no answer, and the shell is stopped after
+ * `SHELL_TIME_LIMIT`, so one that hangs cannot hang the start.
  *
  * Fails with LoginShellPathError when the shell cannot be started, exits
  * with an error, prints no marked `PATH` or an empty one, or runs longer
- * than 5 seconds.
+ * than `SHELL_TIME_LIMIT`.
  */
 export const readLoginShellPath = (shell: string): Effect.Effect<string, LoginShellPathError> =>
   Effect.gen(function* () {
     const marker = `__PATH_${randomUUID()}__`;
     const exit = yield* runProgram(
       shell,
-      ["-ilc", `printf '%s%s%s' '${marker}' "$PATH" '${marker}'`],
-      {
-        env: process.env,
-      },
+      ["-ilc", `printf '%s' '${marker}'; /usr/bin/env -0; printf '%s' '${marker}'`],
+      { env: process.env },
     ).pipe(
       Effect.mapError(
         (error) =>
@@ -76,11 +92,11 @@ export const readLoginShellPath = (shell: string): Effect.Effect<string, LoginSh
           }),
       ),
       Effect.timeoutOrElse({
-        duration: SHELL_LIMIT,
+        duration: SHELL_TIME_LIMIT,
         orElse: () =>
           Effect.fail(
             new LoginShellPathError({
-              reason: `Your login shell, ${shell}, did not print your PATH within 5 seconds. Check that its startup files do not wait for input.`,
+              reason: `Your login shell, ${shell}, did not print your PATH within ${String(Duration.toSeconds(SHELL_TIME_LIMIT))} seconds. Check that its startup files do not wait for input.`,
             }),
           ),
       }),
@@ -90,7 +106,8 @@ export const readLoginShellPath = (shell: string): Effect.Effect<string, LoginSh
         reason: `Your login shell, ${shell}, exited with code ${String(exit.exitCode)} while it printed your PATH.`,
       });
     }
-    const path = findBetweenMarkers(exit.stdout, marker);
+    const environment = findBetweenMarkers(exit.stdout, marker);
+    const path = environment === null ? null : findPathVariable(environment);
     if (path === null || path === "") {
       return yield* new LoginShellPathError({
         reason: `Your login shell, ${shell}, did not print your PATH.`,
