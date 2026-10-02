@@ -10,6 +10,7 @@
     "@hercule/cli": "workspace:*",
     "@hercule/controller": "workspace:*",
     "@hercule/home": "workspace:*",
-    "@hercule/runner": "workspace:*"
+    "@hercule/runner": "workspace:*",
+    "@hercule/service": "workspace:*"
   }
 }

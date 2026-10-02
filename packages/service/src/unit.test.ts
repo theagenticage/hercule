@@ -53,23 +53,23 @@ describe("locateServiceLogs", () => {
 });
 
 describe("buildServicePath", () => {
-  it("puts the binary's folder first, then the existing absolute folders, without duplicates", () => {
+  it("keeps the existing absolute folders in order, without duplicates", () => {
     const bin = join(scratch, "bin");
     const tools = join(scratch, "tools");
     mkdirSync(bin);
     mkdirSync(tools);
     const caller = [tools, "relative/bin", ".", join(scratch, "missing"), bin, tools, ""].join(":");
-    expect(buildServicePath(join(bin, "hercule"), caller)).toBe(`${bin}:${tools}`);
+    expect(buildServicePath(caller)).toBe(`${tools}:${bin}`);
   });
 
   it("leaves out a PATH entry that is a file, not a folder", () => {
     const file = join(scratch, "file");
     writeFileSync(file, "");
-    expect(buildServicePath("/opt/hercule/hercule", file)).toBe("/opt/hercule");
+    expect(buildServicePath(`${file}:${scratch}`)).toBe(scratch);
   });
 
-  it("holds only the binary's folder when the caller has no PATH", () => {
-    expect(buildServicePath("/opt/hercule/hercule", undefined)).toBe("/opt/hercule");
+  it("is empty when the caller has no PATH", () => {
+    expect(buildServicePath(undefined)).toBe("");
   });
 });
 
@@ -79,13 +79,13 @@ describe("buildServiceUnit", () => {
       role: "runner",
       program: "/opt/hercule/hercule",
       home: "/home/ada/.hercule",
-      callerPath: undefined,
+      path: "/usr/bin",
     });
     expect(unit).toEqual({
       role: "runner",
       program: "/opt/hercule/hercule",
       home: "/home/ada/.hercule",
-      path: "/opt/hercule",
+      path: "/usr/bin",
       stderrLog: "/home/ada/.hercule/logs/runner.stderr.log",
     });
   });

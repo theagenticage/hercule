@@ -3,14 +3,16 @@
  * user's systemd folder (spec 15 section 4).
  *
  * A user's service manager runs only while the user is logged in, unless
- * lingering is on for the user. So `install` turns lingering on first, and
+ * lingering is on for the user. So `prepare`, which `install` runs first,
+ * turns lingering on, and
  * writes nothing when it cannot: a unit that stops at logout would look
  * installed and still leave the machine without Hercule. `uninstall` leaves
  * lingering on, because other user units may depend on it.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { Effect } from "effect";
+import type { Env } from "@hercule/home";
 import {
   ServiceError,
   Supervisor,
@@ -47,6 +49,19 @@ export const parseSystemdPid = (shown: string): number | null => {
   const match = /^MainPID=(\d+)$/m.exec(shown);
   const pid = match === null ? 0 : Number(match[1]);
   return pid > 0 ? pid : null;
+};
+
+/**
+ * Returns the folder of the user's systemd units:
+ * `$XDG_CONFIG_HOME/systemd/user`, or `<userHome>/.config/systemd/user` when
+ * `XDG_CONFIG_HOME` is unset or relative. The XDG Base Directory spec has a
+ * relative `XDG_CONFIG_HOME` ignored.
+ */
+export const locateSystemdUnitDir = (env: Env, userHome: string): string => {
+  const configured = env["XDG_CONFIG_HOME"];
+  const configHome =
+    configured !== undefined && isAbsolute(configured) ? configured : join(userHome, ".config");
+  return join(configHome, "systemd", "user");
 };
 
 /** Creates the systemd Supervisor. */
@@ -106,11 +121,16 @@ export const createSystemdSupervisor = (
     }
   });
 
-  const install = (unit: ServiceUnit): Effect.Effect<ServiceStatus, ServiceError> =>
+  const prepare = (unit: ServiceUnit): Effect.Effect<void, ServiceError> =>
     Effect.gen(function* () {
       const installed = yield* readInstalledUnit;
       yield* refuseOtherHome(installed?.home ?? null, unit);
       yield* enableLinger;
+    });
+
+  const install = (unit: ServiceUnit): Effect.Effect<ServiceStatus, ServiceError> =>
+    Effect.gen(function* () {
+      yield* prepare(unit);
       yield* createLogFiles(unit);
       const previousPid = yield* readPid;
       yield* writeUnitFile(unitFile, renderSystemdUnit(unit));
@@ -190,6 +210,7 @@ export const createSystemdSupervisor = (
 
   return Supervisor.of({
     uninstallNote: `Lingering stays on for ${userLabel}. To turn it off, run \`sudo loginctl disable-linger ${lingerUser}\`.`,
+    prepare,
     install,
     uninstall,
     start,

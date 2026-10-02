@@ -150,7 +150,7 @@ export const createLaunchdSupervisor = (
       nextStep: describeLogLocation(installed, unitFile),
     });
 
-  const install = (unit: ServiceUnit): Effect.Effect<ServiceStatus, ServiceError> =>
+  const prepare = (unit: ServiceUnit): Effect.Effect<void, ServiceError> =>
     Effect.gen(function* () {
       const session = yield* run(["launchctl", "print", domain]);
       if (session.exitCode !== 0) {
@@ -160,6 +160,11 @@ export const createLaunchdSupervisor = (
       }
       const installed = yield* readInstalledUnit;
       yield* refuseOtherHome(installed?.home ?? null, unit);
+    });
+
+  const install = (unit: ServiceUnit): Effect.Effect<ServiceStatus, ServiceError> =>
+    Effect.gen(function* () {
+      yield* prepare(unit);
       yield* createLogFiles(unit);
 
       const text = renderLaunchdPlist(unit);
@@ -234,6 +239,7 @@ export const createLaunchdSupervisor = (
 
   return Supervisor.of({
     uninstallNote: undefined,
+    prepare,
     install,
     uninstall,
     start,

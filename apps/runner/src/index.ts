@@ -27,16 +27,10 @@ import {
   type ConfigOverrides,
 } from "@hercule/home";
 import { makeProcessLogLayer } from "@hercule/process-log";
-import {
-  checkServiceCanBeInstalled,
-  describeStatus,
-  installService,
-  makeSupervisorLayer,
-  type ServiceInstallRequest,
-} from "@hercule/service";
+import { makeSupervisorLayer } from "@hercule/service";
 import { runCredentialAction } from "./credentials";
 import { runDaemon } from "./daemon";
-import { join } from "./join";
+import { runJoinCommand } from "./join";
 import { runLocalRunner } from "./local";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
@@ -208,54 +202,31 @@ export async function run(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  const installRequest: ServiceInstallRequest = {
-    role: "runner",
-    home,
-    overrides: options.success.overrides,
-    env: process.env,
-    program: locateCompiledBinary(),
-  };
-  if (!noService) {
-    // Checked before the join, which spends the token: a refusal afterwards
-    // would leave a joined machine that needs a new token to try again.
-    const checked = await Effect.runPromise(
-      Effect.result(checkServiceCanBeInstalled(installRequest)),
-    );
-    if (checked._tag === "Failure") {
-      console.error(
-        `hercule: ${checked.failure.message} To join without installing the service, add --no-service.`,
-      );
-      process.exitCode = EXIT.failed;
-      return;
-    }
-  }
-
   const outcome = await Effect.runPromise(
-    Effect.result(join({ controllerUrl, token, home, reserved })),
+    Effect.result(
+      runJoinCommand({
+        controllerUrl,
+        token,
+        home,
+        reserved,
+        service: noService
+          ? undefined
+          : {
+              request: {
+                role: "runner",
+                home,
+                overrides: options.success.overrides,
+                env: process.env,
+                program: locateCompiledBinary(),
+              },
+              supervisor: makeSupervisorLayer(process.env),
+            },
+        out: (line) => console.log(line),
+      }),
+    ),
   );
-
   if (outcome._tag === "Failure") {
     console.error(`hercule: ${outcome.failure.message}`);
     process.exitCode = EXIT.failed;
-    return;
   }
-  console.log(`This machine joined as ${outcome.success.name}.`);
-  console.log(`Its credential is in ${outcome.success.configPath}.`);
-  if (noService) return;
-
-  // The wait for a started runner can take half a minute.
-  console.log("Installing the service unit for `hercule runner`.");
-
-  const installed = await Effect.runPromise(
-    Effect.result(Effect.provide(installService(installRequest), makeSupervisorLayer(process.env))),
-  );
-  if (installed._tag === "Failure") {
-    // The join token is spent, so the way forward is to install the unit, not to join again.
-    console.error(
-      `hercule: The service was not installed. ${installed.failure.message} This machine has joined, so once that is fixed, run \`hercule service install\` rather than joining again.`,
-    );
-    process.exitCode = EXIT.failed;
-    return;
-  }
-  console.log(describeStatus(installed.success));
 }

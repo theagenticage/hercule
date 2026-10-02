@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { RunCommand } from "./supervisor";
-import { createSystemdSupervisor, parseSystemdPid } from "./systemd";
+import { createSystemdSupervisor, locateSystemdUnitDir, parseSystemdPid } from "./systemd";
 import { buildCommandResult, expectSuccess, readFailureMessage, runOnTestClock } from "./testing";
 import { renderSystemdUnit, type ServiceUnit } from "./unit";
 
@@ -227,6 +227,41 @@ describe("install", () => {
     );
     expect(readFailureMessage(result)).toBe(
       "systemd did not enable the Hercule service: `systemctl --user enable hercule.service` exited with 1: Failed to enable unit: Unit file is masked.",
+    );
+  });
+});
+
+describe("prepare", () => {
+  it("turns lingering on, and writes and starts nothing", async () => {
+    state.linger = false;
+    expectSuccess(await Effect.runPromise(Effect.result(supervisor().prepare(buildUnit()))));
+    expect(calls).toEqual(["loginctl show-user 1000 -p Linger", "loginctl enable-linger 1000"]);
+    expect(state.linger).toBe(true);
+    expect(existsSync(unitFile)).toBe(false);
+    expect(existsSync(join(home, "logs"))).toBe(false);
+  });
+
+  it("refuses when the installed unit runs another Home, before it turns lingering on", async () => {
+    state.linger = false;
+    installBefore(buildUnit({ home: "/home/ada/other-home" }));
+    const result = await Effect.runPromise(Effect.result(supervisor().prepare(buildUnit())));
+    expect(readFailureMessage(result)).toContain("runs the Hercule Home /home/ada/other-home");
+    expect(calls).toEqual([]);
+    expect(state.linger).toBe(false);
+  });
+});
+
+describe("locateSystemdUnitDir", () => {
+  it("uses an absolute XDG_CONFIG_HOME", () => {
+    expect(locateSystemdUnitDir({ XDG_CONFIG_HOME: "/etc/ada" }, "/home/ada")).toBe(
+      "/etc/ada/systemd/user",
+    );
+  });
+
+  it("falls back to ~/.config when XDG_CONFIG_HOME is unset or relative, as systemd does", () => {
+    expect(locateSystemdUnitDir({}, "/home/ada")).toBe("/home/ada/.config/systemd/user");
+    expect(locateSystemdUnitDir({ XDG_CONFIG_HOME: "config" }, "/home/ada")).toBe(
+      "/home/ada/.config/systemd/user",
     );
   });
 });

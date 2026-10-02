@@ -1,19 +1,21 @@
 /**
- * `runServiceCommand` against a fake Supervisor: the command line, the
- * refusals before anything reaches the Supervisor, and what each verb prints.
+ * `runServiceCommand` against a fake Supervisor: the help, the command line,
+ * the refusals before anything reaches the Supervisor, and what each verb
+ * prints.
  */
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Effect, Layer, Result } from "effect";
+import { Effect, Layer } from "effect";
 import { locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import {
-  checkServiceCanBeInstalled,
   describeStatus,
   runServiceCommand,
+  SERVICE_VERBS,
+  type ServiceCommandDependencies,
   type ServiceCommandRequest,
-} from "./index";
+} from "./command";
 import { ServiceError, Supervisor, type ServiceStatus } from "./supervisor";
 import type { ServiceUnit } from "./unit";
 
@@ -38,6 +40,10 @@ const NOT_INSTALLED: Omit<ServiceStatus, "unitFile"> = {
 const FakeSupervisor = Layer.sync(Supervisor, () =>
   Supervisor.of({
     uninstallNote: "A note about what uninstall leaves.",
+    prepare: () =>
+      Effect.sync(() => {
+        actions.push("prepare");
+      }),
     install: (unit) =>
       Effect.sync(() => {
         actions.push("install");
@@ -76,7 +82,7 @@ const FakeSupervisor = Layer.sync(Supervisor, () =>
 const run = (
   args: ReadonlyArray<string>,
   request: Partial<ServiceCommandRequest> = {},
-  dependencies: { readonly program: string | undefined } = { program: PROGRAM },
+  dependencies: Partial<ServiceCommandDependencies> = {},
 ): Promise<number> =>
   runServiceCommand(
     {
@@ -88,7 +94,7 @@ const run = (
       err: (line) => err.push(line),
       ...request,
     },
-    { supervisor: FakeSupervisor, program: dependencies.program },
+    { supervisor: FakeSupervisor, program: PROGRAM, ...dependencies },
   );
 
 beforeEach(() => {
@@ -105,6 +111,30 @@ afterEach(() => {
 });
 
 describe("the command line", () => {
+  it("prints the help with one line per verb", async () => {
+    expect(await run(["--help"])).toBe(0);
+    expect(out[0]).toBe("usage: hercule service <verb> [--json]");
+    for (const verb of SERVICE_VERBS) {
+      expect(
+        out.filter((line) => new RegExp(`^  ${verb}\\s`).test(line)),
+        `${verb} has one line`,
+      ).toHaveLength(1);
+    }
+    expect(err).toEqual([]);
+  });
+
+  it("prints the same help after a verb, and with -h", async () => {
+    await run(["--help"]);
+    const help = out;
+    out = [];
+    expect(await run(["install", "--help"])).toBe(0);
+    expect(out).toEqual(help);
+    out = [];
+    expect(await run(["-h"])).toBe(0);
+    expect(out).toEqual(help);
+    expect(actions).toEqual([]);
+  });
+
   it("exits 2 and names the verbs when there is no verb", async () => {
     expect(await run([])).toBe(2);
     expect(err).toEqual([
@@ -123,9 +153,23 @@ describe("the command line", () => {
 
   it("exits 2 on a flag other than --json, before reaching the Supervisor", async () => {
     expect(await run(["install", "--force"])).toBe(2);
-    expect(err[0]).toBe("hercule: service install takes no `--force`");
+    expect(err).toEqual([
+      "hercule: service install takes no `--force`",
+      "run `hercule service --help`",
+    ]);
     expect(actions).toEqual([]);
   });
+
+  it.each(["install", "restart", "status"])(
+    "refuses a -c flag on %s, which the unit would not see",
+    async (verb) => {
+      expect(await run([verb], { overrides: [["bind.port", "5000"]] })).toBe(1);
+      expect(err).toEqual([
+        `hercule: -c bind.port=5000 applies only to this command, and the service reads only ${join(home, "config.toml")}. Put bind.port in that file instead, then run this again without -c.`,
+      ]);
+      expect(actions).toEqual([]);
+    },
+  );
 });
 
 describe("install", () => {
@@ -142,7 +186,7 @@ describe("install", () => {
         role: "runner",
         program: PROGRAM,
         home,
-        path: "/Users/ada/.local/bin:/usr/bin",
+        path: "/usr/bin",
         stderrLog: join(home, "logs", "runner.stderr.log"),
       },
     ]);
@@ -175,17 +219,6 @@ describe("install", () => {
     expect(actions).toEqual([]);
   });
 
-  it.each(["install", "restart", "status"])(
-    "refuses a -c flag on %s, which the unit would not see",
-    async (verb) => {
-      expect(await run([verb], { overrides: [["bind.port", "5000"]] })).toBe(1);
-      expect(err).toEqual([
-        `hercule: -c bind.port=5000 applies only to this command, and the service reads only ${join(home, "config.toml")}. Put bind.port in that file instead, then run this again without -c.`,
-      ]);
-      expect(actions).toEqual([]);
-    },
-  );
-
   it("refuses a PATH folder every user can write to", async () => {
     const shared = join(home, "shared-bin");
     mkdirSync(shared);
@@ -212,6 +245,7 @@ describe("install", () => {
       Supervisor,
       Supervisor.of({
         uninstallNote: undefined,
+        prepare: () => Effect.fail(new ServiceError({ message: "launchd said no." })),
         install: () => Effect.fail(new ServiceError({ message: "launchd said no." })),
         uninstall: Effect.fail(new ServiceError({ message: "launchd said no." })),
         start: Effect.fail(new ServiceError({ message: "launchd said no." })),
@@ -220,18 +254,7 @@ describe("install", () => {
         readStatus: Effect.fail(new ServiceError({ message: "launchd said no." })),
       }),
     );
-    const code = await runServiceCommand(
-      {
-        args: ["start"],
-        home,
-        overrides: [],
-        env: {},
-        out: (line) => out.push(line),
-        err: (line) => err.push(line),
-      },
-      { supervisor: failing, program: PROGRAM },
-    );
-    expect(code).toBe(1);
+    expect(await run(["start"], {}, { supervisor: failing })).toBe(1);
     expect(err).toEqual(["hercule: launchd said no."]);
     expect(out).toEqual([]);
   });
@@ -250,27 +273,6 @@ describe("install", () => {
     writeFileSync(join(home, "config.toml"), "[data\n");
     expect(await run(["install"])).toBe(1);
     expect(err[0]).toMatch(new RegExp(`^hercule: ${join(home, "config.toml")} `));
-  });
-});
-
-describe("checkServiceCanBeInstalled", () => {
-  it("refuses a runner unit for a Home that holds a controller database", async () => {
-    mkdirSync(join(home, "data"));
-    writeFileSync(join(home, "data", "hercule.db"), "");
-    const result = await Effect.runPromise(
-      Effect.result(
-        checkServiceCanBeInstalled({
-          role: "runner",
-          home,
-          overrides: [],
-          env: { PATH: "/usr/bin" },
-          program: PROGRAM,
-        }),
-      ),
-    );
-    expect(Result.isFailure(result) && result.failure.message).toBe(
-      `The Hercule Home ${home} holds a controller database, so its service runs \`hercule serve\`, which starts a runner of its own. To make this machine a separate runner, give it its own Home with --home.`,
-    );
   });
 });
 

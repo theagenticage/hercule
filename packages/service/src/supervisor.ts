@@ -96,10 +96,20 @@ export class Supervisor extends Context.Service<
      */
     readonly uninstallNote: string | undefined;
     /**
-     * Writes the unit, registers it and (re)starts it, so the process that
-     * runs afterwards is this unit's. Fails when the installed unit runs
-     * another Hercule Home, or when the supervisor cannot run a unit for this
-     * user.
+     * Checks that the supervisor can install the unit, without writing it.
+     * Fails when the installed unit runs another Hercule Home, or when the
+     * supervisor cannot run a unit for this user. May change what the unit
+     * needs from the machine before any unit exists: on Linux, it turns
+     * lingering on.
+     *
+     * `install` runs this first itself. `hercule runner join` runs it before
+     * it spends its join token, so a refusal leaves the token unused.
+     */
+    readonly prepare: (unit: ServiceUnit) => Effect.Effect<void, ServiceError>;
+    /**
+     * Runs `prepare`, then writes the unit, registers it and (re)starts it, so
+     * the process that runs afterwards is this unit's. Fails when `prepare`
+     * fails, or when the supervisor does not start the process.
      */
     readonly install: (unit: ServiceUnit) => Effect.Effect<ServiceStatus, ServiceError>;
     /** Stops and removes the unit. Succeeds when there is none. Leaves the logs. */

@@ -2,11 +2,11 @@
  * The service unit: what the OS supervisor runs to keep Hercule up, and the
  * text of the two unit files that describe it (spec 15 section 4).
  *
- * The renderers and the parser are pure. `buildServicePath`, and with it
- * `buildServiceUnit`, checks which folders on the caller's PATH exist.
+ * The renderers and the parser are pure. `buildServicePath` checks which
+ * folders on the caller's PATH exist.
  */
 import { statSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
+import { isAbsolute } from "node:path";
 import {
   BOOTSTRAP_KEYS,
   buildEnvName,
@@ -70,8 +70,8 @@ const isDirectory = (path: string): boolean => {
 };
 
 /**
- * Returns the PATH the service runs with: the folder of the binary first, then
- * the folders on the caller's PATH, without duplicates.
+ * Returns the PATH the service runs with: the folders on the caller's PATH,
+ * in order and without duplicates.
  *
  * A supervisor starts a process with only the system folders on its PATH, so
  * the caller's PATH is passed on, and the controller and the runner find the
@@ -79,9 +79,13 @@ const isDirectory = (path: string): boolean => {
  * entries are dropped, and so are folders that do not exist: the runner starts
  * programs inside workspace checkouts, where `.` on the PATH would let a
  * repository supply its own `git`.
+ *
+ * The binary's own folder is not added. Hercule finds itself through
+ * `process.execPath`, never by name, and the binary may sit in a checkout,
+ * where the files beside it would shadow the user's `git` or `gh`.
  */
-export const buildServicePath = (program: string, callerPath: string | undefined): string => {
-  const folders = [dirname(program)];
+export const buildServicePath = (callerPath: string | undefined): string => {
+  const folders: Array<string> = [];
   for (const folder of (callerPath ?? "").split(":")) {
     if (isAbsolute(folder) && !folders.includes(folder) && isDirectory(folder)) {
       folders.push(folder);
@@ -92,18 +96,15 @@ export const buildServicePath = (program: string, callerPath: string | undefined
 
 /**
  * Builds the unit that runs `program` in `role` for the Hercule Home `home`,
- * with the PATH taken from `callerPath`.
+ * with `path` as its PATH, usually from `buildServicePath`.
  */
 export const buildServiceUnit = (options: {
   readonly role: ServiceRole;
   readonly program: string;
   readonly home: string;
-  readonly callerPath: string | undefined;
+  readonly path: string;
 }): ServiceUnit => ({
-  role: options.role,
-  program: options.program,
-  home: options.home,
-  path: buildServicePath(options.program, options.callerPath),
+  ...options,
   stderrLog: locateServiceLogs(options.home, options.role).stderrLog,
 });
 

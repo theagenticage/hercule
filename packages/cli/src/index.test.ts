@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
 import { CLI, NOUNS, OPERATIONS, type OperationId } from "@hercule/contract";
-import { SERVICE_VERBS } from "@hercule/service";
 import { main, readSetupUrl } from "./index";
 import { buildErrorEnvelope, buildId, stubFetch, stubIo, type Handler } from "./testing";
 
@@ -325,43 +324,11 @@ describe("hercule runner --help", () => {
   });
 });
 
-// `hercule service` is hand-written: its verbs are not operations. These tests
-// stop at the help and the command line, so nothing reaches launchd or systemd.
-describe("hercule service", () => {
-  it("prints its help with one line per verb", async () => {
-    const out = await runHelp("service");
-    expect(out[0]).toBe("usage: hercule service <verb> [--json]");
-    for (const verb of SERVICE_VERBS) {
-      expect(
-        out.filter((line) => new RegExp(`^  ${verb}\\s`).test(line)),
-        `${verb} has one line`,
-      ).toHaveLength(1);
-    }
-  });
-
-  it("prints the same help after a verb", async () => {
-    expect(await runHelp("service", "install")).toEqual(await runHelp("service"));
-  });
-
-  it("is named in the root help", async () => {
+// `hercule service` is a role of its own, so its help lives in @hercule/service.
+// The root help still names it, because the root help is where people look.
+describe("hercule service in the root help", () => {
+  it("is named", async () => {
     expect((await runHelp()).join("\n")).toContain("hercule service <verb>");
-  });
-
-  it("exits 2 without a verb", async () => {
-    const { io, run } = createStubCli();
-    expect(await run("service")).toBe(2);
-    expect(io.stderr).toEqual([
-      "hercule: service needs a verb: install, uninstall, start, stop, restart, status",
-      "run `hercule service --help`",
-    ]);
-  });
-
-  it("exits 2 on an unknown verb or flag", async () => {
-    const { io, run } = createStubCli();
-    expect(await run("service", "reload")).toBe(2);
-    expect(await run("service", "status", "--all")).toBe(2);
-    expect(io.stderr[0]).toContain("unknown command `reload`");
-    expect(io.stderr[2]).toBe("hercule: service status takes no `--all`");
   });
 });
 

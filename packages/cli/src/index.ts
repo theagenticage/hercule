@@ -5,17 +5,12 @@
  * words to commands, runs them and reports results, but holds no list of
  * commands.
  *
- * Two commands act on this machine instead of calling the API:
+ * `setup-url` is the only exception, and always will be: it reads
+ * `<home>/setup-url` from the filesystem and needs no credential, because it
+ * is what a user has before they have any credential.
  *
- * - `setup-url` reads `<home>/setup-url` from the filesystem and needs no
- *   credential, because it is what a user has before they have any credential.
- * - `service` installs and runs the OS service unit that keeps Hercule
- *   running, through `@hercule/service`.
- *
- * This package writes no Effect code: the CLI calls the API through
- * `client-core`'s promises, and `hercule service` through the promise
- * `runServiceCommand` returns. It uses `@hercule/home` for the global options
- * and the Hercule Home.
+ * Apart from its use of `@hercule/home`, this package writes no Effect code:
+ * the CLI calls the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -25,24 +20,12 @@ import {
   createClient,
   readValidationIssues,
 } from "@hercule/client-core";
-import {
-  parseGlobalOptions,
-  resolveHomePath,
-  locateSetupUrlFile,
-  type Env,
-} from "@hercule/home";
-import { runServiceCommand } from "@hercule/service";
+import { parseGlobalOptions, resolveHomePath, locateSetupUrlFile, type Env } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, formatFieldName } from "./commands/args";
 import { formatIssue, type WorkflowIssues } from "@hercule/contract";
 import { execute, type Outcome } from "./commands/execute";
-import {
-  buildCommandHelp,
-  buildNounHelp,
-  buildRootHelp,
-  buildServiceHelp,
-  buildShellExample,
-} from "./commands/help";
+import { buildCommandHelp, buildNounHelp, buildRootHelp, buildShellExample } from "./commands/help";
 import { renderHuman } from "./commands/render";
 import { findCommandByWords, listWordsAfter, type Command } from "./commands/tree";
 import { CredentialError, resolveCredential, resolveUrl } from "./credentials";
@@ -243,21 +226,6 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     }
     io.out(url.success);
     return EXIT.ok;
-  }
-
-  if (head === "service") {
-    if (wantsHelp(after)) {
-      for (const line of buildServiceHelp()) io.out(line);
-      return EXIT.ok;
-    }
-    return runServiceCommand({
-      args: after,
-      home,
-      overrides: options.success.overrides,
-      env: io.env,
-      out: io.out,
-      err: io.err,
-    });
   }
 
   if (head === "login") {

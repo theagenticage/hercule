@@ -325,6 +325,32 @@ describe("install", () => {
   });
 });
 
+describe("prepare", () => {
+  it("checks the desktop session and the installed unit, and writes and starts nothing", async () => {
+    expectSuccess(await Effect.runPromise(Effect.result(supervisor().prepare(buildUnit()))));
+    expect(calls.filter((call) => !call.startsWith("plutil "))).toEqual([
+      `launchctl print gui/${UID}`,
+    ]);
+    expect(existsSync(unitFile)).toBe(false);
+    expect(existsSync(join(home, "logs"))).toBe(false);
+  });
+
+  it("refuses when the user is not logged in to the desktop", async () => {
+    state.session = false;
+    const result = await Effect.runPromise(Effect.result(supervisor().prepare(buildUnit())));
+    expect(readFailureMessage(result)).toContain("is not logged in to this Mac's desktop");
+  });
+
+  it("refuses when the installed unit runs another Home, and changes nothing", async () => {
+    const legacy = buildLegacyPlist("/Users/ada/other-home");
+    installBefore(legacy);
+    const result = await Effect.runPromise(Effect.result(supervisor().prepare(buildUnit())));
+    expect(readFailureMessage(result)).toContain("runs the Hercule Home /Users/ada/other-home");
+    expect(readFileSync(unitFile, "utf8")).toBe(legacy);
+    expect(state.pid).toBe(100);
+  });
+});
+
 describe("start", () => {
   it("fails with the exact message when no unit is installed, and installs nothing", async () => {
     const { result } = await runOnTestClock(supervisor().start);

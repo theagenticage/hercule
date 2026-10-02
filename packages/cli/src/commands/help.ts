@@ -363,35 +363,6 @@ const listRootNouns = (): ReadonlyArray<{
   });
 };
 
-/**
- * Returns the help of `hercule service`, one line per entry. The verbs are
- * not operations and have no CLI rows, so the text is written here.
- */
-export const buildServiceHelp = (): ReadonlyArray<string> => [
-  "usage: hercule service <verb> [--json]",
-  "",
-  ...wrapParagraph(
-    "Installs and controls the one OS service unit that keeps Hercule running on this machine across logins and reboots: a launchd LaunchAgent on macOS, a systemd user unit on Linux. The unit runs the compiled hercule binary for this Hercule Home, and reads its settings only from <home>/config.toml, so every verb refuses -c flags, and install refuses HERCULE_* settings in the environment.",
-    "",
-  ),
-  "",
-  "verbs:",
-  "  install    write the unit and (re)start it; prints whether it runs serve or runner, and why",
-  "  uninstall  stop the unit and delete it; the logs stay",
-  "  start      start the installed unit when it is not running",
-  "  stop       stop the unit's process; the unit stays installed and starts at the next login",
-  "  restart    stop the unit's process and start it again",
-  "  status     print whether a unit is installed, what it runs, and its pid",
-  "",
-  "flags:",
-  "  --json  print { installed, running, pid, role, home, unitFile } once the verb is done",
-  "",
-  ...wrapParagraph(
-    "The process logs to <home>/logs/controller.log or runner.log; what it prints before its log opens goes to the .stderr.log beside it. A failure exits 1 with one line that explains what to do; a wrong command line exits 2.",
-    "",
-  ),
-];
-
 /** Builds the root help: `hercule --help`. */
 export const buildRootHelp = (): ReadonlyArray<string> => {
   const nouns = listRootNouns();
@@ -431,7 +402,8 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
     "            the end.",
     "  exit      0 succeeded, 1 the controller returned an error envelope or `workflow",
     "            validate` found errors, 2 the command line was wrong and nothing was sent, 3",
-    "            no credential or no controller.",
+    "            no credential or no controller. `hercule service` acts on this machine",
+    "            instead, and exits 1 when its verb failed there.",
     "  403       A forbidden envelope names the grant you lack. Ask the user for it with",
     "            `hercule permission request <grant>`, unless the command's help says only the",
     "            user may make the call: no grant allows that, so ask the user to run it.",
