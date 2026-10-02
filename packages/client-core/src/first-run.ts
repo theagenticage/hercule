@@ -68,6 +68,19 @@ export const decideFirstRunStep = (
   FIRST_RUN_STEPS.find((step) => !done[step] && !putOff.includes(step)) ?? "done";
 
 /**
+ * Returns the steps put off once `step` is put off too, in the order they
+ * were put off. Returns `putOff` itself when it already holds `step`.
+ *
+ * The caller passes the newest list it has, read when the step is put off.
+ * Two steps put off in quick succession then both stay put off, where a list
+ * read before either write would lose the first.
+ */
+export const addPutOffStep = (
+  putOff: readonly FirstRunStep[],
+  step: FirstRunStep,
+): readonly FirstRunStep[] => (putOff.includes(step) ? putOff : [...putOff, step]);
+
+/**
  * How a step stands in the first run's ladder:
  *
  * - `now`: the step on screen;

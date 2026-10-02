@@ -161,6 +161,7 @@ export {
 } from "./new-project";
 export { completeSetup } from "./setup";
 export {
+  addPutOffStep,
   buildAllSetRecap,
   buildFirstRunFacts,
   buildFirstRunHost,

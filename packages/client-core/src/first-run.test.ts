@@ -1,6 +1,7 @@
 import { GITHUB_CONNECTION_TYPE, type Assistant, type Connection } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
+  addPutOffStep,
   buildAllSetRecap,
   buildFirstRunFacts,
   buildFirstRunHost,
@@ -121,6 +122,23 @@ describe("decideFirstRunStep", () => {
         "github",
       ]),
     ).toBe("done");
+  });
+});
+
+describe("addPutOffStep", () => {
+  it("adds the step after the steps already put off", () => {
+    expect(addPutOffStep(["providers"], "github")).toEqual(["providers", "github"]);
+  });
+
+  it("keeps both steps of two put off in quick succession", () => {
+    // Each put-off reads the list the one before it returned.
+    const first = addPutOffStep([], "providers");
+    expect(addPutOffStep(first, "github")).toEqual(["providers", "github"]);
+  });
+
+  it("returns the list itself when the step is already put off", () => {
+    const putOff = ["providers"] as const;
+    expect(addPutOffStep(putOff, "providers")).toBe(putOff);
   });
 });
 

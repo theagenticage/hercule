@@ -42,8 +42,8 @@ const TOKEN_REFUSED =
  *    the web app never asks for them again.
  *
  * Then it reads everything the next steps show, and only then marks setup
- * complete in the cache, which moves the first run on to the next step with
- * nothing left to wait for.
+ * complete in the cache and calls `onSignedIn`, which moves the first run on
+ * to the next step with nothing left to wait for.
  *
  * When a write after `setup.complete` fails, the error shows and Create
  * account tries again. The controller refuses a second `setup.complete`, so
@@ -51,7 +51,13 @@ const TOKEN_REFUSED =
  * It asks the controller rather than the cache: the cache says setup is
  * complete only once every read is done, because that moves the first run on.
  */
-export function AccountCard({ client }: { readonly client: HerculeClient }): JSX.Element {
+export function AccountCard({
+  client,
+  onSignedIn,
+}: {
+  readonly client: HerculeClient;
+  readonly onSignedIn: () => void;
+}): JSX.Element {
   const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
   const { username } = useSuspenseQuery(macUserQuery(bridge)).data;
@@ -80,6 +86,7 @@ export function AccountCard({ client }: { readonly client: HerculeClient }): JSX
     },
     onSuccess: () => {
       queryClient.setQueryData(setupQuery(client).queryKey, { complete: true });
+      onSignedIn();
     },
     onError: (error) => {
       // Each start of Hercule mints a new token, so the one main handed over

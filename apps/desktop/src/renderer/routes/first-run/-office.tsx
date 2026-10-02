@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
+  addPutOffStep,
   buildFirstRunFacts,
   buildFirstRunLadder,
   buildRoomContents,
@@ -23,7 +24,7 @@ import { DoneCard } from "./-done";
 import { GitHubCard } from "./-github";
 import { ProjectCard } from "./-project";
 import { ProvidersCard } from "./-providers";
-import { useFirstRunData } from "./-reads";
+import { readFirstRunData, useFirstRunData } from "./-reads";
 import { ConnectElsewhereCard, WelcomeCard } from "./-welcome";
 
 /**
@@ -80,32 +81,42 @@ export function ControllerFirstRun({
   const [openedOffice, setOpenedOffice] = useState(startRequested || !onThisMac);
 
   const facts = buildFirstRunFacts(data.reads);
-  const decided = decideFirstRunStep(facts, data.putOff);
-  const [pinned, setPinned] = useState<FirstRunStep | "done" | null>(null);
-  if (signedIn && pinned === null) setPinned(decided);
+  // Each decision reads the cache as it is at that moment, not the data this
+  // render holds: a handler can run after the cache moved on, such as once a
+  // new project is read again.
+  const decideStep = (): FirstRunStep | "done" => {
+    const now = readFirstRunData(queryClient, client, bridge);
+    return decideFirstRunStep(buildFirstRunFacts(now.reads), now.putOff);
+  };
+  // The step on screen, kept until the user moves on, or null before the
+  // user has an account.
+  const [shownStep, setShownStep] = useState<FirstRunStep | "done" | null>(() =>
+    signedIn ? decideStep() : null,
+  );
+  const decideAgain = (): void => {
+    setShownStep(decideStep());
+  };
 
   const putOff = useMutation({
     mutationFn: async (step: FirstRunStep) => {
-      const progress = { putOff: [...new Set([...data.putOff, step])] };
+      // The list comes from the cache, which each put-off updates before it
+      // writes, so a second put-off that starts before the first one's write
+      // ends still keeps both steps.
+      const key = firstRunQuery(bridge).queryKey;
+      const progress = { putOff: addPutOffStep(queryClient.getQueryData(key)?.putOff ?? [], step) };
+      queryClient.setQueryData(key, progress);
       await bridge.firstRunProgress.save(progress);
-      return progress;
     },
-    onSuccess: (progress) => {
-      queryClient.setQueryData(firstRunQuery(bridge).queryKey, progress);
-      setPinned(null);
-    },
+    onSuccess: decideAgain,
     // A rejection means main refused the message or failed: a bug, which the
     // user cannot act on, so it is logged rather than shown.
     onError: (error) => {
       console.error("Could not put the step off:", error);
     },
   });
-  const decideAgain = (): void => {
-    setPinned(null);
-  };
 
   const card: FirstRunCard = signedIn
-    ? (pinned ?? decided)
+    ? (shownStep ?? decideFirstRunStep(facts, data.putOff))
     : !openedOffice
       ? "found"
       : setupToken?._tag === "PasteNeeded"
@@ -156,7 +167,7 @@ export function ControllerFirstRun({
       );
       break;
     case "account":
-      body = <AccountCard client={client} />;
+      body = <AccountCard client={client} onSignedIn={decideAgain} />;
       break;
     case "providers":
       body = (
@@ -191,13 +202,13 @@ export function ControllerFirstRun({
           gitHubConnected={facts.github}
           onAdded={decideAgain}
           onConnectGitHub={() => {
-            setPinned("github");
+            setShownStep("github");
           }}
         />
       );
       break;
     case "done":
-      body = <DoneCard client={client} reads={data.reads} onDoItNow={setPinned} />;
+      body = <DoneCard client={client} reads={data.reads} onDoItNow={setShownStep} />;
       break;
   }
 

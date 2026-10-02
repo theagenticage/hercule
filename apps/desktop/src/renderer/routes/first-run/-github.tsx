@@ -76,25 +76,36 @@ export function GitHubCard({
     );
   };
   const start = useMutation({
-    mutationFn: (_request: number) =>
+    mutationFn: () =>
       client.connection.startDeviceFlow({ payload: { type: GITHUB_CONNECTION_TYPE } }),
-    onSuccess: (deviceStart, request) => {
-      settleStart(request, {
-        kind: "code",
-        deviceStart,
-        codeMinutes: countCodeMinutes(deviceStart.expiresAt, Date.now()),
-        wait: describeDeviceFlowWait("pending", GITHUB_NAME),
-      });
-    },
-    onError: (error, request) => {
-      const ending = { kind: "ended", status: "failed", message: readErrorMessage(error) } as const;
-      settleStart(request, {
-        ...describeGitHubSignInEnding(ending, 0),
-        kind: "ended",
-        status: "failed",
-      });
-    },
   });
+  const startSignIn = (): void => {
+    lastRequest.current += 1;
+    const request = lastRequest.current;
+    setFlow({ kind: "starting", request });
+    start.mutate(undefined, {
+      onSuccess: (deviceStart) => {
+        settleStart(request, {
+          kind: "code",
+          deviceStart,
+          codeMinutes: countCodeMinutes(deviceStart.expiresAt, Date.now()),
+          wait: describeDeviceFlowWait("pending", GITHUB_NAME),
+        });
+      },
+      onError: (error) => {
+        const ending = {
+          kind: "ended",
+          status: "failed",
+          message: readErrorMessage(error),
+        } as const;
+        settleStart(request, {
+          ...describeGitHubSignInEnding(ending, 0),
+          kind: "ended",
+          status: "failed",
+        });
+      },
+    });
+  };
 
   const connect = useMutation({
     mutationFn: (pat: string) =>
@@ -149,10 +160,7 @@ export function GitHubCard({
       actions={{
         onSignIn: () => {
           // A second sign-in would replace the code the first one shows.
-          if (flow.kind === "starting") return;
-          lastRequest.current += 1;
-          setFlow({ kind: "starting", request: lastRequest.current });
-          start.mutate(lastRequest.current);
+          if (flow.kind !== "starting") startSignIn();
         },
         onCancel: () => {
           setFlow({ kind: "start" });
