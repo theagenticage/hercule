@@ -8,6 +8,11 @@ Accepted. Decided by [Desktop app: threads in Crew Bureau (#275)](https://github
 
 **Amended 2026-09-29 ([#275](https://github.com/theagenticage/hercule/issues/275)):** performance no longer comes first during the desktop app's first milestone. Slices 1 to 4 were each held to the budgets before they merged. From slice 5 on, the budgets are guides: the milestone's functionality lands first, and performance passes after it bring the app within the budgets. The rules of spec 17 §Performance still apply to every slice, because they cost little when followed from the start and much when added later. The budgets themselves stand, and spec 17 §Performance says how they are checked while they are guides. Everything else here stands.
 
+**Amended 2026-10-02 ([#313](https://github.com/theagenticage/hercule/issues/313)):** two facts below have moved on, and the decision stands.
+
+- **The pixel reference is now the book's second edition,** in [`docs/design/crew-bureau-2/`](../design/crew-bureau-2/). It started as a copy of the first edition and adds #313's first run. The first edition stays in `docs/design/crew-bureau/`, byte for byte, where the Context below names it.
+- **"Later it can manage a local controller" has partly arrived.** The first run's main starts a local controller by running the `hercule` binary that `install.sh` put on the Mac, and asks that binary where the controller is. Main still links only `@hercule/contract` and `@hercule/client-core`, and reads no file in the Hercule Home. Installing and updating the binary stay post-v1 (spec 17 §The first run, spec 15 §Post-v1).
+
 ## Context
 
 ADR 0017 planned the desktop app as a second consumer of two packages: `client-core` for data and `ui` for components. Its planning assumption was Electron. The final call belonged to the desktop effort, which starts now.
