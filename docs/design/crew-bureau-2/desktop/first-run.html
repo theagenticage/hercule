@@ -1296,7 +1296,7 @@
           }[st];
           var perks =
             '<ul class="perks">' +
-            '<li><span class="ico">' + icon("worktree") + "</span><span><b>A worktree for every thread</b>Each agent works on its own branch. Your checkout stays exactly as you left it.</span></li>" +
+            '<li><span class="ico">' + icon("worktree") + "</span><span><b>A workspace for every thread</b>Each agent works on its own branch. Your checkout stays exactly as you left it.</span></li>" +
             '<li><span class="ico">' + icon("intake") + "</span><span><b>Work arrives prepared</b>Triage reads what GitHub sends and brings you Proposals, not notifications.</span></li>" +
             '<li><span class="ico">' + Crew.mark("waiting", 16) + "</span><span><b>You keep the decisions</b>When an agent needs you, it raises its hand and waits.</span></li>" +
             "</ul>";
@@ -1546,7 +1546,7 @@
               '<button class="pick-folder" data-act="pick"><span class="ico">' + icon("worktree", 20) + "</span><b>Choose a folder…</b><span>or drop one here</span></button>" +
               (noRepo
                 ? '<p class="st-note">' + icon("worktree", 14) + "<span>Until the repository joins, threads work without a checkout. <b>The folder you pick stays as it is.</b></span></p>"
-                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own worktrees, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>")
+                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own workspaces, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>")
             );
           }
           var card = function (sub, badge) {
@@ -1584,7 +1584,7 @@
             card(Crew.brand("github", 11) + " " + REPO.slug + " · " + REPO.branch) +
             '<div class="st-form">' +
             field({ key: "name", label: "Project name" }) +
-            field({ key: "setup", label: "Setup command", aside: '<span class="fine" style="font-weight:400">optional</span>', placeholder: "pnpm install", mono: true, hint: "Runs in every new worktree before the agent starts." }) +
+            field({ key: "setup", label: "Setup command", aside: '<span class="fine" style="font-weight:400">optional</span>', placeholder: "pnpm install", mono: true, hint: "Runs in every new workspace before the agent starts." }) +
             "</div>" +
             '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="add">Add project</button></div>'
           );
@@ -1606,7 +1606,7 @@
               ? '<p class="st-sub">Agents need a provider before they can take a desk. Log in from your first thread’s draft, and it can start.</p>'
               : noRepo
                 ? '<p class="st-sub">Your first colleague is at its desk. It can research, write and plan for webshop now. For code, connect GitHub, then add webshop’s repository.</p>'
-                : '<p class="st-sub">Your first colleague is at its desk. Tell it what to do in webshop: it works in its own worktree, and raises its hand when it needs you.</p>') +
+                : '<p class="st-sub">Your first colleague is at its desk. Tell it what to do in webshop: it works in its own workspace, and raises its hand when it needs you.</p>') +
             '<ul class="recap">' +
             rows
               .map(function (r) {

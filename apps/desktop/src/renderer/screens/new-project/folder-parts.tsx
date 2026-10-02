@@ -51,7 +51,7 @@ export function ChooseFolder({
         <p className="st-note">
           <BranchIcon size={14} />
           <span>
-            Threads work in their own worktrees, cloned from the remote.{" "}
+            Threads work in their own workspaces, cloned from the remote.{" "}
             <b>The folder you pick stays as it is.</b>
           </span>
         </p>

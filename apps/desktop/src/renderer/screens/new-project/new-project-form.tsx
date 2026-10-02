@@ -245,7 +245,7 @@ export function NewProjectForm({
         <FormField
           label="Setup command"
           aside={<span className="fine new-project-optional">optional</span>}
-          hint="Runs in every new worktree before the agent starts."
+          hint="Runs in every new workspace before the agent starts."
         >
           <input
             className="mono"

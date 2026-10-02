@@ -144,7 +144,7 @@ export function Welcome({
             and come to you when a decision is yours.
           </p>
           <ul className="perks">
-            <Perk icon={<WorkspaceIcon />} title="A worktree for every thread">
+            <Perk icon={<WorkspaceIcon />} title="A workspace for every thread">
               Each agent works on its own branch. Your checkout stays exactly as you left it.
             </Perk>
             <Perk icon={<IntakeIcon />} title="Work arrives prepared">

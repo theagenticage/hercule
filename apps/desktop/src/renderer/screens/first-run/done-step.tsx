@@ -62,7 +62,7 @@ export function DoneStep({
           ? "Agents need a provider before they can take a desk. Log in from your first thread’s draft, and it can start."
           : recap.gitHubAccount === null
             ? `Your first colleague is at its desk. It can research, write and plan for ${projectName} now. For code, connect GitHub, then add ${projectName}’s repository.`
-            : `Your first colleague is at its desk. Tell it what to do in ${projectName}: it works in its own worktree, and raises its hand when it needs you.`}
+            : `Your first colleague is at its desk. Tell it what to do in ${projectName}: it works in its own workspace, and raises its hand when it needs you.`}
       </p>
       <ul className="recap">
         <RecapRow mark={<UserAvatar name={username} size={20} />} name={<b>{username}</b>}>
