@@ -347,7 +347,8 @@ input.field[type="password"]:not(:placeholder-shown) {
 .fl .field {
   height: 36px;
 }
-.field > input {
+.field > input,
+.field > select {
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -360,7 +361,7 @@ input.field[type="password"]:not(:placeholder-shown) {
 .field > input::placeholder {
   color: var(--faint);
 }
-.field:has(> input):focus-within {
+.field:has(> input, > select):focus-within {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
