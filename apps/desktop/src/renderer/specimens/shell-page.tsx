@@ -171,6 +171,29 @@ const REFUSING_BRIDGE: Bridge = {
   waitingThreads: {
     set: () => Promise.resolve(undefined),
   },
+  localController: {
+    find: () => Promise.reject(buildBridgeCallError("localController.find")),
+    start: () => Promise.reject(buildBridgeCallError("localController.start")),
+  },
+  logsFolder: {
+    show: () => Promise.reject(buildBridgeCallError("logsFolder.show")),
+  },
+  setupToken: {
+    read: () => Promise.reject(buildBridgeCallError("setupToken.read")),
+  },
+  macUser: {
+    read: () => Promise.reject(buildBridgeCallError("macUser.read")),
+  },
+  folder: {
+    pick: () => Promise.reject(buildBridgeCallError("folder.pick")),
+  },
+  firstRun: {
+    read: () => Promise.reject(buildBridgeCallError("firstRun.read")),
+    write: () => Promise.reject(buildBridgeCallError("firstRun.write")),
+  },
+  link: {
+    open: () => Promise.reject(buildBridgeCallError("link.open")),
+  },
   menu: {
     onCommand: () => () => undefined,
   },

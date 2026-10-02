@@ -12,6 +12,7 @@ import {
   NoControllerSaved,
   type WindowState,
 } from "./app-settings";
+import type { FirstRunProgress } from "../ipc/contract";
 import { makeTemporarySettingsFile } from "./testing";
 
 let file: string;
@@ -246,7 +247,7 @@ describe("the controller URL and the token", () => {
 
   it("refuse to save a token with no controller URL saved, and write nothing", async () => {
     const exit = await runWithAppSettings(Effect.exit(saveEncryptedToken(encrypted)));
-    expect(exit).toEqual(Exit.fail(new NoControllerSaved()));
+    expect(exit).toEqual(Exit.fail(new NoControllerSaved("a login token")));
     expect(existsSync(file)).toBe(false);
   });
 
@@ -306,5 +307,53 @@ describe("the controller URL and the token", () => {
       window: windowState,
       newerKey,
     });
+  });
+});
+
+describe("the first run's progress", () => {
+  const readFirstRun = AppSettings.use((settings) => settings.readFirstRun);
+  const saveFirstRun = (progress: FirstRunProgress | null) =>
+    AppSettings.use((settings) => settings.saveFirstRun(progress));
+
+  it("is read for the saved controller", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        controllerUrl: "http://127.0.0.1:4937",
+        firstRun: { controllerUrl: "http://127.0.0.1:4937", putOff: ["github"] },
+      }),
+    );
+    expect(await runWithAppSettings(readFirstRun)).toEqual({ putOff: ["github"] });
+  });
+
+  it("is not read for another controller", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        controllerUrl: "https://hercule.example",
+        firstRun: { controllerUrl: "http://127.0.0.1:4937", putOff: ["github"] },
+      }),
+    );
+    expect(await runWithAppSettings(readFirstRun)).toBeNull();
+  });
+
+  it("is saved with the controller URL it belongs to, and removed", async () => {
+    writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:4937" }));
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveFirstRun({ putOff: ["providers", "project"] }), readFirstRun),
+    );
+    expect(afterSave).toEqual({ putOff: ["providers", "project"] });
+    expect(readFileObject()).toEqual({
+      controllerUrl: "http://127.0.0.1:4937",
+      firstRun: { controllerUrl: "http://127.0.0.1:4937", putOff: ["providers", "project"] },
+    });
+    expect(await runWithAppSettings(Effect.andThen(saveFirstRun(null), readFirstRun))).toBeNull();
+    expect(readFileObject()).toEqual({ controllerUrl: "http://127.0.0.1:4937" });
+  });
+
+  it("is refused with no controller URL saved, and nothing is written", async () => {
+    const exit = await runWithAppSettings(Effect.exit(saveFirstRun({ putOff: [] })));
+    expect(exit).toEqual(Exit.fail(new NoControllerSaved("the first run's progress")));
+    expect(existsSync(file)).toBe(false);
   });
 });

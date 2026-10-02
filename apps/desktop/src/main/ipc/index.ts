@@ -2,6 +2,7 @@
  * Main's side of the IPC contract: one handler per renderer-to-main channel,
  * registered with Electron once at boot.
  */
+import { userInfo } from "node:os";
 import { ipcMain } from "electron";
 import { Effect, type ManagedRuntime } from "effect";
 import {
@@ -12,9 +13,16 @@ import {
 } from "../../ipc/contract";
 import { AppSettings, type NoControllerSaved } from "../app-settings";
 import { ControllerConnection } from "../controller-connection";
+import { FirstRun } from "../first-run";
+import type {
+  ControllerAlreadySaved,
+  NoLogsFolderSeen,
+  StartAlreadyRunning,
+} from "../local-controller";
 import { MainWindow } from "../main-window";
 import { MainMenu } from "../menu";
 import { RunnerIdentity } from "../runner-identity";
+import { openInBrowser } from "../security";
 import { StoredToken } from "../stored-token";
 import { ThreadNotifications } from "../thread-notifications";
 import { answerIpcMessage } from "./message";
@@ -26,6 +34,7 @@ import { answerIpcMessage } from "./message";
 type IpcHandlerServices =
   | AppSettings
   | ControllerConnection
+  | FirstRun
   | MainMenu
   | MainWindow
   | RunnerIdentity
@@ -37,7 +46,8 @@ type IpcHandlerServices =
  * current state. Main refuses the message, and the error's message is the
  * reason. An outcome the user can cause is part of the response instead.
  */
-type IpcHandlerError = NoControllerSaved;
+type IpcHandlerError =
+  NoControllerSaved | ControllerAlreadySaved | StartAlreadyRunning | NoLogsFolderSeen;
 
 /**
  * What main does for each channel, given the decoded request. The table is
@@ -57,6 +67,20 @@ const IPC_HANDLERS: {
   "goMenu.set": (threads) => MainMenu.use((menu) => menu.setGoThreads(threads)),
   "waitingThreads.set": (threads) =>
     ThreadNotifications.use((notifications) => notifications.setWaitingThreads(threads)),
+  "localController.find": () => FirstRun.use((firstRun) => firstRun.findLocalController),
+  "localController.start": () => FirstRun.use((firstRun) => firstRun.startLocalController),
+  "logsFolder.show": () => FirstRun.use((firstRun) => firstRun.showLogsFolder),
+  "setupToken.read": () => FirstRun.use((firstRun) => firstRun.readSetupToken),
+  "macUser.read": () => Effect.sync(() => ({ username: userInfo().username })),
+  "folder.pick": () => FirstRun.use((firstRun) => firstRun.pickFolder),
+  "firstRun.read": () => AppSettings.use((settings) => settings.readFirstRun),
+  // The settings file is in the app's own folder, so a write that fails is a
+  // defect.
+  "firstRun.write": (progress) =>
+    AppSettings.use((settings) => settings.saveFirstRun(progress)).pipe(
+      Effect.catchTag("PlatformError", Effect.die),
+    ),
+  "link.open": ({ url }) => openInBrowser(url),
 };
 
 /**

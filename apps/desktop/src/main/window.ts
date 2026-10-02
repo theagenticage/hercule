@@ -189,6 +189,9 @@ const make = Effect.gen(function* () {
       Effect.sync(() => {
         void dialog.showMessageBox(window, { type: "warning", message, buttons: ["OK"] });
       }),
+    pickFolder: Effect.promise(() =>
+      dialog.showOpenDialog(window, { properties: ["openDirectory"] }),
+    ).pipe(Effect.map(({ canceled, filePaths }) => (canceled ? null : (filePaths[0] ?? null)))),
   });
 });
 

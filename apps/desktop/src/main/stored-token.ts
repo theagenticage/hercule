@@ -162,7 +162,7 @@ const make = Effect.gen(function* () {
             .pipe(Effect.catchTag("PlatformError", Effect.die));
         }
         const controllerUrl = yield* settings.readControllerUrl;
-        if (controllerUrl === null) return yield* new NoControllerSaved();
+        if (controllerUrl === null) return yield* new NoControllerSaved("a login token");
         yield* reflectSignedIn(true);
         yield* encryptAndStore(controllerUrl, token);
       }),

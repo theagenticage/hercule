@@ -1,9 +1,9 @@
 /**
  * The app's settings file: the one small file main keeps in the app's user
  * data folder, `settings.json`. It holds the saved controller URL, the login
- * token as the Keychain encrypted it, and the window's state. The token sits
- * beside the URL of the controller it belongs to, so that one write changes
- * both.
+ * token as the Keychain encrypted it, the window's state, and the steps of
+ * the first run the user put off. The token sits beside the URL of the
+ * controller it belongs to, so that one write changes both.
  *
  * The file is read once, when main starts, and kept in memory; reads never
  * touch the disk. Every save writes the whole file again.
@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import { FirstRunProgress } from "../ipc/contract";
 import { isHttpUrl } from "./http-url";
 
 /** The URL of the controller the app connects to. */
@@ -64,15 +65,25 @@ export type WindowState = typeof WindowState.Type;
 const EncryptedToken = Schema.Uint8ArrayFromBase64;
 
 /**
- * The error a save of the login token fails with when no controller URL is
- * saved: a token belongs to one controller, so there is nothing to save it
- * for. The message completes a sentence, such as a refused IPC message's.
+ * What main keeps of the first run, with the controller URL it was kept for:
+ * it is read back only while that URL is the saved one.
+ */
+const FirstRunRecord = Schema.Struct({
+  controllerUrl: ControllerUrl,
+  putOff: FirstRunProgress.fields.putOff,
+});
+
+/**
+ * The error a request fails with when it needs a saved controller URL and
+ * none is saved. `what` names the thing that belongs to one controller, such
+ * as "a login token": there is no controller to save it for or read it from.
+ * The message completes a sentence, such as a refused IPC message's.
  */
 export class NoControllerSaved extends Data.TaggedError("NoControllerSaved")<{
   readonly message: string;
 }> {
-  constructor() {
-    super({ message: "no controller URL is saved, and a login token belongs to one controller" });
+  constructor(what: string) {
+    super({ message: `no controller URL is saved, and ${what} belongs to one controller` });
   }
 }
 
@@ -159,6 +170,7 @@ const make = (file: string) =>
     let controllerUrl = yield* decodeSettingsKey(ControllerUrl, settings, "controllerUrl", file);
     let encryptedToken = yield* decodeSettingsKey(EncryptedToken, settings, "token", file);
     let windowState = yield* decodeSettingsKey(WindowState, settings, "window", file);
+    let firstRun = yield* decodeSettingsKey(FirstRunRecord, settings, "firstRun", file);
     const fileWriteLock = yield* Semaphore.make(1);
 
     /**
@@ -224,7 +236,7 @@ const make = (file: string) =>
             if (encrypted === null) {
               yield* writeSettings(removeSettingsKey(settings, "token"));
             } else {
-              if (controllerUrl === null) return yield* new NoControllerSaved();
+              if (controllerUrl === null) return yield* new NoControllerSaved("a login token");
               // The schema encodes every byte array.
               const token = yield* Effect.orDie(Schema.encodeEffect(EncryptedToken)(encrypted));
               yield* writeSettings({ ...settings, token });
@@ -247,6 +259,44 @@ const make = (file: string) =>
             const window = yield* Effect.orDie(Schema.encodeEffect(WindowState)(state));
             yield* writeSettings({ ...settings, window });
             windowState = state;
+          }),
+        ),
+
+      /**
+       * Returns what main keeps of the first run for the saved controller, or
+       * `null` when it keeps nothing for that controller: nothing was saved,
+       * or it was saved for another controller URL.
+       */
+      readFirstRun: Effect.sync((): FirstRunProgress | null =>
+        firstRun !== null && firstRun.controllerUrl === controllerUrl
+          ? { putOff: firstRun.putOff }
+          : null,
+      ),
+
+      /**
+       * Saves `progress` as what main keeps of the first run for the saved
+       * controller, or removes it when `progress` is `null`.
+       *
+       * Fails with NoControllerSaved when `progress` is given and no
+       * controller URL is saved. Fails when the file cannot be written, and
+       * then keeps what was saved before.
+       */
+      saveFirstRun: (progress: FirstRunProgress | null) =>
+        runSave(
+          Effect.gen(function* () {
+            if (progress === null) {
+              yield* writeSettings(removeSettingsKey(settings, "firstRun"));
+              firstRun = null;
+              return;
+            }
+            if (controllerUrl === null) {
+              return yield* new NoControllerSaved("the first run's progress");
+            }
+            const record = { controllerUrl, putOff: progress.putOff };
+            // The schema encodes every value of its type.
+            const encoded = yield* Effect.orDie(Schema.encodeEffect(FirstRunRecord)(record));
+            yield* writeSettings({ ...settings, firstRun: encoded });
+            firstRun = record;
           }),
         ),
     };

@@ -221,7 +221,7 @@ describe("the stored token", () => {
   it("is refused, and changes nothing, when no controller URL is saved", async () => {
     const outcome = await runWithStoredToken(write("secret-token"));
     expect(outcome).toEqual({
-      exit: Exit.fail(new NoControllerSaved()),
+      exit: Exit.fail(new NoControllerSaved("a login token")),
       signedIn: [],
       notificationsSignedIn: [],
       window: [],

@@ -453,6 +453,19 @@ export default tseslint.config(
     },
   },
   {
+    // The desktop app's main process runs on Electron's Node, never inside the
+    // compiled binary, so the binary's broken `fork()` cannot reach it.
+    // `run-program.ts` is the one file in main that starts programs: the
+    // installed Hercule binary, the user's login shell, and git.
+    files: ["apps/desktop/src/main/run-program.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { paths: bannedEverywhere, patterns: editorLibraryPatterns },
+      ],
+    },
+  },
+  {
     files: ["**/*.js"],
     extends: [tseslint.configs.disableTypeChecked],
   },

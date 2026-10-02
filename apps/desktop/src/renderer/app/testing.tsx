@@ -125,6 +125,30 @@ export const createFakeBridge = ({
           return Promise.resolve(undefined);
         },
       },
+      // A Mac with no Hercule on it, no setup token, and no first run kept.
+      localController: {
+        find: () => Promise.resolve({ _tag: "Fresh", problem: null }),
+        start: () => Promise.resolve({ _tag: "NotInstalled" }),
+      },
+      logsFolder: {
+        show: () => Promise.resolve(undefined),
+      },
+      setupToken: {
+        read: () => Promise.resolve({ _tag: "PasteNeeded" }),
+      },
+      macUser: {
+        read: () => Promise.resolve({ username: "ada" }),
+      },
+      folder: {
+        pick: () => Promise.resolve({ _tag: "Cancelled" }),
+      },
+      firstRun: {
+        read: () => Promise.resolve(null),
+        write: () => Promise.resolve(undefined),
+      },
+      link: {
+        open: () => Promise.resolve(undefined),
+      },
       menu: {
         onCommand: (listener) => {
           menuListeners.add(listener);

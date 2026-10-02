@@ -30,6 +30,21 @@ describe("the requests of the renderer-to-main channels", () => {
       valid: [{ sessionId: "s-1", requestId: "r-1", title: "A thread", question: "Run git push?" }],
       invalid: [{ sessionId: "s-1", title: "A thread", question: "Run git push?" }],
     },
+    { name: "localController.find", valid: undefined, invalid: "now" },
+    { name: "localController.start", valid: undefined, invalid: "now" },
+    {
+      name: "firstRun.write",
+      valid: { putOff: ["providers", "github"] },
+      invalid: { putOff: ["tour"] },
+    },
+    { name: "firstRun.write", valid: null, invalid: { putOff: "github" } },
+    // Only a web page opens in the browser.
+    {
+      name: "link.open",
+      valid: { url: "https://github.com/settings" },
+      invalid: { url: "ftp://x.test" },
+    },
+    { name: "link.open", valid: { url: "http://127.0.0.1:4937" }, invalid: { url: "file:///etc" } },
   ];
 
   it.each(cases)("$name decodes $valid and refuses $invalid", ({ name, valid, invalid }) => {

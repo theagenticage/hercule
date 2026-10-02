@@ -111,7 +111,7 @@ describe("where the app starts", () => {
     );
     expect(router.state.location.pathname).toBe("/connect");
     expect(screen.getByRole("alert").textContent).toBe(
-      "This controller is not set up yet. Press Connect to finish setup in the browser.",
+      "This controller is not set up yet. Run `hercule setup-url` on its machine, and paste the setup address it prints here.",
     );
   });
 

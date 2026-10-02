@@ -74,7 +74,7 @@ describe("the connect screen", () => {
     [
       "SetupIncomplete",
       { _tag: "SetupIncomplete", origin: CHECKED_ORIGIN },
-      "This controller is not set up yet. Finish setup in the browser window that just opened, then connect again.",
+      "This controller is not set up yet. Run `hercule setup-url` on its machine, and paste the setup address it prints here.",
     ],
   ])("explains the outcome %s with the origin main checked", async (_tag, outcome, line) => {
     await connectWith(() => Promise.resolve(outcome));

@@ -1,0 +1,99 @@
+/**
+ * Picking a project's folder: the user picks a folder in the system's
+ * dialog, and main describes it with git, so the first run can name the
+ * project and its repository. Main only reads the folder; it never changes
+ * it.
+ */
+import { basename } from "node:path";
+import * as Effect from "effect/Effect";
+import type { FolderPickOutcome } from "../ipc/contract";
+import { MainWindow } from "./main-window";
+import { type ProgramExit, readLastErrorLine, runProgram } from "./run-program";
+
+/**
+ * The git main runs: Apple's, which every Mac has. Homebrew's git needs the
+ * Command Line Tools to install, so a Mac with another git has these too.
+ * Without the Command Line Tools, Apple's git offers to install them and
+ * fails, and the outcome is `GitFailed` with git's error.
+ */
+const GIT = "/usr/bin/git";
+
+/** The exit code of `git remote get-url` when the remote does not exist. */
+const NO_SUCH_REMOTE_EXIT_CODE = 2;
+
+/**
+ * Returns main's environment for git: without any `GIT_*` variable, which
+ * could point git at another repository than the folder's, and with git's
+ * messages in English, which `describeFolder` reads.
+ */
+const buildGitEnvironment = (): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
+  LC_ALL: "C",
+});
+
+/** Runs git with `args` in `folder` and returns how it exited. */
+const runGit = (folder: string, args: ReadonlyArray<string>) =>
+  runProgram(GIT, ["-C", folder, ...args], { env: buildGitEnvironment() });
+
+/**
+ * Returns the line that says why git failed in `exit`: the last line git
+ * wrote to stderr, or its exit code when it wrote none.
+ */
+const describeGitFailure = (exit: ProgramExit): string =>
+  readLastErrorLine(exit.stderr) ??
+  (exit.exitCode === null
+    ? "Git was stopped by a signal before it finished."
+    : `Git exited with code ${String(exit.exitCode)} and wrote no error.`);
+
+/**
+ * Describes `folder`, an absolute path, with git:
+ *
+ * - `Repository` when it is in a git repository with an `origin` remote;
+ * - `NoRemote` when it is in a git repository without one;
+ * - `NotGit` when it is in no git repository;
+ * - `GitFailed` when git cannot read it otherwise, with git's last line.
+ *
+ * `remote` is the URL git fetches `origin` from, after the `insteadOf`
+ * rules of the user's git config. `branch` is the branch checked out, also
+ * in a repository with no commit yet, or null when HEAD is detached. Runs
+ * git twice. Never fails.
+ */
+export const describeFolder = (folder: string): Effect.Effect<FolderPickOutcome> =>
+  Effect.gen(function* () {
+    const name = basename(folder);
+    const remote = yield* runGit(folder, ["remote", "get-url", "origin"]);
+    if (remote.exitCode !== 0 && remote.exitCode !== NO_SUCH_REMOTE_EXIT_CODE) {
+      return remote.stderr.includes("not a git repository")
+        ? ({ _tag: "NotGit", name } as const)
+        : ({ _tag: "GitFailed", name, line: describeGitFailure(remote) } as const);
+    }
+    // symbolic-ref exits 1, quietly, when HEAD is detached.
+    const head = yield* runGit(folder, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    if (head.exitCode !== 0 && head.exitCode !== 1) {
+      return { _tag: "GitFailed", name, line: describeGitFailure(head) } as const;
+    }
+    const branch = head.exitCode === 0 ? head.stdout.trim() : null;
+    return remote.exitCode === 0
+      ? ({ _tag: "Repository", name, remote: remote.stdout.trim(), branch } as const)
+      : ({ _tag: "NoRemote", name, branch } as const);
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed({
+        _tag: "GitFailed",
+        name: basename(folder),
+        line: `Git could not be started: ${error.message}`,
+      } as const),
+    ),
+  );
+
+/**
+ * Asks the user to pick a folder in the system's dialog, and describes it
+ * with `describeFolder`. Returns `Cancelled` when the user cancels.
+ */
+export const pickFolder: Effect.Effect<FolderPickOutcome, never, MainWindow> = Effect.gen(
+  function* () {
+    const folder = yield* MainWindow.use((window) => window.pickFolder);
+    if (folder === null) return { _tag: "Cancelled" } as const;
+    return yield* describeFolder(folder);
+  },
+);

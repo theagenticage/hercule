@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import {
   ControllerConnection,
   makeControllerConnectionLayer,
+  parseControllerAddress,
   parseControllerUrl,
 } from "./controller-connection";
 import { StoredToken } from "./stored-token";
@@ -47,6 +48,32 @@ describe("parseControllerUrl", () => {
     ["a fragment", "http://127.0.0.1:4937/#top"],
     ["an empty fragment", "http://127.0.0.1:4937#"],
   ])("refuses %s", (_case, text) => expect(parseControllerUrl(text)).toBeNull());
+});
+
+describe("parseControllerAddress", () => {
+  it.each([
+    ["http://127.0.0.1:4937", { origin: "http://127.0.0.1:4937", setupToken: null }],
+    [
+      "http://127.0.0.1:4937/setup?token=abc",
+      { origin: "http://127.0.0.1:4937", setupToken: "abc" },
+    ],
+    [
+      " HTTPS://Hercule.Example.com:443/setup?token=a%2Bb ",
+      { origin: "https://hercule.example.com", setupToken: "a+b" },
+    ],
+  ])("reads %j as %j", (text, address) => expect(parseControllerAddress(text)).toEqual(address));
+
+  it.each([
+    ["an empty field", ""],
+    ["a path other than /setup", "http://127.0.0.1:4937/login?token=abc"],
+    ["/setup with no query", "http://127.0.0.1:4937/setup"],
+    ["an empty token", "http://127.0.0.1:4937/setup?token="],
+    ["another key", "http://127.0.0.1:4937/setup?token=abc&next=x"],
+    ["a token twice", "http://127.0.0.1:4937/setup?token=abc&token=def"],
+    ["a fragment", "http://127.0.0.1:4937/setup?token=abc#top"],
+    ["a user name", "http://me@127.0.0.1:4937/setup?token=abc"],
+    ["another scheme", "ftp://127.0.0.1:4937/setup?token=abc"],
+  ])("refuses %s", (_case, text) => expect(parseControllerAddress(text)).toBeNull());
 });
 
 describe("ControllerConnection.save", () => {
@@ -93,14 +120,15 @@ describe("ControllerConnection.save", () => {
   });
 
   /**
-   * Saves `input` through a connection service built on the temporary
-   * settings file, with fakes of the stored token, the window and the
-   * browser. Returns the outcome, each token written, how many times the
-   * window reloaded, and each URL opened in the browser.
+   * Runs `program` on a connection service built on the temporary settings
+   * file, with fakes of the stored token and the window. Returns what
+   * `program` returned, each token written, and how many times the window
+   * reloaded.
    */
-  const save = async (input: string) => {
+  const runOnConnection = async <A>(
+    program: (connection: ControllerConnection["Service"]) => Effect.Effect<A>,
+  ) => {
     const tokenWrites: Array<string | null> = [];
-    const opened: Array<string> = [];
     const storedToken = Layer.succeed(StoredToken)({
       read: Effect.succeed(null),
       write: (token) =>
@@ -109,22 +137,18 @@ describe("ControllerConnection.save", () => {
         }),
     });
     const window = makeFakeMainWindow();
-    const layer = makeControllerConnectionLayer(
-      (url) =>
-        Effect.sync(() => {
-          opened.push(url);
-        }),
-      nodeFetchWithoutRedirects,
-    ).pipe(Layer.provide(Layer.mergeAll(settingsFile.layer, storedToken, window.layer)));
+    const layer = makeControllerConnectionLayer(nodeFetchWithoutRedirects).pipe(
+      Layer.provide(Layer.mergeAll(settingsFile.layer, storedToken, window.layer)),
+    );
     const outcome = await Effect.runPromise(
-      Effect.provide(
-        ControllerConnection.use((connection) => connection.save(input)),
-        layer,
-      ),
+      Effect.provide(ControllerConnection.use(program), layer),
     );
     const reloads = window.calls.filter((call) => call === "reload").length;
-    return { outcome, tokenWrites, reloads, opened };
+    return { outcome, tokenWrites, reloads };
   };
+
+  /** Saves `input`; see runOnConnection. */
+  const save = (input: string) => runOnConnection((connection) => connection.save(input));
 
   const readFileObject = (): unknown => JSON.parse(readFileSync(settingsFile.path, "utf8"));
 
@@ -137,7 +161,6 @@ describe("ControllerConnection.save", () => {
       outcome: { _tag: "Saved", origin },
       tokenWrites: [null],
       reloads: 1,
-      opened: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: origin });
   });
@@ -148,7 +171,6 @@ describe("ControllerConnection.save", () => {
       outcome: { _tag: "Saved", origin },
       tokenWrites: [],
       reloads: 1,
-      opened: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: origin, token: "AAEC" });
   });
@@ -158,21 +180,47 @@ describe("ControllerConnection.save", () => {
       outcome: { _tag: "InvalidUrl" },
       tokenWrites: [],
       reloads: 0,
-      opened: [],
     });
     expect(requestCount).toBe(0);
     expect(() => readFileSync(settingsFile.path)).toThrow();
   });
 
-  it("opens the setup page of a controller that is not set up, and saves nothing", async () => {
+  it("asks for the setup address of a controller that is not set up, and saves nothing", async () => {
     setUp = false;
     expect(await save(origin)).toEqual({
       outcome: { _tag: "SetupIncomplete", origin },
       tokenWrites: [],
       reloads: 0,
-      opened: [`${origin}/setup`],
     });
     expect(() => readFileSync(settingsFile.path)).toThrow();
+  });
+
+  it("saves the setup address of a controller that is not set up, and keeps its token once", async () => {
+    setUp = false;
+    const { outcome, reloads } = await runOnConnection((connection) =>
+      Effect.gen(function* () {
+        const saved = yield* connection.save(`${origin}/setup?token=abc`);
+        const tokens = [
+          yield* connection.takePastedSetupToken("http://127.0.0.1:1"),
+          yield* connection.takePastedSetupToken(origin),
+          yield* connection.takePastedSetupToken(origin),
+        ];
+        return { saved, tokens };
+      }),
+    );
+    expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, tokens: [null, "abc", null] });
+    expect(reloads).toBe(1);
+    expect(readFileObject()).toEqual({ controllerUrl: origin });
+  });
+
+  it("saves the setup address of a controller that is set up, without its token", async () => {
+    const { outcome } = await runOnConnection((connection) =>
+      Effect.gen(function* () {
+        const saved = yield* connection.save(`${origin}/setup?token=abc`);
+        return { saved, token: yield* connection.takePastedSetupToken(origin) };
+      }),
+    );
+    expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, token: null });
   });
 
   it("returns any other outcome of the check with the origin, and saves nothing", async () => {
@@ -181,8 +229,75 @@ describe("ControllerConnection.save", () => {
       outcome: { _tag: "Redirected", origin, targetOrigin: "https://hercule.example.com" },
       tokenWrites: [],
       reloads: 0,
-      opened: [],
     });
+    expect(() => readFileSync(settingsFile.path)).toThrow();
+  });
+});
+
+describe("ControllerConnection.saveIfAnswering", () => {
+  let settingsFile: TemporarySettingsFile;
+  let server: FakeHttpServer;
+  /** Whether the fake controller is set up. */
+  let setUp: boolean;
+
+  beforeEach(() => {
+    settingsFile = makeTemporarySettingsFile();
+    return settingsFile.remove;
+  });
+
+  beforeEach(async () => {
+    setUp = true;
+    server = await startFakeHttpServer((request, response) => {
+      const allowsApp = { "access-control-allow-origin": "app://hercule" };
+      if (request.method === "OPTIONS") {
+        response
+          .writeHead(204, {
+            ...allowsApp,
+            "access-control-allow-methods": "DELETE, GET, PATCH, POST, PUT",
+            "access-control-allow-headers": "authorization, content-type",
+          })
+          .end();
+      } else {
+        response
+          .writeHead(200, { ...allowsApp, "content-type": "application/json" })
+          .end(JSON.stringify({ complete: setUp }));
+      }
+    });
+    return server.close;
+  });
+
+  /** Runs saveIfAnswering on `origin`, and returns its answer and how many times the window reloaded. */
+  const saveIfAnswering = async (origin: string) => {
+    const window = makeFakeMainWindow();
+    const storedToken = Layer.succeed(StoredToken)({
+      read: Effect.succeed(null),
+      write: () => Effect.void,
+    });
+    const saved = await Effect.runPromise(
+      Effect.provide(
+        ControllerConnection.use((connection) => connection.saveIfAnswering(origin)),
+        makeControllerConnectionLayer(nodeFetchWithoutRedirects).pipe(
+          Layer.provide(Layer.mergeAll(settingsFile.layer, storedToken, window.layer)),
+        ),
+      ),
+    );
+    return { saved, reloads: window.calls.filter((call) => call === "reload").length };
+  };
+
+  it.each([
+    ["set up", true],
+    ["not set up", false],
+  ])("saves a controller that is %s and reloads the window", async (_case, complete) => {
+    setUp = complete;
+    expect(await saveIfAnswering(server.origin)).toEqual({ saved: true, reloads: 1 });
+    expect(JSON.parse(readFileSync(settingsFile.path, "utf8"))).toEqual({
+      controllerUrl: server.origin,
+    });
+  });
+
+  it("saves nothing when nothing answers", async () => {
+    await server.close();
+    expect(await saveIfAnswering(server.origin)).toEqual({ saved: false, reloads: 0 });
     expect(() => readFileSync(settingsFile.path)).toThrow();
   });
 });
