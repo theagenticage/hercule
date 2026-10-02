@@ -36,6 +36,26 @@ const runGit = (folder: string, args: ReadonlyArray<string>) =>
   runProgram(GIT, ["-C", folder, ...args], { env: buildGitEnvironment() });
 
 /**
+ * Returns `remote` without the user name and password an `http:` or
+ * `https:` URL can carry, such as `https://x-access-token:ghp_...@github.com/`.
+ * Returns any other remote, such as `git@github.com:ada/api.git`, unchanged.
+ *
+ * The remote leaves main for the renderer and is saved on the controller as
+ * the project's repository, so a token in it would leak. A token gets there
+ * when the user's git config has an `insteadOf` rule that adds one, or when
+ * the remote was added with one.
+ */
+const removeRemoteCredentials = (remote: string): string => {
+  if (!URL.canParse(remote)) return remote;
+  const url = new URL(remote);
+  if (url.protocol !== "http:" && url.protocol !== "https:") return remote;
+  if (url.username === "" && url.password === "") return remote;
+  url.username = "";
+  url.password = "";
+  return url.href;
+};
+
+/**
  * Returns the line that says why git failed in `exit`: the last line git
  * wrote to stderr, or its exit code when it wrote none.
  */
@@ -54,7 +74,8 @@ const describeGitFailure = (exit: ProgramExit): string =>
  * - `GitFailed` when git cannot read it otherwise, with git's last line.
  *
  * `remote` is the URL git fetches `origin` from, after the `insteadOf`
- * rules of the user's git config. `branch` is the branch checked out, also
+ * rules of the user's git config, with no user name or password in it.
+ * `branch` is the branch checked out, also
  * in a repository with no commit yet, or null when HEAD is detached. Runs
  * git twice. Never fails.
  */
@@ -74,7 +95,12 @@ export const describeFolder = (folder: string): Effect.Effect<FolderPickOutcome>
     }
     const branch = head.exitCode === 0 ? head.stdout.trim() : null;
     return remote.exitCode === 0
-      ? ({ _tag: "Repository", name, remote: remote.stdout.trim(), branch } as const)
+      ? ({
+          _tag: "Repository",
+          name,
+          remote: removeRemoteCredentials(remote.stdout.trim()),
+          branch,
+        } as const)
       : ({ _tag: "NoRemote", name, branch } as const);
   }).pipe(
     Effect.catch((error) =>

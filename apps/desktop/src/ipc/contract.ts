@@ -158,7 +158,8 @@ export type SetupTokenReadOutcome = typeof SetupTokenReadOutcome.Type;
  * HEAD).
  *
  * - `Cancelled`: the user closed the dialog without picking a folder.
- * - `Repository`: a git repository whose `origin` remote is at `remote`.
+ * - `Repository`: a git repository whose `origin` remote is at `remote`,
+ *   with no user name or password in it.
  * - `NoRemote`: a git repository with no `origin` remote.
  * - `NotGit`: a folder that is not in a git repository.
  * - `GitFailed`: git could not read the folder for another reason, such as
