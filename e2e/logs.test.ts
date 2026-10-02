@@ -101,11 +101,17 @@ describe("the process logs", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
+  // Without these two checks, an empty file would pass the secret checks below.
   it("hold what the controller logged while it ran", () => {
-    // Without these, an empty file would pass the checks below.
     const log = readFileSync(join(logsDir(), "controller.log"), "utf8");
     expect(log).toContain("Hercule is listening on");
     expect(log).toContain("Stopping Hercule.");
+  });
+
+  it("hold what the local runner logged while it ran", () => {
+    // The setup waited for the runner to come online, so it has connected.
+    const log = readFileSync(join(logsDir(), "runner.log"), "utf8");
+    expect(log).toContain("The runner connected to the controller");
   });
 
   it.each(["controller.log", "runner.log"])("hold no secret value in %s", (name) => {

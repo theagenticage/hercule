@@ -632,6 +632,12 @@ export const connect = (
         Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
       );
       if (!proved) return yield* disown("the controller did not prove its identity in time");
+      // Logged only now, because before the proof the peer may not be this
+      // runner's controller. Every lost connection is logged as a warning, so
+      // this line shows in the log when the runner got its connection back.
+      yield* Effect.logInfo("The runner connected to the controller").pipe(
+        Effect.annotateLogs({ controllerUrl: pin.controllerUrl, runnerId: pin.runnerId }),
+      );
       // Start the relay only now. A session that survived a reconnect can
       // produce events at once, and a peer that has not proved its identity
       // must not receive any of them. The relay subscribes when it starts, so
