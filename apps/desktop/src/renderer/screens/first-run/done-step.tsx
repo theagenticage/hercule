@@ -13,11 +13,12 @@ import { ProviderLogo } from "../thread/provider-logo";
 /**
  * Renders All set for `username` in `timezone`, from `recap`. `tint` is the
  * project's tint. A step with nothing to show links back to it with Do it
- * now, through `onDoItNow`. `onStart` opens the new project's draft.
+ * now, through `onDoItNow`. Every other button calls `onLeave`, which opens
+ * the new project's draft.
  *
  * Without a logged-in provider, no agent can take a desk, so the main button
- * is Log in to a provider (`onLogIn`) and Open Hercule opens the draft as it
- * is.
+ * is Log in to a provider and Open Hercule is the quiet one. Both open the
+ * draft, whose own Log in button is where the user logs in.
  */
 export function DoneStep({
   username,
@@ -25,16 +26,14 @@ export function DoneStep({
   recap,
   tint,
   onDoItNow,
-  onStart,
-  onLogIn,
+  onLeave,
 }: {
   readonly username: string;
   readonly timezone: string;
   readonly recap: AllSetRecap;
   readonly tint: ProjectTint | null;
   readonly onDoItNow: (step: FirstRunStep) => void;
-  readonly onStart: () => void;
-  readonly onLogIn: () => void;
+  readonly onLeave: () => void;
 }): JSX.Element {
   const { project } = recap;
   const projectName = project?.name ?? "your project";
@@ -111,15 +110,15 @@ export function DoneStep({
       <div className="st-actions">
         {recap.providerNames === null ? (
           <>
-            <button type="button" className="btn btn--accent btn--lg" onClick={onLogIn}>
+            <button type="button" className="btn btn--accent btn--lg" onClick={onLeave}>
               Log in to a provider
             </button>
-            <button type="button" className="btn btn--quiet" onClick={onStart}>
+            <button type="button" className="btn btn--quiet" onClick={onLeave}>
               Open Hercule
             </button>
           </>
         ) : (
-          <button type="button" className="btn btn--accent btn--lg" onClick={onStart}>
+          <button type="button" className="btn btn--accent btn--lg" onClick={onLeave}>
             Start your first thread
           </button>
         )}

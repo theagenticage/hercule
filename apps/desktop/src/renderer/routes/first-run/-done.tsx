@@ -60,8 +60,7 @@ export function DoneCard({
       recap={recap}
       tint={project === null ? null : pickProjectTint(project.id, reads.projects)}
       onDoItNow={onDoItNow}
-      onStart={leave}
-      onLogIn={leave}
+      onLeave={leave}
     />
   );
 }
