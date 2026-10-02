@@ -60,7 +60,7 @@ const unescapeXml = (text: string): string =>
 
 /**
  * Converts the two plist shapes these tests write to the JSON
- * `plutil -convert json` prints, keeping only the keys the Supervisor reads.
+ * `/usr/bin/plutil -convert json` prints, keeping only the keys the Supervisor reads.
  */
 const convertPlist = (text: string): string => {
   const program = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(text)?.[1] ?? "";
@@ -106,13 +106,13 @@ const fakeRun: RunCommand = (argv) =>
     const line = argv.join(" ");
     calls.push(line);
     const [command, verb] = argv;
-    if (command === "plutil") {
+    if (command === "/usr/bin/plutil") {
       const path = argv.at(-1)!;
       return existsSync(path)
         ? buildCommandResult(0, convertPlist(readFileSync(path, "utf8")))
         : buildCommandResult(1);
     }
-    if (command !== "launchctl") return buildCommandResult(127, "", `${command}: not found`);
+    if (command !== "/bin/launchctl") return buildCommandResult(127, "", `${command}: not found`);
     switch (verb) {
       case "print":
         if (argv[2] === `gui/${UID}`)
@@ -213,13 +213,13 @@ describe("install", () => {
       unitFile,
     });
     expect(calls).toEqual([
-      `launchctl print gui/${UID}`,
-      `launchctl print ${TARGET}`,
-      `launchctl bootstrap gui/${UID} ${unitFile}`,
-      `launchctl print ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `plutil -convert json -o - ${unitFile}`,
-      `launchctl print ${TARGET}`,
+      `/bin/launchctl print gui/${UID}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl bootstrap gui/${UID} ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/usr/bin/plutil -convert json -o - ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
     ]);
     expect(seconds).toBe(3);
     expect(readFileSync(unitFile, "utf8")).toBe(renderLaunchdPlist(buildUnit()));
@@ -233,14 +233,14 @@ describe("install", () => {
     const { result } = await runOnTestClock(supervisor().install(buildUnit()));
     expect(expectSuccess(result).pid).toBe(200);
     expect(calls).toEqual([
-      `launchctl print gui/${UID}`,
-      `plutil -convert json -o - ${unitFile}`,
-      `launchctl print ${TARGET}`,
-      `launchctl kickstart -k ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `plutil -convert json -o - ${unitFile}`,
-      `launchctl print ${TARGET}`,
+      `/bin/launchctl print gui/${UID}`,
+      `/usr/bin/plutil -convert json -o - ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl kickstart -k ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/usr/bin/plutil -convert json -o - ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
     ]);
   });
 
@@ -250,14 +250,14 @@ describe("install", () => {
     const { result } = await runOnTestClock(supervisor().install(buildUnit()));
     expect(expectSuccess(result).pid).toBe(200);
     expect(calls.slice(0, 8)).toEqual([
-      `launchctl print gui/${UID}`,
-      `plutil -convert json -o - ${unitFile}`,
-      `launchctl print ${TARGET}`,
-      `launchctl bootout ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `launchctl bootstrap gui/${UID} ${unitFile}`,
+      `/bin/launchctl print gui/${UID}`,
+      `/usr/bin/plutil -convert json -o - ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl bootout ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl bootstrap gui/${UID} ${unitFile}`,
     ]);
     expect(readFileSync(unitFile, "utf8")).toBe(renderLaunchdPlist(buildUnit()));
   });
@@ -266,8 +266,8 @@ describe("install", () => {
     installBefore(buildLegacyPlist(home));
     const { result } = await runOnTestClock(supervisor().install(buildUnit()));
     expect(expectSuccess(result)).toMatchObject({ running: true, pid: 200, role: "serve", home });
-    expect(calls).toContain(`launchctl bootout ${TARGET}`);
-    expect(calls).toContain(`launchctl bootstrap gui/${UID} ${unitFile}`);
+    expect(calls).toContain(`/bin/launchctl bootout ${TARGET}`);
+    expect(calls).toContain(`/bin/launchctl bootstrap gui/${UID} ${unitFile}`);
     expect(readFileSync(unitFile, "utf8")).toBe(renderLaunchdPlist(buildUnit()));
   });
 
@@ -284,7 +284,10 @@ describe("install", () => {
     expect(readFailureMessage(result)).toBe(
       "The Hercule service on this machine runs the Hercule Home /Users/ada/other-home, and there is one unit per machine. To keep it, run this with --home /Users/ada/other-home; to replace it, run `hercule service uninstall` first.",
     );
-    expect(calls).toEqual([`launchctl print gui/${UID}`, `plutil -convert json -o - ${unitFile}`]);
+    expect(calls).toEqual([
+      `/bin/launchctl print gui/${UID}`,
+      `/usr/bin/plutil -convert json -o - ${unitFile}`,
+    ]);
     expect(readFileSync(unitFile, "utf8")).toBe(legacy);
   });
 
@@ -294,7 +297,7 @@ describe("install", () => {
     expect(readFailureMessage(result)).toBe(
       "ada is not logged in to this Mac's desktop, so launchd has nowhere to run Hercule. Run this in Terminal on the Mac itself.",
     );
-    expect(calls).toEqual([`launchctl print gui/${UID}`]);
+    expect(calls).toEqual([`/bin/launchctl print gui/${UID}`]);
     expect(existsSync(unitFile)).toBe(false);
   });
 
@@ -328,8 +331,8 @@ describe("install", () => {
 describe("prepare", () => {
   it("checks the desktop session and the installed unit, and writes and starts nothing", async () => {
     expectSuccess(await Effect.runPromise(Effect.result(supervisor().prepare(buildUnit()))));
-    expect(calls.filter((call) => !call.startsWith("plutil "))).toEqual([
-      `launchctl print gui/${UID}`,
+    expect(calls.filter((call) => !call.startsWith("/usr/bin/plutil"))).toEqual([
+      `/bin/launchctl print gui/${UID}`,
     ]);
     expect(existsSync(unitFile)).toBe(false);
     expect(existsSync(join(home, "logs"))).toBe(false);
@@ -366,13 +369,13 @@ describe("start", () => {
     const { result } = await runOnTestClock(supervisor().start);
     expect(expectSuccess(result)).toMatchObject({ running: true, pid: 200 });
     expect(calls).toEqual([
-      `plutil -convert json -o - ${unitFile}`,
-      `launchctl print ${TARGET}`,
-      `launchctl bootstrap gui/${UID} ${unitFile}`,
-      `launchctl print ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `plutil -convert json -o - ${unitFile}`,
-      `launchctl print ${TARGET}`,
+      `/usr/bin/plutil -convert json -o - ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl bootstrap gui/${UID} ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/usr/bin/plutil -convert json -o - ${unitFile}`,
+      `/bin/launchctl print ${TARGET}`,
     ]);
   });
 
@@ -380,16 +383,16 @@ describe("start", () => {
     installBefore(renderLaunchdPlist(buildUnit()), null);
     const { result } = await runOnTestClock(supervisor().start);
     expect(expectSuccess(result).pid).toBe(200);
-    expect(calls).toContain(`launchctl kickstart ${TARGET}`);
+    expect(calls).toContain(`/bin/launchctl kickstart ${TARGET}`);
   });
 
   it("does nothing to a running process", async () => {
     installBefore(renderLaunchdPlist(buildUnit()), 100);
     const { result, seconds } = await runOnTestClock(supervisor().start);
     expect(expectSuccess(result).pid).toBe(100);
-    expect(calls.filter((line) => !line.includes(" print ") && !line.startsWith("plutil"))).toEqual(
-      [],
-    );
+    expect(
+      calls.filter((line) => !line.includes(" print ") && !line.startsWith("/usr/bin/plutil")),
+    ).toEqual([]);
     expect(seconds).toBe(0);
   });
 });
@@ -399,7 +402,7 @@ describe("stop", () => {
     installBefore(renderLaunchdPlist(buildUnit()), 100);
     const { result } = await runOnTestClock(supervisor().stop);
     expect(expectSuccess(result)).toMatchObject({ installed: true, running: false, pid: null });
-    expect(calls).toContain(`launchctl bootout ${TARGET}`);
+    expect(calls).toContain(`/bin/launchctl bootout ${TARGET}`);
     expect(existsSync(unitFile)).toBe(true);
   });
 
@@ -424,7 +427,7 @@ describe("restart", () => {
     installBefore(renderLaunchdPlist(buildUnit()), 100);
     const { result } = await runOnTestClock(supervisor().restart);
     expect(expectSuccess(result).pid).toBe(200);
-    expect(calls).toContain(`launchctl kickstart -k ${TARGET}`);
+    expect(calls).toContain(`/bin/launchctl kickstart -k ${TARGET}`);
   });
 
   it("bootstraps a job that is not loaded", async () => {
@@ -432,7 +435,7 @@ describe("restart", () => {
     state.loaded = false;
     const { result } = await runOnTestClock(supervisor().restart);
     expect(expectSuccess(result).pid).toBe(200);
-    expect(calls).toContain(`launchctl bootstrap gui/${UID} ${unitFile}`);
+    expect(calls).toContain(`/bin/launchctl bootstrap gui/${UID} ${unitFile}`);
   });
 
   it("fails when no unit is installed", async () => {
@@ -454,10 +457,10 @@ describe("uninstall", () => {
       unitFile,
     });
     expect(calls).toEqual([
-      `launchctl print ${TARGET}`,
-      `launchctl bootout ${TARGET}`,
-      `launchctl print ${TARGET}`,
-      `launchctl print ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl bootout ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
+      `/bin/launchctl print ${TARGET}`,
     ]);
     expect(existsSync(unitFile)).toBe(false);
   });
@@ -465,7 +468,7 @@ describe("uninstall", () => {
   it("succeeds when nothing is installed", async () => {
     const { result } = await runOnTestClock(supervisor().uninstall);
     expect(expectSuccess(result).installed).toBe(false);
-    expect(calls).toEqual([`launchctl print ${TARGET}`, `launchctl print ${TARGET}`]);
+    expect(calls).toEqual([`/bin/launchctl print ${TARGET}`, `/bin/launchctl print ${TARGET}`]);
   });
 });
 
@@ -486,7 +489,9 @@ describe("readStatus", () => {
   it("fails with what to do when plutil cannot read the plist", async () => {
     writeFileSync(unitFile, "not a plist");
     const failing: RunCommand = (argv) =>
-      argv[0] === "plutil" ? Effect.succeed(buildCommandResult(1, "not a plist")) : fakeRun(argv);
+      argv[0] === "/usr/bin/plutil"
+        ? Effect.succeed(buildCommandResult(1, "not a plist"))
+        : fakeRun(argv);
     const { result } = await runOnTestClock(
       createLaunchdSupervisor({ run: failing, unitDir, uid: UID, userName: "ada" }).readStatus,
     );
@@ -504,7 +509,7 @@ describe.skipIf(process.platform !== "darwin")("the real plutil", () => {
     for (const text of [renderLaunchdPlist(awkward), buildLegacyPlist("/Users/ada/a &amp; b")]) {
       writeFileSync(unitFile, text);
       const converted = await Effect.runPromise(
-        runCommand(["plutil", "-convert", "json", "-o", "-", unitFile]),
+        runCommand(["/usr/bin/plutil", "-convert", "json", "-o", "-", unitFile]),
       );
       expect(converted.exitCode).toBe(0);
       const plist: unknown = JSON.parse(converted.stdout);

@@ -31,6 +31,13 @@ import {
 } from "./supervisor";
 import { LAUNCHD_LABEL, renderLaunchdPlist, type ServiceRole, type ServiceUnit } from "./unit";
 
+// The tools are run by their full paths, where macOS ships them, rather than
+// looked up on the caller's PATH. With a PATH that lacks `/bin`, the first
+// `launchctl` call would fail, and `prepare` would report that failure as the
+// user not being logged in.
+const LAUNCHCTL = "/bin/launchctl";
+const PLUTIL = "/usr/bin/plutil";
+
 /** What the launchd Supervisor needs from the machine; tests pass fakes. */
 export interface LaunchdDependencies {
   readonly run: RunCommand;
@@ -74,7 +81,7 @@ export const createLaunchdSupervisor = (
   const target = `${domain}/${LAUNCHD_LABEL}`;
 
   const readJob: Effect.Effect<LaunchdJob> = Effect.map(
-    run(["launchctl", "print", target]),
+    run([LAUNCHCTL, "print", target]),
     (result) =>
       result.exitCode === 0
         ? { loaded: true, pid: parseLaunchdPid(result.stdout) }
@@ -94,7 +101,7 @@ export const createLaunchdSupervisor = (
     const unreadable = new ServiceError({
       message: `${unitFile} is not a plist Hercule can read. Delete it and run \`hercule service install\`.`,
     });
-    const converted = yield* run(["plutil", "-convert", "json", "-o", "-", unitFile]);
+    const converted = yield* run([PLUTIL, "-convert", "json", "-o", "-", unitFile]);
     if (converted.exitCode !== 0) return yield* unreadable;
     const plist = yield* Schema.decodeUnknownEffect(InstalledPlist)(converted.stdout).pipe(
       Effect.mapError(() => unreadable),
@@ -129,13 +136,13 @@ export const createLaunchdSupervisor = (
    */
   const unload = (nextStep: string) =>
     Effect.andThen(
-      run(["launchctl", "bootout", target]),
+      run([LAUNCHCTL, "bootout", target]),
       waitUntilUnloaded(isLoaded, "launchd did not stop the Hercule service", nextStep),
     );
 
   const load = runOrFail(
     run,
-    ["launchctl", "bootstrap", domain, unitFile],
+    [LAUNCHCTL, "bootstrap", domain, unitFile],
     "launchd did not load the Hercule service",
   );
 
@@ -152,7 +159,7 @@ export const createLaunchdSupervisor = (
 
   const prepare = (unit: ServiceUnit): Effect.Effect<void, ServiceError> =>
     Effect.gen(function* () {
-      const session = yield* run(["launchctl", "print", domain]);
+      const session = yield* run([LAUNCHCTL, "print", domain]);
       if (session.exitCode !== 0) {
         return yield* new ServiceError({
           message: `${dependencies.userName ?? "This user"} is not logged in to this Mac's desktop, so launchd has nowhere to run Hercule. Run this in Terminal on the Mac itself.`,
@@ -177,7 +184,7 @@ export const createLaunchdSupervisor = (
       if (job.loaded && unchanged) {
         yield* runOrFail(
           run,
-          ["launchctl", "kickstart", "-k", target],
+          [LAUNCHCTL, "kickstart", "-k", target],
           "launchd did not restart the Hercule service",
         );
       } else {
@@ -202,7 +209,7 @@ export const createLaunchdSupervisor = (
     if (job.loaded) {
       yield* runOrFail(
         run,
-        ["launchctl", "kickstart", target],
+        [LAUNCHCTL, "kickstart", target],
         "launchd did not start the Hercule service",
       );
     } else {
@@ -227,7 +234,7 @@ export const createLaunchdSupervisor = (
     if (job.loaded) {
       yield* runOrFail(
         run,
-        ["launchctl", "kickstart", "-k", target],
+        [LAUNCHCTL, "kickstart", "-k", target],
         "launchd did not restart the Hercule service",
       );
     } else {
