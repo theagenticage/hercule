@@ -279,16 +279,17 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope: CursorScope = {
           op: "apiKey.query",
-          field: "createdAt",
-          direction: page.direction,
+          sort: [{ field: "createdAt", direction: page.direction }],
         };
         const after =
-          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope, "string");
+          page.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(page.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["created_at", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          page.direction,
+          [{ column: "created_at", direction: page.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const rows = yield* sql<ApiKeyRow>`
           SELECT id, user_id, name, created_at, last_used_at, revoked_at
@@ -300,7 +301,7 @@ const make = Effect.gen(function* () {
           rows,
           page.limit,
           (read) => Effect.succeed(read.map(toApiKey)),
-          (last) => encodeCursor(scope, last.createdAt, last.id),
+          (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
 

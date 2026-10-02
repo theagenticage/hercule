@@ -26,6 +26,7 @@ import {
   type OperationId,
   type Requirement,
 } from "@hercule/contract";
+import * as Schema from "effect/Schema";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 
 /** How a flag's or positional's text is converted into a value. */
@@ -103,6 +104,11 @@ export interface Command {
   readonly paged: boolean;
   /** The fields `--sort` accepts, when the operation pages. */
   readonly sortFields: ReadonlyArray<string>;
+  /**
+   * The contract's schema for the three paging parameters, taken from the
+   * operation's query schema. `undefined` when the operation does not page.
+   */
+  readonly pageQuery: Schema.Codec<unknown, unknown> | undefined;
   readonly help: string;
   readonly examples: ReadonlyArray<CliExample>;
   /** The error codes the endpoint declares, in the order it declares them. */
@@ -330,6 +336,28 @@ const listErrorCodes = (errors: unknown): ReadonlyArray<ErrorCode> => {
   return codes;
 };
 
+/**
+ * Returns the schema of the three paging parameters in an operation's query
+ * schema, or `undefined` when the operation does not page. The schemas are the
+ * contract's own, so the CLI checks a paging flag by the same rules as the
+ * API, without restating any of them.
+ */
+const readPageQuery = (query: unknown): Schema.Codec<unknown, unknown> | undefined => {
+  // The query schema is wrapped in the codec that reads a query string, so the
+  // struct with the field schemas is one level down, as in `buildFields`.
+  const fields = (
+    query as {
+      readonly schema?: { readonly fields?: Record<string, Schema.Codec<unknown, unknown>> };
+    }
+  )?.schema?.fields;
+  if (fields?.["sort"] === undefined) return undefined;
+  return Schema.Struct({
+    limit: fields["limit"]!,
+    cursor: fields["cursor"]!,
+    sort: fields["sort"],
+  });
+};
+
 /** Returns the `:name` path parameters of a route, in order. */
 const listPathParams = (path: string): ReadonlyArray<string> =>
   [...path.matchAll(/:([A-Za-z0-9_]+)/g)].map((match) => match[1]!);
@@ -401,6 +429,7 @@ const buildCommands = (): ReadonlyArray<Command> => {
         // shows that the operation is paged.
         paged: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("sort"),
         sortFields: readSortFields(each.query),
+        pageQuery: readPageQuery(each.query),
         help: row.help,
         examples: row.examples,
         codes: listErrorCodes(each.error),

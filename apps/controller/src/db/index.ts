@@ -24,11 +24,16 @@ export {
   buildKeyset,
   buildPageInputFields,
   buildPage,
+  hasSortKeys,
+  prepareKeysetListing,
   refuseCursor,
+  resolveSortDirection,
+  resolveSortKeys,
   type CursorScope,
   type Page,
   type PageRequest,
-  type SortKey,
+  type ResolvedSortKey,
+  type SortColumn,
 } from "./page";
 export { nowIso } from "./time";
 export {

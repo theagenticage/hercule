@@ -23,6 +23,7 @@
  * returning the project, while its tasks keep their `projectId` and its
  * resource links stay. There is no include-deleted option.
  */
+import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -42,12 +43,18 @@ import {
   type Forbidden,
   type NotFound,
   type Project,
-  type SortDirection,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortKeys,
+  withTransaction,
+  type ResolvedSortKey,
+} from "../db";
 import { AuditLog } from "../events";
 import { projectRepository, type ProjectSortField } from "./repository";
 
@@ -81,10 +88,9 @@ interface ScalarChange {
  * Sorted by name: people read a project list to pick a project, and there are
  * few enough projects that the name helps more than how recent it is.
  */
-const DEFAULT_SORT: { field: ProjectSortField; direction: SortDirection } = {
-  field: "name",
-  direction: "asc",
-};
+const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<ProjectSortField>> = [
+  { field: "name", direction: "asc" },
+];
 
 const NO_SUCH_PROJECT = "no such project";
 
@@ -116,12 +122,12 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           createDecodeValidationError,
         );
-        const order =
-          sort === undefined
-            ? DEFAULT_SORT
-            : { field: sort.field, direction: sort.direction ?? "asc" };
         const listing = yield* refuseCursor(
-          projects.list({ limit: limit ?? DEFAULT_PAGE_LIMIT, cursor, ...order }),
+          projects.list({
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            sort: resolveSortKeys(sort, DEFAULT_SORT),
+          }),
         );
         return {
           items: listing.items,

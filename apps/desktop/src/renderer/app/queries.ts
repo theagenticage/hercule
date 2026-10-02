@@ -170,22 +170,33 @@ export const localRunnerQuery = (bridge: Bridge, runners: ReadonlyArray<Runner>)
 const START_TASK_COUNT = 3;
 
 /**
+ * The order of the start cards: highest priority first, and newest first among
+ * tasks of the same priority. `priority` ascends low to urgent, so urgent
+ * first is `desc`.
+ */
+const START_TASK_SORT = [
+  { field: "priority", direction: "desc" },
+  { field: "createdAt", direction: "desc" },
+] as const;
+
+/**
  * Reads the open tasks of `projectId` a Draft Thread offers to start from:
- * the three most urgent. The key sits under the `tasks` prefix, so a push on
- * the `task` topic reads them again while a Draft Thread shows them.
+ * the three most urgent, newest first within one priority. The key sits under
+ * the `tasks` prefix, so a push on the `task` topic reads them again while a
+ * Draft Thread shows them.
  */
 export const startTasksQuery = (client: HerculeClient, projectId: string) =>
   queryOptions({
     queryKey: [
       ...queryKeys.tasks({ projectId, status: ["open"] }),
-      { sort: "priority", limit: START_TASK_COUNT },
+      { sort: START_TASK_SORT, limit: START_TASK_COUNT },
     ],
     queryFn: async (): Promise<readonly Task[]> => {
       const page = await client.task.query({
         query: {
           projectId,
           status: ["open"],
-          sort: { field: "priority", direction: "asc" },
+          sort: START_TASK_SORT,
           limit: START_TASK_COUNT,
         },
       });
@@ -265,7 +276,7 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
     queryFn: async (): Promise<readonly Input[]> => {
       const page = await client.input.query({
         params: { id: sessionId },
-        query: { limit: MAX_PAGE_LIMIT, sort: { field: "createdAt", direction: "desc" } },
+        query: { limit: MAX_PAGE_LIMIT, sort: [{ field: "createdAt", direction: "desc" }] },
       });
       return page.items.filter((input) => input.status === "queued").reverse();
     },

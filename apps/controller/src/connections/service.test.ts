@@ -29,7 +29,7 @@ import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { ConnectionReferences } from "./references";
 import { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
-import { ConnectionService, ConnectionServiceLayer } from "./service";
+import { ConnectionService, ConnectionServiceLayer, type ConnectionPage } from "./service";
 import { buildJsonResponse, createDeviceProvider, type DeviceProvider } from "./testing";
 
 let homes: Array<string> = [];
@@ -360,20 +360,21 @@ describe("the refusal of a setup operation the type does not offer", () => {
   });
 });
 
+/** The qualified name of the test type whose credentials the user pastes. */
+const PASTED_TYPE = "test/pasted-type";
+
+/** Builds a type whose `validate` accepts any token and returns this account name. */
+const buildPastedType = (displayName: string): RegisteredConnectionType => ({
+  pluginId: "test",
+  contribution: {
+    type: PASTED_TYPE,
+    displayName: "Pasted type",
+    setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
+    validate: () => Effect.succeed({ displayName, accountId: "account-1" }),
+  },
+});
+
 describe("the label of a connection the user did not name", () => {
-  const PASTED_TYPE = "test/pasted-type";
-
-  /** Builds a type whose `validate` accepts any token and returns this account name. */
-  const buildPastedType = (displayName: string): RegisteredConnectionType => ({
-    pluginId: "test",
-    contribution: {
-      type: PASTED_TYPE,
-      displayName: "Pasted type",
-      setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
-      validate: () => Effect.succeed({ displayName, accountId: "account-1" }),
-    },
-  });
-
   /** Creates a connection of the pasted type with no label, for this account name. */
   const createForAccount = (displayName: string) =>
     runAsUser(
@@ -415,5 +416,57 @@ describe("the label of a connection the user did not name", () => {
     } finally {
       await provider.stop();
     }
+  });
+});
+
+describe("connection.query with two sort keys", () => {
+  /** Creates a connection of the pasted type with this label. */
+  const createLabelled = (label: string) =>
+    Effect.flatMap(ConnectionService, (connection) =>
+      connection.create({ type: PASTED_TYPE, label, credentials: { pat: "a-token" } }),
+    );
+
+  it("orders rows equal on the first key by the second, across pages of one row", async () => {
+    const labels = await runAsUser(
+      [buildPastedType("octocat")],
+      Effect.gen(function* () {
+        const connection = yield* ConnectionService;
+        // Connections created without moving the clock share `createdAt`.
+        for (const label of ["b", "a"]) yield* createLabelled(label);
+        yield* TestClock.adjust(Duration.minutes(1));
+        for (const label of ["d", "c"]) yield* createLabelled(label);
+        const seen: Array<string> = [];
+        let cursor: string | undefined = undefined;
+        do {
+          const page: ConnectionPage = yield* connection.query({
+            limit: 1,
+            sort: [{ field: "createdAt", direction: "desc" }, { field: "label" }],
+            ...(cursor === undefined ? {} : { cursor }),
+          });
+          seen.push(...page.items.map((item) => item.label));
+          cursor = page.nextCursor;
+        } while (cursor !== undefined);
+        return seen;
+      }),
+    );
+
+    expect(labels).toEqual(["c", "d", "a", "b"]);
+  });
+
+  it("refuses a sort that names a field twice, and names the field", async () => {
+    const failure = await runAsUser(
+      [],
+      Effect.flatMap(ConnectionService, (connection) =>
+        Effect.flip(
+          connection.query({ sort: [{ field: "label" }, { field: "label", direction: "desc" }] }),
+        ),
+      ),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "validation" } });
+    const messages = (
+      failure as { error: { details: { issues: ReadonlyArray<{ message: string }> } } }
+    ).error.details.issues.map((issue) => issue.message);
+    expect(messages).toContainEqual(expect.stringContaining("label appears more than once"));
   });
 });

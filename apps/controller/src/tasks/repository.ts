@@ -9,8 +9,9 @@
  *
  * A listing pages in one of two ways:
  *
- * - Without a search text, it uses a keyset over one sortable column plus the
- *   id, which the partial indexes on `tasks` serve.
+ * - Without a search text, it uses a keyset over the sort keys plus the id.
+ *   The partial indexes on `tasks` serve a sort on one key. A sort on several
+ *   keys has no index of its own, so SQLite sorts the matching rows in memory.
  * - With a search text, it uses the full-text index ordered by relevance. No
  *   row stores its rank, so paging cannot resume from a rank and uses an
  *   offset instead.
@@ -24,6 +25,7 @@
  * only if the database does not change while it is read. A rank is not a key
  * to resume from, and there is nothing else to page by.
  */
+import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -31,25 +33,23 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
   ExternalRef,
   ProvenanceEntry,
-  SortDirection,
   Task,
   TaskPriority,
   TaskStatus,
 } from "@hercule/contract";
 import {
-  decodeCursor,
   decodeOffsetCursor,
-  encodeCursor,
   encodeOffsetCursor,
-  buildKeyset,
   mintUuid,
   buildPage,
+  prepareKeysetListing,
   uuidFromString,
   uuidToString,
   type CursorError,
   type CursorScope,
   type Page,
-  type SortKey,
+  type ResolvedSortKey,
+  type SortColumn,
 } from "../db";
 
 /**
@@ -63,15 +63,18 @@ export interface TaskFilter {
   readonly projectId?: string;
 }
 
-/** The column a keyset listing orders by. */
+/** A field a keyset listing can order by. */
 export type TaskSortField = "updatedAt" | "createdAt" | "priority" | "status";
 
 /**
- * How a listing is ordered: by a column, or by how well each row matches the
- * search text.
+ * How a listing is ordered: by its sort keys, most significant first, or by
+ * how well each row matches the search text.
  */
 export type TaskOrder =
-  | { readonly _tag: "column"; readonly field: TaskSortField; readonly direction: SortDirection }
+  | {
+      readonly _tag: "column";
+      readonly sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<TaskSortField>>;
+    }
   | { readonly _tag: "relevance"; readonly text: string };
 
 /** The page size, cursor and order of a listing. */
@@ -138,37 +141,53 @@ const COLUMNS =
   "tasks.id, tasks.title, tasks.description, tasks.status, tasks.priority, tasks.labels, " +
   "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, tasks.deleted_at";
 
-/** The column, or the expression, each sortable field orders by. */
-const SORT_COLUMN: Record<TaskSortField, string> = {
-  updatedAt: "tasks.updated_at",
-  createdAt: "tasks.created_at",
-  priority: "CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END",
-  status: "tasks.status",
+/**
+ * The rank of each priority, lowest first. It matches the `priority_rank`
+ * column, so a cursor resumes on the value the `tasks_priority` index holds.
+ */
+const PRIORITY_RANK: Record<TaskPriority, number> = { low: 0, normal: 1, high: 2, urgent: 3 };
+
+/**
+ * The rank of each status, in the order work moves through them. It matches
+ * the `status_rank` column, so a cursor resumes on the value the
+ * `tasks_status` index holds.
+ */
+const STATUS_RANK: Record<TaskStatus, number> = {
+  open: 0,
+  "in-progress": 1,
+  done: 2,
+  cancelled: 3,
 };
 
-/** The type of each sortable column, so a cursor value is compared the same way as the column. */
-const SORT_KEY_TYPE: Record<TaskSortField, "string" | "number"> = {
-  updatedAt: "string",
-  createdAt: "string",
-  priority: "number",
-  status: "string",
-};
-
-/** The rank the priority index stores, so a cursor resumes on the same value. */
-const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
-
-/** Returns a task's value for the sort field, to put in the next cursor, in the column's type. */
-const readSortKey = (task: Task, field: TaskSortField): SortKey => {
-  switch (field) {
-    case "updatedAt":
-      return task.updatedAt;
-    case "createdAt":
-      return task.createdAt;
-    case "priority":
-      return PRIORITY_RANK[task.priority];
-    case "status":
-      return task.status;
-  }
+/**
+ * The sortable fields of a task listing, and how each one sorts. Priority and
+ * status order by their rank rather than alphabetically, through the rank
+ * columns migration 0041 adds.
+ *
+ * It is exported for the test of migration 0041, which checks that a sort on
+ * these columns seeks that migration's indexes.
+ */
+export const TASK_SORT_COLUMNS: Record<TaskSortField, SortColumn<Task>> = {
+  updatedAt: {
+    column: "tasks.updated_at",
+    valueType: "string",
+    readValue: (task) => task.updatedAt,
+  },
+  createdAt: {
+    column: "tasks.created_at",
+    valueType: "string",
+    readValue: (task) => task.createdAt,
+  },
+  priority: {
+    column: "tasks.priority_rank",
+    valueType: "number",
+    readValue: (task) => PRIORITY_RANK[task.priority],
+  },
+  status: {
+    column: "tasks.status_rank",
+    valueType: "number",
+    readValue: (task) => STATUS_RANK[task.status],
+  },
 };
 
 /**
@@ -189,12 +208,6 @@ const buildMatchExpression = (text: string): string | undefined => {
   return tokens.length === 0 ? undefined : tokens.map((token) => `"${token}"`).join(" AND ");
 };
 
-const buildColumnScope = (field: TaskSortField, direction: SortDirection): CursorScope => ({
-  op: "task.query",
-  field,
-  direction,
-});
-
 /**
  * Builds the cursor scope of a relevance listing.
  *
@@ -207,14 +220,18 @@ const buildColumnScope = (field: TaskSortField, direction: SortDirection): Curso
  */
 const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => ({
   op: "task.query",
-  field: `relevance:${JSON.stringify([
-    match,
-    filter.refs ?? null,
-    filter.labels ?? null,
-    filter.status ?? null,
-    filter.projectId ?? null,
-  ])}`,
-  direction: "asc",
+  sort: [
+    {
+      field: `relevance:${JSON.stringify([
+        match,
+        filter.refs ?? null,
+        filter.labels ?? null,
+        filter.status ?? null,
+        filter.projectId ?? null,
+      ])}`,
+      direction: "asc",
+    },
+  ],
 });
 
 const make = Effect.gen(function* () {
@@ -431,25 +448,19 @@ const make = Effect.gen(function* () {
           );
         }
 
-        const { field, direction } = request.order;
-        const scope = buildColumnScope(field, direction);
-        const after =
-          request.cursor === undefined
-            ? undefined
-            : yield* decodeCursor(request.cursor, scope, SORT_KEY_TYPE[field]);
-        const { keyset, order } = buildKeyset(
+        const { keyset, order, encodeNextCursor } = yield* prepareKeysetListing(
           sql,
-          [SORT_COLUMN[field], "tasks.id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          direction,
+          "task.query",
+          request.order.sort,
+          TASK_SORT_COLUMNS,
+          "tasks.id",
+          request.cursor,
         );
         const rows = yield* sql<TaskRow>`
           SELECT ${sql.literal(COLUMNS)} FROM tasks
           WHERE ${where} AND ${keyset} ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* buildPage(rows, request.limit, hydrate, (last) =>
-          encodeCursor(scope, readSortKey(last, field), last.id),
-        );
+        return yield* buildPage(rows, request.limit, hydrate, encodeNextCursor);
       }),
   };
 });

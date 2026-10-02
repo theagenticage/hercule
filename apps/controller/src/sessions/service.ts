@@ -70,6 +70,7 @@ import {
   nowIso,
   buildPageInputFields,
   refuseCursor,
+  resolveSortDirection,
   withTransaction,
   type Page,
 } from "../db";
@@ -691,7 +692,7 @@ const make = Effect.gen(function* () {
           sessions.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             status,
             runnerId,
             agentId,
@@ -749,7 +750,7 @@ const make = Effect.gen(function* () {
             sessionId: id,
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? TRANSCRIPT_DIRECTION,
+            direction: resolveSortDirection(sort, TRANSCRIPT_DIRECTION),
           }),
         );
         return toPageOutput(listing);
@@ -1666,7 +1667,7 @@ const make = Effect.gen(function* () {
             sessionId: id,
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? INPUT_DIRECTION,
+            direction: resolveSortDirection(sort, INPUT_DIRECTION),
           }),
         );
         return toPageOutput(listing);

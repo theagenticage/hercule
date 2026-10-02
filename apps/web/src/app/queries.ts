@@ -526,7 +526,7 @@ export const conversationMessagesQuery = (client: HerculeClient, conversationId:
       client.conversation.queryMessages({
         params: { id: conversationId },
         query: {
-          sort: { field: "position", direction: "desc" },
+          sort: [{ field: "position", direction: "desc" }],
           limit: DEFAULT_PAGE_LIMIT,
           ...(pageParam === undefined ? {} : { cursor: pageParam }),
         },
@@ -554,7 +554,7 @@ export const currentConversationSessionQuery = (client: HerculeClient, conversat
     queryFn: async () =>
       (
         await client.session.query({
-          query: { conversationId, sort: { field: "createdAt", direction: "desc" }, limit: 1 },
+          query: { conversationId, sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
         })
       ).items[0] ?? null,
   });

@@ -41,7 +41,14 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { announce, buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
+import {
+  announce,
+  buildPageInputFields,
+  nowIso,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { Users } from "../users";
 import { ConversationMessages } from "./conversation-messages";
 import { messageRepository } from "./message-repository";
@@ -136,7 +143,7 @@ const make = Effect.gen(function* () {
           conversations.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             assistantId,
           }),
         );
@@ -170,7 +177,7 @@ const make = Effect.gen(function* () {
             conversationId,
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_MESSAGE_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_MESSAGE_DIRECTION),
           }),
         );
         return {

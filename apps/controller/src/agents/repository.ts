@@ -126,8 +126,7 @@ const toAgent = (row: AgentRow): StoredAgent => ({
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "agent.query",
-  field: "createdAt",
-  direction,
+  sort: [{ field: "createdAt", direction }],
 });
 
 const make = Effect.gen(function* () {
@@ -232,12 +231,12 @@ const make = Effect.gen(function* () {
         const after =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["created_at", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          [{ column: "created_at", direction: request.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const clauses = [keyset];
         if (request.permissionProfileId !== undefined) {
@@ -252,7 +251,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toAgent)),
-          (last) => encodeCursor(scope, last.createdAt, last.id),
+          (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
   };
