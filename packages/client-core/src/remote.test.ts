@@ -1,5 +1,12 @@
 import { assert, describe, it } from "vitest";
-import { isClonableRemote, isGitHubRemote, parseRepositoryName } from "./remote";
+import {
+  describeRemoteRefusal,
+  isClonableRemote,
+  isGitHubRemote,
+  parseRepositoryName,
+  REMOTE_REFUSAL,
+  REMOTE_USERINFO_REFUSAL,
+} from "./remote";
 
 describe("isClonableRemote", () => {
   it("accepts an https URL and git's scp-like form", () => {
@@ -18,6 +25,14 @@ describe("isClonableRemote", () => {
     assert.isFalse(isClonableRemote("acme/webshop"));
   });
 
+  it("rejects an https URL with a user name or password before its host", () => {
+    assert.isFalse(isClonableRemote("https://user:ghp_token@github.com/acme/webshop"));
+    assert.isFalse(isClonableRemote("https://ghp_token@github.com/acme/webshop"));
+    assert.isFalse(isClonableRemote("git:password@github.com:acme/webshop"));
+    // An @ after the host is part of the path, not a user name.
+    assert.isTrue(isClonableRemote("https://github.com/acme/webshop@v2"));
+  });
+
   it("rejects a value git would read as an option, and an empty value", () => {
     assert.isFalse(isClonableRemote("--upload-pack=rm -rf /"));
     assert.isFalse(isClonableRemote("-https://github.com/acme/webshop"));
@@ -31,7 +46,7 @@ describe("isGitHubRemote", () => {
     assert.isTrue(isGitHubRemote("git@github.com:rogier/webshop.git"));
     assert.isTrue(isGitHubRemote("https://github.com/rogier/webshop"));
     assert.isTrue(isGitHubRemote(" https://GitHub.com/rogier/webshop "));
-    assert.isTrue(isGitHubRemote("https://token@github.com:443/rogier/webshop"));
+    assert.isTrue(isGitHubRemote("https://github.com:443/rogier/webshop"));
   });
 
   it("rejects another host, a host that only starts like GitHub's, and a remote it would not clone", () => {
@@ -70,5 +85,24 @@ describe("parseRepositoryName", () => {
     assert.isNull(parseRepositoryName("https://github.com/webshop"));
     assert.isNull(parseRepositoryName("https://github.com"));
     assert.isNull(parseRepositoryName(""));
+  });
+});
+
+describe("describeRemoteRefusal", () => {
+  it("returns null for a remote Hercule clones", () => {
+    assert.isNull(describeRemoteRefusal("https://github.com/acme/webshop"));
+    assert.isNull(describeRemoteRefusal("git@github.com:acme/webshop.git"));
+  });
+
+  it("asks to leave the credential out of an https URL that holds one", () => {
+    assert.strictEqual(
+      describeRemoteRefusal("https://user:ghp_token@github.com/acme/webshop"),
+      REMOTE_USERINFO_REFUSAL,
+    );
+  });
+
+  it("shows both accepted forms for any other remote", () => {
+    assert.strictEqual(describeRemoteRefusal("/Users/rogier/webshop"), REMOTE_REFUSAL);
+    assert.strictEqual(describeRemoteRefusal("ssh://git@github.com/acme/webshop"), REMOTE_REFUSAL);
   });
 });

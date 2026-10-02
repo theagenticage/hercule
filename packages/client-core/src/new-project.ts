@@ -6,7 +6,7 @@
  */
 import type { HerculeClient } from "./client";
 import { readErrorMessage } from "./errors";
-import { isClonableRemote, REMOTE_REFUSAL } from "./remote";
+import { describeRemoteRefusal } from "./remote";
 
 /** The error for a project with no name. */
 export const PROJECT_NAME_REFUSAL = "Name the project";
@@ -68,8 +68,7 @@ export const createProjectWithRepositories = async <Repository extends Repositor
 
   const checked = draft.repositories.map((repository) => ({
     ...repository,
-    message:
-      repository.createdId !== null || isClonableRemote(repository.remote) ? null : REMOTE_REFUSAL,
+    message: repository.createdId !== null ? null : describeRemoteRefusal(repository.remote),
   }));
   if (checked.some((repository) => repository.message !== null)) {
     return { ...draft, failure: null, repositories: checked };
