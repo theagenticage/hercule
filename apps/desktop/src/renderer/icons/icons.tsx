@@ -51,6 +51,15 @@ export function ClockIcon(props: IconProps): JSX.Element {
   );
 }
 
+/** Renders the close icon: a cross. */
+export function CloseIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" />
+    </IconFrame>
+  );
+}
+
 /** Renders the compose icon: a pencil writing on an open sheet. */
 export function ComposeIcon(props: IconProps): JSX.Element {
   return (
@@ -70,12 +79,31 @@ export function EditorIcon(props: IconProps): JSX.Element {
   );
 }
 
+/** Renders the external icon: an arrow leaving a box, for a link that opens outside the app. */
+export function ExternalIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M6.4 3.4H4a1.2 1.2 0 0 0-1.2 1.2V12A1.2 1.2 0 0 0 4 13.2h7.4a1.2 1.2 0 0 0 1.2-1.2V9.6M9 2.8h4.2V7M13 3l-5.6 5.6" />
+    </IconFrame>
+  );
+}
+
 /** Renders the Intake icon: an inbox tray. */
 export function IntakeIcon(props: IconProps): JSX.Element {
   return (
     <IconFrame {...props}>
       <path d="M2.4 9.2h3.2l1 1.8h2.8l1-1.8h3.2" />
       <path d="M2.4 9.2l1.6-5.4h8l1.6 5.4v3.6a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1z" />
+    </IconFrame>
+  );
+}
+
+/** Renders the key icon: a ring and a bit with two teeth. */
+export function KeyIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <circle cx="5.4" cy="10.6" r="2.8" />
+      <path d="M7.4 8.6l5.4-5.4M11 4.8l1.6 1.6M9.6 6.2l1.2 1.2" />
     </IconFrame>
   );
 }
@@ -111,11 +139,31 @@ export function MoreIcon(props: IconProps): JSX.Element {
   );
 }
 
+/** Renders the pause icon: two upright bars. */
+export function PauseIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M6 4v8M10 4v8" />
+    </IconFrame>
+  );
+}
+
 /** Renders the plus icon. */
 export function PlusIcon(props: IconProps): JSX.Element {
   return (
     <IconFrame {...props}>
       <path d="M8 3.2v9.6M3.2 8h9.6" />
+    </IconFrame>
+  );
+}
+
+/** Renders the question icon: a question mark in a circle. */
+export function QuestionIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <circle cx="8" cy="8" r="5.8" />
+      <path d="M6.3 6.4a1.8 1.8 0 0 1 3.5.5c0 1.2-1.8 1.4-1.8 2.6" />
+      <circle cx="8" cy="11.4" r=".4" fill="currentColor" />
     </IconFrame>
   );
 }
@@ -135,6 +183,17 @@ export function SendIcon(props: IconProps): JSX.Element {
   return (
     <IconFrame {...props}>
       <path d="M8 13V3.4M4 7.2L8 3.2l4 4" />
+    </IconFrame>
+  );
+}
+
+/** Renders the server icon: two stacked units, each with a light. */
+export function ServerIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <rect x="2.4" y="2.6" width="11.2" height="4.4" rx="1.4" />
+      <rect x="2.4" y="9" width="11.2" height="4.4" rx="1.4" />
+      <path d="M5 4.8h.1M5 11.2h.1" />
     </IconFrame>
   );
 }
