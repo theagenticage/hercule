@@ -1,23 +1,8 @@
 /* The project picker. The book draws no picker, so this is spec 14's: a box
-   520px wide, 18vh from the top of the window, over a scrim. Its surface is
-   Bureau's glass, as every surface that floats (`.pop` in menus.css). */
+   520px wide, 18vh from the top of the window, over a scrim (see
+   glass-dialog.css). */
 .picker {
-  flex-direction: column;
   width: 520px;
-  max-width: calc(100% - 48px);
-  max-height: calc(100% - 18vh - 24px);
-  margin: 18vh auto auto;
-  outline: none;
-}
-/* Only while open: a closed dialog is hidden by the browser's own
-   `display: none`, which a plain `display` here would override. The picker
-   is closed for a moment when it mounts, before it opens, and after Esc
-   closes it, before it unmounts. */
-.picker[open] {
-  display: flex;
-}
-.picker::backdrop {
-  background: var(--scrim);
 }
 /* The rows scroll between the header and the key legend, which stay. */
 .picker-rows {
