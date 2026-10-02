@@ -112,18 +112,21 @@ export function ControllerFirstRun({
         ? "remote"
         : "account";
 
+  // The remote screen asks for a setup address before anyone can sign in, so
+  // the room stays dark there, as before Hercule answers.
+  const canSignInOrSetUp = card !== "remote";
+  // The room compares its contents by identity to see what arrived, so they
+  // are built again only when what they are built from changes.
   const contents = useMemo(
     () =>
       buildRoomContents({
         ...data.reads,
-        // The remote screen asks for a setup address before anyone can
-        // sign in, so the room stays dark there, as before Hercule answers.
-        canSignInOrSetUp: card !== "remote",
+        canSignInOrSetUp,
         controllerOnThisMac: onThisMac,
         assistants: data.assistants,
         putOff: data.putOff,
       }),
-    [data, onThisMac, card],
+    [data, onThisMac, canSignInOrSetUp],
   );
 
   let body: ReactNode;
