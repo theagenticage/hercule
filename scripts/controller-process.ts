@@ -96,9 +96,9 @@ export interface Controller {
 /**
  * Starts `hercule serve` against a home, and resolves once it responds.
  *
- * Readiness is checked with the unauthenticated `setup.read`, not a line of
- * output: the tests need the listener, and the log line is printed just
- * before the listener is reachable anyway.
+ * It is ready once it has printed its listening line and then answers the
+ * unauthenticated `setup.read`. The line shows that this process bound the
+ * port, and the response shows that the listener is reachable.
  *
  * With no `port`, a number is picked, and the start is retried on another
  * port if something else on the machine took it in the meantime. With a
@@ -186,11 +186,18 @@ async function startControllerOnPort(
       const ending = child.signalCode ?? String(child.exitCode);
       throw new Error(`hercule serve exited with ${ending}:\n${readOutput()}`);
     }
-    try {
-      const response = await fetch(`${url}/api/v1/setup`);
-      if (response.ok) break;
-    } catch {
-      // Not listening yet.
+    // Another process on this machine can already listen on the port: another
+    // test's controller, or a dev server. It answers before this controller
+    // has bound the port, and keeps answering when this controller never
+    // can. This controller prints its listening line only once it has bound
+    // the port, so a response counts only after that line.
+    if (readOutput().includes(`Hercule is listening on ${url}.`)) {
+      try {
+        const response = await fetch(`${url}/api/v1/setup`);
+        if (response.ok) break;
+      } catch {
+        // Not reachable yet.
+      }
     }
     if (Date.now() > deadline) {
       // Stopped here, because the caller gets no handle on a start that failed.
