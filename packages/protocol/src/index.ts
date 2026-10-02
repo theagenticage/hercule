@@ -206,6 +206,9 @@ export type JoinAnswer = Schema.Schema.Type<typeof JoinAnswer>;
  * it already holds, or a request to be enrolled. No stored record tells the
  * controller which runner is the local one, and `runner.json` belongs to the
  * runner, so the child reports its identity over the pipe they share.
+ *
+ * After a request to be enrolled, the child writes a second line once the join
+ * succeeds: the `runnerId` form, with the id the join gave it.
  */
 export const LocalAnnouncement = Schema.Union([
   Schema.Struct({ runnerId: Fact }),

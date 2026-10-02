@@ -88,6 +88,7 @@ import { WorkspaceServiceLayer } from "../workspaces";
 import {
   JoinTokens,
   JoinTokensLayer,
+  LocalRunnerId,
   RunnerFactsDeadline,
   RunnerPingSchedule,
   RunnerConnectionsLayer,
@@ -331,6 +332,11 @@ export interface ServerOptions {
    * own. A provider plugin is added when none of these offers providers.
    */
   readonly plugins?: ReadonlyArray<Plugin>;
+  /**
+   * The id the local runner reported. The harness starts no local runner, so
+   * without this the controller has none.
+   */
+  readonly localRunnerId?: string;
 }
 
 /**
@@ -464,6 +470,7 @@ export const withServer = (
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
+      Effect.provideService(LocalRunnerId, { read: () => options.localRunnerId }),
       provideTimings(options),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));

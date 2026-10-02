@@ -12,6 +12,7 @@ export { JoinTokens, JoinTokensLayer } from "./join-tokens";
 export {
   LOCAL_RUNNER,
   LocalRunnerFailed,
+  LocalRunnerId,
   startLocalRunner,
   type LocalRunner,
   type LocalRunnerOptions,

@@ -2,11 +2,16 @@
  * `controller.read` and `controller.update`: information about this
  * controller, and the one field a caller may change.
  *
- * `controller.read` returns three values today:
+ * `controller.read` returns four values today:
  *
  * - the identity the runners verify against;
  * - the version built into the binary;
- * - the default runner, which placement falls back to.
+ * - the default runner, which placement falls back to;
+ * - the local runner, which this controller started on its own machine.
+ *
+ * The local runner's id is not stored anywhere. It is read from the running
+ * child on every call, through `LocalRunnerId`, so it is null until the child
+ * has joined and whenever this controller starts no local runner.
  *
  * Update availability belongs here too, but there is no update check yet, so
  * it is not returned; it will get its field here once it is built.
@@ -47,7 +52,7 @@ import { requireUserActor, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
-import { RETIRED, runnerRepository } from "../runners";
+import { LocalRunnerId, RETIRED, runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 
 const decodeUpdate = Schema.decodeUnknownEffect(ControllerUpdateInput);
@@ -66,6 +71,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
+  const localRunner = yield* LocalRunnerId;
 
   const readControllerInfo = (): Effect.Effect<ControllerInfo, SettingError | SqlError> =>
     Effect.gen(function* () {
@@ -81,11 +87,12 @@ const make = Effect.gen(function* () {
         publicKey: Buffer.from(record.value.publicKey).toString("base64"),
         version: VERSION,
         defaultRunnerId: yield* settings.defaultRunnerId(),
+        localRunnerId: localRunner.read() ?? null,
       };
     });
 
   return {
-    /** Returns the controller's identity, version and default runner. */
+    /** Returns the controller's identity, version, default runner and local runner. */
     read: (): Effect.Effect<
       ControllerInfo,
       Unauthenticated | Forbidden | SettingError | SqlError

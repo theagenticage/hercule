@@ -469,6 +469,7 @@ describe("running an operation", () => {
       publicKey: "key",
       version: "0.1.0",
       defaultRunnerId: null,
+      localRunnerId: buildId("12345678"),
     }));
     await run("controller", "read");
     expect(io.stdout).toEqual([
@@ -476,6 +477,7 @@ describe("running an operation", () => {
       "publicKey        key",
       "version          0.1.0",
       "defaultRunnerId",
+      "localRunnerId    12345678",
     ]);
   });
 

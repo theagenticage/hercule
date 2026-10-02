@@ -7,6 +7,10 @@
  * local, and this module knows only what it printed on stdout. Its join token
  * is sent on stdin, the one channel that neither shows in `ps` nor is inherited
  * by the processes the child starts.
+ *
+ * `controller.read` returns the local runner's id through `LocalRunnerId`,
+ * which reads it from the running child on every call rather than from a
+ * stored copy.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -98,13 +102,34 @@ export class LocalRunnerFailed extends Schema.TaggedError<LocalRunnerFailed>()(
 ) {}
 
 export interface LocalRunner {
-  /** Returns the local runner's id. It is kept only here: no column says which runner is local. */
+  /**
+   * Returns the local runner's id, or `undefined` until the child has
+   * reported it. It is kept only here: no column says which runner is local.
+   */
   readonly runnerId: () => string | undefined;
   /** Stops the local runner. Calling it twice has the same effect as once. */
   readonly stop: Effect.Effect<void>;
 }
 
-const decodeAnnouncement = Schema.decodeUnknownEffect(LocalAnnouncement);
+/**
+ * Where a service reads the local runner's id. Its `read` returns the id the
+ * running child reported, or `undefined` when the child has not reported one
+ * yet or when this controller starts no local runner.
+ *
+ * The default always returns `undefined`. `hercule serve` provides the real
+ * one after the boot has started the child, so a service built after that
+ * reads the id live. A test provides its own.
+ */
+export const LocalRunnerId = Context.Reference<{ readonly read: () => string | undefined }>(
+  "hercule/controller/runners/LocalRunnerId",
+  { defaultValue: () => ({ read: () => undefined }) },
+);
+
+/**
+ * Parses one announcement line, and returns `None` when the line is not JSON
+ * or is not an announcement this build can read.
+ */
+const parseAnnouncement = Schema.decodeUnknownOption(Schema.fromJsonString(LocalAnnouncement));
 const encodeEnrolment = Schema.encodeUnknownSync(LocalEnrolment);
 
 /**
@@ -132,43 +157,76 @@ export const createCrashCounter = (
   };
 };
 
+/** The announcement lines at the start of the child's stdout. */
+interface ChildAnnouncements {
+  /** The first line, or `undefined` if the output ends first. */
+  readonly first: Promise<string | undefined>;
+  /**
+   * The second line, which the child writes only after a first line that
+   * asked to join: the runner id the join gave it. `undefined` when the first
+   * line was anything else, or when the output ends first, as it does when the
+   * join fails.
+   */
+  readonly joined: Promise<string | undefined>;
+}
+
 /**
- * Returns the child's first stdout line, or `undefined` if the output ends
- * first. The rest of the output is copied to this process's stdout. The pipe
- * is read to the end either way, because a child whose stdout buffer fills up
- * would block on its next log line.
+ * Reads the announcement lines from the child's stdout, and copies the rest of
+ * the output to this process's stdout. The pipe is read to the end either way,
+ * because a child whose stdout buffer fills up would block on its next log
+ * line.
  */
-const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | undefined> => {
-  let resolveAnnouncement: (line: string | undefined) => void = () => undefined;
+const readAnnouncements = (stdout: ReadableStream<Uint8Array>): ChildAnnouncements => {
+  let resolveFirst: (line: string | undefined) => void = () => undefined;
+  let resolveJoined: (line: string | undefined) => void = () => undefined;
   const first = new Promise<string | undefined>((resolve) => {
-    resolveAnnouncement = resolve;
+    resolveFirst = resolve;
+  });
+  const joined = new Promise<string | undefined>((resolve) => {
+    resolveJoined = resolve;
   });
   void (async () => {
     const decoder = new TextDecoder();
     let head = "";
-    let heard = false;
+    // The number of announcement lines still to read: one at the start, and
+    // one more after a first line that asked to join.
+    let expected = 1;
+    let heard = 0;
     try {
       for await (const chunk of stdout) {
         const text = decoder.decode(chunk, { stream: true });
-        if (heard) {
+        if (expected === 0) {
           process.stdout.write(text);
           continue;
         }
         head += text;
-        const newline = head.indexOf("\n");
-        if (newline < 0) continue;
-        heard = true;
-        resolveAnnouncement(head.slice(0, newline));
-        process.stdout.write(head.slice(newline + 1));
+        let newline = head.indexOf("\n");
+        while (expected > 0 && newline >= 0) {
+          const line = head.slice(0, newline);
+          head = head.slice(newline + 1);
+          expected -= 1;
+          heard += 1;
+          if (heard === 1) {
+            resolveFirst(line);
+            const said = parseAnnouncement(line);
+            if (Option.isSome(said) && "join" in said.value) expected += 1;
+          } else {
+            resolveJoined(line);
+          }
+          newline = head.indexOf("\n");
+        }
+        if (expected === 0) process.stdout.write(head);
       }
     } catch (cause) {
       // A broken pipe means the child is gone. Waiting for the handshake
       // deadline would hold up the boot for half a minute.
       process.stderr.write(`hercule: the local runner's output ended: ${String(cause)}\n`);
     }
-    if (!heard) resolveAnnouncement(undefined);
+    // Resolving a promise that is already resolved does nothing.
+    resolveFirst(undefined);
+    resolveJoined(undefined);
   })();
-  return first;
+  return { first, joined };
 };
 
 /**
@@ -220,8 +278,9 @@ export const startLocalRunner = (
       });
       child = spawned;
 
+      const announcements = readAnnouncements(spawned.stdout);
       const line = yield* Effect.raceFirst(
-        Effect.promise(() => readAnnouncement(spawned.stdout)),
+        Effect.promise(() => announcements.first),
         Effect.as(Effect.sleep(options.handshakeDeadline), undefined),
       );
       // A child that printed nothing either died or is stuck. Killing it turns
@@ -232,16 +291,15 @@ export const startLocalRunner = (
         yield* Effect.logWarning("The local runner started but did not print its announcement.");
         return spawned;
       }
-      const said = yield* Effect.mapError(
-        Effect.flatMap(
-          Effect.try({ try: () => JSON.parse(line) as unknown, catch: () => undefined }),
-          decodeAnnouncement,
-        ),
-        () =>
+      const parsed = parseAnnouncement(line);
+      if (Option.isNone(parsed)) {
+        return yield* Effect.fail(
           new LocalRunnerFailed({
             message: `the local runner's first line was ${JSON.stringify(line)}, which this build cannot read`,
           }),
-      );
+        );
+      }
+      const said = parsed.value;
 
       // A failed write means the child has exited, which the supervisor handles; it is not a failure here.
       const writeEnrolment = (enrolment?: string): Effect.Effect<void> =>
@@ -264,6 +322,17 @@ export const startLocalRunner = (
       yield* writeEnrolment(
         `${JSON.stringify(encodeEnrolment({ controllerUrl: inherited.controllerUrl, token: invitation.token }))}\n`,
       );
+      // The child joins through this controller's API, which does not listen
+      // until the boot is over, so the id the join gives the child is read in
+      // the background rather than waited for here. A second line this build
+      // cannot read leaves the id unknown until the child's next start.
+      void announcements.joined.then((second) => {
+        if (second === undefined) return;
+        const joined = parseAnnouncement(second);
+        if (Option.isSome(joined) && "runnerId" in joined.value) {
+          announced = joined.value.runnerId;
+        }
+      });
       return spawned;
     });
 

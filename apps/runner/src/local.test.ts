@@ -184,6 +184,13 @@ describe("hercule runner --local", () => {
       const join = asked.find((one) => one.path === "/api/v1/runners/join");
       expect(join, `it never joined; stderr: ${JSON.stringify(child.err())}`).toBeDefined();
       expect(join?.authorization).toBe(`Bearer ${token}`);
+
+      // Once joined, the child says which runner it now is, so the controller
+      // knows its local runner without waiting for the next start.
+      await waitUntil(() => child.out().includes("runnerId"));
+      expect(child.out()).toBe(
+        '{"join":true}\n{"runnerId":"0199e0e7-2222-7000-8000-000000000000"}\n',
+      );
     } finally {
       child.kill();
       await server.stop(true);

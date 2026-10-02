@@ -199,24 +199,27 @@ describe("the first run and everything after it", () => {
     // The runner the controller started joins moments after the listener is
     // up, and it is another process: under load, the join can finish after
     // this step would otherwise have read the setting.
+    // The child reports its new id just after the join, so both are waited for.
+    type Identity = { defaultRunnerId: string | null; localRunnerId: string | null };
     let identity = await runLoggedInCli(["controller", "read", "--json"]);
     for (let waited = 0; waited < 10_000; waited += 100) {
-      if (
-        (parseJsonOutput(identity) as { defaultRunnerId: string | null }).defaultRunnerId !== null
-      )
-        break;
+      const read = parseJsonOutput(identity) as Identity;
+      if (read.defaultRunnerId !== null && read.localRunnerId !== null) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
       identity = await runLoggedInCli(["controller", "read", "--json"]);
     }
     expect(identity.code).toBe(0);
-    expect(parseJsonOutput(identity)).toEqual({
+    const read = parseJsonOutput(identity) as Identity;
+    expect(read).toEqual({
       id: expect.any(String) as string,
       publicKey: expect.any(String) as string,
       version: expect.any(String) as string,
       // The runner this controller started next to itself, which is the
       // fleet's first member and so the one placement falls back to.
       defaultRunnerId: expect.any(String) as string,
+      localRunnerId: expect.any(String) as string,
     });
+    expect(read.localRunnerId).toBe(read.defaultRunnerId);
 
     const settings = await runLoggedInCli(["settings", "read", "--json"]);
     expect(settings.code).toBe(0);

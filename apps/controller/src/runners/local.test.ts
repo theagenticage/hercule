@@ -125,7 +125,10 @@ if (text.trim() !== "") {
         body: "{}",
       });
       if (response.ok) {
-        record({ what: "joined", at: Date.now(), answer: await response.json() });
+        const answer = await response.json();
+        record({ what: "joined", at: Date.now(), answer });
+        // The real child says which runner it now is, as a second line.
+        process.stdout.write(JSON.stringify({ runnerId: answer.runnerId }) + "\\n");
         break;
       }
       record({ what: "refused", at: Date.now(), status: response.status });
@@ -278,18 +281,24 @@ describe("the first boot of an empty home", () => {
     const port = await findFreePort();
     const child = buildStubChild(home, JSON.stringify({ join: true }));
 
-    const seen = await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
+    const seen = await bootAndHold(home, port, { ...FAST, command: child.command }, (outcome) =>
       Effect.gen(function* () {
         yield* Effect.promise(() =>
           waitForNotes(child.notes, (notes) => notes.some((note) => note.what === "joined")),
         );
         const id = String(child.notes().find((note) => note.what === "joined")?.answer?.runnerId);
+        // The child writes its new id after the join; reading it takes a moment.
+        const reported = () => outcome.localRunner?.runnerId() !== undefined;
+        for (let waited = 0; waited < 5_000 && !reported(); waited += 20) {
+          yield* Effect.promise(() => delay(20));
+        }
         const runners = yield* runnerRepository;
         return {
           names: yield* Effect.orDie(runnerNames),
           minted: yield* Effect.orDie(tokensMinted),
           defaultRunnerId: yield* Effect.orDie((yield* Settings).defaultRunnerId()),
           row: Option.getOrThrow(yield* Effect.orDie(runners.read(id))),
+          held: outcome.localRunner?.runnerId(),
         };
       }),
     );
@@ -332,6 +341,9 @@ describe("the first boot of an empty home", () => {
     // The controller's own machine is the fleet's general-purpose runner:
     // reserved is something a person asks for on a machine of their own.
     expect(seen.row.reserved).toBe(false);
+    // The controller knows its local runner from the first boot on, not only
+    // after the child's next start.
+    expect(seen.held).toBe(joined?.answer?.runnerId);
   }, 30_000);
 
   it("creates no token and no join for a child that already has its runner id", async () => {

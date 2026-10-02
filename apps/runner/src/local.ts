@@ -5,7 +5,9 @@
  * runner its child process is. Instead the child writes its runner id to the
  * pipe they share. A machine that has never joined writes that instead, and
  * the controller sends a join token back on stdin. Stdin is the one channel
- * that `ps` does not show and that no grandchild process inherits.
+ * that `ps` does not show and that no grandchild process inherits. Once that
+ * join succeeds, the child writes the runner id it was given as a second line,
+ * so the controller knows its local runner without waiting for a restart.
  */
 import { existsSync } from "node:fs";
 import * as Duration from "effect/Duration";
@@ -25,9 +27,10 @@ const encodeAnnouncement = Schema.encodeUnknownSync(LocalAnnouncement);
 const decodeEnrolment = Schema.decodeUnknownEffect(LocalEnrolment);
 
 /**
- * Writes the announcement to stdout as a single line. The controller reads
- * exactly one line and then leaves the pipe to the runner's logs, so a second
- * line would be read as log output, not as part of the announcement.
+ * Writes one announcement to stdout as a single line. The controller reads the
+ * first line, and a second one only after a request to join; everything after
+ * that is copied to its logs, so a third announcement would be read as log
+ * output.
  */
 const announce = (said: LocalAnnouncement): Effect.Effect<void> =>
   Effect.sync(() => {
@@ -50,7 +53,13 @@ const firstStdinLine = Effect.promise(async () => {
   return undefined;
 });
 
-const enrol = (home: string): Effect.Effect<void, JoinError> =>
+/**
+ * Reads the join request the controller writes on stdin, joins with it, and
+ * returns the runner id the join gave this machine. Fails with a `JoinError`
+ * when stdin closes first, when the request cannot be read, or when the
+ * controller refuses the join.
+ */
+const enrol = (home: string): Effect.Effect<string, JoinError> =>
   Effect.gen(function* () {
     const line = yield* firstStdinLine;
     if (line === undefined) {
@@ -76,7 +85,7 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
     // The controller spawns its runner before it binds its port, so the first
     // attempts may find nothing listening. Retry only those failures, not a
     // rejected join.
-    yield* join({
+    const joined = yield* join({
       controllerUrl: enrolment.controllerUrl,
       token: enrolment.token,
       home,
@@ -88,6 +97,7 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
         schedule: Schedule.spaced(JOIN_RETRY_INTERVAL),
       }),
     );
+    return joined.runnerId;
   });
 
 export const runLocalRunner = (
@@ -101,7 +111,7 @@ export const runLocalRunner = (
       yield* announce({ runnerId: enrolled.runnerId });
     } else {
       yield* announce({ join: true });
-      yield* enrol(home);
+      yield* announce({ runnerId: yield* enrol(home) });
     }
     return yield* runDaemon(home);
   });

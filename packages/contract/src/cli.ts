@@ -2787,7 +2787,7 @@ export const CLI = {
 
   "controller.read": {
     command: "controller read",
-    help: "Reads the controller's own identity: its id, its version and the public key runners verify against. The Runner a placement falls back to comes with it.",
+    help: "Reads the controller's own identity: its id, its version and the public key runners verify against. The Runner a placement falls back to comes with it, and so does the Runner the controller started on its own machine, which is empty until that runner has joined.",
     examples: [{ args: [] }],
     fields: {},
     errors: { forbidden: USER_ONLY_FORBIDDEN },

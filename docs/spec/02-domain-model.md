@@ -404,7 +404,7 @@ Fields (pinned by [#7](https://github.com/theagenticage/hercule/issues/7), [#8](
 | `maxConcurrentSessions` | default derived from probed RAM (about one session per 2 GiB, floor 1); user-overridable |
 | protocol facts | negotiated protocol version and capability list from `hello`; last acked sequence number of the runner's outbox |
 
-The controller's auto-joined local runner is an ordinary runner with no distinguishing field; "local" as a placement choice is a client-side alias ([14-web-app.md](./14-web-app.md)).
+The controller's auto-joined local runner is an ordinary runner with no distinguishing field; "local" as a placement choice is a client-side alias ([14-web-app.md](./14-web-app.md)). *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* A client learns which runner that is from `controller.read`'s `localRunnerId`, which the controller reads from its child on every call ([03 §3.4](./03-controller-and-runners.md)), and finds the runner itself in `runner.query`.
 
 Runner-owned, not stored on the controller: the random storage directory created at enrollment, per-workspace paths, inactivity and absolute session timeouts, the disk-space watermark, the event outbox.
 
