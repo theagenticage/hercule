@@ -127,7 +127,7 @@ const buildInstance = (
 const buildSnapshot = (loggedIn: boolean): ProviderInstance["snapshots"][number] => ({
   runnerId: STUDIO.id,
   probedAt: AT,
-  harnessVersion: "2.1.263",
+  harnessVersion: "1.0.0",
   versionVerdict: "ok",
   auth: loggedIn ? { status: "ok", identity: "rogier@example.com" } : { status: "unauthenticated" },
   models: [],
