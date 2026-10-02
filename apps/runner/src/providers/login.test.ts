@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber } from "effect";
+import { Duration, Effect, Fiber, Queue } from "effect";
 import { TestClock } from "effect/testing";
 import { claudeCode } from "./claude-code";
 import { codex } from "./codex/adapter";
@@ -424,12 +424,12 @@ describe("more than one login at a time", () => {
 });
 
 /**
- * A device-code login uses only the first of the two calls. The vendor prints
+ * A device login uses only the first of the two calls. The vendor prints
  * a URL *and* a one-time code, reads nothing, and the browser completes the
  * login with the vendor. Nothing is submitted to it; its child runs until its
  * own timer ends it, and is then forgotten.
  */
-describe("a device-code login", () => {
+describe("a device login", () => {
   // A real directory, because the adapter creates the instance's Codex home and
   // neutral home when it builds the command, just as it does for a session.
   const CODEX_CONTEXT: ProviderRunnerContext = {
@@ -479,13 +479,18 @@ describe("a device-code login", () => {
    * really receive, not a cleaned-up one.
    */
   const printRecordedLogin = (children: ReadonlyArray<Fake>): void => {
-    // If the driver spawned nothing, the test should fail on its assertion, not here.
-    for (const line of RECORDED) children[0]?.says(`\u001b[36m${line}\u001b[0m\n`);
+    // The newest child is the login being started. If the driver spawned
+    // nothing, the test should fail on its assertion, not here.
+    for (const line of RECORDED) children.at(-1)?.says(`\u001b[36m${line}\u001b[0m\n`);
   };
 
-  const startLogin = (driver: ReturnType<typeof makeLogins>, children: ReadonlyArray<Fake>) =>
+  const startLogin = (
+    driver: ReturnType<typeof makeLogins>,
+    children: ReadonlyArray<Fake>,
+    instanceId = INSTANCE,
+  ) =>
     Effect.gen(function* () {
-      const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+      const starting = yield* Effect.forkChild(driver.start(instanceId, codex, CODEX_CONTEXT));
       yield* TestClock.adjust(Duration.zero);
       yield* Effect.sync(() => printRecordedLogin(children));
       return yield* Fiber.join(starting);
@@ -673,32 +678,58 @@ describe("a device-code login", () => {
     expect(answer).toMatchObject({ expiresInSeconds: Duration.toSeconds(LOGIN_CODE_LIFETIME) - 5 });
   });
 
-  describe("reporting its end", () => {
+  describe("reporting the end of a device login", () => {
+    /** An instance whose device login ends last, after the one a test checks. */
+    const SENTINEL = "0199e0e7-0000-7000-8000-00000000000b";
+
+    /** Attaches a connection the way a runner's socket does, and returns the queue it reports into. */
+    const attachQueue = (driver: ReturnType<typeof makeLogins>) =>
+      Effect.gen(function* () {
+        const reports = yield* Queue.unbounded<string>();
+        yield* driver.attachConnection((frame) => Queue.offer(reports, frame.instanceId));
+        return reports;
+      });
+
     /**
-     * Runs `body` with `driver` reporting into the returned list, the way a
-     * connection attaches it, and returns the instance ids reported.
+     * Ends a device login on the sentinel instance, waits for its report, and
+     * returns every report that came before it. Child exits are handled in
+     * the order they happen, so a report caused earlier in the test has
+     * arrived by then.
+     */
+    const listReportsBeforeSentinel = (
+      driver: ReturnType<typeof makeLogins>,
+      children: ReadonlyArray<Fake>,
+      reports: Queue.Queue<string>,
+    ) =>
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, SENTINEL);
+        yield* Effect.sync(() => children.at(-1)!.exit(0));
+        const before: Array<string> = [];
+        for (;;) {
+          const instanceId = yield* Queue.take(reports);
+          if (instanceId === SENTINEL) return before;
+          before.push(instanceId);
+        }
+      });
+
+    /**
+     * Runs `body` with a connection attached, then the sentinel login, and
+     * returns the instance ids reported before the sentinel's.
      */
     const collectReports = (
       driver: ReturnType<typeof makeLogins>,
+      children: ReadonlyArray<Fake>,
       body: Effect.Effect<void>,
-    ): Promise<ReadonlyArray<string>> => {
-      const reported: Array<string> = [];
-      return run(
+    ): Promise<ReadonlyArray<string>> =>
+      run(
         Effect.scoped(
           Effect.gen(function* () {
-            yield* driver.attachConnection((frame) =>
-              Effect.sync(() => {
-                reported.push(frame.instanceId);
-              }),
-            );
+            const reports = yield* attachQueue(driver);
             yield* body;
-            // The exit handler runs on a promise, so let it settle.
-            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
-            return reported;
+            return yield* listReportsBeforeSentinel(driver, children, reports);
           }),
         ),
       );
-    };
 
     it("reports a device login whose vendor exits on its own", async () => {
       const { spawn, children } = createMachine();
@@ -706,6 +737,7 @@ describe("a device-code login", () => {
 
       const reported = await collectReports(
         driver,
+        children,
         Effect.gen(function* () {
           yield* startLogin(driver, children);
           // The user typed the code in the browser, so the vendor exits.
@@ -722,6 +754,7 @@ describe("a device-code login", () => {
 
       const reported = await collectReports(
         driver,
+        children,
         Effect.gen(function* () {
           yield* startLogin(driver, children);
           yield* TestClock.adjust(LOGIN_CODE_LIFETIME);
@@ -739,6 +772,7 @@ describe("a device-code login", () => {
 
       const reported = await collectReports(
         driver,
+        children,
         Effect.gen(function* () {
           yield* startLogin(driver, children);
           // The second login replaces the first, whose end means nothing now.
@@ -763,6 +797,7 @@ describe("a device-code login", () => {
 
       const reported = await collectReports(
         driver,
+        children,
         Effect.gen(function* () {
           const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
           yield* TestClock.adjust(Duration.zero);
@@ -778,26 +813,40 @@ describe("a device-code login", () => {
     it("stops reporting once the connection that attached it closes", async () => {
       const { spawn, children } = createMachine();
       const driver = makeLogins(spawn);
-      const reported: Array<string> = [];
 
-      await run(
+      const [whileOpen, afterClose, nextConnection] = await run(
         Effect.gen(function* () {
-          yield* Effect.scoped(
-            driver.attachConnection((frame) =>
-              Effect.sync(() => {
-                reported.push(frame.instanceId);
-              }),
-            ),
+          const { reports, whileOpen } = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const reports = yield* attachQueue(driver);
+              yield* startLogin(driver, children);
+              yield* Effect.sync(() => children[0]!.exit(0));
+              return { reports, whileOpen: yield* Queue.take(reports) };
+            }),
           );
+          // This login ends while no connection is attached.
           yield* startLogin(driver, children);
-          yield* Effect.sync(() => children[0]!.exit(0));
-          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+          yield* Effect.sync(() => children[1]!.exit(0));
+          // Started before the next connection attaches, which gives the
+          // exit above time to be handled first.
+          yield* startLogin(driver, children, SENTINEL);
+          const next = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const reports = yield* attachQueue(driver);
+              yield* Effect.sync(() => children[2]!.exit(0));
+              return yield* Queue.take(reports);
+            }),
+          );
+          return [whileOpen, yield* Queue.size(reports), next] as const;
         }),
       );
 
-      // The next connection probes every instance when it arrives, which makes
-      // up for the report nobody could receive.
-      expect(reported).toEqual([]);
+      expect(whileOpen).toBe(INSTANCE);
+      // The closed connection received nothing more. The next connection
+      // probes every instance when it arrives, which makes up for the report
+      // nobody could receive.
+      expect(afterClose).toBe(0);
+      expect(nextConnection).toBe(SENTINEL);
     });
   });
 });
