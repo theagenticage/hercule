@@ -21,7 +21,7 @@ import { Naming } from "./-naming";
  * Returns the label of the button that switches the setup to `flow`, for a
  * type that offers more than one flow.
  */
-const labelFlowSwitch = (flow: SetupFlow, type: ConnectionType): string => {
+const buildFlowSwitchLabel = (flow: SetupFlow, type: ConnectionType): string => {
   switch (flow) {
     case "device":
     case "oauth":
@@ -97,10 +97,10 @@ export function ConnectionSetup({
         payload: { type: type.type, label, labels: [topic], config: {}, credentials: pasted },
       });
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
-      onDone();
-    },
+    // The connection exists from this reply on, even when the form is gone, so
+    // the list is fetched again either way. Closing the form is left to the
+    // `mutate` call below.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
   });
 
   // The device flow finishes in its own panel, which polls until the user
@@ -162,8 +162,7 @@ export function ConnectionSetup({
             key={startDeviceFlow.data.setupId}
             client={client}
             providerName={type.displayName}
-            start={startDeviceFlow.data}
-            restarting={startDeviceFlow.isPending}
+            deviceStart={startDeviceFlow.data}
             onRestart={() => {
               startDeviceFlow.mutate();
             }}
@@ -179,7 +178,9 @@ export function ConnectionSetup({
   const send = (event: FormEvent): void => {
     event.preventDefault();
     if (flow === "device") startDeviceFlow.mutate();
-    else submit.mutate();
+    // React Query calls a callback passed to `mutate` only while this form is
+    // on screen, so a reply that arrives after Cancel cannot close another panel.
+    else submit.mutate(undefined, { onSuccess: onDone });
   };
 
   /** Switches the form to another flow, dropping the last attempt's error. */
@@ -254,8 +255,9 @@ export function ConnectionSetup({
         />
       ) : null}
 
-      <div className="flex items-center gap-1.5">
-        <Button type="button" variant="form" onClick={onDone}>
+      <div className="flex items-center gap-2">
+        {/* A quiet button's text is pulled back to line up with the fields above it. */}
+        <Button type="button" className="-ml-2" onClick={onDone}>
           Cancel
         </Button>
         <Button
@@ -278,7 +280,7 @@ export function ConnectionSetup({
               switchFlow(other);
             }}
           >
-            {labelFlowSwitch(other, type)}
+            {buildFlowSwitchLabel(other, type)}
           </Button>
         ))}
 

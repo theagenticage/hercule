@@ -130,20 +130,51 @@ export const listSetupFlows = (type: ConnectionType): ReadonlyArray<SetupFlow> =
 };
 
 /**
- * Returns how many milliseconds to wait before polling a device flow again,
- * or `null` when the flow has ended and must not be polled again.
+ * Where a device flow stands after its last poll, as a screen acts on it:
  *
- * `outcome` is the last poll's result, or `undefined` before the first poll,
- * when the wait is the one the start returned. A `slow-down` outcome carries
- * the new, longer wait, so every outcome that keeps the flow open is read the
- * same way.
+ * - `waiting`: the flow is still open. Poll again after `delay` milliseconds.
+ *   `status` says why the flow is still open.
+ * - `ended`: the flow ended without a connection. `message` is the
+ *   controller's reason, and polling again would only answer `expired`.
+ * - `done`: the connection is written.
  */
-export const computeNextPollDelay = (
-  start: ConnectionDeviceStart,
-  outcome: ConnectionDevicePoll | undefined,
-): number | null => {
-  if (outcome === undefined) return start.interval * 1000;
-  return "interval" in outcome ? outcome.interval * 1000 : null;
+export type DeviceFlowStep =
+  | {
+      readonly kind: "waiting";
+      readonly status: Extract<ConnectionDevicePoll, { interval: number }>["status"];
+      readonly delay: number;
+    }
+  | {
+      readonly kind: "ended";
+      readonly status: Extract<ConnectionDevicePoll, { message: string }>["status"];
+      readonly message: string;
+    }
+  | { readonly kind: "done"; readonly connection: Connection };
+
+/**
+ * Decides what a screen does next in a device flow, from the flow's start and
+ * the last poll reply, or `undefined` before the first poll. Before the first
+ * poll the flow is `pending`, and the wait is the one the start returned.
+ * A `slow-down` reply carries the new, longer wait, so every reply that keeps
+ * the flow open is read the same way.
+ */
+export const decideDeviceFlowStep = (
+  deviceStart: ConnectionDeviceStart,
+  reply: ConnectionDevicePoll | undefined,
+): DeviceFlowStep => {
+  if (reply === undefined) {
+    return { kind: "waiting", status: "pending", delay: deviceStart.interval * 1000 };
+  }
+  switch (reply.status) {
+    case "pending":
+    case "slow-down":
+    case "unreachable":
+      return { kind: "waiting", status: reply.status, delay: reply.interval * 1000 };
+    case "done":
+      return { kind: "done", connection: reply.connection };
+    default:
+      return { kind: "ended", status: reply.status, message: reply.message };
+  }
 };
 
 /** Returns the secret fields the type's setup asks the user to paste, in declared order. */

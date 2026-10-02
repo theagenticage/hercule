@@ -43,8 +43,9 @@ export {
   filterGitHubConnections,
   buildRedirectUri,
   listSetupFlows,
-  computeNextPollDelay,
+  decideDeviceFlowStep,
   type ConnectionType,
+  type DeviceFlowStep,
   type SetupFlow,
 } from "./connections";
 export {

@@ -5,7 +5,7 @@ import {
   listCredentialFields,
   buildRedirectUri,
   listSetupFlows,
-  computeNextPollDelay,
+  decideDeviceFlowStep,
   type ConnectionType,
 } from "./connections";
 
@@ -94,7 +94,7 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
 });
 
 describe("listSetupFlows", () => {
-  it("returns the step that decides how the credential is obtained", () => {
+  it("returns the one flow a type with a single step offers", () => {
     expect(
       listSetupFlows(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
     ).toEqual(["oauth"]);
@@ -135,8 +135,8 @@ describe("listSetupFlows", () => {
   });
 });
 
-describe("computeNextPollDelay", () => {
-  const start = {
+describe("decideDeviceFlowStep", () => {
+  const deviceStart = {
     setupId: "s-1",
     userCode: "WDJB-MJHT",
     verificationUri: "https://example.test/device",
@@ -145,22 +145,49 @@ describe("computeNextPollDelay", () => {
   };
 
   it("waits the start's interval before the first poll", () => {
-    expect(computeNextPollDelay(start, undefined)).toBe(5000);
+    expect(decideDeviceFlowStep(deviceStart, undefined)).toEqual({
+      kind: "waiting",
+      status: "pending",
+      delay: 5000,
+    });
   });
 
-  it("waits the interval the last poll returned while the flow is open", () => {
-    expect(computeNextPollDelay(start, { status: "pending", interval: 5 })).toBe(5000);
-    expect(computeNextPollDelay(start, { status: "slow-down", interval: 10 })).toBe(10_000);
-    expect(computeNextPollDelay(start, { status: "unreachable", interval: 5 })).toBe(5000);
+  it("waits the interval the last reply returned while the flow is open", () => {
+    expect(decideDeviceFlowStep(deviceStart, { status: "pending", interval: 5 })).toEqual({
+      kind: "waiting",
+      status: "pending",
+      delay: 5000,
+    });
+    expect(decideDeviceFlowStep(deviceStart, { status: "slow-down", interval: 10 })).toEqual({
+      kind: "waiting",
+      status: "slow-down",
+      delay: 10_000,
+    });
+    expect(decideDeviceFlowStep(deviceStart, { status: "unreachable", interval: 5 })).toEqual({
+      kind: "waiting",
+      status: "unreachable",
+      delay: 5000,
+    });
   });
 
-  it("returns null once the flow has ended", () => {
-    for (const status of ["expired", "denied", "rejected", "failed"] as const) {
-      expect(computeNextPollDelay(start, { status, message: "over" })).toBeNull();
+  it("ends the flow with the controller's reason", () => {
+    for (const status of ["expired", "denied", "failed"] as const) {
+      const message = "the code expired before it was approved";
+      expect(decideDeviceFlowStep(deviceStart, { status, message })).toEqual({
+        kind: "ended",
+        status,
+        message,
+      });
     }
-    // Only the status is read, so the connection can be any record.
+  });
+
+  it("returns the new connection once the flow is done", () => {
+    // The connection is passed through untouched, so any record will do.
     const connection = {} as Connection;
-    expect(computeNextPollDelay(start, { status: "done", connection })).toBeNull();
+    expect(decideDeviceFlowStep(deviceStart, { status: "done", connection })).toEqual({
+      kind: "done",
+      connection,
+    });
   });
 });
 

@@ -16,10 +16,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  buildErrorBody,
   expectInDocumentOrder,
   readPageText,
   renderApp,
   stubApi,
+  type Answer,
   type Handler,
 } from "../../app/testing";
 
@@ -634,6 +636,10 @@ describe("Connections > reconnecting and removing", () => {
     await user.click(within(row).getByRole("button", { name: "Delete" }));
 
     expect(listWrites(api)).toEqual([]);
+    // Hercule cannot take back a credential it was given, so the user is told.
+    expect(readPageText(row)).toContain(
+      "Hercule forgets its credentials but does not revoke them at Skyline.",
+    );
     // Cancel comes before Confirm.
     const confirm = within(row).getByRole("button", { name: "Confirm" });
     expectInDocumentOrder([within(row).getByRole("button", { name: "Cancel" }), confirm]);
@@ -796,7 +802,7 @@ describe("Connections > a device flow", () => {
     await openApp([]);
 
     expect(readPageText(await findTypeOffer("Glasshouse"))).toContain(
-      "sign in with the provider or paste a token",
+      "sign in with Glasshouse or paste a token",
     );
     await user.click(
       within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
@@ -878,7 +884,8 @@ describe("Connections > a device flow", () => {
   });
 
   it("says why the flow ended, stops polling, and starts again with a new code", async () => {
-    const message = "The code expired before it was approved.";
+    // The controller's own words when the provider answers `expired_token`.
+    const message = "the code expired before it was approved";
     let starts = 0;
     const { api } = await startSignIn({
       [`POST ${START_PATH}`]: () => {
@@ -891,7 +898,9 @@ describe("Connections > a device flow", () => {
     });
 
     await advanceClock(5500);
-    expect(readPageText(screen.getByRole("alert"))).toBe(message);
+    const alert = readPageText(screen.getByRole("alert"));
+    expect(alert).toContain("The sign-in expired before it was approved.");
+    expect(alert).toContain(message);
     expect(screen.queryByText(START.userCode)).toBeNull();
     await advanceClock(30_000);
     expect(countPolls(api)).toBe(1);
@@ -907,6 +916,120 @@ describe("Connections > a device flow", () => {
       label: "work",
       labels: ["Code"],
     });
+  });
+
+  // The controller's own words for each ending, beside the line the screen shows.
+  it.each([
+    {
+      status: "denied",
+      message: "the request was declined at the provider",
+      line: "The sign-in was declined, so nothing was connected.",
+    },
+    {
+      status: "failed",
+      message: "the provider refused the device flow with the error device_flow_disabled",
+      line: "The sign-in failed, so nothing was connected.",
+    },
+  ])("shows a short line and the controller's reason when the flow is $status", async (ending) => {
+    await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls({ status: ending.status, message: ending.message }),
+    });
+
+    await advanceClock(5500);
+    const alert = readPageText(screen.getByRole("alert"));
+    expect(alert).toContain(ending.line);
+    expect(alert).toContain(ending.message);
+  });
+
+  it("keeps polling at the last interval after a poll request fails", async () => {
+    let polls = 0;
+    const { api, hold } = await startSignIn({
+      [`POST ${POLL_PATH}`]: () => {
+        polls++;
+        if (polls === 1) return { body: { status: "slow-down", interval: 10 } };
+        if (polls === 2) {
+          return { status: 500, body: buildErrorBody("internal", "the database is locked") };
+        }
+        return { body: { status: "done", connection: GLASS } };
+      },
+    });
+
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+    await advanceClock(10_000);
+    expect(countPolls(api)).toBe(2);
+
+    // The flow is still open, so the code stays on screen with a note under it.
+    expect(screen.getByText(START.userCode)).toBeDefined();
+    const status = readPageText(screen.getByRole("status"));
+    expect(status).toContain("The last check did not go through. Still trying.");
+    expect(status).toContain("the database is locked");
+
+    // The next poll follows at the interval the last reply named, not the start's.
+    hold([GLASS]);
+    await advanceClock(9000);
+    expect(countPolls(api)).toBe(2);
+    await advanceClock(1500);
+    expect(countPolls(api)).toBe(3);
+    await pumpUntil(() => screen.queryByText(START.userCode) === null);
+
+    vi.useRealTimers();
+    expect(readPageText(await findConnectionRow(GLASS))).toContain("octo-glass");
+  });
+
+  it("shows why the code could not be fetched, and lets the user try again", async () => {
+    const user = userEvent.setup();
+    let starts = 0;
+    const { api } = await openApp([], {
+      [`POST ${START_PATH}`]: () => {
+        starts++;
+        return starts === 1
+          ? { status: 500, body: buildErrorBody("internal", "the database is locked") }
+          : { body: START };
+      },
+    });
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+    await user.type(screen.getByLabelText("Label"), "work");
+    await user.type(screen.getByLabelText("Default topic"), "Code");
+
+    await user.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+
+    expect(readPageText(await screen.findByRole("alert"))).toContain("the database is locked");
+    // The form keeps what the user typed, so trying again is one click.
+    expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("work");
+
+    await user.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+
+    expect(await screen.findByText(START.userCode)).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(listWrites(api).filter((call) => call.path === START_PATH)).toHaveLength(2);
+  });
+
+  it("does not let a reply that arrives after Cancel close the next setup", async () => {
+    let answerPoll: (answer: Answer) => void = () => undefined;
+    const { api, hold } = await startSignIn({
+      [`POST ${POLL_PATH}`]: () =>
+        new Promise<Answer>((resolve) => {
+          answerPoll = resolve;
+        }),
+    });
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // `findBy*` never fires while the clock is fake, and the offers are back at once.
+    const offer = findGroupOffering(screen.getByText("Paper Trail"), "Connect");
+    fireEvent.click(within(offer).getByRole("button", { name: "Connect" }));
+    expect(screen.getByLabelText("Access token")).toBeDefined();
+
+    // The user approved just before cancelling, so the controller wrote the connection.
+    hold([GLASS]);
+    answerPoll({ body: { status: "done", connection: GLASS } });
+    await pumpUntil(() => screen.queryByText(GLASS.displayName) !== null);
+
+    expect(screen.getByLabelText("Access token")).toBeDefined();
   });
 
   it("stops polling once the user cancels", async () => {

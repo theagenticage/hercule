@@ -125,7 +125,6 @@ export function SecretRow({
           </div>
           <Button
             type="button"
-            variant="form"
             onClick={() => {
               setValue("");
               setRotating(false);
