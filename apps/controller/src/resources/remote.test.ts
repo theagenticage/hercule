@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { canonicalizeRemote, isClonableRemote, extractRepoName } from "./remote";
+import { canonicalizeRemote, extractRepoName, hasUserinfo, isClonableRemote } from "./remote";
 
 describe("isClonableRemote", () => {
   it("accepts an https URL and git's scp-like user@host:owner/repo", () => {
@@ -36,6 +36,34 @@ describe("isClonableRemote", () => {
     ]) {
       expect(isClonableRemote(remote), remote).toBe(false);
     }
+  });
+
+  it("rejects an https URL with a user name or password before its host", () => {
+    for (const remote of [
+      "https://user:token@github.com/acme/web.git",
+      "https://x-access-token:ghp_secret@github.com/acme/web",
+      "https://user@github.com/acme/web",
+      "HTTPS://user:token@github.com/acme/web",
+      "https://@github.com/acme/web",
+    ]) {
+      expect(isClonableRemote(remote), remote).toBe(false);
+      expect(hasUserinfo(remote), remote).toBe(true);
+    }
+  });
+
+  it("does not take an @ after the host, or git's scp-like user, for a user name", () => {
+    for (const remote of [
+      "https://github.com/acme/web@main",
+      "https://github.com/acme/web?ref=a@b",
+      "git@github.com:acme/web.git",
+    ]) {
+      expect(hasUserinfo(remote), remote).toBe(false);
+    }
+    expect(isClonableRemote("git@github.com:acme/web.git")).toBe(true);
+  });
+
+  it("rejects a password in git's scp-like form", () => {
+    expect(isClonableRemote("git:secret@github.com:acme/web.git")).toBe(false);
   });
 
   it("rejects the host/path form a runner reports, which still canonicalizes", () => {

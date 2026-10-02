@@ -495,7 +495,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
 | Operation | Input | Grant | Route |
 |---|---|---|---|
 | `project.query` / `read` / `create` / `update` / `delete` | `{ name, description? }` (`description: null` on update removes it); `delete` is soft ([./02-domain-model.md](./02-domain-model.md) Deletion rules) | `project.read` / `project.write` | `/projects[/{id}]` |
-| `resource.query` / `read` / `create` / `update` / `delete` | kind, remote (repo resources are unique on the canonical remote: `conflict`), `connectionId`, setup command, `.workspaceinclude` convention, `projectIds[]`; `delete` is `invalid_state` while a workspace referencing it is not `deleted \| lost` | `resource.read` / `resource.write` | `/resources[/{id}]` |
+| `resource.query` / `read` / `create` / `update` / `delete` | kind, remote (repo resources are unique on the canonical remote: `conflict`), `connectionId`, setup command, `.workspaceinclude` convention, `projectIds[]`; `delete` is `invalid_state` while a workspace referencing it is not `deleted \| lost`. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* A repo's remote is an `https://` URL or git's `user@host:owner/repo`; an `https://` URL with a user name or password before its host is `validation`, because the remote is stored and shown as written, and git gets its credential from the resource's Connection | `resource.read` / `resource.write` | `/resources[/{id}]` |
 
 ## 3. Actor stamping
 
