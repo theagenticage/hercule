@@ -111,7 +111,7 @@ GitHub and Gmail are event-source plugins. Cron, manual, and platform events are
 
 ### 5.1 GitHub (plugin)
 
-- **Auth and Connection type:** `github/github`, credential = a personal access token (section 9.3).
+- **Auth and Connection type:** `github/github`, credential = ~~a personal access token~~ an access token from the device flow through Hercule's own OAuth App, or a pasted personal access token *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))* (section 9.3).
 - **Ingest:** three declared feeds per Connection ([./05-plugins.md](./05-plugins.md) section 4.3):
   - **`notifications`** (default 60 s; `poll()` floors the interval with `X-Poll-Interval`): the Notifications API (`GET /notifications`, `If-Modified-Since`; 304s cost no quota) - what notifies the user: mentions, assignments, review requests, state changes on subscribed threads.
   - **`repos`** (default 120 s): watched-repo polling for issue and PR lifecycle on the Connection's watch list, conditional requests (ETags), diffed against Connection-scoped state.
@@ -125,7 +125,7 @@ GitHub and Gmail are event-source plugins. Cron, manual, and platform events are
   - Deliberately absent: `edited` kinds (title/body edits are noise; payloads carry current titles), per-check-run kinds, `github.release.*`, `github.push.*` (webhook territory, Post-v1). The PR-merged event is what the shipped "done means merged" convention correlates on ([./09-tasks.md](./09-tasks.md)); it lands at poll latency, which is acceptable.
 - **Refs:** `github:issue:owner/repo#42`, `github:pr:owner/repo#87`, `github:repo:owner/repo`; `url` = the GitHub web URL of the subject.
 - **Not covered in v1:** push and commit events, and Actions results. "On push to main" is not a v1 trigger. These need the webhook ingress core service (Post-v1).
-- **Quota:** PAT limit 5,000 requests/hour; 60 s polling of a handful of endpoints uses a few hundred per hour, and conditional 304s are free. The checks feed adds roughly one conditional request per open PR per tick (20 open PRs is about 1,200/hour worst case, mostly 304s); the 7-day window and per-Connection intervals keep it bounded. This polling cost is what raises the webhook ingress service's post-v1 priority.
+- **Quota:** ~~PAT limit~~ the limit for an authenticated user, a PAT and an OAuth App token alike *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*, 5,000 requests/hour; 60 s polling of a handful of endpoints uses a few hundred per hour, and conditional 304s are free. The checks feed adds roughly one conditional request per open PR per tick (20 open PRs is about 1,200/hour worst case, mostly 304s); the 7-day window and per-Connection intervals keep it bounded. This polling cost is what raises the webhook ingress service's post-v1 priority.
 
 The workflow-action roster is pinned in [./05-plugins.md](./05-plugins.md) section 4.4.
 
@@ -257,14 +257,17 @@ A plugin reports credential trouble (refresh failure, revoked token) by setting 
 
 ## 9. Connection setup flows
 
-Policy (from [./13-security.md](./13-security.md)): bring-your-own OAuth client where the provider demands one, no Hercule-hosted OAuth relay, paste-a-token as the universal fallback. Credential storage, encryption, and refresh mechanics are owned by [./13-security.md](./13-security.md); this section states only what each Connection needs and how the user gets there. Facts from research/connection-setup-ux.md (branch `research/connection-setup-ux`).
+Policy (from [./13-security.md](./13-security.md)): bring-your-own OAuth client where the provider demands ~~one~~ a client secret, no Hercule-hosted OAuth relay, paste-a-token as the universal fallback. A public client id for a device flow is shippable *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*. Credential storage, encryption, and refresh mechanics are owned by [./13-security.md](./13-security.md); this section states only what each Connection needs and how the user gets there. Facts from research/connection-setup-ux.md (branch `research/connection-setup-ux`).
 
-### 9.1 Two flow shapes
+### 9.1 ~~Two~~ Three flow shapes
 
-The plugin declares its setup flow through the `connections` capability; the core renders it in the Connections screen and stores the result. The declaration shape (setup step list, `validate`, the core OAuth2 client, pending-setup rows and `state` routing) is pinned in [./05-plugins.md](./05-plugins.md) section 10.1.
+The plugin declares its setup flow through the `connections` capability; the core renders it in the Connections screen and stores the result. The declaration shape (setup step list, `validate`, the core OAuth2 client, pending-setup rows and `state` routing; the device flow client and its pending device setup rows, *amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183)*) is pinned in [./05-plugins.md](./05-plugins.md) section 10.1.
 
-1. **Token paste** (universal): the user pastes a token, the plugin validates it against the provider (e.g. `GET /user`), the core stores it and sets `connected`. Primary path for GitHub, Slack, Discord.
-2. **OAuth redirect** to the controller's own origin: the core serves `/oauth/callback` on whatever origin the user's browser already uses to reach Hercule, and **displays the exact redirect URI to register**, derived from that request origin. The flow carries a state parameter bound to the pending Connection; the callback exchanges the code, stores the refresh token, and sets `connected`. Primary path for Google.
+1. **Token paste** (universal): the user pastes a token, the plugin validates it against the provider (e.g. `GET /user`), the core stores it and sets `connected`. Primary path for ~~GitHub,~~ Slack, Discord; the fallback for GitHub *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*.
+2. **OAuth redirect** to the controller's own origin: the core serves `/oauth/callback` on whatever origin the user's browser already uses to reach Hercule, and **displays the exact redirect URI to register**, derived from that request origin. The flow carries a state parameter bound to the pending Connection; the callback exchanges the code, stores the tokens it receives as the `oauth.tokens` secret, and sets `connected`. Primary path for Google.
+3. **Device flow** (RFC 8628) through an OAuth App whose public client id the plugin ships *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*. The core asks the provider for a code and shows the user the code and the provider's verification page. The user enters the code there and approves; meanwhile the client (the web app, or `hercule connection poll-device-flow`) polls the controller, and the controller asks the provider whether the user has approved. When the provider issues the token, the plugin validates it, and the core stores it and sets `connected`. No redirect URI and no client secret are involved. Primary path for GitHub.
+
+*(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* **A type may offer more than one flow, and the user picks one for each Connection.** GitHub offers the device flow and token paste, so a work account behind an org that blocks third-party OAuth apps can paste a token while a personal account signs in. The flow belongs to the Connection, not to its type: the core reads it from the secrets the Connection holds (a token set, or the pasted fields). A reconnect offers the same choice as a first setup, and replaces whichever secrets the Connection held. A type never offers both a redirect flow and a device flow. The rules are in [./05-plugins.md](./05-plugins.md) section 10.1.
 
 Tailscale Funnel is never required: the browser performing the redirect can already reach the controller. The only public-endpoint case (webhooks) is post-v1.
 
@@ -283,9 +286,17 @@ Device flow is a dead end: Google's limited-input device flow excludes Gmail sco
 
 ### 9.3 GitHub
 
-- **Primary: PAT paste.** A classic PAT gives full API coverage; a fine-grained PAT works where its gaps do not bite (no Packages, no Checks API, single org, no outside-collaborator access). Setup is: settings page, generate, paste. GitHub removes classic PATs unused for a year.
-- **Optional: device flow.** Works with full OAuth scopes and non-expiring tokens and needs no redirect URI, but requires the user to create their own OAuth app and enable device flow on it first; strictly more ceremony than a PAT for one user. Offered as an optional path, not the default.
-- The redirect flow also works against the tailnet origin (GitHub's rules are lenient) but buys nothing over device flow; not offered.
+- ~~**Primary: PAT paste.** A classic PAT gives full API coverage; a fine-grained PAT works where its gaps do not bite (no Packages, no Checks API, single org, no outside-collaborator access). Setup is: settings page, generate, paste. GitHub removes classic PATs unused for a year.~~
+- ~~**Optional: device flow.** Works with full OAuth scopes and non-expiring tokens and needs no redirect URI, but requires the user to create their own OAuth app and enable device flow on it first; strictly more ceremony than a PAT for one user. Offered as an optional path, not the default.~~
+
+*(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The `github/github` type offers two flows, and the user picks one per Connection.
+
+- **Primary: device flow through Hercule's own OAuth App.** The user presses Connect, Hercule shows an 8-character code and links to `github.com/login/device`, and the user approves there. There is no token to generate and no app to register. The GitHub plugin ships the app's public client id; the device flow needs no client secret and no callback URL, which is also how `gh` signs in. Scopes are `repo read:org notifications workflow`, the set a classic PAT needs for the same coverage. `workflow` is what lets an agent push a change under `.github/workflows`; it also lets the token edit the repository's CI. A user who wants narrower access pastes a fine-grained PAT instead. An OAuth App token does not expire and comes with no refresh token, so it is never refreshed. When GitHub rejects it (the user revoked it, or GitHub removed it), the Connection goes `needs-reauth` and the user reconnects.
+- **Fallback: PAT paste.** For an account the device flow cannot reach, such as one in an org that blocks third-party OAuth apps. A classic PAT gives full API coverage; a fine-grained PAT works where its gaps do not bite (no Packages, no Checks API, single org, no outside-collaborator access). Setup is: settings page, generate, paste. GitHub removes classic PATs unused for a year.
+- **A standing commitment.** Hercule's OAuth App lives under a GitHub account or org that keeps it, with device flow enabled in its settings. Turning device flow off stops new sign-ins, because GitHub then refuses to start a device flow for the app. Whatever makes GitHub reject the app's tokens, such as deleting the app, sends every device-flow Connection to `needs-reauth` at once.
+- The redirect flow also works against the tailnet origin (GitHub's rules are lenient) but buys nothing over device flow; not offered. It would also need a client secret at the token exchange, which a shared app cannot ship (PKCE does not replace it at GitHub).
+- **Device-code phishing.** The client id is shared and public, so anyone can start a device flow as Hercule's app and trick a user into entering the attacker's code. The user would then grant the attacker a token. GitHub's approval page shows the app's name and the scopes it asks for. The user should enter only a code their own Hercule showed them. Hercule cannot prevent this; it comes with every device flow ([./13-security.md](./13-security.md) §12).
+- **Deleting a Connection does not revoke its token.** Revoking an OAuth App token at GitHub needs the app's client secret, which Hercule does not ship. The web app's delete confirmation says that Hercule does not revoke the credential at the provider, and the docs point to `github.com/settings/applications`. The same holds for a pasted PAT, which the user revokes where they created it.
 
 ### 9.4 Slack and Discord
 

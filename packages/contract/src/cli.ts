@@ -1840,7 +1840,7 @@ export const CLI = {
   },
   "connection.create": {
     command: "connection create",
-    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` instead.",
+    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` or `hercule connection start-device-flow` instead.",
     examples: [
       {
         args: ["--type", "github/github", "--label", "work", "--topic", "engineering"],
@@ -1901,7 +1901,7 @@ export const CLI = {
   "connection.setCredentials": {
     command: "connection set-credentials",
     help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hercule connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names.",
-    examples: [{ args: ["1f3a9c2e"], stdin: '{"token":"ghp_yyy"}' }],
+    examples: [{ args: ["1f3a9c2e"], stdin: '{"pat":"ghp_yyy"}' }],
     fields: {
       id: {
         positional: true,
@@ -1962,6 +1962,39 @@ export const CLI = {
     errors: {
       invalid_state:
         "the plugin that owns this type has no OAuth client credentials; set them in settings first",
+    },
+  },
+  "connection.startDeviceFlow": {
+    command: "connection start-device-flow",
+    help: "Starts a device flow and returns a code to enter at the provider. Enter it at the page the reply names, such as github.com/login/device. The connection exists only once you approve there and `hercule connection poll-device-flow` sees it. Give --connection to reconnect an existing account instead of creating a second one.",
+    examples: [
+      { args: ["--type", "github/github", "--label", "personal", "--topic", "github"] },
+      { args: ["--type", "github/github", "--connection", "1f3a9c2e"] },
+    ],
+    fields: {
+      type: { flag: "type", help: "The connection type as a Qualified Id, such as github/github." },
+      label: { flag: "label", help: "What to call the new account; a reconnect already has one." },
+      labels: {
+        flag: "topic",
+        help: "A Topic the new account's events file into. A reconnect already has its own and needs none.",
+      },
+      config: { flag: "config", help: "The new account's config as inline JSON." },
+      connectionId: {
+        flag: "connection",
+        help: "The Connection whose credentials this flow replaces; leave it off to create one.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the provider refused to start a device flow, or could not be reached; the message says which",
+    },
+  },
+  "connection.pollDeviceFlow": {
+    command: "connection poll-device-flow",
+    help: "Asks the provider once whether you have approved a device flow. Start one with `hercule connection start-device-flow`. Prints the connection when it is done; otherwise run it again after the interval it prints. It never asks the provider more often than the provider allows.",
+    examples: [{ args: ["--setup", "q2Zt8sKx"] }],
+    fields: {
+      setupId: { flag: "setup", help: "The setupId that start-device-flow printed." },
     },
   },
 
@@ -2846,7 +2879,7 @@ export const NOUNS = {
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",
-    flow: "hercule connection create for a pasted credential or hercule connection start-oauth for a browser flow, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
+    flow: "hercule connection create for a pasted credential, hercule connection start-oauth for a browser flow, or hercule connection start-device-flow and then hercule connection poll-device-flow for a code entered at the provider, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
   },
   agent: {
     summary: "Agents: the named configurations sessions are spawned from, to work unattended.",

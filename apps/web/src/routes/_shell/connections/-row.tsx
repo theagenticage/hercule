@@ -130,7 +130,9 @@ export function ConnectionRow({
 
       {panel === "delete" ? (
         <InPlaceQuestion
-          question="Remove this connection? Its stored credentials go with it."
+          question={`Remove this connection? Hercule forgets its credentials but does not revoke them at ${type?.displayName ?? "the provider"}. Revoke them there if they are no longer needed.`}
+          // Every word matters here, so the question wraps rather than being cut short.
+          stacked
           declineLabel="Cancel"
           acceptLabel="Confirm"
           onDecline={close}

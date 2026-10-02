@@ -26,18 +26,14 @@ import {
   type Plugin,
 } from "@hercule/plugin-host";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
-
-/** A connection as the API returns it; only the fields these tests read. */
-interface ConnectionRecord {
-  readonly id: string;
-  readonly type: string;
-  readonly label: string;
-  readonly displayName: string;
-  readonly status: string;
-  readonly statusDetail?: string;
-  readonly labels: ReadonlyArray<string>;
-  readonly credentials: ReadonlyArray<{ readonly name: string; readonly rotatedAt?: string }>;
-}
+import {
+  buildAccountName,
+  buildJsonResponse,
+  listConnections,
+  readConnectionsSurface,
+  type ConnectionRecord,
+  type TestPlugin,
+} from "./testing";
 
 /** The error envelope every failing operation returns. */
 interface ErrorBody {
@@ -59,11 +55,12 @@ const REJECTED = "that account is not one this type can act as";
 /** A well-formed `state` that no start ever created. */
 const ABSENT_STATE = "zzzz".repeat(16);
 
-const buildJsonResponse = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-
-/** The token endpoint's response for each grant type, which a test can replace. */
-type Answers = Record<string, () => Response>;
+/**
+ * The token endpoint's response for each grant type, which a test can replace.
+ * A test that needs a request held in flight returns a promise it resolves
+ * later.
+ */
+type Answers = Record<string, () => Response | Promise<Response>>;
 
 interface AuthServer {
   /** The origin the type's `authorizationUrl` and `tokenUrl` are built from. */
@@ -129,12 +126,6 @@ const createAuthServer = (): AuthServer => {
   };
 };
 
-/** A plugin and the activation contexts the host passed to it. */
-interface TestPlugin {
-  readonly plugin: Plugin;
-  readonly contexts: Array<ActivationContext>;
-}
-
 /**
  * Builds a plugin that owns one connection type. An OAuth type points at the
  * in-test provider and validates the access token it receives. A credentials
@@ -179,7 +170,7 @@ const buildConnectionTypePlugin = (options: {
         validate: (credentials: Record<string, string>) => {
           const value = credentials[provider === undefined ? "token" : "accessToken"] ?? "";
           return value.startsWith("good-")
-            ? Effect.succeed({ displayName: `acct:${value}` })
+            ? Effect.succeed({ displayName: buildAccountName(value) })
             : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
         },
       }),
@@ -276,29 +267,12 @@ const sendOAuthCallback = (base: string, query: Record<string, string>): Promise
     headers: { connection: "close" },
   });
 
-const listConnections = async (
-  base: string,
-  token: string,
-): Promise<ReadonlyArray<ConnectionRecord>> => {
-  const response = await get(base, "/api/v1/connections", token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { items: ReadonlyArray<ConnectionRecord> }).items;
-};
-
 const readError = async (response: Response): Promise<ErrorBody["error"]> =>
   ((await response.json()) as ErrorBody).error;
 
 /** Computes the S256 challenge, as the provider does to check the verifier. */
 const computeChallenge = (verifier: string): string =>
   createHash("sha256").update(verifier).digest("base64url");
-
-/** Returns the `ConnectionsRuntime` the host passed to a plugin at its last activation. */
-const readConnectionsSurface = (of: TestPlugin) => {
-  const ctx = of.contexts.at(-1);
-  if (ctx === undefined) throw new Error("the plugin was never activated");
-  if (ctx.connections === undefined) throw new Error("the plugin was given no connections surface");
-  return ctx.connections;
-};
 
 /** Runs a whole OAuth flow and returns the connection it created. */
 const connect = async (base: string, token: string): Promise<ConnectionRecord> => {
@@ -444,14 +418,12 @@ describe("GET /oauth/callback", () => {
         type: "oauthy/oauth-type",
         label: "work",
         labels: ["Code"],
-        displayName: `acct:${FIRST_TOKEN}`,
+        displayName: buildAccountName(FIRST_TOKEN),
         status: "connected",
         credentials: [{ name: "oauth.tokens" }],
       });
       const text = await (await get(base, "/api/v1/connections", token)).text();
-      // The display name is derived from the token, so the token may appear
-      // there and nowhere else in the body.
-      expect(text.split(`acct:${FIRST_TOKEN}`).join("")).not.toContain(FIRST_TOKEN);
+      expect(text).not.toContain(FIRST_TOKEN);
       expect(text).not.toContain("refresh-1");
     });
   });
@@ -607,7 +579,7 @@ describe("GET /oauth/callback", () => {
       expect(listed[0]).toMatchObject({
         id: before.id,
         status: "connected",
-        displayName: "acct:good-second",
+        displayName: buildAccountName("good-second"),
       });
       expect(
         await Effect.runPromise(readConnectionsSurface(registry.oauth).credentials(before.id)),
@@ -727,6 +699,121 @@ describe("the access token a plugin asks the core for", () => {
       expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
       const response = await get(base, `/api/v1/connections/${one.id}`, token);
       expect(await response.json()).toMatchObject({ status: "needs-reauth" });
+    });
+  });
+
+  it("fails, and marks the connection needs-reauth, when the provider refuses the refresh with HTTP 200", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      // GitHub returns its OAuth errors with status 200. The error field, not
+      // the status, decides that the provider refused the refresh, rather than
+      // answered with something unreadable.
+      provider.answers["refresh_token"] = () => buildJsonResponse({ error: "bad_refresh_token" });
+
+      const failure = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "needs-reauth" });
+    });
+  });
+
+  describe("when the user reconnects while a refresh is in flight", () => {
+    /**
+     * Connects with tokens that need a refresh, starts a `credentials()` call
+     * whose refresh the provider holds, and reconnects through a second
+     * redirect flow while it waits. The provider then answers the held refresh
+     * with `answer`. Returns the held call's outcome and the connection.
+     */
+    const reconnectDuringRefresh = async (
+      { base }: ServerHarness,
+      registry: Registry,
+      token: string,
+      provider: AuthServer,
+      answer: () => Response,
+    ) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      const surface = readConnectionsSurface(registry.oauth);
+      let releaseRefresh = (): void => {};
+      let refreshArrived = (): void => {};
+      const arrived = new Promise<void>((resolve) => {
+        refreshArrived = resolve;
+      });
+      provider.answers["refresh_token"] = () => {
+        refreshArrived();
+        return new Promise((resolve) => {
+          releaseRefresh = () => {
+            resolve(answer());
+          };
+        });
+      };
+      const held = Effect.runPromise(Effect.result(surface.credentials(one.id)));
+      await arrived;
+
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({
+          access_token: "good-second",
+          refresh_token: "refresh-9",
+          token_type: "bearer",
+          expires_in: 3600,
+        });
+      const url = await startOAuthOrFail(base, token, { connectionId: one.id });
+      const callback = await sendOAuthCallback(base, {
+        state: url.searchParams.get("state") ?? "",
+        code: "another-code",
+      });
+      expect(callback.headers.get("location")).toBe("/connections?oauth=ok");
+
+      releaseRefresh();
+      const outcome = await held;
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      return { outcome, connection: (await response.json()) as ConnectionRecord, one, surface };
+    };
+
+    it("keeps the new tokens instead of the refreshed old ones", async () => {
+      await withOAuth(async (harness, registry, token, provider) => {
+        const { outcome, connection, one, surface } = await reconnectDuringRefresh(
+          harness,
+          registry,
+          token,
+          provider,
+          () =>
+            buildJsonResponse({
+              access_token: REFRESHED_TOKEN,
+              refresh_token: "refresh-2",
+              token_type: "bearer",
+              expires_in: 3600,
+            }),
+        );
+
+        expect(outcome).toMatchObject({ failure: { _tag: "ConnectionUnavailable" } });
+        expect(connection).toMatchObject({ status: "connected" });
+        expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
+          accessToken: "good-second",
+        });
+      });
+    });
+
+    it("leaves the connection connected when the provider rejects the old refresh", async () => {
+      await withOAuth(async (harness, registry, token, provider) => {
+        const { outcome, connection, one, surface } = await reconnectDuringRefresh(
+          harness,
+          registry,
+          token,
+          provider,
+          () => buildJsonResponse({ error: "invalid_grant" }, 400),
+        );
+
+        expect(outcome).toMatchObject({ failure: { _tag: "ConnectionUnavailable" } });
+        expect(connection).toMatchObject({ status: "connected" });
+        expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
+          accessToken: "good-second",
+        });
+      });
     });
   });
 });

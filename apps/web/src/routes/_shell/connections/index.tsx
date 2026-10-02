@@ -2,7 +2,12 @@ import { useEffect, useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { EmptyState, Group, LaneLabel } from "@hercule/ui";
-import { listConnectionTypes, decideSetupFlow, type ConnectionType } from "@hercule/client-core";
+import {
+  listConnectionTypes,
+  listSetupFlows,
+  type ConnectionType,
+  type SetupFlow,
+} from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
 import { ConnectRows } from "../../../screens/connect-rows";
@@ -34,24 +39,36 @@ const OAUTH_FAILURES: Readonly<Record<string, string>> = {
   rejected: "The provider signed in, but the account was turned down.",
 };
 
-/** A short description of each setup flow, short enough for a row. */
-const GISTS = {
-  oauth: "sign in with the provider",
-  credentials: "paste a token",
-  pairing: "pair a chat account",
-} as const;
+/**
+ * Returns a short description of one setup flow, short enough for a row, such
+ * as "sign in with GitHub".
+ */
+const describeSetupFlow = (flow: SetupFlow, type: ConnectionType): string => {
+  switch (flow) {
+    case "device":
+    case "oauth":
+      return `sign in with ${type.displayName}`;
+    case "credentials":
+      return "paste a token";
+    case "pairing":
+      return "pair a chat account";
+  }
+};
 
 /**
  * Returns the secondary line under a connection type's name: the plugin that
- * declares it, then what setting it up takes. The plugin comes first because
- * two plugins may each declare a type called Gmail, and the name above does
- * not show which one this is.
+ * declares it, then what setting it up takes, such as "sign in with GitHub or
+ * paste a token". The plugin comes first because two plugins may each declare
+ * a type called Gmail, and the name above does not show which one this is.
  */
 const summarizeConnectionType = (type: ConnectionType): string => {
-  const flow = decideSetupFlow(type);
-  // For a setup step this build does not know, show the type's name rather
-  // than a description that may be wrong.
-  return `${type.pluginName} · ${flow === "unknown" ? type.type : GISTS[flow]}`;
+  const flows = listSetupFlows(type);
+  // For a setup this build cannot show, show the type's name rather than a
+  // description that may be wrong.
+  // A device flow and a redirect flow read the same in a row, so one is enough.
+  const gists = new Set(flows.map((flow) => describeSetupFlow(flow, type)));
+  const gist = gists.size === 0 ? type.type : [...gists].join(" or ");
+  return `${type.pluginName} · ${gist}`;
 };
 
 /**

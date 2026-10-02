@@ -57,10 +57,7 @@ export function ConfigureConnection({
             : { config: buildConfigPayload(fields, draft, connection.config) }),
         },
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });
-      onDone();
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
   });
 
   // An error about one setting is shown under that setting; any other error
@@ -76,7 +73,9 @@ export function ConfigureConnection({
 
   const send = (event: FormEvent): void => {
     event.preventDefault();
-    save.mutate();
+    // React Query calls a callback passed to `mutate` only while this form is
+    // on screen, so a reply that arrives after Cancel cannot close another panel.
+    save.mutate(undefined, { onSuccess: onDone });
   };
 
   return (
@@ -108,8 +107,9 @@ export function ConfigureConnection({
         />
       ))}
 
-      <div className="flex items-center gap-1.5">
-        <Button type="button" variant="form" onClick={onDone}>
+      <div className="flex items-center gap-2">
+        {/* A quiet button's text is pulled back to line up with the fields above it. */}
+        <Button type="button" className="-ml-2" onClick={onDone}>
           Cancel
         </Button>
         <Button type="submit" variant="form" disabled={save.isPending}>

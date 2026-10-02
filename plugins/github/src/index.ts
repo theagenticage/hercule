@@ -1,6 +1,8 @@
 /**
- * GitHub, as a connection type: a personal access token pasted by the user and
- * checked by asking GitHub which account it belongs to.
+ * GitHub, as a connection type. The user signs in through Hercule's own
+ * OAuth App with a device flow, or pastes a personal access token instead.
+ * Either way the token is checked by asking GitHub which account it belongs
+ * to.
  *
  * It is also the event source for GitHub events: the event kinds it can emit
  * are declared here, so a subscription or a filter can use one before anything
@@ -24,6 +26,19 @@ import { GITHUB_EVENT_KINDS } from "./kinds";
 /** The endpoint that returns the account a token belongs to. */
 const USER_URL = "https://api.github.com/user";
 
+/**
+ * The client id of Hercule's OAuth App on GitHub. A client id is public: the
+ * device flow needs no client secret, so every Hercule install can share one
+ * app without a relay.
+ */
+const OAUTH_APP_CLIENT_ID = "Ov23liAQFrHlllNX9ld6";
+
+/**
+ * What the account needs: repositories (including private ones and their
+ * workflows), the organizations it belongs to, and its notifications.
+ */
+const SCOPES = ["repo", "read:org", "notifications", "workflow"];
+
 /** GitHub rejects a request without a user agent, so one is always sent. */
 const USER_AGENT = "Hercule";
 
@@ -38,13 +53,17 @@ const decodeAccount = Schema.decodeUnknownEffect(Account);
 /**
  * Asks GitHub who the token belongs to. The login is the account name the
  * Connections screen shows, which is the whole reason for the call.
+ *
+ * The host passes the pasted `pat` field, or the `accessToken` the device
+ * flow obtained.
  */
 const validate: ConnectionTypeContribution["validate"] = (credentials) =>
   Effect.gen(function* () {
+    const token = credentials["pat"] ?? credentials["accessToken"];
+    if (token === undefined) return yield* failValidation("No GitHub token was given.");
     const response = yield* HttpClient.get(USER_URL, {
       headers: {
-        // The host passes exactly the fields the type declared.
-        authorization: `Bearer ${credentials["pat"]!}`,
+        authorization: `Bearer ${token}`,
         accept: "application/vnd.github+json",
         "user-agent": USER_AGENT,
       },
@@ -68,7 +87,10 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
 const connectionType: ConnectionTypeContribution = {
   type: "github",
   displayName: "GitHub",
+  // The device flow comes first because it is the one the setup screen
+  // offers by default; pasting a token is the fallback.
   setup: [
+    { kind: "device" },
     {
       kind: "credentials",
       fields: [
@@ -80,6 +102,12 @@ const connectionType: ConnectionTypeContribution = {
       ],
     },
   ],
+  device: {
+    clientId: OAUTH_APP_CLIENT_ID,
+    deviceCodeUrl: "https://github.com/login/device/code",
+    tokenUrl: "https://github.com/login/oauth/access_token",
+    scopes: SCOPES,
+  },
   validate,
 };
 

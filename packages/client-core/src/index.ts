@@ -42,8 +42,11 @@ export {
   listCredentialFields,
   filterGitHubConnections,
   buildRedirectUri,
-  decideSetupFlow,
+  listSetupFlows,
+  decideDeviceFlowStep,
   type ConnectionType,
+  type DeviceFlowStep,
+  type SetupFlow,
 } from "./connections";
 export {
   ApiError,

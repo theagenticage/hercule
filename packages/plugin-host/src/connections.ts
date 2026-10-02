@@ -44,11 +44,20 @@ export type CredentialField = Schema.Schema.Type<typeof CredentialField>;
  * One step of a setup flow. The set of steps is fixed and the core renders all
  * of them: there is no UI extension point. That is what lets the Connections
  * screen show what a type needs before its plugin is even enabled.
+ *
+ * Three steps each obtain the credential in their own way: `credentials` (the
+ * user pastes it), `oauth` (a redirect flow) and `device` (a device flow). A
+ * type that declares more than one of them lets the user pick one for each
+ * connection, with one exception: a type that declares both `oauth` and
+ * `device` is refused at registration, because a type offers a redirect flow
+ * or a device flow, not both. A `checklist` step applies whichever one the
+ * user picks, and a `pairing` step obtains no credential.
  */
 export const SetupStep = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("checklist"), markdown: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("credentials"), fields: Schema.Array(CredentialField) }),
   Schema.Struct({ kind: Schema.Literal("oauth") }),
+  Schema.Struct({ kind: Schema.Literal("device") }),
   Schema.Struct({ kind: Schema.Literal("pairing") }),
 ]);
 
@@ -65,6 +74,20 @@ export const OAuthDeclaration = Schema.Struct({
 export type OAuthDeclaration = Schema.Schema.Type<typeof OAuthDeclaration>;
 
 /**
+ * What the core's own OAuth2 client needs to run a type's device flow
+ * (RFC 8628). The client id is part of the declaration, because a device flow
+ * needs no client secret: the id is public, and the plugin ships it.
+ */
+export const DeviceDeclaration = Schema.Struct({
+  clientId: Schema.String.check(Schema.isMinLength(1)),
+  deviceCodeUrl: Schema.String,
+  tokenUrl: Schema.String,
+  scopes: Schema.Array(Schema.String),
+});
+
+export type DeviceDeclaration = Schema.Schema.Type<typeof DeviceDeclaration>;
+
+/**
  * Everything about a type that the catalog can store. `validate` is the rest of
  * the contribution and is deliberately not here: a function cannot be stored
  * in a JSON column.
@@ -79,7 +102,16 @@ export const ConnectionType = Schema.Struct({
   type: ContributionWord,
   displayName: Schema.String.check(Schema.isMinLength(1)),
   setup: Schema.Array(SetupStep),
+  /**
+   * Required when, and only when, `setup` has an `oauth` step. A type that
+   * declares both `oauth` and `device` is refused at registration.
+   */
   oauth: Schema.optionalKey(OAuthDeclaration),
+  /**
+   * Required when, and only when, `setup` has a `device` step. A type that
+   * declares both `oauth` and `device` is refused at registration.
+   */
+  device: Schema.optionalKey(DeviceDeclaration),
   /** Per-connection plugin config, rendered as a generated form. */
   configSchema: Schema.optionalKey(SchemaValue),
 });
@@ -107,6 +139,10 @@ export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavaila
  * service who the credentials belong to, so it needs an `HttpClient` and
  * nothing else: the host provides the real one, and a plugin test provides a
  * stub.
+ *
+ * `validate` receives the fields the user pasted, or `{ accessToken }` when
+ * the connection was set up through a redirect flow or a device flow. A type
+ * that offers both kinds of step reads whichever it was given.
  */
 export interface ConnectionTypeContribution extends ConnectionType {
   readonly validate: (
@@ -146,9 +182,11 @@ export interface ConnectionReport {
 export interface ConnectionsRuntime {
   readonly list: () => Effect.Effect<ReadonlyArray<ConnectionSummary>>;
   /**
-   * Returns every secret the connection owns, decrypted, keyed by name: the
-   * fields the user pasted, or `{ accessToken }` for a redirect flow. The
-   * access token is refreshed first when it has expired or is about to.
+   * Returns the connection's credentials, decrypted: the fields the user
+   * pasted, or `{ accessToken }` for a connection set up through a redirect
+   * flow or a device flow. Which of the two depends on how this connection was
+   * set up, not on its type. An access token is refreshed first when it has
+   * expired or is about to.
    */
   readonly credentials: (
     connectionId: string,

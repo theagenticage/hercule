@@ -89,13 +89,17 @@ const readConnectionType = async (): Promise<ConnectionTypeContribution> => {
   return contribution;
 };
 
-/** Runs `validate` against a stub and returns its result, success or failure. */
+/**
+ * Runs `validate` against a stub and returns its result, success or failure.
+ * The credentials default to a pasted token.
+ */
 const runValidate = async (
-  of: Stub,
+  stub: Stub,
+  credentials: Readonly<Record<string, string>> = { pat: PAT },
 ): Promise<Result.Result<{ readonly displayName: string }, { readonly message: string }>> => {
   const type = await readConnectionType();
   return Effect.runPromise(
-    Effect.result(type.validate({ pat: PAT })).pipe(Effect.provide(of.layer)),
+    Effect.result(type.validate(credentials)).pipe(Effect.provide(stub.layer)),
   );
 };
 
@@ -127,12 +131,14 @@ const KINDS = [
 ] as const;
 
 describe("what the github plugin registers", () => {
-  it("requests the connections capability and contributes one credentials-flow type", async () => {
+  it("requests the connections and event-sources capabilities", () => {
     expect(github.manifest).toMatchObject({
       id: "github",
       capabilities: ["connections", "event-sources"],
     });
+  });
 
+  it("contributes one type that offers a device flow and a pasted token", async () => {
     const contributions = (await collectContributions(github)).types;
 
     expect(contributions).toHaveLength(1);
@@ -140,13 +146,20 @@ describe("what the github plugin registers", () => {
       type: "github",
       displayName: "GitHub",
       setup: [
+        { kind: "device" },
         {
           kind: "credentials",
           fields: [expect.objectContaining({ name: "pat", label: "Personal access token" })],
         },
       ],
+      device: {
+        deviceCodeUrl: "https://github.com/login/device/code",
+        tokenUrl: "https://github.com/login/oauth/access_token",
+        scopes: ["repo", "read:org", "notifications", "workflow"],
+      },
     });
-    // A personal access token is pasted, never redirected for.
+    expect(contributions[0]?.device?.clientId ?? "").not.toBe("");
+    // A type offers a redirect flow or a device flow, never both.
     expect(contributions[0]?.oauth).toBeUndefined();
   });
 
@@ -165,17 +178,35 @@ describe("what the github plugin registers", () => {
 
 describe("how the github plugin handles GitHub's response", () => {
   it("asks which account the token belongs to, with the headers GitHub requires", async () => {
-    const of = stubAnswer(200, { login: "octocat" });
+    const stub = stubAnswer(200, { login: "octocat" });
 
-    const outcome = await runValidate(of);
+    const outcome = await runValidate(stub);
 
     expect(outcome).toMatchObject({ success: { displayName: "octocat" } });
-    const request = of.requests[0];
+    const request = stub.requests[0];
     expect(request?.method).toBe("GET");
     expect(request?.url).toBe("https://api.github.com/user");
     expect(request?.headers["authorization"]).toBe(`Bearer ${PAT}`);
     expect(request?.headers["accept"]).toBe("application/vnd.github+json");
     expect(request?.headers["user-agent"] ?? "").not.toBe("");
+  });
+
+  it("sends the access token the device flow obtained when no token was pasted", async () => {
+    const stub = stubAnswer(200, { login: "octocat" });
+
+    const outcome = await runValidate(stub, { accessToken: "gho_device-token" });
+
+    expect(outcome).toMatchObject({ success: { displayName: "octocat" } });
+    expect(stub.requests[0]?.headers["authorization"]).toBe("Bearer gho_device-token");
+  });
+
+  it("fails without calling GitHub when it was given no token", async () => {
+    const stub = stubAnswer(200, { login: "octocat" });
+
+    const outcome = await runValidate(stub, {});
+
+    expect(readFailureMessage(outcome)).toContain("No GitHub token");
+    expect(stub.requests).toEqual([]);
   });
 
   it("reports the token as rejected when GitHub returns 401", async () => {
@@ -191,7 +222,7 @@ describe("how the github plugin handles GitHub's response", () => {
   });
 
   it("fails with a message when the request never reached GitHub", async () => {
-    const of = stubHttpClient((request) =>
+    const stub = stubHttpClient((request) =>
       Effect.fail(
         new HttpClientError.HttpClientError({
           reason: new HttpClientError.TransportError({
@@ -202,7 +233,7 @@ describe("how the github plugin handles GitHub's response", () => {
       ),
     );
 
-    const outcome = await runValidate(of);
+    const outcome = await runValidate(stub);
 
     expect(readFailureMessage(outcome).length).toBeGreaterThan(0);
   });

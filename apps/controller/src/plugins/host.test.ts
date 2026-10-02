@@ -529,6 +529,103 @@ describe("a secret field declared outside a provider", () => {
   });
 });
 
+/**
+ * An `oauth` or `device` step is a flow the setup screen offers, and its
+ * declaration is where that flow sends the user and asks for tokens. One
+ * without the other cannot work, so registration refuses the type and names
+ * what is missing.
+ */
+describe("a connection type's token flows", () => {
+  const OAUTH = {
+    authorizationUrl: "https://example.test/authorize",
+    tokenUrl: "https://example.test/token",
+    scopes: [],
+  };
+  const DEVICE = {
+    clientId: "client",
+    deviceCodeUrl: "https://example.test/device/code",
+    tokenUrl: "https://example.test/token",
+    scopes: [],
+  };
+
+  /** Boots a plugin that registers one connection type with the given flow parts. */
+  const bootWithType = (parts: Record<string, unknown>) => {
+    const plugin: Plugin = {
+      manifest: {
+        id: "flows",
+        displayName: "Plugin flows",
+        hostApi: HOST_API,
+        capabilities: ["connections"],
+        configSchema: Schema.Struct({}),
+      },
+      register: (host) =>
+        registerConnectionType(host, {
+          type: "forge",
+          displayName: "Forge",
+          setup: [],
+          validate: () => Effect.succeed({ displayName: "Forge" }),
+          ...parts,
+        }),
+      activate: () => Effect.succeed(Effect.void),
+    };
+    return run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([plugin]);
+        return yield* host.status("flows");
+      }),
+    );
+  };
+
+  it.each([
+    [
+      "an oauth step without its declaration",
+      { setup: [{ kind: "oauth" }] },
+      "the oauth step needs the oauth declaration",
+    ],
+    [
+      "a device step without its declaration",
+      { setup: [{ kind: "device" }] },
+      "the device step needs the device declaration",
+    ],
+    [
+      "a device declaration without its step",
+      {
+        setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
+        device: DEVICE,
+      },
+      "the device declaration needs a device step",
+    ],
+    [
+      "both a redirect flow and a device flow",
+      { setup: [{ kind: "oauth" }, { kind: "device" }], oauth: OAUTH, device: DEVICE },
+      "not both",
+    ],
+    [
+      "a pasted credential field named like the core's token set",
+      { setup: [{ kind: "credentials", fields: [{ name: "oauth.tokens", label: "Tokens" }] }] },
+      "the credential field name oauth.tokens is reserved",
+    ],
+  ])("refuses %s, naming the type", async (_, parts, reason) => {
+    const message = readErroredMessage(await bootWithType(parts));
+
+    expect(message).toContain("flows/forge");
+    expect(message).toContain(reason);
+  });
+
+  it("accepts a device flow beside a pasted token", async () => {
+    const status = await bootWithType({
+      setup: [
+        { kind: "device" },
+        { kind: "credentials", fields: [{ name: "pat", label: "Token" }] },
+      ],
+      device: DEVICE,
+    });
+
+    expect(readErroredMessage(status)).toBeUndefined();
+  });
+});
+
 /** Returns the message of an errored plugin, or `undefined` if the plugin is not errored. */
 const readErroredMessage = (status: Option.Option<unknown>): string | undefined => {
   const found = Option.getOrNull(status) as { readonly _tag: string; readonly message?: string };

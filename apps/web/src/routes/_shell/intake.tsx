@@ -20,7 +20,7 @@ function Intake(): JSX.Element {
         offers={[
           {
             name: "GitHub",
-            gist: "issues, pull requests and mentions across the repos you watch · paste a token",
+            gist: "issues, pull requests and mentions across the repos you watch · GitHub sign-in or a pasted token",
           },
           { name: "Gmail", gist: "one mailbox, read every 30 seconds · Google sign-in" },
         ]}

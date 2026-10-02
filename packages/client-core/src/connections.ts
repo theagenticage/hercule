@@ -8,7 +8,13 @@
  * plugin contribution, so the types come from the plugin list rather than from
  * an operation of their own.
  */
-import { GITHUB_CONNECTION_TYPE, type Connection, type PluginDetail } from "@hercule/contract";
+import {
+  GITHUB_CONNECTION_TYPE,
+  type Connection,
+  type ConnectionDevicePoll,
+  type ConnectionDeviceStart,
+  type PluginDetail,
+} from "@hercule/contract";
 import { readJsonObject } from "./json-shape";
 
 /**
@@ -44,6 +50,7 @@ export type SetupStep =
   | { readonly kind: "checklist"; readonly markdown: string }
   | { readonly kind: "credentials"; readonly fields: ReadonlyArray<CredentialField> }
   | { readonly kind: "oauth" }
+  | { readonly kind: "device" }
   | { readonly kind: "pairing" };
 
 /** A connection type as the screen offers it. */
@@ -95,19 +102,79 @@ export const listConnectionTypes = (
   );
 
 /**
- * Returns how a connection type is set up. A setup is a list of steps, and
- * only one of them decides how the credential is obtained. Every screen that
- * depends on the setup flow uses this function rather than scanning the steps
- * itself. `unknown` means the steps come from a newer host with a step kind
- * this build cannot render; the screen then says so rather than guessing.
+ * One way to obtain a connection's credential:
+ *
+ * - `device`: the user enters a code at the provider (a device flow).
+ * - `oauth`: the browser goes to the provider and comes back (a redirect flow).
+ * - `credentials`: the user pastes the secrets.
+ * - `pairing`: the user sends the bot a one-time code from a chat account.
  */
-export const decideSetupFlow = (
-  type: ConnectionType,
-): "oauth" | "credentials" | "pairing" | "unknown" => {
-  if (type.setup.some((step) => step.kind === "oauth")) return "oauth";
-  if (type.setup.some((step) => step.kind === "credentials")) return "credentials";
-  if (type.setup.some((step) => step.kind === "pairing")) return "pairing";
-  return "unknown";
+export type SetupFlow = "device" | "oauth" | "credentials" | "pairing";
+
+const SETUP_FLOWS: ReadonlyArray<string> = ["device", "oauth", "credentials", "pairing"];
+
+/**
+ * Returns every way the connection type can be set up, in the order its setup
+ * declares them. The first flow is the one the type prefers; a type with more
+ * than one lets the user pick. Every screen that depends on the setup flow
+ * uses this function rather than scanning the steps itself.
+ *
+ * A step kind this build does not know is left out, because it comes from a
+ * newer host. An empty list therefore means that the screen cannot set the
+ * type up, and should say so rather than guess.
+ */
+export const listSetupFlows = (type: ConnectionType): ReadonlyArray<SetupFlow> => {
+  const kinds: ReadonlyArray<string> = type.setup.map((step) => step.kind);
+  // Two credential steps are one flow: the user pastes all their fields at once.
+  return [...new Set(kinds)].filter((kind): kind is SetupFlow => SETUP_FLOWS.includes(kind));
+};
+
+/**
+ * Where a device flow stands after its last poll, as a screen acts on it:
+ *
+ * - `waiting`: the flow is still open. Poll again after `delay` milliseconds.
+ *   `status` says why the flow is still open.
+ * - `ended`: the flow ended without a connection. `message` is the
+ *   controller's reason, and polling again would only answer `expired`.
+ * - `done`: the connection is written.
+ */
+export type DeviceFlowStep =
+  | {
+      readonly kind: "waiting";
+      readonly status: Extract<ConnectionDevicePoll, { interval: number }>["status"];
+      readonly delay: number;
+    }
+  | {
+      readonly kind: "ended";
+      readonly status: Extract<ConnectionDevicePoll, { message: string }>["status"];
+      readonly message: string;
+    }
+  | { readonly kind: "done"; readonly connection: Connection };
+
+/**
+ * Decides what a screen does next in a device flow, from the flow's start and
+ * the last poll reply, or `undefined` before the first poll. Before the first
+ * poll the flow is `pending`, and the wait is the one the start returned.
+ * A `slow-down` reply carries the new, longer wait, so every reply that keeps
+ * the flow open is read the same way.
+ */
+export const decideDeviceFlowStep = (
+  deviceStart: ConnectionDeviceStart,
+  reply: ConnectionDevicePoll | undefined,
+): DeviceFlowStep => {
+  if (reply === undefined) {
+    return { kind: "waiting", status: "pending", delay: deviceStart.interval * 1000 };
+  }
+  switch (reply.status) {
+    case "pending":
+    case "slow-down":
+    case "unreachable":
+      return { kind: "waiting", status: reply.status, delay: reply.interval * 1000 };
+    case "done":
+      return { kind: "done", connection: reply.connection };
+    default:
+      return { kind: "ended", status: reply.status, message: reply.message };
+  }
 };
 
 /** Returns the secret fields the type's setup asks the user to paste, in declared order. */

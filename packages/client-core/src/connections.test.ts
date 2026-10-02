@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { PluginDetail } from "@hercule/contract";
+import type { Connection, PluginDetail } from "@hercule/contract";
 import {
   listConnectionTypes,
   listCredentialFields,
   buildRedirectUri,
-  decideSetupFlow,
+  listSetupFlows,
+  decideDeviceFlowStep,
   type ConnectionType,
 } from "./connections";
 
@@ -92,37 +93,101 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   setup,
 });
 
-describe("decideSetupFlow", () => {
-  it("returns the step that decides how the credential is obtained", () => {
+describe("listSetupFlows", () => {
+  it("returns the one flow a type with a single step offers", () => {
     expect(
-      decideSetupFlow(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
-    ).toBe("oauth");
+      listSetupFlows(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
+    ).toEqual(["oauth"]);
     expect(
-      decideSetupFlow(
+      listSetupFlows(
         withSetup([{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }]),
       ),
-    ).toBe("credentials");
-    expect(decideSetupFlow(withSetup([{ kind: "pairing" }]))).toBe("pairing");
+    ).toEqual(["credentials"]);
+    expect(listSetupFlows(withSetup([{ kind: "device" }]))).toEqual(["device"]);
+    expect(listSetupFlows(withSetup([{ kind: "pairing" }]))).toEqual(["pairing"]);
   });
 
-  it("prefers oauth when a type declares both oauth and credentials", () => {
+  it("returns every flow a type offers, in the order its setup declares them", () => {
+    const token = { kind: "credentials", fields: [{ name: "token", label: "Token" }] } as const;
+    expect(listSetupFlows(withSetup([{ kind: "device" }, token]))).toEqual([
+      "device",
+      "credentials",
+    ]);
+    expect(listSetupFlows(withSetup([token, { kind: "oauth" }]))).toEqual(["credentials", "oauth"]);
+  });
+
+  it("returns one credentials flow for several credential steps", () => {
     expect(
-      decideSetupFlow(
+      listSetupFlows(
         withSetup([
           { kind: "credentials", fields: [{ name: "token", label: "Token" }] },
-          { kind: "oauth" },
+          { kind: "credentials", fields: [{ name: "secret", label: "Secret" }] },
         ]),
       ),
-    ).toBe("oauth");
+    ).toEqual(["credentials"]);
   });
 
-  it("returns unknown when no setup step is one this build can render", () => {
-    expect(decideSetupFlow(withSetup([]))).toBe("unknown");
-    expect(
-      decideSetupFlow(
-        withSetup([{ kind: "device-code" } as unknown as ConnectionType["setup"][number]]),
-      ),
-    ).toBe("unknown");
+  it("leaves out a step kind this build does not know", () => {
+    const unknown = { kind: "carrier-pigeon" } as unknown as ConnectionType["setup"][number];
+    expect(listSetupFlows(withSetup([]))).toEqual([]);
+    expect(listSetupFlows(withSetup([unknown]))).toEqual([]);
+    expect(listSetupFlows(withSetup([unknown, { kind: "device" }]))).toEqual(["device"]);
+  });
+});
+
+describe("decideDeviceFlowStep", () => {
+  const deviceStart = {
+    setupId: "s-1",
+    userCode: "WDJB-MJHT",
+    verificationUri: "https://example.test/device",
+    expiresAt: "2026-10-02T12:15:00.000Z",
+    interval: 5,
+  };
+
+  it("waits the start's interval before the first poll", () => {
+    expect(decideDeviceFlowStep(deviceStart, undefined)).toEqual({
+      kind: "waiting",
+      status: "pending",
+      delay: 5000,
+    });
+  });
+
+  it("waits the interval the last reply returned while the flow is open", () => {
+    expect(decideDeviceFlowStep(deviceStart, { status: "pending", interval: 5 })).toEqual({
+      kind: "waiting",
+      status: "pending",
+      delay: 5000,
+    });
+    expect(decideDeviceFlowStep(deviceStart, { status: "slow-down", interval: 10 })).toEqual({
+      kind: "waiting",
+      status: "slow-down",
+      delay: 10_000,
+    });
+    expect(decideDeviceFlowStep(deviceStart, { status: "unreachable", interval: 5 })).toEqual({
+      kind: "waiting",
+      status: "unreachable",
+      delay: 5000,
+    });
+  });
+
+  it("ends the flow with the controller's reason", () => {
+    for (const status of ["expired", "denied", "failed"] as const) {
+      const message = "the code expired before it was approved";
+      expect(decideDeviceFlowStep(deviceStart, { status, message })).toEqual({
+        kind: "ended",
+        status,
+        message,
+      });
+    }
+  });
+
+  it("returns the new connection once the flow is done", () => {
+    // The connection is passed through untouched, so any record will do.
+    const connection = {} as Connection;
+    expect(decideDeviceFlowStep(deviceStart, { status: "done", connection })).toEqual({
+      kind: "done",
+      connection,
+    });
   });
 });
 

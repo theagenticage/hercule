@@ -176,6 +176,8 @@ const COMMANDS: Record<string, string> = {
   "connection.delete": "connection delete",
   "connection.setCredentials": "connection set-credentials",
   "connection.startOAuth": "connection start-oauth",
+  "connection.startDeviceFlow": "connection start-device-flow",
+  "connection.pollDeviceFlow": "connection poll-device-flow",
 
   "agent.query": "agent list",
   "agent.read": "agent read",

@@ -45,6 +45,7 @@ import workspaceLeases from "./0034-workspace-leases";
 import originalRunId from "./0035-original-run-id";
 import notifications from "./0036-notifications";
 import triggerEffects from "./0037-trigger-effects";
+import deviceSetups from "./0038-device-setups";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -84,6 +85,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [35, "original-run-id", Effect.succeed(originalRunId)],
   [36, "notifications", Effect.succeed(notifications)],
   [37, "trigger-effects", Effect.succeed(triggerEffects)],
+  [38, "device-setups", Effect.succeed(deviceSetups)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

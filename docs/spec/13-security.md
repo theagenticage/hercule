@@ -36,19 +36,26 @@ One owner-scoped secrets table in the controller SQLite database ([./04-state-st
 |---|---|
 | `ownerKind` | `connection` \| `plugin` \| `runner` \| `provider-instance` \| `core` |
 | `ownerId` | the owning Connection, plugin, runner, or provider-instance id; a fixed name for `core` |
-| `name` | key within the owner's namespace (e.g. `oauth.refreshToken`, `pat`, `clientSecret`) |
+| `name` | key within the owner's namespace (e.g. ~~`oauth.refreshToken`~~ `oauth.tokens` *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*, `pat`, `clientSecret`) |
 | `ciphertext` | the value encrypted under the master key |
 | `createdAt`, `rotatedAt` | timestamps; rotation replaces the ciphertext in place |
 
 What lives here:
 
-- **Connection credentials**: pasted tokens (GitHub PAT, Slack and Discord bot tokens), OAuth client id/secret the user registered (BYO client), and OAuth refresh tokens obtained through a Connection's setup flow. Access tokens refreshed from a refresh token are also stored here when the plugin persists them.
+- **Connection credentials**: pasted tokens (GitHub PAT, Slack and Discord bot tokens), ~~OAuth client id/secret the user registered (BYO client), and OAuth refresh tokens obtained through a Connection's setup flow. Access tokens refreshed from a refresh token are also stored here when the plugin persists them.~~ and the token set a redirect flow or a device flow obtained. *(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* A token set is one secret, `oauth.tokens`: the access token, and the refresh token and expiry when the provider issues them. The core writes it, and rewrites it in place when it refreshes the access token; a plugin never stores a token itself. The BYO OAuth client is not a Connection credential: its client id is plugin config and its client secret is a plugin-owned secret ([./05-plugins.md](./05-plugins.md) section 7).
 - **Plugin secrets**: whatever a plugin writes through the plugin secrets API (§2.4).
 - **Runner-scoped secrets**: the `runner` owner kind is reserved for secrets scoped to one runner. The runner's own credential is not stored here: it is an opaque token stored hashed like every other token (§4.5).
 - **Provider-instance secrets**: secret-valued instance settings (API keys such as `ANTHROPIC_API_KEY` or `ZAI_API_KEY`, base-URL credentials) under the `provider-instance` owner kind. The controller decrypts them and sends them inline with each probe or session request over the runner WebSocket; they are held in memory for the operation and never land on runner disk ([./06-providers.md](./06-providers.md) §2.1; resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)).
 - **Core**: the controller's own key material (its persistent identity from [ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)) and any other core-owned secret.
 
 What does not live here: provider (Claude Code, Codex, pi) login credentials. Those stay with the vendor CLI on each runner (§8).
+
+*(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* **Two setup tables hold a secret in plain text.** They are the one exception to encrypting secrets at rest:
+
+- a redirect flow's pending setup row (`oauth_setups`) stores its PKCE `code_verifier`;
+- a device flow's pending setup row (`device_setups`) stores the provider's `device_code`.
+
+Both values are short-lived and single-use. The row is deleted when it is used, and swept once it has expired. The value is useless without the user's approval in the provider's own UI. The device code also never leaves the controller ([./05-plugins.md](./05-plugins.md) section 10.1). The token a flow obtains is encrypted like every other Connection credential.
 
 ADR 0015 originally listed "runner credentials" among the encrypted rows; it is amended (2026-08-28): the runner credential is a token and is stored hashed (§4.5), and the `runner` owner kind stays reserved for runner-scoped secrets.
 
@@ -93,13 +100,13 @@ Setup flows and their UI are owned by [./08-events-and-connections.md](./08-even
 
 ### 3.1 Policy
 
-- **BYO OAuth client** where a provider demands one (Google). Hercule ships no OAuth client id and hosts no OAuth relay.
-- **Paste-a-token is the universal fallback**, and the primary path for Slack and Discord bot tokens and for GitHub (a personal access token).
+- ~~**BYO OAuth client** where a provider demands one (Google). Hercule ships no OAuth client id and hosts no OAuth relay.~~ **BYO OAuth client** where a provider demands a client secret (Google). Hercule ships no OAuth client secret and hosts no OAuth relay. A public client id for a device flow is shippable, because a device flow needs no secret: the GitHub plugin ships the client id of Hercule's own OAuth App. *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*
+- **Paste-a-token is the universal fallback**, and the primary path for Slack and Discord bot tokens ~~and for GitHub (a personal access token)~~. For GitHub, a personal access token is the fallback to the device flow *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*.
 - All resulting credentials are stored as Connection-owned secrets (§2.1).
 
 ### 3.2 Per-provider path
 
-Google = redirect flow to the controller's own HTTPS origin (BYO client); GitHub = PAT paste; Slack and Discord = bot-token paste. The setup recipes (Google consent-screen status, redirect-URI registration, token-lifetime traps) are in [./08-events-and-connections.md](./08-events-and-connections.md), from `research/connection-setup-ux.md` (branch `research/connection-setup-ux`).
+Google = redirect flow to the controller's own HTTPS origin (BYO client); GitHub = ~~PAT paste~~ device flow through Hercule's own OAuth App, with PAT paste as the fallback *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*; Slack and Discord = bot-token paste. The setup recipes (Google consent-screen status, redirect-URI registration, token-lifetime traps) are in [./08-events-and-connections.md](./08-events-and-connections.md), from `research/connection-setup-ux.md` (branch `research/connection-setup-ux`).
 
 ### 3.3 Redirect URIs and the HTTPS origin
 
@@ -277,6 +284,7 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 - Clone, fetch, and push authenticate with the **GitHub Connection of the checkout being touched**. Runners hold no user-managed git credentials.
 - The runner configures each session with a git credential helper through env-injected `GIT_CONFIG_*` variables (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`), never by writing to the checkout's `.git/config` or the user's global config.
 - The helper is a small command that asks the **runner daemon** over its local channel. The daemon resolves checkout -> Resource -> Connection, fetches the token from the controller on demand over the runner WebSocket, and answers the helper. The token is held in memory for the duration of the git operation; nothing lands on runner disk. Short-lived tokens become a drop-in upgrade later.
+- *(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The token the controller hands out is the Connection's pasted `pat`, or the access token in its `oauth.tokens` secret when it was set up by the device flow. The controller only reads it and never refreshes it, because a GitHub OAuth App token never expires and has no refresh token ([./08-events-and-connections.md](./08-events-and-connections.md) §9.3).
 
 **Verify at build time:** the runner daemon's local channel for the helper (Unix socket path or loopback port, and how the helper authenticates to the daemon so only the daemon's own sessions can ask). The tickets pin the shape, not the transport.
 
@@ -359,6 +367,9 @@ Stated explicitly by the tickets:
 - **Prompt injection beyond taint marking.** Wrapping and prompt hardening reduce, not eliminate, the chance an assistant follows third-party text. The provenance line makes the outcome auditable.
 - **A stolen master key.** Anyone with the machine's keychain (or the headless key file) and the database has every secret.
 - **Vendor-side credential races** when a user copies a provider credential to two runners despite the guidance.
+- **Device-code phishing.** *(Added 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The GitHub plugin's client id is shared and public, so an attacker can start a device flow as Hercule's app and trick a user into entering the attacker's code, which grants the attacker a token. GitHub shows the app's name and the scopes it asks for, and the user should enter only a code their own Hercule showed them. Hercule cannot prevent this; it comes with every device flow.
+- **A deleted Connection's token stays valid.** *(Added 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* Revoking an OAuth App token needs the app's client secret, which Hercule does not ship (§3.1). Deleting a GitHub Connection in Hercule therefore leaves its token valid at GitHub. The web app's delete confirmation says so, and the docs point the user to `github.com/settings/applications` to revoke it.
+- **The `workflow` scope.** *(Added 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* A device-flow GitHub token carries `workflow`, which pushing a change under `.github/workflows` needs. It also lets the token, and any agent that can use it, edit a repository's CI. A user who wants narrower access pastes a fine-grained PAT instead ([./08-events-and-connections.md](./08-events-and-connections.md) §9.3).
 - **A stolen desktop signing certificate.** *(Added 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* The Keychain gives the desktop app's token key to any app signed with the same certificate and bundle identifier (spec 17, §Auth and the token). Whoever holds the certificate's private key, or can push to `main` and so have CI sign a build, can make an app the Keychain trusts with that key. The key lives only in the `desktop-signing` environment's secrets, which only `main` can use ([docs/signing-certificate.md](../signing-certificate.md)). And while the certificate is self-signed, the app's entitlements turn library validation off, so the libraries the app itself loads are not checked against its signature.
 
 ## Post-v1
