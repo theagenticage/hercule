@@ -22,7 +22,7 @@ import { locateServiceLogs, type ServiceRole, type ServiceUnit } from "./unit";
 /**
  * What `hercule service status` reports about the Service Unit. Every verb
  * prints it with `--json` once it is done, with two fields about the Hercule
- * Home the command ran for added (`ServiceReport` in `command.ts`).
+ * Home the unit runs added (`ServiceReport` in `command.ts`).
  *
  * - `installed`: a unit file exists.
  * - `running`: the supervisor reports a process for the unit, whose id is `pid`.

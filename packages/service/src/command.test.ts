@@ -369,17 +369,45 @@ describe("the --json report", () => {
     ]);
   });
 
-  it("describes the installed unit's Home in home, and this command's Home in the rest", async () => {
+  it("describes the installed unit's Home, even when this command ran for another", async () => {
+    const unitHome = mkdtempSync(join(tmpdir(), "hercule-service-unit-home-"));
+    try {
+      writeFileSync(join(unitHome, "config.toml"), "bind.port = 5050\n");
+      installed = {
+        installed: true,
+        running: true,
+        pid: 42,
+        role: "serve",
+        home: unitHome,
+        unitFile: UNIT_FILE,
+      };
+      const report = await runForReport("status");
+      expect(report.home).toBe(unitHome);
+      expect(report.logsDir).toBe(join(unitHome, "logs"));
+      expect(report.controllerUrl).toBe("http://127.0.0.1:5050");
+    } finally {
+      rmSync(unitHome, { recursive: true, force: true });
+    }
+  });
+
+  it("describes this command's Home when no unit is installed", async () => {
+    writeFileSync(join(home, "config.toml"), "bind.port = 6060\n");
+    const report = await runForReport("status");
+    expect(report.home).toBeNull();
+    expect(report.logsDir).toBe(join(home, "logs"));
+    expect(report.controllerUrl).toBe("http://127.0.0.1:6060");
+  });
+
+  it("describes this command's Home when the installed unit names no Home", async () => {
     installed = {
       installed: true,
-      running: true,
-      pid: 42,
-      role: "serve",
-      home: "/Users/ada/other-home",
+      running: false,
+      pid: null,
+      role: null,
+      home: null,
       unitFile: UNIT_FILE,
     };
     const report = await runForReport("status");
-    expect(report.home).toBe("/Users/ada/other-home");
     expect(report.logsDir).toBe(join(home, "logs"));
     expect(report.controllerUrl).toBe("http://127.0.0.1:4937");
   });

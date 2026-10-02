@@ -69,9 +69,9 @@ const SERVICE_HELP: ReadonlyArray<string> = [
   "          the verb is done",
   "",
   "In that JSON, home is the Hercule Home the installed unit runs, which can be another Home than",
-  "this command's. controllerUrl and logsDir describe the Home this command ran for: the address",
-  "Hercule answers at on this machine, from that Home's config.toml alone (null when Hercule",
-  "cannot read it), and its logs folder.",
+  "this command's. controllerUrl and logsDir describe that same Home, or this command's Home when",
+  "no unit is installed: the address Hercule answers at on this machine, from that Home's",
+  "config.toml alone (null when Hercule cannot read it), and its logs folder.",
   "",
   "The process logs to <home>/logs/controller.log or runner.log; what it prints before its log",
   "opens goes to the .stderr.log beside it.",
@@ -82,9 +82,11 @@ const SERVICE_HELP: ReadonlyArray<string> = [
 
 /**
  * What every verb prints with `--json` once it is done (spec 15 section 4):
- * the status of the Service Unit, and two fields about the Hercule Home this
- * command ran for. The two Homes can differ: `home` is the Home the installed
- * unit runs, and a command run with `--home` asks about another one.
+ * the status of the Service Unit, and two fields about one Hercule Home. That
+ * Home is `home`, the Home the installed unit runs, so the address and the
+ * logs belong to the Hercule the unit keeps running, even when this command
+ * ran with another `--home`. When no unit is installed, or the unit names no
+ * Home, it is the Home this command ran for.
  *
  * - `controllerUrl`: the origin a process on this machine opens Hercule at,
  *   or `null` when the Home's `config.toml` cannot be used.
@@ -104,7 +106,7 @@ export interface ServiceReport extends ServiceStatus {
  * `-c` flags and `HERCULE_*` variables are ignored, because the Service Unit
  * runs Hercule with `config.toml` alone.
  */
-const readControllerUrl = (home: string): Effect.Effect<string | null> =>
+const buildControllerUrl = (home: string): Effect.Effect<string | null> =>
   loadBootstrapConfig({ home, overrides: [], env: {} }).pipe(
     Effect.map((config) => buildControllerOrigin(config.bindHost, config.bindPort)),
     Effect.orElseSucceed(() => null),
@@ -231,10 +233,11 @@ export const runServiceCommand = async (
   }
   const status = outcome.success;
   if (json) {
+    const reportedHome = status.installed && status.home !== null ? status.home : request.home;
     const report: ServiceReport = {
       ...status,
-      controllerUrl: await Effect.runPromise(readControllerUrl(request.home)),
-      logsDir: locateLogsDir(request.home),
+      controllerUrl: await Effect.runPromise(buildControllerUrl(reportedHome)),
+      logsDir: locateLogsDir(reportedHome),
     };
     request.out(JSON.stringify(report, null, 2));
   } else if (verb !== "uninstall") {
