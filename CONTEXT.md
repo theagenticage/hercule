@@ -333,7 +333,7 @@ A plugin's static self-description: identity, host API version, requested plugin
 ### Automation
 
 **Connection**:
-A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label, credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
+A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label (the external account's name unless the user renames it), credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
 _Avoid_: account (reserved for a future Hercule user concept), instance
 
 **Event Source**:
@@ -482,5 +482,5 @@ An immediate action triage proposes with no task behind it ("merge these three d
 _Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
-A label that groups Intake: each Connection files its events into one default topic, and triage labels a proposal with a topic (the connection's, unless the content says otherwise). User-defined and ordered; a label, never a domain state.
+A label that groups Intake: a Connection may carry a topic its events file into, and triage labels a proposal with a topic (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined and ordered; a label, never a domain state.
 _Avoid_: category, area, folder
