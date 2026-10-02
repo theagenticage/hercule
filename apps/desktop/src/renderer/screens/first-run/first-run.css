@@ -48,8 +48,12 @@
   border-radius: var(--r-xl);
   transform: translateY(-46%);
 }
+/* The column is as wide as the card and no wider, so a line that does not
+   wrap, such as the installer command, is cut with an ellipsis instead of
+   widening the column past the card's edge. */
 .fr-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 
