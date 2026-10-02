@@ -27,6 +27,7 @@ import {
 } from "@hercule/plugin-host";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import {
+  buildAccount,
   buildAccountName,
   buildJsonResponse,
   listConnections,
@@ -176,7 +177,7 @@ const buildConnectionTypePlugin = (options: {
         validate: (credentials: Record<string, string>) => {
           const value = credentials[provider === undefined ? "token" : "accessToken"] ?? "";
           return value.startsWith("good-")
-            ? Effect.succeed({ displayName: buildAccountName(value) })
+            ? Effect.succeed(buildAccount(value))
             : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
         },
       }),
@@ -594,7 +595,7 @@ describe("GET /oauth/callback", () => {
     });
   });
 
-  it("reconnects the connection the start named, and keeps its id, label and topics", async () => {
+  it("reconnects the connection the start named, keeps its id, label and topics, and takes the new name of the same account", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       const before = await connect(base, token);
       const renamed = await send("PATCH", base, `/api/v1/connections/${before.id}`, {
@@ -633,6 +634,35 @@ describe("GET /oauth/callback", () => {
       expect(
         await Effect.runPromise(readConnectionsSurface(registry.oauth).credentials(before.id)),
       ).toMatchObject({ accessToken: "good-second" });
+    });
+  });
+
+  it("refuses a reconnect that signs in to another account with the other-account outcome, and leaves the connection unchanged", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      const before = await connect(base, token);
+      const surface = readConnectionsSurface(registry.oauth);
+      await Effect.runPromise(surface.report(before.id, { status: "needs-reauth" }));
+      provider.answers["authorization_code"] = () =>
+        // A token the type accepts, for another account than the first sign-in.
+        buildJsonResponse({ access_token: "good-other@account-2", token_type: "bearer" });
+
+      const url = await startOAuthOrFail(base, token, { connectionId: before.id });
+      const response = await sendOAuthCallback(base, {
+        state: url.searchParams.get("state") ?? "",
+        code: "another-code",
+      });
+
+      expect(response.headers.get("location")).toBe("/connections?oauth=other-account");
+      expect(await listConnections(base, token)).toEqual([
+        expect.objectContaining({
+          id: before.id,
+          status: "needs-reauth",
+          displayName: buildAccountName(FIRST_TOKEN),
+        }),
+      ]);
+      expect(await Effect.runPromise(surface.credentials(before.id))).toMatchObject({
+        accessToken: FIRST_TOKEN,
+      });
     });
   });
 });

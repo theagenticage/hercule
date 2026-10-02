@@ -239,6 +239,7 @@ const aGithubConnection = Effect.gen(function* () {
     type: GITHUB_CONNECTION_TYPE,
     label: "work",
     displayName: "octocat",
+    accountId: "583231",
     labels: [],
     config: {},
     at,

@@ -34,10 +34,14 @@ export const Route = createFileRoute("/_shell/connections/")({
 
 /** The message shown for each way a provider redirect can fail. */
 const OAUTH_FAILURES: Readonly<Record<string, string>> = {
-  denied: "The provider denied the request, so nothing was connected.",
+  denied: "The provider denied the request, so nothing changed.",
   expired: "That setup expired before the provider came back. Start it again.",
-  "exchange-failed": "The provider refused to hand over a token, so nothing was connected.",
+  "exchange-failed": "The provider refused to hand over a token, so nothing changed.",
   rejected: "The provider signed in, but the account was turned down.",
+  // The redirect lands on the list with no connection named, so the message
+  // cannot say which connection was reconnected or which account signed in.
+  "other-account":
+    "That sign-in was for a different account than the connection you reconnected, so nothing changed. To add that account, create a new connection for it.",
 };
 
 /**

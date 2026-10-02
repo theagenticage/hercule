@@ -194,7 +194,7 @@ describe("the account check at the end of a device flow", () => {
             new ConnectionValidationFailed({ message: "the provider answered 502" }),
           );
         }
-        return { displayName: "octocat" };
+        return { displayName: "octocat", accountId: "583231" };
       }),
     );
     return runAsUser(
@@ -250,7 +250,9 @@ describe("a device flow whose type changed while the user was approving it", () 
   it("answers failed, and ends the flow, when the type no longer has a device flow", async () => {
     const provider = createDeviceProvider();
     try {
-      const type = buildDeviceType(provider, () => Effect.succeed({ displayName: "octocat" }));
+      const type = buildDeviceType(provider, () =>
+        Effect.succeed({ displayName: "octocat", accountId: "583231" }),
+      );
       const { answer, again } = await runAsUser(
         [type],
         Effect.gen(function* () {
@@ -300,7 +302,7 @@ describe("the refusal of a setup operation the type does not offer", () => {
       type,
       displayName: type,
       setup,
-      validate: () => Effect.succeed({ displayName: "account" }),
+      validate: () => Effect.succeed({ displayName: "account", accountId: "account-1" }),
     },
   });
 
@@ -334,7 +336,11 @@ describe("the refusal of a setup operation the type does not offer", () => {
     const provider = createDeviceProvider();
     try {
       const failure = await runAsUser(
-        [buildDeviceType(provider, () => Effect.succeed({ displayName: "octocat" }))],
+        [
+          buildDeviceType(provider, () =>
+            Effect.succeed({ displayName: "octocat", accountId: "583231" }),
+          ),
+        ],
         Effect.flatMap(ConnectionService, (connection) =>
           Effect.flip(connection.startOAuth({ ...START, origin: "http://127.0.0.1:3000" })),
         ),
@@ -364,7 +370,7 @@ describe("the label of a connection the user did not name", () => {
       type: PASTED_TYPE,
       displayName: "Pasted type",
       setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
-      validate: () => Effect.succeed({ displayName }),
+      validate: () => Effect.succeed({ displayName, accountId: "account-1" }),
     },
   });
 
@@ -387,7 +393,11 @@ describe("the label of a connection the user did not name", () => {
     const provider = createDeviceProvider();
     try {
       const answer = await runAsUser(
-        [buildDeviceType(provider, () => Effect.succeed({ displayName: "" }))],
+        [
+          buildDeviceType(provider, () =>
+            Effect.succeed({ displayName: "", accountId: "account-1" }),
+          ),
+        ],
         Effect.gen(function* () {
           const connection = yield* ConnectionService;
           const { setupId, interval } = yield* connection.startDeviceFlow(START);

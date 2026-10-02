@@ -15,6 +15,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import type {
   ConnectionTypeContribution,
   EventSourceDefinition,
+  ExternalAccount,
   Plugin,
   RegistrationHost,
 } from "@hercule/plugin-host";
@@ -96,7 +97,7 @@ const readConnectionType = async (): Promise<ConnectionTypeContribution> => {
 const runValidate = async (
   stub: Stub,
   credentials: Readonly<Record<string, string>> = { pat: PAT },
-): Promise<Result.Result<{ readonly displayName: string }, { readonly message: string }>> => {
+): Promise<Result.Result<ExternalAccount, { readonly message: string }>> => {
   const type = await readConnectionType();
   return Effect.runPromise(
     Effect.result(type.validate(credentials)).pipe(Effect.provide(stub.layer)),
@@ -105,7 +106,7 @@ const runValidate = async (
 
 /** Returns the message of a failed validation. */
 const readFailureMessage = (
-  outcome: Result.Result<{ readonly displayName: string }, { readonly message: string }>,
+  outcome: Result.Result<ExternalAccount, { readonly message: string }>,
 ): string => {
   if (!Result.isFailure(outcome)) throw new Error("validate was expected to fail");
   return outcome.failure.message;
@@ -178,11 +179,11 @@ describe("what the github plugin registers", () => {
 
 describe("how the github plugin handles GitHub's response", () => {
   it("asks which account the token belongs to, with the headers GitHub requires", async () => {
-    const stub = stubAnswer(200, { login: "octocat" });
+    const stub = stubAnswer(200, { login: "octocat", id: 583231 });
 
     const outcome = await runValidate(stub);
 
-    expect(outcome).toMatchObject({ success: { displayName: "octocat" } });
+    expect(outcome).toMatchObject({ success: { displayName: "octocat", accountId: "583231" } });
     const request = stub.requests[0];
     expect(request?.method).toBe("GET");
     expect(request?.url).toBe("https://api.github.com/user");
@@ -192,21 +193,29 @@ describe("how the github plugin handles GitHub's response", () => {
   });
 
   it("sends the access token the device flow obtained when no token was pasted", async () => {
-    const stub = stubAnswer(200, { login: "octocat" });
+    const stub = stubAnswer(200, { login: "octocat", id: 583231 });
 
     const outcome = await runValidate(stub, { accessToken: "gho_device-token" });
 
-    expect(outcome).toMatchObject({ success: { displayName: "octocat" } });
+    expect(outcome).toMatchObject({ success: { displayName: "octocat", accountId: "583231" } });
     expect(stub.requests[0]?.headers["authorization"]).toBe("Bearer gho_device-token");
   });
 
   it("fails without calling GitHub when it was given no token", async () => {
-    const stub = stubAnswer(200, { login: "octocat" });
+    const stub = stubAnswer(200, { login: "octocat", id: 583231 });
 
     const outcome = await runValidate(stub, {});
 
     expect(readFailureMessage(outcome)).toContain("No GitHub token");
     expect(stub.requests).toEqual([]);
+  });
+
+  it("fails when GitHub's response has no user id, which a reconnect needs to compare", async () => {
+    const outcome = await runValidate(stubAnswer(200, { login: "octocat" }));
+
+    expect(readFailureMessage(outcome)).toBe(
+      "GitHub's response did not include the account's login and user id.",
+    );
   });
 
   it("reports the token as rejected when GitHub returns 401", async () => {

@@ -22,6 +22,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   deriveConfigJsonSchema,
   ConnectionType,
+  ConnectionValidationFailed,
   decodeAgainst,
   HOST_API,
   PluginError,
@@ -139,6 +140,32 @@ const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
   errors: "all",
   onExcessProperty: "error",
 });
+
+/**
+ * Wraps a connection type's `validate` so that an empty `accountId` fails the
+ * validation. Returns the wrapped function; a non-empty `accountId` passes
+ * through unchanged.
+ *
+ * A reconnect compares the stored account id with the new one, and an empty
+ * id would match any other empty id, so the check would let another account
+ * in. An empty id is a bug in the plugin rather than a problem with the
+ * credentials, and the message says so.
+ */
+const refuseEmptyAccountId = (
+  validate: ConnectionTypeContribution["validate"],
+  type: string,
+  pluginId: string,
+): ConnectionTypeContribution["validate"] => {
+  const message =
+    `the connection type ${type} returned an empty account id, so the account cannot be ` +
+    `checked on a reconnect. This is a bug in the plugin ${pluginId}: report it to its author`;
+  return (credentials) =>
+    Effect.flatMap(validate(credentials), (account) =>
+      account.accountId === ""
+        ? Effect.fail(new ConnectionValidationFailed({ message }))
+        : Effect.succeed(account),
+    );
+};
 
 /**
  * Returns a one-line message for a failed plugin call: the `PluginError`'s
@@ -408,7 +435,11 @@ const buildRegistrationHost = (
               // schema accepted rather than the plugin's own object.
               types.push({
                 pluginId: manifest.id,
-                contribution: { ...decoded, type, validate },
+                contribution: {
+                  ...decoded,
+                  type,
+                  validate: refuseEmptyAccountId(validate, type, manifest.id),
+                },
               });
             }),
         },

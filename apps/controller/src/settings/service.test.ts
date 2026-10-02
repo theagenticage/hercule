@@ -295,7 +295,7 @@ const githubPlugin: Plugin = {
       setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Personal access token" }] }],
       validate: (credentials: Record<string, string>) =>
         credentials["pat"] === PAT
-          ? Effect.succeed({ displayName: "octocat" })
+          ? Effect.succeed({ displayName: "octocat", accountId: "583231" })
           : Effect.fail(new ConnectionValidationFailed({ message: "GitHub rejected the token." })),
     }),
   activate: () => Effect.succeed(Effect.void),
@@ -314,7 +314,7 @@ const mailerPlugin: Plugin = {
       type: "mailbox",
       displayName: "Mailbox",
       setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
-      validate: () => Effect.succeed({ displayName: "work@example.com" }),
+      validate: () => Effect.succeed({ displayName: "work@example.com", accountId: "mailbox-1" }),
     }),
   activate: () => Effect.succeed(Effect.void),
 };

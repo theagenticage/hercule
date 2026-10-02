@@ -8,13 +8,19 @@
  *
  * The transport cannot enforce these two rules, so this service does:
  *
- * - **`core` is not writable.** The `core` owner holds the controller's own key
- *   material - its Ed25519 signing key is `core`/`controller.signing-key` - and
- *   overwriting it would break the controller's identity and, with it, every
- *   runner's trust in this controller. So a set or delete for `core` fails
- *   with `validation` on the `ownerKind` field. Its references are still
- *   listed: hiding a row that exists would be worse than showing one the API
- *   does not let you change.
+ * - **`core` and `connection` are not writable.** A set or delete for either
+ *   owner kind fails with `validation` on the `ownerKind` field:
+ *   - The `core` owner holds the controller's own key material - its Ed25519
+ *     signing key is `core`/`controller.signing-key` - and overwriting it
+ *     would break the controller's identity and, with it, every runner's
+ *     trust in this controller.
+ *   - A Connection's credentials may only be replaced by credentials for the
+ *     same account, and only the Connection operations check that. A write
+ *     here would skip the check and could quietly move the Connection, with
+ *     its triggers and Resources, to another account.
+ *
+ *   Their references are still listed: hiding a row that exists would be
+ *   worse than showing one the API does not let you change.
  * - **An owner id or a name containing `|`** would make the encryption's
  *   associated data ambiguous. The contract's schema rejects it before the
  *   payload is decoded. The repository rejects it again for in-process
@@ -78,12 +84,20 @@ export interface SecretRefPage {
   readonly nextCursor?: string;
 }
 
-/** The error message for a set or delete on the `core` owner. */
-const CORE_REFUSED =
-  "the `core` owner holds the controller's own key material and is not writable through the API";
+/** The refusal message for each owner kind that `secret.set` and `secret.delete` may not write. */
+const REFUSAL_BY_OWNER_KIND: Partial<Record<OwnerKind, string>> = {
+  core: "the `core` owner holds the controller's own key material and is not writable through the API",
+  connection:
+    "a Connection's credentials are not writable through the secret operations, because new credentials must be checked to belong to the same account; replace them with `connection.setCredentials` or by reconnecting the Connection, and remove them by deleting the Connection",
+};
 
-const createCoreRefusedError = (): Validation =>
-  createValidationError([{ path: ["ownerKind"], message: CORE_REFUSED }], CORE_REFUSED);
+/** Succeeds when the API may write secrets of this owner kind, and fails with `validation` when it may not. */
+const requireWritableOwnerKind = (ownerKind: OwnerKind): Effect.Effect<void, Validation> => {
+  const message = REFUSAL_BY_OWNER_KIND[ownerKind];
+  return message === undefined
+    ? Effect.void
+    : Effect.fail(createValidationError([{ path: ["ownerKind"], message }], message));
+};
 
 /** Converts a stored secret to the reference the API returns: no value and no internal row id. */
 const toRef = (stored: StoredSecret): SecretRef => ({
@@ -152,7 +166,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<SecretRef, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("secret.set");
-        if (input.ownerKind === "core") return yield* Effect.fail(createCoreRefusedError());
+        yield* requireWritableOwnerKind(input.ownerKind);
 
         const owner = buildSecretOwner(input);
         const stored = yield* withTransaction(
@@ -181,7 +195,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("secret.delete");
-        if (input.ownerKind === "core") return yield* Effect.fail(createCoreRefusedError());
+        yield* requireWritableOwnerKind(input.ownerKind);
 
         const owner = buildSecretOwner(input);
         yield* withTransaction(

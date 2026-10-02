@@ -17,8 +17,8 @@ const DEVICE_FLOW_ENDINGS: Readonly<
   Record<Extract<DeviceFlowStep, { kind: "ended" }>["status"], string>
 > = {
   expired: "The sign-in expired before it was approved.",
-  denied: "The sign-in was declined, so nothing was connected.",
-  failed: "The sign-in failed, so nothing was connected.",
+  denied: "The sign-in was declined, so nothing changed.",
+  failed: "The sign-in did not finish, so nothing changed.",
 };
 
 /**

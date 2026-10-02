@@ -66,7 +66,7 @@ import { NotifierLayer } from "../notifications";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
-import { masterKeyLayer, secretsLayer } from "../secrets";
+import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import { createPluginFixture } from "../plugins/testing";
@@ -278,6 +278,11 @@ export interface ServerHarness {
   readonly reboot: RebootArranger;
   readonly runWithLiveSessions: LiveSessionsRunner;
   /**
+   * The controller's secrets repository. A test uses it to arrange a secret
+   * the public API refuses to write, such as a connection's credentials.
+   */
+  readonly secrets: Secrets["Service"];
+  /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
    * step does after the cancel waits for this to turn false first.
@@ -423,6 +428,7 @@ export const withServer = (
               TEST_USER,
             ),
           );
+        const secrets = yield* Secrets;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -441,6 +447,7 @@ export const withServer = (
             joinToken,
             reboot,
             runWithLiveSessions,
+            secrets,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );

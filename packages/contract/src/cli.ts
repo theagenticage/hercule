@@ -336,7 +336,7 @@ export const CLI = {
   },
   "secret.set": {
     command: "secret set",
-    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here.",
+    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect.",
     examples: [{ args: ["plugin", "github", "client_secret"], stdin: "ghp_the_secret_value" }],
     fields: {
       ownerKind: {
@@ -345,7 +345,7 @@ export const CLI = {
       },
       ownerId: {
         positional: true,
-        help: "The owner's own id in full - a plugin's name, a connection's or runner's id - never a tail and never containing `|`.",
+        help: "The owner's own id in full - a plugin's name, a runner's id - never a tail and never containing `|`.",
       },
       name: {
         positional: true,
@@ -357,7 +357,7 @@ export const CLI = {
   },
   "secret.delete": {
     command: "secret delete",
-    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here.",
+    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials go when the Connection does, with `hercule connection delete`.",
     examples: [{ args: ["plugin", "github", "client_secret"] }],
     fields: {
       ownerKind: {
@@ -1907,7 +1907,7 @@ export const CLI = {
   },
   "connection.setCredentials": {
     command: "connection set-credentials",
-    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hercule connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names.",
+    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hercule connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names. Credentials for another account are refused and change nothing; to use that account, create a new connection for it.",
     examples: [{ args: ["1f3a9c2e"], stdin: '{"pat":"ghp_yyy"}' }],
     fields: {
       id: {

@@ -273,8 +273,11 @@ export const connection = HttpApiGroup.make("connection")
       params: { id: Id },
       payload: ConnectionCredentialsInput,
       success: Connection,
-      // `invalid_state`: as on `update`, the row has a type this build no
-      // longer defines.
+      // `invalid_state` in two cases:
+      // - as on `update`, the row has a type this build no longer defines;
+      // - the credentials belong to another account than the connection's,
+      //   and the message names both. A connection keeps its account for
+      //   life; the caller creates a new connection for the other account.
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // Not under `/connections`: what it starts is a setup, and a setup is not a

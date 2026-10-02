@@ -61,7 +61,7 @@ const localGithubPlugin: Plugin = {
         setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Personal access token" }] }],
         validate: (credentials: Record<string, string>) =>
           credentials["pat"] === ACCEPTED_GITHUB_TOKEN
-            ? Effect.succeed({ displayName: "octocat" })
+            ? Effect.succeed({ displayName: "octocat", accountId: "583231" })
             : Effect.fail(
                 new ConnectionValidationFailed({ message: "GitHub rejected the token." }),
               ),
@@ -102,7 +102,7 @@ export const localMailPlugin: Plugin = {
       type: "mail",
       displayName: "Mail",
       setup: [{ kind: "credentials", fields: [{ name: "password", label: "App password" }] }],
-      validate: () => Effect.succeed({ displayName: "me@example.com" }),
+      validate: () => Effect.succeed({ displayName: "me@example.com", accountId: "mail-1" }),
     }),
   activate: () => Effect.succeed(Effect.void),
 };

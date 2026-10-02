@@ -6,8 +6,11 @@
  * (`/secrets/{ownerKind}/{ownerId}/{name}`); neither may contain the `|` the
  * encryption's associated data is built with.
  *
- * `ownerKind: "core"` is the controller's own key material - its signing key
- * lives there - and the service layer rejects writing it.
+ * The service layer rejects a set or delete for two owner kinds:
+ *
+ * - `core`, the controller's own key material, where its signing key lives.
+ * - `connection`, a Connection's credentials. New credentials must be checked
+ *   to belong to the same account, and only the Connection operations do that.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";

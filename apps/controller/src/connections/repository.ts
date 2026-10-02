@@ -38,6 +38,8 @@ export interface StoredConnection {
   readonly type: string;
   readonly label: string;
   readonly displayName: string;
+  /** The provider's stable id for the account, which a reconnect compares. */
+  readonly accountId: string;
   readonly status: ConnectionStatus;
   readonly statusDetail: string | undefined;
   readonly labels: ReadonlyArray<string>;
@@ -52,6 +54,7 @@ export interface NewConnection {
   readonly type: string;
   readonly label: string;
   readonly displayName: string;
+  readonly accountId: string;
   readonly labels: ReadonlyArray<string>;
   readonly config: Record<string, Schema.Json>;
   readonly at: string;
@@ -84,6 +87,7 @@ interface ConnectionRow {
   readonly type: string;
   readonly label: string;
   readonly display_name: string;
+  readonly account_id: string;
   readonly status: ConnectionStatus;
   readonly status_detail: string | null;
   readonly labels: string;
@@ -93,7 +97,7 @@ interface ConnectionRow {
 }
 
 const COLUMNS =
-  "id, plugin_id, type, label, display_name, status, status_detail, labels, config, " +
+  "id, plugin_id, type, label, display_name, account_id, status, status_detail, labels, config, " +
   "created_at, updated_at";
 
 const SORT_COLUMN: Record<ConnectionSortField, string> = {
@@ -120,6 +124,7 @@ const toConnection = (row: ConnectionRow): StoredConnection => ({
   type: row.type,
   label: row.label,
   displayName: row.display_name,
+  accountId: row.account_id,
   status: row.status,
   statusDetail: row.status_detail ?? undefined,
   labels: parseJson<ReadonlyArray<string>>(row.labels),
@@ -165,11 +170,11 @@ const make = Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
           INSERT INTO connections
-            (id, plugin_id, type, label, display_name, status, status_detail, labels, config,
-             created_at, updated_at)
+            (id, plugin_id, type, label, display_name, account_id, status, status_detail, labels,
+             config, created_at, updated_at)
           VALUES
             (${id}, ${connection.pluginId}, ${connection.type}, ${connection.label},
-             ${connection.displayName}, 'connected', ${null},
+             ${connection.displayName}, ${connection.accountId}, 'connected', ${null},
              ${JSON.stringify(connection.labels)}, ${JSON.stringify(connection.config)},
              ${connection.at}, ${connection.at})
         `;
@@ -179,6 +184,7 @@ const make = Effect.gen(function* () {
           type: connection.type,
           label: connection.label,
           displayName: connection.displayName,
+          accountId: connection.accountId,
           status: "connected",
           statusDetail: undefined,
           labels: connection.labels,

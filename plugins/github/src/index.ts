@@ -45,14 +45,20 @@ const USER_AGENT = "Hercule";
 const failValidation = (message: string) =>
   Effect.fail(new ConnectionValidationFailed({ message }));
 
-/** The only field of the response this plugin reads. */
-const Account = Schema.Struct({ login: Schema.String });
+/**
+ * The only fields of the response this plugin reads: the login, which is the
+ * account's name, and the numeric user id, which stays the same when the
+ * account is renamed.
+ */
+const Account = Schema.Struct({ login: Schema.String, id: Schema.Number });
 
 const decodeAccount = Schema.decodeUnknownEffect(Account);
 
 /**
  * Asks GitHub who the token belongs to. The login is the account name the
- * Connections screen shows, which is the whole reason for the call.
+ * Connections screen shows. The user id is the account id the host compares
+ * on a reconnect, so that a reconnect cannot switch the connection to
+ * another account.
  *
  * The host passes the pasted `pat` field, or the `accessToken` the device
  * flow obtained.
@@ -74,10 +80,10 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
     }
     const account = yield* decodeAccount(yield* response.json).pipe(
       Effect.catchTag("SchemaError", () =>
-        failValidation("GitHub's response did not include an account name."),
+        failValidation("GitHub's response did not include the account's login and user id."),
       ),
     );
-    return { displayName: account.login };
+    return { displayName: account.login, accountId: String(account.id) };
   }).pipe(
     Effect.catchTag("HttpClientError", (error) =>
       failValidation(`GitHub could not be reached: ${error.message}`),

@@ -134,11 +134,30 @@ export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavaila
   { message: Schema.String },
 ) {}
 
+/** The external account a set of credentials belongs to, as the type's `validate` returns it. */
+export interface ExternalAccount {
+  /** The account's name, which the Connections screen shows: the GitHub login, the Gmail address. */
+  readonly displayName: string;
+  /**
+   * The provider's stable id for the account, such as GitHub's numeric user
+   * id as a string. It must not be empty, and it must stay the same when the
+   * account is renamed: the core compares it on every reconnect, so that new
+   * credentials for another account are refused. The core cannot compare the
+   * account name instead, because a renamed login would then be refused too.
+   *
+   * The core treats a `validate` that returns an empty `accountId` as a failed
+   * validation, because an empty id would match any other empty id.
+   */
+  readonly accountId: string;
+  readonly detail?: string;
+}
+
 /**
  * A connection type as a plugin declares it. `validate` asks the external
  * service who the credentials belong to, so it needs an `HttpClient` and
  * nothing else: the host provides the real one, and a plugin test provides a
- * stub.
+ * stub. It returns the account's name and the provider's stable `accountId`,
+ * which the host compares on every reconnect (see `ExternalAccount`).
  *
  * `validate` receives the fields the user pasted, or `{ accessToken }` when
  * the connection was set up through a redirect flow or a device flow. A type
@@ -147,11 +166,7 @@ export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavaila
 export interface ConnectionTypeContribution extends ConnectionType {
   readonly validate: (
     credentials: Record<string, string>,
-  ) => Effect.Effect<
-    { readonly displayName: string; readonly detail?: string },
-    ConnectionValidationFailed,
-    HttpClient.HttpClient
-  >;
+  ) => Effect.Effect<ExternalAccount, ConnectionValidationFailed, HttpClient.HttpClient>;
 }
 
 /** What `register` may declare: the connection types this plugin supports. */

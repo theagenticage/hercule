@@ -502,7 +502,7 @@ describe("a secret field declared outside a provider", () => {
           configSchema: Schema.Struct({
             apiKey: secret({ title: "API key", description: "The vendor's own." }),
           }),
-          validate: () => Effect.succeed({ displayName: "Vault" }),
+          validate: () => Effect.succeed({ displayName: "Vault", accountId: "vault-1" }),
         }),
       activate: () => Effect.succeed(Effect.void),
     };
@@ -563,7 +563,7 @@ describe("a connection type's token flows", () => {
           type: "forge",
           displayName: "Forge",
           setup: [],
-          validate: () => Effect.succeed({ displayName: "Forge" }),
+          validate: () => Effect.succeed({ displayName: "Forge", accountId: "forge-1" }),
           ...parts,
         }),
       activate: () => Effect.succeed(Effect.void),
