@@ -923,11 +923,12 @@ The first screen was already over its guide budget, and [#295](https://github.co
 
 | Measure | Budget | Before | After |
 |---|---|---|---|
-| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | 302.5 kB in 6 chunks | **310.4 kB** in 13 chunks: the thread's route is unchanged at 60.7 kB, and the chunks at first paint grew by 7.9 kB |
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | 302.5 kB in 6 chunks | **310.4 kB** in 13 chunks: the thread's route is unchanged at 60.7 kB, and the chunks at first paint grew by 7.9 kB, from 241.8 to 249.7 kB |
 | The provider login and New project dialogs, loaded the first time one opens | - | - | 10.0 kB in 3 chunks |
 
 - **What the 7.9 kB holds.** 0.8 kB, measured on its own, is the entry guard that sends a fresh Mac to the first run, and the shell's subscription to the Connections live topic. The other 7.1 kB is New thread's Log in button and New project row, the starters and their note, the icons they draw, the shared glass dialog, the reading of Connections, and the cost of compressing 13 chunks instead of 6: the dialogs share code with the first screen, and the bundler moves that code into chunks of its own.
 - **The dialogs were first built into the first screen,** at 313.3 kB in 7 chunks. Loading them on first open saves 2.9 kB at first paint, for 6 more chunks at first paint. The chunks are the app's own files, read from disk, and every byte at first paint is parsed on every launch, so the fewer bytes are worth the extra files. The launch time was not measured for this change.
+- **The Before is 0.2 kB under the entry above's After,** on the commit that recorded it. Two builds of b50ee76d both read 302.5 kB, with the thread's route at 60.7 kB in both Before and After. The entry above may have measured a working tree before its last commit.
 - The first screen was already over its guide budget, and [#295](https://github.com/theagenticage/hercule/issues/295) holds that overrun. This change adds 7.9 kB to it, accepted because the starters and the Log in button are on the screen every new user sees first.
 
 ## Slices
