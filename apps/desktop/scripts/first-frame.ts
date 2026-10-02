@@ -81,6 +81,7 @@ import type { App, NativeTheme } from "electron";
 import { compareBitmaps, OUTSIDE_CELLS, type Bitmap } from "./compare-bitmaps.ts";
 import {
   buildAppArgs,
+  buildHerculeBinaryArg,
   connectInspector,
   evaluateInMain,
   findPackagedApp,
@@ -391,10 +392,12 @@ async function recordLaunch(
     stderr,
     "--args",
     // A packaged app refuses any argument but `buildAppArgs`'s while its
-    // inspector is closed; this one opens it (see `MOCK_KEYCHAIN_SWITCH`).
+    // inspector is closed; this one opens it (see `MOCK_KEYCHAIN_SWITCH` and
+    // `buildHerculeBinaryArg`).
     "--inspect-brk=0",
     ...buildAppArgs(userDataDir),
     MOCK_KEYCHAIN_SWITCH,
+    buildHerculeBinaryArg(userDataDir),
   ]);
   const inspectorUrl = await pollUntil(
     () => /Debugger listening on (ws:\/\/\S+)/.exec(readIfPresent(stderr))?.[1],

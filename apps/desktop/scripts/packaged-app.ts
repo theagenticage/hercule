@@ -83,6 +83,28 @@ export function buildAppArgs(userDataDir: string): string[] {
 }
 
 /**
+ * Returns the path of the Hercule binary a launch on `userDataDir` runs in
+ * place of `~/.local/bin/hercule`, to find and start Hercule on this Mac.
+ * There is no file at the path until a test writes a stand-in binary there
+ * (see `e2e/desktop/stand-in-binary.ts`). Without one, main finds no binary,
+ * as on a Mac where Hercule is not installed.
+ *
+ * Every launch that opens main's inspector names this path with
+ * `--hercule-binary`, so that no test and no measurement runs this Mac's own
+ * Hercule: even `hercule service status` reads this Mac's launchd, and
+ * `hercule service install` writes `~/Library/LaunchAgents`. A release
+ * package, whose inspector stays closed, refuses the switch.
+ */
+export function locateHerculeBinary(userDataDir: string): string {
+  return join(userDataDir, "hercule-binary");
+}
+
+/** Builds the `--hercule-binary` switch for a launch on `userDataDir`; see `locateHerculeBinary`. */
+export function buildHerculeBinaryArg(userDataDir: string): string {
+  return `--hercule-binary=${locateHerculeBinary(userDataDir)}`;
+}
+
+/**
  * Writes the settings file in `userDataDir`, replacing any settings already
  * there. Call it before the app starts: main reads the settings file only
  * once, at start.
@@ -172,7 +194,7 @@ export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
 export function launchTestPackage(userDataDir: string): Promise<ElectronApplication> {
   return _electron.launch({
     executablePath: findExecutable("test"),
-    args: [...buildAppArgs(userDataDir), MOCK_KEYCHAIN_SWITCH],
+    args: [...buildAppArgs(userDataDir), MOCK_KEYCHAIN_SWITCH, buildHerculeBinaryArg(userDataDir)],
     env: buildAppEnv(),
     // Playwright otherwise makes every page match `prefers-color-scheme:
     // light`, whatever the macOS appearance, and the page's theme follows
@@ -220,6 +242,7 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
     [
       ...buildAppArgs(userDataDir),
       MOCK_KEYCHAIN_SWITCH,
+      buildHerculeBinaryArg(userDataDir),
       "--inspect=0",
       "--remote-debugging-port=0",
     ],
@@ -498,7 +521,7 @@ export async function evaluateInMain(inspectorUrl: string, expression: string): 
 }
 
 /** Checks whether the process `pid` is still running. */
-function isRunning(pid: number): boolean {
+export function isRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
