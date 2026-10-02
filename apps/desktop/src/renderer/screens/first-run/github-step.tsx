@@ -281,6 +281,7 @@ function TokenForm({
           hint="The link opens GitHub with the scopes Hercule needs already ticked. Hercule keeps the token encrypted."
         >
           <input
+            type="password"
             className="mono"
             value={token}
             onChange={(event) => actions.onTokenChange(event.target.value)}

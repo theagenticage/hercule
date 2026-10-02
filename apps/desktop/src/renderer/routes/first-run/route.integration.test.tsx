@@ -554,10 +554,8 @@ describe("the first run's steps", () => {
       const user = userEvent.setup();
       const { calls } = await openGitHub();
       await user.click(screen.getByRole("button", { name: "Paste a token instead" }));
-      await user.type(
-        screen.getByRole("textbox", { name: "Personal access token" }),
-        " ghp_secret ",
-      );
+      // The token field is a password field, which has no role of its own.
+      await user.type(screen.getByLabelText("Personal access token"), " ghp_secret ");
       await user.click(screen.getByRole("button", { name: "Connect" }));
       expect(await screen.findByText("GitHub is connected")).toBeTruthy();
       expect(readCalls(calls, "POST", "/api/v1/connections").map((call) => call.body)).toEqual([
@@ -576,7 +574,7 @@ describe("the first run's steps", () => {
         },
       });
       await user.click(screen.getByRole("button", { name: "Paste a token instead" }));
-      await user.type(screen.getByRole("textbox", { name: "Personal access token" }), "ghp_bad");
+      await user.type(screen.getByLabelText("Personal access token"), "ghp_bad");
       await user.click(screen.getByRole("button", { name: "Connect" }));
       expect((await screen.findByRole("alert")).textContent).toContain("GitHub refused the token.");
     });
