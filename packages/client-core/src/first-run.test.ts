@@ -1,6 +1,7 @@
 import { GITHUB_CONNECTION_TYPE, type Assistant, type Connection } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
+  buildAllSetRecap,
   buildFirstRunFacts,
   buildFirstRunLadder,
   buildProvidersStepText,
@@ -17,7 +18,7 @@ import {
 } from "./first-run";
 import { buildProviderRows } from "./provider-rows";
 import { BARE, buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
-import { buildProject } from "./threads/workspaces.testing";
+import { buildProject, buildRepo } from "./threads/workspaces.testing";
 
 const GITHUB: Connection = {
   id: "01a06d02-7200-7000-8000-000000000001",
@@ -415,5 +416,42 @@ describe("formatControllerAddress", () => {
 
   it("returns what does not parse unchanged", () => {
     expect(formatControllerAddress("not an origin")).toBe("not an origin");
+  });
+});
+
+describe("buildAllSetRecap", () => {
+  const PROJECT_ID = "01a06d02-7000-7000-8000-000000000001";
+
+  it("lists the providers logged in, the GitHub account, and the project with its repository", () => {
+    const recap = buildAllSetRecap({
+      ...EVERYTHING,
+      resources: [
+        buildRepo("r1", "git@github.com:rogier/webshop.git", "github.com/rogier/webshop", [
+          PROJECT_ID,
+        ]),
+      ],
+    });
+
+    expect(recap).toEqual({
+      providerNames: "Claude",
+      providerId: "claude-code",
+      gitHubAccount: "rogier",
+      project: { id: PROJECT_ID, name: "webshop", repository: "rogier/webshop" },
+    });
+  });
+
+  it("says when nothing is logged in and the project has no repository", () => {
+    const recap = buildAllSetRecap({
+      ...EVERYTHING,
+      instances: [buildInstance("claude-code", "Claude Code")],
+      connections: [],
+      resources: [],
+    });
+
+    expect(recap.providerNames).toBeNull();
+    // The row still draws a mark: the first provider listed.
+    expect(recap.providerId).toBe("claude-code");
+    expect(recap.gitHubAccount).toBeNull();
+    expect(recap.project?.repository).toBeNull();
   });
 });

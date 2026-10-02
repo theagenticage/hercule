@@ -161,6 +161,7 @@ export {
 } from "./new-project";
 export { completeSetup } from "./setup";
 export {
+  buildAllSetRecap,
   buildFirstRunFacts,
   buildFirstRunLadder,
   buildProvidersStepText,
@@ -171,8 +172,10 @@ export {
   FIRST_RUN_STEPS,
   formatControllerAddress,
   isLoopbackOrigin,
+  joinNames,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
+  type AllSetRecap,
   type FirstRunFacts,
   type FirstRunHost,
   type FirstRunReads,

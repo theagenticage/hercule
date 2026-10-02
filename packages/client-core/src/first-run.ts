@@ -6,9 +6,18 @@
  * draws the same room and resumes at the same step. The only state of the
  * first run's own is the list of steps the user put off.
  */
-import type { Assistant, Connection, ProviderInstance, Project, Runner } from "@hercule/contract";
+import type {
+  Assistant,
+  Connection,
+  ProviderInstance,
+  Project,
+  Resource,
+  Runner,
+} from "@hercule/contract";
 import { DEVICE_FLOW_ENDINGS, filterGitHubConnections, type DeviceFlowStep } from "./connections";
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
+import { parseRepositoryName } from "./remote";
+import { formatRepoName, listProjectRepos } from "./threads/workspaces";
 
 /** The first run's steps, in the order the user takes them. */
 export const FIRST_RUN_STEPS = ["account", "providers", "github", "project"] as const;
@@ -116,7 +125,7 @@ export interface FirstRunHost {
 }
 
 /** Joins names as a reader would list them: "A", "A and B", "A, B and C". */
-const joinNames = (names: readonly string[], conjunction: "and" | "or"): string =>
+export const joinNames = (names: readonly string[], conjunction: "and" | "or"): string =>
   new Intl.ListFormat("en", {
     type: conjunction === "and" ? "conjunction" : "disjunction",
   })
@@ -314,7 +323,7 @@ export const buildRoomContents = (
   },
 ): RoomContents => {
   const done = buildFirstRunFacts(reads);
-  const gitHub = filterGitHubConnections(reads.connections)[0];
+  const gitHubAccount = readGitHubAccount(reads.connections);
   const project = findOldest(reads.projects);
   const assistant = findOldest(reads.assistants);
   return {
@@ -327,15 +336,73 @@ export const buildRoomContents = (
     assistant: done.account && assistant !== undefined ? { name: assistant.name } : null,
     triage:
       done.github || reads.putOff.includes("github")
-        ? { note: gitHub === undefined ? TRIAGE_WITHOUT_CONNECTIONS : TRIAGE_READING_GITHUB }
+        ? { note: gitHubAccount === null ? TRIAGE_WITHOUT_CONNECTIONS : TRIAGE_READING_GITHUB }
         : null,
-    // A Connection with no account name is named after its type, so the
-    // label stands in for the account.
-    gitHubAccount:
-      gitHub === undefined
+    gitHubAccount,
+  };
+};
+
+/**
+ * Returns the account of the first GitHub Connection, or null when there is
+ * none. A Connection with no account name is named after its type, so its
+ * label stands in for the account.
+ */
+const readGitHubAccount = (connections: readonly Connection[]): string | null => {
+  const gitHub = filterGitHubConnections(connections)[0];
+  if (gitHub === undefined) return null;
+  return gitHub.displayName.trim() === "" ? gitHub.label : gitHub.displayName;
+};
+
+/** What All set lists, one entry per step. */
+export interface AllSetRecap {
+  /**
+   * The harnesses logged in on the controller's runner, as one name list
+   * ("Claude Code and Codex"), or null when none is.
+   */
+  readonly providerNames: string | null;
+  /** The provider whose mark stands for the row: the first logged in, else the first listed. */
+  readonly providerId: string | null;
+  readonly gitHubAccount: string | null;
+  /**
+   * The first project, with its first repository as `owner/name`, or null
+   * for the repository when the project has none yet.
+   */
+  readonly project: {
+    readonly id: string;
+    readonly name: string;
+    readonly repository: string | null;
+  } | null;
+}
+
+/** Builds what All set lists from the first run's reads and every resource. */
+export const buildAllSetRecap = (
+  reads: FirstRunReads & { readonly resources: readonly Resource[] },
+): AllSetRecap => {
+  const rows =
+    reads.localRunner === null ? [] : buildProviderRows(reads.localRunner, reads.instances);
+  const loggedIn = rows.filter((row) => row.loggedIn);
+  const project = findOldest(reads.projects);
+  const repo = project === undefined ? undefined : listProjectRepos(reads.resources, project.id)[0];
+  return {
+    providerNames:
+      loggedIn.length === 0
         ? null
-        : gitHub.displayName.trim() === ""
-          ? gitHub.label
-          : gitHub.displayName,
+        : joinNames(
+            loggedIn.map((row) => row.name),
+            "and",
+          ),
+    providerId: (loggedIn[0] ?? rows[0])?.providerId ?? null,
+    gitHubAccount: readGitHubAccount(reads.connections),
+    project:
+      project === undefined
+        ? null
+        : {
+            id: project.id,
+            name: project.name,
+            repository:
+              repo === undefined
+                ? null
+                : (parseRepositoryName(repo.remote ?? "") ?? formatRepoName(repo)),
+          },
   };
 };
