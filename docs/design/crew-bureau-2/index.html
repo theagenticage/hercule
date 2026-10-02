@@ -1898,7 +1898,17 @@
             </tr>
             <tr>
               <td>"A fresh install has nothing to start from."</td>
-              <td>Until Triage first fills Intake, a new thread offers three starter threads and says when Intake fills.</td>
+              <td>Until Triage first fills Intake, a new thread offers three starter threads: about code when the project has its repository, about research, writing and plans when it has none.</td>
+              <td class="bk-see"><a href="#first-run">First run</a></td>
+            </tr>
+            <tr>
+              <td>"Connect GitHub the way Codex logs in."</td>
+              <td>Sign in with GitHub shows a code to copy and enter at GitHub, then waits for your approval. Pasting a token stays as the fallback.</td>
+              <td class="bk-see"><a href="#first-run">First run</a></td>
+            </tr>
+            <tr>
+              <td>"Hercule must work for non-coding work too."</td>
+              <td>Skip GitHub, and the project starts without its repository. Its first thread works without a checkout, and All set says how to add the repository later.</td>
               <td class="bk-see"><a href="#first-run">First run</a></td>
             </tr>
           </tbody>
@@ -2586,7 +2596,7 @@
           <li><span class="icon"><i data-i="office" data-size="18"></i></span><span><b>The room is the promise</b>Before you type anything you see where your agents will work. Progress is furniture, not a counter.</span></li>
           <li><span class="icon"><i data-i="crew" data-size="18"></i></span><span><b>Every step pays off on screen</b>Account: your desk, and Hercule asleep in the lobby. Providers: six free desks. GitHub: Triage and its tube. Project: your first thread.</span></li>
           <li><span class="icon"><i data-i="key" data-size="18"></i></span><span><b>No address, no token, no terminal</b>Open the office starts Hercule on this Mac, and the app asks the <code>hercule</code> command for its address and setup token. You never see either.</span></li>
-          <li><span class="icon"><i data-i="pause" data-size="18"></i></span><span><b>Skipping is said, not hidden</b>A step you put off keeps its number in the ladder instead of a tick, and the last screen says where to finish it.</span></li>
+          <li><span class="icon"><i data-i="pause" data-size="18"></i></span><span><b>Skipping is said, not hidden</b>A step you put off shows a pause mark in the ladder, not a tick or its number, and the last screen says how to finish it.</span></li>
           <li><span class="icon"><i data-i="branch" data-size="18"></i></span><span><b>Your folder stays as it is</b>Picking <code>~/Dev/webshop</code> reads its origin remote. Threads clone from the remote into worktrees of their own.</span></li>
           <li><span class="icon"><i data-i="eye" data-size="18"></i></span><span><b>Why B over A</b>The same room and the same cost. B shows it at full size, and the close shot of what you just added is the reward for the step.</span></li>
         </ul>
@@ -2596,9 +2606,9 @@
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=fresh" data-caption="Welcome" data-note="Nothing runs yet, so the office is dark. Three lines say what Hercule is for, and one says it will run on this Mac from login."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=account" data-caption="1 · Account" data-note="One form. The timezone comes from the Mac, and setup creates Hercule, your assistant, asleep in the lobby."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=harness&amp;state=codex-device" data-caption="2 · Providers" data-note="Claude Code and Codex were found on this Mac. Claude Code takes a pasted code; Codex shows a device code."></figure>
-          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github" data-caption="3 · GitHub" data-note="The link opens GitHub with the scopes already ticked. Skip for now is one click."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github&amp;state=code" data-caption="3 · GitHub" data-note="Sign in with GitHub shows a code, as Codex does: copy it, enter it at GitHub, approve. A token is the fallback, and Skip for now is one click."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=project&amp;state=picked" data-caption="4 · Project" data-note="Pick a folder, and its origin fills in the repository. The setup command is optional."></figure>
-          <figure data-frame="desktop" data-src="desktop/session-empty.html" data-state="first" data-caption="Your first thread" data-note="Intake is empty until Triage first runs, so three starter threads stand in for it, and one line says when it fills."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-empty.html" data-state="first" data-caption="Your first thread" data-note="Intake is empty until Triage first runs, so three starter threads stand in for it, and one line says what fills it."></figure>
         </div>
 
         <h3 class="bk-group"><i data-i="laptop" data-size="18"></i>This Mac or another machine <small>the welcome decides what this Mac runs</small></h3>
@@ -2609,13 +2619,20 @@
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=runner" data-caption="This Mac is a runner" data-note="The app finds the runner at launch, so it never offers Open the office here. It offers to connect to the machine the runner works for."></figure>
         </div>
 
+        <h3 class="bk-group"><i data-i="pause" data-size="18"></i>Without GitHub <small>the project starts without its repository</small></h3>
+        <div class="bk-grid bk-grid--3">
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=project&amp;state=picked&amp;github=skipped" data-caption="4 · Project, GitHub skipped" data-note="The folder still names the project. Runners clone through a GitHub Connection, so the repository joins once GitHub is connected."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=done&amp;github=skipped" data-caption="All set, GitHub skipped" data-note="The first thread still has its desk. The rows for GitHub and webshop say how to finish."></figure>
+          <figure data-frame="desktop" data-src="desktop/session-empty.html" data-state="first-no-repo" data-caption="A first thread without a repository" data-note="No checkout, so the starters are about research, writing and plans, not code."></figure>
+        </div>
+
         <h3 class="bk-group"><i data-i="question" data-size="18"></i>When something is off <small>every state is in the prototype's state menu</small></h3>
         <div class="bk-grid bk-grid--3">
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=start-failed" data-caption="Hercule didn't start" data-note="Hercule never answered. The room stays dark, Show in Finder opens its logs, and Try again runs the start again. When the start itself fails, its error shows here instead."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote-not-set-up" data-caption="Not set up there yet" data-note="A plain address of a Hercule without an account. The field says which command prints the setup address."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=harness&amp;state=none-found" data-caption="No coding tool on this Mac" data-note="Install one from here, or do it later."></figure>
-          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github&amp;state=refused" data-caption="GitHub refused the token" data-note="GitHub's own reason, and what to do about it."></figure>
-          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=project&amp;state=private&amp;github=skipped" data-caption="A private repository, GitHub skipped" data-note="Runners need the Connection you skipped to clone it."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github&amp;state=expired" data-caption="The code expired" data-note="Nothing changed. Start again asks GitHub for a new code; declined and failed sign-ins read the same way."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github&amp;state=token-refused" data-caption="GitHub refused the token" data-note="GitHub's own reason, and what to do about it. The link opens GitHub with the scopes Hercule needs already ticked."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=done&amp;github=skipped&amp;harness=later" data-caption="All set, with steps put off" data-note="No desks without a provider. The screen says what is missing and where to finish it."></figure>
         </div>
 
@@ -2644,7 +2661,8 @@
             <tr><td>Hercule, asleep in the lobby chair</td><td>Setup creates the assistant. It has no chat channel yet, so it sleeps where the office keeps assistants.</td></tr>
             <tr><td>Six free desks, lamps dark</td><td>A runner hosts one session per desk. Empty desks say "room for six" before any session exists.</td></tr>
             <tr><td>Triage, and a brass tube from the GitHub plaque</td><td>The Connection exists and Triage will read it. The tube is fitted but still: capsules travel only with events.</td></tr>
-            <tr><td>The first thread, at a desk in webshop's tint</td><td>A project has no furniture of its own. Its first thread stands for it.</td></tr>
+            <tr><td>Triage, without a tube</td><td>GitHub was skipped. Triage has no Connection to read yet, and its tag says so.</td></tr>
+            <tr><td>The first thread, at a desk in webshop's tint</td><td>A project has no furniture of its own. Its first thread stands for it, with or without a repository.</td></tr>
             <tr><td>No filing cabinets</td><td>Cabinets are Tasks, and there are none yet.</td></tr>
           </tbody>
         </table>
@@ -2659,7 +2677,7 @@
             <tr><td>Hercule answers</td><td>The room's lights come on</td><td>A veil's opacity, <code>--dur-3</code></td></tr>
             <tr><td>A step finishes, in B</td><td>The camera moves to the next step's shot</td><td>One layer's transform, <code>--dur-3</code></td></tr>
             <tr><td>Then</td><td>The new pieces settle from 14 px above, characters with a spring</td><td>Transform and opacity, <code>--dur-3</code>, after the camera stops</td></tr>
-            <tr><td>A login is in progress</td><td>One spinner beside "Waiting for you to finish signing in"</td><td>Only while the login waits</td></tr>
+            <tr><td>A login or the GitHub sign-in is in progress</td><td>One spinner beside the line that says what it waits for</td><td>Only while the sign-in waits</td></tr>
             <tr><td>Any other time</td><td>Nothing</td><td>No loop runs, and the tube stays still</td></tr>
             <tr><td>Reduce motion is on</td><td>Nothing: the room is drawn again in place</td><td>No camera move, no settling</td></tr>
           </tbody>
@@ -2885,7 +2903,8 @@
           <li><span class="bk-qn">13</span><span><b>The web's onboarding steps are marked done</b>After setup, the desktop records <code>"timezone"</code> and <code>"assistant"</code>, so the web app does not ask again. The assistant keeps the name Hercule: there is no rename step, and Settings renames it later.</span></li>
           <li><span class="bk-qn">14</span><span><b>Log in and New project come into v1</b>Spec 17 draws no Log in button and no New project row. The first run builds both, and the draft's Log in and the project picker reuse them.</span></li>
           <li><span class="bk-qn">15</span><span><b>A still office comes into v1</b>Spec 17 keeps the office post-v1. Variants A and B draw a still subset of it on the first run; the live office stays post-v1. Variant C needs no change here.</span></li>
-          <li><span class="bk-qn">16</span><span><b>Starter threads on an empty Intake</b>New: three prompts on the first New thread, until Intake has something. Keep them, or drop them and show only the line about Triage.</span></li>
+          <li><span class="bk-qn">16</span><span><b>Starter threads on an empty Intake</b>New: three prompts on the first New thread, until Intake has something. A project with its repository gets prompts about code; a project without one gets prompts about research, writing and plans. Keep them, or drop them and show only the line about Triage.</span></li>
+          <li><span class="bk-qn">17</span><span><b>Skipping GitHub creates a project without its repository</b>Spec 14 already allows a project with no sources, whose agent works without a checkout. The first run relies on it: a folder picked without a GitHub Connection names the project, and its repository is added once GitHub is connected.</span></li>
         </ul>
         <footer class="bk-foot"><i data-logo="20"></i>Crew Bureau, second edition · Hercule · prototype, not product code</footer>
       </section>
