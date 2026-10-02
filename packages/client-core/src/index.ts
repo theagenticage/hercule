@@ -47,8 +47,12 @@ export {
   buildRedirectUri,
   listSetupFlows,
   decideDeviceFlowStep,
+  describeDeviceFlowWait,
+  DEVICE_FLOW_ENDINGS,
+  waitForDeviceFlow,
   type ConnectionType,
   type DeviceFlowStep,
+  type DeviceFlowWatcher,
   type SetupFlow,
 } from "./connections";
 export {

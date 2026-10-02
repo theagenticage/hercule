@@ -15,6 +15,7 @@ import {
   type ConnectionDeviceStart,
   type PluginDetail,
 } from "@hercule/contract";
+import type { HerculeClient } from "./client";
 import { readJsonObject } from "./json-shape";
 
 /**
@@ -216,6 +217,110 @@ export const decideDeviceFlowStep = (
     default:
       return { kind: "ended", status: reply.status, message: reply.message };
   }
+};
+
+/** The line a screen shows for each way a device flow can end without a connection. */
+export const DEVICE_FLOW_ENDINGS: Readonly<
+  Record<Extract<DeviceFlowStep, { kind: "ended" }>["status"], string>
+> = {
+  expired: "The sign-in expired before it was approved.",
+  denied: "The sign-in was declined, so nothing changed.",
+  failed: "The sign-in did not finish, so nothing changed.",
+};
+
+/**
+ * Returns the status line a screen shows while a device flow waits for the
+ * user. `providerName` is the connection type's display name, such as
+ * "GitHub". A `request-failed` wait is a poll request that did not reach the
+ * controller or failed there: the flow is still open, so polling goes on.
+ */
+export const describeDeviceFlowWait = (
+  status: Extract<DeviceFlowStep, { kind: "waiting" }>["status"] | "request-failed",
+  providerName: string,
+): string => {
+  switch (status) {
+    case "pending":
+      return `Waiting for you to approve the code at ${providerName}.`;
+    case "slow-down":
+      return `${providerName} asked for slower checks. Still waiting for you to approve the code.`;
+    case "unreachable":
+      return `Cannot reach ${providerName} right now. Still trying.`;
+    case "request-failed":
+      return "The last check did not go through. Still trying.";
+  }
+};
+
+/** What `waitForDeviceFlow` reports to the screen that shows the flow. */
+export interface DeviceFlowWatcher {
+  /** Stops the polling. No callback runs after the signal aborts. */
+  readonly signal: AbortSignal;
+  /** Receives the step each poll reply leads to. A failed poll request does not call it. */
+  readonly onStep: (step: DeviceFlowStep) => void;
+  /** Receives the error of a poll request that failed. The flow is still open, so polling goes on. */
+  readonly onRequestFailure: (error: unknown) => void;
+}
+
+/**
+ * Returns a promise that resolves after `delay` milliseconds, or as soon as
+ * `signal` aborts, whichever comes first. The timer is cleared on abort, so
+ * an aborted wait leaves nothing scheduled.
+ */
+const waitUnlessAborted = (delay: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    const stop = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", stop);
+      resolve();
+    }, delay);
+    signal.addEventListener("abort", stop, { once: true });
+  });
+
+/**
+ * Polls `connection.pollDeviceFlow` until the device flow ends, and returns
+ * the last step: `done` or `ended` when the flow ended, or the open `waiting`
+ * step when `watcher.signal` aborted first. It never throws.
+ *
+ * - The first poll waits the interval `deviceStart` returned, and each later
+ *   poll waits the interval of the last reply, so a `slow-down` reply slows
+ *   every poll after it.
+ * - A poll request that fails does not end the flow. The next poll follows at
+ *   the last interval the controller returned.
+ * - One poll runs at a time, and the next one is scheduled only after it
+ *   answers.
+ *
+ * A reply that arrives after the signal aborted calls no callback, so a
+ * screen the user already left cannot act on it. The reply still decides the
+ * step this function returns: a `done` reply means the controller wrote the
+ * Connection, and the caller may want to read its connections again.
+ *
+ * The waits use `setTimeout` alone, so a test can drive them with fake timers.
+ */
+export const waitForDeviceFlow = async (
+  client: HerculeClient,
+  deviceStart: ConnectionDeviceStart,
+  watcher: DeviceFlowWatcher,
+): Promise<DeviceFlowStep> => {
+  const { signal } = watcher;
+  let step = decideDeviceFlowStep(deviceStart, undefined);
+  while (step.kind === "waiting" && !signal.aborted) {
+    await waitUnlessAborted(step.delay, signal);
+    if (signal.aborted) break;
+    let reply: ConnectionDevicePoll;
+    try {
+      reply = await client.connection.pollDeviceFlow({
+        payload: { setupId: deviceStart.setupId },
+      });
+    } catch (error) {
+      if (!signal.aborted) watcher.onRequestFailure(error);
+      continue;
+    }
+    step = decideDeviceFlowStep(deviceStart, reply);
+    if (!signal.aborted) watcher.onStep(step);
+  }
+  return step;
 };
 
 /** Returns the secret fields the type's setup asks the user to paste, in declared order. */

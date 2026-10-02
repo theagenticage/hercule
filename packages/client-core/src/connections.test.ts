@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Connection, PluginDetail } from "@hercule/contract";
+import { buildErrorBody, createApiStub, type Answer, type Handler } from "./api-stub";
+import { createClient } from "./client";
 import {
   listConnectionTypes,
   listCredentialFields,
@@ -9,8 +11,12 @@ import {
   buildRedirectUri,
   listSetupFlows,
   decideDeviceFlowStep,
+  describeDeviceFlowWait,
+  waitForDeviceFlow,
   type ConnectionType,
+  type DeviceFlowStep,
 } from "./connections";
+import { readErrorMessage } from "./errors";
 
 describe("showsAccountBesideLabel", () => {
   const connection = {
@@ -284,5 +290,160 @@ describe("listCredentialFields", () => {
 
   it("returns no fields for a setup that asks the user to paste nothing", () => {
     expect(listCredentialFields(withSetup([{ kind: "oauth" }]))).toEqual([]);
+  });
+});
+
+describe("describeDeviceFlowWait", () => {
+  it("names the provider while the flow waits, and says a failed check is retried", () => {
+    expect(describeDeviceFlowWait("pending", "GitHub")).toBe(
+      "Waiting for you to approve the code at GitHub.",
+    );
+    expect(describeDeviceFlowWait("slow-down", "GitHub")).toBe(
+      "GitHub asked for slower checks. Still waiting for you to approve the code.",
+    );
+    expect(describeDeviceFlowWait("unreachable", "GitHub")).toBe(
+      "Cannot reach GitHub right now. Still trying.",
+    );
+    expect(describeDeviceFlowWait("request-failed", "GitHub")).toBe(
+      "The last check did not go through. Still trying.",
+    );
+  });
+});
+
+describe("waitForDeviceFlow", () => {
+  const POLL = "POST /api/v1/oauth/device/poll";
+  const DEVICE_START = {
+    setupId: "s-1",
+    userCode: "WDJB-MJHT",
+    verificationUri: "https://example.test/device",
+    expiresAt: "2026-10-02T12:15:00.000Z",
+    interval: 5,
+  };
+  const CONNECTION = {
+    id: "0199c0ff-aaaa-7000-8000-000000000001",
+    type: "github/github",
+    label: "octocat",
+    displayName: "octocat",
+    status: "connected",
+    labels: [],
+    config: {},
+    credentials: [],
+    createdAt: "2026-10-02T08:15:00.000Z",
+    updatedAt: "2026-10-02T08:15:00.000Z",
+  } satisfies Connection;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Returns a handler that answers each poll with the next answer, then repeats the last. */
+  const answerPolls = (...answers: readonly Answer[]): Handler => {
+    let index = 0;
+    return () => answers[Math.min(index++, answers.length - 1)]!;
+  };
+
+  /** Starts the wait on a stub controller, and records what it reports. */
+  const startWait = (poll: Handler) => {
+    const api = createApiStub({ [POLL]: poll });
+    const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
+    const stop = new AbortController();
+    const steps: DeviceFlowStep[] = [];
+    const failures: unknown[] = [];
+    const last = waitForDeviceFlow(client, DEVICE_START, {
+      signal: stop.signal,
+      onStep: (step) => steps.push(step),
+      onRequestFailure: (error) => failures.push(error),
+    });
+    const countPolls = () => api.calls.length;
+    return { stop, steps, failures, last, countPolls };
+  };
+
+  it("polls at the start's interval, then at each reply's, until the flow is done", async () => {
+    const wait = startWait(
+      answerPolls(
+        { body: { status: "pending", interval: 5 } },
+        { body: { status: "slow-down", interval: 10 } },
+        { body: { status: "done", connection: CONNECTION } },
+      ),
+    );
+
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(wait.countPolls()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wait.countPolls()).toBe(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(wait.countPolls()).toBe(2);
+    // The slow-down reply asked for ten seconds.
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(wait.countPolls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(await wait.last).toEqual({ kind: "done", connection: CONNECTION });
+    expect(wait.steps.map((step) => step.kind)).toEqual(["waiting", "waiting", "done"]);
+    expect(wait.countPolls()).toBe(3);
+  });
+
+  it("stops at the first reply that ends the flow", async () => {
+    const message = "the code expired before it was approved";
+    const wait = startWait(answerPolls({ body: { status: "expired", message } }));
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(await wait.last).toEqual({ kind: "ended", status: "expired", message });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wait.countPolls()).toBe(1);
+  });
+
+  it("keeps polling at the last interval after a poll request fails", async () => {
+    const wait = startWait(
+      answerPolls(
+        { body: { status: "slow-down", interval: 10 } },
+        { status: 500, body: buildErrorBody("internal", "the database is locked") },
+        { body: { status: "done", connection: CONNECTION } },
+      ),
+    );
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(wait.countPolls()).toBe(2);
+    expect(wait.failures).toHaveLength(1);
+    expect(readErrorMessage(wait.failures[0])).toBe("the database is locked");
+
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(wait.countPolls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await wait.last).kind).toBe("done");
+  });
+
+  it("stops polling and leaves no timer once the signal aborts", async () => {
+    const wait = startWait(answerPolls({ body: { status: "pending", interval: 5 } }));
+
+    wait.stop.abort();
+
+    expect(await wait.last).toEqual({ kind: "waiting", status: "pending", delay: 5000 });
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wait.countPolls()).toBe(0);
+  });
+
+  it("reports no reply that arrives after the signal aborted, but returns it", async () => {
+    let answer: (reply: Answer) => void = () => undefined;
+    const wait = startWait(
+      () =>
+        new Promise<Answer>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(wait.countPolls()).toBe(1);
+
+    wait.stop.abort();
+    answer({ body: { status: "done", connection: CONNECTION } });
+
+    expect(await wait.last).toEqual({ kind: "done", connection: CONNECTION });
+    expect(wait.steps).toEqual([]);
   });
 });
