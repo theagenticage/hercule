@@ -85,6 +85,7 @@ const readShownText = ({ text, openParagraph }: MessageSnapshot): string =>
 type RecordingGlobal = typeof globalThis & {
   messageSnapshots?: MessageSnapshot[];
   sentFrames?: string[];
+  receivedFrames?: string[];
 };
 
 /**
@@ -122,33 +123,68 @@ function recordLastMessage(): void {
 }
 
 /**
- * Starts recording every frame the page sends on a WebSocket, as text, in
- * `sentFrames` on the page's global object. The live connection's socket
- * already exists; it sends through the prototype's `send`, so it is recorded
- * too. It runs in the page, like `recordLastMessage`.
+ * Starts recording the frames the page sends and receives on its WebSockets,
+ * as text: every frame sent, in `sentFrames`, and every frame received from
+ * then on, in `receivedFrames`, both on the page's global object. It runs in
+ * the page, like `recordLastMessage`.
+ *
+ * The live connection's socket already exists. It sends through the
+ * prototype's `send`, so its frames are recorded too, and its first send adds
+ * the listener that records what it receives. A reply never arrives before
+ * its request is sent, so every reply to a recorded request is recorded.
  */
-function recordSentFrames(): void {
-  const frames: string[] = [];
-  (globalThis as RecordingGlobal).sentFrames = frames;
+function recordFrames(): void {
+  const sent: string[] = [];
+  const received: string[] = [];
+  (globalThis as RecordingGlobal).sentFrames = sent;
+  (globalThis as RecordingGlobal).receivedFrames = received;
+  const listened = new WeakSet<WebSocket>();
   // The original `send` is kept apart from any socket, and called below with
   // each socket as `this`.
   const send = Reflect.get(WebSocket.prototype, "send");
   WebSocket.prototype.send = function (this: WebSocket, data) {
-    frames.push(typeof data === "string" ? data : new TextDecoder().decode(data as ArrayBuffer));
+    if (!listened.has(this)) {
+      listened.add(this);
+      this.addEventListener("message", (event: MessageEvent<unknown>) => {
+        received.push(typeof event.data === "string" ? event.data : "");
+      });
+    }
+    sent.push(typeof data === "string" ? data : new TextDecoder().decode(data as ArrayBuffer));
     send.call(this, data);
   };
 }
 
 /**
- * Returns a page expression that checks whether the page has sent the frame
- * that subscribes to the thread's tap. The controller does not acknowledge a
- * subscription, so the frame being sent is the closest a test can get to
- * knowing the tap is live. A test waits for it before a message streams: a
- * delta sent before the controller has the subscription reaches no one.
+ * Returns a page expression that checks, from the frames `recordFrames`
+ * recorded, whether the open thread's two live subscriptions are in place. A
+ * test waits for both before a message streams:
+ *
+ * - The page has sent the frame that subscribes to the thread's tap. The
+ *   controller does not acknowledge a tap subscription, so the frame being
+ *   sent is the closest a test can get to knowing it is live. A delta sent
+ *   before the controller has the subscription reaches no one.
+ * - The page has received the replay of the thread's stream: the first reply
+ *   to the frame that subscribes to it, which the controller sends even when
+ *   there is nothing to replay. A message that starts before the replay
+ *   arrives is in the replay, so the page treats it as one that may have
+ *   missed deltas: it skips the message's tail, and paints none of its text
+ *   until the message's rows land.
  */
-function buildTapSubscribedCheck(sessionId: string): string {
-  const topic = JSON.stringify(`session:${sessionId}:tap`);
-  return `(globalThis.sentFrames ?? []).some((frame) => frame.includes(${topic}))`;
+function buildLiveCheck(sessionId: string): string {
+  const tap = JSON.stringify(`session:${sessionId}:tap`);
+  const stream = JSON.stringify(`session:${sessionId}:stream`);
+  return `(() => {
+    const parse = (frames) => (frames ?? []).flatMap((frame) => {
+      try { return [JSON.parse(frame)].flat(); } catch { return []; }
+    });
+    const requests = parse(globalThis.sentFrames).filter((message) => message?._tag === "Request");
+    const findSubscription = (topic) => requests.findLast((request) => request.payload?.topic === topic);
+    const streamRequest = findSubscription(${stream});
+    return findSubscription(${tap}) !== undefined && streamRequest !== undefined &&
+      parse(globalThis.receivedFrames).some(
+        (message) => message?._tag === "Chunk" && message.requestId === streamRequest.id,
+      );
+  })()`;
 }
 
 /** The first paragraph of `ANSWER`, as markdown and as the page renders it. */
@@ -224,9 +260,9 @@ describe("the thread view", () => {
     await fleet.waitForTurn(thread.id, 1, "waiting");
     const { app, page } = await openSignedIn(url);
     await keepWindowOnTop(app);
-    await page.evaluate(recordSentFrames);
+    await page.evaluate(recordFrames);
     await openThread(page, "Why does the checkout test fail?");
-    await expect.poll(() => page.evaluate(buildTapSubscribedCheck(thread.id))).toBe(true);
+    await expect.poll(() => page.evaluate(buildLiveCheck(thread.id))).toBe(true);
     await page.evaluate(recordLastMessage);
 
     const { openRequest } = await client.session.read({ params: { id: thread.id } });
@@ -256,14 +292,16 @@ describe("the thread view", () => {
       );
     };
     expect(snapshots.filter((snapshot) => !isExpected(snapshot))).toEqual([]);
-    expect(snapshots).toContainEqual({
-      text: "",
-      openParagraph: expect.stringContaining("`fetchOrders`") as string,
-    });
-    expect(snapshots).toContainEqual({
-      text: FIRST_PARAGRAPH.rendered,
-      openParagraph: expect.stringContaining("**retry**") as string,
-    });
+    // The page paints at most once a frame, so which snapshots there are
+    // depends on when frames fall. Their order does not: the first paragraph
+    // being written (0), then the second being written below the first drawn
+    // as markdown (1), then the whole answer (2). Some streamed text shows
+    // before the message is complete.
+    const stages = snapshots.map(({ text, openParagraph }) =>
+      openParagraph === null ? 2 : text === "" ? 0 : 1,
+    );
+    expect(stages).toEqual([...stages].sort((a, b) => a - b));
+    expect(snapshots.some(({ openParagraph }) => (openParagraph ?? "") !== "")).toBe(true);
     expect(snapshots.at(-1)).toEqual({ text: RENDERED_ANSWER, openParagraph: null });
     const answer = page.locator('section[aria-label="Transcript"] .msg-body').last();
     expect(await answer.locator("code").textContent()).toBe("fetchOrders");
@@ -357,10 +395,10 @@ describe("the thread view", () => {
     // keepWindowOnTop.
     await callWindowMethod("setAlwaysOnTop", true);
     await expect.poll(readVisibility, { timeout: 10_000 }).toBe("visible");
-    await evaluateInPage(`(${recordSentFrames.toString()})()`);
+    await evaluateInPage(`(${recordFrames.toString()})()`);
     await evaluateInPage(`${threadRow}.click()`);
     await expect
-      .poll(() => evaluateInPage(buildTapSubscribedCheck(thread.id)), { timeout: 10_000 })
+      .poll(() => evaluateInPage(buildLiveCheck(thread.id)), { timeout: 10_000 })
       .toBe(true);
     await evaluateInPage(`(${recordLastMessage.toString()})()`);
 
