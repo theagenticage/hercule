@@ -20,6 +20,7 @@ import {
   queryKeys,
   readErrorMessage,
   type ComposerPick,
+  type LoginTarget,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionSpawnInput } from "@hercule/contract";
@@ -28,6 +29,7 @@ import { buildDraftKey } from "../../app/pending-submissions";
 import { threadsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
+import { ProviderLoginDialog } from "../provider-login";
 import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
 import { useSendOnMenuCommand } from "../thread/send-key";
 import { DraftComposer } from "./draft-composer";
@@ -56,7 +58,8 @@ interface SentDraft {
  *   joins;
  * - a face and a question, "What should the agent do in webshop?", then the
  *   lead: where the thread will work and on which machine, or why it cannot
- *   start yet;
+ *   start yet. When the reason is a provider instance that is not logged in,
+ *   a Log in button follows it and opens the login in a dialog;
  * - the composer, see `DraftComposer`;
  * - the start cards, when the draft is in a project, see `StartCards`.
  *
@@ -131,6 +134,8 @@ export function DraftScreen({
   // Whether the column is scrolled away from its top, so part of it is under
   // the header. Only then does it fade under the header (thread-header.css).
   const [scrolled, setScrolled] = useState(false);
+  // The login the Log in button opened, while its dialog is open.
+  const [login, setLogin] = useState<LoginTarget | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const canSend = fields.blocked === null && pending.message.text.trim() !== "" && !starting;
@@ -199,6 +204,18 @@ export function DraftScreen({
             ) : (
               <p>
                 <b className="newbie-blocked">Can&apos;t start yet.</b> {fields.blocked.reason}.
+                {fields.blocked.login === null ? null : (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => setLogin(fields.blocked?.login ?? null)}
+                    >
+                      Log in
+                    </button>
+                  </>
+                )}
               </p>
             )}
           </div>
@@ -234,6 +251,15 @@ export function DraftScreen({
           )}
         </div>
       </div>
+      {login === null ? null : (
+        <ProviderLoginDialog
+          target={login}
+          onClose={() => {
+            setLogin(null);
+            fieldRef.current?.focus();
+          }}
+        />
+      )}
     </>
   );
 }
