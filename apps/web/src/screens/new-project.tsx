@@ -46,16 +46,14 @@ export function NewProject({
   const create = useMutation({
     mutationFn: (form: NewProjectForm<SourceSubmission>) =>
       createProjectWithRepositories(client, form),
-    // Only what this submission created is read again.
-    onSuccess: async (next, form) => {
-      const created = next.repositories.some(
-        (source, index) => source.createdId !== form.repositories[index]?.createdId,
-      );
+    // Projects and resources have no live topic yet, so they are read again
+    // here. Both are read after every submission, as the desktop's form does:
+    // working out what one submission created would cost more code than the
+    // two reads.
+    onSuccess: async () => {
       await Promise.all([
-        next.projectId === form.projectId
-          ? undefined
-          : queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
-        created ? queryClient.invalidateQueries({ queryKey: queryKeys.resources() }) : undefined,
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.resources() }),
       ]);
     },
   });
