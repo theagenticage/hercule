@@ -79,3 +79,15 @@ export const decideDeviceLoginStep = (
     ? { kind: "expired" }
     : { kind: "waiting", minutesLeft: Math.ceil(left / 60_000) };
 };
+
+/**
+ * Returns the line shown while a device login waits, such as "Waiting for you
+ * to finish signing in. The code expires in 12 minutes." With `minutesLeft`
+ * null, the line does not say when the code expires: only the runner knows,
+ * and an older runner build does not say.
+ */
+export const describeDeviceLoginWait = (minutesLeft: number | null): string => {
+  const waiting = "Waiting for you to finish signing in.";
+  if (minutesLeft === null) return waiting;
+  return `${waiting} The code expires in ${String(minutesLeft)} ${minutesLeft === 1 ? "minute" : "minutes"}.`;
+};

@@ -116,6 +116,11 @@ describe("buildProviderRows for a provider with a secret field", () => {
     expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).logIn).toBe(false);
   });
 
+  it("gives where the runner found the harness, and no path where it is not installed", () => {
+    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).path).toBe("/usr/local/bin/pi");
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false)).path).toBeNull();
+  });
+
   it("offers neither on a runner where the harness is not installed", () => {
     expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
       secretFields: [],

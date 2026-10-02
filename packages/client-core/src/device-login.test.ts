@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { decideDeviceLoginStep, readProbedAt, type DeviceLogin } from "./device-login";
+import {
+  decideDeviceLoginStep,
+  describeDeviceLoginWait,
+  readProbedAt,
+  type DeviceLogin,
+} from "./device-login";
 import { BARE, buildInstance, buildSnapshot } from "./providers.testing";
 
 const STARTED_AT = "2026-09-05T09:10:00.000Z";
@@ -96,5 +101,20 @@ describe("decideDeviceLoginStep", () => {
       kind: "waiting",
       minutesLeft: null,
     });
+  });
+});
+
+describe("describeDeviceLoginWait", () => {
+  it("says how many minutes the code still works, in the singular for one", () => {
+    expect(describeDeviceLoginWait(12)).toBe(
+      "Waiting for you to finish signing in. The code expires in 12 minutes.",
+    );
+    expect(describeDeviceLoginWait(1)).toBe(
+      "Waiting for you to finish signing in. The code expires in 1 minute.",
+    );
+  });
+
+  it("names no time when the runner did not say when the code expires", () => {
+    expect(describeDeviceLoginWait(null)).toBe("Waiting for you to finish signing in.");
   });
 });

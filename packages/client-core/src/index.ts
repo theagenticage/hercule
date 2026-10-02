@@ -144,10 +144,12 @@ export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export {
   decideDeviceLoginStep,
+  describeDeviceLoginWait,
   readProbedAt,
   type DeviceLogin,
   type DeviceLoginStep,
 } from "./device-login";
+export { isLoginCodeRejected } from "./login-code";
 export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
 export {

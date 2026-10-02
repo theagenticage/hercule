@@ -31,6 +31,12 @@ export interface ProviderRow {
   readonly id: string;
   readonly providerId: string;
   readonly name: string;
+  /**
+   * Where the runner found the harness's binary, such as
+   * `/opt/homebrew/bin/claude`, or `null` when the binary is not there or the
+   * runner did not say where.
+   */
+  readonly path: string | null;
   /** The harness version it reported, or `not reported`. */
   readonly version: string;
   /** How that version compares with the versions this build was tested with. */
@@ -84,9 +90,10 @@ export const buildProviderRows = (
     const adapter = (runner.facts?.adapters ?? []).includes(instance.providerId);
     // The binary name the runner reports from its `PATH` is the instance's
     // `binaryName`, so no lookup table is needed.
-    const present = (runner.facts?.providers ?? []).some(
-      (binary) => binary.name === instance.binaryName && binary.present,
+    const binary = (runner.facts?.providers ?? []).find(
+      (each) => each.name === instance.binaryName && each.present,
     );
+    const present = binary !== undefined;
     // Every action runs on the runner, so an offline runner offers none.
     const reachable = runner.connectivity === "online";
     // A credential can only be entered for a harness installed on this runner,
@@ -97,6 +104,7 @@ export const buildProviderRows = (
       id: instance.id,
       providerId: instance.providerId,
       name: instance.displayName,
+      path: binary?.path ?? null,
       version: snapshot?.harnessVersion ?? "not reported",
       verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
       // Without an adapter, show that instead of what a stale snapshot reported.
