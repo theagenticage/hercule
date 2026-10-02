@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, except the `link.open` channel (see [The IPC contract](#the-ipc-contract)).
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*.
 
 ## Scope of the first milestone
 
@@ -30,6 +30,14 @@ The first milestone is threads, in a native shell:
 
 Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule face and its screens, assistants, All sessions, Settings, the desktop app as installer, and Windows and Linux.
 
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run moves into v1: from "the app is installed" to a first thread, with no browser and no terminal ([The first run](#the-first-run)). It brings three pieces with it:
+
+- a still room, a subset of the Office that the first run furnishes step by step;
+- logging in to a provider, which the draft's Log in button also opens;
+- creating a project from a folder, which the project picker's New project row also opens.
+
+The live Office stays post-v1, and so does the app installing or updating Hercule's binary. `install.sh` still puts the binary and the app on the Mac ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §1); the app only runs that binary.
+
 ## Architecture
 
 ### Process model
@@ -38,7 +46,7 @@ The desktop app has three layers. Each has one job.
 
 | Layer | Runs | Owns | Written with |
 |---|---|---|---|
-| main | Node, in Electron's browser process | the window, the app menu, the `app` scheme and its files, the stored token and settings, notifications, the dock badge, external links, the local-runner probe | Effect 4 ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)) |
+| main | Node, in Electron's browser process | the window, the app menu, the `app` scheme and its files, the stored token and settings, notifications, the dock badge, external links, the local-runner probe; for the first run, running the `hercule` binary, the login shell that reads `PATH`, the folder dialog and `git` *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))* | Effect 4 ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)) |
 | preload | the renderer's isolated world | the bridge: one function per IPC channel, and nothing else | TypeScript without Effect |
 | renderer | a sandboxed Chromium renderer | every screen and component, and every call to the controller | React 19 with the React Compiler, TanStack Router, Query and Virtual; `client-core` for all data; no Effect code ([ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)) |
 
@@ -50,6 +58,7 @@ The desktop app has three layers. Each has one job.
   - anything that interprets domain data goes to `client-core`, with its own test.
 - **The router uses memory history.** A desktop window has no address bar, so no URL is shown or kept.
 - **Main stays thin.** It makes no calls to the controller, with one exception: the connection check in [Reaching the controller](#reaching-the-controller).
+  - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run adds no call to the controller: it reuses that check. It does add commands main runs on this Mac: the `hercule` binary, the user's login shell once to read `PATH`, and `git` once per folder picked ([The first run](#the-first-run)). Main links no new package for them, and reads no file in the Hercule Home.
 
 ### Package
 
@@ -109,6 +118,7 @@ Measured 2026-09-29 against Electron 44.4.5:
 - **Where the URL is kept.** Main keeps the URL in the app's settings file in its user data directory.
 - **The connect screen.** It asks for the URL, prefilled with `http://127.0.0.1:4937` (the default `bind.port`, [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 - **The URL is an origin.** Main accepts an `http:` or `https:` URL with no user name, no password, no path other than `/`, no query and no fragment, and saves its origin. Anything else is refused with a message, never trimmed.
+  - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **A setup address is the one exception.** That is the address `hercule setup-url` prints, `<origin>/setup?token=<token>`. Main splits it into the origin and the token, checks and saves the origin as above, and keeps the token in memory to hand it to the first run once ([Where the setup token comes from](#the-first-run)). The token is never written to disk. The split lives once in main, and both the connect screen and the first run's remote screen use it.
 - **Main checks the URL.** Main sends `setup.read` to it. This is main's one call to the controller: the renderer cannot make it, because its CSP (below) names only the controller it is connected to.
   - **The request goes through Chromium's network stack, the one the page uses,** not through Node's `fetch` and not through the contract's client. That way the check sees the macOS proxy settings and the certificates the Keychain trusts, as the page does. Main uses Electron's `net.request`, because `net.fetch` cannot return a redirect or send the preflight with the page's origin. The request sends no cookies or stored credentials. Main must read the response's `access-control-allow-origin` header, and the derived client does not expose response headers. Main still takes the operation's path from the contract's operation table, and decodes the body with the contract's `SetupState` schema. The check is its own module, imported the first time the user connects, so it is not on the launch path.
   - **The check gives up after 5 seconds,** and reads at most 64 kB of the answer. A larger answer is not a `SetupState`.
@@ -119,16 +129,112 @@ Measured 2026-09-29 against Electron 44.4.5:
     - The status is not 200, or the body is not a `SetupState`: the URL is not a Hercule controller. So does a status outside 200 to 599, such as `999`. Response headers that the page's network stack cannot represent, such as a header with a character above U+00FF, are ignored: the check reads only `location` and the CORS headers, and those are plain ASCII whenever they are valid.
     - The response's `access-control-allow-origin` does not allow the origin (by name or `*`): the controller is older than the desktop app and must be updated.
     - A preflight's answer is not 2xx, does not allow the origin (by name or `*`), does not name `authorization`, does not allow `content-type` (by name or `*`), or does not allow its method (by exact name or `*`): the app names every refused method, and asks the user to update the controller or check any proxy in front of it. A proxy is the likelier cause here, because the controller's own answer passed the step above. These are Chromium's rules for the page's calls. A preflight's answer need not list `GET`, `HEAD` or `POST`, which CORS always allows. `*` counts because the page's calls send no credentials; it never covers `authorization`.
-    - The controller's setup is not complete: the app says so and opens `<url>/setup` in the default browser. The desktop app is not the installer yet.
+    - The controller's setup is not complete: ~~the app says so and opens `<url>/setup` in the default browser. The desktop app is not the installer yet.~~ main saves the URL and reloads the window, and the app opens [the first run](#the-first-run) on that controller, at its account step. No browser opens *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
     - Otherwise the check passes: main saves the URL and reloads the window, so the new CSP names the new controller.
-- **A controller that is down at launch** shows the connect screen, with the saved URL and the "could not reach" line. Connecting checks again.
+- **A controller that is down at launch** shows the connect screen, with the saved URL and the "could not reach" line. Connecting checks again. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* This holds only when a URL is saved. With no saved URL, the app shows the first run's welcome instead of the connect screen ([The first run](#the-first-run)).
 - **A controller that does not answer at launch** is treated as down after 5 seconds. A connection can be accepted and never answered, and neither Chromium nor the client gives up on its own. While the app waits, and only once the wait is noticeable, it shows the lockup, "Connecting to `<url>`…", and a Change button that leads to the connect screen.
 - **Every request the renderer sends gives up after 5 seconds,** for the same reason, and reports the controller as unreachable. The 5 seconds cover the whole answer, body included, so a controller that sends the headers and then stalls is unreachable too. Two operations wait longer on a healthy controller: `session.input` and `input.steer` wait up to 10 seconds for the runner to confirm the message. ~~Slice 6, which adds the composer, gives those two a limit above that wait.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): slice 5 gives those two a limit of 15 seconds, above that wait, because its queued rows already steer.)* A limit shorter than the controller's own wait would report a failure for a message that still arrives, and a user who sends it again would send it twice.
-- **Onboarding is left to the browser.** Setup and onboarding both happen in the web app, before anyone connects the desktop app, so the desktop app has no onboarding step.
+- ~~**Onboarding is left to the browser.** Setup and onboarding both happen in the web app, before anyone connects the desktop app, so the desktop app has no onboarding step.~~ **The desktop app sets Hercule up itself** *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. Its first run starts Hercule on this Mac, or connects to Hercule on another machine, and then runs setup and onboarding in the app, with no browser and no terminal ([The first run](#the-first-run)). A user who set Hercule up on the web never sees it: the app shows sign-in.
 - **Changing controllers.** Changing the controller deletes the stored token (see [Auth and the token](#auth-and-the-token)).
 - **A screen that fails** *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))* shows spec 14's "This screen did not load" screen ([./14-web-app.md](./14-web-app.md), the row "A screen that threw while rendering"), with the failure's own message. It covers a read that fails as well as a render that throws. It differs from the web app's in two ways:
   - It offers **Try again**, which loads every route on screen again, instead of Go to Sessions: the desktop app has no Sessions screen. While the routes load, the button reads "Trying again…" and ignores presses.
   - When the shell itself failed, the screen fills the window, and its foot reads "Controller at `<url>`" with the Change button that leads to the connect screen. It does not say "Connected to", because the failure may be that the controller stopped answering.
+
+### The first run
+
+*(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run takes a new user from "the app is installed" to a first thread, with no browser and no terminal. It decides what this Mac runs, then runs four steps in order: account, providers, GitHub and project. It ends on All set and a draft thread.
+
+- **The pixel reference** is the prototype `docs/design/crew-bureau-2/desktop/first-run.html` and the book's First run chapter ([Design system](#design-system)). Variant B, "Grand opening", is the one built: the Office fills the window under a glass card. Variant A is the fallback. Every state in the prototype's state menu is built, and the prototype's copy is the copy to ship.
+- **When it shows.** At launch with no saved URL, the app opens on the first run's welcome. When the connect check finds that setup is not complete, the app opens the first run at the account step. When the app's settings file says a first run is in progress for the saved controller, the app resumes it (see **Where the first run keeps its place** below).
+- **Its own chunk.** The first run and its room are one chunk of the renderer, loaded only on a first run. Main imports its new modules the first time they are used, so main's startup file does not grow.
+
+**What this Mac runs.** The welcome decides it once:
+
+| What the user does | What runs on this Mac |
+|---|---|
+| Open the office (the default) | Hercule and its local runner, from login |
+| Opens the app on a Mac that is already another machine's runner | The runner, as before. The welcome finds it at launch, never offers Open the office, and offers Connect to it |
+| Connect to it, with any address | Only the app |
+
+**Main asks the binary, not the Hercule Home.** Main reads no file in the Home and links no package beyond `@hercule/contract` and `@hercule/client-core` ([ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md)). The binary owns the Home's layout, so the app spells none of it.
+
+- Main runs `~/.local/bin/hercule` by its full path, because a Mac app has no shell `PATH` of its own. It runs three commands: `hercule service status --json`, `hercule service install --json` and `hercule setup-url`. [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §4 has the verbs and the fields their `--json` output prints.
+- For each command, main removes every `HERCULE_*` variable from the environment and passes no `--home`, so the binary uses its default Home, `~/.hercule`. A Home anywhere else is not looked for: its user connects with the setup address, as for another machine.
+- Main decodes the output with a schema of its own, for the fields it reads, because ADR 0037 keeps `@hercule/service` out of the app. Output that does not decode counts as a status that failed.
+- The renderer never runs a command or reads a file. It asks main through the bridge ([The IPC contract](#the-ipc-contract)).
+
+**Finding the local controller.** At a launch with no saved URL, the welcome shows "Looking for Hercule on this Mac…" while main runs `hercule service status --json`:
+
+- When the Service Unit runs the role `runner`, the welcome shows **runner**: "This Mac is a runner", with Connect to it and no Open the office. Installing again would restart the runner and end the sessions it hosts. Its line says whether the runner is running or stopped; the app does not start it.
+- Otherwise main runs the connect check ([The controller URL and the connect screen](#the-controller-url-and-the-connect-screen)) against the `controllerUrl` the status printed. When the check passes, main saves the URL and reloads the window, so the CSP names the controller. Setup not complete is **found**: Open the office goes straight to the account step. Setup complete is **already set up**: the app shows sign-in.
+- Anything else is **fresh**: nothing answers, the `controllerUrl` is null, there is no binary, or the status fails. Open the office then starts Hercule, and says what is wrong if that fails.
+
+Status runs once per launch with no saved URL. After the first run the URL is saved, so in practice it runs only on the first launch.
+
+**Starting Hercule.** Open the office, in the fresh state:
+
+1. Main reads the user's `PATH` once, from their login shell: `$SHELL -ilc` prints `PATH` between two markers, with stdin closed and a limit of 5 seconds. The Service Unit records its caller's `PATH` ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §4), and a Mac app inherits launchd's minimal one, so without this the runner would find no `claude`, `codex` or `git`. The shell runs as a login and interactive shell because many `PATH` lines live in `.zshrc`. The markers drop anything the shell's startup files print, and the closed stdin and the limit keep a prompt from hanging the start. If the read fails, the start fails with that reason: the Service Unit must not record a `PATH` the user does not have.
+2. Main runs `hercule service install --json` with that `PATH`. The command installs the Service Unit and starts Hercule, and also starts a unit that is installed but stopped. Main stops it by its PID if it still runs after 90 seconds.
+3. When the command exits 0 with the role `serve`, main runs the connect check against the `controllerUrl` it printed, every half second for up to 30 seconds. When the check passes, main saves the URL and reloads, and the welcome continues as for found. When the command exits 0 with the role `runner`, the Home already said this Mac is a runner, and the welcome shows **runner**.
+
+While this runs, the button holds one spinner and reads "Starting Hercule…". macOS shows its own "Background Items Added" notification when the Service Unit is registered; the welcome's "starts at login" line says so before it appears.
+
+**When Hercule does not start,** the welcome shows one of two states. Both have Try again, which runs the start again, and "It runs on another machine". Neither shows before the command has exited or been stopped, so Try again never starts a second command while the first still runs.
+
+- **start-failed**: the command exited 0 but nothing answered within 30 seconds, or main stopped the command after 90 seconds. It names the Home's logs folder, the `logsDir` the binary printed last, with Show in Finder, and says that nothing answers at the `controllerUrl`. Main opens the folder itself; the renderer passes no path.
+- **start-error**: the command failed. It shows the last line the command wrote to stderr, without its `hercule: ` prefix. Spec 15 §4 makes every such failure one line that says what to do, and Try again stands for its "run this again". The `PATH` read's error shows here too. With no file at `~/.local/bin/hercule`, the line says Hercule is not installed on this Mac, with the installer's command and Copy.
+
+**Another machine.** Connect to it opens the remote screen, which is the connect screen drawn on the first run's card: one address field, Continue, and Use this Mac. It takes either kind of address:
+
+- **A plain address:** main runs the connect check. When Hercule there is set up, the user signs in. When it is not, the field says to run `hercule setup-url` on that machine and paste the address it prints. Every other outcome shows the connect check's own line.
+- **A setup address:** main splits it into the origin and the token, checks and saves the origin, and keeps the token in memory across the reload ([The controller URL and the connect screen](#the-controller-url-and-the-connect-screen)). The four steps then run on that machine.
+
+This Mac then runs nothing of Hercule. A remote controller runs the same four steps. The providers step lists the controller's own runner, which `controller.read` names in `localRunnerId`, and every "this Mac" in the copy becomes that runner's name. The project step still picks a folder on this Mac, only to read its remote.
+
+**Where the setup token comes from,** in this order:
+
+1. the setup address the user pasted, which main keeps in memory until the token is used, and then forgets;
+2. `hercule setup-url`, when the origin of the address it prints is the saved controller's. After a relaunch, a remote controller's pasted token is gone, and the origin check keeps main from sending that controller this Mac's token instead;
+3. otherwise, the user pastes the setup address, as for another machine.
+
+The token crosses the bridge once and is never stored. Each start of Hercule mints a new token, so a token can be stale by the time it is used. When `setup.complete` refuses it, Try again asks for the token again.
+
+**The four steps.** A ladder beside the card numbers them; a finished step shows a tick.
+
+1. **Account.** `setup.complete { username, password, timezone }`. The username is prefilled with the Mac account name, which main passes. The timezone comes from the Mac, with a Change link. The password hint and its error come from the contract's `MIN_PASSWORD_LENGTH`. Then the app stores the token, marks the web's onboarding steps done ([./14-web-app.md](./14-web-app.md) §Onboarding and first run), and writes the first-run record.
+2. **Providers.** The provider instances of the controller's runner, with whether each harness is on that machine. Each has its own Log in, done in the app with `provider.login` and `provider.submitLoginCode`: Claude Code takes a pasted code, and Codex shows a device code. The device code's expiry comes from the reply's `expiresAt`, never from a number in the app. The login's end arrives on the `provider` live topic, so the app does not poll. "Open sign-in page" opens the vendor's page in the default browser. When no harness is found, each offers Install (`runner.installHarness`). The same login backs the draft's Log in button ([Design system](#design-system), **A new thread**).
+3. **GitHub.** Sign in with GitHub is the default. The app calls `connection.startDeviceFlow`, shows the user code with Copy, opens its `verificationUri` with Open GitHub, then calls `connection.pollDeviceFlow` at the interval the reply gives until it answers `done`. `pending` and `unreachable` keep waiting, `slow-down` waits longer, and `expired`, `denied` and `failed` show their line with Start again. The step sends no labels. "Paste a token instead" opens the token form, sent with `connection.create`; its "Create one on GitHub" opens GitHub's classic token page with the scopes of [./08-events-and-connections.md](./08-events-and-connections.md) §9.3 already ticked.
+4. **Project.** Choose a folder opens the native folder dialog. Main runs `git` once in the folder, to read its `origin` remote and current branch, and answers with the remote, a repository with no remote, or a folder that is not a git repository. The project name comes from the folder's name, and the setup command is optional. Adding calls `project.create`, then `resource.create { kind: "repo", remote, setupCommand, projectIds }` with the GitHub Connection, after checking the remote with `client-core`'s `isClonableRemote`. The folder itself is never changed: threads clone from the remote into workspaces of their own. The same form backs the project picker's New project row.
+
+**Putting a step off.** Providers has "Do this later", and GitHub has "Skip for now". A step put off shows a pause mark in the ladder where a finished step shows a tick, and All set says what is missing and where to finish it. When GitHub was put off, the project step still picks a folder to name the project, but creates the project without a repository, and says so; "Connect GitHub now" goes back to the GitHub step. A project without a repository works: its threads run without a checkout ([./14-web-app.md](./14-web-app.md) §Onboarding and first run).
+
+**All set** shows the furnished room and a summary card, one row per step. "Start your first thread" opens the New thread draft in the new project and clears the first-run record. Without a logged-in provider there are no desks, and the screen offers "Log in to a provider" instead.
+
+**Where the first run keeps its place.** A step's done state comes from the controller:
+
+- account: setup is complete;
+- providers: an instance is logged in on the controller's runner;
+- GitHub: a GitHub Connection exists;
+- project: a project exists.
+
+The app's settings file keeps only what the controller cannot answer: that a first run is in progress for the saved controller, and which steps were put off. Both are written when `setup.complete` succeeds and cleared when the user leaves All set. The controller stores nothing new. Quitting during the first run and launching again resumes at the first step that is neither done nor put off; `client-core` decides which.
+
+**The room** is a still subset of the Office, which stays post-v1. It is built so the Office can grow from it:
+
+- It has the room shell; one wing for the controller's runner; the user's desk and hat stand; the lobby club chair with Hercule, the assistant setup creates, asleep in it; Triage's desk and its tube from the GitHub plaque; and the first thread's desk.
+- It has no live updates, no filing cabinets, no other wings and no capsules in the tube.
+- The wing has one desk per slot of the runner (`maxConcurrentSessions`, [./03-controller-and-runners.md](./03-controller-and-runners.md) §5.3), up to the 8 a wing holds. Its plate gives the runner's name and the real count.
+- Each finished step adds the pieces it created. B's camera then moves to a close shot of them, one shot per step, framed as in the prototype.
+- Triage is drawn, but no copy names a time it reads GitHub, because Triage is not built yet ([#91](https://github.com/theagenticage/hercule/issues/91)).
+- Hercule's face is the one derived from its name, like any assistant's, until stored looks arrive (see [Post-v1](#post-v1)). The book draws it with a fixed look.
+
+Motion, as the book's Motion table draws it ([Rules](#rules), rule 2):
+
+- the veil's opacity lifts when Hercule answers;
+- the camera moves one layer's `transform` over `--dur-3`;
+- after the camera stops, new pieces settle from 14px above, with `transform` and `opacity` over `--dur-3`;
+- a spinner shows only while Hercule starts or a login waits;
+- nothing else moves. With Reduce motion, the room is redrawn in place.
 
 ### Content-Security-Policy
 
@@ -223,6 +329,7 @@ So the released app is signed with one certificate for every build ([Security ba
   - `--user-data-dir=<folder>` gives each test its own folder. It exposes nothing: a program that can write a folder it names can write the app's own.
   - `-ApplePersistenceIgnoreState` followed by `YES` keeps macOS from offering to reopen windows after a test stops the app. The app does not use window restoration.
 - **The refusal applies only while the Node inspector is closed.** An open inspector already gives full control of main, so refusing arguments would add nothing. The release package's fuse keeps the inspector closed, so there the refusal always applies. The test package runs with the inspector open, which lets Playwright pass `--remote-debugging-port` and the tests pass `--use-mock-keychain`.
+- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **`--hercule-binary=<path>` is a test switch like `--use-mock-keychain`.** It names the binary main runs in place of `~/.local/bin/hercule` ([The first run](#the-first-run)). It is not on the allow-list, and main reads it only while the inspector is open. So a released app never lets anyone choose which binary main runs, and the end-to-end tests can run a stand-in.
 
 *(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* **The released app is signed with one self-signed code-signing certificate,** the same for every build, until an Apple Developer ID replaces it together with notarization. The certificate keeps the app's designated requirement the same from build to build, so the Keychain keeps trusting the app after an update ([Auth and the token](#auth-and-the-token)). How the certificate is made and stored is in [docs/signing-certificate.md](../signing-certificate.md).
 
@@ -328,6 +435,14 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 
 **The pixel reference.** The pixel reference is the Crew Bureau book and its desktop pages, in [`docs/design/crew-bureau/`](../design/crew-bureau/). The folder is a copy of `prototype/design-systems-2/c1-bureau/` at commit a130074e on the `prototype/design-systems` branch, kept byte for byte and never edited. Its pages link to two sibling folders, copied the same way beside it: `docs/design/shared/` (the book's frame scripts and the brief) and `docs/design/c0-crew/` (the original Crew, for the book's before-and-after frames). Open `docs/design/crew-bureau/index.html` in a browser to read the book.
 
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **The pixel reference is now the book's second edition,** in [`docs/design/crew-bureau-2/`](../design/crew-bureau-2/). Open `docs/design/crew-bureau-2/index.html` to read it. The second edition started as a copy of the first, and #313 changed it in three ways:
+
+- The Office's scene styles moved to `office.css`, and `office.js` shares its drawing code, so the first run furnishes the same room. The Office page draws the same pixels as before.
+- It adds the First run chapter and its page, `desktop/first-run.html` ([The first run](#the-first-run)).
+- `crew.js` and `desktop/session-empty.html` gain the fresh install: Hercule's look, and the draft's starter threads and intake note (**A new thread**, below).
+
+The first edition stays in `docs/design/crew-bureau/`, byte for byte as above, as the record of what #275 was built from. Everything below that names "the book" means the second edition, and `pnpm compare:bureau` compares the app with it.
+
 - Where this text and the pages disagree, the pages decide a measurement and this text decides a behaviour. This is spec 14's rule for its prototypes.
 - Behaviour comes from [./14-web-app.md](./14-web-app.md): §App shell (the Threads face), §The thread surface, and §The composer is the thread's configuration.
 
@@ -423,12 +538,12 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 
 **A new thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread creation and the book's `session-empty.html`, with these differences:
 
-- **New thread opens the project picker,** from File › New Thread `⌘N` and the sidebar's New thread row. It is a glass `<dialog>` over a scrim, 520px wide and 18vh from the top. Spec 14 draws it `--raised` with a border; Bureau draws every surface that floats as glass. ↑↓ move and wrap, ⏎ picks, Esc closes, and `⌘1` to `⌘9` pick directly. There is no "New project" row, because the desktop cannot create projects. With no projects there is nothing to pick, so New thread opens the draft with no project at once.
+- **New thread opens the project picker,** from File › New Thread `⌘N` and the sidebar's New thread row. It is a glass `<dialog>` over a scrim, 520px wide and 18vh from the top. Spec 14 draws it `--raised` with a border; Bureau draws every surface that floats as glass. ↑↓ move and wrap, ⏎ picks, Esc closes, and `⌘1` to `⌘9` pick directly. ~~There is no "New project" row, because the desktop cannot create projects. With no projects there is nothing to pick, so New thread opens the draft with no project at once.~~ *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The last row is New project, as in spec 14. It opens the first run's project form ([The first run](#the-first-run), step 4) as a glass dialog, and a project it adds opens the draft in that project. With no projects, New project is the only row.
 - **A draft can have no project.** The new-thread screen with no project is a draft with no project, and the thread it starts has none. The "No project" header's `+` opens it. Its heading is "What should the agent do?", and it has no start cards.
 - **The lip uses [CONTEXT.md](../../CONTEXT.md)'s words, in the UI face.** The book's lip says "New worktree" and sets the branch in monospace. The desktop says "New workspace" or "Main workspace", as the web's workspace menu does, and sets the branch in the UI face (item 2 above). There is no rule between the workspace and the branch, where the web draws one, because the book draws none.
 - **The machine menu has no "Add machine →" foot,** because the desktop has no machine screen to open. The foot keeps its sentence: "The thread runs where you say; nothing moves it later."
 - **The machine menu leaves out retired runners,** where spec 14 lists every machine. A retired runner can never host a thread again, and runners are never deleted, so the menu would fill up with machines that are gone. A started thread still shows the retired runner it ran on. The web app does the same, because both read `buildRunnerMenu` in `@hercule/client-core`.
-- **A draft that cannot start** shows "Can't start yet." and the reason in place of the sentence, and Send is off. Spec 14's Log in button is not drawn yet.
+- **A draft that cannot start** shows "Can't start yet." and the reason in place of the sentence, and Send is off. ~~Spec 14's Log in button is not drawn yet.~~ When the reason is a provider instance that is not logged in, spec 14's Log in button follows the reason. It opens the same login as the first run's providers step ([The first run](#the-first-run), step 2), in a glass dialog, and the draft can start once the login ends *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
 - **A new thread joins only a ready workspace.** A workspace label's `+` and the thread header's `+` show only while the workspace is ready, because the controller refuses to start a thread in a workspace that is still being set up, failed, was deleted or was lost. A draft whose workspace stops being ready while it is open cannot start, and says why: "The workspace it joins could not be set up". Neither can a draft whose machine is retired after the user picked it: the reason is "moss is retired", and the lip's machine reads "moss · retired". The web app does the same, because both read `@hercule/client-core`.
 - **The start cards** are the book's "Start from Intake" section under the lip, which spec 14 does not have. They are up to three open Tasks of the draft's project, the most urgent first. Each card shows:
   - the GitHub mark when the Task came from GitHub, else the tasks glyph;
@@ -442,6 +557,13 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - "Start working on task <id>: <title>" otherwise.
 
   The thread's agent reads the rest itself, with `gh` or `hercule task read`. The message stays short, and text written outside Hercule, such as an issue's body, is never sent as the user's own words. The line goes after a blank line when the field already holds text, and the click focuses the field. The section shows only when the project has open Tasks. The book's "2 new events" is not drawn, because nothing counts new events.
+- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **Starter threads take the start cards' place while Intake is empty,** as the book's `session-empty.html?state=first` and `?state=first-no-repo` draw them. A new user then still has something to start from.
+  - Three starters sit under "Or start from one of these". `@hercule/client-core` picks the set:
+    - a project with a repository gets starters about code, such as "Walk me through how webshop is put together";
+    - a project without one gets starters about knowledge work: "Make me a short presentation about …", "Research … and summarise what you find, with sources" and "Write a one-page plan for …". Hercule is for work that is not code too, and a thread in such a project runs without a checkout.
+  - Picking a starter fills the composer and focuses it. It does not send, so the user can finish the sentence.
+  - Under the starters, one line says what fills Intake: Triage brings what needs work from GitHub, or, without a GitHub Connection, the line says to connect GitHub. The line names no time of day, because Triage is not built yet ([#91](https://github.com/theagenticage/hercule/issues/91)).
+  - Once Intake holds anything, the draft shows the start cards as above.
 - **The open draft is a row in the sidebar,** as the book draws it: "New thread", with its workspace and machine on the second line, and "draft" at its end. It is the last row of the workspace it joins, as its tab is the header's last. A draft that starts a new workspace has a group of its own under the project's header, and a draft with no project is the last row of "No project".
 - **The draft's text and picks are kept while the app runs,** like a thread's Message Draft, one draft per project and workspace.
 
@@ -509,15 +631,15 @@ These are starting budgets. The first performance pass measures the real thread 
 | Budget | Limit |
 |---|---|
 | Launch | The window shows within 500 ms of spawn (warm), and the last open thread's transcript paints within 800 ms |
-| Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one |
+| Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* [The first run](#the-first-run) starts short-lived commands: the `hercule` binary, the login shell once and `git` once per folder. Each exits or is stopped before the step that started it ends, and none stays running. The controller and runner it starts are Hercule's own processes, under the Service Unit, not the app's |
 | Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): with a text field focused and with none, because a focused field costs the GPU process 400 MB more while the glass blur is on screen; see [Measured](#measured))* |
 | Idle, window visible, no thread working *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): and no text field focused)* | Renderer: no wakeups from the app except the live connection's 30-second keepalive *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): and the change of a time label on screen, which rule 4 allows)*. GPU: at most 12 wakeups a second, the still-page level |
 | Idle, window visible, a text field focused | *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* No wakeups from the app beyond what a focused field costs an empty Electron window: at most 63 a second for the GPU and 4 for the renderer on the reference machine. The field's blinking caret keeps Chromium drawing frames, about 60 a second, however still the rest of the page is |
 | Idle, window hidden or minimized | Renderer: no wakeups from the app *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): except the live connection's 30-second keepalive, because rule 3 keeps the `session` topic subscribed while hidden)* |
 | Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The paragraph being written is painted at most once per frame |
 | The thread list's live updates | *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* At most 16 ms of the renderer's main thread for each `session` nudge, with 500 threads in the list: one frame at 60 Hz. Past it, the list stops reading every thread again on a nudge and updates only the threads the nudge names, and [./14-web-app.md](./14-web-app.md) §Live model is amended in the same change |
-| Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts` |
-| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI |
+| Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts`. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run and its room are one chunk, loaded only on a first run, and are not on the check's list of first-screen routes. The first screen grows only by the bridge calls the first run adds |
+| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Main imports the first run's modules the first time they are used, so they add nothing to the startup file |
 
 ### Rules
 
@@ -533,6 +655,8 @@ These rules keep the budgets:
 2. **Nothing animates unless something is happening:**
    - Faces are drawn still in their pose everywhere. Bureau's idle blink is left out of the first milestone, because of the measurement above. It comes back once research finds a way to draw it within the idle budget (see [Post-v1](#post-v1)).
    - Only one continuous animation is allowed: the working pose of the face beside the open thread's running turn, while that turn runs. The sidebar and every other list show still poses and still marks.
+     - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The one other is a spinner, and only while Hercule starts or a login waits in [the first run](#the-first-run) or the draft's Log in. Each is a wait the user started, and each ends: the start after at most 90 seconds for the command and 30 for the answer, a login when it ends or its code expires.
+     - The first run's room moves only when a step finishes: the camera moves one layer's `transform`, and new pieces settle with `transform` and `opacity`, each over `--dur-3`, by the rules below.
    - Animations change only `transform` and `opacity`, and only of an HTML element. Chromium runs such an animation on the compositor thread alone. When the animated element is an SVG element, even an outer `<svg>`, the renderer's main thread also runs style, layout and paint on every frame: 120 times a second on a 120 Hz display. So the working pose's paws are each drawn in an `<svg>` of their own, inside a `<span>` that moves.
    - Transitions answer a user action, last at most `--dur-3`, and change only paint properties: color, background, border-color, box-shadow, opacity and transform. A transition of a layout property, such as `width`, `padding` or `grid-template-rows`, runs layout on every frame. Bureau's composer transitions some of these; slice 6 ports the composer without them, and uses a transform if its growth animates.
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
@@ -544,12 +668,16 @@ These rules keep the budgets:
 4. **No polling, and no timers while idle:**
    - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)*
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
+   - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Two waits in [the first run](#the-first-run) poll, because nothing else can tell the app their outcome. Both are bounded waits the user started, and neither runs while the app is idle:
+     - GitHub's device flow: the protocol requires the client to ask, so the renderer calls `connection.pollDeviceFlow` at the interval GitHub gives, until the flow is done, expires or is denied.
+     - The connect check after `hercule service install`: main checks every half second for at most 30 seconds, because the controller announces nothing while it starts.
+     - A provider's login does not poll: its end arrives on the `provider` live topic.
 5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0, and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
 6. **The first paint is cheap:**
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
-7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds.
+7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
 
 **Verify at build time:** that a macOS window fully covered by other windows stops animation frames, as a minimized one does. Rule 3 then also covers a covered window.
 
@@ -811,10 +939,11 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - Each launch passes `--user-data-dir=<scratch dir>`, so the settings file, the token and the single-instance lock never touch the real app's.
   - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
+  - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's tests pass `--hercule-binary=<path>` with a stand-in binary, a script that prints what a status, an install or a setup URL would print, on a scratch Home. No test runs the real `hercule service install`, because it would register a Service Unit for the user who runs the tests.
 - **Screenshots.** Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* `pnpm --filter @hercule/desktop capture:sidebar-states` captures the sidebar states the book never draws, in both themes, for a check by eye: workspace labels, offline, queued, asleep and away threads, long names, the caps and their "more" rows, and "No project". It writes them to `apps/desktop/out/sidebar-states/`.
 - **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it.
-  - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from `docs/design/crew-bureau/`, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
+  - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from ~~`docs/design/crew-bureau/`~~ `docs/design/crew-bureau-2/` *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's sidebar with the sidebar of the book's `session-active.html`, item by item, with the app fed the book's threads at the book's time.
   - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's thread screen with the main pane of the book's `session-active.html`, item by item, twice: once at rest, and once with the transcript scrolled away from its bottom and the composer shrunk. The book's page is edited where the app draws other words or marks (see **The thread** in [Design system](#design-system)).
   - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's draft screen with the main pane of the book's `session-empty.html`, item by item, with the book's page edited where the app draws other words or marks (see **A new thread** in [Design system](#design-system)).
@@ -835,7 +964,8 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
 - **The Hercule face and its screens:** Intake, Check-in, Tasks, Runs, Workflows, Fleet, Connections and Notifications. Bureau adds the office to them.
 - **Assistants,** with the book's stored look (Spec change 3) and a run that wears its workflow's face (Spec change 4).
 - **All sessions and Settings,** including Appearance: Bureau's five themes, System, and the glass level.
-- **The desktop app as installer:** it runs and upgrades a local controller ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §Post-v1).
+- **The desktop app as installer:** it ~~runs and~~ installs and upgrades ~~a local controller~~ Hercule's binary ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §Post-v1). Starting a local controller with the binary already there is in v1, as part of [the first run](#the-first-run) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
+- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **The live Office.** The first run's still room grows into the Office: live updates, the other wings, filing cabinets and capsules in Triage's tube.
 - **The idle blink, back.** Bureau's idle blink returns once research shows how to draw it within the idle budget. Bureau draws it as an animation that repeats every 7.2 seconds on the SVG group of each face's eyes. The eyes move for only about 0.2 seconds of that, but Chromium draws frames for the whole 7.2 seconds. And because an SVG group is animated on the renderer's main thread, the renderer wakes for every frame. Techniques to measure:
   - one shared timer that starts a single 0.2-second blink on one face at a time, so frames are drawn only while an eye is actually closing
   - eyes drawn in their own compositor layer, so a blink never wakes the renderer's main thread
@@ -850,6 +980,7 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
 Tickets:
 
 - [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275)
+- [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313)
 - [Web app architecture: observability-first, desktop-shell-ready (#19)](https://github.com/theagenticage/hercule/issues/19)
 
 ADRs:
@@ -859,4 +990,4 @@ ADRs:
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 - [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
 
-Prototype: the Crew Bureau book, [`docs/design/crew-bureau/index.html`](../design/crew-bureau/index.html).
+Prototype: the Crew Bureau book, ~~[`docs/design/crew-bureau/index.html`](../design/crew-bureau/index.html)~~ its second edition, [`docs/design/crew-bureau-2/index.html`](../design/crew-bureau-2/index.html) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
