@@ -358,16 +358,25 @@ So the released app is signed with one certificate for every build ([Security ba
 
 The first milestone's channels. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* `goMenu.set` is added, because the Go menu lists the threads the sidebar shows and only the renderer knows them. `waitingThreads.set` replaces `badge.set`, `notification.show` and `notification.close`: the renderer sends every thread waiting on the user, and main decides the badge and which notifications to show or remove. Main then keeps which notifications it has shown, so a reload of the page cannot show them again, and main knows whether the user is signed in before the page sends anything, so a page still leaving the shell after a sign-out cannot bring them back.
 
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run adds the channels from `localController.find` to `firstRun.read` / `firstRun.write` below, and builds `link.open`. Main finds and starts Hercule on this Mac by running the installed binary, `~/.local/bin/hercule`, with no shell, no `HERCULE_*` variable and no `--home`, and decodes its `--json` output with a schema of its own, so the app links no `@hercule/service` (ADR 0037). `controllerUrl.save` also takes a setup address, the controller's origin followed by `/setup?token=<token>` as `hercule setup-url` prints it. When that controller is not set up, main keeps the token in memory only, for `setupToken.read` to return once. `controllerUrl.save` saves a controller that is not set up, as it saves one that is, and no longer opens the browser for it; its outcome `SetupIncomplete` is gone.
+
 | Channel | Direction | Purpose |
 |---|---|---|
 | `token.read` / `token.write` | renderer → main | the stored token (see [Auth and the token](#auth-and-the-token)) |
-| `controllerUrl.read` / `controllerUrl.save` | renderer → main | the saved controller URL; checking a new one and saving it. Not the public API's `controller.read`, which describes the controller itself |
+| `controllerUrl.read` / `controllerUrl.save` | renderer → main | the saved controller URL; checking a new one, a controller's origin or a setup address, and saving it. Not the public API's `controller.read`, which describes the controller itself |
+| `localController.find` | renderer → main | at a launch with no controller URL saved: runs `hercule service status --json`, and saves the controller's URL when one answers at the address it reports. Answers `Saved`, `Runner` or `Fresh` (with the status command's error line, if any) |
+| `localController.start` | renderer → main | runs `hercule service install --json` with the `PATH` of the user's login shell, then waits up to 30 seconds for Hercule to answer and saves its URL. Answers `Saved`, `Runner`, `NotInstalled`, `StartError` (one line) or `NoAnswer` (the address and the logs folder). Installs nothing over a runner; one start at a time; stops an install that runs for 90 seconds |
+| `logsFolder.show` | renderer → main | opens in Finder the logs folder the binary last reported. The renderer passes no path |
+| `setupToken.read` | renderer → main | the saved controller's setup token: the one from a pasted setup address, once, else the one `hercule setup-url` prints on this Mac when it names the saved controller's origin. Answers `Token` or `PasteNeeded` |
+| `macUser.read` | renderer → main | the name of the user's account on this Mac, for the first run's username field |
+| `folder.pick` | renderer → main | the system's folder dialog, and the picked folder as `/usr/bin/git` describes it: `Cancelled`, `Repository` (its `origin` remote and branch), `NoRemote`, `NotGit` or `GitFailed` (git's error line) |
+| `firstRun.read` / `firstRun.write` | renderer → main | the first-run steps the user put off, kept in the settings file for the saved controller |
 | `runnerIdentity.read` | renderer → main | the local-runner probe |
 | `goMenu.set` | renderer → main | the threads the sidebar shows, top to bottom, for the Go menu |
 | ~~`badge.set`~~ | ~~renderer → main~~ | ~~the dock badge count~~ |
 | ~~`notification.show` / `notification.close`~~ | ~~renderer → main~~ | ~~a thread's notification, keyed by session id~~ |
 | `waitingThreads.set` | renderer → main | every thread waiting on the user, for the dock badge and the threads' notifications |
-| `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser. Not built yet: it arrives with the draft's Log in button, which is its first caller. A link the user clicks already opens in the default browser without it (see [Security baseline](#security-baseline)) |
+| `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser. ~~Not built yet: it arrives with the draft's Log in button, which is its first caller.~~ Built with the first run *(2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. A link the user clicks already opens in the default browser without it (see [Security baseline](#security-baseline)) |
 | `firstScreen.report` | renderer → main | the frame that draws the first screen, fonts included, has reached the window, so main can show the window (see [Native behaviour](#native-behaviour)) |
 | `thread.open` | main → renderer | a notification click or a Go menu item asks for a thread |
 | `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread or Send |
@@ -639,7 +648,7 @@ These are starting budgets. The first performance pass measures the real thread 
 | Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The paragraph being written is painted at most once per frame |
 | The thread list's live updates | *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* At most 16 ms of the renderer's main thread for each `session` nudge, with 500 threads in the list: one frame at 60 Hz. Past it, the list stops reading every thread again on a nudge and updates only the threads the nudge names, and [./14-web-app.md](./14-web-app.md) §Live model is amended in the same change |
 | Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts`. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run and its room are one chunk, loaded only on a first run, and are not on the check's list of first-screen routes. The first screen grows only by the bridge calls the first run adds |
-| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Main imports the first run's modules the first time they are used, so they add nothing to the startup file |
+| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Main imports the first run's modules the first time they are used, so they add nothing to the startup file. The 160 kB counts the startup file and every chunk it imports statically, because the bundler can move code the startup file shares with a lazy module into a chunk of its own |
 
 ### Rules
 
@@ -886,6 +895,17 @@ These rules keep the budgets:
 
 The first screen was already over its guide budget, and [#295](https://github.com/theagenticage/hercule/issues/295) holds that overrun. This change adds 1.6 kB to it. 1.2 kB is the question form in the thread's route, which loads after first paint. The other 0.4 kB at first paint, and the 1.1 kB in main, are the contract's new operation and the schema of its answers, which main and the renderer both link. That is accepted: the question form has to ship with the thread, and nothing smaller answers a question.
 
+**Main's part of the first run,** measured 2026-10-02 with `pnpm build:desktop`'s size checks, on the branch base 50ca5fb7 (Before) and on this change (After), for [#313](https://github.com/theagenticage/hercule/issues/313). Main starts no process and does no work until the first run asks: each `localController.*`, `setupToken.read` and `folder.pick` call runs short-lived programs (the installed `hercule`, the user's login shell before an install, or `git`) and waits for them, and `localController.start` polls the controller twice a second for at most 30 seconds. Nothing runs while idle or per streamed token, and no memory is held beyond the remembered logs folder and a pasted setup token, until the first run takes it.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Main's startup, minified: the startup file and the chunks it imports statically | 160 kB | 154.9 kB, one file | 156.9 kB: `index.js` 40.9 kB and a shared Effect Schema chunk of 116.0 kB |
+| Main's first-run modules, loaded the first time the first run asks | - | - | 7.7 kB |
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | - | 302.7 kB |
+
+- **The startup file now imports a chunk.** The first-run modules are imported lazily, and the bundler moves the code they share with the startup file, the Effect Schema runtime, into its own chunk, which the startup file imports statically. The size check counted only `index.js`, so it read 40.9 kB. It now follows the startup file's static imports and counts them too.
+- **The renderer's first screen** was not measured on the base. This change touches the renderer only in the connect screen's line for a controller that is not set up; the 0.2 kB over [#309](https://github.com/theagenticage/hercule/issues/309)'s After is that and the contract's new schemas.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)).
@@ -939,7 +959,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - Each launch passes `--user-data-dir=<scratch dir>`, so the settings file, the token and the single-instance lock never touch the real app's.
   - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
-  - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's tests pass `--hercule-binary=<path>` with a stand-in binary, a script that prints what a status, an install or a setup URL would print, on a scratch Home. No test runs the real `hercule service install`, because it would register a Service Unit for the user who runs the tests.
+  - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Each launch that opens main's inspector passes `--hercule-binary=<path in the user data dir>`, so main runs that path in place of `~/.local/bin/hercule` and no test runs this Mac's own `hercule service`: even `status` reads this Mac's launchd, and `install` writes `~/Library/LaunchAgents/` whatever the Home is. With no file there, main finds no binary. A first-run test writes a stand-in there with `e2e/desktop/stand-in-binary.ts`: a script with a scratch Home that answers `service status --json`, `service install --json` and `setup-url`. Its `serve` kind starts the compiled `hercule serve` in that Home on install; the others fail the install with one line (`start-error`), report a runner (`runner`), or report no Service Unit with nothing answering (`fresh`). Main accepts the switch only where it accepts every argument: in a development run, or with the inspector open. A release package refuses it.
 - **Screenshots.** Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* `pnpm --filter @hercule/desktop capture:sidebar-states` captures the sidebar states the book never draws, in both themes, for a check by eye: workspace labels, offline, queued, asleep and away threads, long names, the caps and their "more" rows, and "No project". It writes them to `apps/desktop/out/sidebar-states/`.
 - **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it.
