@@ -350,17 +350,20 @@ describe("File > New Thread", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens a Draft Thread in no project at once when there is no project to pick", async () => {
+  it("opens the project picker also when there is no project, to offer No project and New project", async () => {
     const { fake, router } = await startShell({
       path: `/threads/${FIXTURE_THREAD_IDS.runbook}`,
       handlers: { "GET /api/v1/projects": { body: { items: [] } } },
     });
 
     fake.sendMenuCommand("newThread");
-    await waitFor(() => {
-      expect(router.state.location.href).toBe("/");
-    });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    const picker = await screen.findByRole("dialog", { name: "New thread in" });
+    expect(
+      within(picker)
+        .getAllByRole("button")
+        .map((row) => row.textContent),
+    ).toEqual(["No project", "New project"]);
+    expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.runbook}`);
   });
 });
 

@@ -5,7 +5,8 @@ import { listWaitingThreads } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
-import { ensureShellData, projectsQuery, threadsQuery } from "../../app/queries";
+import { ensureShellData, threadsQuery } from "../../app/queries";
+import { NewProjectDialog } from "../../screens/new-project";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { ProjectPicker } from "../../screens/new-thread/project-picker";
 import { Shell } from "../../shell";
@@ -19,8 +20,8 @@ import { Shell } from "../../shell";
  * shell is mounted, the live connection runs and keeps those reads current.
  *
  * The shell also owns the project picker, which File > New Thread (⌘N) and
- * the sidebar's New thread open. With no project to pick, both open a Draft
- * Thread in no project instead.
+ * the sidebar's New thread open, and the New project dialog that the
+ * picker's last row opens. A project added there opens a Draft Thread in it.
  *
  * While the user is signed in, the shell sends main the threads waiting on
  * the user whenever the thread list changes, for the dock badge and the
@@ -55,8 +56,9 @@ function ShellLayout(): JSX.Element {
   const navigate = useNavigate();
   useLiveConnection(controller.live, queryClient);
   const threads = useSuspenseQuery(threadsQuery(controller.client)).data;
-  const hasProjects = useSuspenseQuery(projectsQuery(controller.client)).data.length > 0;
-  const [picking, setPicking] = useState(false);
+  // The dialog New thread has open: the project picker, or the New project
+  // dialog its last row opens.
+  const [dialog, setDialog] = useState<"picker" | "new-project" | null>(null);
 
   // Opens the Draft Thread in `projectId`, or in no project when it is
   // `undefined`, with the focus in its message field. A draft that mounts
@@ -74,9 +76,8 @@ function ShellLayout(): JSX.Element {
   );
 
   const openNewThread = useCallback(() => {
-    if (hasProjects) setPicking(true);
-    else openDraft(undefined);
-  }, [hasProjects, openDraft]);
+    setDialog("picker");
+  }, []);
 
   // Main shows the badge and the notifications, and keeps which it has
   // shown, but only the page holds the thread list.
@@ -101,7 +102,7 @@ function ShellLayout(): JSX.Element {
   useEffect(
     () =>
       bridge.thread.onOpen(({ sessionId }) => {
-        setPicking(false);
+        setDialog(null);
         void navigate({ to: "/threads/$sessionId", params: { sessionId } });
       }),
     [bridge, navigate],
@@ -112,11 +113,24 @@ function ShellLayout(): JSX.Element {
       <Shell onNewThread={openNewThread}>
         <Outlet />
       </Shell>
-      {picking ? (
+      {dialog === "picker" ? (
         <ProjectPicker
           onPick={openDraft}
+          onNewProject={() => {
+            setDialog("new-project");
+          }}
           onClose={() => {
-            setPicking(false);
+            // The picker's close event fires after New project has already
+            // asked for the next dialog, which must stay.
+            setDialog((current) => (current === "picker" ? null : current));
+          }}
+        />
+      ) : null}
+      {dialog === "new-project" ? (
+        <NewProjectDialog
+          onAdded={openDraft}
+          onClose={() => {
+            setDialog(null);
           }}
         />
       ) : null}

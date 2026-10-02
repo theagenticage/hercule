@@ -20,6 +20,11 @@
 .picker-row .grow small {
   padding-left: 17px;
 }
+/* The New project row has no tile, and its label starts where the
+   projects' names do, as in the web app's picker. */
+.picker-new {
+  padding-left: 17px;
+}
 /* The row with focus is the one ⏎ picks, so it is marked however the focus
    got there: by the keyboard, or by the picker opening. The mark is the
    row's background, as a selected row in the sidebar, rather than the

@@ -37,12 +37,13 @@ const openPicker = async () => {
 };
 
 describe("the project picker", () => {
-  it("lists each project with what it holds and its shortcut, with the focus on the first", async () => {
+  it("lists each project with what it holds and its shortcut, then New project, with the focus on the first", async () => {
     const { rows } = await openPicker();
 
     expect(rows.map((row) => row.textContent)).toEqual([
       "webshop" + "1 repo · webshop · 3 threads · 1 workspace" + "⌘1",
       "ops" + "2 repos · ops-infra, ops-runbooks · 1 thread · 0 workspaces" + "⌘2",
+      "New project",
     ]);
     expect(document.activeElement).toBe(rows[0]);
   });
@@ -50,12 +51,41 @@ describe("the project picker", () => {
   it("moves the focus with ↓ and ↑, going round at either end", async () => {
     const { rows } = await openPicker();
 
-    await userEvent.keyboard("{ArrowDown}");
-    expect(document.activeElement).toBe(rows[1]);
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+    expect(document.activeElement).toBe(rows[2]);
     await userEvent.keyboard("{ArrowDown}");
     expect(document.activeElement).toBe(rows[0]);
     await userEvent.keyboard("{ArrowUp}");
-    expect(document.activeElement).toBe(rows[1]);
+    expect(document.activeElement).toBe(rows[2]);
+  });
+
+  it("offers No project and New project when there is no project, and No project opens a draft in none", async () => {
+    stubApi(buildSidebarHandlers({ ...SIDEBAR_FIXTURE, projects: [] }));
+    const { router } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: THREAD_PATH },
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "New thread ⌘N" }));
+    const dialog = await screen.findByRole("dialog", { name: "New thread in" });
+    const rows = within(dialog).getAllByRole("button");
+
+    expect(rows.map((row) => row.textContent)).toEqual(["No project", "New project"]);
+    expect(document.activeElement).toBe(rows[0]);
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe("/");
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes and opens the New project dialog from its last row", async () => {
+    const { rows } = await openPicker();
+
+    await userEvent.click(rows[2]!);
+
+    expect(await screen.findByRole("dialog", { name: "New project" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "New thread in" })).toBeNull();
   });
 
   it("opens a Draft Thread in the focused project with ⏎, and closes", async () => {

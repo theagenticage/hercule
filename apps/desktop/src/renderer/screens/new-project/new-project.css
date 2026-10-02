@@ -1,0 +1,74 @@
+/* The New project form, as the book's first-run page draws its project step.
+   The card, the warning, the form and its note are the step's shared parts
+   (see step.css). */
+
+/* The folder to choose, before one is chosen. The book adds "or drop one
+   here" under the label; the app takes no drop, so the line is left out. */
+.pick-folder {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 24px;
+  padding: 26px 20px 24px;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  background: transparent;
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+.pick-folder:hover {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pick-folder {
+    transition:
+      background var(--dur-1),
+      box-shadow var(--dur-1);
+  }
+}
+.pick-folder .ico {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 2px;
+  border-radius: 12px;
+  background: var(--sunken);
+  color: var(--ink);
+}
+.pick-folder b {
+  color: var(--ink);
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+
+/* The book sets "optional" at the label's weight, not bold. */
+.new-project-optional {
+  font-weight: var(--w-regular);
+}
+/* Which GitHub Connection clones the repository, when there are several. */
+.new-project-through {
+  margin: 14px 0 0;
+}
+/* An error that belongs to no field, such as a repository the controller
+   refused after the project was created. */
+.new-project-err {
+  margin: 14px 0 0;
+}
+
+/* The dialog New thread's picker opens, as wide as the first run's card is
+   inside its padding, like the login dialog. */
+.new-project-dialog {
+  width: 448px;
+}
+.pop-sec.new-project-body {
+  padding: 14px;
+}
+/* The step's first part sits under a heading in the first run; here the
+   dialog's header is above it. */
+.new-project-body > :first-child {
+  margin-top: 0;
+}
