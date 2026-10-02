@@ -226,8 +226,15 @@ jobs:
 
       # The next step install.sh prints: the installed binary installs the
       # service unit for the same scratch Home, and returns once the
-      # controller has started and stays up. The unit is removed again
-      # afterwards, though the runner is thrown away after the job anyway.
+      # controller has started and stays up.
+      #
+      # A running process does not prove the boot finished: a keychain prompt
+      # for the master key would hold the boot with the process still up. So
+      # the step waits for `<home>/setup-url`, which the boot writes after it
+      # has read the master key, and calls `setup.read` at the address in it.
+      # That is also how the desktop app finds a local controller. The unit is
+      # removed again afterwards, though the runner is thrown away after the
+      # job anyway.
       - name: Run Hercule as a service with the installed binary
         env:
           HERCULE_HOME: ${{ runner.temp }}/hercule-home
@@ -240,6 +247,20 @@ jobs:
             echo "::error::hercule service install returned, but the service is not running the controller. See $HERCULE_HOME/logs/controller.log and controller.stderr.log."
             exit 1
           fi
+          setup_url_file="$HERCULE_HOME/setup-url"
+          for _ in $(seq 30); do
+            [ -s "$setup_url_file" ] && break
+            sleep 1
+          done
+          if [ ! -s "$setup_url_file" ]; then
+            echo "::error::The controller runs, but did not write $setup_url_file within 30 seconds, so its boot is stuck, for example on a keychain prompt. See $HERCULE_HOME/logs/controller.log."
+            exit 1
+          fi
+          # The setup URL holds a setup token, so only its origin is printed.
+          origin=$(sed -E 's#^(https?://[^/]+)/.*#\1#' "$setup_url_file")
+          echo "The setup URL points at $origin"
+          curl -fsS --retry 10 --retry-connrefused --retry-delay 1 "$origin/api/v1/setup"
+          echo
           "$hercule" service uninstall
 
       - uses: actions/upload-artifact@v7
