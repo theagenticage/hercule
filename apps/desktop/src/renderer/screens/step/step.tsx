@@ -92,17 +92,17 @@ export function DoneMark({ children }: { readonly children?: ReactNode }): JSX.E
   );
 }
 
-/** Renders step `n` of a numbered list of things to do, with `children` as its text and controls. */
+/** Renders step `number` of a numbered list of things to do, with `children` as its text and controls. */
 export function NumberedStep({
-  n,
+  number,
   children,
 }: {
-  readonly n: number;
+  readonly number: number;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
     <div className="hx-step">
-      <b>{n}</b>
+      <b>{number}</b>
       <span>{children}</span>
     </div>
   );
@@ -175,14 +175,14 @@ export function DeviceCodeSteps({
   const codeRef = useRef<HTMLElement>(null);
   return (
     <>
-      <NumberedStep n={1}>
+      <NumberedStep number={1}>
         Copy this code.
         <span className="code">
           <b ref={codeRef}>{code}</b>
           <CopyButton targetRef={codeRef} />
         </span>
       </NumberedStep>
-      <NumberedStep n={2}>
+      <NumberedStep number={2}>
         {openText}
         <br />
         <button type="button" className="btn btn--sm" onClick={onOpen}>

@@ -53,11 +53,11 @@ type GitHubFlow =
  */
 export function GitHubCard({
   client,
-  onSkip,
+  onPutOff,
   onContinue,
 }: {
   readonly client: HerculeClient;
-  readonly onSkip: () => void;
+  readonly onPutOff: () => void;
   readonly onContinue: () => void;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "__root__" });
@@ -170,7 +170,7 @@ export function GitHubCard({
         onConnectToken: () => {
           connect.mutate(token.trim());
         },
-        onSkip,
+        onPutOff,
         onContinue,
       }}
     />

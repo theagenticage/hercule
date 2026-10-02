@@ -26,7 +26,7 @@ export const FIRST_RUN_STATES = [
   { step: "welcome", state: "searching", book: { step: "welcome", state: "searching" } },
   { step: "welcome", state: "fresh", book: { step: "welcome", state: "fresh" } },
   { step: "welcome", state: "starting", book: { step: "welcome", state: "starting" } },
-  { step: "welcome", state: "start-failed", book: { step: "welcome", state: "start-failed" } },
+  { step: "welcome", state: "no-answer", book: { step: "welcome", state: "start-failed" } },
   { step: "welcome", state: "start-error", book: { step: "welcome", state: "start-error" } },
   { step: "welcome", state: "not-installed", book: { step: "welcome", state: "start-error" } },
   { step: "welcome", state: "runner", book: { step: "welcome", state: "runner" } },

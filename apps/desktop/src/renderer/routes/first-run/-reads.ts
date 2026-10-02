@@ -31,7 +31,7 @@ export interface FirstRunData {
 
 /** The first run's reads as they sit in the query cache, each undefined while it has no data. */
 interface CachedFirstRunReads {
-  readonly signedIn: boolean;
+  readonly setupComplete: boolean;
   readonly controller: ControllerInfo | undefined;
   readonly runners: readonly Runner[] | undefined;
   readonly instances: readonly ProviderInstance[] | undefined;
@@ -46,7 +46,7 @@ const NONE: readonly never[] = [];
 /** Builds the first run's data from its cached reads, with an empty list for each read that has no data. */
 const buildFirstRunData = (cached: CachedFirstRunReads): FirstRunData => ({
   reads: {
-    setupComplete: cached.signedIn,
+    setupComplete: cached.setupComplete,
     localRunner:
       cached.runners?.find((runner) => runner.id === cached.controller?.localRunnerId) ?? null,
     instances: cached.instances ?? NONE,
@@ -59,7 +59,7 @@ const buildFirstRunData = (cached: CachedFirstRunReads): FirstRunData => ({
 
 /**
  * Returns what the first run reads, from the query cache, and renders again
- * when any of it changes. Before the user has an account (`signedIn` false),
+ * when any of it changes. Before the user has an account (`setupComplete` false),
  * the controller answers none of these reads, so the data is empty and setup
  * is not complete.
  *
@@ -72,22 +72,21 @@ const buildFirstRunData = (cached: CachedFirstRunReads): FirstRunData => ({
 export const useFirstRunData = (
   client: HerculeClient,
   bridge: Bridge,
-  signedIn: boolean,
+  setupComplete: boolean,
 ): FirstRunData => {
   // The controller answers none of these reads before the user has an account.
-  const enabled = signedIn;
-  const controller = useQuery({ ...controllerQuery(client), enabled }).data;
-  const runners = useQuery({ ...runnersQuery(client), enabled }).data;
-  const instances = useQuery({ ...providersQuery(client), enabled }).data;
-  const connections = useQuery({ ...connectionsQuery(client), enabled }).data;
-  const projects = useQuery({ ...projectsQuery(client), enabled }).data;
-  const assistants = useQuery({ ...assistantsQuery(client), enabled }).data;
-  const progress = useQuery({ ...firstRunQuery(bridge), enabled }).data;
+  const controller = useQuery({ ...controllerQuery(client), enabled: setupComplete }).data;
+  const runners = useQuery({ ...runnersQuery(client), enabled: setupComplete }).data;
+  const instances = useQuery({ ...providersQuery(client), enabled: setupComplete }).data;
+  const connections = useQuery({ ...connectionsQuery(client), enabled: setupComplete }).data;
+  const projects = useQuery({ ...projectsQuery(client), enabled: setupComplete }).data;
+  const assistants = useQuery({ ...assistantsQuery(client), enabled: setupComplete }).data;
+  const progress = useQuery({ ...firstRunQuery(bridge), enabled: setupComplete }).data;
 
   return useMemo(
     () =>
       buildFirstRunData({
-        signedIn,
+        setupComplete,
         controller,
         runners,
         instances,
@@ -96,7 +95,7 @@ export const useFirstRunData = (
         assistants,
         progress,
       }),
-    [signedIn, controller, runners, instances, connections, projects, assistants, progress],
+    [setupComplete, controller, runners, instances, connections, projects, assistants, progress],
   );
 };
 
@@ -111,7 +110,7 @@ export const readFirstRunData = (
   bridge: Bridge,
 ): FirstRunData =>
   buildFirstRunData({
-    signedIn: true,
+    setupComplete: true,
     controller: queryClient.getQueryData(controllerQuery(client).queryKey),
     runners: queryClient.getQueryData(runnersQuery(client).queryKey),
     instances: queryClient.getQueryData(providersQuery(client).queryKey),

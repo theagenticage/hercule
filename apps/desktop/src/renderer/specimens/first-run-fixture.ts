@@ -502,7 +502,7 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
   "welcome-searching": () => buildWelcomeScene({ find: () => hang() }),
   "welcome-fresh": () => buildWelcomeScene({}),
   "welcome-starting": () => buildWelcomeScene({}, () => clickButton("Open the office")),
-  "welcome-start-failed": () =>
+  "welcome-no-answer": () =>
     buildWelcomeScene(
       {
         start: () =>

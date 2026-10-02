@@ -20,7 +20,7 @@ import { ProviderLogo } from "../thread/provider-logo";
  * is Log in to a provider and Open Hercule is the quiet one. Both open the
  * draft, whose own Log in button is where the user logs in.
  */
-export function DoneStep({
+export function AllSet({
   username,
   timezone,
   recap,

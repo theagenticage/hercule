@@ -18,14 +18,14 @@ export function ProvidersStep({
   ready,
   children,
   onContinue,
-  onLater,
+  onPutOff,
 }: {
   readonly heading: string;
   readonly subheading: string;
   readonly ready: boolean;
   readonly children: ReactNode;
   readonly onContinue: () => void;
-  readonly onLater: () => void;
+  readonly onPutOff: () => void;
 }): JSX.Element {
   return (
     <>
@@ -43,7 +43,7 @@ export function ProvidersStep({
           Continue
         </button>
         {ready ? null : (
-          <button type="button" className="btn btn--quiet" onClick={onLater}>
+          <button type="button" className="btn btn--quiet" onClick={onPutOff}>
             Do this later
           </button>
         )}

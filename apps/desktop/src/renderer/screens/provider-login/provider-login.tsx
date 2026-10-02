@@ -258,12 +258,12 @@ function PasteCodeSteps({
   const canSubmit = code.trim() !== "" && !submitting;
   return (
     <>
-      <NumberedStep n={1}>
+      <NumberedStep number={1}>
         Open the sign-in page and approve Hercule.
         <br />
         <SignInPageButton url={url} onOpen={onOpen} />
       </NumberedStep>
-      <NumberedStep n={2}>
+      <NumberedStep number={2}>
         Paste the code it shows you.
         <span className="row">
           <span className={rejected ? "field is-bad" : "field"}>

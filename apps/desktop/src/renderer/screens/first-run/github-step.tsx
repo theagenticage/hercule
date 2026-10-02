@@ -77,7 +77,7 @@ interface GitHubStepActions {
   /** Sends the token in the form. */
   readonly onConnectToken: () => void;
   /** Puts the step off. */
-  readonly onSkip: () => void;
+  readonly onPutOff: () => void;
   /** Moves on once GitHub is connected. */
   readonly onContinue: () => void;
 }
@@ -92,12 +92,12 @@ export function GitHubStep({
   readonly token: string;
   readonly actions: GitHubStepActions;
 }): JSX.Element {
-  const skip = (
+  const skipButton = (
     <button
       type="button"
       className="btn btn--quiet"
       disabled={state.kind === "token" && state.checking}
-      onClick={actions.onSkip}
+      onClick={actions.onPutOff}
     >
       Skip for now
     </button>
@@ -134,7 +134,7 @@ export function GitHubStep({
         </>
       );
     case "token":
-      return <TokenForm state={state} token={token} actions={actions} skip={skip} />;
+      return <TokenForm state={state} token={token} actions={actions} skipButton={skipButton} />;
     case "code":
       return (
         <>
@@ -143,7 +143,7 @@ export function GitHubStep({
             <MarkedRow
               mark={<GitHubMark size={18} />}
               name="GitHub"
-              detail={readHostAndPath(state.verificationUri)}
+              detail={formatUrlWithoutScheme(state.verificationUri)}
               end={
                 <button type="button" className="btn btn--sm btn--quiet" onClick={actions.onCancel}>
                   Cancel
@@ -163,7 +163,7 @@ export function GitHubStep({
             <button type="button" className="btn btn--accent btn--lg" disabled>
               Continue
             </button>
-            {skip}
+            {skipButton}
           </div>
         </>
       );
@@ -187,7 +187,7 @@ export function GitHubStep({
             <button type="button" className="btn btn--accent btn--lg" onClick={actions.onSignIn}>
               Start again
             </button>
-            {skip}
+            {skipButton}
           </div>
           {/* When the sign-in itself failed, the token is the way on, so it moved up into the warning. */}
           {state.status === "failed" ? null : toToken}
@@ -208,7 +208,7 @@ export function GitHubStep({
               {state.starting ? <span className="spin" /> : <GitHubMark size={16} />}
               Sign in with GitHub
             </button>
-            {skip}
+            {skipButton}
           </div>
           {toToken}
         </>
@@ -234,23 +234,23 @@ function GitHubHeading(): JSX.Element {
  * Returns `url` without its scheme, such as `github.com/login/device`, or
  * `url` unchanged when it does not parse.
  */
-function readHostAndPath(url: string): string {
+function formatUrlWithoutScheme(url: string): string {
   if (!URL.canParse(url)) return url;
   const { host, pathname } = new URL(url);
   return `${host}${pathname === "/" ? "" : pathname}`;
 }
 
-/** Renders the token form, with `skip` beside Connect. */
+/** Renders the token form, with `skipButton` beside Connect. */
 function TokenForm({
   state,
   token,
   actions,
-  skip,
+  skipButton,
 }: {
   readonly state: Extract<GitHubStepState, { kind: "token" }>;
   readonly token: string;
   readonly actions: GitHubStepActions;
-  readonly skip: JSX.Element;
+  readonly skipButton: JSX.Element;
 }): JSX.Element {
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -307,7 +307,7 @@ function TokenForm({
             "Connect"
           )}
         </button>
-        {skip}
+        {skipButton}
       </div>
       <p className="st-note">
         <GitHubMark size={14} />

@@ -24,7 +24,7 @@ const INSTALLER_COMMAND =
  * - `fresh`: nothing runs here yet; Open the office starts Hercule.
  * - `starting`: Open the office is starting Hercule.
  * - `found`: Hercule runs on this Mac at `address`, not set up yet.
- * - `start-failed`: Hercule started but nothing answered at `address`;
+ * - `no-answer`: Hercule started but nothing answered at `address`;
  *   its logs are in `logsDir`.
  * - `start-error`: starting Hercule failed with `line`.
  * - `not-installed`: there is no Hercule on this Mac to start.
@@ -35,7 +35,7 @@ export type WelcomeState =
   | { readonly kind: "fresh" }
   | { readonly kind: "starting" }
   | { readonly kind: "found"; readonly address: string }
-  | { readonly kind: "start-failed"; readonly address: string; readonly logsDir: string }
+  | { readonly kind: "no-answer"; readonly address: string; readonly logsDir: string }
   | { readonly kind: "start-error"; readonly line: string }
   | { readonly kind: "not-installed" }
   | { readonly kind: "runner"; readonly running: boolean };
@@ -67,7 +67,7 @@ export function Welcome({
     </div>
   );
   switch (state.kind) {
-    case "start-failed":
+    case "no-answer":
       return (
         <>
           <h1 className="st-h">Hercule didn’t start</h1>

@@ -21,7 +21,7 @@ export function ProvidersCard({
   instances,
   ready,
   onContinue,
-  onLater,
+  onPutOff,
 }: {
   readonly client: HerculeClient;
   /** The controller's origin, which tells whether the runner is on this Mac. */
@@ -30,7 +30,7 @@ export function ProvidersCard({
   readonly instances: readonly ProviderInstance[];
   readonly ready: boolean;
   readonly onContinue: () => void;
-  readonly onLater: () => void;
+  readonly onPutOff: () => void;
 }): JSX.Element {
   const text = buildProvidersStepText(
     localRunner === null ? null : buildProviderRows(localRunner, instances),
@@ -42,7 +42,7 @@ export function ProvidersCard({
       subheading={text.subheading}
       ready={ready}
       onContinue={onContinue}
-      onLater={onLater}
+      onPutOff={onPutOff}
     >
       {localRunner === null
         ? null

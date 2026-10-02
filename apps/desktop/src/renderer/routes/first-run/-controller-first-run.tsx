@@ -20,7 +20,7 @@ import { firstRunQuery, setupQuery, setupTokenQuery } from "../../app/queries";
 import { FirstRunFrame } from "../../screens/first-run";
 import { OfficeRoom, type RoomShot } from "../../screens/office";
 import { AccountCard } from "./-account";
-import { DoneCard } from "./-done";
+import { AllSetCard } from "./-all-set";
 import { GitHubCard } from "./-github";
 import { ProjectCard } from "./-project";
 import { ProvidersCard } from "./-providers";
@@ -72,9 +72,9 @@ export function ControllerFirstRun({
   const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
   const { client, url, live } = controller;
-  const signedIn = useSuspenseQuery(setupQuery(client)).data.complete;
-  const setupToken = useQuery({ ...setupTokenQuery(bridge), enabled: !signedIn }).data;
-  const data = useFirstRunData(client, bridge, signedIn);
+  const setupComplete = useSuspenseQuery(setupQuery(client)).data.complete;
+  const setupToken = useQuery({ ...setupTokenQuery(bridge), enabled: !setupComplete }).data;
+  const data = useFirstRunData(client, bridge, setupComplete);
   const onThisMac = isLoopbackOrigin(url);
   // A controller elsewhere was chosen by the user on the remote screen, so
   // there is nothing to greet.
@@ -91,7 +91,7 @@ export function ControllerFirstRun({
   // The step on screen, kept until the user moves on, or null before the
   // user has an account.
   const [shownStep, setShownStep] = useState<FirstRunStep | "all-set" | null>(() =>
-    signedIn ? decideStep() : null,
+    setupComplete ? decideStep() : null,
   );
   const decideAgain = (): void => {
     setShownStep(decideStep());
@@ -115,7 +115,7 @@ export function ControllerFirstRun({
     },
   });
 
-  const card: FirstRunCard = signedIn
+  const card: FirstRunCard = setupComplete
     ? (shownStep ?? decideFirstRunStep(doneSteps, data.putOff))
     : !openedOffice
       ? "found"
@@ -178,7 +178,7 @@ export function ControllerFirstRun({
           instances={data.reads.instances}
           ready={doneSteps.providers}
           onContinue={decideAgain}
-          onLater={() => {
+          onPutOff={() => {
             putOff.mutate("providers");
           }}
         />
@@ -188,7 +188,7 @@ export function ControllerFirstRun({
       body = (
         <GitHubCard
           client={client}
-          onSkip={() => {
+          onPutOff={() => {
             putOff.mutate("github");
           }}
           onContinue={decideAgain}
@@ -208,20 +208,20 @@ export function ControllerFirstRun({
       );
       break;
     case "all-set":
-      body = <DoneCard client={client} reads={data.reads} onDoItNow={setShownStep} />;
+      body = <AllSetCard client={client} reads={data.reads} onDoItNow={setShownStep} />;
       break;
   }
 
-  const greeting = card === "found" || card === "remote";
+  const isGreeting = card === "found" || card === "remote";
   return (
     <>
-      {signedIn ? <LiveUpdates live={live} /> : null}
+      {setupComplete ? <LiveUpdates live={live} /> : null}
       <FirstRunFrame
         room={
           <OfficeRoom contents={contents} projects={data.reads.projects} shot={CARD_SHOTS[card]} />
         }
-        rungs={greeting ? [] : buildFirstRunLadder(card, doneSteps, data.putOff)}
-        brand={greeting}
+        rungs={isGreeting ? [] : buildFirstRunLadder(card, doneSteps, data.putOff)}
+        brand={isGreeting}
       >
         {body}
       </FirstRunFrame>

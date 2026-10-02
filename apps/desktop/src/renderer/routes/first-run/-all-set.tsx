@@ -9,7 +9,7 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import { firstRunQuery, resourcesQuery, settingsQuery, userQuery } from "../../app/queries";
-import { DoneStep } from "../../screens/first-run";
+import { AllSet } from "../../screens/first-run";
 import { pickProjectTint } from "../../screens/project-tile";
 
 /**
@@ -18,7 +18,7 @@ import { pickProjectTint } from "../../screens/project-tile";
  * thread draft in the first project. Without a logged-in provider, the
  * draft's Log in button is where the user logs in.
  */
-export function DoneCard({
+export function AllSetCard({
   client,
   reads,
   onDoItNow,
@@ -36,7 +36,7 @@ export function DoneCard({
   const recap = buildAllSetRecap({ ...reads, resources });
   const { project } = recap;
 
-  const finish = useMutation({
+  const endFirstRun = useMutation({
     mutationFn: () => bridge.firstRunProgress.save(null),
     onSuccess: async () => {
       // The entry guard reads the record from the cache, and must find the first run over.
@@ -50,11 +50,11 @@ export function DoneCard({
     },
   });
   const leave = (): void => {
-    if (!finish.isPending) finish.mutate();
+    if (!endFirstRun.isPending) endFirstRun.mutate();
   };
 
   return (
-    <DoneStep
+    <AllSet
       username={username}
       timezone={resolveDisplayTimezone(timezone)}
       recap={recap}

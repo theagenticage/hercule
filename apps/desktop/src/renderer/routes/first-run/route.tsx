@@ -2,7 +2,7 @@ import { useEffect, type JSX } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { buildEntryDeps, resolveFirstRunEntry } from "../../app/entry-guard";
 import { ensureFirstRunData, macUserQuery, setupQuery, setupTokenQuery } from "../../app/queries";
-import { ControllerFirstRun } from "./-office";
+import { ControllerFirstRun } from "./-controller-first-run";
 import { clearStartRequested, isStartRequested } from "./-start-flag";
 import { NoControllerFirstRun } from "./-welcome";
 

@@ -121,7 +121,7 @@ const decideStartState = (
     case "StartFailed":
       return { kind: "start-error", line: outcome.line };
     case "NoAnswer":
-      return { kind: "start-failed", address: outcome.origin, logsDir: outcome.logsFolder };
+      return { kind: "no-answer", address: outcome.origin, logsDir: outcome.logsFolder };
     // Something answered at Hercule's address but the connect check refused
     // it, so the line is the one the connect screen shows for the same check.
     case "Redirected":
