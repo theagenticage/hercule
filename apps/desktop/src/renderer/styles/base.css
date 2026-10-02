@@ -93,15 +93,23 @@ kbd {
   line-height: 1.6;
 }
 
-/* Two of the book's helper classes, which any screen may use:
+/* Three of the book's helper classes, which any screen may use:
    - `.faint` draws secondary text in faint ink;
    - `.spacer` takes the free space of a flex row, pushing what follows it to
-     the row's far end. */
+     the row's far end;
+   - `.wordmark` sets the product's name in the Deco face, as the book spells
+     it. The Deco face sets the wordmark and a few large headline numerals,
+     never words in the interface. */
 .faint {
   color: var(--faint);
 }
 .spacer {
   flex: 1;
+}
+.wordmark {
+  font-family: var(--font-deco);
+  font-weight: 400;
+  letter-spacing: 0.02em;
 }
 
 html {

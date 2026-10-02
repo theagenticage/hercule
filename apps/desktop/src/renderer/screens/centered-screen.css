@@ -23,13 +23,6 @@
   -webkit-app-region: no-drag;
 }
 
-/* The Deco face sets the wordmark and a few large headline numerals, never
-   words in the interface. As the book spells it. */
-.wordmark {
-  font-family: var(--font-deco);
-  font-weight: 400;
-  letter-spacing: 0.02em;
-}
 /* The book's lockup: the mark sits on the left of the wordmark, 40px tall
    beside 32px type, with 12px between them. The wordmark is set solid like
    the book's headline wordmark. */
