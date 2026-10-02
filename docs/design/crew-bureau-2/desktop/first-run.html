@@ -559,6 +559,11 @@
       .cmd .spacer {
         flex: 1;
       }
+      /* The box is set in the code font for the command, but its button is not code. */
+      .cmd .btn {
+        font-family: var(--font-ui);
+        font-variation-settings: normal;
+      }
       .fine {
         color: var(--faint);
         font-size: var(--t-12);
@@ -990,7 +995,7 @@
         var LADDER = ["Account", "Providers", "GitHub", "Project"];
         // The states each step can be shown in. The first is where a frame opens without ?state.
         var STATES = {
-          welcome: ["fresh", "searching", "starting", "start-failed", "found", "already-set-up", "remote", "remote-not-set-up", "remote-set-up"],
+          welcome: ["fresh", "searching", "starting", "start-failed", "start-error", "runner", "found", "already-set-up", "remote", "remote-not-set-up", "remote-set-up"],
           account: ["default", "error", "submitting"],
           harness: ["idle", "claude-paste", "claude-error", "codex-device", "ready", "none-found"],
           github: ["empty", "checking", "connected", "refused"],
@@ -1285,13 +1290,31 @@
             '<li><span class="ico">' + Crew.mark("waiting", 16) + "</span><span><b>You keep the decisions</b>When an agent needs you, it raises its hand and waits.</span></li>" +
             "</ul>";
           var lead = '<p class="lead">Hand off the work.<br />Keep the decisions.</p>' + '<p class="st-sub">Hercule gives coding agents desks of their own on this Mac. They work through the night, and come to you when a decision is yours.</p>';
+          var retry = '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="start">Try again</button><button class="btn btn--quiet" data-act="remote">It runs on another machine</button></div>';
           if (st === "start-failed") {
             return (
               '<h1 class="st-h">Hercule didn’t start</h1>' +
-              '<p class="st-sub">The app started Hercule in the background, but it didn’t answer within 30 seconds. Its log may say why:</p>' +
-              '<div class="cmd"><span>~/.hercule/logs/controller.log</span><span class="spacer"></span><button class="btn btn--sm btn--quiet" data-act="copy">Copy</button></div>' +
+              '<p class="st-sub">The app started Hercule in the background, but it never answered. Its logs may say why:</p>' +
+              '<div class="cmd"><span>~/.hercule/logs</span><span class="spacer"></span><button class="btn btn--sm btn--quiet" data-act="noop">Show in Finder</button></div>' +
               '<p class="reach reach--off"><span class="dot-ok"></span><span>Nothing answers at <span class="mono">' + ME.address + "</span></span></p>" +
-              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="start">Try again</button><button class="btn btn--quiet" data-act="remote">It runs on another machine</button></div>'
+              retry
+            );
+          }
+          // The command's own error line, shown as it is: Try again stands for its "run this again".
+          if (st === "start-error") {
+            return (
+              '<h1 class="st-h">Hercule didn’t start</h1>' +
+              '<p class="st-sub">Starting Hercule on this Mac stopped with this error:</p>' +
+              '<div class="warn">' + icon("shield", 14) + '<span>/opt/tools/bin is on the PATH the service runs with, and every user on this machine can write to it, so anyone could put a program there that the service runs. Remove /opt/tools/bin from PATH, or run <span class="mono">chmod o-w /opt/tools/bin</span>, then run this again.</span></div>' +
+              retry
+            );
+          }
+          if (st === "runner") {
+            return (
+              '<h1 class="st-h">This Mac is a runner</h1>' +
+              '<p class="st-sub">It runs agents for Hercule on another machine, so Hercule itself doesn’t run here. Connect to that machine to open its office.</p>' +
+              '<p class="reach"><span class="dot-ok"></span><span><b>Hercule’s runner is running on this Mac</b></span><span class="spacer"></span><span>starts at login</span></p>' +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="remote">Connect to it</button></div>'
             );
           }
           if (st === "remote" || st === "remote-not-set-up") {
@@ -1606,11 +1629,12 @@
             }, 1200);
           },
           // A Hercule that already answers opens straight away. Otherwise the app installs Hercule's
-          // background service on this Mac and waits for it to answer; the lights come on with it.
+          // background service on this Mac and waits for it to answer; the lights come on with it. The
+          // real start takes 3 seconds at least, because the command waits for Hercule to keep running.
           start: function () {
             if (S.state === "found") return go("account", "default");
             go("welcome", "starting");
-            later(1800, function () {
+            later(3200, function () {
               if (S.state === "starting") go("account", "default");
             });
           },

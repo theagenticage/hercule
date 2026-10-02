@@ -2602,15 +2602,16 @@
         </div>
 
         <h3 class="bk-group"><i data-i="laptop" data-size="18"></i>This Mac or another machine <small>the welcome decides what this Mac runs</small></h3>
-        <div class="bk-grid bk-grid--3">
+        <div class="bk-grid bk-grid--2">
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=starting" data-caption="Starting Hercule" data-note="Open the office installs Hercule's background service on this Mac and waits for it to answer. The lights come on with it."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote" data-caption="Hercule runs on another machine" data-note="One address field. A plain address signs in to a Hercule that is set up; a setup address runs the four steps there."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote-set-up" data-caption="Set up there already" data-note="The room is build-box-1's. This Mac runs nothing; it only opens the office."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=runner" data-caption="This Mac is a runner" data-note="Its runner already works for another machine, so the app starts no second Hercule here and offers to connect to that machine."></figure>
         </div>
 
         <h3 class="bk-group"><i data-i="question" data-size="18"></i>When something is off <small>every state is in the prototype's state menu</small></h3>
         <div class="bk-grid bk-grid--3">
-          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=start-failed" data-caption="Hercule didn't start" data-note="Nothing answered within 30 seconds. The room stays dark, the log's path is one Copy away, and Try again runs the start again."></figure>
+          <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=start-failed" data-caption="Hercule didn't start" data-note="Hercule never answered. The room stays dark, Show in Finder opens its logs, and Try again runs the start again. When the start itself fails, its error shows here instead."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=welcome&amp;state=remote-not-set-up" data-caption="Not set up there yet" data-note="A plain address of a Hercule without an account. The field says which command prints the setup address."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=harness&amp;state=none-found" data-caption="No coding tool on this Mac" data-note="Install one from here, or do it later."></figure>
           <figure data-frame="desktop" data-src="desktop/first-run.html?variant=b&amp;step=github&amp;state=refused" data-caption="GitHub refused the token" data-note="GitHub's own reason, and what to do about it."></figure>
@@ -2627,6 +2628,7 @@
             <tr><td>Open the office, the default</td><td>Runs <code>hercule service install</code>, waits for Hercule to answer, then reads the setup address from the Hercule Home.</td><td>Hercule and its local runner, from login</td></tr>
             <tr><td>Connect to it, with a plain address</td><td>Checks Hercule there. If it is set up, the app keeps the address and you sign in.</td><td>Only the app</td></tr>
             <tr><td>Connect to it, with a setup address</td><td>Checks Hercule there, keeps the address, and runs the four steps on that machine.</td><td>Only the app</td></tr>
+            <tr><td>Open the office, on a runner</td><td>Finds the runner's service and starts nothing. It offers Connect to it instead.</td><td>The runner, as before</td></tr>
             <tr><td>Add machine, in Fleet</td><td>Not the desktop app: <code>hercule runner join</code> on the new machine makes it a runner of an existing Hercule.</td><td>A runner</td></tr>
           </tbody>
         </table>
@@ -2653,7 +2655,7 @@
             <tr><th style="width: 300px">When</th><th style="width: 380px">What moves</th><th>How</th></tr>
           </thead>
           <tbody>
-            <tr><td>You open the office</td><td>One spinner in the button, "Starting Hercule…"</td><td>Only until Hercule answers, 30 seconds at most</td></tr>
+            <tr><td>You open the office</td><td>One spinner in the button, "Starting Hercule…"</td><td>Only until Hercule answers: 3 seconds at least, about a minute and a half at most</td></tr>
             <tr><td>Hercule answers</td><td>The room's lights come on</td><td>A veil's opacity, <code>--dur-3</code></td></tr>
             <tr><td>A step finishes, in B</td><td>The camera moves to the next step's shot</td><td>One layer's transform, <code>--dur-3</code></td></tr>
             <tr><td>Then</td><td>The new pieces settle from 14 px above, characters with a spring</td><td>Transform and opacity, <code>--dur-3</code>, after the camera stops</td></tr>
@@ -2671,7 +2673,7 @@
           <tbody>
             <tr><td><b>Scope</b></td><td>A and B draw a still subset of the office in v1: the room, one wing, free desks, your desk, the lobby chair, Triage's desk and tube, a plaque. Spec 17 keeps the office post-v1. C draws none of it.</td><td>The variant decides it</td></tr>
             <tr><td>Bundle bytes</td><td>The first run and its room load only on a first run, as a chunk of their own.</td><td>The bundle budget check lists the chunk on its own line</td></tr>
-            <tr><td>Processes</td><td>None that stays. Main runs your login shell once to read your <code>PATH</code>, then <code>hercule service install</code>; launchd runs Hercule, not the app. Main reads two files in the Hercule Home, and runs <code>git</code> once on the folder you pick.</td><td>The process count during and after the run: the app's own count is back to its baseline once the command exits</td></tr>
+            <tr><td>Processes</td><td>None that stays. Main runs <code>hercule service status</code>, then your login shell once to read your <code>PATH</code>, then <code>hercule service install</code>; launchd runs Hercule, not the app. Main reads two files in the Hercule Home, and runs <code>git</code> once on the folder you pick.</td><td>The process count during and after the run: the app's own count is back to its baseline once the command exits</td></tr>
             <tr><td>Work while idle</td><td>None. No animation repeats while a step waits for you.</td><td>The perf script's idle CPU, on each step</td></tr>
             <tr><td>After the first run</td><td>Nothing: the chunk is never loaded again, and no timer is left.</td><td>A warm launch after the first run matches the baseline</td></tr>
           </tbody>
