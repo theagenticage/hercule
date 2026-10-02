@@ -3,7 +3,7 @@
  * the header, then a column in the middle of the pane with a face and a
  * question, the Draft Thread's composer, and the start cards.
  */
-import { useRef, useState, useSyncExternalStore, type JSX } from "react";
+import { lazy, Suspense, useRef, useState, useSyncExternalStore, type JSX } from "react";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
@@ -30,7 +30,6 @@ import { buildDraftKey } from "../../app/pending-submissions";
 import { threadsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
-import { ProviderLoginDialog } from "../provider-login";
 import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
 import { useSendOnMenuCommand } from "../thread/send-key";
 import { DraftComposer } from "./draft-composer";
@@ -38,6 +37,12 @@ import { DraftHeader } from "./draft-header";
 import { StartCards } from "./start-cards";
 import "../thread/composer.css";
 import "./new-thread.css";
+
+// The login dialog is loaded the first time Log in opens it, so its code is
+// not part of the first screen's scripts (spec 17 §Performance).
+const ProviderLoginDialog = lazy(() =>
+  import("../provider-login").then((module) => ({ default: module.ProviderLoginDialog })),
+);
 
 /** What one start carried: the request, and the draft it was built from. */
 interface SentDraft {
@@ -256,13 +261,17 @@ export function DraftScreen({
         </div>
       </div>
       {login === null ? null : (
-        <ProviderLoginDialog
-          target={login}
-          onClose={() => {
-            setLogin(null);
-            fieldRef.current?.focus();
-          }}
-        />
+        // Without its own boundary, the dialog's load would suspend the draft
+        // behind it.
+        <Suspense fallback={null}>
+          <ProviderLoginDialog
+            target={login}
+            onClose={() => {
+              setLogin(null);
+              fieldRef.current?.focus();
+            }}
+          />
+        </Suspense>
       )}
     </>
   );

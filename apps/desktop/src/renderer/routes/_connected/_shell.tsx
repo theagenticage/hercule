@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type JSX } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { listWaitingThreads } from "@hercule/client-core";
@@ -6,10 +6,15 @@ import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
 import { ensureShellData, threadsQuery } from "../../app/queries";
-import { NewProjectDialog } from "../../screens/new-project";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { ProjectPicker } from "../../screens/new-thread/project-picker";
 import { Shell } from "../../shell";
+
+// The New project dialog is loaded the first time it opens, so its code is
+// not part of the first screen's scripts (spec 17 §Performance).
+const NewProjectDialog = lazy(() =>
+  import("../../screens/new-project").then((module) => ({ default: module.NewProjectDialog })),
+);
 
 /**
  * The shell's layout route. Every screen inside the app is a child of this
@@ -127,12 +132,16 @@ function ShellLayout(): JSX.Element {
         />
       ) : null}
       {dialog === "new-project" ? (
-        <NewProjectDialog
-          onAdded={openDraft}
-          onClose={() => {
-            setDialog(null);
-          }}
-        />
+        // Without its own boundary, the dialog's load would suspend the shell
+        // behind it.
+        <Suspense fallback={null}>
+          <NewProjectDialog
+            onAdded={openDraft}
+            onClose={() => {
+              setDialog(null);
+            }}
+          />
+        </Suspense>
       ) : null}
     </>
   );
