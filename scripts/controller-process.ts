@@ -276,7 +276,7 @@ export async function runCli(
 }
 
 /** The user every suite sets up as, and the password it logs in with. */
-export const USERNAME = "rogier";
+export const USERNAME = "ada";
 export const PASSWORD = "correct horse battery staple";
 
 /**
