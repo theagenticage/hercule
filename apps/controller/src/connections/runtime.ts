@@ -188,8 +188,8 @@ const make = Effect.gen(function* () {
         refreshToken: tokens.refreshToken,
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
-        Effect.catchTag("TokenRefused", (error) => needsReauth(row.id, error.message)),
-        Effect.catchTag("TokenUnreachable", (error) =>
+        Effect.catchTag("ProviderRefused", (error) => needsReauth(row.id, error.message)),
+        Effect.catchTag("ProviderUnreachable", (error) =>
           Effect.fail(new ConnectionUnavailable({ message: error.message })),
         ),
       );

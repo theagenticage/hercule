@@ -177,7 +177,7 @@ const hasCredentialsStep = (contribution: Contribution): boolean =>
 
 /** Returns the operation that starts a type's token flow, for a refusal to point the user to. */
 const nameTokenFlowStart = (contribution: Contribution): string =>
-  contribution.device === undefined ? "connection.startOAuth" : "connection.startDevice";
+  contribution.device === undefined ? "connection.startOAuth" : "connection.startDeviceFlow";
 
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
 const decodeDeviceStart = Schema.decodeUnknownEffect(ConnectionDeviceStartInput);
@@ -858,14 +858,14 @@ const make = Effect.gen(function* () {
      * start a flow or cannot be reached. The provider is called before the
      * transaction, never inside it.
      */
-    startDevice: (
+    startDeviceFlow: (
       input: ConnectionDeviceStartInput,
     ): Effect.Effect<
       ConnectionDeviceStart,
       Unauthenticated | Forbidden | Validation | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
-        yield* requireGrant("connection.startDevice");
+        yield* requireGrant("connection.startDeviceFlow");
         const decoded = yield* Effect.mapError(
           decodeDeviceStart(input),
           createDecodeValidationError,
@@ -928,11 +928,11 @@ const make = Effect.gen(function* () {
      *    poll deleted it first, this one answers `expired`.
      * 4. The type checks the account, and the connection is written.
      */
-    pollDevice: (
+    pollDeviceFlow: (
       input: ConnectionDevicePollInput,
     ): Effect.Effect<ConnectionDevicePoll, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("connection.pollDevice");
+        yield* requireGrant("connection.pollDeviceFlow");
         const { setupId } = yield* Effect.mapError(
           decodeDevicePoll(input),
           createDecodeValidationError,

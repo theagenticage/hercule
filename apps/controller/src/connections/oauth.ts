@@ -134,7 +134,7 @@ export interface OAuthClient {
  * A provider may send an error with status 200 rather than 400, as GitHub
  * does. The body decides, not the status.
  */
-export class TokenRefused extends Schema.TaggedError<TokenRefused>()("TokenRefused", {
+export class ProviderRefused extends Schema.TaggedError<ProviderRefused>()("ProviderRefused", {
   message: Schema.String,
   code: Schema.optionalKey(Schema.String),
   interval: Schema.optionalKey(Schema.Number),
@@ -146,9 +146,12 @@ export class TokenRefused extends Schema.TaggedError<TokenRefused>()("TokenRefus
  * nothing about the credential: a DNS failure or a dropped network is not
  * something the user can fix by reconnecting.
  */
-export class TokenUnreachable extends Schema.TaggedError<TokenUnreachable>()("TokenUnreachable", {
-  message: Schema.String,
-}) {}
+export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>()(
+  "ProviderUnreachable",
+  {
+    message: Schema.String,
+  },
+) {}
 
 /** The standard token response. Any other fields the provider adds are ignored. */
 const TokenResponse = Schema.Struct({
@@ -178,8 +181,8 @@ const DeviceCodeResponse = Schema.Struct({
 
 const decodeDeviceCodeResponse = Schema.decodeUnknownEffect(DeviceCodeResponse);
 
-const failTokenUnreachable = (message: string): Effect.Effect<never, TokenUnreachable> =>
-  Effect.fail(new TokenUnreachable({ message }));
+const failProviderUnreachable = (message: string): Effect.Effect<never, ProviderUnreachable> =>
+  Effect.fail(new ProviderUnreachable({ message }));
 
 /** The redirect URI the provider will send the browser back to, for this origin. */
 export const buildRedirectUri = (origin: string): string => `${origin}${CALLBACK_PATH}`;
@@ -259,9 +262,9 @@ export const oauthClients: Effect.Effect<
  * Sends a form-encoded request to one of the provider's OAuth endpoints, and
  * returns the response body when it is not an OAuth error.
  *
- * - Fails with `TokenRefused` when the body is an OAuth error, whatever the
+ * - Fails with `ProviderRefused` when the body is an OAuth error, whatever the
  *   status, or when the status is any other client error.
- * - Fails with `TokenUnreachable` when the endpoint cannot be reached, answers
+ * - Fails with `ProviderUnreachable` when the endpoint cannot be reached, answers
  *   with a server error, or answers with a body that is not JSON.
  *
  * `endpoint` names the endpoint in the error messages.
@@ -270,7 +273,7 @@ const postForm = (
   url: string,
   form: Record<string, string>,
   endpoint: string,
-): Effect.Effect<unknown, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
+): Effect.Effect<unknown, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const response = yield* HttpClient.post(url, {
       body: HttpBody.urlParams(form),
@@ -278,17 +281,17 @@ const postForm = (
     });
     const status = String(response.status);
     if (response.status >= 500) {
-      return yield* failTokenUnreachable(`the ${endpoint} returned HTTP ${status}`);
+      return yield* failProviderUnreachable(`the ${endpoint} returned HTTP ${status}`);
     }
     const body = yield* Effect.catch(response.json, () =>
       response.status === 200
-        ? failTokenUnreachable(`the ${endpoint} returned a response that is not JSON`)
+        ? failProviderUnreachable(`the ${endpoint} returned a response that is not JSON`)
         : Effect.succeed(undefined),
     );
     const refusal = decodeErrorResponse(body);
     if (Option.isSome(refusal)) {
       return yield* Effect.fail(
-        new TokenRefused({
+        new ProviderRefused({
           message: `the ${endpoint} refused the request: ${refusal.value.error}`,
           code: refusal.value.error,
           ...(refusal.value.interval === undefined ? {} : { interval: refusal.value.interval }),
@@ -297,13 +300,13 @@ const postForm = (
     }
     if (response.status !== 200) {
       return yield* Effect.fail(
-        new TokenRefused({ message: `the ${endpoint} returned HTTP ${status}` }),
+        new ProviderRefused({ message: `the ${endpoint} returned HTTP ${status}` }),
       );
     }
     return body;
   }).pipe(
     Effect.catchTag("HttpClientError", (error) =>
-      failTokenUnreachable(`the ${endpoint} could not be reached: ${error.message}`),
+      failProviderUnreachable(`the ${endpoint} could not be reached: ${error.message}`),
     ),
   );
 
@@ -311,7 +314,7 @@ const postForm = (
  * Sends a form-encoded request to the token endpoint, as every grant type
  * does, and returns the token set.
  *
- * Fails as `postForm` does, and with `TokenUnreachable` when the response is
+ * Fails as `postForm` does, and with `ProviderUnreachable` when the response is
  * neither tokens nor an error. `expires_in` is converted to a timestamp here,
  * because it counts from the moment of the response. A token without
  * `expires_in`, such as a GitHub OAuth App token, never expires, and is stored
@@ -320,11 +323,11 @@ const postForm = (
 const requestTokens = (
   tokenUrl: string,
   form: Record<string, string>,
-): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
+): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const body = yield* decodeTokenResponse(yield* postForm(tokenUrl, form, "token endpoint")).pipe(
       Effect.catchTag("SchemaError", () =>
-        failTokenUnreachable("the token endpoint's response has no access token"),
+        failProviderUnreachable("the token endpoint's response has no access token"),
       ),
     );
     const millis = yield* Clock.currentTimeMillis;
@@ -344,7 +347,7 @@ export const exchangeCode = (request: {
   readonly code: string;
   readonly redirectUri: string;
   readonly codeVerifier: string;
-}): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
+}): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   requestTokens(request.tokenUrl, {
     grant_type: "authorization_code",
     code: request.code,
@@ -362,7 +365,7 @@ export const refreshAccess = (request: {
   readonly tokenUrl: string;
   readonly client: OAuthClient;
   readonly refreshToken: string;
-}): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
+}): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   requestTokens(request.tokenUrl, {
     grant_type: "refresh_token",
     refresh_token: request.refreshToken,
@@ -401,13 +404,13 @@ export interface DeviceCode {
 
 /**
  * Asks the provider's device authorization endpoint for a device code. Fails
- * with `TokenRefused` when the provider refuses, for example because device
- * flow is disabled on its OAuth app, and with `TokenUnreachable` when it
+ * with `ProviderRefused` when the provider refuses, for example because device
+ * flow is disabled on its OAuth app, and with `ProviderUnreachable` when it
  * cannot be reached or its answer has no device code.
  */
 export const requestDeviceCode = (
   device: DeviceDeclaration,
-): Effect.Effect<DeviceCode, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
+): Effect.Effect<DeviceCode, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const answer = yield* postForm(
       device.deviceCodeUrl,
@@ -416,7 +419,7 @@ export const requestDeviceCode = (
     );
     const body = yield* decodeDeviceCodeResponse(answer).pipe(
       Effect.catchTag("SchemaError", () =>
-        failTokenUnreachable("the device authorization endpoint's response has no device code"),
+        failProviderUnreachable("the device authorization endpoint's response has no device code"),
       ),
     );
     return {
@@ -449,7 +452,7 @@ export type DeviceExchange =
     };
 
 /** Converts the provider's refusal of a device code exchange into the exchange's result. */
-const decideDeviceRefusal = (refusal: TokenRefused): DeviceExchange => {
+const decideDeviceRefusal = (refusal: ProviderRefused): DeviceExchange => {
   switch (refusal.code) {
     case "authorization_pending":
       return { status: "pending" };
@@ -492,8 +495,8 @@ export const exchangeDeviceCode = (
     grant_type: DEVICE_CODE_GRANT,
   }).pipe(
     Effect.map((tokens): DeviceExchange => ({ status: "done", tokens })),
-    Effect.catchTag("TokenRefused", (refusal) => Effect.succeed(decideDeviceRefusal(refusal))),
-    Effect.catchTag("TokenUnreachable", (error) =>
+    Effect.catchTag("ProviderRefused", (refusal) => Effect.succeed(decideDeviceRefusal(refusal))),
+    Effect.catchTag("ProviderUnreachable", (error) =>
       Effect.succeed<DeviceExchange>({ status: "unreachable", message: error.message }),
     ),
   );

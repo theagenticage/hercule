@@ -278,7 +278,7 @@ export const connection = HttpApiGroup.make("connection")
     }),
     // Beside the redirect flow's start, for the same reason: a device flow is
     // a setup, not a connection, until the user approves at the provider.
-    HttpApiEndpoint.post("startDevice", "/oauth/device/start", {
+    HttpApiEndpoint.post("startDeviceFlow", "/oauth/device/start", {
       payload: ConnectionDeviceStartInput,
       success: ConnectionDeviceStart,
       // `invalid_state`: the provider refused to start a device flow, or could
@@ -287,7 +287,7 @@ export const connection = HttpApiGroup.make("connection")
     }),
     // Every way the flow can end is a status in the success body rather than
     // an error, because each is an ordinary answer the screen shows.
-    HttpApiEndpoint.post("pollDevice", "/oauth/device/poll", {
+    HttpApiEndpoint.post("pollDeviceFlow", "/oauth/device/poll", {
       payload: ConnectionDevicePollInput,
       success: ConnectionDevicePoll,
       error: [Unauthenticated, Forbidden, Validation, Internal],

@@ -68,7 +68,7 @@ describe("the grant check", () => {
   it("refuses to start a device flow", async () => {
     const failure = await Effect.runPromise(
       Effect.flatMap(ConnectionService, (connection) =>
-        Effect.flip(connection.startDevice({ type: "no/such-type" })),
+        Effect.flip(connection.startDeviceFlow({ type: "no/such-type" })),
       ).pipe(Effect.provide(buildStack())),
     );
 
@@ -80,7 +80,7 @@ describe("the grant check", () => {
   it("refuses to poll a device flow", async () => {
     const failure = await Effect.runPromise(
       Effect.flatMap(ConnectionService, (connection) =>
-        Effect.flip(connection.pollDevice({ setupId: "no-such-setup" })),
+        Effect.flip(connection.pollDeviceFlow({ setupId: "no-such-setup" })),
       ).pipe(Effect.provide(buildStack())),
     );
 

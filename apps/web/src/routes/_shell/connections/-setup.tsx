@@ -106,9 +106,9 @@ export function ConnectionSetup({
   // The device flow finishes in its own panel, which polls until the user
   // approves the code, so starting it only fetches the code. A reconnect sends
   // no label or topic, because the connection keeps its own.
-  const startDevice = useMutation({
+  const startDeviceFlow = useMutation({
     mutationFn: () =>
-      client.connection.startDevice({
+      client.connection.startDeviceFlow({
         payload: {
           type: type.type,
           ...(connection === undefined
@@ -121,7 +121,7 @@ export function ConnectionSetup({
   // An error about one credential field is shown under that field; any other
   // error is shown at the bottom of the form.
   const issues = readConfigIssues(submit.error, fields, "credentials");
-  const failure = startDevice.error ?? (issues.rest ? submit.error : null);
+  const failure = startDeviceFlow.error ?? (issues.rest ? submit.error : null);
 
   // The same column width as the rows and the offers, so the form does not
   // stretch across the whole content width when nothing else does.
@@ -146,26 +146,26 @@ export function ConnectionSetup({
 
   // The panel replaces the form from the moment a code is asked for, and stays
   // while a new code is asked for after the last one ran out.
-  if (flow === "device" && (startDevice.isPending || startDevice.data !== undefined)) {
+  if (flow === "device" && (startDeviceFlow.isPending || startDeviceFlow.data !== undefined)) {
     return (
       <div className={`flex flex-col gap-3 ${column}`}>
         <div className="-mb-2.5">
           <LaneLabel>{heading}</LaneLabel>
         </div>
-        {startDevice.data === undefined ? (
+        {startDeviceFlow.data === undefined ? (
           <p className="text-row text-muted" role="status">
             Asking {type.displayName} for a code.
           </p>
         ) : (
           <DeviceSignIn
             // A new code is a new flow, so its panel starts with no polls.
-            key={startDevice.data.setupId}
+            key={startDeviceFlow.data.setupId}
             client={client}
             providerName={type.displayName}
-            start={startDevice.data}
-            restarting={startDevice.isPending}
+            start={startDeviceFlow.data}
+            restarting={startDeviceFlow.isPending}
             onRestart={() => {
-              startDevice.mutate();
+              startDeviceFlow.mutate();
             }}
             onCancel={onDone}
             onDone={onDone}
@@ -178,14 +178,14 @@ export function ConnectionSetup({
   const idPrefix = connection?.id ?? type.type;
   const send = (event: FormEvent): void => {
     event.preventDefault();
-    if (flow === "device") startDevice.mutate();
+    if (flow === "device") startDeviceFlow.mutate();
     else submit.mutate();
   };
 
   /** Switches the form to another flow, dropping the last attempt's error. */
   const switchFlow = (next: SetupFlow): void => {
     submit.reset();
-    startDevice.reset();
+    startDeviceFlow.reset();
     setFlow(next);
   };
 
@@ -258,7 +258,11 @@ export function ConnectionSetup({
         <Button type="button" variant="form" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" variant="form" disabled={submit.isPending || startDevice.isPending}>
+        <Button
+          type="submit"
+          variant="form"
+          disabled={submit.isPending || startDeviceFlow.isPending}
+        >
           {flow === "device" ? `Sign in with ${type.displayName}` : "Connect"}
         </Button>
       </div>

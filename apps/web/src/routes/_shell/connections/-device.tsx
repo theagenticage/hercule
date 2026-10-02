@@ -43,7 +43,7 @@ export function DeviceSignIn({
   const queryClient = useQueryClient();
 
   const poll = useMutation({
-    mutationFn: () => client.connection.pollDevice({ payload: { setupId: start.setupId } }),
+    mutationFn: () => client.connection.pollDeviceFlow({ payload: { setupId: start.setupId } }),
     onSuccess: async (outcome) => {
       if (outcome.status !== "done") return;
       await queryClient.invalidateQueries({ queryKey: queryKeys.connections() });

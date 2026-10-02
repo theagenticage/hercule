@@ -200,8 +200,12 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
         withApiErrors(connections.setCredentials({ id: params.id, ...payload })),
       )
       .handle("startOAuth", ({ payload }) => withApiErrors(connections.startOAuth(payload)))
-      .handle("startDevice", ({ payload }) => withApiErrors(connections.startDevice(payload)))
-      .handle("pollDevice", ({ payload }) => withApiErrors(connections.pollDevice(payload)));
+      .handle("startDeviceFlow", ({ payload }) =>
+        withApiErrors(connections.startDeviceFlow(payload)),
+      )
+      .handle("pollDeviceFlow", ({ payload }) =>
+        withApiErrors(connections.pollDeviceFlow(payload)),
+      );
   }),
 );
 

@@ -1840,7 +1840,7 @@ export const CLI = {
   },
   "connection.create": {
     command: "connection create",
-    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` or `hercule connection start-device` instead.",
+    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` or `hercule connection start-device-flow` instead.",
     examples: [
       {
         args: ["--type", "github/github", "--label", "work", "--topic", "engineering"],
@@ -1964,9 +1964,9 @@ export const CLI = {
         "the plugin that owns this type has no OAuth client credentials; set them in settings first",
     },
   },
-  "connection.startDevice": {
-    command: "connection start-device",
-    help: "Starts a device flow and returns a code to enter at the provider. Enter it at the page the reply names, such as github.com/login/device. The connection exists only once you approve there and `hercule connection poll-device` sees it. Give --connection to reconnect an existing account instead of creating a second one.",
+  "connection.startDeviceFlow": {
+    command: "connection start-device-flow",
+    help: "Starts a device flow and returns a code to enter at the provider. Enter it at the page the reply names, such as github.com/login/device. The connection exists only once you approve there and `hercule connection poll-device-flow` sees it. Give --connection to reconnect an existing account instead of creating a second one.",
     examples: [
       { args: ["--type", "github/github", "--label", "personal", "--topic", "github"] },
       { args: ["--type", "github/github", "--connection", "1f3a9c2e"] },
@@ -1989,12 +1989,12 @@ export const CLI = {
         "the provider refused to start a device flow, or could not be reached; the message says which",
     },
   },
-  "connection.pollDevice": {
-    command: "connection poll-device",
-    help: "Asks the provider once whether you have approved a device flow. Start one with `hercule connection start-device`. Prints the connection when it is done; otherwise run it again after the interval it prints. It never asks the provider more often than the provider allows.",
+  "connection.pollDeviceFlow": {
+    command: "connection poll-device-flow",
+    help: "Asks the provider once whether you have approved a device flow. Start one with `hercule connection start-device-flow`. Prints the connection when it is done; otherwise run it again after the interval it prints. It never asks the provider more often than the provider allows.",
     examples: [{ args: ["--setup", "q2Zt8sKx"] }],
     fields: {
-      setupId: { flag: "setup", help: "The setupId that start-device printed." },
+      setupId: { flag: "setup", help: "The setupId that start-device-flow printed." },
     },
   },
 
@@ -2879,7 +2879,7 @@ export const NOUNS = {
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",
-    flow: "hercule connection create for a pasted credential, hercule connection start-oauth for a browser flow, or hercule connection start-device and then hercule connection poll-device for a code entered at the provider, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
+    flow: "hercule connection create for a pasted credential, hercule connection start-oauth for a browser flow, or hercule connection start-device-flow and then hercule connection poll-device-flow for a code entered at the provider, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
   },
   agent: {
     summary: "Agents: the named configurations sessions are spawned from, to work unattended.",

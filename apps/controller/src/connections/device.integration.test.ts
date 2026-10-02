@@ -230,7 +230,7 @@ const withDevice = async (
   }
 };
 
-const startDevice = (
+const startDeviceFlow = (
   base: string,
   token: string,
   body: Record<string, unknown> = {},
@@ -248,13 +248,13 @@ const startDeviceOrFail = async (
   token: string,
   body: Record<string, unknown> = {},
 ): Promise<DeviceStart> => {
-  const response = await startDevice(base, token, body);
+  const response = await startDeviceFlow(base, token, body);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as DeviceStart;
 };
 
 /** Polls a device flow and returns the poll's response body. */
-const pollDevice = async (
+const pollDeviceFlow = async (
   base: string,
   token: string,
   setupId: string,
@@ -320,7 +320,7 @@ describe("POST /oauth/device/start", () => {
 
   it("rejects a type that has no device flow", async () => {
     await withDevice(async ({ base }, _registry, token, provider) => {
-      const response = await startDevice(base, token, { type: "pasted/pasted-type" });
+      const response = await startDeviceFlow(base, token, { type: "pasted/pasted-type" });
 
       expect(response.status).toBe(400);
       expect(provider.codeRequests).toEqual([]);
@@ -331,7 +331,7 @@ describe("POST /oauth/device/start", () => {
     await withDevice(async ({ base }, _registry, token, provider) => {
       provider.answers.code = () => buildJsonResponse({ error: "device_flow_disabled" });
 
-      const response = await startDevice(base, token);
+      const response = await startDeviceFlow(base, token);
 
       expect(response.status).toBe(409);
       const { error } = (await response.json()) as { error: { code: string; message: string } };
@@ -344,7 +344,7 @@ describe("POST /oauth/device/start", () => {
     await withDevice(async ({ base }, _registry, token, provider) => {
       await provider.stop();
 
-      const response = await startDevice(base, token);
+      const response = await startDeviceFlow(base, token);
 
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
@@ -357,7 +357,10 @@ describe("POST /oauth/device/poll", () => {
     await withDevice(async ({ base }, _registry, token, provider) => {
       const { setupId } = await startDeviceOrFail(base, token);
 
-      expect(await pollDevice(base, token, setupId)).toEqual({ status: "pending", interval: 5 });
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "pending",
+        interval: 5,
+      });
       expect(provider.tokenRequests).toEqual([]);
     });
   });
@@ -367,7 +370,10 @@ describe("POST /oauth/device/poll", () => {
       const { setupId } = await startDeviceOrFail(base, token);
       await allowPoll(sql, setupId);
 
-      expect(await pollDevice(base, token, setupId)).toEqual({ status: "pending", interval: 5 });
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "pending",
+        interval: 5,
+      });
       expect(provider.tokenRequests).toEqual([
         {
           grant_type: "urn:ietf:params:oauth:grant-type:device_code",
@@ -376,7 +382,10 @@ describe("POST /oauth/device/poll", () => {
         },
       ]);
       // The claim pushed the next poll back by one interval.
-      expect(await pollDevice(base, token, setupId)).toEqual({ status: "pending", interval: 5 });
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "pending",
+        interval: 5,
+      });
       expect(provider.tokenRequests).toHaveLength(1);
     });
   });
@@ -387,10 +396,16 @@ describe("POST /oauth/device/poll", () => {
       await allowPoll(sql, setupId);
       provider.answers.token = () => buildJsonResponse({ error: "slow_down", interval: 10 });
 
-      expect(await pollDevice(base, token, setupId)).toEqual({ status: "slow-down", interval: 10 });
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "slow-down",
+        interval: 10,
+      });
       // The next poll comes too early for the new interval, and is answered
       // from the stored one without asking the provider.
-      expect(await pollDevice(base, token, setupId)).toEqual({ status: "pending", interval: 10 });
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "pending",
+        interval: 10,
+      });
       expect(provider.tokenRequests).toHaveLength(1);
     });
   });
@@ -401,7 +416,10 @@ describe("POST /oauth/device/poll", () => {
       await allowPoll(sql, setupId);
       provider.answers.token = () => buildJsonResponse({ error: "slow_down" });
 
-      expect(await pollDevice(base, token, setupId)).toEqual({ status: "slow-down", interval: 10 });
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "slow-down",
+        interval: 10,
+      });
     });
   });
 
@@ -417,14 +435,14 @@ describe("POST /oauth/device/poll", () => {
         await allowPoll(sql, setupId);
         provider.answers.token = () => buildJsonResponse({ error: providerError });
 
-        const answer = await pollDevice(base, token, setupId);
+        const answer = await pollDeviceFlow(base, token, setupId);
 
         expect(answer).toMatchObject({ status });
         expect(typeof answer["message"]).toBe("string");
         // The flow has ended, so polling again answers expired without asking
         // the provider.
         await allowPoll(sql, setupId);
-        expect(await pollDevice(base, token, setupId)).toMatchObject({ status: "expired" });
+        expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "expired" });
         expect(provider.tokenRequests).toHaveLength(1);
         expect(await listConnections(base, token)).toEqual([]);
       });
@@ -437,7 +455,7 @@ describe("POST /oauth/device/poll", () => {
       await allowPoll(sql, setupId);
       await provider.stop();
 
-      expect(await pollDevice(base, token, setupId)).toEqual({
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
         status: "unreachable",
         interval: 5,
       });
@@ -460,8 +478,10 @@ describe("POST /oauth/device/poll", () => {
         ),
       );
 
-      expect(await pollDevice(base, token, "no-such-setup")).toMatchObject({ status: "expired" });
-      expect(await pollDevice(base, token, setupId)).toMatchObject({ status: "expired" });
+      expect(await pollDeviceFlow(base, token, "no-such-setup")).toMatchObject({
+        status: "expired",
+      });
+      expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "expired" });
       expect(provider.tokenRequests).toEqual([]);
     });
   });
@@ -472,13 +492,13 @@ describe("POST /oauth/device/poll", () => {
       await allowPoll(sql, setupId);
       approve(provider, "nope-1");
 
-      expect(await pollDevice(base, token, setupId)).toEqual({
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
         status: "rejected",
         message: REJECTED,
       });
       expect(await listConnections(base, token)).toEqual([]);
       await allowPoll(sql, setupId);
-      expect(await pollDevice(base, token, setupId)).toMatchObject({ status: "expired" });
+      expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "expired" });
     });
   });
 
@@ -488,7 +508,7 @@ describe("POST /oauth/device/poll", () => {
       await allowPoll(sql, setupId);
       approve(provider);
 
-      const answer = await pollDevice(base, token, setupId);
+      const answer = await pollDeviceFlow(base, token, setupId);
 
       expect(answer).toMatchObject({
         status: "done",
@@ -531,7 +551,7 @@ describe("POST /oauth/device/poll", () => {
       const { setupId } = await startDeviceOrFail(base, token, { connectionId: before.id });
       await allowPoll(sql, setupId);
       approve(provider);
-      const answer = await pollDevice(base, token, setupId);
+      const answer = await pollDeviceFlow(base, token, setupId);
 
       expect(answer).toMatchObject({
         status: "done",
@@ -566,12 +586,12 @@ describe("POST /oauth/device/poll", () => {
       };
 
       await allowPoll(sql, setupId);
-      const first = pollDevice(base, token, setupId);
+      const first = pollDeviceFlow(base, token, setupId);
       await waitFor(() => provider.tokenRequests.length === 1);
       // The first claim pushed the next poll back, so the second poll could
       // not reach the provider without this.
       await allowPoll(sql, setupId);
-      const second = pollDevice(base, token, setupId);
+      const second = pollDeviceFlow(base, token, setupId);
       await waitFor(() => provider.tokenRequests.length === 2);
       release();
 

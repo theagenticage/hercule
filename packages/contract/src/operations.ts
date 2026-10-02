@@ -353,12 +353,12 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/oauth/start",
   },
-  "connection.startDevice": {
+  "connection.startDeviceFlow": {
     requires: "connection.manage",
     method: "POST",
     path: "/api/v1/oauth/device/start",
   },
-  "connection.pollDevice": {
+  "connection.pollDeviceFlow": {
     requires: "connection.manage",
     method: "POST",
     path: "/api/v1/oauth/device/poll",
