@@ -32,11 +32,21 @@ export function isWildcardHost(host: string): boolean {
 /**
  * Returns the origin a process on this machine uses to reach the controller,
  * such as `http://127.0.0.1:4937`. A wildcard bind host becomes loopback,
- * because nothing can open `http://0.0.0.0:4937`; an IPv6 literal is put in
- * brackets. `bind.host` is validated when the config is loaded, so here it is
- * only a host.
+ * because nothing can open `http://0.0.0.0:4937`.
+ *
+ * The origin is written the way `URL` writes it, so it compares equal to the
+ * origin a browser reports for the same address:
+ *
+ * - the host is lower-cased, so `LocalHost` becomes `localhost`;
+ * - an IPv4 shorthand is written out, so `127.1` becomes `127.0.0.1`;
+ * - an IPv6 literal is compressed and put in brackets, so
+ *   `0:0:0:0:0:0:0:1` becomes `[::1]`;
+ * - port 80, the default for `http`, is left out.
+ *
+ * `bind.host` is validated when the config is loaded, so it always parses here.
  */
 export function buildControllerOrigin(bindHost: string, bindPort: number): string {
-  const host = isWildcardHost(bindHost) ? "127.0.0.1" : bindHost;
-  return `http://${bracketIpv6(host)}:${bindPort}`;
+  const url = new URL(`http://${bracketIpv6(bindHost)}:${bindPort}`);
+  if (WILDCARD_HOSTNAMES.has(url.hostname)) url.hostname = "127.0.0.1";
+  return url.origin;
 }

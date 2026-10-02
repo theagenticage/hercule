@@ -34,4 +34,23 @@ describe("buildControllerOrigin", () => {
     expect(buildControllerOrigin("127.0.0.1", 4937)).toBe("http://127.0.0.1:4937");
     expect(buildControllerOrigin("hercule.local", 4937)).toBe("http://hercule.local:4937");
   });
+
+  it("returns the origin the way a browser writes it", () => {
+    expect(buildControllerOrigin("127.1", 4937)).toBe("http://127.0.0.1:4937");
+    expect(buildControllerOrigin("LocalHost", 4937)).toBe("http://localhost:4937");
+    expect(buildControllerOrigin("::1", 4937)).toBe("http://[::1]:4937");
+    expect(buildControllerOrigin("0:0:0:0:0:0:0:1", 4937)).toBe("http://[::1]:4937");
+  });
+
+  it("leaves out port 80, the default port for http", () => {
+    expect(buildControllerOrigin("127.0.0.1", 80)).toBe("http://127.0.0.1");
+    expect(buildControllerOrigin("0.0.0.0", 80)).toBe("http://127.0.0.1");
+  });
+
+  it("returns a value that is its own origin", () => {
+    for (const host of ["127.1", "LocalHost", "0:0:0:0:0:0:0:1", "::", "hercule.local"]) {
+      const origin = buildControllerOrigin(host, 4937);
+      expect(new URL(origin).origin).toBe(origin);
+    }
+  });
 });
