@@ -288,7 +288,7 @@ See the last section.
 5. **`apps/controller/src/index.ts`**: next to the perimeter warning (:156-157), `console.warn` once when the store is not the platform default. This follows "never silently substitute behaviour": a `HERCULE_MASTER_KEY_STORE=file` left in a shell profile shows up. Keep it one rule with no option.
 6. **In-process test callers** (the list in "Who picks the store"): replace `masterKeyBackend: "file"` with `env: { HERCULE_MASTER_KEY_STORE: "file" }`, or `-c master_key.store=file` in `argv`. `http/testing.ts:171` and `plugins/testing.ts:80` cover most of them.
 7. **`scripts/controller-process.ts`**
-   - In `startControllerOnPort`, set `HERCULE_MASTER_KEY_STORE: "file"` after `buildCleanEnv()` (:158-162), with a comment on why: tests never touch the developer's login keychain, and a crash leaves nothing behind but a temp dir.
+   - In `startControllerOnPort`, set `HERCULE_MASTER_KEY_STORE: "file"` beside `HERCULE_HOME`, after the `...env` spread (:158-162), so no caller's `env` can override it, with a comment on why: tests never touch the developer's login keychain, and a crash leaves nothing behind but a temp dir.
    - Delete `deleteMasterKeyItem` (:59-64).
 8. **Remove the `deleteMasterKeyItem` calls** in `e2e/harness.ts:142-145`, `apps/desktop/scripts/perf-fixture.ts:389-390` and `apps/desktop/scripts/packaged-app.ts:339-352`.
 9. **The `e2e/harness.ts:121-132` `Library` symlink**: see open question 5.
@@ -375,8 +375,11 @@ See the last section.
    *Recommended: yes to both.* The alternative is a hidden env var, which contradicts spec 15 §6 in a worse way.
 2. **Does first run write `master_key.store` into `config.toml`?**
    *Recommended: yes, like the other four keys.*
-   - Consequence: a scratch home first booted with the keychain records `keychain`, and later boots read it from the file.
-   - A macOS scratch home booted with `file` and later booted without the env var still reads `file` from its `config.toml`. That is correct.
+   - First run writes the platform **default**, not the resolved value: `writeDefaultConfigFile` writes `DEFAULTS` and never the `-c` or env overrides (`packages/home/src/config.ts:136-144`).
+   - So on macOS, a scratch home's `config.toml` reads `master_key.store = "keychain"` while the home actually uses `master.key`. This looks broken, but it is not; the docs and the new comment in `startControllerOnPort` should say so.
+   - The env var must therefore be set on every boot of a scratch home, not just the first. The harness does this, because every spawn and restart goes through `startControllerOnPort`. Ad hoc runs must set it each time (the drafted AGENTS.md sentence covers that).
+   - A boot that forgets it reads `keychain`, finds no key, sees secrets in the database and refuses to start with `MasterKeyError`. That is a guard, not a leak.
+   - Not recommended: writing resolved values on first run. That would change what `-c bind.port=...` means on a first boot for all four existing keys.
    - `apps/controller/src/config/index.test.ts:56-63` changes.
 3. **A startup warning when the store is not the platform default?**
    *Recommended: yes.* Print one `console.warn` line beside the perimeter warning, plus an info log of the store on every boot. It catches an env var left in a shell profile.
