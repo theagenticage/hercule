@@ -24,18 +24,28 @@ export type IconName =
   | "check"
   | "chevron-right"
   | "clock"
+  | "close"
   | "compose"
   | "editor"
+  | "external"
+  | "eye"
+  | "file"
   | "intake"
+  | "key"
   | "laptop"
+  | "list"
   | "mic"
   | "more"
+  | "pause"
   | "plus"
+  | "question"
   | "search"
   | "send"
+  | "server"
   | "shield"
   | "sidebar"
   | "sliders"
+  | "sparkle"
   | "stop"
   | "tasks"
   | "workspace";
@@ -71,26 +81,39 @@ const MARK_STATES: ReadonlyArray<MarkState> = [
 // Every icon, with each size other than 16 that the v1 desktop pages draw it
 // at. The sheet draws every icon at 16, and again at each of these sizes.
 const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
-  ["branch", [13]],
-  ["check", [14]],
+  ["branch", [13, 14]],
+  ["check", [12, 14]],
   ["chevron-right", [13]],
   ["clock", [14]],
+  ["close", [12]],
   ["compose", [14]],
   ["editor", []],
+  ["external", [12, 14]],
+  ["eye", [14]],
+  ["file", [12, 14]],
   ["intake", [13, 14]],
+  ["key", [14]],
   ["laptop", [13]],
+  ["list", [14]],
   ["mic", []],
   ["more", []],
+  ["pause", [12, 14]],
   ["plus", [14]],
-  ["search", []],
+  ["question", [14]],
+  ["search", [14]],
   ["send", []],
+  ["server", [14]],
   ["shield", [14]],
   ["sidebar", []],
   ["sliders", [14]],
+  ["sparkle", [14]],
   ["stop", [14]],
   ["tasks", [14]],
-  ["workspace", [13]],
+  ["workspace", [13, 14, 18, 20]],
 ];
+
+/** Every icon at each of its sizes other than 16, in one list the sheet splits into two rows. */
+const SIZED_ICONS = ICONS.flatMap(([icon, sizes]) => sizes.map((size) => buildIconCell(icon, size)));
 
 // Session ids as the controller makes them: UUIDv7 strings.
 const SEEDS = [
@@ -160,5 +183,6 @@ export const SHEET: ReadonlyArray<ReadonlyArray<Cell>> = [
     })),
     ...ICONS.map(([icon]) => buildIconCell(icon, 16)),
   ],
-  ICONS.flatMap(([icon, sizes]) => sizes.map((size) => buildIconCell(icon, size))),
+  SIZED_ICONS.slice(0, Math.ceil(SIZED_ICONS.length / 2)),
+  SIZED_ICONS.slice(Math.ceil(SIZED_ICONS.length / 2)),
 ];

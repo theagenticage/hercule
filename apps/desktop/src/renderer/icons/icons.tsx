@@ -88,6 +88,26 @@ export function ExternalIcon(props: IconProps): JSX.Element {
   );
 }
 
+/** Renders the eye icon: an open eye with its pupil. */
+export function EyeIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z" />
+      <circle cx="8" cy="8" r="1.9" />
+    </IconFrame>
+  );
+}
+
+/** Renders the file icon: a sheet with its corner folded. */
+export function FileIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M4 2.4h5l3 3v8.2H4z" />
+      <path d="M9 2.4v3h3" />
+    </IconFrame>
+  );
+}
+
 /** Renders the Intake icon: an inbox tray. */
 export function IntakeIcon(props: IconProps): JSX.Element {
   return (
@@ -114,6 +134,18 @@ export function LaptopIcon(props: IconProps): JSX.Element {
     <IconFrame {...props}>
       <rect x="3.4" y="3.4" width="9.2" height="6.6" rx="1.2" />
       <path d="M1.8 12.6h12.4" />
+    </IconFrame>
+  );
+}
+
+/** Renders the list icon: three lines, each after a filled dot. */
+export function ListIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M6 4.2h7.4M6 8h7.4M6 11.8h7.4" />
+      <circle cx="3" cy="4.2" r=".5" fill="currentColor" />
+      <circle cx="3" cy="8" r=".5" fill="currentColor" />
+      <circle cx="3" cy="11.8" r=".5" fill="currentColor" />
     </IconFrame>
   );
 }
@@ -225,6 +257,15 @@ export function SlidersIcon(props: IconProps): JSX.Element {
       <path d="M3 5h5.4M11.6 5H13M3 11h1.4M7.6 11H13" />
       <circle cx="10" cy="5" r="1.6" />
       <circle cx="6" cy="11" r="1.6" />
+    </IconFrame>
+  );
+}
+
+/** Renders the sparkle icon: a four-pointed star with curved sides. */
+export function SparkleIcon(props: IconProps): JSX.Element {
+  return (
+    <IconFrame {...props}>
+      <path d="M8 2.4c.5 2.9 2.7 5.1 5.6 5.6-2.9.5-5.1 2.7-5.6 5.6-.5-2.9-2.7-5.1-5.6-5.6 2.9-.5 5.1-2.7 5.6-5.6z" />
     </IconFrame>
   );
 }
