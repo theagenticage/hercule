@@ -8,7 +8,13 @@
  * plugin contribution, so the types come from the plugin list rather than from
  * an operation of their own.
  */
-import { GITHUB_CONNECTION_TYPE, type Connection, type PluginDetail } from "@hercule/contract";
+import {
+  GITHUB_CONNECTION_TYPE,
+  type Connection,
+  type ConnectionDevicePoll,
+  type ConnectionDeviceStart,
+  type PluginDetail,
+} from "@hercule/contract";
 import { readJsonObject } from "./json-shape";
 
 /**
@@ -44,6 +50,7 @@ export type SetupStep =
   | { readonly kind: "checklist"; readonly markdown: string }
   | { readonly kind: "credentials"; readonly fields: ReadonlyArray<CredentialField> }
   | { readonly kind: "oauth" }
+  | { readonly kind: "device" }
   | { readonly kind: "pairing" };
 
 /** A connection type as the screen offers it. */
@@ -95,19 +102,48 @@ export const listConnectionTypes = (
   );
 
 /**
- * Returns how a connection type is set up. A setup is a list of steps, and
- * only one of them decides how the credential is obtained. Every screen that
- * depends on the setup flow uses this function rather than scanning the steps
- * itself. `unknown` means the steps come from a newer host with a step kind
- * this build cannot render; the screen then says so rather than guessing.
+ * One way to obtain a connection's credential:
+ *
+ * - `device`: the user enters a code at the provider (a device flow).
+ * - `oauth`: the browser goes to the provider and comes back (a redirect flow).
+ * - `credentials`: the user pastes the secrets.
+ * - `pairing`: the user sends the bot a one-time code from a chat account.
  */
-export const decideSetupFlow = (
-  type: ConnectionType,
-): "oauth" | "credentials" | "pairing" | "unknown" => {
-  if (type.setup.some((step) => step.kind === "oauth")) return "oauth";
-  if (type.setup.some((step) => step.kind === "credentials")) return "credentials";
-  if (type.setup.some((step) => step.kind === "pairing")) return "pairing";
-  return "unknown";
+export type SetupFlow = "device" | "oauth" | "credentials" | "pairing";
+
+const SETUP_FLOWS: ReadonlyArray<string> = ["device", "oauth", "credentials", "pairing"];
+
+/**
+ * Returns every way the connection type can be set up, in the order its setup
+ * declares them. The first flow is the one the type prefers; a type with more
+ * than one lets the user pick. Every screen that depends on the setup flow
+ * uses this function rather than scanning the steps itself.
+ *
+ * A step kind this build does not know is left out, because it comes from a
+ * newer host. An empty list therefore means that the screen cannot set the
+ * type up, and should say so rather than guess.
+ */
+export const listSetupFlows = (type: ConnectionType): ReadonlyArray<SetupFlow> => {
+  const kinds: ReadonlyArray<string> = type.setup.map((step) => step.kind);
+  // Two credential steps are one flow: the user pastes all their fields at once.
+  return [...new Set(kinds)].filter((kind): kind is SetupFlow => SETUP_FLOWS.includes(kind));
+};
+
+/**
+ * Returns how many milliseconds to wait before polling a device flow again,
+ * or `null` when the flow has ended and must not be polled again.
+ *
+ * `outcome` is the last poll's result, or `undefined` before the first poll,
+ * when the wait is the one the start returned. A `slow-down` outcome carries
+ * the new, longer wait, so every outcome that keeps the flow open is read the
+ * same way.
+ */
+export const computeNextPollDelay = (
+  start: ConnectionDeviceStart,
+  outcome: ConnectionDevicePoll | undefined,
+): number | null => {
+  if (outcome === undefined) return start.interval * 1000;
+  return "interval" in outcome ? outcome.interval * 1000 : null;
 };
 
 /** Returns the secret fields the type's setup asks the user to paste, in declared order. */

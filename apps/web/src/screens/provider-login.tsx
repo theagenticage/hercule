@@ -8,6 +8,7 @@ import {
   type SecretFieldOffer,
   readErrorMessage,
 } from "@hercule/client-core";
+import { DeviceCode } from "./device-code";
 
 /**
  * The Log in button for a provider, with the drawer that walks the user
@@ -178,17 +179,7 @@ export function ProviderLogin({
             </>
           ) : (
             <>
-              <div className="flex flex-col items-start gap-1.5">
-                <p className="font-mono text-title tracking-widest text-ink">{userCode}</p>
-                <Button
-                  className="-ml-2"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(userCode);
-                  }}
-                >
-                  Copy code
-                </Button>
-              </div>
+              <DeviceCode code={userCode} />
               <p className="text-fine text-muted">
                 If the code does not work, log in on the machine itself: forward its login port with{" "}
                 <code className="font-mono text-ink">ssh -L 1455:localhost:1455</code> and run{" "}

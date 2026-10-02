@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { PluginDetail } from "@hercule/contract";
+import type { Connection, PluginDetail } from "@hercule/contract";
 import {
   listConnectionTypes,
   listCredentialFields,
   buildRedirectUri,
-  decideSetupFlow,
+  listSetupFlows,
+  computeNextPollDelay,
   type ConnectionType,
 } from "./connections";
 
@@ -92,37 +93,74 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   setup,
 });
 
-describe("decideSetupFlow", () => {
+describe("listSetupFlows", () => {
   it("returns the step that decides how the credential is obtained", () => {
     expect(
-      decideSetupFlow(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
-    ).toBe("oauth");
+      listSetupFlows(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
+    ).toEqual(["oauth"]);
     expect(
-      decideSetupFlow(
+      listSetupFlows(
         withSetup([{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }]),
       ),
-    ).toBe("credentials");
-    expect(decideSetupFlow(withSetup([{ kind: "pairing" }]))).toBe("pairing");
+    ).toEqual(["credentials"]);
+    expect(listSetupFlows(withSetup([{ kind: "device" }]))).toEqual(["device"]);
+    expect(listSetupFlows(withSetup([{ kind: "pairing" }]))).toEqual(["pairing"]);
   });
 
-  it("prefers oauth when a type declares both oauth and credentials", () => {
+  it("returns every flow a type offers, in the order its setup declares them", () => {
+    const token = { kind: "credentials", fields: [{ name: "token", label: "Token" }] } as const;
+    expect(listSetupFlows(withSetup([{ kind: "device" }, token]))).toEqual([
+      "device",
+      "credentials",
+    ]);
+    expect(listSetupFlows(withSetup([token, { kind: "oauth" }]))).toEqual(["credentials", "oauth"]);
+  });
+
+  it("returns one credentials flow for several credential steps", () => {
     expect(
-      decideSetupFlow(
+      listSetupFlows(
         withSetup([
           { kind: "credentials", fields: [{ name: "token", label: "Token" }] },
-          { kind: "oauth" },
+          { kind: "credentials", fields: [{ name: "secret", label: "Secret" }] },
         ]),
       ),
-    ).toBe("oauth");
+    ).toEqual(["credentials"]);
   });
 
-  it("returns unknown when no setup step is one this build can render", () => {
-    expect(decideSetupFlow(withSetup([]))).toBe("unknown");
-    expect(
-      decideSetupFlow(
-        withSetup([{ kind: "device-code" } as unknown as ConnectionType["setup"][number]]),
-      ),
-    ).toBe("unknown");
+  it("leaves out a step kind this build does not know", () => {
+    const unknown = { kind: "carrier-pigeon" } as unknown as ConnectionType["setup"][number];
+    expect(listSetupFlows(withSetup([]))).toEqual([]);
+    expect(listSetupFlows(withSetup([unknown]))).toEqual([]);
+    expect(listSetupFlows(withSetup([unknown, { kind: "device" }]))).toEqual(["device"]);
+  });
+});
+
+describe("computeNextPollDelay", () => {
+  const start = {
+    setupId: "s-1",
+    userCode: "WDJB-MJHT",
+    verificationUri: "https://example.test/device",
+    expiresAt: "2026-10-02T12:15:00.000Z",
+    interval: 5,
+  };
+
+  it("waits the start's interval before the first poll", () => {
+    expect(computeNextPollDelay(start, undefined)).toBe(5000);
+  });
+
+  it("waits the interval the last poll returned while the flow is open", () => {
+    expect(computeNextPollDelay(start, { status: "pending", interval: 5 })).toBe(5000);
+    expect(computeNextPollDelay(start, { status: "slow-down", interval: 10 })).toBe(10_000);
+    expect(computeNextPollDelay(start, { status: "unreachable", interval: 5 })).toBe(5000);
+  });
+
+  it("returns null once the flow has ended", () => {
+    for (const status of ["expired", "denied", "rejected", "failed"] as const) {
+      expect(computeNextPollDelay(start, { status, message: "over" })).toBeNull();
+    }
+    // Only the status is read, so the connection can be any record.
+    const connection = {} as Connection;
+    expect(computeNextPollDelay(start, { status: "done", connection })).toBeNull();
   });
 });
 

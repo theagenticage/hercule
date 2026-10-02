@@ -6,22 +6,44 @@ import {
   listCredentialFields,
   queryKeys,
   buildRedirectUri,
-  decideSetupFlow,
+  listSetupFlows,
   type ConnectionType,
   type HerculeClient,
+  type SetupFlow,
   readErrorMessage,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { SaveStatus } from "../../../screens/save-status";
+import { DeviceSignIn } from "./-device";
 import { Naming } from "./-naming";
+
+/**
+ * Returns the label of the button that switches the setup to `flow`, for a
+ * type that offers more than one flow.
+ */
+const labelFlowSwitch = (flow: SetupFlow, type: ConnectionType): string => {
+  switch (flow) {
+    case "device":
+    case "oauth":
+      return `Sign in with ${type.displayName} instead`;
+    case "credentials":
+      return "Paste a token instead";
+    case "pairing":
+      return "Pair a chat account instead";
+  }
+};
 
 /**
  * The form that sets up a connection: either a new one, or a fresh credential
  * for an existing one (a reconnect). Both show the same steps because they ask
  * the user for the same thing; only the request they send differs.
  *
- * - A reconnect with a pasted credential asks only for the credential. The
- *   request sends only that; the label and topic are edited under Configure.
+ * A type can offer several flows. The form starts with the first one the type
+ * declares, and offers the others as quieter buttons under it.
+ *
+ * - A reconnect with a pasted credential or a device flow asks for no label
+ *   or topic. The request leaves them out, and the connection keeps its own;
+ *   they are edited under Configure.
  * - A reconnect through a provider redirect also asks for the label and
  *   topic, because it runs the whole setup again and sends them along.
  */
@@ -38,17 +60,18 @@ export function ConnectionSetup({
   readonly onDone: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const flow = decideSetupFlow(type);
+  const flows = listSetupFlows(type);
   const fields = listCredentialFields(type);
-  const redirects = flow === "oauth";
 
+  // Undefined when the type offers no flow this build can show.
+  const [flow, setFlow] = useState<SetupFlow | undefined>(flows[0]);
   const [pasted, setPasted] = useState<Readonly<Record<string, string>>>({});
   const [label, setLabel] = useState(connection?.label ?? "");
   const [topic, setTopic] = useState(connection?.labels[0] ?? "");
 
   const submit = useMutation({
     mutationFn: async () => {
-      if (redirects) {
+      if (flow === "oauth") {
         const { authorizationUrl } = await client.connection.startOAuth({
           payload: {
             type: type.type,
@@ -80,17 +103,32 @@ export function ConnectionSetup({
     },
   });
 
+  // The device flow finishes in its own panel, which polls until the user
+  // approves the code, so starting it only fetches the code. A reconnect sends
+  // no label or topic, because the connection keeps its own.
+  const startDevice = useMutation({
+    mutationFn: () =>
+      client.connection.startDevice({
+        payload: {
+          type: type.type,
+          ...(connection === undefined
+            ? { label, labels: [topic] }
+            : { connectionId: connection.id }),
+        },
+      }),
+  });
+
   // An error about one credential field is shown under that field; any other
   // error is shown at the bottom of the form.
   const issues = readConfigIssues(submit.error, fields, "credentials");
-  const failure = issues.rest ? submit.error : null;
+  const failure = startDevice.error ?? (issues.rest ? submit.error : null);
 
   // The same column width as the rows and the offers, so the form does not
   // stretch across the whole content width when nothing else does.
   const column = "max-w-[560px]";
   const heading = `${connection === undefined ? "Connect" : "Reconnect"} ${type.displayName}`;
 
-  if (!redirects && fields.length === 0) {
+  if (flow === undefined || flow === "pairing") {
     return (
       <div className={`flex flex-col items-start gap-1.5 text-row text-muted ${column}`}>
         <LaneLabel>{heading}</LaneLabel>
@@ -106,10 +144,49 @@ export function ConnectionSetup({
     );
   }
 
+  // The panel replaces the form from the moment a code is asked for, and stays
+  // while a new code is asked for after the last one ran out.
+  if (flow === "device" && (startDevice.isPending || startDevice.data !== undefined)) {
+    return (
+      <div className={`flex flex-col gap-3 ${column}`}>
+        <div className="-mb-2.5">
+          <LaneLabel>{heading}</LaneLabel>
+        </div>
+        {startDevice.data === undefined ? (
+          <p className="text-row text-muted" role="status">
+            Asking {type.displayName} for a code.
+          </p>
+        ) : (
+          <DeviceSignIn
+            // A new code is a new flow, so its panel starts with no polls.
+            key={startDevice.data.setupId}
+            client={client}
+            providerName={type.displayName}
+            start={startDevice.data}
+            restarting={startDevice.isPending}
+            onRestart={() => {
+              startDevice.mutate();
+            }}
+            onCancel={onDone}
+            onDone={onDone}
+          />
+        )}
+      </div>
+    );
+  }
+
   const idPrefix = connection?.id ?? type.type;
   const send = (event: FormEvent): void => {
     event.preventDefault();
-    submit.mutate();
+    if (flow === "device") startDevice.mutate();
+    else submit.mutate();
+  };
+
+  /** Switches the form to another flow, dropping the last attempt's error. */
+  const switchFlow = (next: SetupFlow): void => {
+    submit.reset();
+    startDevice.reset();
+    setFlow(next);
   };
 
   return (
@@ -128,7 +205,7 @@ export function ConnectionSetup({
         ) : null,
       )}
 
-      {redirects ? (
+      {flow === "oauth" ? (
         <p className="max-w-[52ch] text-row text-muted">
           Register this redirect URI with the provider:{" "}
           <code className="font-mono text-fine break-all text-ink">
@@ -137,33 +214,37 @@ export function ConnectionSetup({
         </p>
       ) : null}
 
-      {fields.map((field) => (
-        <Field
-          key={field.name}
-          id={`${idPrefix}-${field.name}`}
-          label={field.label}
-          error={issues.perField[field.name]}
-        >
-          {field.help === undefined ? null : <p className="text-fine text-faint">{field.help}</p>}
-          <Input
-            id={`${idPrefix}-${field.name}`}
-            // A pasted credential is never read back, so it is never prefilled.
-            type="password"
-            autoComplete="off"
-            required
-            value={pasted[field.name] ?? ""}
-            onChange={(event) => {
-              // Clears the last attempt's error, because that error was about
-              // the old value, not the one being typed now.
-              if (!submit.isIdle) submit.reset();
-              const value = event.target.value;
-              setPasted((current) => ({ ...current, [field.name]: value }));
-            }}
-          />
-        </Field>
-      ))}
+      {flow === "credentials"
+        ? fields.map((field) => (
+            <Field
+              key={field.name}
+              id={`${idPrefix}-${field.name}`}
+              label={field.label}
+              error={issues.perField[field.name]}
+            >
+              {field.help === undefined ? null : (
+                <p className="text-fine text-faint">{field.help}</p>
+              )}
+              <Input
+                id={`${idPrefix}-${field.name}`}
+                // A pasted credential is never read back, so it is never prefilled.
+                type="password"
+                autoComplete="off"
+                required
+                value={pasted[field.name] ?? ""}
+                onChange={(event) => {
+                  // Clears the last attempt's error, because that error was about
+                  // the old value, not the one being typed now.
+                  if (!submit.isIdle) submit.reset();
+                  const value = event.target.value;
+                  setPasted((current) => ({ ...current, [field.name]: value }));
+                }}
+              />
+            </Field>
+          ))
+        : null}
 
-      {connection === undefined || redirects ? (
+      {connection === undefined || flow === "oauth" ? (
         <Naming
           idPrefix={idPrefix}
           label={label}
@@ -177,10 +258,25 @@ export function ConnectionSetup({
         <Button type="button" variant="form" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" variant="form" disabled={submit.isPending}>
-          Connect
+        <Button type="submit" variant="form" disabled={submit.isPending || startDevice.isPending}>
+          {flow === "device" ? `Sign in with ${type.displayName}` : "Connect"}
         </Button>
       </div>
+
+      {flows
+        .filter((other) => other !== flow)
+        .map((other) => (
+          <Button
+            key={other}
+            type="button"
+            className="-mt-1.5 -ml-2 self-start"
+            onClick={() => {
+              switchFlow(other);
+            }}
+          >
+            {labelFlowSwitch(other, type)}
+          </Button>
+        ))}
 
       {/* A successful setup closes the form and its row appears, so only a
           failure is shown here. */}

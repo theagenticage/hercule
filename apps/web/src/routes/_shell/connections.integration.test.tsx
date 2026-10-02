@@ -12,8 +12,8 @@
  * record holds only references to it. So a row has no value to leak, and the
  * assertions below check what was sent, not what came back.
  */
-import { describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   expectInDocumentOrder,
@@ -96,6 +96,25 @@ const CHATTER_TYPE = {
   setup: [{ kind: "pairing" }],
 };
 
+/**
+ * A type with two flows: a device flow first, which it prefers, and a pasted
+ * token as the alternative.
+ */
+const GLASS_TYPE = {
+  type: "glasshouse/glass",
+  displayName: "Glasshouse",
+  setup: [
+    { kind: "device" },
+    { kind: "credentials", fields: [{ name: "token", label: "Personal access token" }] },
+  ],
+  device: {
+    clientId: "glass-client",
+    deviceCodeUrl: "https://glasshouse.test/login/device/code",
+    tokenUrl: "https://glasshouse.test/login/oauth/access_token",
+    scopes: ["repo"],
+  },
+};
+
 const buildPlugin = (id: string, definition: { type: string; displayName: string }): Plugin => ({
   id,
   // The plugin's name differs from its type's name, because a row shows both:
@@ -125,6 +144,7 @@ const CATALOG: readonly Plugin[] = [
   buildPlugin("paper-trail", PAPER_TYPE),
   buildPlugin("skyline", SKY_TYPE),
   buildPlugin("chatterbox", CHATTER_TYPE),
+  buildPlugin("glasshouse", GLASS_TYPE),
   BYSTANDER,
 ];
 
@@ -153,6 +173,19 @@ const SKY: Connection = {
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-09-02T09:30:00.000Z",
   updatedAt: "2026-09-12T07:05:00.000Z",
+};
+
+const GLASS: Connection = {
+  id: "0199c0ff-dddd-7000-8000-000000000004",
+  type: "glasshouse/glass",
+  label: "work",
+  displayName: "octo-glass",
+  status: "connected",
+  labels: ["Code"],
+  config: {},
+  credentials: [{ name: "oauth.tokens" }],
+  createdAt: "2026-10-02T08:15:00.000Z",
+  updatedAt: "2026-10-02T08:15:00.000Z",
 };
 
 /** Builds a stub controller that returns `connections` and the catalog above. */
@@ -268,7 +301,7 @@ describe("Connections", () => {
 
     expect(readPageText()).toContain("Nothing connected yet.");
 
-    for (const displayName of ["Paper Trail", "Skyline", "Chatterbox"]) {
+    for (const displayName of ["Paper Trail", "Skyline", "Chatterbox", "Glasshouse"]) {
       const offer = await findTypeOffer(displayName);
       expect(within(offer).getByRole("button", { name: "Connect" }).hasAttribute("disabled")).toBe(
         false,
@@ -283,7 +316,7 @@ describe("Connections", () => {
       .map((connect) =>
         readPageText(findGroupOffering(connect, "Connect").querySelector<HTMLElement>("b")),
       );
-    expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox"]);
+    expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox", "Glasshouse"]);
     // Each name has the plugin that declares the type under it, because two
     // plugins may declare the same type name.
     expect(readPageText(await findTypeOffer("Paper Trail"))).toContain("paper-trail plugin");
@@ -346,7 +379,7 @@ describe("Connections", () => {
     await openApp([PAPER, SKY]);
 
     await findTypeOffer("Chatterbox");
-    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(4);
   });
 
   it("fetches the list again when a connection changes elsewhere", async () => {
@@ -691,5 +724,257 @@ describe("Connections > configuring a connection", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("personal");
     expect(screen.getByLabelText<HTMLInputElement>("Default topic").value).toBe("Business");
     expect(screen.queryByLabelText(/folder/i)).toBeNull();
+  });
+});
+
+describe("Connections > a device flow", () => {
+  const START = {
+    setupId: "setup-1",
+    userCode: "WDJB-MJHT",
+    verificationUri: "https://glasshouse.test/login/device",
+    expiresAt: "2026-10-02T09:00:00.000Z",
+    interval: 5,
+  };
+  const START_PATH = "/api/v1/oauth/device/start";
+  const POLL_PATH = "/api/v1/oauth/device/poll";
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Returns a handler that answers each poll with the next outcome, then repeats the last. */
+  const answerPolls = (...outcomes: readonly unknown[]): Handler => {
+    let index = 0;
+    return () => ({ body: outcomes[Math.min(index++, outcomes.length - 1)] });
+  };
+
+  const countPolls = (api: { readonly calls: readonly { path: string }[] }) =>
+    api.calls.filter((call) => call.path === POLL_PATH).length;
+
+  /** Advances the fake clock, and lets React and the promises it resolves catch up. */
+  const advanceClock = (milliseconds: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(milliseconds);
+    });
+
+  /**
+   * Advances the fake clock a millisecond at a time until `predicate` returns
+   * true. A response reaches the screen through a few promises and a timer or
+   * two, and `findBy*` never fires while the clock is fake.
+   */
+  const pumpUntil = async (predicate: () => boolean): Promise<void> => {
+    for (let step = 0; step < 50; step++) {
+      if (predicate()) return;
+      await advanceClock(1);
+    }
+    throw new Error("the condition never became true");
+  };
+
+  const isCodeShown = (code: string) => () => screen.queryByText(code) !== null;
+
+  /**
+   * Opens the Glasshouse setup, fills in the label and topic, and starts the
+   * device flow under a fake clock. The clock is faked only now, because
+   * user-event waits on timers that a fake clock never fires.
+   */
+  const startSignIn = async (extra: Readonly<Record<string, Handler>>) => {
+    const user = userEvent.setup();
+    const app = await openApp([], { [`POST ${START_PATH}`]: { body: START }, ...extra });
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+    await user.type(screen.getByLabelText("Label"), "work");
+    await user.type(screen.getByLabelText("Default topic"), "Code");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+    await pumpUntil(isCodeShown(START.userCode));
+    return app;
+  };
+
+  it("offers the device flow first, and pasting a token as the alternative", async () => {
+    const user = userEvent.setup();
+    await openApp([]);
+
+    expect(readPageText(await findTypeOffer("Glasshouse"))).toContain(
+      "sign in with the provider or paste a token",
+    );
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+
+    const signIn = screen.getByRole("button", { name: "Sign in with Glasshouse" });
+    const paste = screen.getByRole("button", { name: "Paste a token instead" });
+    expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), signIn, paste]);
+    expect(screen.queryByLabelText("Personal access token")).toBeNull();
+    expect(screen.getByLabelText("Label")).toBeDefined();
+  });
+
+  it("does not offer a choice for a type with one flow", async () => {
+    const user = userEvent.setup();
+    await openApp([]);
+
+    await user.click(
+      within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
+    );
+
+    expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
+  });
+
+  it("shows the code, waits for the approval, and then shows the new connection", async () => {
+    const { api, hold } = await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls(
+        { status: "pending", interval: 5 },
+        { status: "unreachable", interval: 5 },
+        { status: "done", connection: GLASS },
+      ),
+    });
+
+    expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: START_PATH });
+    expect(listWrites(api)[0]?.body).toEqual({
+      type: "glasshouse/glass",
+      label: "work",
+      labels: ["Code"],
+    });
+    expect(readPageText()).toContain("Connect Glasshouse");
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
+    const open = screen.getByRole("link", { name: "Open Glasshouse" });
+    expect(open.getAttribute("href")).toBe(START.verificationUri);
+    expect(open.getAttribute("target")).toBe("_blank");
+    expect(open.getAttribute("rel")).toBe("noopener noreferrer");
+    expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), open]);
+    expect(readPageText(screen.getByRole("status"))).toContain("Waiting for you to approve");
+
+    // The first poll waits for the interval the start returned.
+    await advanceClock(4000);
+    expect(countPolls(api)).toBe(0);
+    await advanceClock(1500);
+    expect(countPolls(api)).toBe(1);
+
+    // A provider that cannot be reached leaves the flow open.
+    await advanceClock(6000);
+    expect(countPolls(api)).toBe(2);
+    expect(readPageText(screen.getByRole("status"))).toContain("Cannot reach Glasshouse");
+
+    hold([GLASS]);
+    await advanceClock(6000);
+    expect(countPolls(api)).toBe(3);
+    await pumpUntil(() => screen.queryByText(START.userCode) === null);
+
+    vi.useRealTimers();
+    expect(readPageText(await findConnectionRow(GLASS))).toContain("octo-glass");
+  });
+
+  it("polls more slowly once the provider asks it to", async () => {
+    const { api } = await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "slow-down", interval: 10 }),
+    });
+
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+    await advanceClock(8000);
+    expect(countPolls(api)).toBe(1);
+    await advanceClock(3000);
+    expect(countPolls(api)).toBe(2);
+  });
+
+  it("says why the flow ended, stops polling, and starts again with a new code", async () => {
+    const message = "The code expired before it was approved.";
+    let starts = 0;
+    const { api } = await startSignIn({
+      [`POST ${START_PATH}`]: () => {
+        starts++;
+        return {
+          body: starts === 1 ? START : { ...START, setupId: "setup-2", userCode: "KQRT-ZXPV" },
+        };
+      },
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "expired", message }),
+    });
+
+    await advanceClock(5500);
+    expect(readPageText(screen.getByRole("alert"))).toBe(message);
+    expect(screen.queryByText(START.userCode)).toBeNull();
+    await advanceClock(30_000);
+    expect(countPolls(api)).toBe(1);
+
+    const again = screen.getByRole("button", { name: "Start again" });
+    expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), again]);
+    fireEvent.click(again);
+    await pumpUntil(isCodeShown("KQRT-ZXPV"));
+
+    expect(starts).toBe(2);
+    expect(listWrites(api).filter((call) => call.path === START_PATH)[1]?.body).toEqual({
+      type: "glasshouse/glass",
+      label: "work",
+      labels: ["Code"],
+    });
+  });
+
+  it("stops polling once the user cancels", async () => {
+    const { api } = await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "pending", interval: 5 }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await advanceClock(30_000);
+
+    expect(screen.queryByText(START.userCode)).toBeNull();
+    expect(countPolls(api)).toBe(0);
+  });
+
+  it("still lets the user paste a token instead", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([], {
+      "POST /api/v1/connections": { status: 201, body: GLASS },
+    });
+
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Paste a token instead" }));
+
+    // The way back to the preferred flow stays on offer.
+    expect(screen.getByRole("button", { name: "Sign in with Glasshouse instead" })).toBeDefined();
+    await user.type(screen.getByLabelText("Personal access token"), "ghp-glass-1");
+    await user.type(screen.getByLabelText("Label"), "work");
+    await user.type(screen.getByLabelText("Default topic"), "Code");
+    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
+    expect(listWrites(api)[0]?.body).toEqual({
+      type: "glasshouse/glass",
+      label: "work",
+      labels: ["Code"],
+      config: {},
+      credentials: { token: "ghp-glass-1" },
+    });
+  });
+
+  it("reconnects an existing connection through the device flow", async () => {
+    const user = userEvent.setup();
+    const stale: Connection = { ...GLASS, status: "needs-reauth" };
+    const { api } = await openApp([stale], {
+      [`POST ${START_PATH}`]: { body: START },
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "done", connection: GLASS }),
+    });
+
+    await user.click(
+      within(await findConnectionRow(stale)).getByRole("button", { name: "Reconnect" }),
+    );
+    expect(readPageText()).toContain("Reconnect Glasshouse");
+    // The connection keeps its label and topic, so a reconnect does not ask for them.
+    expect(screen.queryByLabelText("Label")).toBeNull();
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+    await pumpUntil(isCodeShown(START.userCode));
+
+    expect(listWrites(api)[0]?.body).toEqual({ type: "glasshouse/glass", connectionId: GLASS.id });
+
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+    await pumpUntil(() => screen.queryByText(START.userCode) === null);
   });
 });
