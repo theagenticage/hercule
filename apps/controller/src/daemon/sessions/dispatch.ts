@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { ConnectionTypes } from "../../connections";
 import { withTransaction } from "../../db";
 import { PluginHost } from "../../plugins";
 import { RunnerConnections, runnerRepository } from "../../runners";
@@ -84,5 +85,5 @@ export class Dispatch extends Context.Service<Dispatch, Effect.Success<typeof ma
 export const DispatchLayer: Layer.Layer<
   Dispatch,
   never,
-  SqlClient.SqlClient | SessionService | RunnerConnections | Secrets | PluginHost
+  SqlClient.SqlClient | SessionService | RunnerConnections | Secrets | PluginHost | ConnectionTypes
 > = Layer.effect(Dispatch)(make);

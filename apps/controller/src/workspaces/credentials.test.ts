@@ -41,6 +41,9 @@ import {
 
 const SECOND_PAT = "ghp_another-token";
 
+/** An access token as the GitHub device flow issues one. */
+const DEVICE_TOKEN = "gho_a-device-token";
+
 const withCredentials = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   withFleet(body, { plugins: [githubPlugin] });
 
@@ -129,6 +132,37 @@ describe("a credential asked for by a provisioning workspace", () => {
       expect(answer["username"]).toBe(GITHUB_LOGIN);
       expect(answer["name"]).toBeUndefined();
       expect(answer["email"]).toBeUndefined();
+      expect(answer["error"]).toBeUndefined();
+    });
+  });
+
+  it("answers with the access token of a connection set up through the device flow", async () => {
+    await withCredentials(async (arranged) => {
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+      // A device flow stores a token set rather than a pasted token. The test
+      // GitHub type has no device flow, so the test swaps the connection's
+      // secrets through the secrets API to arrive at the same state.
+      const { base } = arranged.harness;
+      const owner = `/api/v1/secrets/connection/${github}`;
+      const stored = await send("PUT", base, `${owner}/oauth.tokens`, {
+        body: { value: JSON.stringify({ accessToken: DEVICE_TOKEN }) },
+        token: arranged.token,
+      });
+      expect(stored.status, await stored.clone().text()).toBe(200);
+      const dropped = await send("DELETE", base, `${owner}/pat`, { token: arranged.token });
+      expect(dropped.status, await dropped.clone().text()).toBe(200);
+      const web = await createRepo(arranged, "https://github.com/acme/web", github);
+      const workspace = await provisionWorkspaceOrFail(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
+
+      const answer = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/web",
+        workspaceId: workspace.id,
+      });
+      expect(answer["token"]).toBe(DEVICE_TOKEN);
+      expect(answer["username"]).toBe(GITHUB_LOGIN);
       expect(answer["error"]).toBeUndefined();
     });
   });

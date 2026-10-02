@@ -192,7 +192,7 @@ afterEach(() => {
 });
 
 /**
- * Builds the service layer with a gated `Secrets.get`: it signals `entered`
+ * Builds the service layer with a gated `Secrets.values`: it signals `entered`
  * and then waits on `hold`. So an interruption that arrives there has to pass
  * through the credential reader's error handling. The rest of the stack is
  * real, over the same database, with its own master key in a temporary home.
@@ -205,10 +205,10 @@ const buildGatedCredentialStack = (
     Secrets,
     Effect.map(Effect.provide(Secrets, buildRealSecretsLayer()), (inner) => ({
       ...inner,
-      get: (owner: SecretOwner, name: string) =>
+      values: (owner: SecretOwner) =>
         Effect.andThen(
           Deferred.succeed(entered, undefined),
-          Effect.andThen(Deferred.await(hold), inner.get(owner, name)),
+          Effect.andThen(Deferred.await(hold), inner.values(owner)),
         ),
     })),
   );

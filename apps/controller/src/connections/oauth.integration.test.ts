@@ -729,4 +729,23 @@ describe("the access token a plugin asks the core for", () => {
       expect(await response.json()).toMatchObject({ status: "needs-reauth" });
     });
   });
+
+  it("fails, and marks the connection needs-reauth, when the provider refuses the refresh with HTTP 200", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      // GitHub returns its OAuth errors with status 200. The error field, not
+      // the status, decides that the provider refused the refresh, rather than
+      // answered with something unreadable.
+      provider.answers["refresh_token"] = () => buildJsonResponse({ error: "bad_refresh_token" });
+
+      const failure = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "needs-reauth" });
+    });
+  });
 });

@@ -1,23 +1,32 @@
 /**
- * The core's OAuth2 client: the parts of the authorization-code flow that are
- * the same for every provider, so a plugin that declares a connection type
- * implements none of them.
+ * The core's OAuth2 client: the parts of the two token flows that are the same
+ * for every provider, so a plugin that declares a connection type implements
+ * none of them.
+ *
+ * - The redirect flow (authorization code with PKCE, RFC 6749 and RFC 7636)
+ *   sends the browser to the provider and back to the controller.
+ * - The device flow (RFC 8628) shows the user a code to enter at the provider,
+ *   and the controller polls the token endpoint until the user approves.
  *
  * This module holds the protocol:
  *
  * - building the authorization URL;
  * - decoding the query the browser comes back with;
+ * - requesting a device code, and exchanging it for tokens;
  * - requesting tokens from the token endpoint;
  * - storing a token set and deciding when it needs a refresh.
  *
- * The flow itself (starting it, handling the callback, writing the connection)
- * is in the connection service. The refresh that a plugin's `credentials()`
- * call triggers is in `./runtime`. Both call into this module.
+ * The flows themselves (starting them, handling the callback or the poll,
+ * writing the connection) are in the connection service. The refresh that a
+ * plugin's `credentials()` call triggers is in `./runtime`. Both call into
+ * this module.
  *
- * The client credentials belong to the plugin that owns the connection type:
- * the client id is a field of the plugin's config, and the client secret is a
- * secret the plugin owns, both under fixed names. Each type belongs to one
- * plugin, so each type has exactly one client id and secret.
+ * The redirect flow's client credentials belong to the plugin that owns the
+ * connection type: the client id is a field of the plugin's config, and the
+ * client secret is a secret the plugin owns, both under fixed names. Each type
+ * belongs to one plugin, so each type has exactly one client id and secret.
+ * The device flow needs no client secret: its client id is public, and the
+ * type declares it.
  */
 import { createHash } from "node:crypto";
 import * as Clock from "effect/Clock";
@@ -28,7 +37,7 @@ import * as Schema from "effect/Schema";
 import * as HttpBody from "effect/unstable/http/HttpBody";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { OAuthDeclaration } from "@hercule/plugin-host";
+import type { DeviceDeclaration, OAuthDeclaration } from "@hercule/plugin-host";
 import { Secrets } from "../secrets";
 import { PluginConfigs } from "./plugin-configs";
 
@@ -115,17 +124,27 @@ export interface OAuthClient {
 }
 
 /**
- * The token endpoint returned a status other than 200. The code or refresh
- * token that was sent is treated as the problem.
+ * The provider refused the request: the code, refresh token or device code
+ * that was sent is treated as the problem. `code` is the OAuth error code the
+ * provider answered with, such as `invalid_grant` or `authorization_pending`,
+ * and is absent when the provider sent a client error with no code.
+ * `interval` is the new polling interval in seconds, which a provider may send
+ * with `slow_down`.
+ *
+ * A provider may send an error with status 200 rather than 400, as GitHub
+ * does. The body decides, not the status.
  */
 export class TokenRefused extends Schema.TaggedError<TokenRefused>()("TokenRefused", {
   message: Schema.String,
+  code: Schema.optionalKey(Schema.String),
+  interval: Schema.optionalKey(Schema.Number),
 }) {}
 
 /**
- * The token endpoint could not be reached, or its response had no access
- * token. This error says nothing about the credential: a DNS failure or a
- * dropped network is not something the user can fix by reconnecting.
+ * The provider could not be reached, failed with a server error, or answered
+ * with a body that is neither tokens nor an OAuth error. This error says
+ * nothing about the credential: a DNS failure or a dropped network is not
+ * something the user can fix by reconnecting.
  */
 export class TokenUnreachable extends Schema.TaggedError<TokenUnreachable>()("TokenUnreachable", {
   message: Schema.String,
@@ -140,8 +159,24 @@ const TokenResponse = Schema.Struct({
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
 
-const failTokenRefused = (message: string): Effect.Effect<never, TokenRefused> =>
-  Effect.fail(new TokenRefused({ message }));
+/** The standard error response (RFC 6749 section 5.2, and RFC 8628 section 3.5 for `interval`). */
+const ErrorResponse = Schema.Struct({
+  error: Schema.String,
+  interval: Schema.optionalKey(Schema.Number),
+});
+
+const decodeErrorResponse = Schema.decodeUnknownOption(ErrorResponse);
+
+/** The device authorization response (RFC 8628 section 3.2). */
+const DeviceCodeResponse = Schema.Struct({
+  device_code: Schema.String,
+  user_code: Schema.String,
+  verification_uri: Schema.String,
+  expires_in: Schema.Number,
+  interval: Schema.optionalKey(Schema.Number),
+});
+
+const decodeDeviceCodeResponse = Schema.decodeUnknownEffect(DeviceCodeResponse);
 
 const failTokenUnreachable = (message: string): Effect.Effect<never, TokenUnreachable> =>
   Effect.fail(new TokenUnreachable({ message }));
@@ -221,27 +256,73 @@ export const oauthClients: Effect.Effect<
 });
 
 /**
- * Sends a form-encoded request to the token endpoint, as both grant types do,
- * and returns the token set.
+ * Sends a form-encoded request to one of the provider's OAuth endpoints, and
+ * returns the response body when it is not an OAuth error.
  *
- * Fails with `TokenRefused` when the status is not 200, and with
- * `TokenUnreachable` when the endpoint cannot be reached or returns no access
- * token. `expires_in` is converted to a timestamp here, because it counts from
- * the moment of the response.
+ * - Fails with `TokenRefused` when the body is an OAuth error, whatever the
+ *   status, or when the status is any other client error.
+ * - Fails with `TokenUnreachable` when the endpoint cannot be reached, answers
+ *   with a server error, or answers with a body that is not JSON.
+ *
+ * `endpoint` names the endpoint in the error messages.
+ */
+const postForm = (
+  url: string,
+  form: Record<string, string>,
+  endpoint: string,
+): Effect.Effect<unknown, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const response = yield* HttpClient.post(url, {
+      body: HttpBody.urlParams(form),
+      acceptJson: true,
+    });
+    const status = String(response.status);
+    if (response.status >= 500) {
+      return yield* failTokenUnreachable(`the ${endpoint} returned HTTP ${status}`);
+    }
+    const body = yield* Effect.catch(response.json, () =>
+      response.status === 200
+        ? failTokenUnreachable(`the ${endpoint} returned a response that is not JSON`)
+        : Effect.succeed(undefined),
+    );
+    const refusal = decodeErrorResponse(body);
+    if (Option.isSome(refusal)) {
+      return yield* Effect.fail(
+        new TokenRefused({
+          message: `the ${endpoint} refused the request: ${refusal.value.error}`,
+          code: refusal.value.error,
+          ...(refusal.value.interval === undefined ? {} : { interval: refusal.value.interval }),
+        }),
+      );
+    }
+    if (response.status !== 200) {
+      return yield* Effect.fail(
+        new TokenRefused({ message: `the ${endpoint} returned HTTP ${status}` }),
+      );
+    }
+    return body;
+  }).pipe(
+    Effect.catchTag("HttpClientError", (error) =>
+      failTokenUnreachable(`the ${endpoint} could not be reached: ${error.message}`),
+    ),
+  );
+
+/**
+ * Sends a form-encoded request to the token endpoint, as every grant type
+ * does, and returns the token set.
+ *
+ * Fails as `postForm` does, and with `TokenUnreachable` when the response is
+ * neither tokens nor an error. `expires_in` is converted to a timestamp here,
+ * because it counts from the moment of the response. A token without
+ * `expires_in`, such as a GitHub OAuth App token, never expires, and is stored
+ * without `expiresAt`.
  */
 const requestTokens = (
   tokenUrl: string,
   form: Record<string, string>,
 ): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const response = yield* HttpClient.post(tokenUrl, {
-      body: HttpBody.urlParams(form),
-      acceptJson: true,
-    });
-    if (response.status !== 200) {
-      return yield* failTokenRefused(`the token endpoint returned HTTP ${String(response.status)}`);
-    }
-    const body = yield* decodeTokenResponse(yield* response.json).pipe(
+    const body = yield* decodeTokenResponse(yield* postForm(tokenUrl, form, "token endpoint")).pipe(
       Effect.catchTag("SchemaError", () =>
         failTokenUnreachable("the token endpoint's response has no access token"),
       ),
@@ -254,11 +335,7 @@ const requestTokens = (
         ? {}
         : { expiresAt: new Date(millis + body.expires_in * 1000).toISOString() }),
     };
-  }).pipe(
-    Effect.catchTag("HttpClientError", (error) =>
-      failTokenUnreachable(`the token endpoint could not be reached: ${error.message}`),
-    ),
-  );
+  });
 
 /** Exchanges the authorization code for a token set, sending the PKCE verifier as proof. */
 export const exchangeCode = (request: {
@@ -292,3 +369,131 @@ export const refreshAccess = (request: {
     client_id: request.client.clientId,
     client_secret: request.client.clientSecret,
   });
+
+/** The grant type a device code is exchanged with (RFC 8628 section 3.4). */
+const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+
+/** The polling interval, in seconds, when the provider names none (RFC 8628 section 3.2). */
+const DEFAULT_POLL_INTERVAL_SECONDS = 5;
+
+/**
+ * How many seconds a `slow_down` adds to the polling interval when the
+ * provider names no new interval (RFC 8628 section 3.5).
+ */
+export const SLOW_DOWN_STEP_SECONDS = 5;
+
+/**
+ * Converts an interval the provider sent into whole seconds of at least one,
+ * the form the contract carries it in.
+ */
+const toPollInterval = (seconds: number): number => Math.max(1, Math.ceil(seconds));
+
+/** A device code the provider issued, and what the user needs to approve it. */
+export interface DeviceCode {
+  readonly deviceCode: string;
+  readonly userCode: string;
+  readonly verificationUri: string;
+  /** Seconds until the device code expires. */
+  readonly expiresIn: number;
+  /** Seconds to wait between two polls of the token endpoint. */
+  readonly interval: number;
+}
+
+/**
+ * Asks the provider's device authorization endpoint for a device code. Fails
+ * with `TokenRefused` when the provider refuses, for example because device
+ * flow is disabled on its OAuth app, and with `TokenUnreachable` when it
+ * cannot be reached or its answer has no device code.
+ */
+export const requestDeviceCode = (
+  device: DeviceDeclaration,
+): Effect.Effect<DeviceCode, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const answer = yield* postForm(
+      device.deviceCodeUrl,
+      { client_id: device.clientId, scope: device.scopes.join(" ") },
+      "device authorization endpoint",
+    );
+    const body = yield* decodeDeviceCodeResponse(answer).pipe(
+      Effect.catchTag("SchemaError", () =>
+        failTokenUnreachable("the device authorization endpoint's response has no device code"),
+      ),
+    );
+    return {
+      deviceCode: body.device_code,
+      userCode: body.user_code,
+      verificationUri: body.verification_uri,
+      expiresIn: body.expires_in,
+      interval: toPollInterval(body.interval ?? DEFAULT_POLL_INTERVAL_SECONDS),
+    };
+  });
+
+/**
+ * What one exchange of a device code returned.
+ *
+ * - `done`: the user approved, and the provider issued tokens.
+ * - `pending`: the user has not approved yet.
+ * - `slow-down`: the provider asked for slower polling. `interval` is the new
+ *   interval it named, or `undefined` when it named none.
+ * - `expired`, `denied`, `failed`: the provider ended the flow. `message`
+ *   says why, in words the user can read.
+ * - `unreachable`: the provider could not be reached this time.
+ */
+export type DeviceExchange =
+  | { readonly status: "done"; readonly tokens: TokenSet }
+  | { readonly status: "pending" }
+  | { readonly status: "slow-down"; readonly interval: number | undefined }
+  | {
+      readonly status: "expired" | "denied" | "failed" | "unreachable";
+      readonly message: string;
+    };
+
+/** Converts the provider's refusal of a device code exchange into the exchange's result. */
+const decideDeviceRefusal = (refusal: TokenRefused): DeviceExchange => {
+  switch (refusal.code) {
+    case "authorization_pending":
+      return { status: "pending" };
+    case "slow_down":
+      return {
+        status: "slow-down",
+        interval: refusal.interval === undefined ? undefined : toPollInterval(refusal.interval),
+      };
+    case "expired_token":
+      return { status: "expired", message: "the code expired before it was approved" };
+    case "access_denied":
+      return { status: "denied", message: "the request was declined at the provider" };
+    default:
+      // Every other code, such as `incorrect_client_credentials` or
+      // `device_flow_disabled`, is a problem with the type's OAuth app rather
+      // than with this flow. The code is the most precise thing to show.
+      return {
+        status: "failed",
+        message:
+          refusal.code === undefined
+            ? refusal.message
+            : `the provider refused the device flow with the error ${refusal.code}`,
+      };
+  }
+};
+
+/**
+ * Exchanges a device code for a token set, once. Never fails: every way the
+ * exchange can end, including an unreachable provider, is a `DeviceExchange`,
+ * because the caller answers each of them to the user. No client secret is
+ * sent, because the device flow has none.
+ */
+export const exchangeDeviceCode = (
+  device: DeviceDeclaration,
+  deviceCode: string,
+): Effect.Effect<DeviceExchange, never, HttpClient.HttpClient> =>
+  requestTokens(device.tokenUrl, {
+    client_id: device.clientId,
+    device_code: deviceCode,
+    grant_type: DEVICE_CODE_GRANT,
+  }).pipe(
+    Effect.map((tokens): DeviceExchange => ({ status: "done", tokens })),
+    Effect.catchTag("TokenRefused", (refusal) => Effect.succeed(decideDeviceRefusal(refusal))),
+    Effect.catchTag("TokenUnreachable", (error) =>
+      Effect.succeed<DeviceExchange>({ status: "unreachable", message: error.message }),
+    ),
+  );

@@ -61,4 +61,31 @@ describe("the grant check", () => {
       error: { code: "forbidden", details: { grant: "connection.read" } },
     });
   });
+
+  // Each device-flow method checks the grant before it decodes its input or
+  // calls the provider, so even input that would fail to decode is refused
+  // as forbidden.
+  it("refuses to start a device flow", async () => {
+    const failure = await Effect.runPromise(
+      Effect.flatMap(ConnectionService, (connection) =>
+        Effect.flip(connection.startDevice({ type: "no/such-type" })),
+      ).pipe(Effect.provide(buildStack())),
+    );
+
+    expect(failure).toMatchObject({
+      error: { code: "forbidden", details: { grant: "connection.manage" } },
+    });
+  });
+
+  it("refuses to poll a device flow", async () => {
+    const failure = await Effect.runPromise(
+      Effect.flatMap(ConnectionService, (connection) =>
+        Effect.flip(connection.pollDevice({ setupId: "no-such-setup" })),
+      ).pipe(Effect.provide(buildStack())),
+    );
+
+    expect(failure).toMatchObject({
+      error: { code: "forbidden", details: { grant: "connection.manage" } },
+    });
+  });
 });
