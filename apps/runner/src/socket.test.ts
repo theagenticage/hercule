@@ -13,6 +13,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Logger, Schema } from "effect";
 import {
+  LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
   RunnerToController,
   encodeChallengeBytes,
@@ -534,10 +535,14 @@ describe("which controller a runner accepts", () => {
     await delay(Duration.toMillis(DEADLINE) * 4);
     expect(settled, "the runner ended a connection it should have kept").toBeUndefined();
     // The hello lists the workspace actions this build implements, so the
-    // controller pins a run that commits only to a runner that can.
+    // controller pins a run that commits only to a runner that can, and the
+    // frame that reports the end of a device login.
     expect(stub.received[0]).toMatchObject({
       _tag: "runnerHello",
-      capabilities: expect.arrayContaining(["action:git.commit"]) as unknown,
+      capabilities: expect.arrayContaining([
+        "action:git.commit",
+        LOGIN_ENDED_CAPABILITY,
+      ]) as unknown,
     });
 
     stub.hangUp();

@@ -450,6 +450,17 @@ describe("a device-code login", () => {
   const DEVICE_URL = "https://auth.openai.com/codex/device";
   const USER_CODE = "CH61-0FI2N";
 
+  /**
+   * The answer to a device login started with the test clock at zero: the
+   * code's whole lifetime is still ahead of it.
+   */
+  const DEVICE_ANSWER: LoginAnswer = {
+    _tag: "loginUrl",
+    url: DEVICE_URL,
+    userCode: USER_CODE,
+    expiresInSeconds: Duration.toSeconds(LOGIN_CODE_LIFETIME),
+  };
+
   /** The lines `codex login --device-auth` printed, taken from a recording. */
   const RECORDED = ((): ReadonlyArray<string> => {
     const lines = readFileSync(
@@ -486,7 +497,7 @@ describe("a device-code login", () => {
 
     const answer = await run(startLogin(driver, children));
 
-    expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
+    expect(answer).toStrictEqual(DEVICE_ANSWER);
   });
 
   it("returns the URL only once the code has been read too", async () => {
@@ -514,7 +525,7 @@ describe("a device-code login", () => {
     );
 
     expect(pending).toBeUndefined();
-    expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
+    expect(answer).toStrictEqual(DEVICE_ANSWER);
   });
 
   it("returns the URL and code when the output ends right after the code", async () => {
@@ -534,7 +545,7 @@ describe("a device-code login", () => {
       }),
     );
 
-    expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
+    expect(answer).toStrictEqual(DEVICE_ANSWER);
   });
 
   it("fails with the child's stderr output when it prints a URL but no code", async () => {
@@ -643,5 +654,150 @@ describe("a device-code login", () => {
     expect(children[0]!.killed()).toBe(true);
     // The login was killed and forgotten, so no login is held for the instance.
     expect(answer).toMatchObject({ _tag: "loginFailed", message: "no login in progress" });
+  });
+
+  it("counts the code's lifetime from when it was printed", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+        yield* TestClock.adjust(Duration.seconds(5));
+        yield* Effect.sync(() => printRecordedLogin(children));
+        return yield* Fiber.join(starting);
+      }),
+    );
+
+    // The clock started at the spawn, and the vendor took five seconds to print.
+    expect(answer).toMatchObject({ expiresInSeconds: Duration.toSeconds(LOGIN_CODE_LIFETIME) - 5 });
+  });
+
+  describe("reporting its end", () => {
+    /**
+     * Runs `body` with `driver` reporting into the returned list, the way a
+     * connection attaches it, and returns the instance ids reported.
+     */
+    const collectReports = (
+      driver: ReturnType<typeof makeLogins>,
+      body: Effect.Effect<void>,
+    ): Promise<ReadonlyArray<string>> => {
+      const reported: Array<string> = [];
+      return run(
+        Effect.scoped(
+          Effect.gen(function* () {
+            yield* driver.attached((frame) =>
+              Effect.sync(() => {
+                reported.push(frame.instanceId);
+              }),
+            );
+            yield* body;
+            // The exit handler runs on a promise, so let it settle.
+            yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+            return reported;
+          }),
+        ),
+      );
+    };
+
+    it("reports a device login whose vendor exits on its own", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        Effect.gen(function* () {
+          yield* startLogin(driver, children);
+          // The user typed the code in the browser, so the vendor exits.
+          yield* Effect.sync(() => children[0]!.exit(0));
+        }),
+      );
+
+      expect(reported).toEqual([INSTANCE]);
+    });
+
+    it("reports a device login whose code expired", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        Effect.gen(function* () {
+          yield* startLogin(driver, children);
+          yield* TestClock.adjust(LOGIN_CODE_LIFETIME);
+        }),
+      );
+
+      expect(children[0]!.killed()).toBe(true);
+      // Reported once: the kill that ends the child must not report it again.
+      expect(reported).toEqual([INSTANCE]);
+    });
+
+    it("does not report a login that was replaced or stopped with the runner", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        Effect.gen(function* () {
+          yield* startLogin(driver, children);
+          // The second login replaces the first, whose end means nothing now.
+          const second = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+          yield* TestClock.adjust(Duration.zero);
+          yield* Effect.sync(() => {
+            for (const line of RECORDED) children[1]?.says(`${line}\n`);
+            children[0]!.exit(1);
+          });
+          yield* Fiber.join(second);
+          yield* driver.stopAll;
+          yield* Effect.sync(() => children[1]!.exit(1));
+        }),
+      );
+
+      expect(reported).toEqual([]);
+    });
+
+    it("does not report a paste login, whose submit already waits for its end", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        Effect.gen(function* () {
+          const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+          yield* TestClock.adjust(Duration.zero);
+          yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+          yield* Fiber.join(starting);
+          yield* Effect.sync(() => children[0]!.exit(0));
+        }),
+      );
+
+      expect(reported).toEqual([]);
+    });
+
+    it("stops reporting once the connection that attached it closes", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+      const reported: Array<string> = [];
+
+      await run(
+        Effect.gen(function* () {
+          yield* Effect.scoped(
+            driver.attached((frame) =>
+              Effect.sync(() => {
+                reported.push(frame.instanceId);
+              }),
+            ),
+          );
+          yield* startLogin(driver, children);
+          yield* Effect.sync(() => children[0]!.exit(0));
+          yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+        }),
+      );
+
+      // The next connection probes every instance when it arrives, which makes
+      // up for the report nobody could receive.
+      expect(reported).toEqual([]);
+    });
   });
 });

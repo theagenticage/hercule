@@ -69,6 +69,13 @@ Delivery is idempotent by the step key, not sequenced. The controller sends a `W
 
 Versions are still not compared, and section 2.4 is unchanged: the only hard refusal at hello is an incompatible protocol version. A runner that lacks a workspace action stays online and takes every other placement.
 
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **A device-code login reports its end.** A device-code login (Codex's `codex login --device-auth`, section 3.3) is finished in the user's browser, so nothing comes back through Hercule. The runner reports when the vendor's login ends, and the controller probes the instance again.
+
+- The runner's `LoginUrl` answer gains `expiresInSeconds?`: how long the printed code still works, counted from when the vendor printed it. It is present only with `userCode`. The runner keeps a device login for 15 minutes, the lifetime of Codex's code. The runner sends a duration and not an instant, so the two machines' clocks never meet. The controller turns it into `provider.login`'s `expiresAt` on its own clock ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 4).
+- Runner to controller: `LoginEnded { instanceId }`. It is sent when a device-code login's child exits by itself, whether the login worked or not, and when the code's lifetime runs out. It is not sent when the login is replaced by a new one, when the runner stops, or for a paste-a-code login, whose end the controller already sees in the `provider.submitLoginCode` answer.
+- On `LoginEnded`, the controller probes that instance on that runner. The probe stores the snapshot and announces `provider` / `updated`, which is how a client learns the login finished.
+- **This amends the capability list above: it also holds `loginEnded`**, the one capability that is not a workspace action. Both sides list it. The runner sends `LoginEnded` only when the controller's hello lists it, because an older controller closes the socket on a frame it does not know. A report lost while the socket is down needs no replay: the controller probes every instance when the runner connects.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.

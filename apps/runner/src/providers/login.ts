@@ -8,13 +8,20 @@
  * not just the same instance id. Otherwise a caller that was still waiting
  * when its login was replaced would kill the login the user is halfway
  * through.
+ *
+ * A device login reads nothing back, so no request is waiting when it ends.
+ * Its end is reported instead, through `attached`, so the controller can probe
+ * the instance and learn whether the user finished it in the browser.
  */
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import type * as Scope from "effect/Scope";
 import {
   MAX_AUTHORIZE_URL_LENGTH,
   MAX_FACT_LENGTH,
+  type LoginEnded,
   type LoginFailed,
   type LoginResult,
   type LoginUrl,
@@ -140,22 +147,49 @@ interface Held {
   /** Resolves with the child's next complaint, and never when it ends first. */
   readonly nextComplaint: () => Promise<string>;
   readonly transcript: () => string;
+  /**
+   * When a device login's code stops being valid, in milliseconds on this
+   * machine's clock. Undefined for a login that reads a code back.
+   */
+  readonly expiresAt: number | undefined;
   /** The expiry timer. Undefined only between the spawn and the first call to `armExpiry`. */
   idle: Fiber.Fiber<void> | undefined;
 }
 
-export const makeLogins = (
-  spawn: LoginSpawn,
-): {
+/** Sends a `LoginEnded` frame to the controller. */
+type ReportLoginEnded = (frame: LoginEnded) => Effect.Effect<void, unknown>;
+
+export interface Logins {
   readonly start: (
     instanceId: string,
     adapter: ProviderAdapter,
     ctx: ProviderRunnerContext,
   ) => Effect.Effect<LoginAnswer>;
   readonly submit: (instanceId: string, code: string) => Effect.Effect<LoginAnswer>;
+  /**
+   * Reports through `report` each device login that ends, for as long as the
+   * scope is open. A login that ends while nothing is attached is not
+   * reported: the controller probes every instance when a runner connects, so
+   * the next connection makes up for it.
+   */
+  readonly attached: (report: ReportLoginEnded) => Effect.Effect<void, never, Scope.Scope>;
   readonly stopAll: Effect.Effect<void>;
-} => {
+}
+
+export const makeLogins = (spawn: LoginSpawn): Logins => {
   const held = new Map<string, Held>();
+  let reporting: ReportLoginEnded | undefined;
+
+  /**
+   * Reports that a device login ended. A failed send is dropped: the
+   * connection is going away, and the next one probes every instance anyway.
+   */
+  const reportEnded = (instanceId: string): Effect.Effect<void> =>
+    Effect.suspend(() =>
+      reporting === undefined
+        ? Effect.void
+        : Effect.ignore(reporting({ _tag: "loginEnded", instanceId })),
+    );
 
   const forgetLogin = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
@@ -176,15 +210,24 @@ export const makeLogins = (
   /**
    * Restarts the expiry timer of a login that just showed activity. A device
    * login shows none, because nothing is ever written to it. Its timer is the
-   * lifetime of the code it printed, started once and never restarted.
+   * lifetime of the code it printed, started once and never restarted, and
+   * its expiry is reported like any other end, so nobody keeps waiting for a
+   * code that no longer works.
    */
   const armExpiry = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (login.idle !== undefined) yield* Fiber.interrupt(login.idle);
       login.idle = yield* Effect.forkDetach(
-        Effect.andThen(
-          Effect.sleep(login.device ? LOGIN_CODE_LIFETIME : LOGIN_IDLE),
-          stopLogin(instanceId, login),
+        Effect.sleep(login.device ? LOGIN_CODE_LIFETIME : LOGIN_IDLE).pipe(
+          // Clear the timer first: stopping the login interrupts the timer it
+          // holds, and this fiber must not interrupt itself before it reports.
+          Effect.andThen(
+            Effect.sync(() => {
+              login.idle = undefined;
+            }),
+          ),
+          Effect.andThen(stopLogin(instanceId, login)),
+          Effect.andThen(login.device ? reportEnded(instanceId) : Effect.void),
         ),
       );
     });
@@ -248,12 +291,27 @@ export const makeLogins = (
             complaints.push(resolve);
           }),
         transcript: () => transcript,
+        expiresAt:
+          pattern === undefined
+            ? undefined
+            : (yield* Clock.currentTimeMillis) + Duration.toMillis(LOGIN_CODE_LIFETIME),
         idle: undefined,
       };
       held.set(instanceId, login);
-      // Once the vendor exits on its own, nobody can finish this login.
+      // Once the vendor exits on its own, nobody can finish this login. A
+      // device login exits on its own when the user finishes it in the
+      // browser, so its exit is reported. A login that is no longer held was
+      // stopped or replaced, and its end means nothing.
       void child.exited
-        .then(() => Effect.runPromise(forgetLogin(instanceId, login)))
+        .then(() =>
+          Effect.runPromise(
+            Effect.suspend(() =>
+              held.get(instanceId) === login && login.device
+                ? Effect.andThen(forgetLogin(instanceId, login), reportEnded(instanceId))
+                : forgetLogin(instanceId, login),
+            ),
+          ),
+        )
         .catch(() => undefined);
       yield* armExpiry(instanceId, login);
       return login;
@@ -293,12 +351,30 @@ export const makeLogins = (
           yield* stopLogin(instanceId, login);
           return buildLoginFailed("the login printed a URL that is too long to pass on");
         }
+        if (printed.userCode === undefined || login.expiresAt === undefined) {
+          return { _tag: "loginUrl", url: printed.url };
+        }
+        const now = yield* Clock.currentTimeMillis;
         return {
           _tag: "loginUrl",
           url: printed.url,
-          ...(printed.userCode === undefined ? {} : { userCode: printed.userCode }),
+          userCode: printed.userCode,
+          // At least one second: the code was valid a moment ago, and the
+          // protocol does not accept zero.
+          expiresInSeconds: Math.max(1, Math.floor((login.expiresAt - now) / 1000)),
         };
       }),
+
+    attached: (report) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          reporting = report;
+        }),
+        () =>
+          Effect.sync(() => {
+            if (reporting === report) reporting = undefined;
+          }),
+      ),
 
     submit: (instanceId, code) =>
       Effect.gen(function* () {

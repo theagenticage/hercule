@@ -30,6 +30,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Schema } from "effect";
 import {
   ControllerToRunner,
+  LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
   encodeChallengeBytes,
   type ControllerHello,
@@ -2166,6 +2167,86 @@ describe("logging a runner's provider instance in", () => {
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
         expect(await response.json()).toEqual({ url: DEVICE_URL, userCode: "CH61-0FI2N" });
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("returns when the one-time code expires, counted from the lifetime the runner sent", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
+        const request = await waitForFrame<LoginStart>(wire, "loginStart");
+        const sentAt = Date.now();
+        wire.send({
+          _tag: "loginUrl",
+          requestId: request.requestId,
+          url: DEVICE_URL,
+          userCode: "CH61-0FI2N",
+          expiresInSeconds: 900,
+        });
+
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+        const started = (await response.json()) as { expiresAt: string };
+        // The instant is the controller's own: when the answer arrived, plus
+        // the lifetime, so the runner's clock plays no part in it.
+        const expiresAt = Date.parse(started.expiresAt);
+        expect(expiresAt).toBeGreaterThanOrEqual(sentAt + 900_000);
+        expect(expiresAt).toBeLessThanOrEqual(Date.now() + 900_000);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("offers the login-ended frame at hello", async () => {
+    await withRegistry(async (harness) => {
+      const joined = await enlist(harness);
+      const { wire, answer } = await greet(harness.base, joined.credential);
+      try {
+        expect(answer.capabilities).toContain(LOGIN_ENDED_CAPABILITY);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes the instance again on that runner when a device login ends", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        // Let the probe every connection starts go out first, so the one
+        // awaited below can only be the one the frame caused.
+        await waitForProbe(wire, claude.id, 0);
+        const before = wire.frames.length;
+
+        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+
+        const probe = await waitForProbe(wire, claude.id, before);
+        wire.send({
+          _tag: "probeReport",
+          requestId: probe.requestId,
+          instanceId: claude.id,
+          result: buildProbeResult("2.1.263"),
+        });
+        // The probe stores the snapshot, which announces it on the provider
+        // topic; a screen waiting on the login reads it from there.
+        await waitUntil("recorded the logged-in snapshot", async () => {
+          const response = await get(harness.base, `/api/v1/providers/${claude.id}`, token);
+          const one = (await response.json()) as Instance;
+          return one.snapshots.find(
+            (each) => each.runnerId === joined.runnerId && each.auth.status === "ok",
+          );
+        });
       } finally {
         wire.close();
       }

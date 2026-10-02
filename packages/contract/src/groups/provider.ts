@@ -165,8 +165,17 @@ export const provider = HttpApiGroup.make("provider")
       payload: ProviderLoginInput,
       success: Schema.Struct({
         url: Schema.String,
-        /** Present when the harness printed a code to type in the browser. */
+        /**
+         * Present when the harness printed a code to type in the browser. Such
+         * a device login finishes by itself: the instance's snapshot is
+         * probed again when it ends, and announced on the `provider` topic.
+         */
         userCode: Schema.optionalKey(Schema.String),
+        /**
+         * When the printed code stops being valid. Present with `userCode`,
+         * unless the runner's build is too old to say.
+         */
+        expiresAt: Schema.optionalKey(Timestamp),
       }),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

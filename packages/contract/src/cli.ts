@@ -1782,7 +1782,7 @@ export const CLI = {
   },
   "provider.login": {
     command: "provider login",
-    help: "Starts the vendor login for a Provider Instance on one machine. Returns the URL to open, and the code the harness printed if there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hercule provider submit-login-code`.",
+    help: "Starts the vendor login for a Provider Instance on one machine. Returns the URL to open. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. When the harness prints a code to type in the browser, the reply also holds that code and when it expires (expiresAt), and the login finishes by itself once you have typed it: `hercule provider read` then shows the machine logged in. Otherwise, paste the code the browser shows into `hercule provider submit-login-code`.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       id: {

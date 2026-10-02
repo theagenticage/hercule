@@ -34,6 +34,7 @@ import {
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
   RunnerToController,
+  LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -71,13 +72,16 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 const NONCE_BYTES = 16;
 
 /**
- * The capabilities this runner offers at hello: one for each workspace action
- * its build implements. The controller pins a run only to a runner that lists
- * every workspace action in the run's plan.
+ * The capabilities this runner offers at hello:
+ *
+ * - one for each workspace action its build implements. The controller pins a
+ *   run only to a runner that lists every workspace action in the run's plan.
+ * - `LOGIN_ENDED_CAPABILITY`: this runner reports the end of a device login.
  */
-const CAPABILITIES: ReadonlyArray<string> = WORKSPACE_ACTION_IDS.map(
-  buildWorkspaceActionCapability,
-);
+const CAPABILITIES: ReadonlyArray<string> = [
+  ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
+  LOGIN_ENDED_CAPABILITY,
+];
 
 const ED25519 = { name: "Ed25519" } as const;
 
@@ -527,6 +531,14 @@ export const connect = (
           yield* options.workspaceSteps
             .attached((frame) => write(encodeFrameText(frame)))
             .pipe(Scope.provide(connection));
+          // An older controller closes the connection on a frame it cannot
+          // read, so the end of a device login is reported only to a
+          // controller that lists the frame.
+          if (message.capabilities.includes(LOGIN_ENDED_CAPABILITY)) {
+            yield* providerLogins
+              .attached((frame) => write(encodeFrameText(frame)))
+              .pipe(Scope.provide(connection));
+          }
           proven.openUnsafe();
           return;
         }

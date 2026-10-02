@@ -149,6 +149,7 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   },
   { _tag: "loginFailed", requestId: REQUEST_ID, message: "no login in progress" },
   { _tag: "loginResult", requestId: REQUEST_ID, ok: false, message: "Invalid code." },
+  { _tag: "loginEnded", instanceId: INSTANCE_ID },
   {
     _tag: "sessionEvent",
     seq: 12,
@@ -308,6 +309,30 @@ describe("the runner-to-controller catalogue", () => {
     } as const;
     const encoded = Schema.encodeSync(RunnerToController)(report);
     expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(report);
+  });
+
+  it("round-trips a device login's URL, with its code and how long the code lasts", () => {
+    const device = {
+      _tag: "loginUrl",
+      requestId: REQUEST_ID,
+      url: "https://auth.openai.com/codex/device",
+      userCode: "ABCD-1234",
+      expiresInSeconds: 900,
+    } as const;
+    const encoded = Schema.encodeSync(RunnerToController)(device);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(device);
+  });
+
+  it("rejects a device login code that has already expired", () => {
+    expect(
+      decodeFromRunner({
+        _tag: "loginUrl",
+        requestId: REQUEST_ID,
+        url: "https://auth.openai.com/codex/device",
+        userCode: "ABCD-1234",
+        expiresInSeconds: 0,
+      })._tag,
+    ).toBe("Failure");
   });
 
   it("rejects a tag outside the union, including one from the other direction", () => {

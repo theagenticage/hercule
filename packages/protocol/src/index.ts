@@ -432,9 +432,38 @@ export const LoginUrl = Schema.Struct({
   url: AuthorizeUrl,
   /** Present when the vendor printed a code to type in the browser, instead of expecting a code back. */
   userCode: Schema.optionalKey(Fact),
+  /**
+   * How many seconds the printed code stays valid, counted from when this
+   * frame was sent. Present with `userCode`. A duration rather than an instant,
+   * so the runner's clock never has to agree with the controller's. Optional,
+   * because a runner on an older build does not send it.
+   */
+  expiresInSeconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
 });
 
 export type LoginUrl = Schema.Schema.Type<typeof LoginUrl>;
+
+/**
+ * The capability for `LoginEnded`. The runner lists it at hello when it sends
+ * the frame, and the controller when it reads it. A controller on an older
+ * build closes the socket on a frame it cannot read, so the runner sends
+ * `LoginEnded` only when the controller's hello lists this.
+ */
+export const LOGIN_ENDED_CAPABILITY = "loginEnded";
+
+/**
+ * Sent by the runner, unasked, when a device login stops waiting: its vendor
+ * exited, or its code expired and the runner stopped it. A device login reads
+ * nothing back, so this is the only way the controller learns that the user
+ * finished it in the browser. The frame carries no outcome: the controller
+ * probes the instance again, and the probe says whether the login worked.
+ */
+export const LoginEnded = Schema.Struct({
+  _tag: Schema.Literal("loginEnded"),
+  instanceId: InstanceId,
+});
+
+export type LoginEnded = Schema.Schema.Type<typeof LoginEnded>;
 
 /**
  * The login cannot continue: no URL arrived, or there is no login in progress
@@ -477,6 +506,7 @@ export const RunnerToController = Schema.Union([
   LoginUrl,
   LoginFailed,
   LoginResult,
+  LoginEnded,
   SessionEvent,
   SessionInputResult,
   SessionsReport,
