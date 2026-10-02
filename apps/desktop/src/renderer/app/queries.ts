@@ -380,6 +380,35 @@ export const ensureShellData = async (
 };
 
 /**
+ * Reads everything the first run shows once the user has an account into
+ * `queryClient`: the records its steps and its room are drawn from, the
+ * signed-in user and their settings, and what main keeps of the first run.
+ * Resolves once every read is cached, and fails with the first read that
+ * fails.
+ *
+ * The first run's loader calls it when it resumes a first run, and its
+ * account step calls it right after setup, so the next step never waits.
+ */
+export const ensureFirstRunData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  bridge: Bridge,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.ensureQueryData(controllerQuery(client)),
+    queryClient.ensureQueryData(runnersQuery(client)),
+    queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(connectionsQuery(client)),
+    queryClient.ensureQueryData(projectsQuery(client)),
+    queryClient.ensureQueryData(assistantsQuery(client)),
+    queryClient.ensureQueryData(resourcesQuery(client)),
+    queryClient.ensureQueryData(userQuery(client)),
+    queryClient.ensureQueryData(settingsQuery(client)),
+    queryClient.ensureQueryData(firstRunQuery(bridge)),
+  ]);
+};
+
+/**
  * Reads everything the thread screen shows of the thread `sessionId` into
  * `queryClient`: its session, its whole transcript and its queued inputs.
  * Resolves once every read is cached, and fails with the first read that

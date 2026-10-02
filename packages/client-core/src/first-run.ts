@@ -344,7 +344,7 @@ export const buildRoomContents = (
   },
 ): RoomContents => {
   const done = buildFirstRunFacts(reads);
-  const gitHubAccount = readGitHubAccount(reads.connections);
+  const gitHubAccount = findGitHubAccount(reads.connections);
   const project = findOldest(reads.projects);
   const assistant = findOldest(reads.assistants);
   return {
@@ -368,7 +368,7 @@ export const buildRoomContents = (
  * none. A Connection with no account name is named after its type, so its
  * label stands in for the account.
  */
-const readGitHubAccount = (connections: readonly Connection[]): string | null => {
+export const findGitHubAccount = (connections: readonly Connection[]): string | null => {
   const gitHub = filterGitHubConnections(connections)[0];
   if (gitHub === undefined) return null;
   return gitHub.displayName.trim() === "" ? gitHub.label : gitHub.displayName;
@@ -413,7 +413,7 @@ export const buildAllSetRecap = (
             "and",
           ),
     providerId: (loggedIn[0] ?? rows[0])?.providerId ?? null,
-    gitHubAccount: readGitHubAccount(reads.connections),
+    gitHubAccount: findGitHubAccount(reads.connections),
     project:
       project === undefined
         ? null

@@ -164,6 +164,7 @@ export {
   buildAllSetRecap,
   buildFirstRunFacts,
   buildFirstRunHost,
+  findGitHubAccount,
   buildFirstRunLadder,
   buildProvidersStepText,
   buildRoomContents,

@@ -1,6 +1,6 @@
 export { AccountStep, type AccountError, type AccountForm } from "./account-step";
 export { DoneStep } from "./done-step";
-export { FirstRunFrame } from "./first-run-frame";
+export { FirstRunFrame, StepKicker } from "./first-run-frame";
 export {
   GITHUB_TOKEN_URL,
   GitHubStep,
