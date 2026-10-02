@@ -89,13 +89,17 @@ const readConnectionType = async (): Promise<ConnectionTypeContribution> => {
   return contribution;
 };
 
-/** Runs `validate` against a stub and returns its result, success or failure. */
+/**
+ * Runs `validate` against a stub and returns its result, success or failure.
+ * The credentials default to a pasted token.
+ */
 const runValidate = async (
   of: Stub,
+  credentials: Readonly<Record<string, string>> = { pat: PAT },
 ): Promise<Result.Result<{ readonly displayName: string }, { readonly message: string }>> => {
   const type = await readConnectionType();
   return Effect.runPromise(
-    Effect.result(type.validate({ pat: PAT })).pipe(Effect.provide(of.layer)),
+    Effect.result(type.validate(credentials)).pipe(Effect.provide(of.layer)),
   );
 };
 
@@ -127,7 +131,7 @@ const KINDS = [
 ] as const;
 
 describe("what the github plugin registers", () => {
-  it("requests the connections capability and contributes one credentials-flow type", async () => {
+  it("requests the connections capability and contributes one type, signed in to by device flow or a pasted token", async () => {
     expect(github.manifest).toMatchObject({
       id: "github",
       capabilities: ["connections", "event-sources"],
@@ -140,13 +144,20 @@ describe("what the github plugin registers", () => {
       type: "github",
       displayName: "GitHub",
       setup: [
+        { kind: "device" },
         {
           kind: "credentials",
           fields: [expect.objectContaining({ name: "pat", label: "Personal access token" })],
         },
       ],
+      device: {
+        deviceCodeUrl: "https://github.com/login/device/code",
+        tokenUrl: "https://github.com/login/oauth/access_token",
+        scopes: ["repo", "read:org", "notifications", "workflow"],
+      },
     });
-    // A personal access token is pasted, never redirected for.
+    expect(contributions[0]?.device?.clientId ?? "").not.toBe("");
+    // A type offers a redirect flow or a device flow, never both.
     expect(contributions[0]?.oauth).toBeUndefined();
   });
 
@@ -176,6 +187,24 @@ describe("how the github plugin handles GitHub's response", () => {
     expect(request?.headers["authorization"]).toBe(`Bearer ${PAT}`);
     expect(request?.headers["accept"]).toBe("application/vnd.github+json");
     expect(request?.headers["user-agent"] ?? "").not.toBe("");
+  });
+
+  it("sends the access token the device flow obtained when no token was pasted", async () => {
+    const of = stubAnswer(200, { login: "octocat" });
+
+    const outcome = await runValidate(of, { accessToken: "gho_device-token" });
+
+    expect(outcome).toMatchObject({ success: { displayName: "octocat" } });
+    expect(of.requests[0]?.headers["authorization"]).toBe("Bearer gho_device-token");
+  });
+
+  it("fails without calling GitHub when it was given no token", async () => {
+    const of = stubAnswer(200, { login: "octocat" });
+
+    const outcome = await runValidate(of, {});
+
+    expect(readFailureMessage(outcome)).toContain("No GitHub token");
+    expect(of.requests).toEqual([]);
   });
 
   it("reports the token as rejected when GitHub returns 401", async () => {
