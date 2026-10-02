@@ -50,6 +50,13 @@ What lives here:
 
 What does not live here: provider (Claude Code, Codex, pi) login credentials. Those stay with the vendor CLI on each runner (§8).
 
+*(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* **Two setup tables hold a secret in plain text.** They are the one exception to encrypting secrets at rest:
+
+- a redirect flow's pending setup row (`oauth_setups`) stores its PKCE `code_verifier`;
+- a device flow's pending setup row (`device_setups`) stores the provider's `device_code`.
+
+Both values are short-lived and single-use. The row is deleted when it is used, and swept once it has expired. The value is useless without the user's approval in the provider's own UI. The device code also never leaves the controller ([./05-plugins.md](./05-plugins.md) section 10.1). The token a flow obtains is encrypted like every other Connection credential.
+
 ADR 0015 originally listed "runner credentials" among the encrypted rows; it is amended (2026-08-28): the runner credential is a token and is stored hashed (§4.5), and the `runner` owner kind stays reserved for runner-scoped secrets.
 
 **Open:** field names above are consolidated from ADR 0015's prose ("owner-scoped", "per-value"); the tickets pin the owner set and per-value encryption but not column names. Column names are the implementer's ([./16-open-items.md](./16-open-items.md) B); the cipher is settled below.
@@ -277,6 +284,7 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 - Clone, fetch, and push authenticate with the **GitHub Connection of the checkout being touched**. Runners hold no user-managed git credentials.
 - The runner configures each session with a git credential helper through env-injected `GIT_CONFIG_*` variables (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`), never by writing to the checkout's `.git/config` or the user's global config.
 - The helper is a small command that asks the **runner daemon** over its local channel. The daemon resolves checkout -> Resource -> Connection, fetches the token from the controller on demand over the runner WebSocket, and answers the helper. The token is held in memory for the duration of the git operation; nothing lands on runner disk. Short-lived tokens become a drop-in upgrade later.
+- *(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The token the controller hands out is the Connection's pasted `pat`, or the access token in its `oauth.tokens` secret when it was set up by the device flow. The controller only reads it and never refreshes it, because a GitHub OAuth App token never expires and has no refresh token ([./08-events-and-connections.md](./08-events-and-connections.md) §9.3).
 
 **Verify at build time:** the runner daemon's local channel for the helper (Unix socket path or loopback port, and how the helper authenticates to the daemon so only the daemon's own sessions can ask). The tickets pin the shape, not the transport.
 
@@ -359,6 +367,9 @@ Stated explicitly by the tickets:
 - **Prompt injection beyond taint marking.** Wrapping and prompt hardening reduce, not eliminate, the chance an assistant follows third-party text. The provenance line makes the outcome auditable.
 - **A stolen master key.** Anyone with the machine's keychain (or the headless key file) and the database has every secret.
 - **Vendor-side credential races** when a user copies a provider credential to two runners despite the guidance.
+- **Device-code phishing.** *(Added 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The GitHub plugin's client id is shared and public, so an attacker can start a device flow as Hercule's app and trick a user into entering the attacker's code, which grants the attacker a token. GitHub shows the app's name and the scopes it asks for, and the user should enter only a code their own Hercule showed them. Hercule cannot prevent this; it comes with every device flow.
+- **A deleted Connection's token stays valid.** *(Added 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* Revoking an OAuth App token needs the app's client secret, which Hercule does not ship (§3.1). Deleting a GitHub Connection in Hercule therefore leaves its token valid at GitHub. The web app's delete confirmation says so, and the docs point the user to `github.com/settings/applications` to revoke it.
+- **The `workflow` scope.** *(Added 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* A device-flow GitHub token carries `workflow`, which pushing a change under `.github/workflows` needs. It also lets the token, and any agent that can use it, edit a repository's CI. A user who wants narrower access pastes a fine-grained PAT instead ([./08-events-and-connections.md](./08-events-and-connections.md) §9.3).
 - **A stolen desktop signing certificate.** *(Added 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* The Keychain gives the desktop app's token key to any app signed with the same certificate and bundle identifier (spec 17, §Auth and the token). Whoever holds the certificate's private key, or can push to `main` and so have CI sign a build, can make an app the Keychain trusts with that key. The key lives only in the `desktop-signing` environment's secrets, which only `main` can use ([docs/signing-certificate.md](../signing-certificate.md)). And while the certificate is self-signed, the app's entitlements turn library validation off, so the libraries the app itself loads are not checked against its signature.
 
 ## Post-v1

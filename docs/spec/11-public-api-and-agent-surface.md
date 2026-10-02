@@ -349,7 +349,7 @@ Semantics: [./08-events-and-connections.md](./08-events-and-connections.md).
 | `connection.setCredentials` | `{ connectionId, ... }` (values in, references out) | `connection.manage` | `POST /connections/{id}/credentials` |
 | `connection.startOAuth` | `{ type, origin, label?, labels?, config?, connectionId? }` (`connectionId` on a reconnect) -> `{ authorizationUrl }`; `invalid_state` when the plugin has no OAuth client credentials | `connection.manage` | `POST /oauth/start` |
 | `connection.startDeviceFlow` | `{ type, label?, labels?, config?, connectionId? }` -> `{ setupId, userCode, verificationUri, interval, expiresAt }`; `invalid_state` when the provider refuses to start a device flow or cannot be reached | `connection.manage` | `POST /oauth/device/start` |
-| `connection.pollDeviceFlow` | `{ setupId }` -> `pending` / `slow-down` / `unreachable` with the interval to wait, `done` with the Connection, or `expired` / `denied` / `rejected` / `failed` with a message. Every ending is a status, not an error | `connection.manage` | `POST /oauth/device/poll` |
+| `connection.pollDeviceFlow` | `{ setupId }` -> `pending` / `slow-down` / `unreachable` with the interval to wait, `done` with the Connection, or `expired` / `denied` / `failed` with a message. Every ending is a status, not an error | `connection.manage` | `POST /oauth/device/poll` |
 
 *(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* `connection.startOAuth` was built without a row here; it is added with the two device flow operations. Their semantics are in [./05-plugins.md](./05-plugins.md) section 10.1.
 
