@@ -144,7 +144,7 @@ Measured 2026-09-29 against Electron 44.4.5:
 
 *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run takes a new user from "the app is installed" to a first thread, with no browser and no terminal. It decides what this Mac runs, then runs four steps in order: account, providers, GitHub and project. It ends on All set and a draft thread.
 
-- **The pixel reference** is the prototype `docs/design/crew-bureau-2/desktop/first-run.html` and the book's First run chapter ([Design system](#design-system)). Variant B, "Grand opening", is the one built: the Office fills the window under a glass card. Variant A is the fallback. Every state in the prototype's state menu is built, and the prototype's copy is the copy to ship.
+- **The pixel reference** is the prototype `docs/design/crew-bureau-2/desktop/first-run.html` and the book's First run chapter ([Design system](#design-system)). Variant B, "Grand opening", is the one built: the Office fills the window under a glass card. Variant A is the fallback. Every state in the prototype's state menu is built, and the prototype's copy is the copy to ship, except where this section says otherwise.
 - **When it shows.** At launch with no saved URL, the app opens on the first run's welcome. When the connect check finds that setup is not complete, the app opens the first run at the account step. When the app's settings file says a first run is in progress for the saved controller, the app resumes it (see **Where the first run keeps its place** below).
 - **Its own chunk.** The first run and its room are one chunk of the renderer, loaded only on a first run. Main imports its new modules the first time they are used, so main's startup file does not grow.
 
