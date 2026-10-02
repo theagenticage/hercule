@@ -11,7 +11,7 @@
  * with an Ed25519 key pair generated here.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect, Logger, Schema } from "effect";
 import {
   PROTOCOL_VERSION,
   RunnerToController,
@@ -281,6 +281,18 @@ const IDLE_STEPS = makeWorkspaceSteps({
   baseEnv: {},
 });
 
+/** Every line the connections of the current test logged, formatted as the process log writes them. */
+const logged: Array<string> = [];
+
+afterEach(() => {
+  logged.length = 0;
+});
+
+/** Sends every log line to `logged` instead of the console. */
+const collectLogLines = Logger.layer([
+  Logger.map(Logger.formatLogFmt, (line) => logged.push(line)),
+]);
+
 /** Runs one connection until it ends, and returns how it ended. */
 const runConnection = (
   pin: ControllerPin,
@@ -305,7 +317,7 @@ const runConnection = (
         herculeTool: HERCULE_TOOL,
         proofDeadline,
       }),
-    ),
+    ).pipe(Effect.provide(collectLogLines)),
   );
 
 /** Returns the error a finished connection failed with, or undefined when it succeeded. */
@@ -323,6 +335,8 @@ describe("which controller a runner accepts", () => {
     // One frame and no more: the runner sent its hello and then nothing else.
     expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
     expect(await stub.ended()).toBe(true);
+    // An impostor must not show in the log as the controller this runner connected to.
+    expect(logged.filter((line) => line.includes("connected to the controller"))).toEqual([]);
   });
 
   it("closes the connection on a hello with another controller's key, and sends nothing more", async () => {
@@ -478,6 +492,24 @@ describe("which controller a runner accepts", () => {
     stub.hangUp();
     await pending;
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+
+  it("logs one line once the controller has proved its identity, without the credential", async () => {
+    const stub = await stubController();
+    const pin = buildPin(stub);
+
+    const pending = runConnection(pin);
+    await stub.connected();
+    await waitUntilProven(stub);
+    stub.hangUp();
+    await pending;
+
+    const connected = logged.filter((line) => line.includes("connected to the controller"));
+    expect(connected).toHaveLength(1);
+    expect(connected[0]).toContain("level=INFO");
+    expect(connected[0]).toContain(`controllerUrl=${pin.controllerUrl}`);
+    expect(connected[0]).toContain(`runnerId=${pin.runnerId}`);
+    for (const line of logged) expect(line).not.toContain(pin.credential);
   });
 
   it("keeps the connection when the hello matches the pin", async () => {

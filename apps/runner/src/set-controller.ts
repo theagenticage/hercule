@@ -12,12 +12,8 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import {
-  CONTROLLER_URL_SCHEMES,
-  readRunnerFile,
-  buildRunnerFilePath,
-  writeRunnerFile,
-} from "./runner-file";
+import { locateRunnerFile } from "@hercule/home";
+import { CONTROLLER_URL_SCHEMES, readRunnerFile, writeRunnerFile } from "./runner-file";
 
 export class SetControllerError extends Schema.TaggedError<SetControllerError>()(
   "SetControllerError",
@@ -48,7 +44,7 @@ export const setController = (options: {
       readRunnerFile(options.home),
       (error) => new SetControllerError({ message: error.message }),
     );
-    const path = buildRunnerFilePath(options.home);
+    const path = locateRunnerFile(options.home);
     yield* Effect.try({
       try: () => {
         writeRunnerFile(path, { ...current, controllerUrl: options.controllerUrl });

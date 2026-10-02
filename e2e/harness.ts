@@ -22,7 +22,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { ROOT, runCli, type Ran } from "../scripts/controller-process";
+import { ROOT, deleteMasterKeyItem, runCli, type Ran } from "../scripts/controller-process";
 
 /**
  * Returns the path of the release binary if one has been built, or `undefined`
@@ -141,6 +141,7 @@ export function createTemporaryHome(gitconfig?: string): TemporaryHome {
     // again removes the late file too.
     remove: () => {
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      deleteMasterKeyItem(home);
     },
   };
 }
@@ -236,9 +237,11 @@ export async function listInstances(options: {
 }
 
 /**
- * Waits for the controller's own runner to enrol and connect, and returns it.
- * On the way, the runner writes `runner.json` and its storage directory, which
- * the login is copied into, so nothing may read either before this returns.
+ * Waits for the controller's own runner to enrol and come online, and returns
+ * its id. On the way, the runner writes `runner.json` and its storage
+ * directory, which the login is copied into, so nothing may read either before
+ * this returns. An enrolled runner is listed before it connects, so the list
+ * is filtered to online runners.
  */
 export async function waitForEnrolledRunner(options: {
   readonly home: string;
@@ -247,7 +250,7 @@ export async function waitForEnrolledRunner(options: {
 }): Promise<string> {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
-    const ran = await runCli(["runner", "list", "--json"], options);
+    const ran = await runCli(["runner", "list", "--connectivity", "online", "--json"], options);
     const id =
       ran.code === 0
         ? parseJsonOutputOrFail<Page<{ readonly id: string }>>(ran).items[0]?.id

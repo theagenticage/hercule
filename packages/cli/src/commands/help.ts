@@ -303,7 +303,7 @@ const DAEMON_FORMS = [
   "daemon forms (this machine's own runner, not the fleet):",
   "  hercule runner",
   "  hercule runner --local",
-  "  hercule runner join <controller-url> --token <token> [--reserved]",
+  "  hercule runner join <controller-url> --token <token> [--reserved] [--no-service]",
   "  hercule runner set-controller <controller-url>",
 ];
 
@@ -387,7 +387,8 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
   lines.push(
     "",
     "other commands:",
-    "  hercule login <url>, hercule setup-url, hercule serve, and the daemon forms of hercule runner.",
+    "  hercule login <url>, hercule setup-url, hercule service <verb>, hercule serve, and the",
+    "  daemon forms of hercule runner.",
     "",
     "conventions:",
     "  ids       An id in full, or its last eight or more characters where a command's help",
@@ -401,7 +402,8 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
     "            the end.",
     "  exit      0 succeeded, 1 the controller returned an error envelope or `workflow",
     "            validate` found errors, 2 the command line was wrong and nothing was sent, 3",
-    "            no credential or no controller.",
+    "            no credential or no controller. `hercule service` acts on this machine",
+    "            instead, and exits 1 when its verb failed there.",
     "  403       A forbidden envelope names the grant you lack. Ask the user for it with",
     "            `hercule permission request <grant>`, unless the command's help says only the",
     "            user may make the call: no grant allows that, so ask the user to run it.",

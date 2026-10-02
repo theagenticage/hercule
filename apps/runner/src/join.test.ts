@@ -1,17 +1,29 @@
 /**
- * Tests `join`, the one function both entry points call.
+ * Tests `join`, the one function both entry points call, and
+ * `runJoinCommand`, which joins and then installs the service.
  *
  * The controller is a stub `fetch`, because this package must not import any
  * controller code. So these tests check what the join writes to disk and
  * returns, given a response of the shape the controller sends.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { ServiceError, Supervisor } from "@hercule/service";
 import { run as runArgv } from "./index";
-import { join } from "./join";
+import { join, runJoinCommand, type JoinCommandOptions } from "./join";
 
 const homes: Array<string> = [];
 
@@ -191,6 +203,7 @@ describe("hercule runner join --reserved", () => {
         "--token",
         "a-join-token",
         "--reserved",
+        "--no-service",
       ]),
     ).toEqual({ reserved: true });
   });
@@ -205,7 +218,186 @@ describe("hercule runner join --reserved", () => {
         "http://127.0.0.1:4937",
         "--token",
         "a-join-token",
+        "--no-service",
       ]),
     ).toEqual({ reserved: false });
+  });
+
+  it("refuses to install the service before it joins, so the token stays unused", async () => {
+    const home = createTemporaryHome();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetched = vi.spyOn(globalThis, "fetch");
+    try {
+      process.exitCode = 0;
+      // A test runs from the source checkout, which a service cannot run.
+      await runArgv(["--home", home, "join", "http://127.0.0.1:4937", "--token", "a-join-token"]);
+      expect(process.exitCode).toBe(1);
+      expect(fetched).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(
+        "hercule: A service runs the compiled hercule binary, and this Hercule runs from a source checkout. Build the binary with `pnpm build:binary` and run `./hercule service install`. To join without installing the service, add --no-service.",
+      );
+    } finally {
+      error.mockRestore();
+      fetched.mockRestore();
+      process.exitCode = 0;
+    }
+  });
+});
+
+describe("runJoinCommand", () => {
+  const unused = Effect.die(new Error("The test did not expect this verb."));
+
+  /** Returns a fake Supervisor that records each verb, and fails a verb given a message. */
+  const buildFakeSupervisor = (
+    asked: Array<string>,
+    failures: { readonly prepare?: string; readonly install?: string } = {},
+  ) =>
+    Layer.succeed(
+      Supervisor,
+      Supervisor.of({
+        uninstallNote: undefined,
+        prepare: () =>
+          Effect.suspend(() => {
+            asked.push("prepare");
+            return failures.prepare === undefined
+              ? Effect.void
+              : Effect.fail(new ServiceError({ message: failures.prepare }));
+          }),
+        install: (unit) =>
+          Effect.suspend(() => {
+            asked.push("install");
+            return failures.install === undefined
+              ? Effect.succeed({
+                  installed: true,
+                  running: true,
+                  pid: 42,
+                  role: unit.role,
+                  home: unit.home,
+                  unitFile: "/u",
+                })
+              : Effect.fail(new ServiceError({ message: failures.install }));
+          }),
+        uninstall: unused,
+        start: unused,
+        stop: unused,
+        restart: unused,
+        readStatus: unused,
+      }),
+    );
+
+  /** Runs the command for a fresh Home and returns its output, its error, and what it asked. */
+  const runCommand = async (
+    options: {
+      readonly withService?: boolean;
+      readonly failures?: { readonly prepare?: string; readonly install?: string };
+      readonly prepareHome?: (home: string) => void;
+    } = {},
+  ) => {
+    const home = createTemporaryHome();
+    options.prepareHome?.(home);
+    const program = pathJoin(home, "bin", "hercule");
+    mkdirSync(pathJoin(home, "bin"));
+    writeFileSync(program, "");
+    chmodSync(program, 0o755);
+    const asked: Array<string> = [];
+    const out: Array<string> = [];
+    const fetched = vi.fn(
+      stubFetch(buildJoinAnswer("0199e0e7-6666-7000-8000-000000000000", "vega")),
+    );
+    const service: JoinCommandOptions["service"] =
+      options.withService === false
+        ? undefined
+        : {
+            request: {
+              role: "runner",
+              home,
+              overrides: [],
+              env: { PATH: "/usr/bin" },
+              program,
+            },
+            supervisor: buildFakeSupervisor(asked, options.failures),
+          };
+    const result = await Effect.runPromise(
+      Effect.result(
+        runJoinCommand({
+          controllerUrl: "http://127.0.0.1:4937",
+          token: "a-join-token",
+          home,
+          reserved: false,
+          fetch: Object.assign(fetched, { preconnect: () => {} }),
+          service,
+          out: (line) => out.push(line),
+        }),
+      ),
+    );
+    return {
+      home,
+      out,
+      asked,
+      fetched: fetched.mock.calls.length,
+      message: result._tag === "Failure" ? result.failure.message : undefined,
+    };
+  };
+
+  it("prepares the service, joins, installs it, and prints each step", async () => {
+    const { home, out, asked, fetched, message } = await runCommand();
+    expect(message).toBeUndefined();
+    expect(fetched).toBe(1);
+    expect(asked).toEqual(["prepare", "install"]);
+    expect(out).toEqual([
+      "This machine joined as vega.",
+      `Its credential is in ${pathJoin(home, "runner", "runner.json")}.`,
+      "Installing the service unit for `hercule runner`.",
+      `The Hercule service runs \`hercule runner\` for the Hercule Home ${home}, as pid 42.`,
+    ]);
+  });
+
+  it("joins without a Supervisor with --no-service", async () => {
+    const { out, fetched, message } = await runCommand({ withService: false });
+    expect(message).toBeUndefined();
+    expect(fetched).toBe(1);
+    expect(out).toHaveLength(2);
+  });
+
+  it("refuses before it joins when the Supervisor refuses, so the token stays unused", async () => {
+    const { out, asked, fetched, message } = await runCommand({
+      failures: { prepare: "Could not turn on lingering for ada" },
+    });
+    expect(message).toBe(
+      "Could not turn on lingering for ada. To join without installing the service, add --no-service.",
+    );
+    expect(fetched).toBe(0);
+    expect(asked).toEqual(["prepare"]);
+    expect(out).toEqual([]);
+  });
+
+  it.each([true, false])(
+    "refuses a Home that holds a controller database before it joins (service: %s)",
+    async (withService) => {
+      const { home, asked, fetched, message } = await runCommand({
+        withService,
+        prepareHome: (home) => {
+          mkdirSync(pathJoin(home, "data"));
+          writeFileSync(pathJoin(home, "data", "hercule.db"), "");
+        },
+      });
+      expect(message).toBe(
+        `The Hercule Home ${home} holds a controller database, and its runner.json belongs to the controller's own runner, so joining would point that runner at another controller. To make this machine a separate runner, give it its own Home with --home.`,
+      );
+      expect(fetched).toBe(0);
+      expect(asked).toEqual([]);
+    },
+  );
+
+  it("says to run `hercule service install` when the install fails after the join", async () => {
+    const { out, asked, fetched, message } = await runCommand({
+      failures: { install: "launchd said no." },
+    });
+    expect(message).toBe(
+      "The service was not installed. launchd said no. This machine has joined, so once that is fixed, run `hercule service install` rather than joining again.",
+    );
+    expect(fetched).toBe(1);
+    expect(asked).toEqual(["prepare", "install"]);
+    expect(out.at(-1)).toBe("Installing the service unit for `hercule runner`.");
   });
 });

@@ -20,7 +20,7 @@ import {
   createClient,
   readValidationIssues,
 } from "@hercule/client-core";
-import { parseGlobalOptions, resolveHomePath, locateSetupUrlFile } from "@hercule/home";
+import { parseGlobalOptions, resolveHomePath, locateSetupUrlFile, type Env } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, formatFieldName } from "./commands/args";
 import { formatIssue, type WorkflowIssues } from "@hercule/contract";
@@ -28,7 +28,7 @@ import { execute, type Outcome } from "./commands/execute";
 import { buildCommandHelp, buildNounHelp, buildRootHelp, buildShellExample } from "./commands/help";
 import { renderHuman } from "./commands/render";
 import { findCommandByWords, listWordsAfter, type Command } from "./commands/tree";
-import { CredentialError, resolveCredential, resolveUrl, type Env } from "./credentials";
+import { CredentialError, resolveCredential, resolveUrl } from "./credentials";
 import { EXIT, UsageError } from "./exit";
 import { login, getLoginHelp } from "./login";
 import { processIo, type Io } from "./io";

@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { locateCompiledBinary, type LogLevel } from "@hercule/home";
 import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { nowIso } from "../db";
@@ -30,18 +31,15 @@ import { JoinTokens } from "./join-tokens";
  */
 export const LOCAL_RUNNER_COMMAND: ReadonlyArray<string> = [process.execPath, "runner", "--local"];
 
-/** The path prefix Bun uses for an entry script inside a compiled binary. */
-const EMBEDDED = "/$bunfs/";
-
 /**
  * Builds the spawn command. When Hercule is not compiled, the executable is Bun
  * rather than Hercule, so the entry script must be passed too. Without this,
  * `hercule serve` from a checkout has no local runner.
  */
 const buildSpawnCommand = (): ReadonlyArray<string> =>
-  Bun.main.startsWith(EMBEDDED)
-    ? LOCAL_RUNNER_COMMAND
-    : [process.execPath, Bun.main, "runner", "--local"];
+  locateCompiledBinary() === undefined
+    ? [process.execPath, Bun.main, "runner", "--local"]
+    : LOCAL_RUNNER_COMMAND;
 
 export const LOCAL_RUNNER_BACKOFF = {
   first: Duration.seconds(1),
@@ -178,11 +176,17 @@ const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | 
  * Fails with `LocalRunnerFailed` when the first child's announcement cannot be
  * read. The first child is started here, so a failed handshake stops the boot
  * rather than leaving the controller next to a child it cannot understand.
+ *
+ * The child runs with the controller's Hercule Home and log level, so that
+ * `-c log.level=debug` on `hercule serve` reaches the local runner's log too.
  */
 export const startLocalRunner = (
   options: LocalRunnerOptions,
-  controllerUrl: string,
-  home: string,
+  inherited: {
+    readonly controllerUrl: string;
+    readonly home: string;
+    readonly logLevel: LogLevel;
+  },
 ): Effect.Effect<LocalRunner, LocalRunnerFailed | SqlError, Scope.Scope | JoinTokens | AuditLog> =>
   Effect.gen(function* () {
     const joinTokens = yield* JoinTokens;
@@ -205,14 +209,14 @@ export const startLocalRunner = (
     };
 
     const start = Effect.gen(function* () {
-      const spawned = Bun.spawn([...options.command], {
+      const spawned = Bun.spawn([...options.command, "-c", `log.level=${inherited.logLevel}`], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "inherit",
         // The controller's home is not always the default one. The token is
         // never put in the environment: every process the child starts would
         // inherit it.
-        env: { ...process.env, HERCULE_HOME: home },
+        env: { ...process.env, HERCULE_HOME: inherited.home },
       });
       child = spawned;
 
@@ -258,7 +262,7 @@ export const startLocalRunner = (
       // ever sees it.
       const invitation = yield* joinTokens.create(yield* nowIso);
       yield* writeEnrolment(
-        `${JSON.stringify(encodeEnrolment({ controllerUrl, token: invitation.token }))}\n`,
+        `${JSON.stringify(encodeEnrolment({ controllerUrl: inherited.controllerUrl, token: invitation.token }))}\n`,
       );
       return spawned;
     });

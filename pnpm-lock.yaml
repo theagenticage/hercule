@@ -93,6 +93,9 @@ importers:
       '@hercule/plugin-pi':
         specifier: workspace:*
         version: link:../../plugins/pi
+      '@hercule/process-log':
+        specifier: workspace:*
+        version: link:../../packages/process-log
       '@hercule/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -192,9 +195,15 @@ importers:
       '@hercule/home':
         specifier: workspace:*
         version: link:../../packages/home
+      '@hercule/process-log':
+        specifier: workspace:*
+        version: link:../../packages/process-log
       '@hercule/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@hercule/service':
+        specifier: workspace:*
+        version: link:../../packages/service
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
@@ -362,6 +371,9 @@ importers:
       '@hercule/runner':
         specifier: workspace:*
         version: link:../../apps/runner
+      '@hercule/service':
+        specifier: workspace:*
+        version: link:../service
 
   packages/home:
     dependencies:
@@ -378,11 +390,29 @@ importers:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
 
+  packages/process-log:
+    dependencies:
+      '@hercule/home':
+        specifier: workspace:*
+        version: link:../home
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+
   packages/protocol:
     dependencies:
       '@cfworker/json-schema':
         specifier: 4.1.1
         version: 4.1.1
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+
+  packages/service:
+    dependencies:
+      '@hercule/home':
+        specifier: workspace:*
+        version: link:../home
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112

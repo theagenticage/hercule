@@ -97,7 +97,7 @@ describe("hercule runner join through the binary", () => {
       const before = new Set((await listRunners()).map((one) => one.id));
       const token = await mintToken();
 
-      const ran = await runCli(["runner", "join", url, "--token", token], {
+      const ran = await runCli(["runner", "join", url, "--token", token, "--no-service"], {
         home: machine.home,
         binary,
       });
@@ -122,10 +122,13 @@ describe("hercule runner join through the binary", () => {
     try {
       const before = (await listRunners()).length;
 
-      const ran = await runCli(["runner", "join", url, "--token", "a-token-nobody-minted"], {
-        home: machine.home,
-        binary,
-      });
+      const ran = await runCli(
+        ["runner", "join", url, "--token", "a-token-nobody-minted", "--no-service"],
+        {
+          home: machine.home,
+          binary,
+        },
+      );
       expect(ran.code).not.toBe(0);
       // The output has to be about the token the controller rejected, so a
       // command that never reached the controller cannot pass this.
@@ -140,7 +143,10 @@ describe("hercule runner join through the binary", () => {
   it("fails with usage when no token is given", async () => {
     const machine = createTemporaryHome();
     try {
-      const ran = await runCli(["runner", "join", url], { home: machine.home, binary });
+      const ran = await runCli(["runner", "join", url, "--no-service"], {
+        home: machine.home,
+        binary,
+      });
       expect(ran.code).not.toBe(0);
       expect(`${ran.stdout}${ran.stderr}`).toMatch(/usage/i);
       expect(existsSync(join(machine.home, "runner", "runner.json"))).toBe(false);
@@ -188,7 +194,7 @@ describe("retiring a joined runner through the binary", () => {
       const before = new Set((await listRunners()).map((one) => one.id));
 
       const joined = await runCli(
-        ["runner", "join", url, "--token", await mintToken(), "--reserved"],
+        ["runner", "join", url, "--token", await mintToken(), "--reserved", "--no-service"],
         {
           home: machine.home,
           binary,
@@ -234,10 +240,13 @@ describe("retiring a joined runner through the binary", () => {
 
       // The same machine home and a new token: a new runner next to the old
       // row rather than in place of it.
-      const rejoined = await runCli(["runner", "join", url, "--token", await mintToken()], {
-        home: machine.home,
-        binary,
-      });
+      const rejoined = await runCli(
+        ["runner", "join", url, "--token", await mintToken(), "--no-service"],
+        {
+          home: machine.home,
+          binary,
+        },
+      );
       expect(rejoined.code, `${rejoined.stdout}\n${rejoined.stderr}`).toBe(0);
 
       const fleet = await listRunners();

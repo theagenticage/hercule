@@ -7,11 +7,14 @@
  *
  * - the dispatcher routes on `--home`;
  * - the CLI reads `<home>/setup-url`;
- * - the runner reads `<home>/runner/`;
+ * - the runner reads `<home>/runner/`, and `hercule service install` checks
+ *   it for a `runner.json`;
+ * - the controller and the runner write their logs into `<home>/logs/`;
  * - the controller opens the database.
  */
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import type { Env } from "./args";
 
 /**
  * Every path in a Hercule Home, absolute. `dataDir` is the resolved `data.dir`
@@ -44,10 +47,7 @@ export const DATABASE_FILE_NAME = "hercule.db";
  * path is resolved against the working directory, so the result is always
  * absolute.
  */
-export function resolveHomePath(
-  homeOption: string | undefined,
-  env: Readonly<Record<string, string | undefined>>,
-): string {
+export function resolveHomePath(homeOption: string | undefined, env: Env): string {
   const chosen = homeOption ?? env["HERCULE_HOME"];
   return chosen === undefined || chosen === ""
     ? join(homedir(), DEFAULT_HOME_NAME)
@@ -69,6 +69,32 @@ export function locateRunnerDir(home: string): string {
   return join(home, "runner");
 }
 
+/** Returns the path of `runner.json`, the credential a runner receives when it joins. */
+export function locateRunnerFile(home: string): string {
+  return join(locateRunnerDir(home), "runner.json");
+}
+
+/** Returns the directory where the controller and the runner write their rotated process logs. */
+export function locateLogsDir(home: string): string {
+  return join(home, "logs");
+}
+
+/** The two roles that run as long-lived processes and write a process log. */
+export type DaemonRole = "controller" | "runner";
+
+/** Returns the path of the log file the controller or a runner writes: `<home>/logs/<role>.log`. */
+export function locateProcessLogFile(home: string, role: DaemonRole): string {
+  return join(locateLogsDir(home), `${role}.log`);
+}
+
+/**
+ * Returns the path a service unit appends the process's standard error to:
+ * `<home>/logs/<role>.stderr.log`.
+ */
+export function locateStderrLogFile(home: string, role: DaemonRole): string {
+  return join(locateLogsDir(home), `${role}.stderr.log`);
+}
+
 /** Returns the path of `setup-url`, which is known without reading any config. */
 export function locateSetupUrlFile(home: string): string {
   return join(home, "setup-url");
@@ -84,7 +110,7 @@ export function buildHomePaths(home: string, dataDir: string): HomePaths {
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
     runnerDir: locateRunnerDir(home),
-    logsDir: join(home, "logs"),
+    logsDir: locateLogsDir(home),
     backupsDir: join(home, "backups"),
     tlsDir: join(home, "tls"),
     setupUrlFile: locateSetupUrlFile(home),

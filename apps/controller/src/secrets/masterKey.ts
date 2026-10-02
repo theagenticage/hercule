@@ -161,10 +161,30 @@ export const createFileStore = (path: string): KeyStore => {
   };
 };
 
-/** Runs `security` and returns its exit code and stdout. Injected, so tests drive every branch. */
-export type SecurityRunner = (
-  argv: ReadonlyArray<string>,
-) => Promise<{ readonly exitCode: number; readonly stdout: string }>;
+/** What one run of `security` returned. */
+export interface SecurityResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Runs `security` and returns its exit code and output. Injected, so tests drive every branch. */
+export type SecurityRunner = (argv: ReadonlyArray<string>) => Promise<SecurityResult>;
+
+/**
+ * Returns the end of a failure message: how `security` exited and, when it
+ * printed an error, that error on one line. `security` prints the reason on
+ * stderr, such as a locked keychain or a session with no access to it, and
+ * without the reason the failure cannot be explained.
+ *
+ * Only stderr is quoted. `find-generic-password -w` prints the key on stdout,
+ * and `security` never repeats its arguments on stderr.
+ */
+const describeSecurityExit = (result: SecurityResult, item: string): string => {
+  const printed = result.stderr.trim().replace(/\s*\n\s*/g, " ");
+  const exit = `\`security\` exited ${String(result.exitCode)} for ${item}.`;
+  return printed === "" ? exit : `${exit} It printed: ${printed}`;
+};
 
 /**
  * Runs the real macOS `security` CLI.
@@ -175,9 +195,12 @@ export type SecurityRunner = (
  * happens once, at first run.
  */
 export const spawnSecurity: SecurityRunner = async (argv) => {
-  const child = Bun.spawn([...argv], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-  const stdout = await new Response(child.stdout).text();
-  return { exitCode: await child.exited, stdout };
+  const child = Bun.spawn([...argv], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  return { exitCode: await child.exited, stdout, stderr };
 };
 
 /** The macOS login keychain, one item per Hercule Home. */
@@ -190,8 +213,7 @@ export const createKeychainStore = (
     Effect.tryPromise({
       try: () => run(argv),
       // No cause: it would carry the argv, and the write command's argv carries
-      // the key. Same reason stderr is discarded and stdout never appears here -
-      // `find-generic-password -w` prints the key on stdout.
+      // the key.
       catch: () => new MasterKeyError({ message: failure }),
     });
 
@@ -203,9 +225,7 @@ export const createKeychainStore = (
     if (result.exitCode === KEYCHAIN_ITEM_NOT_FOUND) return undefined;
     if (result.exitCode !== 0) {
       return yield* new MasterKeyError({
-        message:
-          `Reading the master key from the login keychain failed: \`security\` exited ` +
-          `${result.exitCode} for ${item}.`,
+        message: `Reading the master key from the login keychain failed: ${describeSecurityExit(result, item)}`,
       });
     }
     return yield* Effect.try({
@@ -240,9 +260,7 @@ export const createKeychainStore = (
         const stored = yield* read;
         if (stored !== undefined) return stored;
         return yield* new MasterKeyError({
-          message:
-            `Storing the master key in the login keychain failed: \`security\` exited ` +
-            `${result.exitCode} for ${item}.`,
+          message: `Storing the master key in the login keychain failed: ${describeSecurityExit(result, item)}`,
         });
       }),
   };

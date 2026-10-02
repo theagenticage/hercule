@@ -6,10 +6,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { locateRunnerDir } from "@hercule/home";
+import { locateRunnerFile } from "@hercule/home";
 
 export const CONTROLLER_URL_SCHEMES: ReadonlyArray<string> = ["http:", "https:"];
 
@@ -34,11 +33,6 @@ export const RunnerFile = Schema.Struct({
 });
 
 export type RunnerFile = Schema.Schema.Type<typeof RunnerFile>;
-
-const RUNNER_FILE_NAME = "runner.json";
-
-export const buildRunnerFilePath = (home: string): string =>
-  joinPath(locateRunnerDir(home), RUNNER_FILE_NAME);
 
 export class NotEnrolled extends Schema.TaggedError<NotEnrolled>()("NotEnrolled", {
   message: Schema.String,
@@ -71,7 +65,7 @@ export const writeRunnerFile = (path: string, contents: RunnerFile): void => {
 
 export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrolled> =>
   Effect.gen(function* () {
-    const path = buildRunnerFilePath(home);
+    const path = locateRunnerFile(home);
     const raw = yield* Effect.try({
       try: () => JSON.parse(readFileSync(path, "utf8")) as unknown,
       catch: () =>

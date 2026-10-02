@@ -95,7 +95,9 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 | `apps/controller` | `@hercule/controller` | The controller role (`hercule serve`) |
 | `apps/runner` | `@hercule/runner` | The runner role (`hercule runner`). Its import graph must never reach the controller, the DB engine, the plugin host, or the web bundle |
 | `packages/cli` | `@hercule/cli` | The CLI role. HTTP only |
-| `packages/home` | `@hercule/home` | The Hercule Home: the global options that locate it, the layout inside it, and the build-time version (`@hercule/home/version`). A leaf every role links |
+| `packages/home` | `@hercule/home` | The Hercule Home: the global options that locate it, the layout inside it, the bootstrap config in its `config.toml`, the compiled binary every role runs as, and the build-time version (`@hercule/home/version`). A leaf every role links |
+| `packages/process-log` | `@hercule/process-log` | The log file the controller and every runner write, each its own: `<home>/logs/controller.log` or `runner.log`, rotated by size |
+| `packages/service` | `@hercule/service` | The service role (`hercule service`): the Service Unit on launchd and systemd that keeps the controller or a runner running. `hercule runner join` installs the runner's unit through it, so it links nothing of the controller |
 | `packages/contract` | `@hercule/contract` | The public API contract in Effect Schema |
 | `packages/protocol` | `@hercule/protocol` | The controller-runner WebSocket protocol in Effect Schema |
 | `packages/plugin-host` | `@hercule/plugin-host` | The API a plugin is written against: its manifest, its hooks and the services the host passes them, and the contributions it registers (providers, event sources, Connection types, workflow actions with `ActionContext` and `ActionError`). Uses no controller internals |

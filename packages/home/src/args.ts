@@ -6,12 +6,18 @@ export class InvalidOptionError extends Schema.TaggedError<InvalidOptionError>()
   { option: Schema.String, message: Schema.String },
 ) {}
 
+/** The `-c key=value` overrides, in the order given; for a repeated key, the last one wins. */
+export type ConfigOverrides = ReadonlyArray<readonly [key: string, value: string]>;
+
+/** A process environment: `process.env`, or a copy of it. */
+export type Env = Readonly<Record<string, string | undefined>>;
+
 /** The two global options, stripped from `argv` before a role reads it. */
 export interface GlobalOptions {
   /** `--home <dir>` / `--home=<dir>` / `HERCULE_HOME`; the last one on the line wins. */
   readonly home: string | undefined;
   /** `-c key=value`, in the order given; for a repeated key, the last one wins. */
-  readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
+  readonly overrides: ConfigOverrides;
   /** Everything that is not a global option, in order. */
   readonly rest: ReadonlyArray<string>;
   /**

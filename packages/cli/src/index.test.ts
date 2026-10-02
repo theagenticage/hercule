@@ -318,8 +318,17 @@ describe("hercule runner --help", () => {
     ).toBe(true);
     expect(text).toContain("hercule runner --local");
     expect(text).toContain("hercule runner join");
+    expect(text).toContain("--no-service");
     expect(text).toContain("hercule runner set-controller");
     expect(text).toContain("list");
+  });
+});
+
+// `hercule service` is a role of its own, so its help lives in @hercule/service.
+// The root help still names it, because the root help is where people look.
+describe("hercule service in the root help", () => {
+  it("is named", async () => {
+    expect((await runHelp()).join("\n")).toContain("hercule service <verb>");
   });
 });
 

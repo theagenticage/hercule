@@ -12,11 +12,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import { locateRunnerFile } from "@hercule/home";
 import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { runDaemon, type ToolingUnavailable } from "./daemon";
 import type { RunnerRetired } from "./socket";
 import { join, JoinError } from "./join";
-import { readRunnerFile, buildRunnerFilePath, type NotEnrolled } from "./runner-file";
+import { readRunnerFile, type NotEnrolled } from "./runner-file";
 
 const JOIN_RETRY_INTERVAL = Duration.millis(250);
 
@@ -95,7 +96,7 @@ export const runLocalRunner = (
   Effect.gen(function* () {
     // Check whether the file exists, not whether it parses: a machine with an
     // invalid `runner.json` should report the error instead of joining again.
-    if (existsSync(buildRunnerFilePath(home))) {
+    if (existsSync(locateRunnerFile(home))) {
       const enrolled = yield* readRunnerFile(home);
       yield* announce({ runnerId: enrolled.runnerId });
     } else {

@@ -16,6 +16,7 @@
     "@hercule/plugin-github": "workspace:*",
     "@hercule/plugin-host": "workspace:*",
     "@hercule/plugin-pi": "workspace:*",
+    "@hercule/process-log": "workspace:*",
     "@hercule/protocol": "workspace:*",
     "@marcbachmann/cel-js": "8.0.0",
     "effect": "4.0.0-rc.112"

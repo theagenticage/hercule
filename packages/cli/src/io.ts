@@ -8,7 +8,7 @@
 import { createInterface } from "node:readline";
 import { hostname } from "node:os";
 import type { FetchLike } from "@hercule/client-core";
-import type { Env } from "./credentials";
+import type { Env } from "@hercule/home";
 import { UsageError } from "./exit";
 
 export interface Io {

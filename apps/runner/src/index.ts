@@ -10,16 +10,27 @@
  * Closing the connection's scope is where the runner tells the controller it
  * is going away. A runner that just disappeared would instead show as
  * unreachable for a minute.
+ *
+ * Both daemon forms write their log lines to `<home>/logs/runner.log`, never
+ * to stdout: the controller that spawns a local runner reads a line from its
+ * stdout, and a service unit discards stdout.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
-import * as Logger from "effect/Logger";
 import type * as Scope from "effect/Scope";
 import { Result } from "effect";
-import { parseGlobalOptions, resolveHomePath } from "@hercule/home";
+import {
+  loadBootstrapConfig,
+  locateCompiledBinary,
+  parseGlobalOptions,
+  resolveHomePath,
+  type ConfigOverrides,
+} from "@hercule/home";
+import { makeProcessLogLayer } from "@hercule/process-log";
+import { makeSupervisorLayer } from "@hercule/service";
 import { runCredentialAction } from "./credentials";
 import { runDaemon } from "./daemon";
-import { join } from "./join";
+import { runJoinCommand } from "./join";
 import { runLocalRunner } from "./local";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
@@ -31,7 +42,7 @@ const EXIT = { failed: 1, usage: 2 } as const;
 const USAGE = [
   "usage: hercule runner",
   "       hercule runner --local",
-  "       hercule runner join <controller-url> --token <token> [--reserved]",
+  "       hercule runner join <controller-url> --token <token> [--reserved] [--no-service]",
   "       hercule runner set-controller <controller-url>",
 ].join("\n");
 
@@ -59,15 +70,29 @@ const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Eff
 ).pipe(Effect.map(({ stopped }) => stopped.await));
 
 /**
- * Runs a daemon until it fails or a stop signal arrives. On failure, prints
- * the error and sets a failing exit code.
- *
- * All logs go to stderr, because the controller that spawns a local runner
- * reads a line from its stdout.
+ * Runs a daemon until it fails or a stop signal arrives, with its log lines
+ * going to `<home>/logs/runner.log` at the configured `log.level`. When the
+ * daemon fails, prints the error and sets exit code 1. Does the same without
+ * starting the daemon when `config.toml`, a `-c` flag or a `HERCULE_*`
+ * variable is invalid.
  */
 const runUntilStopped = async (
+  options: {
+    readonly home: string;
+    readonly overrides: ConfigOverrides;
+  },
   work: Effect.Effect<void, { readonly message: string }>,
 ): Promise<void> => {
+  const config = await Effect.runPromise(
+    Effect.result(
+      loadBootstrapConfig({ home: options.home, overrides: options.overrides, env: process.env }),
+    ),
+  );
+  if (Result.isFailure(config)) {
+    console.error(`hercule: ${config.failure.message}`);
+    process.exitCode = EXIT.failed;
+    return;
+  }
   const outcome = await Effect.runPromise(
     Effect.result(
       Effect.scoped(
@@ -82,7 +107,13 @@ const runUntilStopped = async (
         // stdin would otherwise outlive this process, still waiting for a
         // credential.
         Effect.ensuring(providerLogins.stopAll),
-        Effect.provideService(Logger.LogToStderr, true),
+        Effect.provide(
+          makeProcessLogLayer({
+            home: options.home,
+            role: "runner",
+            level: config.success.logLevel,
+          }),
+        ),
       ),
     ),
   );
@@ -116,7 +147,10 @@ export async function run(argv: readonly string[]): Promise<void> {
       reportMisuse(`unknown runner option \`${unknown}\``);
       return;
     }
-    return await runUntilStopped(verb === "--local" ? runLocalRunner(home) : runDaemon(home));
+    return await runUntilStopped(
+      { home, overrides: options.success.overrides },
+      verb === "--local" ? runLocalRunner(home) : runDaemon(home),
+    );
   }
   if (verb !== "join" && verb !== "set-controller") {
     // Any other subcommand that reaches this role came from
@@ -150,9 +184,10 @@ export async function run(argv: readonly string[]): Promise<void> {
   const token = flag < 0 ? undefined : args[flag + 1];
   const named = flag < 0 ? args : args.filter((_, at) => at !== flag && at !== flag + 1);
   const reserved = named.includes("--reserved");
+  const noService = named.includes("--no-service");
   // Whatever is left after removing the flags and the token is the URL, so a
   // stray flag is rejected instead of ignored.
-  const targets = named.filter((value) => value !== "--reserved");
+  const targets = named.filter((value) => value !== "--reserved" && value !== "--no-service");
   const controllerUrl = targets[0];
   if (controllerUrl === undefined) {
     reportMisuse("join needs the controller's URL");
@@ -168,14 +203,30 @@ export async function run(argv: readonly string[]): Promise<void> {
   }
 
   const outcome = await Effect.runPromise(
-    Effect.result(join({ controllerUrl, token, home, reserved })),
+    Effect.result(
+      runJoinCommand({
+        controllerUrl,
+        token,
+        home,
+        reserved,
+        service: noService
+          ? undefined
+          : {
+              request: {
+                role: "runner",
+                home,
+                overrides: options.success.overrides,
+                env: process.env,
+                program: locateCompiledBinary(),
+              },
+              supervisor: makeSupervisorLayer(process.env),
+            },
+        out: (line) => console.log(line),
+      }),
+    ),
   );
-
   if (outcome._tag === "Failure") {
     console.error(`hercule: ${outcome.failure.message}`);
     process.exitCode = EXIT.failed;
-    return;
   }
-  console.log(`This machine joined as ${outcome.success.name}.`);
-  console.log(`Its credential is in ${outcome.success.configPath}.`);
 }

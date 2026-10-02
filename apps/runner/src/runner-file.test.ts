@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { readRunnerFile, buildRunnerFilePath, type RunnerFile } from "./runner-file";
+import { locateRunnerFile } from "@hercule/home";
+import { readRunnerFile, type RunnerFile } from "./runner-file";
 
 const homes: Array<string> = [];
 
@@ -24,7 +25,7 @@ const ENROLLED: RunnerFile = {
 const createHomeWithRunnerFile = (contents: Record<string, unknown>): string => {
   const home = mkdtempSync(join(tmpdir(), "hercule-runner-file-"));
   homes.push(home);
-  const path = buildRunnerFilePath(home);
+  const path = locateRunnerFile(home);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify(contents, null, 2)}\n`, { mode: 0o600 });
   return home;

@@ -32,11 +32,19 @@ The script installs:
 
 - the `hercule` binary at `~/.local/bin/hercule`. When `~/.local/bin` is not on your `PATH`, it prints the line to add to your shell profile.
 - the desktop app at `/Applications/Hercule.app`.
-- a LaunchAgent that runs the controller, `hercule serve`, at login and restarts it when it stops. Its log is `logs/controller.log` in the Hercule Home, which is `~/.hercule` unless `HERCULE_HOME` is set.
 
-After a first install, run `hercule setup-url` and open the URL it prints to set up the controller.
+A first install starts nothing, because only you know what this Mac is for. To run the controller on it:
 
-**To update, run the same line again.** It replaces the binary and the app together, so the two always agree, and restarts the controller. The restart ends any turn in progress, so update when no agent is working. The controller migrates its database itself when it starts, and keeps a copy from before the migration in the Hercule Home's `backups/`.
+```sh
+hercule service install
+hercule setup-url
+```
+
+The first command installs a LaunchAgent that runs `hercule serve` at login and restarts it when it stops. The second prints the URL to open to set up the controller. To make this Mac a runner of a controller on another machine instead, run the join command from the Fleet's "Add machine" in that controller's web app; it installs the LaunchAgent for `hercule runner` itself.
+
+Either way, Hercule keeps everything in the Hercule Home, which is `~/.hercule` unless `HERCULE_HOME` is set. Its logs are `logs/controller.log` and `logs/runner.log` there. `hercule service status` says whether the service is running; `hercule service stop`, `start`, `restart` and `uninstall` do what they say.
+
+**To update, run the same line again.** It replaces the binary and the app together, so the two always agree, and restarts the service. The restart ends any turn in progress, so update when no agent is working. The controller migrates its database itself when it starts, and keeps a copy from before the migration in the Hercule Home's `backups/`.
 
 If your desktop app was installed before the app was signed with a certificate, the first update asks you to sign in once more, because the Keychain sees a different app ([docs/signing-certificate.md](docs/signing-certificate.md)). Later updates keep the sign-in.
 

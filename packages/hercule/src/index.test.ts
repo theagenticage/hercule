@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatch, VERSION } from "./index";
 
-const run = vi.hoisted(() => ({ controller: vi.fn(), runner: vi.fn(), cli: vi.fn() }));
+const run = vi.hoisted(() => ({
+  controller: vi.fn(),
+  runner: vi.fn(),
+  service: vi.fn(),
+  cli: vi.fn(),
+}));
 vi.mock("@hercule/controller", () => ({ run: run.controller }));
 vi.mock("@hercule/runner", () => ({ run: run.runner }));
+vi.mock("@hercule/service", () => ({ run: run.service }));
 vi.mock("@hercule/cli", () => ({ run: run.cli }));
 
 beforeEach(() => {
@@ -24,6 +30,16 @@ describe("dispatch", () => {
   it("sends serve to the controller", async () => {
     await dispatch(["serve"]);
     expect(run.controller).toHaveBeenCalledWith([]);
+  });
+
+  // `service` acts on this machine's supervisor, not on the controller, so
+  // it is a role of its own and its help comes from that role too.
+  it("sends service to the service role, its help included", async () => {
+    await dispatch(["--home", "/tmp/h", "service", "install", "--json"]);
+    expect(run.service).toHaveBeenCalledWith(["--home", "/tmp/h", "install", "--json"]);
+    await dispatch(["service", "--help"]);
+    expect(run.service).toHaveBeenCalledWith(["--help"]);
+    expect(run.cli).not.toHaveBeenCalled();
   });
 
   it("sends the runner daemon forms to the runner", async () => {

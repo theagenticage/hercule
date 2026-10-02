@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import { BootstrapConfig, buildEnvName, layer, HerculeHome } from "./index";
+import { BootstrapConfig, layer, HerculeHome } from "./index";
 
 let home: string;
 
@@ -40,14 +40,6 @@ const loadAndReadFailure = async (
   if (Result.isSuccess(result)) throw new Error("expected a failure");
   return result.failure;
 };
-
-describe("buildEnvName", () => {
-  it("uppercases, turns dots into underscores and prefixes HERCULE_", () => {
-    expect(buildEnvName("bind.port")).toBe("HERCULE_BIND_PORT");
-    expect(buildEnvName("data.dir")).toBe("HERCULE_DATA_DIR");
-    expect(buildEnvName("log.level")).toBe("HERCULE_LOG_LEVEL");
-  });
-});
 
 describe("the config layer", () => {
   it("uses the default for every key and writes the config file it would have read", async () => {
@@ -139,7 +131,7 @@ describe("the config layer", () => {
 
     const error = await loadAndReadFailure();
     expect(error._tag).toBe("ConfigFileError");
-    expect(error).toMatchObject({ path: join(home, "config.toml") });
+    expect(error.message.startsWith(`${join(home, "config.toml")} `)).toBe(true);
     expect(error.message).toContain("Expected a value");
   });
 

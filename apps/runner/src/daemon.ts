@@ -8,7 +8,7 @@ import { networkInterfaces } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { locateRunnerDir } from "@hercule/home";
+import { locateCompiledBinary, locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import { IDENTITY_PORT } from "@hercule/protocol";
 import {
   buildGitCredentialEnv,
@@ -21,12 +21,7 @@ import { probeFacts, thisMachine } from "./probe";
 import { HERCULE_SKILL } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
-import {
-  CONTROLLER_URL_SCHEMES,
-  NotEnrolled,
-  readRunnerFile,
-  buildRunnerFilePath,
-} from "./runner-file";
+import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile } from "./runner-file";
 import { connect, type RunnerRetired } from "./socket";
 import { readMachineHeadroom } from "./watermark";
 import { makeWorkspaceSteps } from "./workspace-actions";
@@ -62,14 +57,11 @@ const validateControllerUrl = (
   return Effect.fail(
     new NotEnrolled({
       message:
-        `controllerUrl in ${buildRunnerFilePath(home)} ${wrong}: ${controllerUrl}. ` +
+        `controllerUrl in ${locateRunnerFile(home)} ${wrong}: ${controllerUrl}. ` +
         "Run `hercule runner set-controller <controller-url>` to point this machine at a valid controller URL.",
     }),
   );
 };
-
-/** Bun's own marker for an entry script that lives inside a compiled binary. */
-const EMBEDDED = "/$bunfs/";
 
 /**
  * The runner could not install the `hercule` link and the session skill. This
@@ -109,7 +101,7 @@ const prepareRunnerTooling = (
       // CLI only in a compiled build; from a source checkout it is bun. Warn
       // once here, instead of leaving a session to find out when its first
       // call runs bun instead of hercule.
-      Bun.main.startsWith(EMBEDDED)
+      locateCompiledBinary() !== undefined
         ? Effect.void
         : Effect.logWarning(
             `This runner is not the compiled binary, so ${joinPath(locateRunnerDir(home), "bin", "hercule")} ` +

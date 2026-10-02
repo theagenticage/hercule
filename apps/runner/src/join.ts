@@ -1,7 +1,7 @@
 /**
- * Joins this machine to a controller. Both callers use this one function: the
- * `hercule runner join` command and the child process a controller spawns. A
- * second implementation would drift apart from the first.
+ * Joins this machine to a controller. Both callers use `join`: the `hercule
+ * runner join` command, through `runJoinCommand`, and the child process a
+ * controller spawns. A second implementation would drift apart from the first.
  *
  * The storage directory gets a random name. So a machine that joins again gets
  * a fresh directory: it never opens the workspaces of its previous
@@ -10,10 +10,19 @@
 import { mkdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
+import type * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { locateRunnerDir } from "@hercule/home";
+import { holdsControllerDatabase, locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import { JoinAnswer } from "@hercule/protocol";
-import { buildRunnerFilePath, writeRunnerFile, type RunnerFile } from "./runner-file";
+import {
+  describeStatus,
+  installService,
+  prepareServiceInstall,
+  type ServiceError,
+  type ServiceInstallRequest,
+  type Supervisor,
+} from "@hercule/service";
+import { writeRunnerFile, type RunnerFile } from "./runner-file";
 
 /** The join route is not in the operation table, so its path is written out here. */
 const JOIN_PATH = "/api/v1/runners/join";
@@ -132,7 +141,7 @@ export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
       crypto.getRandomValues(new Uint8Array(STORAGE_NAME_BYTES)),
     ).toString("hex");
     const storageDirectory = joinPath(runnerDir, storageName);
-    const configPath = buildRunnerFilePath(options.home);
+    const configPath = locateRunnerFile(options.home);
     const contents: RunnerFile = {
       runnerId: answer.runnerId,
       credential: answer.credential,
@@ -155,4 +164,83 @@ export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
     });
 
     return { runnerId: answer.runnerId, name: answer.name, configPath, storageDirectory };
+  });
+
+/** What `hercule runner join` was asked to do, and where its output goes. */
+export interface JoinCommandOptions extends JoinOptions {
+  /**
+   * The service unit to install once this machine has joined, and the
+   * Supervisor that installs it, or `undefined` with `--no-service`.
+   */
+  readonly service:
+    | {
+        readonly request: ServiceInstallRequest;
+        readonly supervisor: Layer.Layer<Supervisor, ServiceError>;
+      }
+    | undefined;
+  /** Writes one line for the person running the command. */
+  readonly out: (line: string) => void;
+}
+
+/** Returns `text` with a full stop at the end, unless it already ends a sentence. */
+const endSentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+/**
+ * Runs `hercule runner join`: joins this machine, then installs the runner's
+ * service unit unless `options.service` is `undefined`, and prints what it did
+ * and the service's status. Fails with a `JoinError` whose message says what
+ * to do next.
+ *
+ * Every refusal it can know about runs before the join, because the join
+ * spends the token and a second try needs a new one:
+ *
+ * - a Hercule Home that holds a controller database is refused, even without
+ *   a service, because its `runner.json` belongs to the controller's own
+ *   runner, which would then dial the other controller;
+ * - a `config.toml` that cannot be used is refused, because the runner daemon
+ *   would fail on it the same way;
+ * - every check `installService` runs, and the Supervisor's `prepare`, runs
+ *   before the join when a service is to be installed.
+ */
+export const runJoinCommand = (options: JoinCommandOptions): Effect.Effect<void, JoinError> =>
+  Effect.gen(function* () {
+    const refuse = (message: string) => new JoinError({ message, retryable: false });
+    const service = options.service;
+
+    if (
+      yield* Effect.mapError(holdsControllerDatabase(options.home), (error) =>
+        refuse(error.message),
+      )
+    ) {
+      return yield* refuse(
+        `The Hercule Home ${options.home} holds a controller database, and its runner.json belongs to the controller's own runner, so joining would point that runner at another controller. To make this machine a separate runner, give it its own Home with --home.`,
+      );
+    }
+    if (service !== undefined) {
+      yield* prepareServiceInstall(service.request).pipe(
+        Effect.provide(service.supervisor),
+        Effect.mapError((error) =>
+          refuse(
+            `${endSentence(error.message)} To join without installing the service, add --no-service.`,
+          ),
+        ),
+      );
+    }
+
+    const joined = yield* join(options);
+    options.out(`This machine joined as ${joined.name}.`);
+    options.out(`Its credential is in ${joined.configPath}.`);
+    if (service === undefined) return;
+
+    // The wait for a started runner can take half a minute.
+    options.out("Installing the service unit for `hercule runner`.");
+    const status = yield* installService(service.request).pipe(
+      Effect.provide(service.supervisor),
+      Effect.mapError((error) =>
+        refuse(
+          `The service was not installed. ${endSentence(error.message)} This machine has joined, so once that is fixed, run \`hercule service install\` rather than joining again.`,
+        ),
+      ),
+    );
+    options.out(describeStatus(status));
   });

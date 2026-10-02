@@ -24,6 +24,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import type { Plugin } from "@hercule/plugin-host";
 import type { HomePaths } from "@hercule/home";
+import { makeProcessLogLayer } from "@hercule/process-log";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
 import { AssistantSessionObserverLayer } from "./assistants";
@@ -266,6 +267,9 @@ export type ControllerServices =
  * `argv`, `env` and the master-key backend are arguments rather than read from
  * the process, so a test can use a temporary home and the file-backed key
  * exactly the way the binary uses the real ones.
+ *
+ * Everything the boot and `use` log goes to `<home>/logs/controller.log`, at
+ * the configured `log.level`, and nowhere else unless stderr is a terminal.
  */
 export const bootWith = <A, E>(
   options: BootOptions,
@@ -388,11 +392,11 @@ export const bootWith = <A, E>(
       const localRunner =
         options.localRunner === undefined
           ? undefined
-          : yield* startLocalRunner(
-              options.localRunner,
-              buildControllerOrigin(bootstrap.bindHost, bootstrap.bindPort),
-              paths.home,
-            );
+          : yield* startLocalRunner(options.localRunner, {
+              controllerUrl: buildControllerOrigin(bootstrap.bindHost, bootstrap.bindPort),
+              home: paths.home,
+              logLevel: bootstrap.logLevel,
+            });
 
       return { paths, identityId: record.id, setupUrl: url, localRunner } satisfies BootOutcome;
     });
@@ -407,7 +411,24 @@ export const bootWith = <A, E>(
     );
   });
 
-  return sequence.pipe(
+  // The process log is installed as soon as the config names the home and the
+  // level, so the migrations and every later boot step log into
+  // `<home>/logs/controller.log` too. A failure after that point is logged
+  // there as well as printed, because a service unit keeps only the log; a
+  // failure before it, such as a `config.toml` that does not parse, reaches
+  // only stderr.
+  const sequenceWithProcessLog = Effect.gen(function* () {
+    const paths = yield* HerculeHome;
+    const bootstrap = yield* BootstrapConfig;
+    return yield* Effect.provide(
+      sequence.pipe(
+        Effect.tapCause((cause) => Effect.logError("The controller stopped on a failure", cause)),
+      ),
+      makeProcessLogLayer({ home: paths.home, role: "controller", level: bootstrap.logLevel }),
+    );
+  });
+
+  return sequenceWithProcessLog.pipe(
     Effect.provide(Layer.mergeAll(config.layer(options.argv, options.env), BunFileSystem.layer)),
   );
 };
