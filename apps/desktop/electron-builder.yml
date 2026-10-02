@@ -19,10 +19,15 @@ directories:
   output: dist/release
 
 # Main, the preload and the renderer are bundled into `out/`, so the app needs
-# nothing else: no node_modules, no source. The renderer's Vite manifest is
-# left out: only the bundle budget check reads it, at build time.
+# nothing else: no node_modules, no source. The rest of `out/` holds what the
+# design checks write, such as `compare:bureau`'s and `capture:first-run`'s
+# screenshots, which the app never reads, so only the three bundles are
+# packaged. The renderer's Vite manifest is left out: only the bundle budget
+# check reads it, at build time.
 files:
-  - out/**
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
   - "!out/renderer/.vite/**"
   - package.json
 asar: true

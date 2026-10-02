@@ -90,13 +90,19 @@ describe("the release package", () => {
     expect(checked).toEqual(RELEASE_FUSES);
   });
 
-  it("holds only out/ and package.json in its app.asar", () => {
+  it("holds only the three bundles in out/ and package.json in its app.asar", () => {
     const archive = join(findPackagedApp("release"), "Contents/Resources/app.asar");
 
-    // Main, the preload and the renderer are bundled into out/. Anything else
-    // here, such as node_modules or source, ships to every user for nothing.
+    // Main, the preload and the renderer are bundled into out/main,
+    // out/preload and out/renderer. Anything else here, such as node_modules,
+    // source, or the screenshots the design checks write to out/, ships to
+    // every user for nothing.
+    const bundles = ["/out/main", "/out/preload", "/out/renderer"];
     const unexpected = listPackage(archive, { isPack: false }).filter(
-      (path) => path !== "/package.json" && path !== "/out" && !path.startsWith("/out/"),
+      (path) =>
+        path !== "/package.json" &&
+        path !== "/out" &&
+        !bundles.some((bundle) => path === bundle || path.startsWith(`${bundle}/`)),
     );
     expect(unexpected).toEqual([]);
   });
