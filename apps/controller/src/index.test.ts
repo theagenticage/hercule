@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import { MigrationError } from "effect/unstable/sql/Migrator";
 import { HerculeHomeError } from "./config";
 import { explain, STILL_STOPPING, untilStopped } from "./index";
 
@@ -22,6 +23,18 @@ describe("explain", () => {
     expect(explain(new HerculeHomeError({ action: "write", path, cause }))).toContain(
       "permission denied",
     );
+  });
+
+  it("gives the reason a migration failed after the migration's name", () => {
+    const reason =
+      "This version stores the account each connection belongs to, and cannot add it to the " +
+      "1 existing connection.";
+    const failure = new MigrationError({
+      kind: "Failed",
+      message: 'Migration "40_connection-account-id" failed',
+      cause: new Error(reason),
+    });
+    expect(explain(failure)).toBe(`Migration "40_connection-account-id" failed: ${reason}`);
   });
 });
 

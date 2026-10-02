@@ -108,7 +108,11 @@ export const githubPlugin: Plugin = {
       validate: (credentials: Record<string, string>) => {
         const pat = credentials["pat"] ?? "";
         return pat.startsWith("ghp_")
-          ? Effect.succeed({ displayName: pat === GITHUB_PAT ? GITHUB_LOGIN : "hubot" })
+          ? Effect.succeed(
+              pat === GITHUB_PAT
+                ? { displayName: GITHUB_LOGIN, accountId: "583231" }
+                : { displayName: "hubot", accountId: "480938" },
+            )
           : Effect.fail(new ConnectionValidationFailed({ message: "GitHub rejected the token." }));
       },
     }),

@@ -12,7 +12,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { FileSystem } from "effect/FileSystem";
 import type { PlatformError } from "effect/PlatformError";
-import type * as Migrator from "effect/unstable/sql/Migrator";
+import * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator";
@@ -96,14 +96,28 @@ export const backupBeforeMigration = (
     return path;
   });
 
-/** Applies every pending migration inside one transaction, and nothing else. */
+/**
+ * Applies every pending migration inside one transaction, and nothing else.
+ * Returns the migrations applied, and fails with a `MigrationError` whose
+ * `cause` is the error of a migration that failed.
+ *
+ * The migrator dies, rather than fails, when a migration fails. A migration
+ * may refuse a database on purpose, such as one holding rows it cannot
+ * convert, so that death is turned back into a failure the boot can explain.
+ * Any other defect passes through unchanged.
+ */
 export const runMigrations = (
   set: ReadonlyArray<Migrator.ResolvedMigration> = migrations,
 ): Effect.Effect<
   ReadonlyArray<readonly [id: number, name: string]>,
   SqlError | Migrator.MigrationError,
   SqlClient.SqlClient
-> => Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(set) }));
+> =>
+  Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(set) })).pipe(
+    Effect.catchDefect((defect) =>
+      defect instanceof Migrator.MigrationError ? Effect.fail(defect) : Effect.die(defect),
+    ),
+  );
 
 /** Returns the schema version of a migration set: the highest id in it. */
 const findHighestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =>

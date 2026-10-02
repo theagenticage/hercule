@@ -625,6 +625,14 @@ describe("Connections > a redirect flow", () => {
     expect(readPageText(await screen.findByRole("alert"))).toContain("denied");
   });
 
+  it("says a reconnect that signed in to another account changed nothing", async () => {
+    await openApp([PAPER], {}, "/connections?oauth=other-account");
+
+    expect(readPageText(await screen.findByRole("alert"))).toBe(
+      "That sign-in was for a different account than the connection you reconnected, so nothing changed. To add that account, create a new connection for it.",
+    );
+  });
+
   it("does not show an unknown outcome value from the address", async () => {
     await openApp([PAPER], {}, "/connections?oauth=%3Cscript%3Eboom%3C%2Fscript%3E");
 
@@ -1059,12 +1067,12 @@ describe("Connections > a device flow", () => {
     {
       status: "denied",
       message: "the request was declined at the provider",
-      line: "The sign-in was declined, so nothing was connected.",
+      line: "The sign-in was declined, so nothing changed.",
     },
     {
       status: "failed",
       message: "the provider refused the device flow with the error device_flow_disabled",
-      line: "The sign-in failed, so nothing was connected.",
+      line: "The sign-in did not finish, so nothing changed.",
     },
   ])("shows a short line and the controller's reason when the flow is $status", async (ending) => {
     await startSignIn({

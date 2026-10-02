@@ -45,6 +45,12 @@ export function explain(error: BootError): string {
       return `${error.option}: ${error.message}`;
     case "HerculeHomeError":
       return `Cannot ${error.action} ${error.path}: ${String(error.cause)}`;
+    // The migrator's own message names only the migration. The reason it
+    // failed, and what the operator can do about it, is in the cause.
+    case "MigrationError":
+      return error.cause instanceof Error
+        ? `${error.message}: ${error.cause.message}`
+        : error.message;
     default:
       return error.message;
   }

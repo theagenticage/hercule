@@ -37,6 +37,7 @@ export {
   type ConnectionsRuntime,
   type ConnectionSummary,
   type ConnectionTypeContribution,
+  type ExternalAccount,
 } from "./connections";
 
 export {

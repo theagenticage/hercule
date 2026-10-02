@@ -55,10 +55,15 @@ export const SETUP_LIFETIME_MS = 10 * 60 * 1000;
 
 /**
  * How an OAuth flow ended, as the word the Connections screen receives in its
- * URL. The user only ever sees one of these five outcomes, never the
+ * URL. The user only ever sees one of these six outcomes, never the
  * provider's own error message, which the controller does not put in a URL.
+ *
+ * `other-account` ends a reconnect whose sign-in was for another account
+ * than the connection's own. The URL holds only this word, so the screen's
+ * message cannot name the two accounts.
  */
-export type Outcome = "ok" | "denied" | "expired" | "exchange-failed" | "rejected";
+export type Outcome =
+  "ok" | "denied" | "expired" | "exchange-failed" | "rejected" | "other-account";
 
 /** The query string the browser brings to the callback. */
 const CallbackQuery = Schema.Struct({

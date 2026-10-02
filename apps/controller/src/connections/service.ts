@@ -13,6 +13,11 @@
  * database for as long as the service takes to respond. As a result, a
  * connection is written only once its account is known.
  *
+ * A reconnect keeps the connection's id, so its triggers and resources stay
+ * attached, and it must therefore sign in to the same account. `validate`
+ * returns the provider's stable id for the account, and a reconnect whose
+ * credentials belong to another id is refused with nothing written.
+ *
  * Credentials are stored in the secrets table under the owner
  * `connection/<id>`. The API returns only references to them: each name, and
  * when the value was last replaced.
@@ -32,7 +37,11 @@ import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { decodeAgainst, type ConnectionValidationFailed } from "@hercule/plugin-host";
+import {
+  decodeAgainst,
+  type ConnectionValidationFailed,
+  type ExternalAccount,
+} from "@hercule/plugin-host";
 import {
   CONNECTION_SORT_FIELDS,
   ConnectionCreateInput,
@@ -259,6 +268,42 @@ const describeIntervalPastExpiry = (interval: number): string =>
  */
 const ACCOUNT_CHECK_RETRY = { schedule: Schedule.exponential("1 second"), times: 2 };
 
+/**
+ * Checks whether new credentials belong to another account than the one the
+ * connection signs in as.
+ */
+const isOtherAccount = (account: ExternalAccount, connection: StoredConnection): boolean =>
+  connection.accountId !== account.accountId;
+
+/**
+ * Builds the refusal of a reconnect that signed in to another account.
+ * `connectionDisplayName` is the account name the connection stored at its
+ * last sign-in. The account may have been renamed since, so the message
+ * gives it as the last known name rather than as the name to sign in with.
+ */
+const describeOtherAccount = (account: ExternalAccount, connectionDisplayName: string): string =>
+  `the account ${account.displayName} is not the account this connection belongs to ` +
+  `(last signed in as ${connectionDisplayName}). A reconnect must stay with the same account, ` +
+  `because the connection's triggers and resources are tied to it. Reconnect with that ` +
+  `account, or create a new connection for ${account.displayName}`;
+
+/**
+ * How writing the connection at the end of a token flow ended:
+ *
+ * - `written`: the connection was created or reconnected, and is returned;
+ * - `connection-gone`: the connection being reconnected was deleted while
+ *   the user was at the provider;
+ * - `other-account`: the tokens belong to another account than the
+ *   connection being reconnected. `connectionDisplayName` is the name of the
+ *   connection's own account, for the refusal.
+ *
+ * Nothing is written in the last two cases.
+ */
+type TokenFlowWriteResult =
+  | { readonly _tag: "written"; readonly connection: Connection }
+  | { readonly _tag: "connection-gone" }
+  | { readonly _tag: "other-account"; readonly connectionDisplayName: string };
+
 /** Fails an OAuth callback with the outcome to show the user. */
 const failWithOutcome = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
 
@@ -370,8 +415,8 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Asks the type whether these credentials work, and returns the account's
-   * display name. When they do not work, fails with `validation` at the first
+   * Asks the type whether these credentials work, and returns the account
+   * they belong to. When they do not work, fails with `validation` at the first
    * credential field: the error is about the credentials as a whole, but a form
    * needs a field to show the message under. A type with no credential fields,
    * such as an OAuth type, gets the error at `credentials` itself.
@@ -379,7 +424,7 @@ const make = Effect.gen(function* () {
   const validateCredentials = (
     contribution: Contribution,
     credentials: Record<string, string>,
-  ): Effect.Effect<{ readonly displayName: string; readonly detail?: string }, Validation> =>
+  ): Effect.Effect<ExternalAccount, Validation> =>
     Effect.mapError(
       Effect.provide(contribution.validate(credentials), FetchHttpClient.layer),
       (failure: ConnectionValidationFailed) => {
@@ -533,14 +578,16 @@ const make = Effect.gen(function* () {
 
   /**
    * Writes the connection a token flow set up, in one transaction: a new
-   * connection, or new tokens and account for the one a reconnect names. The
-   * connection's secrets become the token set alone. Returns the connection,
-   * or `None` when the connection being reconnected was deleted while the
-   * user was at the provider; nothing is written then.
+   * connection, or new tokens for the one a reconnect names. The connection's
+   * secrets become the token set alone. Returns how the write ended (see
+   * `TokenFlowWriteResult`); a reconnect writes nothing when its connection was
+   * deleted while the user was at the provider, or when the tokens belong to
+   * another account.
    *
    * A new connection the user did not name gets the account name as its
-   * label. A reconnect changes only the account name and the status, and
-   * keeps the connection's label, topics and config.
+   * label. A reconnect changes only the account name, which may have been
+   * renamed, and the status. It keeps the connection's label, topics and
+   * config.
    *
    * `actor` is passed in rather than read, because the redirect flow's
    * callback arrives without a credential.
@@ -548,17 +595,17 @@ const make = Effect.gen(function* () {
   const writeConnectionFromTokens = ({
     setup,
     connectionType,
-    displayName,
+    account,
     tokens,
     actor,
   }: {
     readonly setup: StoredSetupTarget;
     readonly connectionType: RegisteredConnectionType;
-    /** The account name the type's `validate` returned for the new tokens. */
-    readonly displayName: string;
+    /** The account the type's `validate` returned for the new tokens. */
+    readonly account: ExternalAccount;
     readonly tokens: TokenSet;
     readonly actor: string;
-  }): Effect.Effect<Option.Option<Connection>, SqlError> =>
+  }): Effect.Effect<TokenFlowWriteResult, SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -569,8 +616,9 @@ const make = Effect.gen(function* () {
           const row = yield* connections.insert({
             pluginId,
             type: setup.type,
-            label: setup.label ?? buildDefaultLabel(displayName, contribution.displayName),
-            displayName,
+            label: setup.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
+            displayName: account.displayName,
+            accountId: account.accountId,
             labels: setup.labels,
             config: setup.config,
             at: now,
@@ -578,14 +626,21 @@ const make = Effect.gen(function* () {
           id = row.id;
         } else {
           // A reconnect keeps the connection's id, so anything that refers to
-          // it stays attached; only the account and the tokens are replaced.
-          // The check runs inside the transaction, so nothing is written under
-          // an id that no longer exists.
+          // it stays attached; only the account name and the tokens are
+          // replaced. The check runs inside the transaction, so nothing is
+          // written under an id that no longer exists.
           id = setup.connectionId;
-          if (Option.isNone(yield* connections.one(id))) return Option.none();
+          const existing = Option.getOrUndefined(yield* connections.one(id));
+          if (existing === undefined) return { _tag: "connection-gone" } as const;
+          if (isOtherAccount(account, existing)) {
+            return {
+              _tag: "other-account",
+              connectionDisplayName: existing.displayName,
+            } as const;
+          }
           yield* connections.update(
             id,
-            { displayName, status: "connected", statusDetail: null },
+            { displayName: account.displayName, status: "connected", statusDetail: null },
             now,
           );
         }
@@ -597,7 +652,10 @@ const make = Effect.gen(function* () {
           record: { topic: "connection", id },
           at: now,
         });
-        return Option.some(yield* Effect.orDie(readConnectionOrFail(id)));
+        return {
+          _tag: "written",
+          connection: yield* Effect.orDie(readConnectionOrFail(id)),
+        } as const;
       }),
     );
 
@@ -659,7 +717,7 @@ const make = Effect.gen(function* () {
         writeConnectionFromTokens({
           setup,
           connectionType: registered,
-          displayName: account.displayName,
+          account,
           tokens,
           // The user started this setup with an authenticated request. The
           // browser comes back without a credential, but the actor is still
@@ -667,7 +725,8 @@ const make = Effect.gen(function* () {
           actor: USER_ACTOR,
         }),
       );
-      if (Option.isNone(written)) return yield* failWithOutcome("expired");
+      if (written._tag === "connection-gone") return yield* failWithOutcome("expired");
+      if (written._tag === "other-account") return yield* failWithOutcome("other-account");
       return "ok" as const;
     });
 
@@ -751,6 +810,7 @@ const make = Effect.gen(function* () {
               label:
                 decoded.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
               displayName: account.displayName,
+              accountId: account.accountId,
               labels: decoded.labels ?? [],
               config,
               at,
@@ -814,6 +874,10 @@ const make = Effect.gen(function* () {
      * Replaces the credentials of an existing connection. This is how the user
      * reconnects a connection that needs reauthentication. The id stays the
      * same, so anything that refers to the connection stays attached.
+     *
+     * Fails with `invalid_state`, and writes nothing, when the new credentials
+     * belong to another account than the connection's: the message names both
+     * accounts and says to create a new connection instead.
      */
     setCredentials: (
       input: CredentialsInput,
@@ -839,6 +903,11 @@ const make = Effect.gen(function* () {
         }
         const credentials = yield* checkCredentialFields(contribution, decoded.credentials);
         const account = yield* validateCredentials(contribution, credentials);
+        if (isOtherAccount(account, row)) {
+          return yield* Effect.fail(
+            createInvalidStateError(describeOtherAccount(account, row.displayName)),
+          );
+        }
 
         return yield* withTransaction(
           sql,
@@ -926,7 +995,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Finishes the OAuth flow the browser came back from, and returns the path
-     * to redirect the browser to. The path carries one of the five `Outcome`
+     * to redirect the browser to. The path carries one of the six `Outcome`
      * words, never the provider's own error text.
      *
      * The code exchange and the type's `validate` call the provider, so they run
@@ -1030,7 +1099,9 @@ const make = Effect.gen(function* () {
      *    poll deleted it first, this one answers `expired`.
      * 4. The type checks the account, up to three times, and the connection
      *    is written. If every check fails, the answer is `failed`: the
-     *    approval is spent, so the user has to start again.
+     *    approval is spent, so the user has to start again. A reconnect that
+     *    signed in to another account also answers `failed`, and writes
+     *    nothing.
      */
     pollDeviceFlow: (
       input: ConnectionDevicePollInput,
@@ -1115,17 +1186,24 @@ const make = Effect.gen(function* () {
         const written = yield* writeConnectionFromTokens({
           setup,
           connectionType: registered,
-          displayName: account.success.displayName,
+          account: account.success,
           tokens: exchange.tokens,
           actor: yield* currentStamp,
         });
-        return Option.match(written, {
-          onNone: () => ({
-            status: "expired" as const,
-            message: "the connection this flow was reconnecting has been deleted",
-          }),
-          onSome: (connection) => ({ status: "done" as const, connection }),
-        });
+        switch (written._tag) {
+          case "connection-gone":
+            return {
+              status: "expired",
+              message: "the connection this flow was reconnecting has been deleted",
+            } as const;
+          case "other-account":
+            return {
+              status: "failed",
+              message: describeOtherAccount(account.success, written.connectionDisplayName),
+            } as const;
+          case "written":
+            return { status: "done", connection: written.connection } as const;
+        }
       }),
 
     /**

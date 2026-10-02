@@ -164,6 +164,7 @@ describe("run.start", () => {
           type: "github/github",
           label: "Acme GitHub",
           displayName: "acme",
+          accountId: "1",
           labels: [],
           config: {},
           at: AT,

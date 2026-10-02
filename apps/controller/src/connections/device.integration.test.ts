@@ -31,6 +31,7 @@ import {
 } from "@hercule/plugin-host";
 import { completeSetup, del, post, withServer, type ServerHarness } from "../http/testing";
 import {
+  buildAccount,
   buildAccountName,
   buildJsonResponse,
   createDeviceProvider,
@@ -108,7 +109,7 @@ const buildConnectionTypePlugin = (options: {
         validate: (credentials: Record<string, string>) => {
           const value = credentials["pat"] ?? credentials["accessToken"] ?? "";
           return value.startsWith("good-")
-            ? Effect.succeed({ displayName: buildAccountName(value) })
+            ? Effect.succeed(buildAccount(value))
             : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
         },
       }),
@@ -615,7 +616,7 @@ describe("POST /oauth/device/poll", () => {
     });
   });
 
-  it("reconnects the connection the start named, keeps its id, label and topics, and drops its pasted token", async () => {
+  it("reconnects the connection the start named, keeps its id, label and topics, takes the new name of the same account, and drops its pasted token", async () => {
     await withDevice(async ({ base, sql }, registry, token, provider) => {
       const created = await post(
         base,
@@ -678,6 +679,46 @@ describe("POST /oauth/device/poll", () => {
       });
       // The flow does not bring the deleted connection back as a new one.
       expect(await listConnections(base, token)).toEqual([]);
+    });
+  });
+
+  it("answers failed for a reconnect that signs in to another account, names both accounts, and leaves the connection unchanged", async () => {
+    await withDevice(async ({ base, sql }, registry, token, provider) => {
+      const created = await startDeviceOrFail(base, token);
+      await allowPoll(sql, created.setupId);
+      approve(provider);
+      const before = (await pollDeviceFlow(base, token, created.setupId))[
+        "connection"
+      ] as ConnectionRecord;
+      const surface = readConnectionsSurface(registry.device);
+      await Effect.runPromise(surface.report(before.id, { status: "needs-reauth" }));
+      // A token the type accepts, for another account than the first sign-in.
+      const otherAccountToken = "good-other@account-2";
+
+      const reconnect = await startDeviceOrFail(base, token, { connectionId: before.id });
+      await allowPoll(sql, reconnect.setupId);
+      approve(provider, otherAccountToken);
+      const answer = await pollDeviceFlow(base, token, reconnect.setupId);
+
+      expect(answer).toEqual({
+        status: "failed",
+        message:
+          `the account ${buildAccountName(otherAccountToken)} is not the account this ` +
+          `connection belongs to (last signed in as ${buildAccountName(GOOD_TOKEN)}). A ` +
+          "reconnect must stay with the same account, because the connection's triggers and " +
+          "resources are tied to it. Reconnect with that account, or create a new connection " +
+          `for ${buildAccountName(otherAccountToken)}`,
+      });
+      expect(await listConnections(base, token)).toEqual([
+        expect.objectContaining({
+          id: before.id,
+          status: "needs-reauth",
+          displayName: buildAccountName(GOOD_TOKEN),
+        }),
+      ]);
+      expect(await Effect.runPromise(surface.credentials(before.id))).toEqual({
+        accessToken: GOOD_TOKEN,
+      });
     });
   });
 

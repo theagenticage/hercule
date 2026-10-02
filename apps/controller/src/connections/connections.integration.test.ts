@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import {
   ConnectionValidationFailed,
@@ -31,7 +32,9 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import {
+  buildAccount,
   buildAccountName,
+  listConnections,
   readConnectionsSurface,
   type ConnectionRecord,
   type TestPlugin,
@@ -49,9 +52,14 @@ interface ErrorBody {
 /** The message the test type's `validate` fails with when it rejects a token. */
 const REJECTED = "that token is not one this account knows";
 
-/** The tokens the test type accepts, and one it does not. */
+/**
+ * The tokens the test type accepts, and one it does not. `GOOD` and `ROTATED`
+ * belong to one account under two names, as after a rename; `OTHER_ACCOUNT`
+ * belongs to another account.
+ */
 const GOOD = "good-1";
 const ROTATED = "good-2";
+const OTHER_ACCOUNT = "good-3@account-2";
 const BAD = "nope-1";
 
 /** A valid id that no record was ever created with. */
@@ -104,7 +112,7 @@ const buildConnectionPlugin = (options: {
         validate: (credentials: Record<string, string>) => {
           const token = credentials["token"] ?? "";
           return token.startsWith("good-")
-            ? Effect.succeed({ displayName: buildAccountName(token) })
+            ? Effect.succeed(buildAccount(token))
             : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
         },
       }),
@@ -243,6 +251,27 @@ describe("POST /connections", () => {
         Effect.orDie(sql`SELECT id FROM secrets WHERE owner_kind = 'connection'`),
       );
       expect(rows).toEqual([]);
+    });
+  });
+
+  it("refuses the token, and names the plugin bug, when the type returns an empty account id", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      // Nothing follows the `@`, so the test type returns an empty account id.
+      const response = await createConnection(base, token, {
+        type: "main/main-type",
+        credentials: { token: "good-1@" },
+      });
+
+      const error = await readError(response);
+      expect(error.code).toBe("validation");
+      expect(error.details?.issues).toContainEqual({
+        path: ["credentials", "token"],
+        message:
+          "the connection type main/main-type returned an empty account id, so the account " +
+          "cannot be checked on a reconnect. This is a bug in the plugin main: report it to " +
+          "its author",
+      });
+      expect(await listConnections(base, token)).toEqual([]);
     });
   });
 
@@ -471,7 +500,7 @@ describe("POST /connections/:id/credentials", () => {
   ): Promise<Response> =>
     post(base, `/api/v1/connections/${id}/credentials`, { credentials }, token);
 
-  it("sets a connection that needed reauthentication back to connected, and keeps its id, label and topics", async () => {
+  it("sets a connection that needed reauthentication back to connected, keeps its id, label and topics, and takes the new name of the same account", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       await Effect.runPromise(
@@ -513,28 +542,49 @@ describe("POST /connections/:id/credentials", () => {
       expect(after.credentials[0]?.rotatedAt).toBeUndefined();
     });
   });
+
+  it("refuses credentials for another account, names both accounts, and leaves the connection unchanged", async () => {
+    await withConnections(async ({ base }, registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      const surface = readConnectionsSurface(registry.main);
+      await Effect.runPromise(surface.report(one.id, { status: "needs-reauth" }));
+
+      const response = await setCredentials(base, token, one.id, { token: OTHER_ACCOUNT });
+
+      expect(await readError(response)).toEqual({
+        code: "invalid_state",
+        message:
+          `the account ${buildAccountName(OTHER_ACCOUNT)} is not the account this connection ` +
+          `belongs to (last signed in as ${buildAccountName(GOOD)}). A reconnect must stay with ` +
+          "the same account, because the connection's triggers and resources are tied to it. " +
+          "Reconnect with that account, or create a new connection for " +
+          buildAccountName(OTHER_ACCOUNT),
+      });
+      expect(await readConnection(base, token, one.id)).toMatchObject({
+        status: "needs-reauth",
+        displayName: one.displayName,
+      });
+      expect(await Effect.runPromise(surface.credentials(one.id))).toEqual({ token: GOOD });
+    });
+  });
 });
 
 describe("DELETE /connections/:id", () => {
   it("deletes the connection and every secret it owned", async () => {
-    await withConnections(async ({ base, audit }, _registry, token) => {
+    await withConnections(async ({ base, audit, secrets }, _registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
-      const second = await send("PUT", base, `/api/v1/secrets/connection/${one.id}/extra`, {
-        body: { value: "another-value" },
-        token,
-      });
-      expect(second.status).toBe(200);
+      // The test type takes one credential, and the API refuses to write a
+      // connection's secrets, so the second secret goes in through the repository.
+      await Effect.runPromise(
+        secrets.set({ kind: "connection", id: one.id }, "extra", Redacted.make("another-value")),
+      );
 
       const response = await del(base, `/api/v1/connections/${one.id}`, token);
 
       expect(response.status, await response.clone().text()).toBe(200);
       expect((await get(base, `/api/v1/connections/${one.id}`, token)).status).toBe(404);
-      const secrets = await get(
-        base,
-        `/api/v1/secrets?ownerKind=connection&ownerId=${one.id}`,
-        token,
-      );
-      expect(await secrets.json()).toEqual({ items: [] });
+      const left = await get(base, `/api/v1/secrets?ownerKind=connection&ownerId=${one.id}`, token);
+      expect(await left.json()).toEqual({ items: [] });
 
       const entries = await audit("connection.deleted");
       expect(entries).toHaveLength(1);

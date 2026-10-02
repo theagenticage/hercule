@@ -5,7 +5,12 @@
  * with a device flow.
  */
 import { expect } from "vitest";
-import type { ActivationContext, ConnectionsRuntime, Plugin } from "@hercule/plugin-host";
+import type {
+  ActivationContext,
+  ConnectionsRuntime,
+  ExternalAccount,
+  Plugin,
+} from "@hercule/plugin-host";
 import { get } from "../http/testing";
 
 /** A connection as the API returns it. */
@@ -36,6 +41,21 @@ export interface TestPlugin {
  * token and fail on any leak.
  */
 export const buildAccountName = (token: string): string => `acct:${[...token].reverse().join("")}`;
+
+/** The account id of every test token that names no account of its own. */
+const DEFAULT_ACCOUNT_ID = "account-1";
+
+/**
+ * Builds the account a test type's `validate` returns for a token. The name
+ * comes from `buildAccountName`. The id is the text after `@` in the token, or
+ * `DEFAULT_ACCOUNT_ID` when the token has no `@`. So tokens without `@` all
+ * belong to one account under different names, as after a rename, and a test
+ * signs in to another account with a token such as `good-1@account-2`.
+ */
+export const buildAccount = (token: string): ExternalAccount => ({
+  displayName: buildAccountName(token),
+  accountId: token.split("@")[1] ?? DEFAULT_ACCOUNT_ID,
+});
 
 /** Builds a JSON response, as a provider's OAuth endpoints send. */
 export const buildJsonResponse = (body: unknown, status = 200): Response =>
