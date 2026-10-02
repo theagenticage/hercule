@@ -73,8 +73,10 @@ export function ProviderLogin({
       if (started.userCode === undefined) return { ...started, probedAtStart: null };
       // A one-time-code login is finished by a snapshot taken after this one.
       // Reading it once the code is out is early enough: the vendor completes
-      // the login only after the user has typed that code.
-      const instances = await queryClient.ensureQueryData(providersQuery(client));
+      // the login only after the user has typed that code. It is read from
+      // the controller, not the cache, which may be older than the newest
+      // snapshot and would make that snapshot look like the login's result.
+      const instances = await queryClient.fetchQuery(providersQuery(client));
       return { ...started, probedAtStart: readProbedAt(instances, instanceId, runnerId) };
     },
   });

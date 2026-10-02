@@ -186,11 +186,14 @@ describe("a login with a one-time code from the vendor", () => {
     expect(onLoggedIn).not.toHaveBeenCalled();
 
     // An announcement while the harness is still logged out keeps the drawer open.
+    const countProviderReads = () =>
+      api.calls.filter((call) => call.path === "/api/v1/providers").length;
+    const before = countProviderReads();
     act(() => {
       announce([queryKeys.providers()]);
     });
     await waitFor(() => {
-      expect(api.calls.filter((call) => call.path === "/api/v1/providers")).toHaveLength(2);
+      expect(countProviderReads()).toBeGreaterThan(before);
     });
     expect(screen.getByRole("dialog")).toBeDefined();
 
