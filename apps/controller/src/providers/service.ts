@@ -355,6 +355,9 @@ const make = Effect.gen(function* () {
         );
         const instance = yield* readInstanceOrFail(id);
         yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        // Expected before the runner is asked, because a device login that
+        // fails at once can report its end before this fiber reads the answer.
+        yield* probes.expectLoginEnd(runnerId, id);
         const answer = yield* askRunner(
           runnerId,
           {
@@ -364,12 +367,20 @@ const make = Effect.gen(function* () {
             providerId: instance.providerId,
           },
           yield* ProviderLoginDeadline,
-        );
-        if (answer._tag !== "loginUrl")
+        ).pipe(Effect.tapError(() => probes.forgetLoginEnd(runnerId, id)));
+        if (answer._tag !== "loginUrl") {
+          yield* probes.forgetLoginEnd(runnerId, id);
           return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
+        }
         // Absent rather than empty: a code means the login is finished in the
         // user's browser, not through this exchange.
-        if (answer.userCode === undefined) return { url: answer.url };
+        if (answer.userCode === undefined) {
+          // A login finished by pasting a code reports no end. It also
+          // replaced any device login before it on this runner, and the runner
+          // never reports the end of a replaced login.
+          yield* probes.forgetLoginEnd(runnerId, id);
+          return { url: answer.url };
+        }
         if (answer.expiresInSeconds === undefined) {
           return { url: answer.url, userCode: answer.userCode };
         }

@@ -110,10 +110,11 @@ const make = Effect.gen(function* () {
         // A device login reads nothing back, so its end carries no outcome.
         // A fresh probe of the instance on that runner tells whether the user
         // finished it, and announces the new snapshot to everyone watching.
-        // Forked, because the probe waits on the runner.
+        // Forked, because the probe waits on the runner. The probe runs only
+        // for a login this controller started.
         return forkAndAbsorbFailures(
           "Probing an instance after its login ended failed",
-          probes.probe(traffic.runnerId, traffic.ended.instanceId),
+          probes.probeAfterLoginEnd(traffic.runnerId, traffic.ended.instanceId),
         );
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's
