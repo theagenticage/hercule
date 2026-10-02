@@ -79,7 +79,7 @@ export function ProviderLogin({
   const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
   const [code, setCode] = useState("");
-  const [keyField, setKeyField] = useState<SecretFieldOffer | null>(null);
+  const [secretField, setSecretField] = useState<SecretFieldOffer | null>(null);
 
   const start = useMutation({
     mutationFn: () => startProviderLogin(client, row.id, runnerId),
@@ -96,7 +96,7 @@ export function ProviderLogin({
     // goes straight to "Logged in" without showing Log in for a moment.
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
-      finish();
+      endLogin();
     },
   });
   const install = useMutation({
@@ -113,15 +113,15 @@ export function ProviderLogin({
   });
 
   /** Clears the steps of a login or a secret field, and any error they showed. */
-  const reset = (): void => {
+  const clearLoginSteps = (): void => {
     setCode("");
-    setKeyField(null);
+    setSecretField(null);
     start.reset();
     submit.reset();
   };
   /** Ends a login that logged the harness in. */
-  const finish = (): void => {
-    reset();
+  const endLogin = (): void => {
+    clearLoginSteps();
     onLoggedIn?.();
   };
 
@@ -135,7 +135,7 @@ export function ProviderLogin({
   }, [startOnOpen, row.logIn, row.loggedIn, start]);
 
   const started = start.data;
-  const busy = started !== undefined || keyField !== null;
+  const busy = started !== undefined || secretField !== null;
 
   return (
     <MarkedRow
@@ -145,7 +145,7 @@ export function ProviderLogin({
       detailMono={row.path !== null}
       end={
         busy ? (
-          <button type="button" className="btn btn--sm btn--quiet" onClick={reset}>
+          <button type="button" className="btn btn--sm btn--quiet" onClick={clearLoginSteps}>
             Cancel
           </button>
         ) : row.loggedIn ? (
@@ -176,7 +176,7 @@ export function ProviderLogin({
                 key={field.name}
                 type="button"
                 className="btn btn--sm"
-                onClick={() => setKeyField(field)}
+                onClick={() => setSecretField(field)}
               >
                 {field.label}
               </button>
@@ -206,14 +206,19 @@ export function ProviderLogin({
               <DeviceLoginWait
                 client={client}
                 login={started.deviceLogin}
-                onDone={finish}
+                onDone={endLogin}
                 onRestart={() => start.mutate()}
               />
             }
           />
         )
-      ) : keyField !== null ? (
-        <SecretFieldEntry client={client} instanceId={row.id} field={keyField} onSaved={finish} />
+      ) : secretField !== null ? (
+        <SecretFieldEntry
+          client={client}
+          instanceId={row.id}
+          field={secretField}
+          onSaved={endLogin}
+        />
       ) : start.error !== null ? (
         <span className="fl-err" role="alert">
           {readErrorMessage(start.error)}
@@ -348,9 +353,9 @@ function DeviceLoginWait({
   const instances = useQuery(providersQuery(client)).data ?? [];
   const step = decideDeviceLoginStep(login, instances, useMinutesLeft(login.expiresAt));
 
-  const finish = useEffectEvent(onDone);
+  const endLogin = useEffectEvent(onDone);
   useEffect(() => {
-    if (step.kind === "done") finish();
+    if (step.kind === "done") endLogin();
   }, [step.kind]);
 
   if (step.kind === "expired") {
