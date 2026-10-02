@@ -601,6 +601,11 @@ describe("a connection type's token flows", () => {
       { setup: [{ kind: "oauth" }, { kind: "device" }], oauth: OAUTH, device: DEVICE },
       "not both",
     ],
+    [
+      "a pasted credential field named like the core's token set",
+      { setup: [{ kind: "credentials", fields: [{ name: "oauth.tokens", label: "Tokens" }] }] },
+      "the credential field name oauth.tokens is reserved",
+    ],
   ])("refuses %s, naming the type", async (_, parts, reason) => {
     const message = readErroredMessage(await bootWithType(parts));
 

@@ -51,7 +51,12 @@ import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
 // both live in the connections domain: everything they touch is there. This is
 // the only direction the two point in.
-import { ConnectionTypes, PluginConfigs, type RegisteredConnectionType } from "../connections";
+import {
+  ConnectionTypes,
+  OAUTH_TOKENS,
+  PluginConfigs,
+  type RegisteredConnectionType,
+} from "../connections";
 import { toPluginError, describeFieldIssues, truncateMessage } from "./errors";
 import { registerEventSourceContribution, type RegisteredEventKind } from "./event-sources";
 import { pluginRepository, type NewContribution } from "./repository";
@@ -226,6 +231,26 @@ const checkFlowDeclarations = (type: ConnectionType): string | undefined => {
 };
 
 /**
+ * Checks that no pasted credential field uses the name the core stores a
+ * token set under. Returns the reason the type is refused, or `undefined`
+ * when it is accepted.
+ *
+ * A connection's secrets carry no other mark of how they were obtained: the
+ * core reads a secret named `oauth.tokens` as the token set from a redirect
+ * flow or a device flow. A pasted value under that name would be parsed as a
+ * token set, fail, and send a working connection to `needs-reauth`.
+ */
+const checkCredentialFieldNames = (type: ConnectionType): string | undefined => {
+  const reserved = type.setup.some(
+    (step) =>
+      step.kind === "credentials" && step.fields.some((field) => field.name === OAUTH_TOKENS),
+  );
+  return reserved
+    ? `the credential field name ${OAUTH_TOKENS} is reserved for the tokens of a redirect flow or a device flow: choose another name`
+    : undefined;
+};
+
+/**
  * Checks what can be decided from the manifest alone, before any plugin code
  * runs. Returns the config's JSON Schema, or the reason the plugin is
  * `refused`.
@@ -336,7 +361,8 @@ const buildRegistrationHost = (
                   }),
                 );
               }
-              const declarationFailure = checkFlowDeclarations(decoded);
+              const declarationFailure =
+                checkFlowDeclarations(decoded) ?? checkCredentialFieldNames(decoded);
               if (declarationFailure !== undefined) {
                 return yield* Effect.fail(
                   new PluginError({

@@ -23,12 +23,13 @@ export interface StoredDeviceSetup extends StoredSetupTarget {
   readonly deviceCode: string;
   /** Seconds the provider wants between two polls. */
   readonly interval: number;
+  /** When the device code expires, after which no poll can finish the flow. */
+  readonly expiresAt: string;
 }
 
 /** Everything a new flow stores. */
 export interface NewDeviceSetup extends StoredDeviceSetup {
   readonly nextPollAt: string;
-  readonly expiresAt: string;
   readonly createdAt: string;
 }
 
@@ -63,6 +64,7 @@ const parseDeviceSetupRow = (row: DeviceSetupRow): StoredDeviceSetup => ({
   setupId: row.setup_id,
   deviceCode: row.device_code,
   interval: row.interval_seconds,
+  expiresAt: row.expires_at,
 });
 
 /** Returns the timestamp `seconds` after `timestamp`. */

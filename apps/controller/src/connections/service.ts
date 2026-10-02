@@ -220,13 +220,23 @@ const decodeDevicePoll = Schema.decodeUnknownEffect(ConnectionDevicePollInput);
 const DEVICE_FLOW_EXPIRED = "this device flow has ended or expired: start a new one";
 
 /**
- * The longest a device flow is kept, in seconds, and the longest pause
- * between two polls, whatever the provider asks for. A hostile or broken
- * provider could otherwise keep a setup row alive for years, or tell a client
- * to wait forever before its next poll.
+ * The longest a device flow is kept, in seconds, whatever the provider asks
+ * for. A hostile or broken provider could otherwise keep a setup row alive
+ * for years.
+ *
+ * The poll interval has no cap of its own: RFC 8628 section 3.5 forbids
+ * polling sooner than the provider asks. A flow whose next poll would come
+ * after it expires ends instead, so no client ever waits longer than this.
  */
 const MAX_DEVICE_FLOW_SECONDS = 30 * 60;
-const MAX_POLL_INTERVAL_SECONDS = 60;
+
+/**
+ * Builds the message for a device flow the provider wants polled so slowly
+ * that it would expire before its next poll.
+ */
+const describeIntervalPastExpiry = (interval: number): string =>
+  `the provider asks to wait ${interval} seconds before the next check, but the code expires ` +
+  `before then, so the sign-in cannot finish: start again to get a new code`;
 
 /**
  * How the account check is retried once a device flow's approval is spent:
@@ -947,7 +957,10 @@ const make = Effect.gen(function* () {
         const now = yield* nowIso;
         const setupId = mintToken();
         const lifetime = Math.min(code.expiresIn, MAX_DEVICE_FLOW_SECONDS);
-        const interval = Math.min(code.interval, MAX_POLL_INTERVAL_SECONDS);
+        const interval = code.interval;
+        if (interval >= lifetime) {
+          return yield* Effect.fail(createInvalidStateError(describeIntervalPastExpiry(interval)));
+        }
         const expiresAt = new Date(Date.parse(now) + lifetime * 1000).toISOString();
         yield* withTransaction(
           sql,
@@ -1033,11 +1046,18 @@ const make = Effect.gen(function* () {
           case "unreachable":
             return { status: exchange.status, interval: setup.interval } as const;
           case "slow-down": {
-            const interval = Math.min(
-              exchange.interval ?? setup.interval + SLOW_DOWN_STEP_SECONDS,
-              MAX_POLL_INTERVAL_SECONDS,
+            // RFC 8628 section 3.5: a slow_down adds five seconds for every
+            // later poll. A provider that names a longer interval gets it.
+            const interval = Math.max(
+              exchange.interval ?? 0,
+              setup.interval + SLOW_DOWN_STEP_SECONDS,
             );
-            yield* withTransaction(sql, deviceSetups.setInterval(setupId, interval, yield* nowIso));
+            const now = yield* nowIso;
+            if (Date.parse(now) + interval * 1000 >= Date.parse(setup.expiresAt)) {
+              yield* endFlow;
+              return { status: "failed", message: describeIntervalPastExpiry(interval) } as const;
+            }
+            yield* withTransaction(sql, deviceSetups.setInterval(setupId, interval, now));
             return { status: "slow-down", interval } as const;
           }
           case "expired":

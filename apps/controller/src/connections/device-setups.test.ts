@@ -62,6 +62,7 @@ describe("claimPoll", () => {
         config: { org: "acme" },
         deviceCode: "a-device-code",
         interval: 5,
+        expiresAt: afterStart(900),
       },
     });
     expect(result.again).toEqual({ _tag: "early", interval: 5 });

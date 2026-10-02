@@ -264,7 +264,29 @@ describe("POST /oauth/device/start", () => {
     });
   });
 
-  it("caps the flow's lifetime at 30 minutes and the poll interval at 60 seconds", async () => {
+  it("caps the flow's lifetime at 30 minutes", async () => {
+    await withDevice(async ({ base }, _registry, token, provider) => {
+      provider.answers.code = () =>
+        buildJsonResponse({
+          device_code: DEVICE_CODE,
+          user_code: "WDJB-MJHT",
+          verification_uri: "https://provider.test/device",
+          expires_in: 365 * 24 * 60 * 60,
+          interval: 600,
+        });
+
+      const before = Date.now();
+      const started = await startDeviceOrFail(base, token);
+
+      // The interval is the provider's own: polling sooner is not allowed.
+      expect(started.interval).toBe(600);
+      const lifetime = Date.parse(started.expiresAt) - before;
+      expect(lifetime).toBeGreaterThan(29 * 60 * 1000);
+      expect(lifetime).toBeLessThanOrEqual(30 * 60 * 1000 + 1000);
+    });
+  });
+
+  it("fails with invalid_state when the first poll would come after the code expires", async () => {
     await withDevice(async ({ base }, _registry, token, provider) => {
       provider.answers.code = () =>
         buildJsonResponse({
@@ -275,13 +297,12 @@ describe("POST /oauth/device/start", () => {
           interval: 3600,
         });
 
-      const before = Date.now();
-      const started = await startDeviceOrFail(base, token);
+      const response = await startDeviceFlow(base, token);
 
-      expect(started.interval).toBe(60);
-      const lifetime = Date.parse(started.expiresAt) - before;
-      expect(lifetime).toBeGreaterThan(29 * 60 * 1000);
-      expect(lifetime).toBeLessThanOrEqual(30 * 60 * 1000 + 1000);
+      expect(response.status).toBe(409);
+      const { error } = (await response.json()) as { error: { code: string; message: string } };
+      expect(error.code).toBe("invalid_state");
+      expect(error.message).toContain("wait 3600 seconds");
     });
   });
 
@@ -368,16 +389,31 @@ describe("POST /oauth/device/poll", () => {
     });
   });
 
-  it("caps the longer interval the provider asks for at 60 seconds", async () => {
+  it("adds at least five seconds, even when the provider names a shorter interval", async () => {
+    await withDevice(async ({ base, sql }, _registry, token, provider) => {
+      const { setupId } = await startDeviceOrFail(base, token);
+      await allowPoll(sql, setupId);
+      provider.answers.token = () => buildJsonResponse({ error: "slow_down", interval: 6 });
+
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "slow-down",
+        interval: 10,
+      });
+    });
+  });
+
+  it("ends the flow as failed when the longer interval would outlast the code", async () => {
     await withDevice(async ({ base, sql }, _registry, token, provider) => {
       const { setupId } = await startDeviceOrFail(base, token);
       await allowPoll(sql, setupId);
       provider.answers.token = () => buildJsonResponse({ error: "slow_down", interval: 3600 });
 
-      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
-        status: "slow-down",
-        interval: 60,
-      });
+      const ended = await pollDeviceFlow(base, token, setupId);
+      expect(ended.status).toBe("failed");
+      expect(ended["message"]).toContain("wait 3600 seconds");
+      // The flow ended, so the next poll finds no setup.
+      expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "expired" });
+      expect(provider.tokenRequests).toHaveLength(1);
     });
   });
 

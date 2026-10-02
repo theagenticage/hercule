@@ -55,8 +55,12 @@ const REJECTED = "that account is not one this type can act as";
 /** A well-formed `state` that no start ever created. */
 const ABSENT_STATE = "zzzz".repeat(16);
 
-/** The token endpoint's response for each grant type, which a test can replace. */
-type Answers = Record<string, () => Response>;
+/**
+ * The token endpoint's response for each grant type, which a test can replace.
+ * A test that needs a request held in flight returns a promise it resolves
+ * later.
+ */
+type Answers = Record<string, () => Response | Promise<Response>>;
 
 interface AuthServer {
   /** The origin the type's `authorizationUrl` and `tokenUrl` are built from. */
@@ -714,6 +718,102 @@ describe("the access token a plugin asks the core for", () => {
       expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
       const response = await get(base, `/api/v1/connections/${one.id}`, token);
       expect(await response.json()).toMatchObject({ status: "needs-reauth" });
+    });
+  });
+
+  describe("when the user reconnects while a refresh is in flight", () => {
+    /**
+     * Connects with tokens that need a refresh, starts a `credentials()` call
+     * whose refresh the provider holds, and reconnects through a second
+     * redirect flow while it waits. The provider then answers the held refresh
+     * with `answer`. Returns the held call's outcome and the connection.
+     */
+    const reconnectDuringRefresh = async (
+      { base }: ServerHarness,
+      registry: Registry,
+      token: string,
+      provider: AuthServer,
+      answer: () => Response,
+    ) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      const surface = readConnectionsSurface(registry.oauth);
+      let releaseRefresh = (): void => {};
+      let refreshArrived = (): void => {};
+      const arrived = new Promise<void>((resolve) => {
+        refreshArrived = resolve;
+      });
+      provider.answers["refresh_token"] = () => {
+        refreshArrived();
+        return new Promise((resolve) => {
+          releaseRefresh = () => {
+            resolve(answer());
+          };
+        });
+      };
+      const held = Effect.runPromise(Effect.result(surface.credentials(one.id)));
+      await arrived;
+
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({
+          access_token: "good-second",
+          refresh_token: "refresh-9",
+          token_type: "bearer",
+          expires_in: 3600,
+        });
+      const url = await startOAuthOrFail(base, token, { connectionId: one.id });
+      const callback = await sendOAuthCallback(base, {
+        state: url.searchParams.get("state") ?? "",
+        code: "another-code",
+      });
+      expect(callback.headers.get("location")).toBe("/connections?oauth=ok");
+
+      releaseRefresh();
+      const outcome = await held;
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      return { outcome, connection: (await response.json()) as ConnectionRecord, one, surface };
+    };
+
+    it("keeps the new tokens instead of the refreshed old ones", async () => {
+      await withOAuth(async (harness, registry, token, provider) => {
+        const { outcome, connection, one, surface } = await reconnectDuringRefresh(
+          harness,
+          registry,
+          token,
+          provider,
+          () =>
+            buildJsonResponse({
+              access_token: REFRESHED_TOKEN,
+              refresh_token: "refresh-2",
+              token_type: "bearer",
+              expires_in: 3600,
+            }),
+        );
+
+        expect(outcome).toMatchObject({ failure: { _tag: "ConnectionUnavailable" } });
+        expect(connection).toMatchObject({ status: "connected" });
+        expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
+          accessToken: "good-second",
+        });
+      });
+    });
+
+    it("leaves the connection connected when the provider rejects the old refresh", async () => {
+      await withOAuth(async (harness, registry, token, provider) => {
+        const { outcome, connection, one, surface } = await reconnectDuringRefresh(
+          harness,
+          registry,
+          token,
+          provider,
+          () => buildJsonResponse({ error: "invalid_grant" }, 400),
+        );
+
+        expect(outcome).toMatchObject({ failure: { _tag: "ConnectionUnavailable" } });
+        expect(connection).toMatchObject({ status: "connected" });
+        expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
+          accessToken: "good-second",
+        });
+      });
     });
   });
 });
