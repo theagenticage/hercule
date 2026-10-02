@@ -64,6 +64,7 @@ import {
 } from "./secrets";
 import {
   JoinTokensLayer,
+  LocalRunnerId,
   RunnerConnections,
   RunnerConnectionsLayer,
   startLocalRunner,
@@ -236,6 +237,7 @@ export type ControllerServices =
   | WorkspaceService
   | WorkspaceStepActivity
   | ConnectionService
+  | LocalRunnerId
   | HerculeHome
   | BootstrapConfig;
 
@@ -385,7 +387,15 @@ export const bootWith = <A, E>(
       return { paths, identityId: record.id, setupUrl: url, localRunner } satisfies BootOutcome;
     });
 
-    return yield* Effect.scoped(Effect.flatMap(steps, use)).pipe(
+    return yield* Effect.scoped(
+      Effect.flatMap(steps, (outcome) =>
+        // Provided here, next to the local runner the boot started, so a
+        // service built in `use` reads the id from the running child.
+        Effect.provideService(use(outcome), LocalRunnerId, {
+          read: () => outcome.localRunner?.runnerId(),
+        }),
+      ),
+    ).pipe(
       Effect.provide(withPlugins.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
       // A failed statement becomes one line that includes the file name,
       // because a controller that fails at boot has printed nothing else yet.

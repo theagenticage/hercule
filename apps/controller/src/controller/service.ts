@@ -71,7 +71,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
-  const localRunner = yield* LocalRunnerId;
+  const localRunnerId = yield* LocalRunnerId;
 
   const readControllerInfo = (): Effect.Effect<ControllerInfo, SettingError | SqlError> =>
     Effect.gen(function* () {
@@ -87,7 +87,7 @@ const make = Effect.gen(function* () {
         publicKey: Buffer.from(record.value.publicKey).toString("base64"),
         version: VERSION,
         defaultRunnerId: yield* settings.defaultRunnerId(),
-        localRunnerId: localRunner.read() ?? null,
+        localRunnerId: localRunnerId.read() ?? null,
       };
     });
 
@@ -162,5 +162,5 @@ export class Controller extends Context.Service<Controller, Effect.Success<typeo
 export const ControllerLayer: Layer.Layer<
   Controller,
   never,
-  SqlClient.SqlClient | ControllerIdentity | Settings | AuditLog
+  SqlClient.SqlClient | ControllerIdentity | Settings | AuditLog | LocalRunnerId
 > = Layer.effect(Controller)(make);

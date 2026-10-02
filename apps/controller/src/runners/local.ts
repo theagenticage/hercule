@@ -116,14 +116,14 @@ export interface LocalRunner {
  * running child reported, or `undefined` when the child has not reported one
  * yet or when this controller starts no local runner.
  *
- * The default always returns `undefined`. `hercule serve` provides the real
- * one after the boot has started the child, so a service built after that
- * reads the id live. A test provides its own.
+ * It has no default, so a service that reads it cannot be built without
+ * someone deciding where the id comes from. The boot provides it next to the
+ * local runner it starts, and a test provides its own.
  */
-export const LocalRunnerId = Context.Reference<{ readonly read: () => string | undefined }>(
-  "hercule/controller/runners/LocalRunnerId",
-  { defaultValue: () => ({ read: () => undefined }) },
-);
+export class LocalRunnerId extends Context.Service<
+  LocalRunnerId,
+  { readonly read: () => string | undefined }
+>()("hercule/controller/runners/LocalRunnerId") {}
 
 /**
  * Parses one announcement line, and returns `None` when the line is not JSON

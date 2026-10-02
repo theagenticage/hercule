@@ -27,7 +27,7 @@ import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { BootstrapConfig } from "./config";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { bodyLimits, operationLayers, buildPerimeterWarning, serve, webBundle } from "./http";
-import { LOCAL_RUNNER, LocalRunnerId } from "./runners";
+import { LOCAL_RUNNER } from "./runners";
 
 export { boot, bootWith, hashToken, buildSetupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
@@ -169,13 +169,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     // to this controller, and a controller that had already stopped listening
     // would treat that as a machine that disappeared.
     if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
-  }).pipe(
-    Effect.provide(operationLayers),
-    // Provided outside the operation layers, so the services they build read
-    // the id from the running child rather than from the default, which knows
-    // no local runner.
-    Effect.provideService(LocalRunnerId, { read: () => outcome.localRunner?.runnerId() }),
-  );
+  }).pipe(Effect.provide(operationLayers));
 
 export async function run(argv: readonly string[]): Promise<void> {
   // The signal handlers are installed outside the boot and removed only once
