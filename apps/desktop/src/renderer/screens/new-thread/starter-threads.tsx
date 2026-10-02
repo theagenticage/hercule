@@ -30,7 +30,7 @@ const STARTER_ICONS: Readonly<
 
 /**
  * Renders three starter threads under "Or start from one of these", for a
- * project whose Intake is empty, then a line that says what fills Intake.
+ * project whose Intake is empty, then a line that explains what fills Intake.
  * A click hands the starter's message to `onStart`, which adds it to the
  * Message Draft without sending it, so the user can finish the sentence.
  *

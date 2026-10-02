@@ -206,7 +206,7 @@ export function WaitLine({ text }: { readonly text: string }): JSX.Element {
 }
 
 /**
- * Renders a warning: `icon`, then `children`, which say what stands in the
+ * Renders a warning: `icon`, then `children`, which describe what stands in the
  * way and what to do about it. A button among the children sits under the
  * text.
  */

@@ -3,8 +3,8 @@
  * In a device login the user types a one-time code in the browser, and
  * nothing is sent back through Hercule. When the vendor's login ends, the
  * controller probes the instance again and announces the new snapshot, so the
- * login is finished once a fresh snapshot for the login's runner says the
- * harness is logged in. That holds only for a harness that was logged out as
+ * login is finished once a fresh snapshot for the login's runner shows the
+ * harness logged in. That holds only for a harness that was logged out as
  * the login started: see `DeviceLogin.loggedInAtStart`.
  */
 import type { CapabilitySnapshot, ProviderInstance } from "@hercule/contract";
@@ -25,7 +25,7 @@ export type DeviceLoginStep =
       readonly minutesLeft: number | null;
       readonly endsByItself: boolean;
     }
-  /** A snapshot taken after the login started says the harness is logged in. */
+  /** A snapshot taken after the login started shows the harness logged in. */
   | { readonly kind: "done" }
   /** The code expired before the login finished. */
   | { readonly kind: "expired" };
@@ -135,9 +135,9 @@ export const decideDeviceLoginStep = (
  * Returns the line shown while a device login waits, such as "Waiting for
  * you to finish signing in. The code expires in 12 minutes."
  *
- * - With `minutesLeft` null, the line does not say when the code expires:
+ * - With `minutesLeft` null, the line leaves out when the code expires:
  *   only the runner knows, and an older runner build does not say.
- * - When the login cannot end by itself, the line says why, so the user
+ * - When the login cannot end by itself, the line explains why, so the user
  *   knows to close it once they are done.
  */
 export const describeDeviceLoginWait = (

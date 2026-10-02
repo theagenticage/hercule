@@ -13,7 +13,7 @@ import "./new-project.css";
  * Thread in it.
  *
  * The dialog has no Connect GitHub button. Without a GitHub Connection, the
- * form says to connect GitHub in the web app, because the desktop app sets
+ * form asks the user to connect GitHub in the web app, because the desktop app sets
  * up a Connection only in its first run.
  *
  * `onClose` is called whenever the dialog closes, the project added or not.

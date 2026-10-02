@@ -37,9 +37,9 @@ import { DeviceCode } from "./device-code";
  *   browser, and the browser completes the login with the vendor. Hercule has
  *   nothing to send. When the vendor's login ends, the controller probes the
  *   instance again and announces the new snapshot, and the drawer closes by
- *   itself once that snapshot says the harness is logged in. When the user
+ *   itself once that snapshot shows the harness logged in. When the user
  *   logs in again, the harness was logged in before the login started, so no
- *   snapshot can tell that the login ended: the drawer stays open until the
+ *   snapshot shows that the login ended: the drawer stays open until the
  *   user closes it.
  */
 export function ProviderLogin({
@@ -94,7 +94,7 @@ export function ProviderLogin({
   };
 
   /**
-   * Finishes a one-time-code login once a fresh snapshot says the harness is
+   * Finishes a one-time-code login once a fresh snapshot shows the harness
    * logged in: closes the drawer and notifies the caller.
    */
   const finishLogin = (): void => {
@@ -226,8 +226,8 @@ export function ProviderLogin({
 }
 
 /**
- * The end of a one-time-code login: waits until a fresh snapshot says the
- * harness is logged in, then calls `onDone` once, or shows that the code
+ * The end of a one-time-code login: waits until a fresh snapshot shows the
+ * harness logged in, then calls `onDone` once, or shows that the code
  * expired. A login of a harness that was logged in already never calls
  * `onDone`, and the line asks the user to close the drawer instead. It keeps
  * the instances current through the live connection while it is on screen,
@@ -307,7 +307,7 @@ const parseSiteHost = (url: string | undefined): string => {
  * The other way to log in: for a provider whose credential is typed in,
  * such as an API key, rather than obtained through a vendor's browser login.
  * The plugin defines the field: its title is the drawer's title and the
- * input's label, and its description says where to get the credential. So
+ * input's label, and its description explains where to get the credential. So
  * this component does not know which provider it serves.
  *
  * The value is stored as a secret owned by the provider instance and is never

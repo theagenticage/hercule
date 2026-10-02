@@ -170,7 +170,7 @@ function useStageSize(
  * in place.
  *
  * The room is a picture with one label for assistive technology. The labels
- * over it are visible text, but the screen around the room says in words
+ * over it are visible text, but the screen around the room puts into words
  * everything they show.
  */
 export function OfficeRoom({

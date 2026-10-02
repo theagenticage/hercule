@@ -15,11 +15,11 @@ describe("countMinutesLeft", () => {
     expect(countMinutesLeft(EXPIRES_AT, EXPIRY - 14 * 60_000 - 1_000)).toBe(15);
   });
 
-  it("says 1 while the code has seconds left", () => {
+  it("returns 1 while the code has seconds left", () => {
     expect(countMinutesLeft(EXPIRES_AT, EXPIRY - 1)).toBe(1);
   });
 
-  it("says 0 from the moment the code expires", () => {
+  it("returns 0 from the moment the code expires", () => {
     expect(countMinutesLeft(EXPIRES_AT, EXPIRY)).toBe(0);
     expect(countMinutesLeft(EXPIRES_AT, EXPIRY + 60_000)).toBe(0);
   });
@@ -33,7 +33,7 @@ describe("describeMinutes", () => {
 });
 
 describe("describeCodeExpiry", () => {
-  it("says how long the code still works, or that it has expired", () => {
+  it("describes how long the code still works, or that it has expired", () => {
     expect(describeCodeExpiry(12)).toBe("The code expires in 12 minutes.");
     expect(describeCodeExpiry(1)).toBe("The code expires in 1 minute.");
     expect(describeCodeExpiry(0)).toBe("The code has expired.");

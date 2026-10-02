@@ -48,7 +48,7 @@ import { ProviderLogo } from "../thread/provider-logo";
  *   vendor's page. Nothing comes back through the app. The controller probes
  *   the instance when the vendor's login ends and announces the new
  *   snapshot on the `provider` live topic, and the login ends when a fresh
- *   snapshot says the harness is logged in. The screen does not poll, so
+ *   snapshot shows the harness logged in. The screen does not poll, so
  *   whoever mounts this row must keep the live connection open.
  *
  * `onLoggedIn` is called once when a login started here ends with the
@@ -235,7 +235,7 @@ export function ProviderLogin({
 /**
  * Renders the two steps of a paste-back login: open the sign-in page, then
  * paste the code it shows. `error` is the last submit's failure, if any. A
- * code the vendor refused marks the field and says why, in the book's words;
+ * code the vendor refused marks the field and shows why, in the book's words;
  * any other failure shows its own message.
  *
  * The code field is drawn by hand rather than with `FormField`: the book sets
@@ -332,7 +332,7 @@ function SignInPageButton({
 /**
  * Renders the end of a device-code login: the wait line with the minutes
  * the code has left, or, once the code has expired, that line and Start
- * again. Calls `onDone` once when a fresh snapshot says the harness is
+ * again. Calls `onDone` once when a fresh snapshot shows the harness
  * logged in, which never happens for a harness that was logged in when the
  * login started (`DeviceLogin.loggedInAtStart`); the user presses Cancel.
  *

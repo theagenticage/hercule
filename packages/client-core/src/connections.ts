@@ -176,7 +176,7 @@ export const listSetupFlows = (type: ConnectionType): ReadonlyArray<SetupFlow> =
  * Where a device flow stands after its last poll, as a screen acts on it:
  *
  * - `waiting`: the flow is still open. Poll again after `delay` milliseconds.
- *   `status` says why the flow is still open.
+ *   `status` is the reason the flow is still open.
  * - `ended`: the flow ended without a connection. `message` is the
  *   controller's reason, and polling again would only answer `expired`.
  * - `done`: the connection is written.

@@ -48,7 +48,7 @@ const submitOnEnter =
  *
  * Runners clone the repository through the first GitHub Connection. With no
  * GitHub Connection, the project is created without its repository, and the
- * form says so. `onConnectGitHub`, when given, adds a Connect GitHub now
+ * form shows that. `onConnectGitHub`, when given, adds a Connect GitHub now
  * button there; the first run passes it to go back to its GitHub step.
  *
  * The folder itself is never changed: threads clone from the remote.
@@ -60,7 +60,7 @@ const submitOnEnter =
  * Once everything is created, the project and resource reads are refreshed
  * and then `onAdded` is called with the project's id, so the caller finds
  * the project in the cache. When the project is created but its repository
- * is not, the form says why: Add project sends the repository again, and
+ * is not, the form shows why: Add project sends the repository again, and
  * "Continue without the repository" calls `onAdded` with the project as it
  * is.
  *

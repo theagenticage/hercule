@@ -225,7 +225,7 @@
   height: 16px;
 }
 
-/* The line that says where Hercule runs, and whether it answers. */
+/* The line that shows where Hercule runs, and whether it answers. */
 .fr .reach {
   display: flex;
   align-items: center;

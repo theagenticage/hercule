@@ -205,7 +205,7 @@ export interface RoomWing {
   /** The runner's name, engraved on the wing's plate. */
   readonly runnerName: string;
   /**
-   * What the plate says after the name: "this Mac · 6 desks", "this Mac",
+   * The plate's text after the name: "this Mac · 6 desks", "this Mac",
    * "6 desks", or "" when there is nothing to add.
    */
   readonly note: string;
@@ -298,7 +298,7 @@ export const buildRoomContents = (
      * setup address to be pasted does not count yet.
      */
     readonly canSignInOrSetUp: boolean;
-    /** Whether the controller runs on this Mac, which the wing's plate says. */
+    /** Whether the controller runs on this Mac, which the wing's plate shows. */
     readonly controllerOnThisMac: boolean;
     readonly assistants: readonly Assistant[];
     readonly putOff: readonly FirstRunStep[];

@@ -37,9 +37,9 @@ const STARTER_THREADS: Readonly<
 };
 
 /**
- * Returns the line under the starters that says what fills Intake: Triage
- * brings work from GitHub, so without a GitHub Connection the line says to
- * connect GitHub. It names no time of day, because Triage does not run on a
+ * Returns the line under the starters that explains what fills Intake:
+ * Triage brings work from GitHub, so without a GitHub Connection the line
+ * asks the user to connect GitHub. It names no time of day, because Triage does not run on a
  * schedule yet, and a time would be a promise nothing keeps.
  */
 export const describeEmptyIntake = (hasGitHubConnection: boolean): string =>

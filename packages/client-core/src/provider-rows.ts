@@ -20,7 +20,7 @@ export interface SecretFieldOffer extends ProviderSecretField {
 }
 
 /**
- * Adds the action label. A field that is already set says "Replace", because
+ * Adds the action label. A field that is already set is labelled "Replace", because
  * the stored value cannot be read, only overwritten.
  */
 const buildOffer = (field: ProviderSecretField): SecretFieldOffer => ({

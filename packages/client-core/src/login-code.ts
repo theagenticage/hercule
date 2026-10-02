@@ -5,7 +5,7 @@
 import { readValidationIssues } from "./errors";
 
 /**
- * Returns true when `error` says the vendor did not accept the pasted code.
+ * Returns true when `error` means the vendor did not accept the pasted code.
  * The controller answers such a code with a `validation` error whose issue
  * points at the `code` field. Any other error, such as a runner that cannot
  * be reached, returns false: the code itself may be fine.

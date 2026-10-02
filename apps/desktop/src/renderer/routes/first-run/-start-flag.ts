@@ -5,8 +5,8 @@
  * When the start succeeds, main saves the controller's URL and reloads the
  * window, so the page that asked for the start is gone. The reloaded page
  * finds a controller on this Mac that is not set up, which it would greet as
- * found. The mark tells it the user already pressed Open the office, so it
- * goes straight to the account step. Session storage lives as long as the
+ * found. The mark records that the user already pressed Open the office,
+ * so the reloaded page goes straight to the account step. Session storage lives as long as the
  * window and survives the reload.
  */
 

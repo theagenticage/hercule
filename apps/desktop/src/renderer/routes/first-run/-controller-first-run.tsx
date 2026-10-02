@@ -235,8 +235,8 @@ export function ControllerFirstRun({
  * Renders nothing.
  *
  * The controller's record has no live topic, but its `localRunnerId` is null
- * until its runner joins, which a push on the `runner` topic tells. So each
- * such push reads the controller's record again too. The subscription is
+ * until its runner joins, and the join arrives as a push on the `runner`
+ * topic. So each such push reads the controller's record again too. The subscription is
  * made before the live connection starts, so the connection's first reads
  * cover it.
  */

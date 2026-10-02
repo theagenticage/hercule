@@ -32,8 +32,8 @@ const TOKEN_REFUSED =
  *
  * 1. `setup.complete`, with the setup token main hands over. The client
  *    keeps the login token from the reply, so the user is signed in.
- * 2. `firstRunProgress.save`, which tells main a first run is in progress, so a
- *    relaunch resumes it. It comes straight after setup: a set-up controller
+ * 2. `firstRunProgress.save`, which records in main that a first run is in
+ *    progress, so a relaunch resumes it. It comes straight after setup: a set-up controller
  *    with no first-run record sends a relaunch home, past every later step.
  * 3. `settings.update`, which marks the web app's onboarding steps done, so
  *    the web app never asks for them again.
@@ -45,7 +45,7 @@ const TOKEN_REFUSED =
  * When a write after `setup.complete` fails, the error shows and Create
  * account tries again. The controller refuses a second `setup.complete`, so
  * each try first asks the controller whether setup already went through.
- * It asks the controller rather than the cache: the cache says setup is
+ * It asks the controller rather than the cache: the cache holds setup as
  * complete only once every read is done, because that moves the first run on.
  */
 export function AccountCard({

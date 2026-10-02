@@ -19,7 +19,7 @@ export const describeMinutes = (minutes: number): string =>
   `${String(minutes)} ${minutes === 1 ? "minute" : "minutes"}`;
 
 /**
- * Returns the sentence that tells how long a code still works, given its
+ * Returns the sentence about how long a code still works, given its
  * `countMinutesLeft`: "The code expires in 12 minutes.", or "The code has
  * expired." at 0.
  */

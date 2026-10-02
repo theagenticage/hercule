@@ -210,7 +210,7 @@ function Perk({
   );
 }
 
-/** Renders the line under the perks that says where Hercule runs, and whether it answers. */
+/** Renders the line under the perks that shows where Hercule runs, and whether it answers. */
 function ReachLine({
   state,
 }: {
@@ -252,7 +252,7 @@ function ReachLine({
 
 /**
  * Renders the welcome when there is no Hercule on this Mac to start. It is
- * drawn as a start error whose line says so, followed by the command that
+ * drawn as a start error whose line explains that, followed by the command that
  * installs Hercule, with Copy, then `tryAgain`.
  */
 function NotInstalled({ tryAgain }: { readonly tryAgain: ReactNode }): JSX.Element {

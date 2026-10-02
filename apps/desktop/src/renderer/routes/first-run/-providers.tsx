@@ -12,7 +12,7 @@ import { ProviderLogin } from "../../screens/provider-login";
 /**
  * Renders the providers step: the harnesses on the controller's runner,
  * `localRunner`, each with its own login. Continue waits for a login to be
- * `ready`. Until the runner joins, the step says it is waiting for it.
+ * `ready`. Until the runner joins, the step shows that it waits for the runner.
  */
 export function ProvidersCard({
   client,
@@ -24,7 +24,7 @@ export function ProvidersCard({
   onPutOff,
 }: {
   readonly client: HerculeClient;
-  /** The controller's origin, which tells whether the runner is on this Mac. */
+  /** The controller's origin, from which the step works out whether the runner is on this Mac. */
   readonly origin: string;
   readonly localRunner: Runner | null;
   readonly instances: readonly ProviderInstance[];
