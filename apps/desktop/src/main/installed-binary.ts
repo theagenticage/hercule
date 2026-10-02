@@ -119,28 +119,28 @@ export class InstalledBinary extends Context.Service<
 export const describeBinaryFailure = (exit: ProgramExit): string =>
   describeFailedExit(exit, "Hercule").replace(/^hercule: /, "");
 
-/**
- * Returns main's environment without any `HERCULE_*` variable, so that the
- * binary reads its settings from its default Hercule Home alone. `install`
- * refuses to run with one set, because the Service Unit would run without
- * it. Main's environment is read at each call, so each command runs with
- * the environment main has at that moment.
- */
-const buildBinaryEnvironment = (): NodeJS.ProcessEnv =>
-  removeVariablesWithPrefix(process.env, "HERCULE_");
-
 /** Builds the service on the binary at `binaryPath`. */
 export const makeInstalledBinaryLayer = (binaryPath: string): Layer.Layer<InstalledBinary> => {
   /**
-   * Runs the binary with `args` and returns how it exited. Fails with
-   * BinaryNotFound when there is no file at `binaryPath`, and with
-   * BinaryCommandFailed when the binary could not be started otherwise.
+   * Runs the binary with `args` and returns how it exited. It runs with
+   * main's environment at that moment, without any `HERCULE_*` variable, so
+   * that the binary reads its settings from its default Hercule Home alone:
+   * `install` refuses to run with one set, because the Service Unit would
+   * run without it. `path`, when given, replaces `PATH`.
+   *
+   * Fails with BinaryNotFound when there is no file at `binaryPath`, and
+   * with BinaryCommandFailed when the binary could not be started otherwise.
    */
   const runBinary = (
     args: ReadonlyArray<string>,
-    env: NodeJS.ProcessEnv,
+    path?: string,
   ): Effect.Effect<ProgramExit, BinaryNotFound | BinaryCommandFailed> =>
-    runProgram(binaryPath, args, { env }).pipe(
+    Effect.suspend(() => {
+      const env = removeVariablesWithPrefix(process.env, "HERCULE_");
+      return runProgram(binaryPath, args, {
+        env: path === undefined ? env : { ...env, PATH: path },
+      });
+    }).pipe(
       Effect.mapError((error) =>
         error.code === "ENOENT"
           ? new BinaryNotFound({ message: `There is no Hercule binary at ${binaryPath}.` })
@@ -149,15 +149,16 @@ export const makeInstalledBinaryLayer = (binaryPath: string): Layer.Layer<Instal
     );
 
   /**
-   * Runs `hercule service <verb> --json` and decodes what it prints. Fails
-   * when it exits with an error, or prints output that does not decode.
+   * Runs `hercule service <verb> --json`, with `path` as its `PATH` when
+   * given, and decodes what it prints. Fails when it exits with an error, or
+   * prints output that does not decode.
    */
   const runServiceCommand = (
     verb: string,
-    env: NodeJS.ProcessEnv,
+    path?: string,
   ): Effect.Effect<ServiceReport, BinaryNotFound | BinaryCommandFailed> =>
     Effect.gen(function* () {
-      const exit = yield* runBinary(["service", verb, "--json"], env);
+      const exit = yield* runBinary(["service", verb, "--json"], path);
       if (exit.exitCode !== 0)
         return yield* new BinaryCommandFailed({ line: describeBinaryFailure(exit) });
       const report = decodeServiceReport(exit.stdout);
@@ -187,20 +188,12 @@ export const makeInstalledBinaryLayer = (binaryPath: string): Layer.Layer<Instal
     );
 
   return Layer.succeed(InstalledBinary)({
-    readStatus: Effect.suspend(() =>
-      limitQuickCommand(
-        "hercule service status",
-        runServiceCommand("status", buildBinaryEnvironment()),
-      ),
-    ),
-    install: (path) =>
-      Effect.suspend(() =>
-        runServiceCommand("install", { ...buildBinaryEnvironment(), PATH: path }),
-      ),
+    readStatus: limitQuickCommand("hercule service status", runServiceCommand("status")),
+    install: (path) => runServiceCommand("install", path),
     readSetupUrl: limitQuickCommand(
       "hercule setup-url",
       Effect.gen(function* () {
-        const exit = yield* runBinary(["setup-url"], buildBinaryEnvironment());
+        const exit = yield* runBinary(["setup-url"]);
         if (exit.exitCode === NO_SETUP_URL_EXIT_CODE) return null;
         if (exit.exitCode !== 0) {
           return yield* new BinaryCommandFailed({ line: describeBinaryFailure(exit) });
