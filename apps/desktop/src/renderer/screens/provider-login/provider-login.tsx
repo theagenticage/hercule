@@ -20,7 +20,7 @@ import {
   type SecretFieldOffer,
 } from "@hercule/client-core";
 import { providersQuery } from "../../app/queries";
-import { ExternalIcon } from "../../icons";
+import { ExternalIcon } from "../../icons/external";
 import { DeviceCodeSteps, DoneMark, FormField, MarkedRow, NumberedStep, WaitLine } from "../step";
 import { ProviderLogo } from "../thread/provider-logo";
 

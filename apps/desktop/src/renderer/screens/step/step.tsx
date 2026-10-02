@@ -6,7 +6,8 @@
  * presentational: it takes values and callbacks and reads nothing.
  */
 import { useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
-import { CheckIcon, ExternalIcon } from "../../icons";
+import { CheckIcon } from "../../icons/check";
+import { ExternalIcon } from "../../icons/external";
 import "./step.css";
 
 /** Renders a framed list of `MarkedRow`s. */

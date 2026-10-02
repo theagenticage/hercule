@@ -13,7 +13,9 @@ import {
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
 import { useSendOnChange } from "../app/send-on-change";
-import { ComposeIcon, SearchIcon, SidebarIcon } from "../icons";
+import { ComposeIcon } from "../icons/compose";
+import { SearchIcon } from "../icons/search";
+import { SidebarIcon } from "../icons/sidebar";
 import { buildSidebar, listGoMenuThreads, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";

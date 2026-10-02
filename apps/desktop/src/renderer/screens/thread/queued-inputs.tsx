@@ -4,7 +4,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { canSteerOrCancelQueuedInputs, queryKeys, readErrorMessage } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { queuedInputsQuery, sessionQuery } from "../../app/queries";
-import { ClockIcon } from "../../icons";
+import { ClockIcon } from "../../icons/clock";
 import "./queued-inputs.css";
 
 /**

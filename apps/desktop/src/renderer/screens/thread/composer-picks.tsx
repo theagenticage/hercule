@@ -9,7 +9,7 @@ import {
   type ThreadKind,
 } from "@hercule/client-core";
 import type { ModelOption } from "@hercule/contract";
-import { SlidersIcon } from "../../icons";
+import { SlidersIcon } from "../../icons/sliders";
 import { ComposerMenu } from "./composer-menu";
 import { ModelMenu } from "./model-menu";
 import { OptionsMenu } from "./options-menu";

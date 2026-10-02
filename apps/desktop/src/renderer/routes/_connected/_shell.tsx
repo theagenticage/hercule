@@ -7,11 +7,16 @@ import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
 import { ensureShellData, threadsQuery } from "../../app/queries";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
-import { ProjectPicker } from "../../screens/new-thread/project-picker";
 import { Shell } from "../../shell";
 
-// The New project dialog is loaded the first time it opens, so its code is
-// not part of the first screen's scripts (spec 17 §Performance).
+// The project picker and the New project dialog are each loaded the first
+// time they open, so their code is not part of the first screen's scripts
+// (spec 17 §Performance).
+const ProjectPicker = lazy(() =>
+  import("../../screens/new-thread/project-picker").then((module) => ({
+    default: module.ProjectPicker,
+  })),
+);
 const NewProjectDialog = lazy(() =>
   import("../../screens/new-project").then((module) => ({ default: module.NewProjectDialog })),
 );
@@ -118,31 +123,31 @@ function ShellLayout(): JSX.Element {
       <Shell onNewThread={openNewThread}>
         <Outlet />
       </Shell>
-      {dialog === "picker" ? (
-        <ProjectPicker
-          onPick={openDraft}
-          onNewProject={() => {
-            setDialog("new-project");
-          }}
-          onClose={() => {
-            // The picker's close event fires after New project has already
-            // asked for the next dialog, which must stay.
-            setDialog((current) => (current === "picker" ? null : current));
-          }}
-        />
-      ) : null}
-      {dialog === "new-project" ? (
-        // Without its own boundary, the dialog's load would suspend the shell
-        // behind it.
-        <Suspense fallback={null}>
+      {/* Without a boundary of their own, a dialog's load would suspend the
+          shell behind it. */}
+      <Suspense fallback={null}>
+        {dialog === "picker" ? (
+          <ProjectPicker
+            onPick={openDraft}
+            onNewProject={() => {
+              setDialog("new-project");
+            }}
+            onClose={() => {
+              // The picker's close event fires after New project has already
+              // asked for the next dialog, which must stay.
+              setDialog((current) => (current === "picker" ? null : current));
+            }}
+          />
+        ) : null}
+        {dialog === "new-project" ? (
           <NewProjectDialog
             onAdded={openDraft}
             onClose={() => {
               setDialog(null);
             }}
           />
-        </Suspense>
-      ) : null}
+        ) : null}
+      </Suspense>
     </>
   );
 }

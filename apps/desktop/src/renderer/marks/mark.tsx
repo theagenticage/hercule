@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { IconFrame } from "../icons";
+import { IconFrame } from "../icons/icon-frame";
 import type { MarkState } from "./mark-state";
 import "./mark.css";
 

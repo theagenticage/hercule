@@ -201,6 +201,19 @@ const viteAssetUrlSyntax = {
 const specimensMessage =
   "The specimen sheets are a development tool that never ships, so no renderer file outside specimens/ imports them. Import the component the sheet draws instead.";
 const specimensPattern = { group: ["**/specimens", "**/specimens/*"], message: specimensMessage };
+/**
+ * The desktop renderer's icons folder lists every icon for the specimen
+ * sheet and the tests. App code imports each icon from its own module: an
+ * icon reached through the list ships with the first screen, even when only a
+ * dialog loaded later draws it.
+ */
+const iconListPattern = {
+  // A regular expression rather than a group: a group of `**/icons` would also
+  // refuse every module inside the folder, as a `.gitignore` line does.
+  regex: "(^|/)icons(/index)?$",
+  message:
+    "Import each icon from its own module, such as `../icons/plus`. The icons folder's index lists every icon for the specimen sheet and the tests, and an icon reached through it ships with the first screen even when only a dialog loaded later draws it.",
+};
 const specimensCalls = buildImportCalls("/(^|\\x2F)specimens(\\x2F|$)/", specimensMessage);
 
 /**
@@ -306,7 +319,7 @@ export default tseslint.config(
   {
     files: ["apps/desktop/src/renderer/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": browserImports({ more: [specimensPattern] }),
+      "no-restricted-imports": browserImports({ more: [specimensPattern, iconListPattern] }),
       "no-restricted-syntax": browserSyntax({ more: [...desktopRendererSyntax, ...markupSyntax] }),
     },
   },
@@ -342,7 +355,9 @@ export default tseslint.config(
     // because a rule's options here replace the ones above.
     files: ["apps/desktop/src/renderer/routes/**/*.tsx"],
     rules: {
-      "no-restricted-imports": browserImports({ more: [shellPattern, specimensPattern] }),
+      "no-restricted-imports": browserImports({
+        more: [shellPattern, specimensPattern, iconListPattern],
+      }),
     },
   },
   {
@@ -353,8 +368,15 @@ export default tseslint.config(
   },
   {
     // The desktop app's layout route mounts the shell, so it may import it,
-    // but it keeps the specimen ban.
+    // but it keeps the specimen and icon-list bans.
     files: ["apps/desktop/src/renderer/routes/_connected/_shell.tsx"],
+    rules: {
+      "no-restricted-imports": browserImports({ more: [specimensPattern, iconListPattern] }),
+    },
+  },
+  {
+    // The specimen sheets draw every icon, and never ship.
+    files: ["apps/desktop/src/renderer/specimens/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": browserImports({ more: [specimensPattern] }),
     },

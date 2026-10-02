@@ -15,7 +15,10 @@ import {
 } from "@hercule/client-core";
 import type { FolderPickOutcome } from "../../../ipc/contract";
 import { connectionsQuery } from "../../app/queries";
-import { BranchIcon, PauseIcon, QuestionIcon, WorkspaceIcon } from "../../icons";
+import { BranchIcon } from "../../icons/branch";
+import { PauseIcon } from "../../icons/pause";
+import { QuestionIcon } from "../../icons/question";
+import { WorkspaceIcon } from "../../icons/workspace";
 import { GitHubMark } from "../../logos";
 import { FormField, MarkedCard, Warning } from "../step";
 import "./new-project.css";

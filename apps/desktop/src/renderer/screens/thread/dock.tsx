@@ -14,7 +14,7 @@ import {
 } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
-import { CheckIcon } from "../../icons";
+import { CheckIcon } from "../../icons/check";
 import { isSendKey } from "./send-key";
 import "./dock.css";
 

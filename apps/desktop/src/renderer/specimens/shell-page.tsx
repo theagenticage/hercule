@@ -322,6 +322,18 @@ const buildRouter = (
 };
 
 /**
+ * Waits until the page holds an element that matches `selector`, checking
+ * once a frame. Returns when it does, or after five seconds when it never
+ * does, and leaves the failure to the check that follows.
+ */
+const waitForElement = async (selector: string): Promise<void> => {
+  const deadline = performance.now() + 5000;
+  while (document.querySelector(selector) === null && performance.now() < deadline) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+};
+
+/**
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, and the start cards with the focus in the message
  * field when it opens a draft, and started no read. Fails with the keys of the
@@ -395,6 +407,9 @@ async function mountShellSpecimen(
       </QueryClientProvider>,
     );
   });
+  // The starters, which a draft shows in a project with no open task, load
+  // the first time they show, so they arrive after the first render.
+  if (screens.draft !== undefined) await waitForElement(".start");
   assertShellDrawn(queryClient, screens);
 }
 
