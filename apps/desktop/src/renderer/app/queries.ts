@@ -253,7 +253,10 @@ export const startTasksQuery = (client: HerculeClient, projectId: string) =>
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** Reads the controller's own record, whose `localRunnerId` names the runner beside it. */
+/**
+ * Reads the controller's own record. Its `localRunnerId` is the runner on the
+ * controller's machine, or `null` when no runner runs there.
+ */
 export const controllerQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.controller(),

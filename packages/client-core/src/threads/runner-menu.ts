@@ -49,7 +49,7 @@ export const findDimmedReason = (
 
 /**
  * Returns one row per runner that is not retired, and the default runner: the
- * local runner when it is usable, else the first usable runner, else `null`.
+ * runner on this Mac when it is usable, else the first usable runner, else `null`.
  * A row is dimmed, with the reason, when its runner is not online, is
  * draining, or is not logged in to the instance.
  */
@@ -91,15 +91,15 @@ export const buildRunnerMenu = (
  *
  * - the selected runner, even a retired one, because a started thread keeps
  *   the runner it ran on;
- * - otherwise the local runner, unless it is retired;
+ * - otherwise the runner on this Mac, unless it is retired;
  * - otherwise the first runner in the list that is not retired;
  * - otherwise `undefined`, when every runner is retired or there are none.
  */
 export const findReferenceRunner = (
   runners: readonly Runner[],
   selectedRunnerId: string | null,
-  localRunnerId: string | null,
+  thisMacRunnerId: string | null,
 ): Runner | undefined =>
   runners.find((runner) => runner.id === selectedRunnerId) ??
-  runners.find((runner) => runner.id === localRunnerId && !isRetired(runner)) ??
+  runners.find((runner) => runner.id === thisMacRunnerId && !isRetired(runner)) ??
   runners.find((runner) => !isRetired(runner));

@@ -151,7 +151,7 @@ export function ThreadComposer({
   const catalogs: ThreadCatalogs = {
     instances,
     runners,
-    localRunnerId: null,
+    thisMacRunnerId: null,
     projects,
     resources,
     workspaces,

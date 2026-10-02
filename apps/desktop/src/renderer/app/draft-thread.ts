@@ -46,7 +46,7 @@ export function useDraftThread(address: DraftAddress | null): DraftView | null {
   const lists = {
     instances: useSuspenseQuery(providersQuery(client)).data,
     runners,
-    localRunnerId: useQuery({ ...localRunnerQuery(bridge, runners), enabled: open }).data ?? null,
+    thisMacRunnerId: useQuery({ ...localRunnerQuery(bridge, runners), enabled: open }).data ?? null,
     projects: useSuspenseQuery(projectsQuery(client)).data,
     resources: useSuspenseQuery(resourcesQuery(client)).data,
     workspaces: useSuspenseQuery(workspacesQuery(client)).data,

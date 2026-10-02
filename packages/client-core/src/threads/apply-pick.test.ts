@@ -46,8 +46,8 @@ const CODEX = buildInstance("codex", "Codex", [
 const CATALOGS: {
   readonly instances: readonly ProviderInstance[];
   readonly runners: readonly Runner[];
-  readonly localRunnerId: string | null;
-} = { instances: [CLAUDE, CODEX], runners: [LOCAL, REMOTE], localRunnerId: LOCAL.id };
+  readonly thisMacRunnerId: string | null;
+} = { instances: [CLAUDE, CODEX], runners: [LOCAL, REMOTE], thisMacRunnerId: LOCAL.id };
 
 /**
  * Returns what the thread runs with while the picks are made: the defaults with

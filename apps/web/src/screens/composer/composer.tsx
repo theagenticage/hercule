@@ -55,7 +55,7 @@ export function Composer({
   const queryClient = useQueryClient();
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
-  const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
+  const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   // The catalogs the workspace menu reads. If the controller cannot return
   // them, the composer simply offers no project and no workspace.
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
@@ -65,7 +65,7 @@ export function Composer({
   const catalogs = {
     instances,
     runners,
-    localRunnerId,
+    thisMacRunnerId,
     projects,
     resources,
     workspaces,

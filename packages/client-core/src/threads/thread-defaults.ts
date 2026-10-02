@@ -47,9 +47,9 @@ export interface ThreadDefaults {
 export const computeInstanceDefaults = (
   instance: ProviderInstance,
   runners: readonly Runner[],
-  localRunnerId: string | null,
+  thisMacRunnerId: string | null,
 ): { readonly runnerId: string | null; readonly model: string | null } => {
-  const runnerId = buildRunnerMenu(runners, localRunnerId, instance).defaultRunnerId;
+  const runnerId = buildRunnerMenu(runners, thisMacRunnerId, instance).defaultRunnerId;
   const field = buildThreadModelField(instance, runnerId, undefined);
   const model =
     field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug ?? null;
@@ -62,7 +62,7 @@ export const computeThreadDefaults = (
   instances: readonly ProviderInstance[],
   runners: readonly Runner[],
   profiles: readonly Profile[],
-  localRunnerId: string | null,
+  thisMacRunnerId: string | null,
 ): ThreadDefaults => {
   // A stored instance id that no longer exists falls back the same way an
   // unset one does. So there is always an instance to read a catalog from,
@@ -73,7 +73,7 @@ export const computeThreadDefaults = (
   const forInstance =
     instance === undefined
       ? { runnerId: null, model: null }
-      : computeInstanceDefaults(instance, runners, localRunnerId);
+      : computeInstanceDefaults(instance, runners, thisMacRunnerId);
 
   return {
     instanceId: instance?.id ?? null,
@@ -107,7 +107,7 @@ export const buildDraftConfig = ({
   instances,
   runners,
   profiles,
-  localRunnerId,
+  thisMacRunnerId,
   projectId,
   workspaceId,
 }: {
@@ -115,11 +115,11 @@ export const buildDraftConfig = ({
   readonly instances: readonly ProviderInstance[];
   readonly runners: readonly Runner[];
   readonly profiles: readonly Profile[];
-  readonly localRunnerId: string | null;
+  readonly thisMacRunnerId: string | null;
   readonly projectId: string | null;
   readonly workspaceId: string | null;
 }): ThreadConfig => ({
-  ...computeThreadDefaults(settingsUser, instances, runners, profiles, localRunnerId),
+  ...computeThreadDefaults(settingsUser, instances, runners, profiles, thisMacRunnerId),
   options: {},
   projectId,
   workspace: workspaceId === null ? null : { kind: "existing", workspaceId },

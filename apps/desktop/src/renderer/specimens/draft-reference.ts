@@ -74,7 +74,7 @@ const view = buildDraftView(
     sessions: records.threads,
     settings: { controller: {}, user: {} },
     profiles: [],
-    localRunnerId: null,
+    thisMacRunnerId: null,
   },
   { projectId: draft.projectId, workspaceId: null },
   draft.picks,

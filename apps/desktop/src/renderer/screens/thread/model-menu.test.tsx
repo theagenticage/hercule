@@ -60,7 +60,7 @@ const CONFIG = readThreadConfig({ kind: "active", session: THREAD_FIXTURES.finis
 const buildCatalogs = (instances: readonly ProviderInstance[]): ThreadCatalogs => ({
   instances,
   runners: SIDEBAR_FIXTURE.runners,
-  localRunnerId: null,
+  thisMacRunnerId: null,
 });
 
 /** Renders the menu and returns the function that received each pick. */

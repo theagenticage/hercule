@@ -71,13 +71,13 @@ export const buildDraftView = (
   address: DraftAddress,
   picks: ThreadPicks,
 ): DraftView => {
-  const { instances, runners, localRunnerId, resources, workspaces, sessions } = reads;
+  const { instances, runners, thisMacRunnerId, resources, workspaces, sessions } = reads;
   const base = buildDraftConfig({
     settingsUser: reads.settings.user,
     instances,
     runners,
     profiles: reads.profiles,
-    localRunnerId,
+    thisMacRunnerId,
     ...address,
   });
   const config = computeEffectiveConfig(base, picks);

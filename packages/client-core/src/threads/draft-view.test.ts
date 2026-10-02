@@ -46,7 +46,7 @@ const READS: DraftReads = {
   profiles: [UNRESTRICTED],
   instances: [CLAUDE],
   runners: [MOSS, COVE],
-  localRunnerId: MOSS.id,
+  thisMacRunnerId: MOSS.id,
   projects: [WEBSHOP_PROJECT, OPS_PROJECT],
   resources: [WEBSHOP, INFRA, RUNBOOKS],
   workspaces: [PRIMARY, THREAD_3F1],
