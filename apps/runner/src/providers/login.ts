@@ -133,11 +133,6 @@ interface Held {
    */
   readonly printed: Promise<Printed | undefined>;
   /**
-   * Whether this is a device login. It prints a code and reads nothing, so nothing can be submitted
-   * to it.
-   */
-  readonly device: boolean;
-  /**
    * The URL on its own. It tells a login that printed only the URL apart from one that printed
    * nothing.
    */
@@ -149,12 +144,20 @@ interface Held {
   readonly transcript: () => string;
   /**
    * When a device login's code stops being valid, in milliseconds on this
-   * machine's clock. Undefined for a login that reads a code back.
+   * machine's clock. Undefined for a login that reads a code back, so it also
+   * tells the two kinds apart (see `isDeviceLogin`).
    */
   readonly expiresAt: number | undefined;
   /** The expiry timer. Undefined only between the spawn and the first call to `armExpiry`. */
   idle: Fiber.Fiber<void> | undefined;
 }
+
+/**
+ * Checks whether a held login is a device login: one that prints a code for
+ * the user to type in the browser and reads nothing back, so nothing can be
+ * submitted to it. Only a device login has an expiry instant.
+ */
+const isDeviceLogin = (login: Held): boolean => login.expiresAt !== undefined;
 
 /** Sends a `LoginEnded` frame to the controller. */
 type ReportLoginEnded = (frame: LoginEnded) => Effect.Effect<void, unknown>;
@@ -218,7 +221,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     Effect.gen(function* () {
       if (login.idle !== undefined) yield* Fiber.interrupt(login.idle);
       login.idle = yield* Effect.forkDetach(
-        Effect.sleep(login.device ? LOGIN_CODE_LIFETIME : LOGIN_IDLE).pipe(
+        Effect.sleep(isDeviceLogin(login) ? LOGIN_CODE_LIFETIME : LOGIN_IDLE).pipe(
           // Clear the timer first: stopping the login interrupts the timer it
           // holds, and this fiber must not interrupt itself before it reports.
           Effect.andThen(
@@ -227,7 +230,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             }),
           ),
           Effect.andThen(stopLogin(instanceId, login)),
-          Effect.andThen(login.device ? reportEnded(instanceId) : Effect.void),
+          Effect.andThen(isDeviceLogin(login) ? reportEnded(instanceId) : Effect.void),
         ),
       );
     });
@@ -280,7 +283,6 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       }).catch(() => undefined);
       const login: Held = {
         child,
-        device: pattern !== undefined,
         address: () => url,
         abandon: () => {
           settle(undefined);
@@ -306,7 +308,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         .then(() =>
           Effect.runPromise(
             Effect.suspend(() =>
-              held.get(instanceId) === login && login.device
+              held.get(instanceId) === login && isDeviceLogin(login)
                 ? Effect.andThen(forgetLogin(instanceId, login), reportEnded(instanceId))
                 : forgetLogin(instanceId, login),
             ),
@@ -383,7 +385,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         // For a device login the user types the code into the browser, and the
         // browser completes the login with the vendor. The child reads nothing,
         // so there is nothing to submit and nothing to wait for.
-        if (login.device)
+        if (isDeviceLogin(login))
           return buildLoginFailed(
             "this login does not accept a code here; type the code it showed into the browser",
           );
