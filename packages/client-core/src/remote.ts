@@ -29,3 +29,28 @@ export const isClonableRemote = (remote: string): boolean => {
 
 /** The form's error for an invalid remote. It shows both accepted forms. */
 export const REMOTE_REFUSAL = "Write an https:// URL or git@host:owner/repo";
+
+/**
+ * Returns the repository's path on its host, as written, from a remote:
+ * `rogier/webshop` from `git@github.com:rogier/webshop.git` or from
+ * `https://github.com/rogier/webshop`. A `.git` suffix and a trailing `/` are
+ * dropped; the case is kept, because the name is shown to the user.
+ *
+ * Returns null when the remote is not one `isClonableRemote` accepts, or when
+ * its path has fewer than two segments (an owner and a repository).
+ */
+export const parseRepositoryName = (remote: string): string | null => {
+  if (!isClonableRemote(remote)) return null;
+  const written = remote.trim();
+  // A URL's path starts at the first `/` after its host; the scp-like form's
+  // path starts after the colon that follows the host.
+  const path = SCHEME.test(written)
+    ? written.replace(SCHEME, "").replace(/^[^/]*/, "")
+    : written.slice(written.indexOf(":") + 1);
+  const segments = path
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .split("/")
+    .filter((segment) => segment.length > 0);
+  return segments.length < 2 ? null : segments.join("/");
+};

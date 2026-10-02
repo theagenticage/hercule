@@ -1,5 +1,5 @@
 import { assert, describe, it } from "vitest";
-import { isClonableRemote } from "./remote";
+import { isClonableRemote, parseRepositoryName } from "./remote";
 
 describe("isClonableRemote", () => {
   it("accepts an https URL and git's scp-like form", () => {
@@ -23,5 +23,35 @@ describe("isClonableRemote", () => {
     assert.isFalse(isClonableRemote("-https://github.com/acme/webshop"));
     assert.isFalse(isClonableRemote(""));
     assert.isFalse(isClonableRemote("   "));
+  });
+});
+
+describe("parseRepositoryName", () => {
+  it("reads owner/repo from both accepted forms, as written", () => {
+    assert.strictEqual(parseRepositoryName("git@github.com:rogier/webshop.git"), "rogier/webshop");
+    assert.strictEqual(parseRepositoryName("https://github.com/rogier/webshop"), "rogier/webshop");
+    assert.strictEqual(
+      parseRepositoryName(" https://github.com/Rogier/WebShop.git/ "),
+      "Rogier/WebShop",
+    );
+    assert.strictEqual(
+      parseRepositoryName("https://git.example.com:8443/acme/webshop"),
+      "acme/webshop",
+    );
+  });
+
+  it("keeps every segment of a nested path", () => {
+    assert.strictEqual(
+      parseRepositoryName("git@gitlab.com:acme/platform/webshop.git"),
+      "acme/platform/webshop",
+    );
+  });
+
+  it("returns null for a remote it would not clone, or one with no owner", () => {
+    assert.isNull(parseRepositoryName("/Users/rogier/webshop"));
+    assert.isNull(parseRepositoryName("ssh://git@github.com/rogier/webshop"));
+    assert.isNull(parseRepositoryName("https://github.com/webshop"));
+    assert.isNull(parseRepositoryName("https://github.com"));
+    assert.isNull(parseRepositoryName(""));
   });
 });
