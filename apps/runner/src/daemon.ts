@@ -18,6 +18,7 @@ import {
 } from "./credentials";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
+import { providerLogins } from "./providers";
 import { HERCULE_SKILL } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
@@ -197,6 +198,7 @@ export const runDaemon = (
             workspaceSteps,
             socketPath,
             credentials,
+            providerLogins,
             binDir,
             herculeTool,
           }),

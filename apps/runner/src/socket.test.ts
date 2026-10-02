@@ -35,6 +35,7 @@ import {
   type ControllerPin,
 } from "./socket";
 import { makeCredentialRelay } from "./credentials";
+import { makeLogins, type Logins } from "./providers/login";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-actions";
 import { makeWorkspaces } from "./workspaces";
 
@@ -282,6 +283,11 @@ const IDLE_STEPS = makeWorkspaceSteps({
   baseEnv: {},
 });
 
+/** The provider logins of a runner that starts none. */
+const IDLE_LOGINS = makeLogins(() => {
+  throw new Error("no test in this file starts a login");
+});
+
 /** Every line the connections of the current test logged, formatted as the process log writes them. */
 const logged: Array<string> = [];
 
@@ -300,6 +306,7 @@ const runConnection = (
   probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS),
   proofDeadline: Duration.Duration = PATIENT,
   workspaceSteps: WorkspaceSteps = IDLE_STEPS,
+  providerLogins: Logins = IDLE_LOGINS,
 ) =>
   Effect.runPromise(
     Effect.result(
@@ -314,6 +321,7 @@ const runConnection = (
         workspaceSteps,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
+        providerLogins,
         binDir: BIN_DIR,
         herculeTool: HERCULE_TOOL,
         proofDeadline,
@@ -577,6 +585,69 @@ describe("a runner with workspace steps in flight", () => {
       stub.received.flatMap((frame) => (frame._tag === "workspaceStepsReport" ? frame.steps : []));
     await waitUntil(() => listReported().length === inFlight.length);
     expect(listReported()).toEqual(inFlight);
+
+    stub.hangUp();
+    await pending;
+  });
+});
+
+describe("reporting the end of a device login", () => {
+  /** Returns the idle provider logins, counting how often a connection attaches to them. */
+  const countAttaches = (): { readonly logins: Logins; readonly attaches: () => number } => {
+    let attaches = 0;
+    return {
+      logins: {
+        ...IDLE_LOGINS,
+        attachConnection: (report) => {
+          attaches += 1;
+          return IDLE_LOGINS.attachConnection(report);
+        },
+      },
+      attaches: () => attaches,
+    };
+  };
+
+  it("reports to a controller whose hello lists the frame", async () => {
+    const stub = await stubController((real) => ({
+      ...real,
+      capabilities: [LOGIN_ENDED_CAPABILITY],
+    }));
+    const counted = countAttaches();
+
+    const pending = runConnection(
+      buildPin(stub),
+      Effect.succeed(FACTS),
+      PATIENT,
+      IDLE_STEPS,
+      counted.logins,
+    );
+
+    await stub.connected();
+    // The logins are attached while the hello is handled, before the proof
+    // lets the first report out.
+    await waitUntilProven(stub);
+    expect(counted.attaches()).toBe(1);
+
+    stub.hangUp();
+    await pending;
+  });
+
+  it("reports nothing to a controller whose hello does not list the frame", async () => {
+    const stub = await stubController();
+    const counted = countAttaches();
+
+    const pending = runConnection(
+      buildPin(stub),
+      Effect.succeed(FACTS),
+      PATIENT,
+      IDLE_STEPS,
+      counted.logins,
+    );
+
+    await stub.connected();
+    await waitUntilProven(stub);
+    // An older controller closes the connection on a frame it cannot read.
+    expect(counted.attaches()).toBe(0);
 
     stub.hangUp();
     await pending;

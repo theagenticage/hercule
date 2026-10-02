@@ -56,12 +56,11 @@ import {
   findAdapter,
   describeMissingAdapter,
   buildFailedProbe,
-  providerLogins,
   type InstallOutcome,
   type ProviderAdapter,
   type ProviderRunnerContext,
 } from "./providers";
-import type { LoginAnswer } from "./providers/login";
+import type { LoginAnswer, Logins } from "./providers/login";
 import { sessions } from "./sessions";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS, type WorkspaceSteps } from "./workspace-actions";
@@ -131,6 +130,8 @@ export interface ConnectOptions {
   readonly socketPath: string;
   /** Forwards a credential helper's request to the controller, and the response back. */
   readonly credentials: CredentialRelay;
+  /** The provider logins on this machine. They outlive this connection. */
+  readonly providerLogins: Logins;
   /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
   /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
@@ -485,7 +486,7 @@ export const connect = (
               _tag: "loginFailed",
               message: describeMissingAdapter(request.providerId),
             })
-          : providerLogins.start(
+          : options.providerLogins.start(
               request.instanceId,
               adapter,
               // A login is the harness writing its own credential on this
@@ -535,7 +536,7 @@ export const connect = (
           // read, so the end of a device login is reported only to a
           // controller that lists the frame.
           if (message.capabilities.includes(LOGIN_ENDED_CAPABILITY)) {
-            yield* providerLogins
+            yield* options.providerLogins
               .attachConnection((frame) => write(encodeFrameText(frame)))
               .pipe(Scope.provide(connection));
           }
@@ -568,7 +569,7 @@ export const connect = (
               Effect.forkIn(
                 answerLogin(
                   message.requestId,
-                  providerLogins.submit(message.instanceId, message.code),
+                  options.providerLogins.submit(message.instanceId, message.code),
                 ),
                 connection,
               ),
