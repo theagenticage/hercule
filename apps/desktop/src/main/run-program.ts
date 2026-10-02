@@ -4,6 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 
 /** How a program exited, and what it wrote. */
@@ -23,6 +24,13 @@ export class ProgramNotStarted extends Data.TaggedError("ProgramNotStarted")<{
   readonly code: string | undefined;
   readonly message: string;
 }> {}
+
+/**
+ * How long `runProgram` keeps reading a program's output after the program
+ * has exited. Output still in the pipes arrives within milliseconds, but a
+ * process the program left running can hold the pipes open for good.
+ */
+const OUTPUT_TIME_LIMIT_AFTER_EXIT = "200 millis";
 
 /**
  * Returns the last line a program wrote to stderr, `stderr`, without the
@@ -47,9 +55,14 @@ export const readLastErrorLine = (stderr: string): string | undefined =>
  *
  * The program's stdin is closed, so a program that asks a question gets no
  * answer and cannot wait for one. The program runs in a process group of its
- * own, with no terminal. Interrupting the returned effect kills that group,
- * whose id is the program's PID, with SIGKILL: an interactive shell ignores
- * SIGTERM, and the group includes what the program started.
+ * own, with no terminal, and the group's id is the program's PID.
+ *
+ * Once the program exits, its output is read for at most
+ * `OUTPUT_TIME_LIMIT_AFTER_EXIT` more, and then the whole group is killed
+ * with SIGKILL. So a process the program started and left running cannot
+ * keep the effect waiting by holding the output pipes open, and nothing the
+ * program started outlives it. Interrupting the effect kills the group the
+ * same way; SIGKILL, because an interactive shell ignores SIGTERM.
  */
 export const runProgram = (
   file: string,
@@ -71,26 +84,43 @@ export const runProgram = (
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
       stderr += chunk;
     });
-    // Node emits `close` after `error` too, so the effect resumes once, there.
-    let startError: NodeJS.ErrnoException | undefined;
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      startError = error;
-    });
-    child.on("close", (exitCode) => {
-      resume(
-        startError === undefined
-          ? Effect.succeed({ exitCode, stdout, stderr })
-          : Effect.fail(
-              new ProgramNotStarted({ code: startError.code, message: startError.message }),
-            ),
-      );
-    });
-    return Effect.sync(() => {
-      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // The group has already exited.
+
+    let stopped = false;
+    let outputTimer: NodeJS.Timeout | undefined;
+    /** Kills the program's process group and stops reading its output. Does nothing the second time. */
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(outputTimer);
+      if (child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          // Every process of the group has already exited.
+        }
       }
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+
+    // Node emits `error`, and maybe no `exit`, when the program could not be
+    // started.
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      if (stopped) return;
+      stop();
+      resume(Effect.fail(new ProgramNotStarted({ code: error.code, message: error.message })));
     });
+    child.on("exit", (exitCode) => {
+      if (stopped) return;
+      const finish = () => {
+        if (stopped) return;
+        stop();
+        resume(Effect.succeed({ exitCode, stdout, stderr }));
+      };
+      // Node emits `close` once every process holding the pipes has closed
+      // them, which is at once unless the program left a process running.
+      child.on("close", finish);
+      outputTimer = setTimeout(finish, Duration.toMillis(OUTPUT_TIME_LIMIT_AFTER_EXIT));
+    });
+    return Effect.sync(stop);
   });

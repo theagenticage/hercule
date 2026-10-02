@@ -148,8 +148,12 @@ export async function writeStandInBinaryForTest(
   }[kind];
   const install = {
     serve: [
-      // The controller writes to a file, not to the stand-in's output: main
-      // reads that output until every process holding it has exited.
+      // Main kills the stand-in's whole process group once the stand-in
+      // exits, as it would kill anything the real install left behind, so
+      // `set -m` starts the controller in a process group of its own, as
+      // launchd would. The controller also writes to a file, not to the
+      // stand-in's output, which main stops reading soon after the exit.
+      "set -m",
       `if [ ! -f ${quoteForShell(pidFile)} ]; then`,
       `  HERCULE_HOME=${quoteForShell(home)} PATH=/usr/bin:/bin /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' ${quoteForShell(compiled ?? "")} serve -c bind.port=${port} > ${quoteForShell(join(home, "stand-in-serve.log"))} 2>&1 < /dev/null &`,
       `  echo $! > ${quoteForShell(pidFile)}`,

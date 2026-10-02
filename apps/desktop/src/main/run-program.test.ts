@@ -57,6 +57,22 @@ describe("runProgram", () => {
     expect(error.code).toBe("ENOENT");
   });
 
+  it("returns when the program exits, and kills what it left running, though that holds its output open", async () => {
+    const pids = join(folder, "pids");
+    // The background sleep inherits the program's stdout and stderr, so they
+    // stay open after the program exits.
+    const script = writeScript("leave", `sleep 30 & echo "$!" > "${pids}"; echo done`);
+    const startedAt = Date.now();
+    const exit = await Effect.runPromise(
+      runProgram(script, [], { env: { PATH: "/bin:/usr/bin" } }),
+    );
+    const leftRunning = Number(readFileSync(pids, "utf8"));
+    started.push(leftRunning);
+    expect(exit).toEqual({ exitCode: 0, stdout: "done\n", stderr: "" });
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    await waitUntil(() => !isProcessRunning(leftRunning));
+  });
+
   it("kills the program and what it started when the effect is interrupted", async () => {
     const pids = join(folder, "pids");
     // The program starts a child of its own, and waits for it.
