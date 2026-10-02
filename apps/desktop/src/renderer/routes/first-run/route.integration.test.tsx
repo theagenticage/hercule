@@ -518,6 +518,35 @@ describe("the first run's steps", () => {
       await pumpUntil(() => readCalls(calls, "POST", "/api/v1/oauth/device/start").length === 2);
     });
 
+    it("starts one sign-in on a double press, and drops its code once the user chose a token", async () => {
+      const user = userEvent.setup();
+      let answerStart: (answer: { body: unknown }) => void = () => undefined;
+      const { calls } = await openSignedIn({
+        firstRun: { putOff: ["providers"] },
+        handlers: {
+          "POST /api/v1/oauth/device/start": () =>
+            new Promise((resolve) => {
+              answerStart = resolve;
+            }),
+        },
+      });
+      const signIn = screen.getByRole("button", { name: "Sign in with GitHub" });
+      await user.click(signIn);
+      signIn.focus();
+      await user.keyboard("{Enter}");
+      expect(readCalls(calls, "POST", "/api/v1/oauth/device/start")).toHaveLength(1);
+
+      await user.click(screen.getByRole("button", { name: "Paste a token instead" }));
+      // The answer passes through the client and the mutation before it can
+      // reach the screen, so the test waits a moment past it.
+      await act(async () => {
+        answerStart({ body: START });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(screen.queryByText(START.userCode)).toBeNull();
+      expect(readHeading()).toBe("Connect GitHub with a token");
+    });
+
     it("connects with a pasted token, and shows the check while the controller makes it", async () => {
       const user = userEvent.setup();
       const { calls } = await openGitHub();

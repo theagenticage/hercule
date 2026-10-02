@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -22,6 +22,8 @@ const GITHUB_NAME = "GitHub";
  * Where the GitHub sign-in stands:
  *
  * - `start`: nothing started yet;
+ * - `starting`: the step waits for the controller's code, asked for by the
+ *   sign-in numbered `request`;
  * - `code`: the user enters the code of `deviceStart` on GitHub, which the
  *   step polls for; `codeMinutes` is how long the code lasts, and `wait`
  *   the line under it;
@@ -30,6 +32,7 @@ const GITHUB_NAME = "GitHub";
  */
 type GitHubFlow =
   | { readonly kind: "start" }
+  | { readonly kind: "starting"; readonly request: number }
   | {
       readonly kind: "code";
       readonly deviceStart: ConnectionDeviceStart;
@@ -62,21 +65,34 @@ export function GitHubCard({
   const account = findGitHubAccount(useSuspenseQuery(connectionsQuery(client)).data);
   const [flow, setFlow] = useState<GitHubFlow>({ kind: "start" });
   const [token, setToken] = useState("");
+  // Numbers each sign-in, so a code that arrives after the user moved on,
+  // with Paste a token instead, is dropped rather than shown.
+  const lastRequest = useRef(0);
 
+  /** Applies `next` only while the step still waits for the code of sign-in `request`. */
+  const settleStart = (request: number, next: GitHubFlow): void => {
+    setFlow((current) =>
+      current.kind === "starting" && current.request === request ? next : current,
+    );
+  };
   const start = useMutation({
-    mutationFn: () =>
+    mutationFn: (_request: number) =>
       client.connection.startDeviceFlow({ payload: { type: GITHUB_CONNECTION_TYPE } }),
-    onSuccess: (deviceStart) => {
-      setFlow({
+    onSuccess: (deviceStart, request) => {
+      settleStart(request, {
         kind: "code",
         deviceStart,
         codeMinutes: countCodeMinutes(deviceStart.expiresAt, Date.now()),
         wait: describeDeviceFlowWait("pending", GITHUB_NAME),
       });
     },
-    onError: (error) => {
+    onError: (error, request) => {
       const ending = { kind: "ended", status: "failed", message: readErrorMessage(error) } as const;
-      setFlow({ ...describeGitHubSignInEnding(ending, 0), kind: "ended", status: "failed" });
+      settleStart(request, {
+        ...describeGitHubSignInEnding(ending, 0),
+        kind: "ended",
+        status: "failed",
+      });
     },
   });
 
@@ -128,13 +144,15 @@ export function GitHubCard({
 
   return (
     <GitHubStep
-      state={decideStepState(account, flow, start.isPending, connect)}
+      state={decideStepState(account, flow, connect)}
       token={token}
       actions={{
         onSignIn: () => {
-          // Start again, after a sign-in that ended, shows the start while it waits for the new code.
-          setFlow({ kind: "start" });
-          start.mutate();
+          // A second sign-in would replace the code the first one shows.
+          if (flow.kind === "starting") return;
+          lastRequest.current += 1;
+          setFlow({ kind: "starting", request: lastRequest.current });
+          start.mutate(lastRequest.current);
         },
         onCancel: () => {
           setFlow({ kind: "start" });
@@ -168,7 +186,6 @@ export function GitHubCard({
 const decideStepState = (
   account: string | null,
   flow: GitHubFlow,
-  starting: boolean,
   connect: {
     readonly isPending: boolean;
     readonly isSuccess: boolean;
@@ -178,7 +195,9 @@ const decideStepState = (
   if (account !== null) return { kind: "connected", account };
   switch (flow.kind) {
     case "start":
-      return { kind: "start", starting };
+      return { kind: "start", starting: false };
+    case "starting":
+      return { kind: "start", starting: true };
     case "code":
       return {
         kind: "code",

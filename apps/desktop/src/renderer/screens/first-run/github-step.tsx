@@ -202,6 +202,7 @@ export function GitHubStep({
               type="button"
               className="btn btn--accent btn--lg"
               aria-busy={state.starting ? true : undefined}
+              aria-disabled={state.starting ? true : undefined}
               onClick={actions.onSignIn}
             >
               {state.starting ? <span className="spin" /> : <GitHubMark size={16} />}
