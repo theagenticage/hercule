@@ -9,7 +9,8 @@ import {
   queryKeys,
   readErrorMessage,
   type HerculeClient,
-  type NewProjectDraft,
+  type NewProjectForm,
+  type NewProjectSubmission,
 } from "@hercule/client-core";
 import { connectionsQuery } from "../../app/queries";
 import { FormField } from "../step";
@@ -87,7 +88,7 @@ export function NewProjectForm({
   const [remote, setRemote] = useState("");
   const [setupCommand, setSetupCommand] = useState("");
   // What the last submission left: what exists, and why the rest does not.
-  const [sent, setSent] = useState<NewProjectDraft | null>(null);
+  const [lastSubmission, setLastSubmission] = useState<NewProjectSubmission | null>(null);
 
   const pick = useMutation({
     mutationFn: () => bridge.folder.pick(),
@@ -97,14 +98,14 @@ export function NewProjectForm({
       setName(outcome.name);
       setRemote(outcome._tag === "Repository" ? outcome.remote : "");
       setSetupCommand("");
-      setSent(null);
+      setLastSubmission(null);
     },
   });
 
   const create = useMutation({
-    mutationFn: (draft: NewProjectDraft) => createProjectWithRepositories(client, draft),
+    mutationFn: (form: NewProjectForm) => createProjectWithRepositories(client, form),
     onSuccess: async (next) => {
-      setSent(next);
+      setLastSubmission(next);
       // Projects and resources have no live topic yet, so they are read again
       // here, before the caller looks the project up.
       await Promise.all([
@@ -126,8 +127,8 @@ export function NewProjectForm({
     );
   }
 
-  const projectId = sent?.projectId ?? null;
-  const repository = sent?.repositories[0];
+  const projectId = lastSubmission?.projectId ?? null;
+  const repository = lastSubmission?.repositories[0];
   const projectName = name.trim() === "" ? folder.name : name.trim();
   const pending = create.isPending;
 
@@ -137,7 +138,6 @@ export function NewProjectForm({
     create.mutate({
       name,
       projectId,
-      failure: null,
       repositories:
         withRepository && gitHub !== undefined
           ? [
@@ -171,9 +171,9 @@ export function NewProjectForm({
           pending={pending}
           onCreateWithoutRepository={() => submit(false)}
         />
-        {sent === null || sent.failure === null ? null : (
+        {lastSubmission === null || lastSubmission.failure === null ? null : (
           <p className="fl-err new-project-err" role="alert">
-            {sent.failure}
+            {lastSubmission.failure}
           </p>
         )}
       </>
@@ -186,7 +186,7 @@ export function NewProjectForm({
     gitHub !== undefined && (folder._tag === "NoRemote" || !isClonableRemote(folder.remote));
 
   const nameField = (
-    <FormField label="Project name" error={sent?.failure ?? null}>
+    <FormField label="Project name" error={lastSubmission?.failure ?? null}>
       <input
         value={name}
         disabled={projectId !== null}

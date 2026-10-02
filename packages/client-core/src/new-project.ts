@@ -12,10 +12,10 @@ import { describeRemoteRefusal } from "./remote";
 export const PROJECT_NAME_REFUSAL = "Name the project";
 
 /**
- * One repository in a New project form, as the form holds it between
- * submissions. Each one becomes a repo resource of the project.
+ * One repository in a New project form, as the form sends it and as a
+ * submission leaves it. Each one becomes a repo resource of the project.
  */
-export interface RepositoryDraft {
+export interface RepositorySubmission {
   /** The git remote, as typed or read from a folder. */
   readonly remote: string;
   /** The command a fresh checkout runs, or empty for none. */
@@ -29,24 +29,29 @@ export interface RepositoryDraft {
 }
 
 /**
- * A New project form between submissions. A project needs no repository at
- * all, so `repositories` may be empty: such a project holds work that is not
- * code.
+ * A New project form as it is sent. A project needs no repository at all, so
+ * `repositories` may be empty: such a project holds work that is not code.
  */
-export interface NewProjectDraft<Repository extends RepositoryDraft = RepositoryDraft> {
+export interface NewProjectForm<Repository extends RepositorySubmission = RepositorySubmission> {
   readonly name: string;
   /** The project's id once a submission created it, or `null` while it does not exist. */
   readonly projectId: string | null;
-  /** Why the project itself was not created, or `null`. */
-  readonly failure: string | null;
   readonly repositories: readonly Repository[];
 }
 
+/** A New project form as a submission leaves it: what exists, and why the rest does not. */
+export interface NewProjectSubmission<
+  Repository extends RepositorySubmission = RepositorySubmission,
+> extends NewProjectForm<Repository> {
+  /** Why the project itself was not created, or `null`. */
+  readonly failure: string | null;
+}
+
 /**
- * Creates the project in `draft`, then one repo resource per repository, and
- * returns the draft as the submission leaves it. It never throws: every error
- * is written into the returned draft, as `failure` for the project and as
- * `message` for a repository.
+ * Creates the project in `form`, then one repo resource per repository, and
+ * returns the form as the submission leaves it. It never throws: every error
+ * is written into the returned submission, as `failure` for the project and
+ * as `message` for a repository.
  *
  * - A blank name sends nothing and returns `PROJECT_NAME_REFUSAL` as the failure.
  * - Every remote is checked before anything is sent. A remote git would not
@@ -55,31 +60,31 @@ export interface NewProjectDraft<Repository extends RepositoryDraft = Repository
  * - The project is created first, because each repository names it.
  *
  * A write that succeeded is not undone when a later one fails. Instead the
- * returned draft records what exists (`projectId`, each `createdId`), and the
- * next submission of that draft skips it, so only the failed writes are sent
- * again. `isNewProjectCreated` checks whether anything is left to send.
+ * returned submission records what exists (`projectId`, each `createdId`),
+ * and sending it as the next form skips that, so only the failed writes
+ * are sent again. `isNewProjectCreated` checks whether anything is left to send.
  */
-export const createProjectWithRepositories = async <Repository extends RepositoryDraft>(
+export const createProjectWithRepositories = async <Repository extends RepositorySubmission>(
   client: HerculeClient,
-  draft: NewProjectDraft<Repository>,
-): Promise<NewProjectDraft<Repository>> => {
-  const name = draft.name.trim();
-  if (name === "") return { ...draft, failure: PROJECT_NAME_REFUSAL };
+  form: NewProjectForm<Repository>,
+): Promise<NewProjectSubmission<Repository>> => {
+  const name = form.name.trim();
+  if (name === "") return { ...form, failure: PROJECT_NAME_REFUSAL };
 
-  const checked = draft.repositories.map((repository) => ({
+  const checked = form.repositories.map((repository) => ({
     ...repository,
     message: repository.createdId !== null ? null : describeRemoteRefusal(repository.remote),
   }));
   if (checked.some((repository) => repository.message !== null)) {
-    return { ...draft, failure: null, repositories: checked };
+    return { ...form, failure: null, repositories: checked };
   }
 
-  let projectId = draft.projectId;
+  let projectId = form.projectId;
   if (projectId === null) {
     try {
       projectId = (await client.project.create({ payload: { name } })).id;
     } catch (error) {
-      return { ...draft, failure: readErrorMessage(error), repositories: checked };
+      return { ...form, failure: readErrorMessage(error), repositories: checked };
     }
   }
 
@@ -105,15 +110,16 @@ export const createProjectWithRepositories = async <Repository extends Repositor
       repositories.push({ ...repository, message: readErrorMessage(error) });
     }
   }
-  return { ...draft, projectId, failure: null, repositories };
+  return { ...form, projectId, failure: null, repositories };
 };
 
 /**
- * Checks whether the project and every repository in `draft` exist, so nothing
- * is left to send. When it returns true, `draft.projectId` is the project's id.
+ * Checks whether the project and every repository in `submission` exist, so
+ * nothing is left to send. When it returns true, `submission.projectId` is the
+ * project's id.
  */
-export const isNewProjectCreated = <Draft extends NewProjectDraft>(
-  draft: Draft,
-): draft is Draft & { readonly projectId: string } =>
-  draft.projectId !== null &&
-  draft.repositories.every((repository) => repository.createdId !== null);
+export const isNewProjectCreated = <Submission extends NewProjectSubmission>(
+  submission: Submission,
+): submission is Submission & { readonly projectId: string } =>
+  submission.projectId !== null &&
+  submission.repositories.every((repository) => repository.createdId !== null);

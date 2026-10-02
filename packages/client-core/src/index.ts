@@ -165,8 +165,9 @@ export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-st
 export {
   createProjectWithRepositories,
   isNewProjectCreated,
-  type NewProjectDraft,
-  type RepositoryDraft,
+  type NewProjectForm,
+  type NewProjectSubmission,
+  type RepositorySubmission,
 } from "./new-project";
 export { completeSetup, validatePasswordLength } from "./setup";
 export {

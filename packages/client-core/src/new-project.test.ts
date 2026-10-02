@@ -5,8 +5,8 @@ import {
   createProjectWithRepositories,
   isNewProjectCreated,
   PROJECT_NAME_REFUSAL,
-  type NewProjectDraft,
-  type RepositoryDraft,
+  type NewProjectForm,
+  type RepositorySubmission,
 } from "./new-project";
 import { REMOTE_REFUSAL } from "./remote";
 import { buildProject, buildRepo } from "./threads/workspaces.testing";
@@ -15,7 +15,7 @@ const PROJECT = buildProject("01a06d02-7000-7000-8000-000000000009", "webshop");
 const REPO_ID = "01a06d02-7100-7000-8000-000000000009";
 const CONNECTION_ID = "01a06d02-7200-7000-8000-000000000009";
 
-const REPOSITORY: RepositoryDraft = {
+const REPOSITORY: RepositorySubmission = {
   remote: " git@github.com:rogier/webshop.git ",
   setupCommand: "",
   connectionId: null,
@@ -23,10 +23,9 @@ const REPOSITORY: RepositoryDraft = {
   message: null,
 };
 
-const DRAFT: NewProjectDraft = {
+const FORM: NewProjectForm = {
   name: " webshop ",
   projectId: null,
-  failure: null,
   repositories: [REPOSITORY],
 };
 
@@ -50,7 +49,7 @@ describe("createProjectWithRepositories", () => {
     const { api, client } = buildController();
 
     const next = await createProjectWithRepositories(client, {
-      ...DRAFT,
+      ...FORM,
       repositories: [
         { ...REPOSITORY, setupCommand: " pnpm install ", connectionId: CONNECTION_ID },
       ],
@@ -77,7 +76,7 @@ describe("createProjectWithRepositories", () => {
   it("creates a project with no repository, for work that is not code", async () => {
     const { api, client } = buildController();
 
-    const next = await createProjectWithRepositories(client, { ...DRAFT, repositories: [] });
+    const next = await createProjectWithRepositories(client, { ...FORM, repositories: [] });
 
     expect(listWrites(api)).toEqual([["/api/v1/projects", { name: "webshop" }]]);
     expect(isNewProjectCreated(next)).toBe(true);
@@ -86,7 +85,7 @@ describe("createProjectWithRepositories", () => {
   it("sends no setup command and no Connection when there is none", async () => {
     const { api, client } = buildController();
 
-    await createProjectWithRepositories(client, DRAFT);
+    await createProjectWithRepositories(client, FORM);
 
     expect(listWrites(api)[1]?.[1]).toEqual({
       kind: "repo",
@@ -98,7 +97,7 @@ describe("createProjectWithRepositories", () => {
   it("sends nothing for a blank name", async () => {
     const { api, client } = buildController();
 
-    const next = await createProjectWithRepositories(client, { ...DRAFT, name: "  " });
+    const next = await createProjectWithRepositories(client, { ...FORM, name: "  " });
 
     expect(next.failure).toBe(PROJECT_NAME_REFUSAL);
     expect(api.calls).toEqual([]);
@@ -108,7 +107,7 @@ describe("createProjectWithRepositories", () => {
     const { api, client } = buildController();
 
     const next = await createProjectWithRepositories(client, {
-      ...DRAFT,
+      ...FORM,
       repositories: [REPOSITORY, { ...REPOSITORY, remote: "/Users/rogier/webshop" }],
     });
 
@@ -127,7 +126,7 @@ describe("createProjectWithRepositories", () => {
       },
     });
 
-    const next = await createProjectWithRepositories(client, DRAFT);
+    const next = await createProjectWithRepositories(client, FORM);
 
     expect(next.failure).toBe("the database is locked");
     expect(next.projectId).toBeNull();
@@ -143,7 +142,7 @@ describe("createProjectWithRepositories", () => {
           : { body: buildRepo(REPO_ID, "git@github.com:rogier/webshop.git", null) },
     });
 
-    const first = await createProjectWithRepositories(client, DRAFT);
+    const first = await createProjectWithRepositories(client, FORM);
     expect(first.projectId).toBe(PROJECT.id);
     expect(first.repositories[0]?.message).toBe("that repo is already a resource");
     expect(isNewProjectCreated(first)).toBe(false);
@@ -164,7 +163,7 @@ describe("createProjectWithRepositories", () => {
     const { client } = buildController();
 
     const next = await createProjectWithRepositories(client, {
-      ...DRAFT,
+      ...FORM,
       repositories: [{ ...REPOSITORY, key: "source-1" }],
     });
 

@@ -7,10 +7,10 @@ import {
   isNewProjectCreated,
   queryKeys,
   type HerculeClient,
-  type NewProjectDraft,
+  type NewProjectForm,
 } from "@hercule/client-core";
 import { connectionsQuery } from "../app/queries";
-import { NewProjectDialog, type SourceDraft } from "./new-project-dialog";
+import { NewProjectDialog, type SourceSubmission } from "./new-project-dialog";
 
 /**
  * Creates a project and its sources with `createProjectWithRepositories`, and
@@ -39,20 +39,20 @@ export function NewProject({
   ).map((connection) => ({ id: connection.id, label: connection.label }));
 
   const [name, setName] = useState("");
-  const [sources, setSources] = useState<readonly SourceDraft[]>([]);
+  const [sources, setSources] = useState<readonly SourceSubmission[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
 
   const create = useMutation({
-    mutationFn: (draft: NewProjectDraft<SourceDraft>) =>
-      createProjectWithRepositories(client, draft),
+    mutationFn: (form: NewProjectForm<SourceSubmission>) =>
+      createProjectWithRepositories(client, form),
     // Only what this submission created is read again.
-    onSuccess: async (next, draft) => {
+    onSuccess: async (next, form) => {
       const created = next.repositories.some(
-        (source, index) => source.createdId !== draft.repositories[index]?.createdId,
+        (source, index) => source.createdId !== form.repositories[index]?.createdId,
       );
       await Promise.all([
-        next.projectId === draft.projectId
+        next.projectId === form.projectId
           ? undefined
           : queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
         created ? queryClient.invalidateQueries({ queryKey: queryKeys.resources() }) : undefined,
@@ -60,7 +60,7 @@ export function NewProject({
     },
   });
 
-  const patchSource = (key: string, next: Partial<SourceDraft>): void => {
+  const patchSource = (key: string, next: Partial<SourceSubmission>): void => {
     setSources((current) =>
       current.map((source) => (source.key === key ? { ...source, ...next } : source)),
     );
@@ -80,7 +80,7 @@ export function NewProject({
   };
 
   const submit = async (): Promise<void> => {
-    const next = await create.mutateAsync({ name, projectId, failure, repositories: sources });
+    const next = await create.mutateAsync({ name, projectId, repositories: sources });
     setFailure(next.failure);
     setProjectId(next.projectId);
     const sent = new Map(next.repositories.map((source) => [source.key, source]));

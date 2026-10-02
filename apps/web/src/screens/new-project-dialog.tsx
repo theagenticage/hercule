@@ -1,18 +1,18 @@
 import type { JSX } from "react";
-import type { RepositoryDraft } from "@hercule/client-core";
+import type { RepositorySubmission } from "@hercule/client-core";
 import { Field, Input, Select } from "@hercule/ui";
 
 /**
  * One source in the New project form. For now the only kind of source is a
- * git repository, so this type is a repository's draft plus `key`, which
- * tells React the rows apart.
+ * git repository, so this type is a repository as the form sends it, plus
+ * `key`, which React tells the rows apart by.
  *
  * - `message` is the error for this source: from the server, or from the form's
  *   own check before sending.
  * - `createdId` is set once the source is created, so resubmitting after an
  *   error does not create it twice.
  */
-export interface SourceDraft extends RepositoryDraft {
+export interface SourceSubmission extends RepositorySubmission {
   readonly key: string;
 }
 
@@ -45,7 +45,7 @@ export function NewProjectDialog({
   onClose,
 }: {
   readonly name: string;
-  readonly sources: readonly SourceDraft[];
+  readonly sources: readonly SourceSubmission[];
   readonly accounts: readonly ConnectionOption[];
   /** Whether a save is in progress. While it is, Cancel and Create are disabled. */
   readonly pending: boolean;
@@ -53,7 +53,7 @@ export function NewProjectDialog({
   readonly failure: string | null;
   readonly onName: (name: string) => void;
   readonly onAddSource: () => void;
-  readonly onChangeSource: (key: string, source: Partial<SourceDraft>) => void;
+  readonly onChangeSource: (key: string, source: Partial<SourceSubmission>) => void;
   readonly onRemoveSource: (key: string) => void;
   readonly onSubmit: () => void;
   readonly onClose: () => void;
@@ -165,9 +165,9 @@ function SourceRow({
   onChange,
   onRemove,
 }: {
-  readonly source: SourceDraft;
+  readonly source: SourceSubmission;
   readonly accounts: readonly ConnectionOption[];
-  readonly onChange: (next: Partial<SourceDraft>) => void;
+  readonly onChange: (next: Partial<SourceSubmission>) => void;
   readonly onRemove: () => void;
 }): JSX.Element {
   const remoteId = `source-${source.key}-remote`;
