@@ -20,6 +20,7 @@ import {
   type Grant,
   type Notification,
   type NotificationCreateInput,
+  type SortDirection,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import type { Change } from "../db";
@@ -714,7 +715,7 @@ describe("notification.query", () => {
         const notifications = yield* NotificationService;
         yield* withThreeNotifications;
         yield* withThreeNotifications;
-        const walk = (direction: "asc" | "desc") =>
+        const walk = (direction: SortDirection) =>
           Effect.gen(function* () {
             const titles: Array<string> = [];
             let cursor: string | undefined;

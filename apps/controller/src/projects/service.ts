@@ -23,6 +23,7 @@
  * returning the project, while its tasks keep their `projectId` and its
  * resource links stay. There is no include-deleted option.
  */
+import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -87,7 +88,7 @@ interface ScalarChange {
  * Sorted by name: people read a project list to pick a project, and there are
  * few enough projects that the name helps more than how recent it is.
  */
-const DEFAULT_SORT: ReadonlyArray<ResolvedSortKey<ProjectSortField>> = [
+const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<ProjectSortField>> = [
   { field: "name", direction: "asc" },
 ];
 

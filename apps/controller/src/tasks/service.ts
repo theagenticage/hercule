@@ -18,6 +18,7 @@
  * Delete is soft: `deletedAt` is set and everything that reads a task stops
  * seeing it. There is no include-deleted option.
  */
+import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -52,6 +53,7 @@ import {
   nowIso,
   buildPageInputFields,
   refuseCursor,
+  hasSortKeys,
   resolveSortKeys,
   withTransaction,
   type ResolvedSortKey,
@@ -90,7 +92,7 @@ export interface TaskPage {
 }
 
 /** Newest work first: a task list is read to see what is going on now. */
-const DEFAULT_SORT: ReadonlyArray<ResolvedSortKey<TaskSortField>> = [
+const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<TaskSortField>> = [
   { field: "updatedAt", direction: "desc" },
 ];
 
@@ -113,13 +115,13 @@ const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...
  * Relevance is not a column, so a search cannot also be sorted. Supporting
  * both would need two paging strategies chosen per request, and ignoring the
  * sort would silently return an order nobody asked for. An empty sort list is
- * no sort at all, so a search may come with one.
+ * no sort at all (see `hasSortKeys`), so a search may come with one.
  */
 const chooseOrder = (
   text: QueryInput["text"],
   sort: QueryInput["sort"],
 ): Effect.Effect<TaskOrder, Validation> => {
-  if (text !== undefined && sort !== undefined && sort.length > 0) {
+  if (text !== undefined && hasSortKeys(sort)) {
     return Effect.fail(
       createValidationError([
         { path: ["sort"], message: "a full-text search is ordered by relevance" },
@@ -128,7 +130,7 @@ const chooseOrder = (
     );
   }
   if (text !== undefined) return Effect.succeed({ _tag: "relevance", text });
-  return Effect.succeed({ _tag: "column", keys: resolveSortKeys(sort, DEFAULT_SORT) });
+  return Effect.succeed({ _tag: "column", sort: resolveSortKeys(sort, DEFAULT_SORT) });
 };
 
 const make = Effect.gen(function* () {

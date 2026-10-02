@@ -38,6 +38,7 @@
  * an id. The operation and sort keys alone would not always tell the two
  * apart.
  */
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -51,7 +52,7 @@ import {
   type SortKey,
   type Validation,
 } from "@hercule/contract";
-import { UUID_PATTERN } from "./id";
+import { UUID_PATTERN, uuidFromString } from "./id";
 
 /** One page of a keyset list. `nextCursor` is `undefined` on the last page. */
 export interface Page<A> {
@@ -59,7 +60,10 @@ export interface Page<A> {
   readonly nextCursor: string | undefined;
 }
 
-/** The paging input of a list operation: how many rows, where to start, and which direction. */
+/**
+ * The paging input of a listing that sorts by one field: how many rows, where
+ * to start, and which direction.
+ */
 export interface PageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
@@ -93,7 +97,7 @@ export interface ResolvedSortKey<Field extends string = string> {
  */
 export interface CursorScope {
   readonly op: OperationId;
-  readonly sort: ReadonlyArray<ResolvedSortKey>;
+  readonly sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey>;
 }
 
 /** A cursor that was not issued by this operation, or was edited by the client. */
@@ -114,15 +118,14 @@ const OTHER_ORDER = "The cursor was issued under a different sort order.";
  */
 const OTHER_LISTING = "The cursor was issued for a different listing.";
 
-/** The values a cursor holds after the operation and the sort keys. */
-type Payload = ReadonlyArray<string | number>;
-
 /** A sort value in a cursor: the value of one sort column on a row. */
 export type SortValue = string | number;
 
 /**
  * The type of one sort column's values. A cursor value is checked against it,
- * so the next page compares the value the same way as the column.
+ * so the next page compares the value the same way as the column. A `number`
+ * is always an integer, because every numeric sort column holds a rank or a
+ * position.
  */
 export type SortValueType = "string" | "number";
 
@@ -132,13 +135,14 @@ export type SortValueType = "string" | "number";
  * the type of its values and the reading of a value from an item never
  * disagree.
  */
-export interface SortableField<Item> {
+export interface SortColumn<Item> {
   /**
    * The SQL the listing orders by: a column, or an expression such as a rank.
    * An expression is written exactly as the index that serves it, because
    * SQLite uses an expression index only for the same expression.
    */
   readonly column: string;
+  /** The type of the value in a cursor, which `decodeCursor` checks. */
   readonly valueType: SortValueType;
   /** Returns the item's value for the column, to put in the next page's cursor. */
   readonly readValue: (item: Item) => SortValue;
@@ -149,7 +153,7 @@ const isSealedSort = Schema.is(
   Schema.Array(Schema.Struct({ field: Schema.String, direction: SortDirection })),
 );
 
-const sealCursor = (scope: CursorScope, payload: Payload): string =>
+const sealCursor = (scope: CursorScope, payload: ReadonlyArray<SortValue>): string =>
   Buffer.from(
     JSON.stringify([
       scope.op,
@@ -215,6 +219,15 @@ const isPosition = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
 /**
+ * Checks that a value read back from a cursor has the type of its sort column.
+ * A number must be a safe integer, for the same reason as a position: an
+ * edited cursor could otherwise hold a fraction, or a number too large to
+ * parse exactly, that no rank or position ever has.
+ */
+const isSortValueOfType = (value: unknown, valueType: SortValueType): value is SortValue =>
+  valueType === "number" ? Number.isSafeInteger(value) : typeof value === "string";
+
+/**
  * Encodes the cursor for a row: its scope, its sort values and its id.
  * `values` holds one value per sort key of `scope`, in the same order.
  *
@@ -235,12 +248,12 @@ export const encodeCursor = (
  * if the cursor is malformed or belongs to another scope.
  *
  * `valueTypes` holds the type of each sort column, one per sort key. A cursor
- * with another number of values, or with a value of the other type, is
- * rejected rather than compared. SQLite sorts every number below every string,
- * so a value of the wrong type makes the boundary always true or always false:
- * the list silently restarts or silently ends. A cursor is opaque, so the only
- * way to get here is to edit one, and an edited cursor is rejected as not
- * issued by this operation.
+ * is rejected rather than compared when it has another number of values, a
+ * value of the other type, or a number that is not a safe integer. SQLite
+ * sorts every number below every string, so a value of the wrong type makes
+ * the boundary always true or always false: the list silently restarts or
+ * silently ends. A cursor is opaque, so the only way to get here is to edit
+ * one, and an edited cursor is rejected as not issued by this operation.
  */
 export const decodeCursor = (
   cursor: string,
@@ -251,7 +264,7 @@ export const decodeCursor = (
     const values = payload.slice(0, -1);
     const id = payload[payload.length - 1];
     return payload.length === valueTypes.length + 1 &&
-      values.every((value, index) => typeof value === valueTypes[index]) &&
+      valueTypes.every((valueType, index) => isSortValueOfType(values[index], valueType)) &&
       typeof id === "string" &&
       UUID_PATTERN.test(id)
       ? { values: values as ReadonlyArray<SortValue>, id }
@@ -299,8 +312,8 @@ export const decodeOwnedCursor = (
  * last row. The scope's one sort key names the column; the payload holds only
  * its value, tagged `key` so it is never read as an offset cursor.
  */
-export const encodeIntegerKeyCursor = (scope: CursorScope, key: number): string =>
-  sealCursor(scope, ["key", key]);
+export const encodeIntegerKeyCursor = (scope: CursorScope, value: number): string =>
+  sealCursor(scope, ["key", value]);
 
 /**
  * Decodes a cursor from `encodeIntegerKeyCursor` into its integer key. Fails
@@ -328,7 +341,7 @@ export const encodeOffsetCursor = (scope: CursorScope, offset: number): string =
  * as the priority rank, and it has to be written exactly the way the index
  * that serves it was built.
  */
-export interface SortColumn {
+export interface KeysetColumn {
   readonly column: string;
   readonly direction: SortDirection;
 }
@@ -347,11 +360,17 @@ export interface SortColumn {
  *   key, then one per tie-break column. It is `undefined` on the first page.
  *
  * When every key has the same direction, the boundary is a row-value
- * comparison, so SQLite can resume with one index seek: `(a, b) > (x, y)` reads
- * along the index from that pair rather than filtering out every row before
- * it. With mixed directions no single comparison fits, so the boundary is
- * written out column by column, each in its own direction. For `p desc, c asc`
- * and the id: `(p < ?p OR (p = ?p AND (c > ?c OR (c = ?c AND id > ?id))))`.
+ * comparison, `(a, b) > (x, y)`, preceded by a plain range on the first
+ * column, `a >= x`. The range is what lets SQLite resume with an index seek
+ * when the first column is an expression, such as the rank of a priority or a
+ * status: SQLite seeks an expression index from a plain range, but not from a
+ * row-value comparison. Without the range, each page would read the index
+ * from the start and skip every row before the boundary.
+ *
+ * With mixed directions no single comparison fits, so the boundary is written
+ * out column by column, each in its own direction. For `p desc, c asc` and the
+ * id: `(p < ?p OR (p = ?p AND (c > ?c OR (c = ?c AND id > ?id))))`. No index
+ * serves a sort in mixed directions, so this form does not try to seek.
  *
  * Both forms rely on every sort column being `NOT NULL`, which every sortable
  * column is today. A comparison with `NULL` is never true, so a row with a
@@ -359,15 +378,15 @@ export interface SortColumn {
  */
 export const buildKeyset = (
   sql: SqlClient.SqlClient,
-  keys: ReadonlyArray<SortColumn>,
+  keys: Arr.NonEmptyReadonlyArray<KeysetColumn>,
   tieBreak: ReadonlyArray<string>,
   after: ReadonlyArray<unknown> | undefined,
 ): { readonly keyset: Fragment; readonly order: Fragment } => {
-  const lastDirection = keys[keys.length - 1]?.direction ?? "asc";
-  const columns: ReadonlyArray<SortColumn> = [
-    ...keys,
-    ...tieBreak.map((column) => ({ column, direction: lastDirection })),
-  ];
+  const lastDirection = Arr.lastNonEmpty(keys).direction;
+  const columns = Arr.appendAll(
+    keys,
+    tieBreak.map((column) => ({ column, direction: lastDirection })),
+  );
   const order = sql.literal(
     `ORDER BY ${columns
       .map(({ column, direction }) => `${column} ${direction === "asc" ? "ASC" : "DESC"}`)
@@ -380,28 +399,85 @@ export const buildKeyset = (
   const chooseComparison = (direction: SortDirection) =>
     sql.literal(direction === "asc" ? ">" : "<");
   if (columns.every(({ direction }) => direction === lastDirection)) {
+    const first = sql.literal(Arr.headNonEmpty(columns).column);
+    const range = sql`${first} ${sql.literal(lastDirection === "asc" ? ">=" : "<=")} ${after[0]}`;
     const key = sql.literal(columns.map(({ column }) => column).join(", "));
     const values = sql.csv(after.map((value) => sql`${value}`));
-    return { keyset: sql`(${key}) ${chooseComparison(lastDirection)} (${values})`, order };
+    const rowValue = sql`(${key}) ${chooseComparison(lastDirection)} (${values})`;
+    return { keyset: sql`${range} AND ${rowValue}`, order };
   }
   // Built from the last column outwards: each column's condition wraps the
   // conditions of the columns after it in parentheses. The outermost
   // parentheses keep the `OR` inside, because callers join this fragment to
   // their own conditions with `AND`.
-  const keyset = columns.reduceRight<Fragment | undefined>(
-    (inner, { column, direction }, index) => {
-      const name = sql.literal(column);
-      const beyondValue = sql`${name} ${chooseComparison(direction)} ${after[index]}`;
-      return inner === undefined
-        ? beyondValue
-        : sql`(${beyondValue} OR (${name} = ${after[index]} AND ${inner}))`;
+  const compareBeyond = ({ column, direction }: KeysetColumn, index: number) =>
+    sql`${sql.literal(column)} ${chooseComparison(direction)} ${after[index]}`;
+  const keyset = Arr.initNonEmpty(columns).reduceRight<Fragment>(
+    (inner, column, index) => {
+      const sameValue = sql`${sql.literal(column.column)} = ${after[index]}`;
+      return sql`(${compareBeyond(column, index)} OR (${sameValue} AND ${inner}))`;
     },
-    undefined,
+    compareBeyond(Arr.lastNonEmpty(columns), columns.length - 1),
   );
-  // `keyset` is never `undefined` here, because mixed directions take at least
-  // two columns; the fallback only satisfies the type.
-  return { keyset: keyset ?? sql`1 = 1`, order };
+  return { keyset, order };
 };
+
+/**
+ * Decodes the cursor of a listing sorted by the keys in `sort`, and returns
+ * what its keyset query needs:
+ *
+ * - `keyset` and `order`, the two fragments from `buildKeyset`;
+ * - `encodeNextCursor`, which encodes the cursor of the page that starts after
+ *   an item.
+ *
+ * `columns` is the listing's table of sort columns. `idColumn` is the column
+ * that holds the row's id as a UUID; it breaks the ties the sort keys leave.
+ * With no `cursor`, the boundary lets every row through. Fails with
+ * `CursorError` if the cursor is malformed or was issued for another operation
+ * or other sort keys.
+ */
+export const prepareKeysetListing = <Field extends string, Item extends { readonly id: string }>(
+  sql: SqlClient.SqlClient,
+  op: OperationId,
+  sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<Field>>,
+  columns: Record<Field, SortColumn<Item>>,
+  idColumn: string,
+  cursor: string | undefined,
+): Effect.Effect<
+  {
+    readonly keyset: Fragment;
+    readonly order: Fragment;
+    readonly encodeNextCursor: (item: Item) => string;
+  },
+  CursorError
+> =>
+  Effect.gen(function* () {
+    const scope: CursorScope = { op, sort };
+    const after =
+      cursor === undefined
+        ? undefined
+        : yield* decodeCursor(
+            cursor,
+            scope,
+            sort.map(({ field }) => columns[field].valueType),
+          );
+    const { keyset, order } = buildKeyset(
+      sql,
+      Arr.map(sort, ({ field, direction }) => ({ column: columns[field].column, direction })),
+      [idColumn],
+      after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
+    );
+    return {
+      keyset,
+      order,
+      encodeNextCursor: (item: Item) =>
+        encodeCursor(
+          scope,
+          sort.map(({ field }) => columns[field].readValue(item)),
+          item.id,
+        ),
+    };
+  });
 
 /**
  * Builds one page from the rows a keyset query read.
@@ -477,20 +553,27 @@ export const buildPageInputFields = <const Fields extends ReadonlyArray<string>>
 });
 
 /**
+ * Checks whether the caller sent at least one sort key. An empty list counts
+ * as no sort at all, because the wire cannot tell the two apart: an empty
+ * list writes no query parameter.
+ */
+export const hasSortKeys = <Key>(
+  sort: ReadonlyArray<Key> | undefined,
+): sort is Arr.NonEmptyReadonlyArray<Key> =>
+  sort !== undefined && Arr.isReadonlyArrayNonEmpty(sort);
+
+/**
  * Returns the sort keys a listing sorts by: `defaultKeys` when the caller sent
- * no `sort` or an empty list, and otherwise the caller's keys in order, with a
+ * none (see `hasSortKeys`), and otherwise the caller's keys in order, with a
  * missing direction set to `asc`.
- *
- * An empty list gives the default order because the wire cannot tell it apart
- * from no `sort` at all: an empty list writes no query parameter.
  */
 export const resolveSortKeys = <Field extends string>(
   sort: ReadonlyArray<SortKey<Field>> | undefined,
-  defaultKeys: ReadonlyArray<ResolvedSortKey<Field>>,
-): ReadonlyArray<ResolvedSortKey<Field>> =>
-  sort === undefined || sort.length === 0
-    ? defaultKeys
-    : sort.map(({ field, direction }) => ({ field, direction: direction ?? "asc" }));
+  defaultKeys: Arr.NonEmptyReadonlyArray<ResolvedSortKey<Field>>,
+): Arr.NonEmptyReadonlyArray<ResolvedSortKey<Field>> =>
+  hasSortKeys(sort)
+    ? Arr.map(sort, ({ field, direction }) => ({ field, direction: direction ?? "asc" }))
+    : defaultKeys;
 
 /**
  * Returns the direction of a listing that sorts by one field: the direction of

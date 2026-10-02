@@ -124,7 +124,19 @@ describe("profile.query", () => {
     const error = await runError(
       Effect.flatMap(Profiles, (profiles) => profiles.query({ cursor: "not-a-cursor" })),
     );
+    expect(error).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["cursor"] }] } },
+    });
+  });
+
+  it("refuses a sort that names a field twice, and names the field", async () => {
+    const error = await runError(
+      Effect.flatMap(Profiles, (profiles) =>
+        profiles.query({ sort: [{ field: "name" }, { field: "name", direction: "desc" }] }),
+      ),
+    );
     expect(error).toMatchObject({ error: { code: "validation" } });
+    expect(JSON.stringify(error)).toMatch(/name appears more than once/);
   });
 });
 

@@ -25,6 +25,7 @@
  * only if the database does not change while it is read. A rank is not a key
  * to resume from, and there is nothing else to page by.
  */
+import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -37,20 +38,18 @@ import type {
   TaskStatus,
 } from "@hercule/contract";
 import {
-  decodeCursor,
   decodeOffsetCursor,
-  encodeCursor,
   encodeOffsetCursor,
-  buildKeyset,
   mintUuid,
   buildPage,
+  prepareKeysetListing,
   uuidFromString,
   uuidToString,
   type CursorError,
   type CursorScope,
   type Page,
   type ResolvedSortKey,
-  type SortableField,
+  type SortColumn,
 } from "../db";
 
 /**
@@ -68,11 +67,14 @@ export interface TaskFilter {
 export type TaskSortField = "updatedAt" | "createdAt" | "priority" | "status";
 
 /**
- * How a listing is ordered: by a column, or by how well each row matches the
- * search text.
+ * How a listing is ordered: by its sort keys, most significant first, or by
+ * how well each row matches the search text.
  */
 export type TaskOrder =
-  | { readonly _tag: "column"; readonly keys: ReadonlyArray<ResolvedSortKey<TaskSortField>> }
+  | {
+      readonly _tag: "column";
+      readonly sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<TaskSortField>>;
+    }
   | { readonly _tag: "relevance"; readonly text: string };
 
 /** The page size, cursor and order of a listing. */
@@ -139,10 +141,18 @@ const COLUMNS =
   "tasks.id, tasks.title, tasks.description, tasks.status, tasks.priority, tasks.labels, " +
   "tasks.project_id, tasks.created_at, tasks.updated_at, tasks.status_changed_at, tasks.deleted_at";
 
-/** The rank of each priority, lowest first, as the priority sort stores it. */
+/**
+ * The rank of each priority, lowest first. It matches the `CASE` expression
+ * the `tasks_priority` index is built on, so a cursor resumes on the value the
+ * index holds.
+ */
 const PRIORITY_RANK: Record<TaskPriority, number> = { low: 0, normal: 1, high: 2, urgent: 3 };
 
-/** The rank of each status, in the order work moves through them, as the status sort stores it. */
+/**
+ * The rank of each status, in the order work moves through them. It matches
+ * the `CASE` expression the `tasks_status` index is built on, so a cursor
+ * resumes on the value the index holds.
+ */
 const STATUS_RANK: Record<TaskStatus, number> = {
   open: 0,
   "in-progress": 1,
@@ -161,7 +171,7 @@ const STATUS_RANK: Record<TaskStatus, number> = {
  * It is exported for the test of migration 0041, which checks that these
  * expressions are served by that migration's indexes.
  */
-export const TASK_SORT_COLUMNS: Record<TaskSortField, SortableField<Task>> = {
+export const TASK_SORT_COLUMNS: Record<TaskSortField, SortColumn<Task>> = {
   updatedAt: {
     column: "tasks.updated_at",
     valueType: "string",
@@ -202,11 +212,6 @@ const buildMatchExpression = (text: string): string | undefined => {
   const tokens = text.split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 0);
   return tokens.length === 0 ? undefined : tokens.map((token) => `"${token}"`).join(" AND ");
 };
-
-const buildColumnScope = (keys: ReadonlyArray<ResolvedSortKey<TaskSortField>>): CursorScope => ({
-  op: "task.query",
-  sort: keys,
-});
 
 /**
  * Builds the cursor scope of a relevance listing.
@@ -448,36 +453,19 @@ const make = Effect.gen(function* () {
           );
         }
 
-        const { keys } = request.order;
-        const scope = buildColumnScope(keys);
-        const after =
-          request.cursor === undefined
-            ? undefined
-            : yield* decodeCursor(
-                request.cursor,
-                scope,
-                keys.map(({ field }) => TASK_SORT_COLUMNS[field].valueType),
-              );
-        const { keyset, order } = buildKeyset(
+        const { keyset, order, encodeNextCursor } = yield* prepareKeysetListing(
           sql,
-          keys.map(({ field, direction }) => ({
-            column: TASK_SORT_COLUMNS[field].column,
-            direction,
-          })),
-          ["tasks.id"],
-          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
+          "task.query",
+          request.order.sort,
+          TASK_SORT_COLUMNS,
+          "tasks.id",
+          request.cursor,
         );
         const rows = yield* sql<TaskRow>`
           SELECT ${sql.literal(COLUMNS)} FROM tasks
           WHERE ${where} AND ${keyset} ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* buildPage(rows, request.limit, hydrate, (last) =>
-          encodeCursor(
-            scope,
-            keys.map(({ field }) => TASK_SORT_COLUMNS[field].readValue(last)),
-            last.id,
-          ),
-        );
+        return yield* buildPage(rows, request.limit, hydrate, encodeNextCursor);
       }),
   };
 });

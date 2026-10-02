@@ -77,8 +77,8 @@ describe("the Task and Project tables", () => {
     }
   });
 
-  // The other status query, a sort on status, is tested with the index that
-  // serves it now, in `0041-task-sort-ranks.test.ts`.
+  // A sort on status is served by the rank index of migration 0041 and tested
+  // in `0041-task-sort-ranks.test.ts`.
   it("serves a status filter from an index, without a temporary b-tree", async () => {
     const plan = await run(
       Effect.gen(function* () {

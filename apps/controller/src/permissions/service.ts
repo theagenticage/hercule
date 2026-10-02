@@ -20,14 +20,17 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createConflictError,
   createInvalidStateError,
   createNotFoundError,
+  createDecodeValidationError,
   createValidationError,
   DEFAULT_PAGE_LIMIT,
+  PROFILE_SORT_FIELDS,
   type Conflict,
   type Forbidden,
   type Grant,
@@ -35,22 +38,27 @@ import {
   type NotFound,
   type Profile,
   type SortDirection,
-  type SortKey,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { afterCommit, resolveSortDirection, withTransaction } from "../db";
+import {
+  afterCommit,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "./profiles";
 import { SessionTokens } from "./tokens";
 
 /** The input of `profile.query`. An absent field means its default value. */
-export interface QueryInput {
-  readonly limit?: number;
-  readonly cursor?: string;
-  readonly sort?: ReadonlyArray<SortKey<"name">>;
-}
+const QueryInput = Schema.Struct(buildPageInputFields(PROFILE_SORT_FIELDS));
+
+export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
+
+const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 
 /** One page of profiles, in the contract's shape. */
 export interface ProfilePage {
@@ -109,17 +117,17 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("profile.query");
-        const page = yield* profiles
-          .list({
-            limit: input.limit ?? DEFAULT_PAGE_LIMIT,
-            cursor: input.cursor,
-            direction: resolveSortDirection(input.sort, DEFAULT_DIRECTION),
-          })
-          .pipe(
-            Effect.catchTag("CursorError", (error) =>
-              Effect.fail(createValidationError([{ path: ["cursor"], message: error.message }])),
-            ),
-          );
+        const { limit, cursor, sort } = yield* Effect.mapError(
+          decodeQuery(input),
+          createDecodeValidationError,
+        );
+        const page = yield* refuseCursor(
+          profiles.list({
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
+          }),
+        );
         return {
           items: page.items,
           ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),

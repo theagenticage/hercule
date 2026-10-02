@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { uuidFromString, uuidToString } from "./id";
 import { TestDatabase } from "./testing";
 import {
   decodeCursor,
@@ -13,20 +15,30 @@ import {
   encodeOwnedCursor,
   buildKeyset,
   buildPage,
+  hasSortKeys,
+  prepareKeysetListing,
   resolveSortDirection,
   resolveSortKeys,
   type CursorScope,
+  type KeysetColumn,
   type ResolvedSortKey,
   type SortColumn,
+  type SortValueType,
 } from "./page";
 
-const KEYS: CursorScope = { op: "apiKey.query", sort: [{ field: "createdAt", direction: "desc" }] };
+const API_KEYS: CursorScope = {
+  op: "apiKey.query",
+  sort: [{ field: "createdAt", direction: "desc" }],
+};
 const NAMES: CursorScope = { op: "secret.query", sort: [{ field: "name", direction: "asc" }] };
 const ID = "0192ce07-8c4f-7d66-afec-2482b5c9b03c";
 const CREATED_AT = "2026-09-22T10:00:00.000Z";
 
 /** Returns `scope` with its sort keys replaced by `sort`. */
-const withSort = (scope: CursorScope, ...sort: ReadonlyArray<ResolvedSortKey>): CursorScope => ({
+const withSort = (
+  scope: CursorScope,
+  ...sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey>
+): CursorScope => ({
   ...scope,
   sort,
 });
@@ -39,7 +51,7 @@ const sealRawCursor = (...parts: ReadonlyArray<unknown>): string =>
 const readDecodeFailure = (
   cursor: string,
   scope: CursorScope,
-  valueTypes: ReadonlyArray<"string" | "number"> = ["string"],
+  valueTypes: ReadonlyArray<SortValueType> = ["string"],
 ): Promise<string | null> =>
   Effect.runPromise(
     decodeCursor(cursor, scope, valueTypes).pipe(
@@ -49,8 +61,8 @@ const readDecodeFailure = (
 
 describe("keyset cursors", () => {
   it("round-trips the sort value and the id", async () => {
-    const cursor = encodeCursor(KEYS, [CREATED_AT], ID);
-    expect(await Effect.runPromise(decodeCursor(cursor, KEYS, ["string"]))).toEqual({
+    const cursor = encodeCursor(API_KEYS, [CREATED_AT], ID);
+    expect(await Effect.runPromise(decodeCursor(cursor, API_KEYS, ["string"]))).toEqual({
       values: [CREATED_AT],
       id: ID,
     });
@@ -75,6 +87,23 @@ describe("keyset cursors", () => {
     ).toEqual({ values: [2], id: ID });
   });
 
+  it.each(["2.5", "1e999", "-1e999", "9007199254740993"])(
+    "rejects a numeric sort value that is not a safe integer: %s",
+    async (value) => {
+      // A rank is always a small integer, so only an edited cursor holds a
+      // fraction or a number too large to parse exactly. The JSON is written
+      // by hand because `JSON.stringify` turns an infinite number into `null`.
+      const sort = [{ field: "priority", direction: "asc" }] as const;
+      const cursor = Buffer.from(
+        `["task.query",${JSON.stringify(sort)},${value},"${ID}"]`,
+        "utf8",
+      ).toString("base64url");
+      expect(await readDecodeFailure(cursor, { op: "task.query", sort }, ["number"])).toMatch(
+        /not one this listing/,
+      );
+    },
+  );
+
   it("round-trips one value per sort key, in order", async () => {
     const tasks: CursorScope = {
       op: "task.query",
@@ -93,14 +122,14 @@ describe("keyset cursors", () => {
   it("rejects another operation's cursor", async () => {
     const cursor = encodeCursor(NAMES, ["controller.signing-key"], ID);
     expect(
-      await readDecodeFailure(cursor, withSort(KEYS, { field: "name", direction: "asc" })),
+      await readDecodeFailure(cursor, withSort(API_KEYS, { field: "name", direction: "asc" })),
     ).toMatch(/not one this listing/);
   });
 
   it("rejects its own cursor used with the other direction", async () => {
-    const cursor = encodeCursor(KEYS, [CREATED_AT], ID);
+    const cursor = encodeCursor(API_KEYS, [CREATED_AT], ID);
     expect(
-      await readDecodeFailure(cursor, withSort(KEYS, { field: "createdAt", direction: "asc" })),
+      await readDecodeFailure(cursor, withSort(API_KEYS, { field: "createdAt", direction: "asc" })),
     ).toMatch(/different sort order/);
   });
 
@@ -109,9 +138,9 @@ describe("keyset cursors", () => {
     // name, so a mismatch there means a different list rather than a
     // different direction. The message must not send the caller to check
     // `--sort`.
-    const cursor = encodeCursor(KEYS, [CREATED_AT], ID);
+    const cursor = encodeCursor(API_KEYS, [CREATED_AT], ID);
     expect(
-      await readDecodeFailure(cursor, withSort(KEYS, { field: "name", direction: "desc" })),
+      await readDecodeFailure(cursor, withSort(API_KEYS, { field: "name", direction: "desc" })),
     ).toMatch(/different listing/);
   });
 
@@ -171,8 +200,6 @@ describe("keyset cursors", () => {
     });
   });
 
-  const KEYS_SORT = [{ field: "createdAt", direction: "desc" }];
-
   it.each([
     ["not base64url", "not a cursor at all"],
     ["not JSON", Buffer.from("nonsense", "utf8").toString("base64url")],
@@ -192,23 +219,26 @@ describe("keyset cursors", () => {
       "a sort key whose field is not a string",
       sealRawCursor("apiKey.query", [{ field: 1, direction: "desc" }], CREATED_AT, ID),
     ],
-    ["an id that is not a UUID", sealRawCursor("apiKey.query", KEYS_SORT, "x", "-".repeat(36))],
+    ["an id that is not a UUID", sealRawCursor("apiKey.query", API_KEYS.sort, "x", "-".repeat(36))],
     [
       // A sort value has the type of its column, and this column holds text,
       // so a boolean can never be a valid value.
       "a sort value that is not what the column holds",
-      sealRawCursor("apiKey.query", KEYS_SORT, true, ID),
+      sealRawCursor("apiKey.query", API_KEYS.sort, true, ID),
     ],
     [
       // SQLite sorts every number below every string, so a number compared
       // against a text column makes the boundary always true or always false:
       // the list restarts or ends instead of returning the next page.
       "a numeric sort value where the column holds text",
-      sealRawCursor("apiKey.query", KEYS_SORT, 1757, ID),
+      sealRawCursor("apiKey.query", API_KEYS.sort, 1757, ID),
     ],
-    ["a second sort value", sealRawCursor("apiKey.query", KEYS_SORT, CREATED_AT, CREATED_AT, ID)],
+    [
+      "a second sort value",
+      sealRawCursor("apiKey.query", API_KEYS.sort, CREATED_AT, CREATED_AT, ID),
+    ],
   ])("rejects a cursor: %s", async (_case, cursor) => {
-    expect(await readDecodeFailure(cursor, KEYS)).toMatch(/not one this listing/);
+    expect(await readDecodeFailure(cursor, API_KEYS)).toMatch(/not one this listing/);
   });
 });
 
@@ -400,8 +430,18 @@ describe("offset cursors", () => {
   });
 });
 
+describe("hasSortKeys", () => {
+  it("counts an empty list as no sort at all", () => {
+    expect(hasSortKeys(undefined)).toBe(false);
+    expect(hasSortKeys([])).toBe(false);
+    expect(hasSortKeys([{ field: "createdAt" }])).toBe(true);
+  });
+});
+
 describe("resolveSortKeys", () => {
-  const DEFAULT = [{ field: "updatedAt", direction: "desc" }] as const;
+  const DEFAULT: Arr.NonEmptyReadonlyArray<ResolvedSortKey> = [
+    { field: "updatedAt", direction: "desc" },
+  ];
 
   it("returns the default keys when the caller sent no sort or an empty list", () => {
     expect(resolveSortKeys(undefined, DEFAULT)).toEqual(DEFAULT);
@@ -410,10 +450,7 @@ describe("resolveSortKeys", () => {
 
   it("returns the caller's keys in order, with a missing direction set to asc", () => {
     expect(
-      resolveSortKeys(
-        [{ field: "priority", direction: "desc" }, { field: "createdAt" }],
-        DEFAULT as ReadonlyArray<ResolvedSortKey>,
-      ),
+      resolveSortKeys([{ field: "priority", direction: "desc" }, { field: "createdAt" }], DEFAULT),
     ).toEqual([
       { field: "priority", direction: "desc" },
       { field: "createdAt", direction: "asc" },
@@ -439,7 +476,8 @@ describe("resolveSortDirection", () => {
 /**
  * Paging through a real table. Every list operation is built from these SQL
  * fragments and `buildPage`, so they are tested once here rather than through
- * each operation.
+ * each operation. The walk goes through `prepareKeysetListing`, which builds
+ * the fragments the way a listing with several sort keys does.
  *
  * `label` names each row in the results. `rank` and `name` repeat, so a sort by
  * both has ties on `rank` alone (`a` and `c`) and ties on both (`b` and `e`).
@@ -455,16 +493,31 @@ const ROWS = [
 ] as const;
 
 interface WalkedRow {
+  readonly id: Uint8Array;
+  readonly label: string;
+  readonly rank: number;
+  readonly name: string;
+}
+
+interface WalkedItem {
   readonly id: string;
   readonly label: string;
   readonly rank: number;
   readonly name: string;
 }
 
+type WalkedSortField = "label" | "rank" | "name";
+
+const WALKED_SORT_COLUMNS: Record<WalkedSortField, SortColumn<WalkedItem>> = {
+  label: { column: "label", valueType: "string", readValue: (item) => item.label },
+  rank: { column: "rank", valueType: "number", readValue: (item) => item.rank },
+  name: { column: "name", valueType: "string", readValue: (item) => item.name },
+};
+
 const seed = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`CREATE TABLE walked (
-    id TEXT PRIMARY KEY NOT NULL,
+    id BLOB PRIMARY KEY NOT NULL,
     label TEXT NOT NULL,
     rank INTEGER NOT NULL,
     name TEXT NOT NULL,
@@ -472,8 +525,8 @@ const seed = Effect.gen(function* () {
   )`;
   for (const [index, row] of ROWS.entries()) {
     yield* sql`INSERT INTO walked (id, label, rank, name, team)
-               VALUES (${`0192ce07-8c4f-7d66-afec-2482b5c9b03${String(index)}`}, ${row.label},
-                       ${row.rank}, ${row.name}, ${row.team})`;
+               VALUES (${uuidFromString(`0192ce07-8c4f-7d66-afec-2482b5c9b03${String(index)}`)},
+                       ${row.label}, ${row.rank}, ${row.name}, ${row.team})`;
   }
   return sql;
 });
@@ -484,43 +537,37 @@ const seed = Effect.gen(function* () {
  * are listed, through a condition joined to the boundary with `AND`.
  */
 const walkAll = (
-  keys: ReadonlyArray<SortColumn & { readonly column: "label" | "rank" | "name" }>,
+  sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<WalkedSortField>>,
   limit: number,
   team?: string,
 ) =>
   Effect.gen(function* () {
     const sql = yield* seed;
-    const scope: CursorScope = {
-      op: "task.query",
-      sort: keys.map(({ column, direction }) => ({ field: column, direction })),
-    };
-    const valueTypes = keys.map(({ column }) => (column === "rank" ? "number" : "string"));
     const labels: Array<string> = [];
     let cursor: string | undefined;
     let pages = 0;
     for (;;) {
-      const decoded =
-        cursor === undefined ? undefined : yield* decodeCursor(cursor, scope, valueTypes);
-      const { keyset, order } = buildKeyset(
+      const { keyset, order, encodeNextCursor } = yield* prepareKeysetListing(
         sql,
-        keys,
-        ["id"],
-        decoded === undefined ? undefined : [...decoded.values, decoded.id],
+        "task.query",
+        sort,
+        WALKED_SORT_COLUMNS,
+        "id",
+        cursor,
       );
       const byTeam = team === undefined ? sql`` : sql`AND team = ${team}`;
       const rows = yield* sql<WalkedRow>`
         SELECT id, label, rank, name FROM walked WHERE ${keyset} ${byTeam} ${order}
         LIMIT ${limit + 1}
       `;
-      const page = yield* buildPage(rows, limit, Effect.succeed, (last) =>
-        encodeCursor(
-          scope,
-          keys.map(({ column }) => last[column]),
-          last.id,
-        ),
+      const page = yield* buildPage(
+        rows,
+        limit,
+        (read) => Effect.succeed(read.map((row) => ({ ...row, id: uuidToString(row.id) }))),
+        encodeNextCursor,
       );
       pages++;
-      labels.push(...page.items.map((row) => row.label));
+      labels.push(...page.items.map((item) => item.label));
       if (page.nextCursor === undefined) break;
       cursor = page.nextCursor;
     }
@@ -529,11 +576,11 @@ const walkAll = (
 
 describe("keyset paging", () => {
   it("reads every row exactly once, in the direction it was given", async () => {
-    expect(await walkAll([{ column: "label", direction: "asc" }], 2)).toEqual({
+    expect(await walkAll([{ field: "label", direction: "asc" }], 2)).toEqual({
       labels: ["a", "b", "c", "d", "e", "f"],
       pages: 3,
     });
-    expect(await walkAll([{ column: "label", direction: "desc" }], 2)).toEqual({
+    expect(await walkAll([{ field: "label", direction: "desc" }], 2)).toEqual({
       labels: ["f", "e", "d", "c", "b", "a"],
       pages: 3,
     });
@@ -542,7 +589,7 @@ describe("keyset paging", () => {
   it("issues no cursor when the last page is exactly full", async () => {
     // Six rows with a page size of six: the seventh row the query asked for is
     // not there, so there is no next page and no cursor.
-    expect(await walkAll([{ column: "label", direction: "asc" }], 6)).toEqual({
+    expect(await walkAll([{ field: "label", direction: "asc" }], 6)).toEqual({
       labels: ["a", "b", "c", "d", "e", "f"],
       pages: 1,
     });
@@ -555,8 +602,8 @@ describe("keyset paging", () => {
       (
         await walkAll(
           [
-            { column: "rank", direction: "desc" },
-            { column: "name", direction: "asc" },
+            { field: "rank", direction: "desc" },
+            { field: "name", direction: "asc" },
           ],
           limit,
         )
@@ -567,8 +614,8 @@ describe("keyset paging", () => {
       (
         await walkAll(
           [
-            { column: "rank", direction: "asc" },
-            { column: "name", direction: "desc" },
+            { field: "rank", direction: "asc" },
+            { field: "name", direction: "desc" },
           ],
           limit,
         )
@@ -581,8 +628,8 @@ describe("keyset paging", () => {
       (
         await walkAll(
           [
-            { column: "rank", direction: "desc" },
-            { column: "name", direction: "desc" },
+            { field: "rank", direction: "desc" },
+            { field: "name", direction: "desc" },
           ],
           1,
         )
@@ -597,8 +644,8 @@ describe("keyset paging", () => {
       (
         await walkAll(
           [
-            { column: "rank", direction: "desc" },
-            { column: "name", direction: "asc" },
+            { field: "rank", direction: "desc" },
+            { field: "name", direction: "asc" },
           ],
           1,
           "x",
@@ -611,7 +658,7 @@ describe("keyset paging", () => {
 describe("buildKeyset", () => {
   /** Returns the SQL text and parameters of a query that uses the keyset's two fragments. */
   const compileKeyset = (
-    keys: ReadonlyArray<SortColumn>,
+    keys: Arr.NonEmptyReadonlyArray<KeysetColumn>,
     tieBreak: ReadonlyArray<string>,
     after: ReadonlyArray<unknown> | undefined,
   ) =>
@@ -628,8 +675,9 @@ describe("buildKeyset", () => {
     ]);
   });
 
-  it("compares a row value when every key has the same direction", async () => {
-    // One row-value comparison lets SQLite resume with a single index seek.
+  it("compares a row value after a range on the first key when every key has the same direction", async () => {
+    // The range on the first key lets SQLite start an index seek there, even
+    // when that key is an expression such as a rank.
     expect(
       await compileKeyset(
         [
@@ -640,8 +688,9 @@ describe("buildKeyset", () => {
         [2, "n", ID],
       ),
     ).toEqual([
-      "SELECT id FROM t WHERE (rank, name, id) < (?,?,?) ORDER BY rank DESC, name DESC, id DESC",
-      [2, "n", ID],
+      "SELECT id FROM t WHERE rank <= ? AND (rank, name, id) < (?,?,?) " +
+        "ORDER BY rank DESC, name DESC, id DESC",
+      [2, 2, "n", ID],
     ]);
   });
 
@@ -664,8 +713,8 @@ describe("buildKeyset", () => {
 
   it("takes no tie-break when the key is already unique", async () => {
     expect(await compileKeyset([{ column: "position", direction: "desc" }], [], [7])).toEqual([
-      "SELECT id FROM t WHERE (position) < (?) ORDER BY position DESC",
-      [7],
+      "SELECT id FROM t WHERE position <= ? AND (position) < (?) ORDER BY position DESC",
+      [7, 7],
     ]);
   });
 
@@ -677,9 +726,9 @@ describe("buildKeyset", () => {
         [CREATED_AT, ID, "nightly"],
       ),
     ).toEqual([
-      "SELECT id FROM t WHERE (created_at, workflow_id, trigger_id) < (?,?,?) " +
+      "SELECT id FROM t WHERE created_at <= ? AND (created_at, workflow_id, trigger_id) < (?,?,?) " +
         "ORDER BY created_at DESC, workflow_id DESC, trigger_id DESC",
-      [CREATED_AT, ID, "nightly"],
+      [CREATED_AT, CREATED_AT, ID, "nightly"],
     ]);
   });
 });

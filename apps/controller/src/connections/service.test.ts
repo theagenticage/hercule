@@ -464,6 +464,9 @@ describe("connection.query with two sort keys", () => {
     );
 
     expect(failure).toMatchObject({ error: { code: "validation" } });
-    expect(JSON.stringify(failure)).toMatch(/label appears more than once/);
+    const messages = (
+      failure as { error: { details: { issues: ReadonlyArray<{ message: string }> } } }
+    ).error.details.issues.map((issue) => issue.message);
+    expect(messages).toContainEqual(expect.stringContaining("label appears more than once"));
   });
 });

@@ -47,10 +47,13 @@ export const Profile = Schema.Struct({
 
 export type Profile = Schema.Schema.Type<typeof Profile>;
 
+/** What a profile listing may be sorted by. People look for a profile by its name. */
+export const PROFILE_SORT_FIELDS = ["name"] as const;
+
 export const profile = HttpApiGroup.make("profile")
   .add(
     HttpApiEndpoint.get("query", "/profiles", {
-      query: pageParams(["name"]),
+      query: pageParams(PROFILE_SORT_FIELDS),
       success: page(Profile),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),

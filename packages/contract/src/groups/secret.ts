@@ -48,6 +48,15 @@ export const SecretRef = Schema.Struct({
 
 export type SecretRef = Schema.Schema.Type<typeof SecretRef>;
 
+/** Which secrets `secret.query` lists: those of one owner kind, one owner, or both. */
+export const SecretFilter = Schema.Struct({
+  ownerKind: Schema.optionalKey(OwnerKind),
+  ownerId: Schema.optionalKey(OwnerSegment),
+});
+
+/** What a secret listing may be sorted by. People look for a secret by its name. */
+export const SECRET_SORT_FIELDS = ["name"] as const;
+
 const SecretPath = {
   ownerKind: OwnerKind,
   ownerId: OwnerSegment,
@@ -58,9 +67,8 @@ export const secret = HttpApiGroup.make("secret")
   .add(
     HttpApiEndpoint.get("query", "/secrets", {
       query: Schema.Struct({
-        ownerKind: Schema.optionalKey(OwnerKind),
-        ownerId: Schema.optionalKey(OwnerSegment),
-        ...pageParams(["name"]).fields,
+        ...SecretFilter.fields,
+        ...pageParams(SECRET_SORT_FIELDS).fields,
       }),
       success: page(SecretRef),
       error: [Unauthenticated, Forbidden, Validation, Internal],

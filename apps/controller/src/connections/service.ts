@@ -26,6 +26,7 @@
  * already decoded a request's id against the contract, and a caller inside
  * the controller passes an id it read from a stored row.
  */
+import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -138,7 +139,7 @@ export interface ConnectionPage {
 }
 
 /** Oldest first, so the Connections screen lists connections in the order the user added them. */
-const DEFAULT_SORT: ReadonlyArray<ResolvedSortKey<ConnectionSortField>> = [
+const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<ConnectionSortField>> = [
   { field: "createdAt", direction: "asc" },
 ];
 

@@ -64,6 +64,7 @@ import {
   nowIso,
   buildPage,
   buildPageInputFields,
+  refuseCursor,
   resolveSortDirection,
   uuidFromString,
   withTransaction,
@@ -180,13 +181,7 @@ const make = Effect.gen(function* () {
         const after =
           decoded.cursor === undefined
             ? undefined
-            : yield* decodeIntegerKeyCursor(decoded.cursor, scope).pipe(
-                Effect.catchTag("CursorError", (error) =>
-                  Effect.fail(
-                    createValidationError([{ path: ["cursor"], message: error.message }]),
-                  ),
-                ),
-              );
+            : yield* refuseCursor(decodeIntegerKeyCursor(decoded.cursor, scope));
 
         const where: Array<Fragment> = [sql`1 = 1`];
         if (decoded.connectionId !== undefined) {

@@ -24,6 +24,8 @@ export {
   buildKeyset,
   buildPageInputFields,
   buildPage,
+  hasSortKeys,
+  prepareKeysetListing,
   refuseCursor,
   resolveSortDirection,
   resolveSortKeys,
@@ -32,9 +34,6 @@ export {
   type PageRequest,
   type ResolvedSortKey,
   type SortColumn,
-  type SortValue,
-  type SortValueType,
-  type SortableField,
 } from "./page";
 export { nowIso } from "./time";
 export {

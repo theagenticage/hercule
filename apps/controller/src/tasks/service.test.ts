@@ -56,6 +56,22 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     ),
   );
 
+/** Returns the issues of a `Validation` error. Fails the test when the error is not one. */
+const readValidationIssues = (
+  error: unknown,
+): ReadonlyArray<{ readonly path: ReadonlyArray<string>; readonly message: string }> => {
+  expect(error).toMatchObject({ error: { code: "validation" } });
+  return (
+    error as {
+      error: {
+        details: {
+          issues: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>;
+        };
+      };
+    }
+  ).error.details.issues;
+};
+
 /**
  * Casts input that a caller can send over the wire but the types here rule
  * out. Rejecting such input is the service's job, so the test must be able to
@@ -879,10 +895,7 @@ describe("paging", () => {
         tasks.query({ text: "prose", sort: [{ field: "updatedAt" }] }),
       ),
     );
-    expect(error).toMatchObject({ error: { code: "validation" } });
-    const paths = (
-      error as { error: { details: { issues: ReadonlyArray<{ path: ReadonlyArray<string> }> } } }
-    ).error.details.issues.flatMap((issue) => issue.path);
+    const paths = readValidationIssues(error).flatMap((issue) => issue.path);
     expect(paths.sort()).toEqual(["sort", "text"]);
   });
 
@@ -991,25 +1004,6 @@ describe("the project a task belongs to", () => {
   });
 });
 
-/**
- * Reads the issues of a `Validation` error. Fails the test when the error is
- * not one.
- */
-const readValidationIssues = (
-  error: unknown,
-): ReadonlyArray<{ readonly path: ReadonlyArray<string>; readonly message: string }> => {
-  expect(error).toMatchObject({ error: { code: "validation" } });
-  return (
-    error as {
-      error: {
-        details: {
-          issues: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>;
-        };
-      };
-    }
-  ).error.details.issues;
-};
-
 describe("the order of the sort keys", () => {
   it("sorts by the first key, breaks its ties with the second, and breaks the rest by id", async () => {
     const { walked, created } = await run(
@@ -1044,15 +1038,15 @@ describe("the order of the sort keys", () => {
     // The id breaks the ties left by both keys, in the direction of the last
     // key. Ids are random within one millisecond, so the order of each tie
     // is read from the ids rather than written down.
-    const idOf = (title: string) => created.find((task) => task.title === title)?.id ?? "";
-    const inIdOrder = (...titles: ReadonlyArray<string>) =>
+    const findIdByTitle = (title: string) => created.find((task) => task.title === title)?.id ?? "";
+    const sortTitlesById = (...titles: ReadonlyArray<string>) =>
       // A lowercase hex id sorts as a string the way its bytes sort in SQLite.
-      [...titles].sort((a, b) => (idOf(a) < idOf(b) ? -1 : 1));
+      [...titles].sort((a, b) => (findIdByTitle(a) < findIdByTitle(b) ? -1 : 1));
     expect(walked).toEqual([
-      ...inIdOrder("urgent 1", "urgent 2"),
+      ...sortTitlesById("urgent 1", "urgent 2"),
       "urgent 3",
       "normal 1",
-      ...inIdOrder("normal 2", "normal 3"),
+      ...sortTitlesById("normal 2", "normal 3"),
       "low",
     ]);
   });
@@ -1109,9 +1103,7 @@ describe("the order of the sort keys", () => {
       ),
     );
     const messages = readValidationIssues(error).map((issue) => issue.message);
-    expect(messages.some((message) => message.includes("priority appears more than once"))).toBe(
-      true,
-    );
+    expect(messages).toContainEqual(expect.stringContaining("priority appears more than once"));
   });
 
   it("refuses a cursor issued under another list of keys", async () => {

@@ -223,7 +223,7 @@ describe("hercule task list --help", () => {
   it("says --sort repeats and what a repeat means", async () => {
     const flags = readBetweenSections(await runHelp("task", "list"), "flags:", "paging:");
     const text = flags.replace(/\s+/g, " ");
-    expect(text).toContain("optional, repeatable; one of: updatedAt, createdAt, priority, status");
+    expect(text).toContain("optional; repeatable; one of: updatedAt, createdAt, priority, status");
     expect(text).toContain(
       "Repeat to break ties: the first --sort orders the list, and each later one orders only the rows the ones before it leave equal. No direction means asc.",
     );
@@ -317,7 +317,9 @@ describe("hercule --help", () => {
     expect(text.replace(/\s+/g, " ")).toContain(
       "unless the command's help says only the user may make the call",
     );
-    expect(text.replace(/\s+/g, " ")).toContain("--sort repeats, one flag per key in order");
+    expect(text.replace(/\s+/g, " ")).toContain(
+      "Where a list sorts on more than one field, --sort may be repeated",
+    );
   });
 
   it("has no auth noun at all", async () => {

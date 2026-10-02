@@ -28,6 +28,7 @@ import {
   type NotFound,
   type Run,
   type RunSummary,
+  type SortDirection,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -54,6 +55,9 @@ export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 
+/** Newest first, because the run someone started last is the one they look for. */
+const DEFAULT_DIRECTION: SortDirection = "desc";
+
 /** One page of the run list, as `run.query` returns it. */
 export interface RunPage {
   readonly items: ReadonlyArray<RunSummary>;
@@ -79,10 +83,7 @@ const make = Effect.gen(function* () {
     listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
     wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
 
-    /**
-     * Returns one page of runs, the newest first unless the caller sorts the
-     * other way: the run someone started last is the one they look for.
-     */
+    /** Returns one page of runs, the newest first unless the caller sorts the other way. */
     query: (
       input: QueryInput,
     ): Effect.Effect<RunPage, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -96,7 +97,7 @@ const make = Effect.gen(function* () {
           runs.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: resolveSortDirection(sort, "desc"),
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             ...filter,
           }),
         );

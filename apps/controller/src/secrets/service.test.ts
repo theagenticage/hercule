@@ -236,7 +236,20 @@ describe("secret.query", () => {
   it("rejects a cursor it did not issue, rather than silently starting from the first page", async () => {
     const failure = await run((secret) => Effect.flip(secret.query({ cursor: "not-a-cursor" })));
 
+    expect(failure).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["cursor"] }] } },
+    });
+  });
+
+  it("refuses a sort that names a field twice, and names the field", async () => {
+    const failure = await run((secret) =>
+      Effect.flip(
+        secret.query({ sort: [{ field: "name" }, { field: "name", direction: "desc" }] }),
+      ),
+    );
+
     expect(failure).toMatchObject({ error: { code: "validation" } });
+    expect(JSON.stringify(failure)).toMatch(/name appears more than once/);
   });
 });
 

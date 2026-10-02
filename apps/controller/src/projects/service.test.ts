@@ -438,7 +438,10 @@ describe("project.query", () => {
       ),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
-    expect(JSON.stringify(error)).toMatch(/name appears more than once/);
+    const messages = (
+      error as { error: { details: { issues: ReadonlyArray<{ message: string }> } } }
+    ).error.details.issues.map((issue) => issue.message);
+    expect(messages).toContainEqual(expect.stringContaining("name appears more than once"));
   });
 });
 

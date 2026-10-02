@@ -145,9 +145,7 @@ describe("the order of a task listing", () => {
       };
       expect(body.error.code).toBe("validation");
       const messages = body.error.details.issues.map((issue) => issue.message);
-      expect(messages.some((message) => message.includes("priority appears more than once"))).toBe(
-        true,
-      );
+      expect(messages).toContainEqual(expect.stringContaining("priority appears more than once"));
     });
   });
 
