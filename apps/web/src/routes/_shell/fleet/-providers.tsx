@@ -79,10 +79,13 @@ export function Providers({
             onInstall={() => {
               install.mutate(row.providerId);
             }}
-            // The stored snapshot does not know about the new credential yet, so
-            // the machine is probed again rather than the page refetching the
-            // same stale snapshot.
-            onCredentialEntered={() => {
+            // A login ends with the controller probing the machine, so the
+            // new snapshot is already stored and only needs reading.
+            onLoggedIn={reread}
+            // A saved secret is not probed by itself: the stored snapshot does
+            // not know about the new credential yet, so the machine is probed
+            // again rather than the page refetching the same stale snapshot.
+            onSecretSaved={() => {
               probe.mutate(row.id);
             }}
           />
@@ -107,7 +110,8 @@ function Row({
   busy,
   onProbe,
   onInstall,
-  onCredentialEntered,
+  onLoggedIn,
+  onSecretSaved,
 }: {
   readonly row: ProviderRow;
   readonly client: HerculeClient;
@@ -118,7 +122,8 @@ function Row({
   readonly busy: boolean;
   readonly onProbe: () => void;
   readonly onInstall: () => void;
-  readonly onCredentialEntered: () => void;
+  readonly onLoggedIn: () => void;
+  readonly onSecretSaved: () => void;
 }): JSX.Element {
   return (
     // Grouped so a screen reader reads one provider's facts and actions as
@@ -156,7 +161,7 @@ function Row({
             runnerId={runnerId}
             subject={`${row.name} on ${runnerName}`}
             label={row.logInLabel}
-            onLoggedIn={onCredentialEntered}
+            onLoggedIn={onLoggedIn}
           />
         ) : null}
         {row.secretFields.map((field) => (
@@ -165,7 +170,7 @@ function Row({
             client={client}
             instanceId={row.id}
             field={field}
-            onSaved={onCredentialEntered}
+            onSaved={onSecretSaved}
           />
         ))}
         {row.probe ? (

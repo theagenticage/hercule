@@ -83,9 +83,17 @@ export function NewProject({
     const next = await create.mutateAsync({ name, projectId, failure, repositories: sources });
     setFailure(next.failure);
     setProjectId(next.projectId);
-    for (const source of next.repositories) {
-      patchSource(source.key, { createdId: source.createdId, message: source.message });
-    }
+    const sent = new Map(next.repositories.map((source) => [source.key, source]));
+    // Only what the submission decided is copied back, so a source keeps
+    // anything else it holds now.
+    setSources((current) =>
+      current.map((source) => {
+        const after = sent.get(source.key);
+        return after === undefined
+          ? source
+          : { ...source, createdId: after.createdId, message: after.message };
+      }),
+    );
     if (!isNewProjectCreated(next)) return;
 
     onClose();

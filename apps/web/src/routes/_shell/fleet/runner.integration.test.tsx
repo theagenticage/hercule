@@ -655,9 +655,6 @@ describe("Runner > providers", () => {
           held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
           return { body: LOGGED_IN };
         },
-        // Every finished login is followed by a probe, so the page shows the
-        // account the machine now holds.
-        [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => ({ body: LOGGED_IN }),
       },
     });
 
@@ -690,6 +687,9 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(readPageText()).toContain("rogier@example.com");
     });
+    // The controller probes the machine before it answers the code, so the
+    // page only reads the new snapshot and never asks for a second probe.
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
   it("finishes a device-code login by itself once the controller announces the new snapshot", async () => {
@@ -708,7 +708,6 @@ describe("Runner > providers", () => {
             expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
           },
         },
-        [`POST /api/v1/runners/${ONLINE.id}/probe`]: { body: fresh },
       },
     });
 
@@ -732,6 +731,7 @@ describe("Runner > providers", () => {
     });
     expect(readPageText()).toContain("rogier@example.com");
     expect(api.calls.filter((call) => call.path.endsWith("/login-code"))).toEqual([]);
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
   it("probes one instance on demand and shows the result", async () => {
