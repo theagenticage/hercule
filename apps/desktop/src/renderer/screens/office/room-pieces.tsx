@@ -1,7 +1,9 @@
 import type { JSX, ReactNode } from "react";
 import { buildLook } from "../../faces";
 import { GitHubMark } from "../../logos";
-import type { ProjectTint } from "../project-tile";
+import type { RoomContents } from "@hercule/client-core";
+import type { Project } from "@hercule/contract";
+import { pickProjectTint } from "../project-tile";
 import {
   drawClubChair,
   drawColleague,
@@ -15,41 +17,6 @@ import {
 } from "./furniture";
 import type { Projection } from "./projection";
 import { drawTubeToDesk, drawWingField, TUBE_Y } from "./room-shell";
-
-/**
- * What stands in the Office. Every field reads from state the controller
- * already holds, so the room can be drawn again on any later visit.
- */
-export interface RoomContents {
-  /** False while no controller has answered: the room is drawn dimmed. */
-  readonly lightsOn: boolean;
-  /** The first runner's wing, or `null` while no runner is known. */
-  readonly wing: RoomWing | null;
-  /** Whether your desk and its hat stand stand in the room: there is a user. */
-  readonly yourDesk: boolean;
-  /** The assistant asleep in the lobby's club chair, or `null` for none. */
-  readonly assistant: { readonly name: string } | null;
-  /** The Triage desk in the back corner, or `null` before Triage is set up. */
-  readonly triage: { readonly note: string } | null;
-  /**
-   * The account GitHub is connected as, such as "rogier", or `null` without a
-   * GitHub Connection. With one, the GitHub plaque hangs on the wall and a
-   * tube runs from it to the Triage desk.
-   */
-  readonly gitHubAccount: string | null;
-}
-
-/** A runner's wing: an inlaid field on the floor with one desk per session it can host. */
-export interface RoomWing {
-  /** The runner's name, engraved in the floor. */
-  readonly runnerName: string;
-  /** The words engraved after the name, such as "this Mac · 6 desks", or "" for none. */
-  readonly note: string;
-  /** How many desks to set out. The wing has room for 8, so it draws at most 8. */
-  readonly deskCount: number;
-  /** The first thread, seated at a desk of the wing in its project's tint, or `null` for none. */
-  readonly firstThread: { readonly projectName: string; readonly tint: ProjectTint } | null;
-}
 
 /** A label over the room: an HTML pill pinned above a plan point. */
 export interface RoomLabel {
@@ -128,9 +95,11 @@ function writeLabel(name: string, note?: string): ReactNode {
 
 /**
  * Returns the pieces `contents` puts in the room, in the order the book's
- * first run lists them. The sideboard and the palms are always there.
+ * first run lists them. The sideboard and the palms are always there. The
+ * first thread's desk takes its project's tint from `projects`, so the room
+ * tints a project as the sidebar does.
  */
-export function furnishRoom(contents: RoomContents): RoomPiece[] {
+export function furnishRoom(contents: RoomContents, projects: readonly Project[]): RoomPiece[] {
   const pieces: RoomPiece[] = [];
   const add = (piece: Omit<RoomPiece, "character" | "label"> & Partial<RoomPiece>) => {
     pieces.push({ character: false, label: () => null, ...piece });
@@ -203,9 +172,11 @@ export function furnishRoom(contents: RoomContents): RoomPiece[] {
   if (wing !== null) {
     const deskCount = Math.min(wing.deskCount, MAX_DESKS);
     const threadSeat = pickFirstThreadSeat(deskCount);
+    const threadTint =
+      wing.firstThread === null ? null : pickProjectTint(wing.firstThread.projectId, projects);
     for (let index = 0; index < deskCount; index++) {
       const seat = placeSeat(index);
-      const tint = index === threadSeat ? (wing.firstThread?.tint ?? null) : null;
+      const tint = index === threadSeat ? threadTint : null;
       add({
         key: `desk-${index}`,
         depth: seat.x + seat.y,

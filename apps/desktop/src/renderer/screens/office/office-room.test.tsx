@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { OfficeRoom, type RoomContents, type RoomShot } from ".";
+import type { RoomContents } from "@hercule/client-core";
+import { buildProject } from "@hercule/client-core/threads/testing";
+import { OfficeRoom, type RoomShot } from ".";
 
 /** The room before anything is set up: the lights off and nothing in it but the shell and its dressing. */
 const BARE: RoomContents = {
@@ -19,13 +21,16 @@ const FURNISHED: RoomContents = {
     runnerName: "studio-mac",
     note: "this Mac · 6 desks",
     deskCount: 6,
-    firstThread: { projectName: "webshop", tint: "webshop" },
+    firstThread: { projectId: "p-webshop", projectName: "webshop" },
   },
   yourDesk: true,
   assistant: { name: "Hercule" },
   triage: { note: "reads GitHub" },
   gitHubAccount: "rogier",
 };
+
+/** The projects the room tints desks from: webshop, first, takes the first tint. */
+const PROJECTS = [buildProject("p-webshop", "webshop")];
 
 let reduceMotion = false;
 
@@ -47,11 +52,13 @@ afterEach(() => {
 
 /** Renders the room with `contents` at `shot` and returns its root element, with a function to change both. */
 function renderRoom(contents: RoomContents, shot: RoomShot = "room") {
-  const { container, rerender } = render(<OfficeRoom contents={contents} shot={shot} />);
+  const { container, rerender } = render(
+    <OfficeRoom contents={contents} projects={PROJECTS} shot={shot} />,
+  );
   return {
     room: container.querySelector<HTMLElement>(".office-room")!,
     change: (next: RoomContents, nextShot: RoomShot = shot) => {
-      rerender(<OfficeRoom contents={next} shot={nextShot} />);
+      rerender(<OfficeRoom contents={next} projects={PROJECTS} shot={nextShot} />);
     },
   };
 }

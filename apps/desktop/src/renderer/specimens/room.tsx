@@ -15,7 +15,7 @@ import "./room.css";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { OfficeRoom } from "../screens/office";
-import { ROOM_STEPS, type RoomStep } from "./room-fixture";
+import { ROOM_PROJECTS, ROOM_STEPS, type RoomStep } from "./room-fixture";
 import { ROOM_STEP_NAMES } from "./room-steps";
 import { applySheetTheme, markSheetReady } from "./sheet-page";
 import { THEMES } from "./sheet-themes";
@@ -42,7 +42,7 @@ flushSync(() => {
   root.render(
     step !== null ? (
       <div className="room-stage">
-        <OfficeRoom contents={step.contents} shot={step.shot} />
+        <OfficeRoom contents={step.contents} projects={ROOM_PROJECTS} shot={step.shot} />
       </div>
     ) : (
       <div className="room-sheet">
@@ -56,7 +56,11 @@ flushSync(() => {
                 </figcaption>
                 <div className="room-cell-window">
                   <div className="room-stage">
-                    <OfficeRoom contents={each.contents} shot={each.shot} />
+                    <OfficeRoom
+                      contents={each.contents}
+                      projects={ROOM_PROJECTS}
+                      shot={each.shot}
+                    />
                   </div>
                 </div>
               </figure>

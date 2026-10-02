@@ -173,9 +173,19 @@ export const FolderPickOutcome = Schema.TaggedUnion({
 });
 export type FolderPickOutcome = typeof FolderPickOutcome.Type;
 
-/** A step of the first run, in the order the first run shows them. */
-export const FirstRunStep = Schema.Literals(["account", "providers", "github", "project"]);
-export type FirstRunStep = typeof FirstRunStep.Type;
+/**
+ * A step of the first run, in the order the first run shows them. Client-core
+ * owns the steps, as `FIRST_RUN_STEPS`. The list is spelled again here,
+ * checked against client-core's, because main imports client-core only as
+ * types: a runtime import would add client-core to main's startup file.
+ */
+export const FirstRunStep = Schema.Literals([
+  "account",
+  "providers",
+  "github",
+  "project",
+] satisfies typeof ClientCore.FIRST_RUN_STEPS);
+export type FirstRunStep = ClientCore.FirstRunStep;
 
 /** What main keeps of the first run for the saved controller: the steps the user put off. */
 export const FirstRunProgress = Schema.Struct({ putOff: Schema.Array(FirstRunStep) });

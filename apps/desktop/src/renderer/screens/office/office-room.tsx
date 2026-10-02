@@ -16,7 +16,9 @@ import {
   type PlanRegion,
   type Projection,
 } from "./projection";
-import { furnishRoom, type RoomContents, type RoomPiece } from "./room-pieces";
+import type { RoomContents } from "@hercule/client-core";
+import type { Project } from "@hercule/contract";
+import { furnishRoom, type RoomPiece } from "./room-pieces";
 import { drawRoomShell } from "./room-shell";
 import "./office.css";
 
@@ -81,6 +83,11 @@ interface Scene {
 const prefersReducedMotion = (): boolean =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** Returns the keys of the pieces `contents` puts in the room. */
+const listPieceKeys = (contents: RoomContents): string[] =>
+  // The keys do not depend on the projects, which only tint a desk.
+  furnishRoom(contents, []).map((piece) => piece.key);
+
 /**
  * Returns the scene after the room is asked to draw `contents` at `shot`,
  * having last drawn `scene`. The pieces `contents` adds arrive, and a new
@@ -88,7 +95,7 @@ const prefersReducedMotion = (): boolean =>
  * room is drawn again in place.
  */
 function advanceScene(scene: Scene, contents: RoomContents, shot: RoomShot): Scene {
-  const keys = furnishRoom(contents).map((piece) => piece.key);
+  const keys = listPieceKeys(contents);
   const reduced = prefersReducedMotion();
   const added = reduced ? [] : keys.filter((key) => !scene.keys.includes(key));
   const moved = !reduced && shot !== scene.shot;
@@ -139,8 +146,9 @@ function useStageSize(
 
 /**
  * Draws the Office as the first run furnishes it: the room `contents`
- * describes, framed at `shot`. It fills its positioned parent, and draws
- * nothing until the parent has a size.
+ * describes, framed at `shot`. The first thread's desk takes its project's
+ * tint from `projects`, the project list in its own order. The room fills its
+ * positioned parent, and draws nothing until the parent has a size.
  *
  * When `contents` gains a piece, the piece settles into place from just
  * above, then the room is drawn again as one still picture. When `shot`
@@ -155,9 +163,11 @@ function useStageSize(
  */
 export function OfficeRoom({
   contents,
+  projects,
   shot,
 }: {
   readonly contents: RoomContents;
+  readonly projects: readonly Project[];
   readonly shot: RoomShot;
 }): JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -169,7 +179,7 @@ export function OfficeRoom({
   const [scene, setScene] = useState<Scene>(() => ({
     contents,
     shot,
-    keys: furnishRoom(contents).map((piece) => piece.key),
+    keys: listPieceKeys(contents),
     arriving: [],
     late: false,
     cameraMove: null,
@@ -213,6 +223,7 @@ export function OfficeRoom({
         {size !== null && (
           <RoomDrawing
             contents={contents}
+            projects={projects}
             projection={frameShot(size.width, size.height, shot)}
             width={size.width}
             height={size.height}
@@ -234,6 +245,7 @@ export function OfficeRoom({
  */
 function RoomDrawing({
   contents,
+  projects,
   projection,
   width,
   height,
@@ -242,6 +254,7 @@ function RoomDrawing({
   late,
 }: {
   readonly contents: RoomContents;
+  readonly projects: readonly Project[];
   readonly projection: Projection;
   readonly width: number;
   readonly height: number;
@@ -249,7 +262,7 @@ function RoomDrawing({
   readonly arriving: ReadonlyArray<string>;
   readonly late: boolean;
 }): JSX.Element {
-  const pieces = furnishRoom(contents).sort((a, b) => a.depth - b.depth);
+  const pieces = furnishRoom(contents, projects).sort((a, b) => a.depth - b.depth);
   const still = pieces.filter((piece) => !arriving.includes(piece.key));
   const things = pieces.filter((piece) => arriving.includes(piece.key) && !piece.character);
   const characters = pieces.filter((piece) => arriving.includes(piece.key) && piece.character);

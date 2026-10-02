@@ -5,7 +5,10 @@
  * prototype's state: Hercule runs on this Mac (studio-mac), both providers
  * are ready, and GitHub is connected as rogier.
  */
-import type { RoomContents, RoomShot } from "../screens/office";
+import type { RoomContents } from "@hercule/client-core";
+import { buildProject } from "@hercule/client-core/threads/testing";
+import type { Project } from "@hercule/contract";
+import type { RoomShot } from "../screens/office";
 import type { RoomStepName } from "./room-steps";
 
 /** The room a step of the first run shows, and the shot that frames it. */
@@ -13,6 +16,9 @@ export interface RoomStep {
   readonly shot: RoomShot;
   readonly contents: RoomContents;
 }
+
+/** The one project the first run adds. As the first project, it takes the first tint, webshop's. */
+export const ROOM_PROJECTS: readonly Project[] = [buildProject("p-webshop", "webshop")];
 
 /** The room on the welcome page, before Hercule on this Mac has answered: the office is closed. */
 const CLOSED: RoomContents = {
@@ -40,7 +46,7 @@ const PROJECT: RoomContents = {
 };
 const DONE: RoomContents = {
   ...PROJECT,
-  wing: { ...FURNISHED_WING, firstThread: { projectName: "webshop", tint: "webshop" } },
+  wing: { ...FURNISHED_WING, firstThread: { projectId: "p-webshop", projectName: "webshop" } },
 };
 
 /** The room each step shows. */

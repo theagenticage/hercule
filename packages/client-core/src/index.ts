@@ -172,7 +172,12 @@ export {
   type RoomWing,
 } from "./first-run";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
-export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
+export {
+  addCompletedStep,
+  findNextOnboardingStep,
+  ONBOARDING_STEPS,
+  type OnboardingStep,
+} from "./onboarding";
 export {
   chooseStamps,
   formatPreciseStamp,
