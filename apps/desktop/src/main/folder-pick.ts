@@ -8,7 +8,7 @@ import { basename } from "node:path";
 import * as Effect from "effect/Effect";
 import type { FolderPickOutcome } from "../ipc/contract";
 import { MainWindow } from "./main-window";
-import { type ProgramExit, readLastErrorLine, runProgram } from "./run-program";
+import { describeFailedExit, removeVariablesWithPrefix, runProgram } from "./run-program";
 
 /**
  * The git main runs: Apple's, which every Mac has. Homebrew's git needs the
@@ -27,7 +27,7 @@ const NO_SUCH_REMOTE_EXIT_CODE = 2;
  * messages in English, which `describeFolder` reads.
  */
 const buildGitEnvironment = (): NodeJS.ProcessEnv => ({
-  ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
+  ...removeVariablesWithPrefix(process.env, "GIT_"),
   LC_ALL: "C",
 });
 
@@ -56,16 +56,6 @@ const removeRemoteCredentials = (remote: string): string => {
 };
 
 /**
- * Returns the line that says why git failed in `exit`: the last line git
- * wrote to stderr, or its exit code when it wrote none.
- */
-const describeGitFailure = (exit: ProgramExit): string =>
-  readLastErrorLine(exit.stderr) ??
-  (exit.exitCode === null
-    ? "Git was stopped by a signal before it finished."
-    : `Git exited with code ${String(exit.exitCode)} and wrote no error.`);
-
-/**
  * Describes `folder`, an absolute path, with git:
  *
  * - `Repository` when it is in a git repository with an `origin` remote;
@@ -86,12 +76,12 @@ export const describeFolder = (folder: string): Effect.Effect<FolderPickOutcome>
     if (remote.exitCode !== 0 && remote.exitCode !== NO_SUCH_REMOTE_EXIT_CODE) {
       return remote.stderr.includes("not a git repository")
         ? ({ _tag: "NotGit", name } as const)
-        : ({ _tag: "GitFailed", name, line: describeGitFailure(remote) } as const);
+        : ({ _tag: "GitFailed", name, line: describeFailedExit(remote, "Git") } as const);
     }
     // symbolic-ref exits 1, quietly, when HEAD is detached.
     const head = yield* runGit(folder, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
     if (head.exitCode !== 0 && head.exitCode !== 1) {
-      return { _tag: "GitFailed", name, line: describeGitFailure(head) } as const;
+      return { _tag: "GitFailed", name, line: describeFailedExit(head, "Git") } as const;
     }
     const branch = head.exitCode === 0 ? head.stdout.trim() : null;
     return remote.exitCode === 0

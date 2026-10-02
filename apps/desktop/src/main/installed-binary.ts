@@ -18,7 +18,12 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { parseControllerUrl } from "./controller-connection";
-import { type ProgramExit, readLastErrorLine, runProgram } from "./run-program";
+import {
+  describeFailedExit,
+  type ProgramExit,
+  removeVariablesWithPrefix,
+  runProgram,
+} from "./run-program";
 
 /** The origin of a controller, as the binary prints it, such as `http://127.0.0.1:4937`. */
 const ControllerOrigin = Schema.String.check(
@@ -57,10 +62,11 @@ export class BinaryNotFound extends Data.TaggedError("BinaryNotFound")<{
 }> {}
 
 /**
- * The error a command fails with when it failed. `line` says why, in one
- * line: usually the last line the binary wrote to stderr, without its
- * `hercule: ` prefix. Spec 15 §4 makes each of those one line that says what
- * to do.
+ * The error a command fails with when it exits with an error, prints output
+ * that does not decode, or runs past its time limit. `line` is the reason, in
+ * one line: usually the last line the binary wrote to stderr, without its
+ * `hercule: ` prefix. Spec 15 §4 makes each of those one line that tells the
+ * user what to do.
  */
 export class BinaryCommandFailed extends Data.TaggedError("BinaryCommandFailed")<{
   readonly line: string;
@@ -106,31 +112,24 @@ export class InstalledBinary extends Context.Service<
 >()("hercule/desktop/InstalledBinary") {}
 
 /**
- * Returns a copy of `env` without any `HERCULE_*` variable, so that the binary
- * reads its settings from its default Hercule Home alone. `install` refuses
- * to run with one set, because the Service Unit would run without it.
+ * Returns one line about why `exit`, a command's exit, failed: as
+ * describeFailedExit returns it, without the `hercule: ` prefix the binary
+ * starts each of its errors with.
  */
-export const removeConfigVariables = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith("HERCULE_")));
+export const describeBinaryFailure = (exit: ProgramExit): string =>
+  describeFailedExit(exit, "Hercule").replace(/^hercule: /, "");
 
 /**
- * Returns the line that says why `exit`, a command's exit, failed: the last
- * line the command wrote to stderr, without the `hercule: ` prefix the binary
- * starts each of its errors with, or the exit code when stderr is empty.
+ * Returns main's environment without any `HERCULE_*` variable, so that the
+ * binary reads its settings from its default Hercule Home alone. `install`
+ * refuses to run with one set, because the Service Unit would run without
+ * it. Main's environment is read at each call, so each command runs with
+ * the environment main has at that moment.
  */
-export const describeFailedExit = (exit: ProgramExit): string => {
-  const lastLine = readLastErrorLine(exit.stderr);
-  if (lastLine !== undefined) return lastLine.replace(/^hercule: /, "");
-  return exit.exitCode === null
-    ? "Hercule was stopped by a signal before it finished."
-    : `Hercule exited with code ${String(exit.exitCode)} and wrote no error.`;
-};
+const buildBinaryEnvironment = (): NodeJS.ProcessEnv =>
+  removeVariablesWithPrefix(process.env, "HERCULE_");
 
-/**
- * Builds the service on the binary at `binaryPath`. Each command runs with
- * main's environment, without its `HERCULE_*` variables, as it is when the
- * command runs.
- */
+/** Builds the service on the binary at `binaryPath`. */
 export const makeInstalledBinaryLayer = (binaryPath: string): Layer.Layer<InstalledBinary> => {
   /**
    * Runs the binary with `args` and returns how it exited. Fails with
@@ -160,7 +159,7 @@ export const makeInstalledBinaryLayer = (binaryPath: string): Layer.Layer<Instal
     Effect.gen(function* () {
       const exit = yield* runBinary(["service", verb, "--json"], env);
       if (exit.exitCode !== 0)
-        return yield* new BinaryCommandFailed({ line: describeFailedExit(exit) });
+        return yield* new BinaryCommandFailed({ line: describeBinaryFailure(exit) });
       const report = decodeServiceReport(exit.stdout);
       if (Option.isNone(report)) {
         return yield* new BinaryCommandFailed({
@@ -191,20 +190,20 @@ export const makeInstalledBinaryLayer = (binaryPath: string): Layer.Layer<Instal
     readStatus: Effect.suspend(() =>
       limitQuickCommand(
         "hercule service status",
-        runServiceCommand("status", removeConfigVariables(process.env)),
+        runServiceCommand("status", buildBinaryEnvironment()),
       ),
     ),
     install: (path) =>
       Effect.suspend(() =>
-        runServiceCommand("install", { ...removeConfigVariables(process.env), PATH: path }),
+        runServiceCommand("install", { ...buildBinaryEnvironment(), PATH: path }),
       ),
     readSetupUrl: limitQuickCommand(
       "hercule setup-url",
       Effect.gen(function* () {
-        const exit = yield* runBinary(["setup-url"], removeConfigVariables(process.env));
+        const exit = yield* runBinary(["setup-url"], buildBinaryEnvironment());
         if (exit.exitCode === NO_SETUP_URL_EXIT_CODE) return null;
         if (exit.exitCode !== 0) {
-          return yield* new BinaryCommandFailed({ line: describeFailedExit(exit) });
+          return yield* new BinaryCommandFailed({ line: describeBinaryFailure(exit) });
         }
         return exit.stdout.trim();
       }),

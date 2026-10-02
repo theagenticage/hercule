@@ -44,6 +44,27 @@ export const readLastErrorLine = (stderr: string): string | undefined =>
     .findLast((line) => line !== "");
 
 /**
+ * Returns one line about why a program, `programName` such as `Git`, failed
+ * in `exit`: the last line it wrote to stderr, or, when it wrote none, its
+ * exit code or that a signal stopped it.
+ */
+export const describeFailedExit = (exit: ProgramExit, programName: string): string =>
+  readLastErrorLine(exit.stderr) ??
+  (exit.exitCode === null
+    ? `${programName} was stopped by a signal before it finished.`
+    : `${programName} exited with code ${String(exit.exitCode)} and wrote no error.`);
+
+/**
+ * Returns a copy of the environment `env` without any variable whose name
+ * starts with `prefix`, such as `GIT_`.
+ */
+export const removeVariablesWithPrefix = (
+  env: NodeJS.ProcessEnv,
+  prefix: string,
+): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith(prefix)));
+
+/**
  * Runs the program at `file` with `args`, without a shell, and returns how it
  * exited once it has. Fails with ProgramNotStarted when the program could not
  * be started. A program that exits with an error code succeeds: the caller

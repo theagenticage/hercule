@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import { ProgramNotStarted, readLastErrorLine, runProgram } from "./run-program";
+import {
+  describeFailedExit,
+  ProgramNotStarted,
+  readLastErrorLine,
+  removeVariablesWithPrefix,
+  runProgram,
+} from "./run-program";
 import { isProcessRunning, waitUntil, writeShellScript } from "./testing";
 
 let folder: string;
@@ -93,4 +99,26 @@ describe("readLastErrorLine", () => {
     ["", undefined],
     ["\n \n", undefined],
   ])("reads %j as %j", (stderr, line) => expect(readLastErrorLine(stderr)).toBe(line));
+});
+
+describe("describeFailedExit", () => {
+  it.each([
+    [
+      { exitCode: 128, stdout: "", stderr: "fatal: not a git repository\n" },
+      "fatal: not a git repository",
+    ],
+    [{ exitCode: 2, stdout: "", stderr: "" }, "Git exited with code 2 and wrote no error."],
+    [{ exitCode: null, stdout: "", stderr: "" }, "Git was stopped by a signal before it finished."],
+  ])("describes %j as %j", (exit, line) => expect(describeFailedExit(exit, "Git")).toBe(line));
+});
+
+describe("removeVariablesWithPrefix", () => {
+  it("removes every variable whose name starts with the prefix, and keeps the rest", () => {
+    expect(
+      removeVariablesWithPrefix(
+        { HERCULE_HOME: "/x", HERCULE_PORT: "1", HOME: "/Users/ada", PATH: "/bin" },
+        "HERCULE_",
+      ),
+    ).toEqual({ HOME: "/Users/ada", PATH: "/bin" });
+  });
 });

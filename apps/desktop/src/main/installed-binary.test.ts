@@ -8,10 +8,9 @@ import { TestClock } from "effect/testing";
 import {
   BinaryCommandFailed,
   BinaryNotFound,
-  describeFailedExit,
+  describeBinaryFailure,
   InstalledBinary,
   makeInstalledBinaryLayer,
-  removeConfigVariables,
 } from "./installed-binary";
 import { isProcessRunning, waitUntil, writeShellScript } from "./testing";
 
@@ -170,20 +169,7 @@ describe("InstalledBinary", () => {
   });
 });
 
-describe("removeConfigVariables", () => {
-  it("removes every HERCULE_* variable and keeps the rest", () => {
-    expect(
-      removeConfigVariables({
-        HERCULE_HOME: "/x",
-        HERCULE_PORT: "1",
-        HOME: "/Users/ada",
-        PATH: "/bin",
-      }),
-    ).toEqual({ HOME: "/Users/ada", PATH: "/bin" });
-  });
-});
-
-describe("describeFailedExit", () => {
+describe("describeBinaryFailure", () => {
   it.each([
     [{ exitCode: 1, stdout: "", stderr: "hercule: it broke\n" }, "it broke"],
     [{ exitCode: 1, stdout: "", stderr: "warning: no prefix" }, "warning: no prefix"],
@@ -192,5 +178,5 @@ describe("describeFailedExit", () => {
       { exitCode: null, stdout: "", stderr: "" },
       "Hercule was stopped by a signal before it finished.",
     ],
-  ])("describes %j as %j", (exit, line) => expect(describeFailedExit(exit)).toBe(line));
+  ])("describes %j as %j", (exit, line) => expect(describeBinaryFailure(exit)).toBe(line));
 });
