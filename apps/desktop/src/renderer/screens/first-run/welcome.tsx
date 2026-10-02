@@ -3,7 +3,10 @@
  * Presentational.
  */
 import { useRef, type FormEvent, type JSX, type ReactNode } from "react";
-import { IntakeIcon, ServerIcon, ShieldIcon, WorkspaceIcon } from "../../icons";
+import { IntakeIcon } from "../../icons/intake";
+import { ServerIcon } from "../../icons/server";
+import { ShieldIcon } from "../../icons/shield";
+import { WorkspaceIcon } from "../../icons/workspace";
 import { Mark } from "../../marks";
 import { CopyButton, FormField, Warning } from "../step";
 

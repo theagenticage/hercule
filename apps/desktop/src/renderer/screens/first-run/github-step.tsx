@@ -4,7 +4,11 @@
  */
 import type { FormEvent, JSX } from "react";
 import { GitHubMark } from "../../logos";
-import { ClockIcon, CloseIcon, ExternalIcon, KeyIcon, QuestionIcon } from "../../icons";
+import { ClockIcon } from "../../icons/clock";
+import { CloseIcon } from "../../icons/close";
+import { ExternalIcon } from "../../icons/external";
+import { KeyIcon } from "../../icons/key";
+import { QuestionIcon } from "../../icons/question";
 import {
   DeviceCodeSteps,
   DoneMark,

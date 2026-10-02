@@ -6,7 +6,8 @@
  */
 import type { JSX, ReactNode } from "react";
 import { FIRST_RUN_STEPS, type FirstRunRungStatus, type FirstRunStep } from "@hercule/client-core";
-import { CheckIcon, PauseIcon } from "../../icons";
+import { CheckIcon } from "../../icons/check";
+import { PauseIcon } from "../../icons/pause";
 import { LogoMark } from "../../logos";
 import "../step/step.css";
 import "./first-run.css";

@@ -5,7 +5,8 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { MIN_PASSWORD_LENGTH } from "@hercule/contract";
 import { buildLook, Face } from "../../faces";
-import { ClockIcon, QuestionIcon } from "../../icons";
+import { ClockIcon } from "../../icons/clock";
+import { QuestionIcon } from "../../icons/question";
 import { FormField, Warning } from "../step";
 import { StepKicker } from "./first-run-frame";
 
