@@ -1,9 +1,9 @@
-import type { JSX } from "react";
+import { useEffect, type JSX } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { buildEntryDeps, resolveFirstRunEntry } from "../../app/entry-guard";
 import { ensureFirstRunData, macUserQuery, setupQuery, setupTokenQuery } from "../../app/queries";
 import { ControllerFirstRun } from "./-office";
-import { takeStartRequested } from "./-start-flag";
+import { clearStartRequested, isStartRequested } from "./-start-flag";
 import { NoControllerFirstRun } from "./-welcome";
 
 /**
@@ -35,7 +35,7 @@ export const Route = createFileRoute("/first-run")({
   },
   loader: async ({ context: { bridge, controller, queryClient } }) => {
     if (controller === null) return { startRequested: false };
-    const startRequested = takeStartRequested();
+    const startRequested = isStartRequested();
     const { client } = controller;
     const setup = await queryClient.ensureQueryData(setupQuery(client));
     if (setup.complete) {
@@ -55,6 +55,12 @@ export const Route = createFileRoute("/first-run")({
 function FirstRun(): JSX.Element {
   const { controller } = Route.useRouteContext();
   const { startRequested } = Route.useLoaderData();
+  // The loader read the mark the welcome left before a start. It is cleared
+  // once the page shows, not in the loader, because the router can run a
+  // loader again, and a loader only reads.
+  useEffect(() => {
+    clearStartRequested();
+  }, []);
   return controller === null ? (
     <NoControllerFirstRun />
   ) : (

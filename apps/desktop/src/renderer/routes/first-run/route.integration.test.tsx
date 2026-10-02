@@ -34,7 +34,7 @@ import {
   type Call,
   type Handler,
 } from "../../app/testing";
-import { markStartRequested, takeStartRequested } from "./-start-flag";
+import { isStartRequested, markStartRequested } from "./-start-flag";
 
 /** A controller on this Mac, which the welcome greets as found. */
 const LOCAL_URL = "http://127.0.0.1:4937";
@@ -159,7 +159,7 @@ describe("the welcome, with no controller saved", () => {
     await user.keyboard("{Enter}");
     expect(fake.startCount()).toBe(1);
     // The page after the reload learns of the start from the mark.
-    expect(takeStartRequested()).toBe(true);
+    expect(isStartRequested()).toBe(true);
   });
 
   it.each<[string, () => Promise<LocalControllerStartOutcome>, string]>([
@@ -193,7 +193,7 @@ describe("the welcome, with no controller saved", () => {
       await user.click(await screen.findByRole("button", { name: "Open the office" }));
       expect(await screen.findByRole("heading", { name: "Hercule didn’t start" })).toBeTruthy();
       expect(document.querySelector(".fr-body")?.textContent).toContain(line);
-      expect(takeStartRequested()).toBe(false);
+      expect(isStartRequested()).toBe(false);
       await user.click(screen.getByRole("button", { name: "Try again" }));
       expect(fake.startCount()).toBe(2);
     },
@@ -274,8 +274,8 @@ describe("the first run on a controller that is not set up", () => {
     markStartRequested();
     await openNotSetUp({ url: LOCAL_URL });
     expect(readHeading()).toBe("Create your account");
-    // The mark is read once, so a later launch greets Hercule again.
-    expect(takeStartRequested()).toBe(false);
+    // The mark is cleared once the page shows, so a later launch greets Hercule again.
+    expect(isStartRequested()).toBe(false);
   });
 
   it("asks for the setup address when main has no setup token for the controller", async () => {

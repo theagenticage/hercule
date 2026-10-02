@@ -17,17 +17,14 @@ export const markStartRequested = (): void => {
   sessionStorage.setItem(START_REQUESTED_KEY, "1");
 };
 
-/** Forgets the request, after a start that did not end in a reload. */
+/**
+ * Forgets the request: after a start that did not end in a reload, and once
+ * the page after the reload has read it, so a later launch greets the
+ * controller as found again.
+ */
 export const clearStartRequested = (): void => {
   sessionStorage.removeItem(START_REQUESTED_KEY);
 };
 
-/**
- * Returns whether the user asked to start Hercule before the last reload, and
- * forgets it, so a later launch greets the controller as found again.
- */
-export const takeStartRequested = (): boolean => {
-  const requested = sessionStorage.getItem(START_REQUESTED_KEY) !== null;
-  clearStartRequested();
-  return requested;
-};
+/** Checks whether the user asked to start Hercule before the last reload. */
+export const isStartRequested = (): boolean => sessionStorage.getItem(START_REQUESTED_KEY) !== null;
