@@ -68,7 +68,10 @@ export function NoControllerFirstRun(): JSX.Element {
       <WelcomeCard
         state={state}
         onOpenOffice={() => {
-          start.mutate();
+          // Main refuses a second start while the first runs, and its error
+          // would hide the first start's outcome. A start that worked also
+          // shows as starting until the reload, with no request pending.
+          if (state.kind !== "starting") start.mutate();
         }}
       />
     </FirstRunFrame>

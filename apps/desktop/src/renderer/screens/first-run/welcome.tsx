@@ -161,6 +161,7 @@ export function Welcome({
               className="btn btn--accent btn--lg"
               disabled={state.kind === "searching"}
               aria-busy={state.kind === "starting" ? true : undefined}
+              aria-disabled={state.kind === "starting" ? true : undefined}
               onClick={onOpenOffice}
             >
               {state.kind === "starting" ? (

@@ -154,6 +154,10 @@ describe("the welcome, with no controller saved", () => {
     expect(fake.startCount()).toBe(1);
     const button = screen.getByRole("button", { name: "Starting Hercule…" });
     expect(button.getAttribute("aria-busy")).toBe("true");
+    // A second press, from the keyboard, starts nothing more.
+    button.focus();
+    await user.keyboard("{Enter}");
+    expect(fake.startCount()).toBe(1);
     // The page after the reload learns of the start from the mark.
     expect(takeStartRequested()).toBe(true);
   });
