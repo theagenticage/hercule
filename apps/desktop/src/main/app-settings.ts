@@ -65,15 +65,6 @@ export type WindowState = typeof WindowState.Type;
 const EncryptedToken = Schema.Uint8ArrayFromBase64;
 
 /**
- * What main keeps of the first run, with the controller URL it was kept for:
- * it is read back only while that URL is the saved one.
- */
-const FirstRunRecord = Schema.Struct({
-  controllerUrl: ControllerUrl,
-  putOff: FirstRunProgress.fields.putOff,
-});
-
-/**
  * The error a request fails with when it needs a saved controller URL and
  * none is saved. `what` names the thing that belongs to one controller, such
  * as "a login token": there is no controller to save it for or read it from.
@@ -170,7 +161,7 @@ const make = (file: string) =>
     let controllerUrl = yield* decodeSettingsKey(ControllerUrl, settings, "controllerUrl", file);
     let encryptedToken = yield* decodeSettingsKey(EncryptedToken, settings, "token", file);
     let windowState = yield* decodeSettingsKey(WindowState, settings, "window", file);
-    let firstRun = yield* decodeSettingsKey(FirstRunRecord, settings, "firstRun", file);
+    let firstRun = yield* decodeSettingsKey(FirstRunProgress, settings, "firstRun", file);
     const fileWriteLock = yield* Semaphore.make(1);
 
     /**
@@ -201,20 +192,25 @@ const make = (file: string) =>
       /**
        * Saves `origin`, the origin of a controller, as the controller URL.
        * When `origin` differs from the saved controller URL, the same write
-       * removes the stored token, which belongs to the controller saved
-       * before. Fails when the file cannot be written, and then keeps the
-       * settings saved before.
+       * removes the stored token and the first run's progress, which belong
+       * to the controller saved before. Fails when the file cannot be
+       * written, and then keeps the settings saved before.
        */
       saveControllerUrl: (origin: string) =>
         runSave(
           Effect.gen(function* () {
             // An origin is an http or https URL, so the schema encodes it.
             const encoded = yield* Effect.orDie(Schema.encodeEffect(ControllerUrl)(origin));
-            const keepsToken = origin === controllerUrl;
-            const kept = keepsToken ? settings : removeSettingsKey(settings, "token");
+            const sameController = origin === controllerUrl;
+            const kept = sameController
+              ? settings
+              : removeSettingsKey(removeSettingsKey(settings, "token"), "firstRun");
             yield* writeSettings({ ...kept, controllerUrl: encoded });
             controllerUrl = origin;
-            if (!keepsToken) encryptedToken = null;
+            if (!sameController) {
+              encryptedToken = null;
+              firstRun = null;
+            }
           }),
         ),
 
@@ -264,14 +260,9 @@ const make = (file: string) =>
 
       /**
        * Returns what main keeps of the first run for the saved controller, or
-       * `null` when it keeps nothing for that controller: nothing was saved,
-       * or it was saved for another controller URL.
+       * `null` when it keeps nothing.
        */
-      readFirstRunProgress: Effect.sync((): FirstRunProgress | null =>
-        firstRun !== null && firstRun.controllerUrl === controllerUrl
-          ? { putOff: firstRun.putOff }
-          : null,
-      ),
+      readFirstRunProgress: Effect.sync(() => firstRun),
 
       /**
        * Saves `progress` as what main keeps of the first run for the saved
@@ -292,11 +283,10 @@ const make = (file: string) =>
             if (controllerUrl === null) {
               return yield* new NoControllerSaved("the first run's progress");
             }
-            const record = { controllerUrl, putOff: progress.putOff };
             // The schema encodes every value of its type.
-            const encoded = yield* Effect.orDie(Schema.encodeEffect(FirstRunRecord)(record));
+            const encoded = yield* Effect.orDie(Schema.encodeEffect(FirstRunProgress)(progress));
             yield* writeSettings({ ...settings, firstRun: encoded });
-            firstRun = record;
+            firstRun = progress;
           }),
         ),
     };

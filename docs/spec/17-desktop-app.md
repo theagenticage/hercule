@@ -392,7 +392,7 @@ The first milestone's channels. *(Amended 2026-09-30, [#275](https://github.com/
 | `setupToken.read` | renderer → main | the saved controller's setup token: the one from a pasted setup URL, once, else the one `hercule setup-url` prints on this Mac when it names the saved controller's origin. Answers `Token` or `PasteNeeded` |
 | `macUser.read` | renderer → main | the name of the user's account on this Mac, for the first run's username field |
 | `folder.pick` | renderer → main | the system's folder dialog, and the picked folder as `/usr/bin/git` describes it: `Cancelled`, `Repository` (its `origin` remote and branch), `NoRemote`, `NotGit` or `GitFailed` (git's error line). Main removes the user name and password from an `http:` or `https:` remote before it answers, because an `insteadOf` rule in the user's git config can put a token there, and the remote is saved on the controller |
-| `firstRunProgress.read` / `firstRunProgress.save` | renderer → main | the first-run steps the user put off, kept in the settings file for the saved controller |
+| `firstRunProgress.read` / `firstRunProgress.save` | renderer → main | the first-run steps the user put off, kept in the settings file for the saved controller; saving another controller's URL removes them |
 | `runnerIdentity.read` | renderer → main | the local-runner probe |
 | `goMenu.set` | renderer → main | the threads the sidebar shows, top to bottom, for the Go menu |
 | ~~`badge.set`~~ | ~~renderer → main~~ | ~~the dock badge count~~ |

@@ -311,6 +311,8 @@ describe("the controller URL and the token", () => {
 });
 
 describe("the first run's progress", () => {
+  const saveControllerUrl = (origin: string) =>
+    AppSettings.use((settings) => settings.saveControllerUrl(origin));
   const readFirstRunProgress = AppSettings.use((settings) => settings.readFirstRunProgress);
   const saveFirstRunProgress = (progress: FirstRunProgress | null) =>
     AppSettings.use((settings) => settings.saveFirstRunProgress(progress));
@@ -320,24 +322,36 @@ describe("the first run's progress", () => {
       file,
       JSON.stringify({
         controllerUrl: "http://127.0.0.1:4937",
-        firstRun: { controllerUrl: "http://127.0.0.1:4937", putOff: ["github"] },
+        firstRun: { putOff: ["github"] },
       }),
     );
     expect(await runWithAppSettings(readFirstRunProgress)).toEqual({ putOff: ["github"] });
   });
 
-  it("is not read for another controller", async () => {
+  it("is kept when the same controller is saved again", async () => {
     writeFileSync(
       file,
-      JSON.stringify({
-        controllerUrl: "https://hercule.example",
-        firstRun: { controllerUrl: "http://127.0.0.1:4937", putOff: ["github"] },
-      }),
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", firstRun: { putOff: ["github"] } }),
     );
-    expect(await runWithAppSettings(readFirstRunProgress)).toBeNull();
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveControllerUrl("http://127.0.0.1:4937"), readFirstRunProgress),
+    );
+    expect(afterSave).toEqual({ putOff: ["github"] });
   });
 
-  it("is saved with the controller URL it belongs to, and removed", async () => {
+  it("is removed in the same write when a different controller is saved", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", firstRun: { putOff: ["github"] } }),
+    );
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveControllerUrl("https://hercule.example"), readFirstRunProgress),
+    );
+    expect(afterSave).toBeNull();
+    expect(readFileObject()).toEqual({ controllerUrl: "https://hercule.example" });
+  });
+
+  it("is saved beside the controller URL, and removed", async () => {
     writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:4937" }));
     const afterSave = await runWithAppSettings(
       Effect.andThen(
@@ -348,7 +362,7 @@ describe("the first run's progress", () => {
     expect(afterSave).toEqual({ putOff: ["providers", "project"] });
     expect(readFileObject()).toEqual({
       controllerUrl: "http://127.0.0.1:4937",
-      firstRun: { controllerUrl: "http://127.0.0.1:4937", putOff: ["providers", "project"] },
+      firstRun: { putOff: ["providers", "project"] },
     });
     expect(
       await runWithAppSettings(Effect.andThen(saveFirstRunProgress(null), readFirstRunProgress)),
