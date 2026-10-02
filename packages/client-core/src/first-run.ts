@@ -27,7 +27,7 @@ export const FIRST_RUN_STEPS = ["account", "providers", "github", "project"] as 
 export type FirstRunStep = (typeof FIRST_RUN_STEPS)[number];
 
 /** Which steps are done, one flag per step. */
-export type FirstRunFacts = Readonly<Record<FirstRunStep, boolean>>;
+export type FirstRunDoneSteps = Readonly<Record<FirstRunStep, boolean>>;
 
 /** The query data the first run reads. */
 export interface FirstRunReads {
@@ -50,7 +50,7 @@ export interface FirstRunReads {
  * - `github` when a GitHub Connection exists;
  * - `project` when a project exists.
  */
-export const buildFirstRunFacts = (reads: FirstRunReads): FirstRunFacts => ({
+export const findDoneSteps = (reads: FirstRunReads): FirstRunDoneSteps => ({
   account: reads.setupComplete,
   providers:
     reads.localRunner !== null &&
@@ -61,13 +61,13 @@ export const buildFirstRunFacts = (reads: FirstRunReads): FirstRunFacts => ({
 
 /**
  * Returns the step the first run shows: the first step that is neither done
- * nor put off, or `"done"` when there is none.
+ * nor put off, or `"all-set"` when there is none.
  */
 export const decideFirstRunStep = (
-  done: FirstRunFacts,
+  done: FirstRunDoneSteps,
   putOff: readonly FirstRunStep[],
-): FirstRunStep | "done" =>
-  FIRST_RUN_STEPS.find((step) => !done[step] && !putOff.includes(step)) ?? "done";
+): FirstRunStep | "all-set" =>
+  FIRST_RUN_STEPS.find((step) => !done[step] && !putOff.includes(step)) ?? "all-set";
 
 /**
  * Returns the steps put off once `step` is put off too, in the order they
@@ -99,8 +99,8 @@ export type FirstRunRungStatus = "now" | "done" | "put-off" | "next";
  * one still shows its tick.
  */
 export const buildFirstRunLadder = (
-  now: FirstRunStep | "done",
-  done: FirstRunFacts,
+  now: FirstRunStep | "all-set",
+  done: FirstRunDoneSteps,
   putOff: readonly FirstRunStep[],
 ): readonly { readonly step: FirstRunStep; readonly status: FirstRunRungStatus }[] =>
   FIRST_RUN_STEPS.map((step) => ({
@@ -132,7 +132,7 @@ export const buildFirstRunHost = (origin: string, localRunner: Runner | null): F
 /** The heading, the line under it, and the rows of the providers step. */
 export interface ProvidersStepText {
   readonly heading: string;
-  readonly sub: string;
+  readonly subheading: string;
   /** The rows the step lists: the harnesses found, or every harness when none was found. */
   readonly rows: readonly ProviderRow[];
 }
@@ -155,7 +155,7 @@ export const buildProvidersStepText = (
   if (rows === null) {
     return {
       heading: "Waiting for the runner",
-      sub: `Your agents run on a runner, and the one on ${host.name} hasn’t joined Hercule yet. Its coding tools show here once it does.`,
+      subheading: `Your agents run on a runner, and the one on ${host.name} hasn’t joined Hercule yet. Its coding tools show here once it does.`,
       rows: [],
     };
   }
@@ -164,7 +164,7 @@ export const buildProvidersStepText = (
   if (found.length === 0) {
     return {
       heading: "Your agents need a coding tool",
-      sub: `Hercule drives ${formatNameList(
+      subheading: `Hercule drives ${formatNameList(
         rows.map((row) => row.name),
         "or",
       )}, and found none of them on ${host.name}. Install one and log in to it; Hercule can install it for you.`,
@@ -176,7 +176,7 @@ export const buildProvidersStepText = (
       found.map((row) => row.name),
       "and",
     )} ${found.length === 1 ? "is" : "are"} on ${host.name}`,
-    sub: `Log in to the ones you want your agents to use. The login runs on ${host.name} and its credential stays ${host.isThisMac ? "here" : "there"}.`,
+    subheading: `Log in to the ones you want your agents to use. The login runs on ${host.name} and its credential stays ${host.isThisMac ? "here" : "there"}.`,
     rows: found,
   };
 };
@@ -304,7 +304,7 @@ export const buildRoomContents = (
     readonly putOff: readonly FirstRunStep[];
   },
 ): RoomContents => {
-  const done = buildFirstRunFacts(reads);
+  const done = findDoneSteps(reads);
   const gitHubAccount = findGitHubAccount(reads.connections);
   const project = findOldest(reads.projects);
   const assistant = findOldest(reads.assistants);

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addPutOffStep,
   buildAllSetRecap,
-  buildFirstRunFacts,
+  findDoneSteps,
   buildFirstRunHost,
   buildFirstRunLadder,
   buildProvidersStepText,
@@ -11,7 +11,7 @@ import {
   decideFirstRunStep,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
-  type FirstRunFacts,
+  type FirstRunDoneSteps,
   type FirstRunReads,
 } from "./first-run";
 import { buildProviderRows } from "./provider-rows";
@@ -51,20 +51,20 @@ const EVERYTHING: FirstRunReads = {
   projects: [buildProject("01a06d02-7000-7000-8000-000000000001", "webshop")],
 };
 
-const NONE_DONE: FirstRunFacts = {
+const NONE_DONE: FirstRunDoneSteps = {
   account: false,
   providers: false,
   github: false,
   project: false,
 };
 
-describe("buildFirstRunFacts", () => {
+describe("findDoneSteps", () => {
   it("marks nothing done on a fresh controller", () => {
-    expect(buildFirstRunFacts(NOTHING)).toEqual(NONE_DONE);
+    expect(findDoneSteps(NOTHING)).toEqual(NONE_DONE);
   });
 
   it("marks every step done when the controller holds each piece", () => {
-    expect(buildFirstRunFacts(EVERYTHING)).toEqual({
+    expect(findDoneSteps(EVERYTHING)).toEqual({
       account: true,
       providers: true,
       github: true,
@@ -77,8 +77,8 @@ describe("buildFirstRunFacts", () => {
       buildSnapshot({ runnerId: "01a06d02-beff-7037-9f5b-000000000000" }),
     ]);
 
-    expect(buildFirstRunFacts({ ...EVERYTHING, instances: [elsewhere] }).providers).toBe(false);
-    expect(buildFirstRunFacts({ ...EVERYTHING, localRunner: null }).providers).toBe(false);
+    expect(findDoneSteps({ ...EVERYTHING, instances: [elsewhere] }).providers).toBe(false);
+    expect(findDoneSteps({ ...EVERYTHING, localRunner: null }).providers).toBe(false);
   });
 
   it("does not count a login that failed", () => {
@@ -86,13 +86,13 @@ describe("buildFirstRunFacts", () => {
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
 
-    expect(buildFirstRunFacts({ ...EVERYTHING, instances: [loggedOut] }).providers).toBe(false);
+    expect(findDoneSteps({ ...EVERYTHING, instances: [loggedOut] }).providers).toBe(false);
   });
 
   it("counts only a GitHub Connection", () => {
     const slack = { ...GITHUB, type: "slack/slack" };
 
-    expect(buildFirstRunFacts({ ...EVERYTHING, connections: [slack] }).github).toBe(false);
+    expect(findDoneSteps({ ...EVERYTHING, connections: [slack] }).github).toBe(false);
   });
 });
 
@@ -112,12 +112,12 @@ describe("decideFirstRunStep", () => {
     expect(decideFirstRunStep({ ...NONE_DONE, account: true, github: true }, [])).toBe("providers");
   });
 
-  it("returns done when every step is done or put off", () => {
+  it("returns all-set when every step is done or put off", () => {
     expect(
       decideFirstRunStep({ account: true, providers: true, github: false, project: true }, [
         "github",
       ]),
-    ).toBe("done");
+    ).toBe("all-set");
   });
 });
 
@@ -319,7 +319,7 @@ describe("buildProvidersStepText", () => {
     const text = buildProvidersStepText(null, THIS_MAC);
 
     expect(text.heading).toBe("Waiting for the runner");
-    expect(text.sub).toContain("the one on this Mac hasn’t joined Hercule yet");
+    expect(text.subheading).toContain("the one on this Mac hasn’t joined Hercule yet");
     expect(text.rows).toEqual([]);
   });
 
@@ -327,7 +327,7 @@ describe("buildProvidersStepText", () => {
     const text = buildProvidersStepText(buildProviderRows(WITH_CLAUDE, INSTANCES), THIS_MAC);
 
     expect(text.heading).toBe("Claude Code is on this Mac");
-    expect(text.sub).toBe(
+    expect(text.subheading).toBe(
       "Log in to the ones you want your agents to use. The login runs on this Mac and its credential stays here.",
     );
     expect(text.rows.map((row) => row.name)).toEqual(["Claude Code"]);
@@ -351,14 +351,14 @@ describe("buildProvidersStepText", () => {
     });
 
     expect(text.heading).toBe("Claude Code and Codex are on moss");
-    expect(text.sub).toContain("The login runs on moss and its credential stays there.");
+    expect(text.subheading).toContain("The login runs on moss and its credential stays there.");
   });
 
   it("lists every harness when none was found", () => {
     const text = buildProvidersStepText(buildProviderRows(BARE, INSTANCES), THIS_MAC);
 
     expect(text.heading).toBe("Your agents need a coding tool");
-    expect(text.sub).toBe(
+    expect(text.subheading).toBe(
       "Hercule drives Claude Code, Codex or pi, and found none of them on this Mac. Install one and log in to it; Hercule can install it for you.",
     );
     expect(text.rows).toHaveLength(3);
@@ -366,11 +366,9 @@ describe("buildProvidersStepText", () => {
 });
 
 describe("buildFirstRunLadder", () => {
-  const NONE: FirstRunFacts = { account: false, providers: false, github: false, project: false };
-
   it("marks the step on screen, the steps done, and the steps put off", () => {
     expect(
-      buildFirstRunLadder("github", { ...NONE, account: true }, ["providers"]).map(
+      buildFirstRunLadder("github", { ...NONE_DONE, account: true }, ["providers"]).map(
         (rung) => rung.status,
       ),
     ).toEqual(["done", "put-off", "now", "next"]);
@@ -378,7 +376,7 @@ describe("buildFirstRunLadder", () => {
 
   it("ticks a step done after the current one, when the user went back", () => {
     expect(
-      buildFirstRunLadder("providers", { ...NONE, account: true, project: true }, []).map(
+      buildFirstRunLadder("providers", { ...NONE_DONE, account: true, project: true }, []).map(
         (rung) => rung.status,
       ),
     ).toEqual(["done", "now", "next", "done"]);
@@ -387,7 +385,7 @@ describe("buildFirstRunLadder", () => {
   it("shows every step as done or put off on All set", () => {
     expect(
       buildFirstRunLadder(
-        "done",
+        "all-set",
         { account: true, providers: true, github: false, project: true },
         ["github"],
       ).map((rung) => rung.status),

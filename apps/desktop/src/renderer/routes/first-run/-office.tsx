@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { useRouteContext } from "@tanstack/react-router";
 import {
   addPutOffStep,
-  buildFirstRunFacts,
   buildFirstRunLadder,
   buildRoomContents,
   decideFirstRunStep,
+  findDoneSteps,
   formatControllerAddress,
   invalidateWithoutCancelling,
   isLoopbackOrigin,
@@ -33,9 +33,9 @@ import { ConnectElsewhereCard, WelcomeCard } from "./-welcome";
  * - `found`: the welcome, for Hercule found on this Mac and not set up;
  * - `remote`: the remote screen, when main has no setup token for the
  *   controller, so the user pastes its setup address;
- * - `account`, then each step, then `done` (All set).
+ * - each step, from `account` on, then `all-set`.
  */
-type FirstRunCard = "found" | "remote" | "account" | FirstRunStep | "done";
+type FirstRunCard = "found" | "remote" | FirstRunStep | "all-set";
 
 /** The part of the room each card frames, as the book's first run moves its camera. */
 const CARD_SHOTS: { readonly [Card in FirstRunCard]: RoomShot } = {
@@ -45,7 +45,7 @@ const CARD_SHOTS: { readonly [Card in FirstRunCard]: RoomShot } = {
   providers: "your-desk",
   github: "wing",
   project: "triage",
-  done: "room",
+  "all-set": "room",
 };
 
 /**
@@ -80,17 +80,17 @@ export function ControllerFirstRun({
   // there is nothing to greet.
   const [openedOffice, setOpenedOffice] = useState(startRequested || !onThisMac);
 
-  const facts = buildFirstRunFacts(data.reads);
+  const doneSteps = findDoneSteps(data.reads);
   // Each decision reads the cache as it is at that moment, not the data this
   // render holds: a handler can run after the cache moved on, such as once a
   // new project is read again.
-  const decideStep = (): FirstRunStep | "done" => {
+  const decideStep = (): FirstRunStep | "all-set" => {
     const now = readFirstRunData(queryClient, client, bridge);
-    return decideFirstRunStep(buildFirstRunFacts(now.reads), now.putOff);
+    return decideFirstRunStep(findDoneSteps(now.reads), now.putOff);
   };
   // The step on screen, kept until the user moves on, or null before the
   // user has an account.
-  const [shownStep, setShownStep] = useState<FirstRunStep | "done" | null>(() =>
+  const [shownStep, setShownStep] = useState<FirstRunStep | "all-set" | null>(() =>
     signedIn ? decideStep() : null,
   );
   const decideAgain = (): void => {
@@ -116,7 +116,7 @@ export function ControllerFirstRun({
   });
 
   const card: FirstRunCard = signedIn
-    ? (shownStep ?? decideFirstRunStep(facts, data.putOff))
+    ? (shownStep ?? decideFirstRunStep(doneSteps, data.putOff))
     : !openedOffice
       ? "found"
       : setupToken?._tag === "PasteNeeded"
@@ -176,7 +176,7 @@ export function ControllerFirstRun({
           origin={url}
           localRunner={data.reads.localRunner}
           instances={data.reads.instances}
-          ready={facts.providers}
+          ready={doneSteps.providers}
           onContinue={decideAgain}
           onLater={() => {
             putOff.mutate("providers");
@@ -199,7 +199,7 @@ export function ControllerFirstRun({
       body = (
         <ProjectCard
           client={client}
-          gitHubConnected={facts.github}
+          gitHubConnected={doneSteps.github}
           onAdded={decideAgain}
           onConnectGitHub={() => {
             setShownStep("github");
@@ -207,7 +207,7 @@ export function ControllerFirstRun({
         />
       );
       break;
-    case "done":
+    case "all-set":
       body = <DoneCard client={client} reads={data.reads} onDoItNow={setShownStep} />;
       break;
   }
@@ -220,7 +220,7 @@ export function ControllerFirstRun({
         room={
           <OfficeRoom contents={contents} projects={data.reads.projects} shot={CARD_SHOTS[card]} />
         }
-        rungs={greeting ? [] : buildFirstRunLadder(card, facts, data.putOff)}
+        rungs={greeting ? [] : buildFirstRunLadder(card, doneSteps, data.putOff)}
         brand={greeting}
       >
         {body}

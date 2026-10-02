@@ -172,7 +172,7 @@ export { completeSetup, validatePasswordLength } from "./setup";
 export {
   addPutOffStep,
   buildAllSetRecap,
-  buildFirstRunFacts,
+  findDoneSteps,
   buildFirstRunHost,
   findGitHubAccount,
   buildFirstRunLadder,
@@ -181,7 +181,7 @@ export {
   decideFirstRunStep,
   FIRST_RUN_STEPS,
   type AllSetRecap,
-  type FirstRunFacts,
+  type FirstRunDoneSteps,
   type FirstRunHost,
   type FirstRunReads,
   type FirstRunRungStatus,

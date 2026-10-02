@@ -39,7 +39,7 @@ export function ProvidersCard({
   return (
     <ProvidersStep
       heading={text.heading}
-      sub={text.sub}
+      subheading={text.subheading}
       ready={ready}
       onContinue={onContinue}
       onLater={onLater}
