@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
-import { buildProviderRows, describeModelCount } from "./provider-rows";
+import { buildProviderRows } from "./provider-rows";
 import { buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
 
 const buildProviderRow = (runner: Runner, one: ProviderInstance) =>
@@ -150,11 +150,5 @@ describe("buildProviderRows for a provider with a secret field", () => {
       secretFields: [],
       logIn: false,
     });
-  });
-});
-
-describe("describeModelCount", () => {
-  it("says no models, one model, or how many", () => {
-    expect([0, 1, 3].map(describeModelCount)).toEqual(["no models", "1 model", "3 models"]);
   });
 });

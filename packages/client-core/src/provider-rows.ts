@@ -5,6 +5,7 @@
  * than in the markup.
  */
 import type { ProviderInstance, ProviderSecretField, Runner } from "@hercule/contract";
+import { describeModelCount } from "./model-count";
 
 /** A row's install action: offered, blocked (shown dimmed with its reason), or not shown. */
 type Install = "offered" | "blocked" | "none";
@@ -79,12 +80,6 @@ const describeAccount = (snapshot: ProviderInstance["snapshots"][number] | undef
     (part): part is string => part !== undefined && part !== "",
   );
   return named.length === 0 ? (auth.backend ?? "signed in") : named.join(" · ");
-};
-
-/** Returns how many models an account has, in words: "no models", "1 model", "3 models". */
-export const describeModelCount = (count: number): string => {
-  if (count === 0) return "no models";
-  return count === 1 ? "1 model" : `${String(count)} models`;
 };
 
 /** Returns one row per provider instance, as seen on `runner`. */

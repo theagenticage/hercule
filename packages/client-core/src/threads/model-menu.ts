@@ -12,7 +12,7 @@
  * Switching runners rebuilds the whole menu.
  */
 import type { ModelDescriptor, ProviderInstance } from "@hercule/contract";
-import { describeModelCount } from "../provider-rows";
+import { describeModelCount } from "../model-count";
 import {
   findAccountName,
   buildInstanceLabel,
