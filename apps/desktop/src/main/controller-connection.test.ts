@@ -227,6 +227,21 @@ describe("ControllerConnection", () => {
       expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, token: null });
     });
 
+    it("keeps no setup token when the check of a setup URL does not pass", async () => {
+      setUp = false;
+      redirectTo = "https://hercule.example.com/api/v1/setup";
+      const { outcome } = await runOnConnection((connection) =>
+        Effect.gen(function* () {
+          const saved = yield* connection.save(`${origin}/setup?token=abc`);
+          return { saved, token: yield* connection.takePastedSetupToken(origin) };
+        }),
+      );
+      expect(outcome).toEqual({
+        saved: { _tag: "Redirected", origin, targetOrigin: "https://hercule.example.com" },
+        token: null,
+      });
+    });
+
     it("returns any other outcome of the check with the origin, and saves nothing", async () => {
       redirectTo = "https://hercule.example.com/api/v1/setup";
       expect(await save(origin)).toEqual({

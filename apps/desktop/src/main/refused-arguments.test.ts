@@ -80,6 +80,16 @@ describe("readBinaryPathArgument", () => {
     expect(findRefusedArgument(args, true, false)).toBe("--hercule-binary=/tmp/stand-in/hercule");
   });
 
+  it("reads the last path when the switch is given twice", () => {
+    expect(
+      readBinaryPathArgument(
+        [...TEST_ARGS, "--hercule-binary=/tmp/first/hercule", "--hercule-binary=/tmp/last/hercule"],
+        false,
+        false,
+      ),
+    ).toBe("/tmp/last/hercule");
+  });
+
   it("returns undefined without the switch", () => {
     expect(readBinaryPathArgument(TEST_ARGS, false, false)).toBeUndefined();
   });

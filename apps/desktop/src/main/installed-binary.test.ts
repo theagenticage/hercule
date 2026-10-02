@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +26,15 @@ const STATUS_JSON = JSON.stringify({
   logsDir: "/Users/ada/.hercule/logs",
 });
 
+/** What the service returns for STATUS_JSON: the fields main reads. */
+const STATUS_REPORT = {
+  installed: true,
+  running: true,
+  role: "serve",
+  controllerUrl: "http://127.0.0.1:4937",
+  logsDir: "/Users/ada/.hercule/logs",
+};
+
 let folder: string;
 let binary: string;
 
@@ -35,12 +44,15 @@ beforeEach(() => {
   return () => rmSync(folder, { recursive: true, force: true });
 });
 
-// A HERCULE_* variable in main's environment must not reach the binary.
+// A HERCULE_* variable in main's environment must not reach the binary. The
+// value the tests started with is put back after each test.
+const startingHerculeHome = process.env.HERCULE_HOME;
 beforeEach(() => {
   process.env.HERCULE_HOME = "/tmp/not-the-default-home";
 });
 afterEach(() => {
-  delete process.env.HERCULE_HOME;
+  if (startingHerculeHome === undefined) delete process.env.HERCULE_HOME;
+  else process.env.HERCULE_HOME = startingHerculeHome;
 });
 
 /**
@@ -74,23 +86,14 @@ describe("InstalledBinary", () => {
   it("reads the status, without any HERCULE_* variable", async () => {
     writeStandIn(`printf '%s' '${STATUS_JSON}'`);
     const result = await run((service) => service.readStatus);
-    expect(result).toEqual({
-      _tag: "Success",
-      success: {
-        installed: true,
-        running: true,
-        role: "serve",
-        controllerUrl: "http://127.0.0.1:4937",
-        logsDir: "/Users/ada/.hercule/logs",
-      },
-    });
+    expect(result).toEqual({ _tag: "Success", success: STATUS_REPORT });
     expect(readCalls()).toEqual([`service status --json|unset|${process.env.PATH ?? ""}`]);
   });
 
   it("installs with the PATH it is given", async () => {
     writeStandIn(`printf '%s' '${STATUS_JSON}'`);
     const result = await run((service) => service.install("/opt/tools/bin:/usr/bin:/bin"));
-    expect(result._tag).toBe("Success");
+    expect(result).toEqual({ _tag: "Success", success: STATUS_REPORT });
     expect(readCalls()).toEqual(["service install --json|unset|/opt/tools/bin:/usr/bin:/bin"]);
   });
 
@@ -118,12 +121,22 @@ describe("InstalledBinary", () => {
     writeStandIn(
       `printf '%s' '${STATUS_JSON.replace("http://127.0.0.1:4937", "http://127.0.0.1:4937/setup")}'`,
     );
-    const result = await run((service) => service.readStatus);
-    expect(result._tag).toBe("Failure");
+    expect(await run((service) => service.readStatus)).toEqual({
+      _tag: "Failure",
+      failure: new BinaryCommandFailed({
+        line: "`hercule service status --json` printed a status the app cannot read. Install Hercule again.",
+      }),
+    });
   });
 
   it("stops the status command after 10 seconds", async () => {
     const pidFile = join(folder, "pid");
+    onTestFinished(() => {
+      // Stops the stand-in by the PID it wrote, if a failed test left it running.
+      if (!existsSync(pidFile)) return;
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      if (isProcessRunning(pid)) process.kill(pid, "SIGKILL");
+    });
     writeStandIn(`echo $$ > "${pidFile}"; exec /bin/sleep 30`);
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
@@ -154,18 +167,29 @@ describe("InstalledBinary", () => {
     });
   });
 
-  it("reads the setup URL, or null when the Home holds none", async () => {
+  it("reads the setup URL, without any HERCULE_* variable", async () => {
     writeStandIn("echo 'http://127.0.0.1:4937/setup?token=abc'");
     expect(await run((service) => service.readSetupUrl)).toEqual({
       _tag: "Success",
       success: "http://127.0.0.1:4937/setup?token=abc",
     });
+    expect(readCalls()).toEqual([`setup-url|unset|${process.env.PATH ?? ""}`]);
+  });
+
+  it("reads no setup URL when the Home holds none", async () => {
     writeStandIn("echo 'hercule: this Home is set up' >&2; exit 3");
     expect(await run((service) => service.readSetupUrl)).toEqual({
       _tag: "Success",
       success: null,
     });
-    expect(readCalls().map((call) => call.split("|")[0])).toEqual(["setup-url", "setup-url"]);
+  });
+
+  it("fails to read the setup URL with the last line of stderr on any other exit code", async () => {
+    writeStandIn("echo 'hercule: the Home cannot be read' >&2; exit 1");
+    expect(await run((service) => service.readSetupUrl)).toEqual({
+      _tag: "Failure",
+      failure: new BinaryCommandFailed({ line: "the Home cannot be read" }),
+    });
   });
 });
 
