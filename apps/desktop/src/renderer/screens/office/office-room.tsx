@@ -86,7 +86,7 @@ interface Scene {
   /** The keys of the pieces still settling, each drawn on an arrival layer. */
   readonly arriving: ReadonlyArray<string>;
   /** Whether the arrivals wait for the camera to stop first. */
-  readonly late: boolean;
+  readonly waitsForCamera: boolean;
   /** The last camera move, by the shots it runs between; a new object starts a new move. */
   readonly cameraMove: { readonly from: RoomShot; readonly to: RoomShot } | null;
 }
@@ -117,7 +117,7 @@ function advanceScene(scene: Scene, contents: RoomContents, shot: RoomShot): Sce
     keys,
     // Pieces still settling from an earlier change keep settling, unless this change adds its own.
     arriving: added.length > 0 ? added : scene.arriving.filter((key) => keys.includes(key)),
-    late: added.length > 0 ? moved : scene.late,
+    waitsForCamera: added.length > 0 ? moved : scene.waitsForCamera,
     cameraMove: moved ? { from: scene.shot, to: shot } : scene.cameraMove,
   };
 }
@@ -193,7 +193,7 @@ export function OfficeRoom({
     shot,
     keys: listPieceKeys(contents),
     arriving: [],
-    late: false,
+    waitsForCamera: false,
     cameraMove: null,
   }));
   if (scene.contents !== contents || scene.shot !== shot) {
@@ -221,17 +221,17 @@ export function OfficeRoom({
     camera.style.transform = "none";
   }, [cameraMove]);
 
-  const settle = (event: AnimationEvent) => {
+  const endArrivals = (event: AnimationEvent) => {
     if (event.animationName !== "room-settle" && event.animationName !== "room-label-settle")
       return;
     setScene((last) =>
-      last.arriving.length === 0 ? last : { ...last, arriving: [], late: false },
+      last.arriving.length === 0 ? last : { ...last, arriving: [], waitsForCamera: false },
     );
   };
 
   return (
     <div ref={stageRef} className="office-room" data-lights={contents.lightsOn ? "on" : "off"}>
-      <div ref={cameraRef} className="room-camera" onAnimationEnd={settle}>
+      <div ref={cameraRef} className="room-camera" onAnimationEnd={endArrivals}>
         {size !== null && (
           <RoomDrawing
             contents={contents}
@@ -241,7 +241,7 @@ export function OfficeRoom({
             height={size.height}
             parquetId={parquetId}
             arriving={scene.arriving}
-            late={scene.late}
+            waitsForCamera={scene.waitsForCamera}
           />
         )}
       </div>
@@ -263,7 +263,7 @@ function RoomDrawing({
   height,
   parquetId,
   arriving,
-  late,
+  waitsForCamera,
 }: {
   readonly contents: RoomContents;
   readonly projects: readonly Project[];
@@ -272,13 +272,17 @@ function RoomDrawing({
   readonly height: number;
   readonly parquetId: string;
   readonly arriving: ReadonlyArray<string>;
-  readonly late: boolean;
+  readonly waitsForCamera: boolean;
 }): JSX.Element {
   const pieces = furnishRoom(contents, projects).sort((a, b) => a.depth - b.depth);
-  const still = pieces.filter((piece) => !arriving.includes(piece.key));
-  const things = pieces.filter((piece) => arriving.includes(piece.key) && !piece.character);
-  const characters = pieces.filter((piece) => arriving.includes(piece.key) && piece.character);
-  const lateClass = late ? " is-late" : "";
+  const stillPieces = pieces.filter((piece) => !arriving.includes(piece.key));
+  const arrivingFurniture = pieces.filter(
+    (piece) => arriving.includes(piece.key) && !piece.isColleague,
+  );
+  const arrivingColleagues = pieces.filter(
+    (piece) => arriving.includes(piece.key) && piece.isColleague,
+  );
+  const lateClass = waitsForCamera ? " is-late" : "";
 
   const drawPieces = (list: ReadonlyArray<RoomPiece>) =>
     list.map((piece) => <PieceDrawing key={piece.key} piece={piece} projection={projection} />);
@@ -293,25 +297,25 @@ function RoomDrawing({
         aria-label="Your office, furnished as you set it up"
       >
         {drawRoomShell(projection, parquetId, contents.gitHubAccount !== null)}
-        {drawPieces(still)}
+        {drawPieces(stillPieces)}
       </svg>
-      {things.length > 0 && (
+      {arrivingFurniture.length > 0 && (
         <div className={`room-arrival${lateClass}`}>
           <svg className="floor" {...svgSize} aria-hidden="true">
-            {drawPieces(things)}
+            {drawPieces(arrivingFurniture)}
           </svg>
         </div>
       )}
-      {characters.length > 0 && (
+      {arrivingColleagues.length > 0 && (
         <div className={`room-arrival room-arrival--character${lateClass}`}>
           <svg className="floor" {...svgSize} aria-hidden="true">
-            {drawPieces(characters)}
+            {drawPieces(arrivingColleagues)}
           </svg>
         </div>
       )}
       <div className={`tags${lateClass}`}>
         {pieces.map((piece) => {
-          const label = piece.label(projection);
+          const label = piece.placeLabel(projection);
           if (label === null) return null;
           const [x, y] = projectPoint(projection, label.x, label.y, label.z);
           if (!isLabelInView(x, y, width, height)) return null;

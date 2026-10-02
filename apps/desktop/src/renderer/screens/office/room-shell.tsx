@@ -126,7 +126,7 @@ function drawWordmark(p: Projection, x: number, z: number): JSX.Element {
 
 /**
  * Draws the rail of Connection plaques on the left-hand wall, spaced for
- * eight. With `gitHub`, the GitHub plaque hangs first: its mark over a brass
+ * eight. With `gitHubConnected`, the GitHub plaque hangs first: its mark over a brass
  * mouth, with a tube from the mouth into the manifold along the wall. Without
  * it the rail is bare. The collar where the tube leaves the wall for the
  * Triage desk is always fitted.
@@ -134,7 +134,7 @@ function drawWordmark(p: Projection, x: number, z: number): JSX.Element {
  * The book sends capsules down the tubes; the room draws none, because
  * nothing moves in the room unless something is happening.
  */
-function drawTubeWall(p: Projection, gitHub: boolean): JSX.Element {
+function drawTubeWall(p: Projection, gitHubConnected: boolean): JSX.Element {
   const u = p.tile;
   const span = (PLAQUES_Y[1] - PLAQUES_Y[0]) * u;
   const pitch = span / PLAQUE_SLOTS;
@@ -145,7 +145,7 @@ function drawTubeWall(p: Projection, gitHub: boolean): JSX.Element {
   const mx = pitch * 0.5;
   const m = 0.26 * u;
   // The tube from the mouth down to the manifold, then the manifold from the mouth to the collar.
-  const tubes = gitHub
+  const tubes = gitHubConnected
     ? `M${formatTenths(mx)} ${formatTenths(mouthY)}V${formatTenths(pipeY)}M${formatTenths(Math.min(pitch * 0.5, joinX))} ${formatTenths(pipeY)}H${formatTenths(Math.max(pitch * 0.5, joinX))}`
     : "";
   return (
@@ -169,7 +169,7 @@ function drawTubeWall(p: Projection, gitHub: boolean): JSX.Element {
           className="collar"
         />
       </g>
-      {gitHub && (
+      {gitHubConnected && (
         <>
           <g
             className="plaque-mark"
@@ -290,9 +290,13 @@ function drawMedallion(p: Projection, cx: number, cy: number, r: number): JSX.El
  * plaque rail, and the sunburst in the lobby floor.
  *
  * `parquetId` names the parquet's pattern, so it must be unique on the page.
- * With `gitHub`, the GitHub plaque hangs on the rail.
+ * With `gitHubConnected`, the GitHub plaque hangs on the rail.
  */
-export function drawRoomShell(p: Projection, parquetId: string, gitHub: boolean): JSX.Element {
+export function drawRoomShell(
+  p: Projection,
+  parquetId: string,
+  gitHubConnected: boolean,
+): JSX.Element {
   const W = ROOM_WIDTH;
   const D = ROOM_DEPTH;
   const H = WALL_HEIGHT;
@@ -364,7 +368,7 @@ export function drawRoomShell(p: Projection, parquetId: string, gitHub: boolean)
       {drawWindowPair(p, 11.4, 14.6)}
       {drawWordmark(p, 10.6, 2.98)}
       {drawClock(p, 18.4, 2.3)}
-      {drawTubeWall(p, gitHub)}
+      {drawTubeWall(p, gitHubConnected)}
       {drawMedallion(p, 16.6, 16.9, 1.2)}
     </>
   );

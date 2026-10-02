@@ -37,11 +37,11 @@ export interface RoomPiece {
   readonly key: string;
   readonly depth: number;
   /** Whether the piece is a colleague: a colleague settles with a spring. */
-  readonly character: boolean;
+  readonly isColleague: boolean;
   /** Draws the piece under a projection, or `null` for a piece that is only a label. */
   readonly draw: (p: Projection) => JSX.Element | null;
   /** Places the piece's labels under a projection. */
-  readonly label: (p: Projection) => RoomLabel | null;
+  readonly placeLabel: (p: Projection) => RoomLabel | null;
 }
 
 /**
@@ -98,8 +98,8 @@ function writeLabel(name: string, note?: string): ReactNode {
  */
 export function furnishRoom(contents: RoomContents, projects: readonly Project[]): RoomPiece[] {
   const pieces: RoomPiece[] = [];
-  const add = (piece: Omit<RoomPiece, "character" | "label"> & Partial<RoomPiece>) => {
-    pieces.push({ character: false, label: () => null, ...piece });
+  const add = (piece: Omit<RoomPiece, "isColleague" | "placeLabel"> & Partial<RoomPiece>) => {
+    pieces.push({ isColleague: false, placeLabel: () => null, ...piece });
   };
 
   add({
@@ -134,7 +134,7 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
           {drawHatStand(p, 0.6, 14.8)}
         </>
       ),
-      label: () => ({
+      placeLabel: () => ({
         x: 2.9,
         y: 16.4,
         z: 1.62,
@@ -149,14 +149,14 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
     add({
       key: "assistant",
       depth: 21.4 + 16.9,
-      character: true,
+      isColleague: true,
       draw: (p) => (
         <>
           {drawSideTable(p, 20.0, 17.7)}
           {drawClubChair(p, 21.4, 16.9, buildLook(assistant.name))}
         </>
       ),
-      label: (p) => ({
+      placeLabel: (p) => ({
         x: 21.4,
         y: 16.9,
         z: measureHeadHeight(p, 0.38),
@@ -187,7 +187,7 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
       add({
         key: "thread",
         depth: seat.x + seat.y + 0.01,
-        character: true,
+        isColleague: true,
         draw: (p) =>
           drawColleague(
             p,
@@ -197,7 +197,7 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
             seat.y,
             0.42,
           ),
-        label: (p) => ({
+        placeLabel: (p) => ({
           x: seat.x,
           y: seat.y,
           z: measureHeadHeight(p, 0.42),
@@ -216,14 +216,14 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
       // A new key once the tube is fitted, so the desk arrives again with it.
       key: tube ? "triage+github" : "triage",
       depth: seat.x + seat.y,
-      character: true,
+      isColleague: true,
       draw: (p) =>
         drawDesk(
           p,
           { ...seat, tint: null, colleague: buildLook("Triage") },
           tube ? drawTubeToDesk(p, seat.x - 1.2) : undefined,
         ),
-      label: (p) => ({
+      placeLabel: (p) => ({
         ...seat,
         z: measureHeadHeight(p, 0.42),
         variant: null,
@@ -237,7 +237,7 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
       key: "plaque",
       depth: -50,
       draw: () => null,
-      label: () => ({
+      placeLabel: () => ({
         x: 0.02,
         y: 4.72,
         z: 3.38,
