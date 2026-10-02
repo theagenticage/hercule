@@ -77,10 +77,10 @@ const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Eff
 
 /**
  * Runs a daemon until it fails or a stop signal arrives, with its log lines
- * going to `<home>/logs/runner.log` at the configured `log.level`. On failure,
- * prints the error and sets a failing exit code. Fails before the daemon
- * starts when `config.toml`, a `-c` flag or a `HERCULE_*` variable is
- * invalid.
+ * going to `<home>/logs/runner.log` at the configured `log.level`. When the
+ * daemon fails, prints the error and sets exit code 1. Does the same without
+ * starting the daemon when `config.toml`, a `-c` flag or a `HERCULE_*`
+ * variable is invalid.
  */
 const runUntilStopped = async (
   options: {

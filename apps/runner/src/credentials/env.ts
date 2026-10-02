@@ -7,9 +7,7 @@
  * as the process that receives them.
  */
 import { join as joinPath } from "node:path";
-
-/** The path prefix Bun gives an entry script embedded in a compiled binary. */
-const EMBEDDED = "/$bunfs/";
+import { locateCompiledBinary } from "@hercule/home";
 
 /** Matches a word that the shell would not read as one plain word, so it needs quoting. */
 const QUOTABLE = /[^A-Za-z0-9_@%+=:,./-]/;
@@ -27,7 +25,7 @@ const quoteShellWord = (word: string): string => `'${word.replaceAll("'", `'\\''
  * from a checkout.
  */
 const buildHelperCommand = (): string =>
-  [process.execPath, ...(Bun.main.startsWith(EMBEDDED) ? [] : [Bun.main]), "git-credential"]
+  [process.execPath, ...(locateCompiledBinary() === undefined ? [Bun.main] : []), "git-credential"]
     .map((word, at) => (at > 0 && QUOTABLE.test(word) ? quoteShellWord(word) : word))
     .join(" ");
 

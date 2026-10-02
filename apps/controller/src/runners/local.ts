@@ -182,7 +182,7 @@ const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | 
  */
 export const startLocalRunner = (
   options: LocalRunnerOptions,
-  target: {
+  inherited: {
     readonly controllerUrl: string;
     readonly home: string;
     readonly logLevel: LogLevel;
@@ -209,14 +209,14 @@ export const startLocalRunner = (
     };
 
     const start = Effect.gen(function* () {
-      const spawned = Bun.spawn([...options.command, "-c", `log.level=${target.logLevel}`], {
+      const spawned = Bun.spawn([...options.command, "-c", `log.level=${inherited.logLevel}`], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "inherit",
         // The controller's home is not always the default one. The token is
         // never put in the environment: every process the child starts would
         // inherit it.
-        env: { ...process.env, HERCULE_HOME: target.home },
+        env: { ...process.env, HERCULE_HOME: inherited.home },
       });
       child = spawned;
 
@@ -262,7 +262,7 @@ export const startLocalRunner = (
       // ever sees it.
       const invitation = yield* joinTokens.create(yield* nowIso);
       yield* writeEnrolment(
-        `${JSON.stringify(encodeEnrolment({ controllerUrl: target.controllerUrl, token: invitation.token }))}\n`,
+        `${JSON.stringify(encodeEnrolment({ controllerUrl: inherited.controllerUrl, token: invitation.token }))}\n`,
       );
       return spawned;
     });

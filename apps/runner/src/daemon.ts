@@ -8,7 +8,7 @@ import { networkInterfaces } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { locateRunnerDir, locateRunnerFile } from "@hercule/home";
+import { locateCompiledBinary, locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import { IDENTITY_PORT } from "@hercule/protocol";
 import {
   buildGitCredentialEnv,
@@ -63,9 +63,6 @@ const validateControllerUrl = (
   );
 };
 
-/** Bun's own marker for an entry script that lives inside a compiled binary. */
-const EMBEDDED = "/$bunfs/";
-
 /**
  * The runner could not install the `hercule` link and the session skill. This
  * is its own error because reconnecting will not fix it: the user has to make
@@ -104,7 +101,7 @@ const prepareRunnerTooling = (
       // CLI only in a compiled build; from a source checkout it is bun. Warn
       // once here, instead of leaving a session to find out when its first
       // call runs bun instead of hercule.
-      Bun.main.startsWith(EMBEDDED)
+      locateCompiledBinary() !== undefined
         ? Effect.void
         : Effect.logWarning(
             `This runner is not the compiled binary, so ${joinPath(locateRunnerDir(home), "bin", "hercule")} ` +
