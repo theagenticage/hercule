@@ -923,7 +923,7 @@ The first screen was already over its guide budget, and [#295](https://github.co
 
 | Measure | Budget | Before | After |
 |---|---|---|---|
-| Main's startup, minified: the startup file and the chunks it imports statically | 160 kB | 154.9 kB, one file | 156.9 kB: `index.js` 40.9 kB and a shared Effect Schema chunk of 116.0 kB |
+| Main's startup, minified: the startup file and the chunks it imports statically | 160 kB | ~~154.9 kB, one file~~ 151.3 kB, one file *(corrected 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313): 154.9 was the same file counted in thousands of bytes; see "The first run, measured on the app" below)* | 156.9 kB: `index.js` 40.9 kB and a shared Effect Schema chunk of 116.0 kB |
 | Main's first-run modules, loaded the first time the first run asks | - | - | 7.7 kB |
 | Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | - | 302.7 kB |
 
@@ -955,6 +955,46 @@ The first screen was already over its guide budget, and [#295](https://github.co
 - **The project picker and the starters show a moment later the first time,** after one read of a file from the local disk. Until then the draft shows nothing in the starters' place, as it does until its tasks are read. The launch time was not measured for this change.
 - **The Before is 0.2 kB under the entry above's After,** on the commit that recorded it. Two builds of b50ee76d both read 302.5 kB, with the thread's route at 60.7 kB. The entry above may have measured a working tree before its last commit.
 - The first screen was already over its guide budget, and [#295](https://github.com/theagenticage/hercule/issues/295) holds that overrun. This change brings it 6.9 kB closer, all of it from the first-screen chunk.
+
+**The first run, measured on the app,** 2026-10-02 on the reference machine, on the branch base f962cc91 (Before) and on 332a0f6f (After), for [#313](https://github.com/theagenticage/hercule/issues/313). *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Sizes come from `pnpm build:desktop`'s size checks, 1,024 bytes to a kB. Everything else comes from the end-to-end suite's test package, run against the stand-in `hercule` binary and a scratch Hercule Home, with provider logins and GitHub's device flow answered by the test. The real `hercule service` was not run.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | 302.7 kB in 6 chunks: 242.0 kB at first paint, 60.7 kB for the thread's route | **296.4 kB** in 6 chunks: 235.1 kB at first paint, 61.2 kB for the thread's route |
+| The first run's chunk, gzipped | - | - | 23.9 kB, and 2.7 kB of CSS |
+| Everything a first run loads, gzipped | - | - | 36.7 kB in 7 chunks: the first run's chunk, the provider login and New project chunks, and four small chunks they share with the app |
+| The project picker, the dialogs and the starters, each loaded the first time it shows | - | - | 15.9 kB in 9 chunks |
+| Main's startup, minified: the startup file and the chunks it imports statically | 160 kB | 151.3 kB, one file | **157.0 kB**: `index.js` 40.9 kB and a shared Effect Schema chunk of 116.0 kB |
+| Main's first-run modules, loaded the first time the first run asks | - | - | 7.7 kB |
+| Processes after the first run | 4 | 4 | 4: the browser, GPU, utility and renderer processes, and nothing else |
+| Launch after the first run: spawn to window shown, warm | 500 ms | 372, 341 and 449 ms | 358, 328 and 346 ms |
+
+- **The first screen is 0.8 kB over the entry above's After,** 295.6 kB. The clock icon is now a 0.5 kB chunk of its own in the thread's route, because since 2ef96b67 the first run's account and GitHub steps import it as well as the thread screen's queued inputs. The other 0.3 kB was not traced to a module.
+- **Main's startup grew by 5.7 kB, against the budget's "add nothing to the startup file".** The first-run modules themselves stay out of it. The growth comes from the split the entry above describes: the bundler moved the Effect Schema runtime, which the startup file shares with the lazy first-run modules, into a chunk the startup file imports statically, and the two files together read 5.7 kB more than the one file did. The startup is still 3.0 kB under 160 kB. Whether that growth is accepted, or the budget's wording changes, is open for the owner of this spec to decide. The entry above recorded the Before as 154.9 kB: that is the same 151.3 kB file counted in thousands of bytes, so the growth it implied, 2.0 kB, was too small. Its After of 156.9 kB is this table's 157.0 kB, rounded part by part.
+- **No first-run code loads after the first run.** A launch after it parsed only the first-screen chunk, the bundler's runtime and `theme-init.js`, read from the page's DevTools connection. The Before parsed its three first-screen chunks and `theme-init.js`.
+- **Processes during the first run.** Open the office ran `service status --json` twice, once when the welcome looked for Hercule and once when the start began, then the login shell, then `service install --json`. At most two of these programs ran at once, beside the app's three helper processes. All had exited before the account step showed. Picking a folder ran `git`, which exited before a process list sampled every few milliseconds could see it. After the app quit, no process it started was left. A launch with a controller saved ran no `hercule` command.
+- **On a runner Mac and on another machine's controller,** nothing was installed or started. A runner Mac ran `service status --json` once. Connecting to a controller elsewhere that is not set up ran `service status --json` and `setup-url`, which reads the token for a controller on this Mac, and no `service install`. A controller set up elsewhere ran `service status --json` once, and the app showed sign-in.
+- **`hercule service status` was not timed,** because it reads launchd, and no test may run the real binary. It is left for the walk-through on a fresh Mac. Take it with `/usr/bin/time -l hercule service status --json`, which prints the wall time and the peak memory.
+- **Reduce motion keeps the room still.** With Reduce motion on, no animation ran after Create account or after Do this later, and two screenshots 1.2 seconds apart, starting the moment the providers step showed, were identical. Without it, Create account ran the room's `room-settle` and `room-label-settle` animations, two of each.
+
+Idle at each step of the first run, with the window visible, read from a plain launch with nothing attached. Each launch opens on the step and settles for 4 seconds, and then `app.getAppMetrics()` is read over 10 seconds. That is sooner than [Measuring](#measuring)'s 30 seconds, so a timer that fires once after a page loads would show here; none did. The renderer's 0 to 2 wakeups a second count as none, as there.
+
+| Step | GPU wakeups a second | Renderer wakeups a second | Notes |
+|---|---|---|---|
+| Welcome | 6 to 15 | 1 to 2 | |
+| Hercule starting | 309 to 320 | 64 to 73 | the spinner, 0.8% of a core in the GPU process and 0.15% in the renderer |
+| Account | 71 | 6 | the username field is focused |
+| Providers | 4 | 1 | |
+| A provider login waiting | 301 | 36 | the spinner; read with Playwright attached |
+| GitHub | 3 | 1 | |
+| GitHub's code waiting | 327 | 64 | the spinner; read with Playwright attached |
+| Project | 4 | 1 | |
+| All set | 6 | 1 | |
+| After the first run: the draft, its composer focused | 60 to 65 | 4 to 5 | the Before reads 51 to 65 and 4 to 5 on the same screen |
+
+- **The waiting steps cost what rule 2's spinner costs,** about 300 GPU wakeups a second, for as long as the wait lasts. That is a 120 Hz display drawing every frame while something turns. Each wait ends by itself, as rule 2 requires. Between waits, every step is at the still-page level.
+- **The two focused screens read a little over the focused-field budget** of 63 and 4: the account step at 71 and 6, and the draft at up to 65 and 5. The Before reads the same on the draft, so the first run did not cause it. The account step was read once and was not looked into further.
+- **The launch was measured as [Measuring](#measuring) describes,** with two differences: one launch under Playwright warms the code cache, and three plain launches follow, 3 seconds apart. The Before's third launch, 449 ms, was slow from main's first step, so it was likely the machine. A second set of launches 10 minutes earlier read 355 to 379 ms for the After and 365 to 381 ms for the Before. Memory was not measured for this change.
 
 ## Slices
 
