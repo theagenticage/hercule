@@ -58,12 +58,24 @@ export function frameShot(width: number, height: number, shot: RoomShot): Projec
 }
 
 /**
+ * How far, in pixels, a label's pin keeps from the stage's left and top
+ * edges. A label stands above its pin and reaches left of it, and at the top
+ * it must also clear the step ladder.
+ */
+const LABEL_LEFT_AND_TOP_CLEARANCE = 72;
+/** How far, in pixels, a label's pin keeps from the stage's bottom edge. */
+const LABEL_BOTTOM_CLEARANCE = 40;
+
+/**
  * Checks whether a label pinned at stage point `(x, y)` shows whole on a
  * stage `width` by `height` pixels: clear of the window's edges and of the
  * first run's card. A label the shot would cut is left out.
  */
 export const isLabelInView = (x: number, y: number, width: number, height: number): boolean =>
-  x >= 72 && x <= width - CARD_ALLOWANCE && y >= 72 && y <= height - 40;
+  x >= LABEL_LEFT_AND_TOP_CLEARANCE &&
+  x <= width - CARD_ALLOWANCE &&
+  y >= LABEL_LEFT_AND_TOP_CLEARANCE &&
+  y <= height - LABEL_BOTTOM_CLEARANCE;
 
 /** What the room last drew, and what is still settling into it. */
 interface Scene {

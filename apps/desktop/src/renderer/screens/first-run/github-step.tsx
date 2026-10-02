@@ -25,7 +25,7 @@ import { StepKicker } from "./first-run-frame";
  * GitHub's page for a new classic token, with the scopes Hercule's GitHub
  * Connection reads with already ticked (spec 08 §9.3).
  */
-export const GITHUB_TOKEN_URL =
+const GITHUB_TOKEN_URL =
   "https://github.com/settings/tokens/new?scopes=repo,read:org,notifications,workflow&description=Hercule";
 
 /**
@@ -64,7 +64,7 @@ const ENDING_ICONS = {
 } as const;
 
 /** What the GitHub step's buttons and fields do. */
-export interface GitHubStepActions {
+interface GitHubStepActions {
   /** Starts a sign-in with a code: Sign in with GitHub, Start again. */
   readonly onSignIn: () => void;
   /** Stops waiting for the code to be approved. */

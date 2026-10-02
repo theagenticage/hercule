@@ -15,7 +15,7 @@ export interface StarterThread {
  * is for work that is not code too. `{project}` stands for the project's name.
  * A `…` marks where the user writes their own subject.
  */
-export const STARTER_THREADS: Readonly<
+const STARTER_THREADS: Readonly<
   Record<"code" | "knowledgeWork", readonly [StarterThread, StarterThread, StarterThread]>
 > = {
   code: [

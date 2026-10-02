@@ -165,7 +165,6 @@ export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-st
 export {
   createProjectWithRepositories,
   isNewProjectCreated,
-  PROJECT_NAME_REFUSAL,
   type NewProjectDraft,
   type RepositoryDraft,
 } from "./new-project";
@@ -181,8 +180,6 @@ export {
   buildRoomContents,
   decideFirstRunStep,
   FIRST_RUN_STEPS,
-  TRIAGE_READING_GITHUB,
-  TRIAGE_WITHOUT_CONNECTIONS,
   type AllSetRecap,
   type FirstRunFacts,
   type FirstRunHost,
@@ -344,7 +341,6 @@ export { appendToMessage, buildStartCards } from "./threads/start-cards";
 export {
   chooseStarterThreads,
   describeEmptyIntake,
-  STARTER_THREADS,
   type StarterThread,
 } from "./threads/starter-threads";
 export {

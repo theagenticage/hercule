@@ -109,8 +109,9 @@ describe("OfficeRoom", () => {
     expect(readLabels(room)).toEqual(["Herculeyour assistant"]);
   });
 
-  it("lays the wing's field with one desk per session, eight at most", () => {
-    const wing = { runnerName: "studio-mac", note: "", deskCount: 12, firstThread: null };
+  it("lays the wing's field with its desks, two rows of four at most", () => {
+    // client-core caps a wing at eight desks, so eight is the most the room draws.
+    const wing = { runnerName: "studio-mac", note: "", deskCount: 8, firstThread: null };
     const { room } = renderRoom({ ...BARE, wing }, "wing");
     expect(room.querySelector(".engrave-name")?.textContent).toBe("studio-mac");
     expect(room.querySelectorAll(".desk-top")).toHaveLength(8);

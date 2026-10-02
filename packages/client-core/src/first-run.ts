@@ -191,7 +191,10 @@ export const TRIAGE_WITHOUT_CONNECTIONS = "no Connections yet";
  */
 export const TRIAGE_READING_GITHUB = "reads GitHub";
 
-/** How many desks a wing seats. A runner that hosts more sessions still gets this many. */
+/**
+ * How many desks a wing seats: the Office draws two rows of four. A runner
+ * that hosts more sessions still gets this many.
+ */
 const WING_DESKS = 8;
 
 /**

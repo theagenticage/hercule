@@ -232,6 +232,10 @@ export function ProviderLogin({
  * paste the code it shows. `error` is the last submit's failure, if any. A
  * code the vendor refused marks the field and says why, in the book's words;
  * any other failure shows its own message.
+ *
+ * The code field is drawn by hand rather than with `FormField`: the book sets
+ * it inside the numbered step, beside its Submit button and with no label of
+ * its own, where `FormField` would add a label row above it.
  */
 function PasteCodeSteps({
   url,

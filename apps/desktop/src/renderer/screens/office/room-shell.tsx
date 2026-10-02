@@ -19,8 +19,6 @@ import {
 // the inlay in the floor. The markup is the book's, element for element and in
 // the same nesting, because office.css styles some of it by position.
 
-const f = formatTenths;
-
 /** Where the plaques of the Connections hang on the left-hand wall: their span along y, in tiles. */
 const PLAQUES_Y: readonly [number, number] = [0.4, 5.0];
 /** The height of the top of the plaque rail, in tiles. */
@@ -42,23 +40,30 @@ function drawWindowPair(p: Projection, y1: number, y2: number): JSX.Element {
   let rays = "";
   for (let i = 1; i < 6; i++) {
     const a = Math.PI + (i * Math.PI) / 6;
-    rays += `M${f(w / 2)} ${f(t)}L${f(w / 2 + Math.cos(a) * t * 0.86)} ${f(t + Math.sin(a) * t * 0.86)}`;
+    rays += `M${formatTenths(w / 2)} ${formatTenths(t)}L${formatTenths(w / 2 + Math.cos(a) * t * 0.86)} ${formatTenths(t + Math.sin(a) * t * 0.86)}`;
   }
   const at = (x: number, y: number) => projectPoint(p, x, y, 0);
   return (
     <>
       <g transform={placeOnSideWall(p, 0.01, y2, 2.9)}>
-        <rect width={f(w)} height={f(h)} rx="3" className="window" />
+        <rect width={formatTenths(w)} height={formatTenths(h)} rx="3" className="window" />
         <path
           className="mullion"
-          d={`M0 ${f(t)}H${f(w)}M${f(w / 3)} ${f(t)}V${f(h)}M${f((w * 2) / 3)} ${f(t)}V${f(h)}M0 ${f(t + (h - t) / 2)}H${f(w)}`}
+          d={`M0 ${formatTenths(t)}H${formatTenths(w)}M${formatTenths(w / 3)} ${formatTenths(t)}V${formatTenths(h)}M${formatTenths((w * 2) / 3)} ${formatTenths(t)}V${formatTenths(h)}M0 ${formatTenths(t + (h - t) / 2)}H${formatTenths(w)}`}
         />
         <path
           className="mullion mullion--fan"
-          d={`M${f(w / 2 - t * 0.86)} ${f(t)}A${f(t * 0.86)} ${f(t * 0.86)} 0 0 1 ${f(w / 2 + t * 0.86)} ${f(t)}${rays}`}
+          d={`M${formatTenths(w / 2 - t * 0.86)} ${formatTenths(t)}A${formatTenths(t * 0.86)} ${formatTenths(t * 0.86)} 0 0 1 ${formatTenths(w / 2 + t * 0.86)} ${formatTenths(t)}${rays}`}
         />
-        <rect width={f(w)} height={f(h)} rx="3" className="window-frame" />
-        <rect y={f(h + 3)} x="-5" width={f(w + 10)} height="4" rx="2" className="sill" />
+        <rect width={formatTenths(w)} height={formatTenths(h)} rx="3" className="window-frame" />
+        <rect
+          y={formatTenths(h + 3)}
+          x="-5"
+          width={formatTenths(w + 10)}
+          height="4"
+          rx="2"
+          className="sill"
+        />
       </g>
       {drawQuad(at(0, y1 + 0.4), at(0, y2 + 0.4), at(2.8, y2 + 1.9), at(2.8, y1 + 1.9), "sun")}
     </>
@@ -69,7 +74,10 @@ function drawWindowPair(p: Projection, y1: number, y2: number): JSX.Element {
 function drawHand(degrees: number, length: number, className: string): JSX.Element {
   const a = (degrees * Math.PI) / 180;
   return (
-    <path className={className} d={`M0 0L${f(Math.sin(a) * length)} ${f(-Math.cos(a) * length)}`} />
+    <path
+      className={className}
+      d={`M0 0L${formatTenths(Math.sin(a) * length)} ${formatTenths(-Math.cos(a) * length)}`}
+    />
   );
 }
 
@@ -80,15 +88,15 @@ function drawClock(p: Projection, x: number, z: number): JSX.Element {
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2;
     const reach = i % 2 === 0 ? 1.7 : 1.4;
-    rays += `M${f(Math.cos(a) * r * 1.12)} ${f(Math.sin(a) * r * 1.12)}L${f(Math.cos(a) * r * reach)} ${f(Math.sin(a) * r * reach)}`;
+    rays += `M${formatTenths(Math.cos(a) * r * 1.12)} ${formatTenths(Math.sin(a) * r * 1.12)}L${formatTenths(Math.cos(a) * r * reach)} ${formatTenths(Math.sin(a) * r * reach)}`;
   }
   return (
     <g transform={placeOnBackWall(p, x, 0.01, z)}>
       <path className="clock-rays" d={rays} />
-      <circle r={f(r)} className="clock" />
+      <circle r={formatTenths(r)} className="clock" />
       {drawHand((9 + 41 / 60) * 30, r * 0.5, "hand hand--h")}
       {drawHand(41 * 6, r * 0.78, "hand")}
-      <circle r={f(p.tile * 0.05)} className="hand-dot" />
+      <circle r={formatTenths(p.tile * 0.05)} className="hand-dot" />
     </g>
   );
 }
@@ -102,12 +110,15 @@ function drawWordmark(p: Projection, x: number, z: number): JSX.Element {
         <LogoMark size={Math.round(u * 0.95)} />
       </g>
       <g transform={placeOnBackWall(p, x + 1.18, 0.01, z - 0.74)}>
-        <text className="wall-word" style={{ fontSize: `${f(u * 0.78)}px` }}>
+        <text className="wall-word" style={{ fontSize: `${formatTenths(u * 0.78)}px` }}>
           Hercule
         </text>
       </g>
       <g transform={placeOnBackWall(p, x, 0.01, z - 1.02)}>
-        <path className="brass-rule" d={`M0 0H${f(u * 5.1)}M0 5H${f(u * 5.1)}`} />
+        <path
+          className="brass-rule"
+          d={`M0 0H${formatTenths(u * 5.1)}M0 5H${formatTenths(u * 5.1)}`}
+        />
       </g>
     </>
   );
@@ -135,22 +146,49 @@ function drawTubeWall(p: Projection, gitHub: boolean): JSX.Element {
   const m = 0.26 * u;
   // The tube from the mouth down to the manifold, then the manifold from the mouth to the collar.
   const tubes = gitHub
-    ? `M${f(mx)} ${f(mouthY)}V${f(pipeY)}M${f(Math.min(pitch * 0.5, joinX))} ${f(pipeY)}H${f(Math.max(pitch * 0.5, joinX))}`
+    ? `M${formatTenths(mx)} ${formatTenths(mouthY)}V${formatTenths(pipeY)}M${formatTenths(Math.min(pitch * 0.5, joinX))} ${formatTenths(pipeY)}H${formatTenths(Math.max(pitch * 0.5, joinX))}`
     : "";
   return (
     <g transform={placeOnSideWall(p, 0.01, PLAQUES_Y[1], PLAQUES_Z)}>
-      <rect x="-4" y="-4" width={f(span + 8)} height={f(0.8 * u)} rx="3" className="plaque-rail" />
+      <rect
+        x="-4"
+        y="-4"
+        width={formatTenths(span + 8)}
+        height={formatTenths(0.8 * u)}
+        rx="3"
+        className="plaque-rail"
+      />
       <g className="flow">
         <path className="tube" d={tubes} />
-        <rect x={f(joinX - 5)} y={f(pipeY - 5)} width="10" height="10" rx="3" className="collar" />
+        <rect
+          x={formatTenths(joinX - 5)}
+          y={formatTenths(pipeY - 5)}
+          width="10"
+          height="10"
+          rx="3"
+          className="collar"
+        />
       </g>
       {gitHub && (
         <>
-          <g className="plaque-mark" transform={`translate(${f(mx - m / 2)} ${f(0.06 * u)})`}>
+          <g
+            className="plaque-mark"
+            transform={`translate(${formatTenths(mx - m / 2)} ${formatTenths(0.06 * u)})`}
+          >
             <GitHubMark size={m} />
           </g>
-          <circle cx={f(mx)} cy={f(mouthY)} r={f(0.13 * u)} className="mouth" />
-          <circle cx={f(mx)} cy={f(mouthY)} r={f(0.07 * u)} className="mouth-in" />
+          <circle
+            cx={formatTenths(mx)}
+            cy={formatTenths(mouthY)}
+            r={formatTenths(0.13 * u)}
+            className="mouth"
+          />
+          <circle
+            cx={formatTenths(mx)}
+            cy={formatTenths(mouthY)}
+            r={formatTenths(0.07 * u)}
+            className="mouth-in"
+          />
         </>
       )}
     </g>
@@ -171,7 +209,7 @@ export function drawTubeToDesk(p: Projection, x: number): JSX.Element {
       {drawBox(p, x - 0.15, TUBE_Y - 0.15, DESK_SURFACE, 0.3, 0.3, 0.3, "var(--brass)", "brass")}
       <path
         className="tube tube--main"
-        d={`M${f(a[0])} ${f(a[1])}L${f(b[0])} ${f(b[1])}L${f(c[0])} ${f(c[1])}`}
+        d={`M${formatTenths(a[0])} ${formatTenths(a[1])}L${formatTenths(b[0])} ${formatTenths(b[1])}L${formatTenths(c[0])} ${formatTenths(c[1])}`}
       />
     </g>
   );
@@ -205,7 +243,7 @@ export function drawWingField(
         <Fragment key={`${cx},${cy}`}>{drawPatch(p, cx, cy, 0.36, 0.36, "field-corner")}</Fragment>
       ))}
       <g transform={placeOnFloor(p, label[0], label[1])}>
-        <text className="engrave" style={{ fontSize: `${f(p.tile * 0.4)}px` }}>
+        <text className="engrave" style={{ fontSize: `${formatTenths(p.tile * 0.4)}px` }}>
           <tspan className="engrave-name">{runnerName}</tspan>
           {`   ${note}`}
         </text>
@@ -222,16 +260,26 @@ function drawMedallion(p: Projection, cx: number, cy: number, r: number): JSX.El
     const a0 = (i / 16) * Math.PI * 2;
     const a1 = a0 + Math.PI / 16;
     rays +=
-      `M${f(R + Math.cos(a0) * R * 0.34)} ${f(R + Math.sin(a0) * R * 0.34)}` +
-      `L${f(R + Math.cos(a0) * R * 0.86)} ${f(R + Math.sin(a0) * R * 0.86)}` +
-      `L${f(R + Math.cos(a1) * R * 0.86)} ${f(R + Math.sin(a1) * R * 0.86)}Z`;
+      `M${formatTenths(R + Math.cos(a0) * R * 0.34)} ${formatTenths(R + Math.sin(a0) * R * 0.34)}` +
+      `L${formatTenths(R + Math.cos(a0) * R * 0.86)} ${formatTenths(R + Math.sin(a0) * R * 0.86)}` +
+      `L${formatTenths(R + Math.cos(a1) * R * 0.86)} ${formatTenths(R + Math.sin(a1) * R * 0.86)}Z`;
   }
   return (
     <g transform={placeOnFloor(p, cx - r, cy - r)}>
-      <circle cx={f(R)} cy={f(R)} r={f(R)} className="med" />
-      <circle cx={f(R)} cy={f(R)} r={f(R * 0.93)} className="med-line" />
+      <circle cx={formatTenths(R)} cy={formatTenths(R)} r={formatTenths(R)} className="med" />
+      <circle
+        cx={formatTenths(R)}
+        cy={formatTenths(R)}
+        r={formatTenths(R * 0.93)}
+        className="med-line"
+      />
       <path className="med-ray" d={rays} />
-      <circle cx={f(R)} cy={f(R)} r={f(R * 0.3)} className="med-core" />
+      <circle
+        cx={formatTenths(R)}
+        cy={formatTenths(R)}
+        r={formatTenths(R * 0.3)}
+        className="med-core"
+      />
     </g>
   );
 }
@@ -260,12 +308,27 @@ export function drawRoomShell(p: Projection, parquetId: string, gitHub: boolean)
       {drawBox(p, 0, 0, -0.5, W, D, 0.5, "var(--room-floor)", "slab")}
       <g transform={placeOnFloor(p, 0, 0)}>
         <defs>
-          <pattern id={parquetId} width={f(2 * u)} height={f(2 * u)} patternUnits="userSpaceOnUse">
-            <rect width={f(u)} height={f(u)} className="pq" />
-            <rect x={f(u)} y={f(u)} width={f(u)} height={f(u)} className="pq" />
+          <pattern
+            id={parquetId}
+            width={formatTenths(2 * u)}
+            height={formatTenths(2 * u)}
+            patternUnits="userSpaceOnUse"
+          >
+            <rect width={formatTenths(u)} height={formatTenths(u)} className="pq" />
+            <rect
+              x={formatTenths(u)}
+              y={formatTenths(u)}
+              width={formatTenths(u)}
+              height={formatTenths(u)}
+              className="pq"
+            />
           </pattern>
         </defs>
-        <rect width={f(W * u)} height={f(D * u)} fill={`url(#${parquetId})`} />
+        <rect
+          width={formatTenths(W * u)}
+          height={formatTenths(D * u)}
+          fill={`url(#${parquetId})`}
+        />
       </g>
       <g className="wall">
         {drawQuad(at(-0.4, -0.4, H), at(W, -0.4, H), at(W, 0, H), at(-0.4, 0, H), "wall-top")}

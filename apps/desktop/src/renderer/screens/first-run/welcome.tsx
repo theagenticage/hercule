@@ -14,7 +14,7 @@ import { CopyButton, FormField, Warning } from "../step";
  * The command that installs Hercule, from spec 15's install script. The
  * welcome offers it when there is no binary to start.
  */
-export const INSTALLER_COMMAND =
+const INSTALLER_COMMAND =
   "curl -fsSL https://raw.githubusercontent.com/theagenticage/hercule/edge/install.sh | sh";
 
 /**

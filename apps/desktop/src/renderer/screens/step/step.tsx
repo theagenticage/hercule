@@ -229,8 +229,8 @@ export function Warning({
  * Renders a labelled field: `label` above the field box, which holds
  * `children` (an `<input>`, and anything drawn after it), and under the box
  * either `error` or `hint`. `aside` sits at the label's far end, such as
- * "optional". A `bad` field, or one with an `error`, draws a red edge.
- * `error` is `null` when there is none. The hint and the error can hold
+ * "optional". A field with an `error` draws a red edge. `error` is `null`
+ * when there is none. The hint and the error can hold
  * markup, such as a command set in monospace.
  *
  * The `<label>` holds the label and the field but not the aside, the hint
@@ -245,21 +245,19 @@ export function FormField({
   aside,
   hint,
   error = null,
-  bad = false,
   children,
 }: {
   readonly label: string;
   readonly aside?: ReactNode;
   readonly hint?: ReactNode;
   readonly error?: ReactNode;
-  readonly bad?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
     <div className="fl">
       <label>
         <span className="fl-label">{label}</span>
-        <span className={bad || error !== null ? "field is-bad" : "field"}>{children}</span>
+        <span className={error === null ? "field" : "field is-bad"}>{children}</span>
       </label>
       {aside === undefined ? null : <span className="fl-aside">{aside}</span>}
       {error !== null ? (

@@ -203,11 +203,10 @@ function drawLeaf(
   const my = (from[1] + ey) / 2 - length * 0.12;
   const nx = -Math.sin(r) * width;
   const ny = Math.cos(r) * width;
-  const f = formatTenths;
   return (
     <path
       className={className}
-      d={`M${f(from[0])} ${f(from[1])}Q${f(mx + nx)} ${f(my + ny)} ${f(ex)} ${f(ey)}Q${f(mx - nx)} ${f(my - ny)} ${f(from[0])} ${f(from[1])}Z`}
+      d={`M${formatTenths(from[0])} ${formatTenths(from[1])}Q${formatTenths(mx + nx)} ${formatTenths(my + ny)} ${formatTenths(ex)} ${formatTenths(ey)}Q${formatTenths(mx - nx)} ${formatTenths(my - ny)} ${formatTenths(from[0])} ${formatTenths(from[1])}Z`}
     />
   );
 }
@@ -348,19 +347,27 @@ export function drawYourDesk(p: Projection, x0: number, y0: number): JSX.Element
 export function drawHatStand(p: Projection, x: number, y: number): JSX.Element {
   const [hx, hy] = projectPoint(p, x, y, 1.72);
   const u = p.tile;
-  const f = formatTenths;
   return (
     <>
       {drawEllipse(p, x, y, 0, 0.3, "shadow")}
       {drawEllipse(p, x, y, 0.02, 0.2, "lamp-foot")}
       {drawBox(p, x - 0.03, y - 0.03, 0, 0.06, 0.06, 1.7, "var(--brass)", "brass")}
-      <g transform={`translate(${f(hx)} ${f(hy)})`}>
-        <ellipse cx="0" cy={f(u * 0.1)} rx={f(u * 0.34)} ry={f(u * 0.1)} className="hat" />
+      <g transform={`translate(${formatTenths(hx)} ${formatTenths(hy)})`}>
+        <ellipse
+          cx="0"
+          cy={formatTenths(u * 0.1)}
+          rx={formatTenths(u * 0.34)}
+          ry={formatTenths(u * 0.1)}
+          className="hat"
+        />
         <path
-          d={`M${f(-u * 0.2)} ${f(u * 0.1)}V${f(-u * 0.12)}Q0 ${f(-u * 0.26)} ${f(u * 0.2)} ${f(-u * 0.12)}V${f(u * 0.1)}Z`}
+          d={`M${formatTenths(-u * 0.2)} ${formatTenths(u * 0.1)}V${formatTenths(-u * 0.12)}Q0 ${formatTenths(-u * 0.26)} ${formatTenths(u * 0.2)} ${formatTenths(-u * 0.12)}V${formatTenths(u * 0.1)}Z`}
           className="hat hat--crown"
         />
-        <path d={`M${f(-u * 0.2)} ${f(u * 0.02)}H${f(u * 0.2)}`} className="hat-band" />
+        <path
+          d={`M${formatTenths(-u * 0.2)} ${formatTenths(u * 0.02)}H${formatTenths(u * 0.2)}`}
+          className="hat-band"
+        />
       </g>
     </>
   );

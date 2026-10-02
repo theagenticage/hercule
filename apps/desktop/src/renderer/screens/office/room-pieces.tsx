@@ -60,9 +60,6 @@ const WING = {
   label: [9.9, 7.75],
 } as const;
 
-/** The most desks the wing has room for: two rows of four. */
-const MAX_DESKS = WING.cols.length * WING.rows.length;
-
 /** The seat the first thread takes: the front row's first, nearest to you, where nothing hides it. */
 const FIRST_THREAD_SEAT = 4;
 
@@ -170,7 +167,8 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
   }
 
   if (wing !== null) {
-    const deskCount = Math.min(wing.deskCount, MAX_DESKS);
+    // client-core caps a wing at eight desks, the two rows of four drawn here.
+    const deskCount = wing.deskCount;
     const threadSeat = pickFirstThreadSeat(deskCount);
     const threadTint =
       wing.firstThread === null ? null : pickProjectTint(wing.firstThread.projectId, projects);
