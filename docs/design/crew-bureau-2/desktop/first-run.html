@@ -1377,7 +1377,7 @@
             '<div class="row fine">' + icon("clock", 14) + "<span>Times show in <b style=\"color:var(--muted)\">" + ME.tz + '</b></span><a class="link" data-act="noop">Change</a></div>' +
             "</div>" +
             '<div class="st-actions">' + busyButton("Create account", "Creating your account…", "create-account", st === "submitting") + "</div>" +
-            '<p class="st-note">' + Crew.face("Hercule", { pose: "asleep", size: 18 }) + "<span>This also sets up <b>Hercule, your assistant</b>. Give it a chat channel later in Settings › Assistants.</span></p>"
+            '<p class="st-note">' + Crew.face("Hercule", { pose: "asleep", size: 18 }) + "<span>This also sets up <b>Hercule, your assistant</b>. Give it a chat channel later in the web app’s Settings › Assistants.</span></p>"
           );
         }
 
@@ -1590,26 +1590,27 @@
           var noRepo = S.github !== "connected";
           var rows = [
             [Crew.you(20), "<b>" + ME.user + "</b>", ME.tz],
-            [Crew.brand("claude", 16), noHarness ? "<b>No provider yet</b>" : "<b>Claude Code and Codex</b>", noHarness ? '<em class="later">Log in from Settings</em>' : "logged in"],
-            [Crew.brand("github", 16), noRepo ? "<b>GitHub</b>" : "<b>GitHub</b> as rogier", noRepo ? '<em class="later">Connect from Settings</em>' : "12 repositories"],
+            // A step the user put off links back to it.
+            [Crew.brand("claude", 16), noHarness ? "<b>No provider yet</b>" : "<b>Claude Code and Codex</b>", noHarness ? '<a class="link" data-act="harness-back">Do it now</a>' : "logged in"],
+            [Crew.brand("github", 16), noRepo ? "<b>GitHub</b>" : "<b>GitHub</b> as rogier", noRepo ? '<a class="link" data-act="github-back">Do it now</a>' : "12 repositories"],
             ['<span class="proj proj--webshop"></span>', "<b>webshop</b>", noRepo ? '<em class="later">Add its repository after GitHub</em>' : REPO.slug],
           ];
           return (
             '<div class="newbie"><span class="newbie-face">' + (noHarness ? Crew.logo(30) : Crew.face("New thread in webshop", { pose: "idle", size: 46 })) + "</span>" + '<span><p class="st-kicker" style="margin:0 0 4px">All set</p><h1 class="st-h">Your office is open</h1></span></div>' +
             (noHarness
-              ? '<p class="st-sub">Agents need a provider before they can take a desk. Log in to Claude Code or Codex in Settings › Providers, and your first thread can start.</p>'
+              ? '<p class="st-sub">Agents need a provider before they can take a desk. Log in from your first thread’s draft, and it can start.</p>'
               : noRepo
                 ? '<p class="st-sub">Your first colleague is at its desk. It can research, write and plan for webshop now. For code, connect GitHub, then add webshop’s repository.</p>'
                 : '<p class="st-sub">Your first colleague is at its desk. Tell it what to do in webshop: it works in its own worktree, and raises its hand when it needs you.</p>') +
             '<ul class="recap">' +
             rows
               .map(function (r) {
-                // A row whose note is already marked up keeps its own <em>.
-                return "<li><span>" + r[0] + "</span><span>" + r[1] + "</span>" + (r[2].indexOf("<em") === 0 ? r[2] : "<em>" + r[2] + "</em>") + "</li>";
+                // A row whose note is already marked up keeps its own markup.
+                return "<li><span>" + r[0] + "</span><span>" + r[1] + "</span>" + (r[2].charAt(0) === "<" ? r[2] : "<em>" + r[2] + "</em>") + "</li>";
               })
               .join("") +
             "</ul>" +
-            '<div class="st-actions">' + (noHarness ? '<button class="btn btn--accent btn--lg" data-act="noop">Log in to a provider</button><button class="btn btn--quiet" data-act="first-thread">Open Hercule</button>' : '<button class="btn btn--accent btn--lg" data-act="first-thread">Start your first thread</button>') + "</div>"
+            '<div class="st-actions">' + (noHarness ? '<button class="btn btn--accent btn--lg" data-act="first-thread">Log in to a provider</button><button class="btn btn--quiet" data-act="first-thread">Open Hercule</button>' : '<button class="btn btn--accent btn--lg" data-act="first-thread">Start your first thread</button>') + "</div>"
           );
         }
 
@@ -1799,6 +1800,9 @@
           },
           "github-back": function () {
             go("github", "empty");
+          },
+          "harness-back": function () {
+            go("harness", "idle");
           },
           "github-continue": function () {
             S.github = "connected";
