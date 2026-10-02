@@ -308,7 +308,7 @@ export { buildBranchField, type BranchField } from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { buildThreadWorkspaceLabel } from "./threads/thread-workspace";
 export { describeWorkStretch, summarizeWork } from "./threads/work-summary";
-export { isClonableRemote, parseRepositoryName, REMOTE_REFUSAL } from "./remote";
+export { isClonableRemote, isGitHubRemote, parseRepositoryName, REMOTE_REFUSAL } from "./remote";
 export {
   buildComposerPlaceholder,
   type DraftSubject,

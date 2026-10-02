@@ -54,3 +54,21 @@ export const parseRepositoryName = (remote: string): string | null => {
     .filter((segment) => segment.length > 0);
   return segments.length < 2 ? null : segments.join("/");
 };
+
+/**
+ * Checks whether `remote` is a repository on github.com, so a screen draws
+ * the GitHub mark beside it only when the repository really is on GitHub.
+ * The host is compared without its case, and a user or a port in a URL is
+ * ignored. Returns false for a remote `isClonableRemote` refuses.
+ */
+export const isGitHubRemote = (remote: string): boolean => {
+  if (!isClonableRemote(remote)) return false;
+  const written = remote.trim();
+  // A URL's host sits between its scheme and the first `/`, after any
+  // `user@` and before any `:port`. The scp-like form's host sits between
+  // the `@` and the colon, and its path holds no colon.
+  const host = SCHEME.test(written)
+    ? written.replace(SCHEME, "").replace(/\/.*$/, "").replace(/^.*@/, "").replace(/:\d*$/, "")
+    : written.slice(written.indexOf("@") + 1, written.lastIndexOf(":"));
+  return host.toLowerCase() === "github.com";
+};

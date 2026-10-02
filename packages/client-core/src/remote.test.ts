@@ -1,5 +1,5 @@
 import { assert, describe, it } from "vitest";
-import { isClonableRemote, parseRepositoryName } from "./remote";
+import { isClonableRemote, isGitHubRemote, parseRepositoryName } from "./remote";
 
 describe("isClonableRemote", () => {
   it("accepts an https URL and git's scp-like form", () => {
@@ -23,6 +23,23 @@ describe("isClonableRemote", () => {
     assert.isFalse(isClonableRemote("-https://github.com/acme/webshop"));
     assert.isFalse(isClonableRemote(""));
     assert.isFalse(isClonableRemote("   "));
+  });
+});
+
+describe("isGitHubRemote", () => {
+  it("accepts a github.com remote in both forms, whatever the host's case", () => {
+    assert.isTrue(isGitHubRemote("git@github.com:rogier/webshop.git"));
+    assert.isTrue(isGitHubRemote("https://github.com/rogier/webshop"));
+    assert.isTrue(isGitHubRemote(" https://GitHub.com/rogier/webshop "));
+    assert.isTrue(isGitHubRemote("https://token@github.com:443/rogier/webshop"));
+  });
+
+  it("rejects another host, a host that only starts like GitHub's, and a remote it would not clone", () => {
+    assert.isFalse(isGitHubRemote("git@gitlab.com:acme/webshop.git"));
+    assert.isFalse(isGitHubRemote("https://github.com.example.net/acme/webshop"));
+    assert.isFalse(isGitHubRemote("https://git.example.com/github.com/webshop"));
+    assert.isFalse(isGitHubRemote("http://github.com/acme/webshop"));
+    assert.isFalse(isGitHubRemote(""));
   });
 });
 
