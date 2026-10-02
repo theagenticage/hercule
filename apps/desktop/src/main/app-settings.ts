@@ -24,7 +24,7 @@ import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { FirstRunProgress } from "../ipc/contract";
-import { isHttpUrl } from "./http-url";
+import { isHttpUrl } from "../ipc/http-url";
 
 /** The URL of the controller the app connects to. */
 const ControllerUrl = Schema.String.check(

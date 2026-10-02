@@ -6,7 +6,7 @@
  */
 import { shell, type Session, type WebContents } from "electron";
 import * as Effect from "effect/Effect";
-import { isHttpUrl } from "./http-url";
+import { isHttpUrl } from "../ipc/http-url";
 
 /**
  * Opens an `http:` or `https:` URL in the default browser, and ignores any

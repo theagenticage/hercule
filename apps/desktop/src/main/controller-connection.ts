@@ -14,9 +14,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { ControllerUrlSaveOutcome } from "../ipc/contract";
+import { isHttpUrl } from "../ipc/http-url";
 import { AppSettings } from "./app-settings";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
-import { isHttpUrl } from "./http-url";
 import { MainWindow } from "./main-window";
 import { StoredToken } from "./stored-token";
 

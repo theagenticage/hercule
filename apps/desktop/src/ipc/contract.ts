@@ -30,7 +30,7 @@
 import { Schema } from "effect";
 import type * as ClientCore from "@hercule/client-core";
 import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/contract";
-import { isHttpUrl } from "../main/http-url";
+import { isHttpUrl } from "./http-url";
 
 /**
  * An IPC channel the renderer calls and main answers: the renderer sends one
