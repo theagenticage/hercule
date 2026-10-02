@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { readErrorMessage, resolveBrowserTimezone } from "@hercule/client-core";
+import { completeSetup, readErrorMessage, resolveBrowserTimezone } from "@hercule/client-core";
 import { SetupForm } from "@hercule/contract";
 import { Button, Field, Input } from "@hercule/ui";
 import { validate, type FieldErrors } from "../app/form";
@@ -50,15 +50,9 @@ function Setup(): JSX.Element {
     if (checked.errors !== undefined) return;
 
     setSubmitting(true);
-    // Send the setup token as the client's bearer token, like any other
-    // credential, but never store it: the call uses it up, and a tab closed
-    // during the call must leave no credential behind. A successful call
-    // replaces it with the login token.
-    client.presentToken(token);
     try {
-      await client.setup.complete({ payload: checked.value });
+      await completeSetup(client, token, checked.value);
     } catch (error) {
-      client.presentToken(null);
       setFailure(readErrorMessage(error));
       setSubmitting(false);
       return;

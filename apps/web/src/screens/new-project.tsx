@@ -2,20 +2,19 @@ import { useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createProjectWithRepositories,
   filterGitHubConnections,
-  isClonableRemote,
+  isNewProjectCreated,
   queryKeys,
-  REMOTE_REFUSAL,
   type HerculeClient,
-  readErrorMessage,
+  type NewProjectDraft,
 } from "@hercule/client-core";
-import type { ResourceCreateInput } from "@hercule/contract";
 import { connectionsQuery } from "../app/queries";
 import { NewProjectDialog, type SourceDraft } from "./new-project-dialog";
 
 /**
- * Creates a project and its sources. It creates the project first, then one
- * resource per source, and then opens a draft thread in the project.
+ * Creates a project and its sources with `createProjectWithRepositories`, and
+ * then opens a draft thread in the project.
  *
  * A write that succeeded is not undone when a later one fails. Instead, what
  * was already created is remembered and skipped on the next submission, so
@@ -44,13 +43,21 @@ export function NewProject({
   const [failure, setFailure] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
 
-  const createProject = useMutation({
-    mutationFn: (value: string) => client.project.create({ payload: { name: value } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
-  });
-  const createResource = useMutation({
-    mutationFn: (payload: ResourceCreateInput) => client.resource.create({ payload }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.resources() }),
+  const create = useMutation({
+    mutationFn: (draft: NewProjectDraft<SourceDraft>) =>
+      createProjectWithRepositories(client, draft),
+    // Only what this submission created is read again.
+    onSuccess: async (next, draft) => {
+      const created = next.repositories.some(
+        (source, index) => source.createdId !== draft.repositories[index]?.createdId,
+      );
+      await Promise.all([
+        next.projectId === draft.projectId
+          ? undefined
+          : queryClient.invalidateQueries({ queryKey: queryKeys.projects() }),
+        created ? queryClient.invalidateQueries({ queryKey: queryKeys.resources() }) : undefined,
+      ]);
+    },
   });
 
   const patchSource = (key: string, next: Partial<SourceDraft>): void => {
@@ -59,7 +66,7 @@ export function NewProject({
     );
   };
 
-  const pending = createProject.isPending || createResource.isPending;
+  const pending = create.isPending;
 
   /**
    * Closes the dialog. If the project was already created, it opens a draft
@@ -73,54 +80,16 @@ export function NewProject({
   };
 
   const submit = async (): Promise<void> => {
-    if (name.trim() === "") {
-      setFailure("Name the project");
-      return;
+    const next = await create.mutateAsync({ name, projectId, failure, repositories: sources });
+    setFailure(next.failure);
+    setProjectId(next.projectId);
+    for (const source of next.repositories) {
+      patchSource(source.key, { createdId: source.createdId, message: source.message });
     }
-    // Check the remotes before sending anything: a remote that git cannot
-    // clone is a typo the user can fix without a round trip to the server.
-    const written = sources.map((source) => ({
-      ...source,
-      message: source.createdId !== null || isClonableRemote(source.remote) ? null : REMOTE_REFUSAL,
-    }));
-    setSources(written);
-    if (written.some((source) => source.message !== null)) return;
-
-    setFailure(null);
-    let id = projectId;
-    if (id === null) {
-      try {
-        id = (await createProject.mutateAsync(name.trim())).id;
-        setProjectId(id);
-      } catch (error) {
-        setFailure(readErrorMessage(error));
-        return;
-      }
-    }
-
-    let refused = false;
-    for (const source of written) {
-      if (source.createdId !== null) continue;
-      try {
-        const resource = await createResource.mutateAsync({
-          kind: "repo",
-          remote: source.remote.trim(),
-          ...(source.connectionId === "" ? {} : { connectionId: source.connectionId }),
-          ...(source.setupCommand.trim() === ""
-            ? {}
-            : { setupCommand: source.setupCommand.trim() }),
-          projectIds: [id],
-        });
-        patchSource(source.key, { createdId: resource.id, message: null });
-      } catch (error) {
-        refused = true;
-        patchSource(source.key, { message: readErrorMessage(error) });
-      }
-    }
-    if (refused) return;
+    if (!isNewProjectCreated(next)) return;
 
     onClose();
-    await navigate({ to: "/threads/new", search: { project: id } });
+    await navigate({ to: "/threads/new", search: { project: next.projectId } });
   };
 
   return (
@@ -137,7 +106,7 @@ export function NewProject({
           {
             key: `source-${String(current.length + 1)}-${String(Date.now())}`,
             remote: "",
-            connectionId: "",
+            connectionId: null,
             setupCommand: "",
             message: null,
             createdId: null,

@@ -1,23 +1,19 @@
 import type { JSX } from "react";
+import type { RepositoryDraft } from "@hercule/client-core";
 import { Field, Input, Select } from "@hercule/ui";
 
 /**
  * One source in the New project form. For now the only kind of source is a
- * git repository, so this type holds a repository's fields directly rather
- * than a kind plus kind-specific fields.
+ * git repository, so this type is a repository's draft plus `key`, which
+ * tells React the rows apart.
  *
  * - `message` is the error for this source: from the server, or from the form's
  *   own check before sending.
  * - `createdId` is set once the source is created, so resubmitting after an
  *   error does not create it twice.
  */
-export interface SourceDraft {
+export interface SourceDraft extends RepositoryDraft {
   readonly key: string;
-  readonly remote: string;
-  readonly connectionId: string;
-  readonly setupCommand: string;
-  readonly message: string | null;
-  readonly createdId: string | null;
 }
 
 /** A GitHub account a source can be cloned and pushed with. */
@@ -208,9 +204,9 @@ function SourceRow({
       <Field id={accountId} label="GitHub account">
         <Select
           id={accountId}
-          value={source.connectionId}
+          value={source.connectionId ?? ""}
           onChange={(event) => {
-            onChange({ connectionId: event.target.value });
+            onChange({ connectionId: event.target.value === "" ? null : event.target.value });
           }}
         >
           <option value="">No account</option>

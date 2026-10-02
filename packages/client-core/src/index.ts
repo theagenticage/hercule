@@ -140,6 +140,14 @@ export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
+export {
+  createProjectWithRepositories,
+  isNewProjectCreated,
+  PROJECT_NAME_REFUSAL,
+  type NewProjectDraft,
+  type RepositoryDraft,
+} from "./new-project";
+export { completeSetup } from "./setup";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export {
