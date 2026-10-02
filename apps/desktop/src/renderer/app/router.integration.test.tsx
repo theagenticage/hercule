@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
+import firstRunCss from "../screens/first-run/first-run.css?raw";
 import shellCss from "../shell/shell.css?raw";
 import { readLastThread, rememberLastThread } from "./last-thread";
 import {
@@ -248,5 +249,15 @@ describe("the drag regions", () => {
     expect(document.querySelector(".centered-screen > .centered-column")).not.toBeNull();
     expectDeclaration(centeredScreenCss, "centered-screen", "-webkit-app-region", "drag");
     expectDeclaration(centeredScreenCss, "centered-column", "-webkit-app-region", "no-drag");
+  });
+
+  it("lets the room drag on the first run, but not the card or the ladder", async () => {
+    await renderApp(createFakeBridge());
+    expect(document.querySelector(".fr > .fr-panel")).not.toBeNull();
+    expectDeclaration(firstRunCss, "fr", "-webkit-app-region", "drag");
+    // The card and the ladder share one rule, which `expectDeclaration` cannot read.
+    expect(firstRunCss).toMatch(
+      /\.fr-panel,\s*\.fr-ladder\s*\{[^}]*-webkit-app-region:\s*no-drag;/,
+    );
   });
 });

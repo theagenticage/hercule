@@ -64,6 +64,24 @@ window.ResizeObserver = class {
 };
 
 /**
+ * jsdom has no `window.matchMedia`. The Office room asks it whether the user
+ * reduced motion each time its shot or its contents change, so each test that
+ * moves the first run from one step to the next would fail without it. The
+ * stub matches no query. A test that needs a match replaces it.
+ */
+window.matchMedia = (query: string) =>
+  ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }) satisfies MediaQueryList;
+
+/**
  * jsdom has a `<dialog>` element with an `open` attribute, but no
  * `showModal` or `close`. The project picker opens with `showModal`, and
  * closes with `close`, which fires `close` on the dialog as a browser does,
