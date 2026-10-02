@@ -18,7 +18,9 @@
  * line each, in the order its schema declares them. Never in the order the
  * markers were written, or the two passwords could silently swap.
  */
-import type { SortKey } from "@hercule/contract";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import { listDecodeIssues, type SortKey } from "@hercule/contract";
 import { UsageError } from "../exit";
 import type { Command, Field } from "./tree";
 
@@ -130,9 +132,8 @@ const assignFieldValue = (into: Record<string, unknown>, field: Field, value: un
  * direction.
  *
  * A field with no direction leaves the direction unset, and the API reads a
- * key with no direction as `asc`. A field named twice is not refused here:
- * the client encodes the query with the contract's schema, which refuses it
- * with a message naming the field before anything is sent.
+ * key with no direction as `asc`. A field named twice is not refused here but
+ * by `checkPaging`, with the contract's own message.
  */
 const parseSort = (text: string, command: Command, help: string): SortKey => {
   const colon = text.indexOf(":");
@@ -149,6 +150,39 @@ const parseSort = (text: string, command: Command, help: string): SortKey => {
     throw new UsageError(`--sort: ${direction} is not asc or desc`, help);
   }
   return { field, direction };
+};
+
+/**
+ * Checks the paging flags against the contract's schema for them. Throws a
+ * `UsageError` naming each flag the schema refuses, such as a `--sort` that
+ * names a field twice or a `--limit` out of range.
+ *
+ * The client would refuse the same values when it encodes the request, but
+ * only after `execute` has looked up every id tail. A lookup is a call to the
+ * API, and one that finds nothing fails first, with its own error and exit
+ * code. Checking here means a wrong command line always exits 2 and sends
+ * nothing.
+ */
+const checkPaging = (
+  command: Command,
+  paging: {
+    readonly limit: number | undefined;
+    readonly cursor: string | undefined;
+    readonly sort: ReadonlyArray<SortKey> | undefined;
+  },
+  help: string,
+): void => {
+  if (command.pageQuery === undefined) return;
+  const given = Object.fromEntries(
+    Object.entries(paging).filter(([, value]) => value !== undefined),
+  );
+  const encoded = Schema.encodeUnknownResult(command.pageQuery)(given);
+  if (Result.isFailure(encoded)) {
+    const refused = listDecodeIssues(encoded.failure).map((issue) =>
+      issue.path[0] === undefined ? issue.message : `--${String(issue.path[0])}: ${issue.message}`,
+    );
+    throw new UsageError(refused.join("; "), help);
+  }
 };
 
 /**
@@ -315,6 +349,8 @@ export const parseArguments = async (
       help,
     );
   }
+
+  checkPaging(command, { limit, cursor, sort }, help);
 
   const missing = command.payload
     .filter((field) => !field.optional && !(field.name in payload) && !reading.includes(field))

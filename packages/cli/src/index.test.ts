@@ -671,8 +671,6 @@ describe("paging", () => {
   });
 
   it("exits 2 naming the field when --sort repeats one, and sends nothing", async () => {
-    // The CLI does not check for a repeated field itself: the client encodes
-    // the query with the contract's schema, which refuses it before sending.
     const { fetch, io, run } = createStubCli(() => ({ items: [] }));
     expect(await run("task", "list", "--sort", "priority", "--sort", "priority:desc")).toBe(2);
     expect(io.stderr.join("\n")).toContain("--sort: priority appears more than once");
@@ -683,6 +681,22 @@ describe("paging", () => {
     const { fetch, io, run } = createStubCli(() => ({ items: [] }));
     expect(await run("task", "list", "--limit", "0")).toBe(2);
     expect(io.stderr.join("\n")).toContain("--limit: ");
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it.each([
+    [
+      ["--sort", "createdAt", "--sort", "createdAt:desc"],
+      "--sort: createdAt appears more than once",
+    ],
+    [["--limit", "0"], "--limit: "],
+  ])("refuses %j before looking up an id tail, so nothing is sent", async (paging, refusal) => {
+    // An id tail is looked up through the API before the request is made, so
+    // the paging flags are checked first. Otherwise a tail that matches no
+    // runner would fail with "no runner" and exit 1, not 2.
+    const { fetch, io, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("session", "list", "--runner", "deadbeef", ...paging)).toBe(2);
+    expect(io.stderr.join("\n")).toContain(refusal);
     expect(fetch.calls).toEqual([]);
   });
 

@@ -61,25 +61,16 @@ const wantsHelp = (tokens: ReadonlyArray<string>): boolean =>
  * document piped in) does not match the field it was given for.
  *
  * Each issue's path is the field's path inside the request, so its first
- * segment is a field of this command or one of the paging parameters. The
- * message names that field or parameter the way the caller wrote it.
+ * segment is a field of this command. The message names that field the way
+ * the caller wrote it.
  */
 const toUsageError = (error: RequestError, command: Command): UsageError => {
-  const named = new Map([
-    ...[...command.positionals, ...command.payload, ...command.query].map(
-      (field) => [field.name, formatFieldName(field)] as const,
-    ),
-    // The paging flags are not fields of the command, so the list above does
-    // not name them. A repeated --sort field, or a --limit out of range, is
-    // refused only when the client encodes the query.
-    ...(command.paged
-      ? ([
-          ["limit", "--limit"],
-          ["cursor", "--cursor"],
-          ["sort", "--sort"],
-        ] as const)
-      : []),
-  ]);
+  const named = new Map(
+    [...command.positionals, ...command.payload, ...command.query].map((field) => [
+      field.name,
+      formatFieldName(field),
+    ]),
+  );
   const refused = error.issues.map((issue) => {
     const label = issue.path[0] === undefined ? undefined : named.get(issue.path[0]);
     return label === undefined ? issue.message : `${label}: ${issue.message}`;
