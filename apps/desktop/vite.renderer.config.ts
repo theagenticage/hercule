@@ -55,10 +55,13 @@ export default defineConfig(({ command }) => {
           //
           // Without this group, the bundler gives each set of modules that
           // the entry and the lazy chunks share a chunk of its own. The first
-          // screen then loads many small files, and each file costs gzip
-          // bytes of its own: compressed apart, they are about 1 kB bigger
-          // than compressed together. The app is read from the local disk,
-          // so splitting buys no caching in return.
+          // screen then loads many files, and that costs bytes twice: each
+          // file is compressed apart, and the files import and export names
+          // from each other, which the minifier cannot shorten across a file
+          // boundary. Measured on the first screen as it stood before this
+          // group, one chunk was 7.4 kB smaller gzipped (spec 17,
+          // §Measured). The app is read from the local disk, so splitting
+          // buys no caching in return.
           codeSplitting: { groups: [{ name: "first-screen", tags: ["$initial"] }] },
         },
       },
