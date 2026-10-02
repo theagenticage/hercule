@@ -42,7 +42,12 @@ import type {
   ControllerUrlSaveOutcome,
   EncodedIpcPayload,
   EncodedIpcRequest,
+  FirstRunProgress,
+  FolderPickOutcome,
+  LocalControllerFindOutcome,
+  LocalControllerStartOutcome,
   MenuCommand,
+  SetupTokenReadOutcome,
 } from "../../ipc/contract";
 import { buildRouterContext, type RouterContext } from "./context";
 import { createAppRouter } from "./router";
@@ -65,6 +70,14 @@ export interface FakeBridge {
   readonly waitingThreadLists: readonly EncodedIpcRequest<"waitingThreads.set">[];
   /** Asks the app to open a thread, as main does for Go and a notification's click. */
   readonly openThread: (sessionId: string) => void;
+  /** What the app asked main to keep of the first run, oldest first. `null` forgets it. */
+  readonly firstRunWrites: readonly (FirstRunProgress | null)[];
+  /** The URLs the app asked main to open in the browser, oldest first. */
+  readonly openedLinks: readonly string[];
+  /** How many times the app asked main to start Hercule on this Mac. */
+  readonly startCount: () => number;
+  /** How many times the app asked main to show the logs folder. */
+  readonly logsFolderShowCount: () => number;
 }
 
 /**
@@ -73,20 +86,42 @@ export interface FakeBridge {
  * Connect; by default the controller checks out and the URL is saved.
  * `runnerIdentities` maps a loopback port to the runner id that answers
  * there; any other port answers nothing, as a Mac with no runner does.
+ *
+ * The first run's channels answer as on a Mac with no Hercule on it, no
+ * setup token and no first run kept, unless a test passes its own: `find`
+ * and `start` answer the look for and the start of Hercule on this Mac,
+ * `setupToken` the setup token read, `pickFolder` the folder dialog, and
+ * `firstRun` is what main keeps of the first run at launch. A write of the
+ * first run replaces what a later read returns.
  */
 export const createFakeBridge = ({
   controllerUrl = null,
   token = null,
   save = (url) => Promise.resolve({ _tag: "Saved", origin: url }),
   runnerIdentities = {},
+  find = () => Promise.resolve({ _tag: "Fresh", problem: null }),
+  start = () => Promise.resolve({ _tag: "NotInstalled" }),
+  setupToken = { _tag: "PasteNeeded" },
+  pickFolder = () => Promise.resolve({ _tag: "Cancelled" }),
+  firstRun = null,
 }: {
   readonly controllerUrl?: string | null;
   readonly token?: string | null;
   readonly save?: (url: string) => Promise<ControllerUrlSaveOutcome>;
   readonly runnerIdentities?: Readonly<Record<number, string>>;
+  readonly find?: () => Promise<LocalControllerFindOutcome>;
+  readonly start?: () => Promise<LocalControllerStartOutcome>;
+  readonly setupToken?: SetupTokenReadOutcome;
+  readonly pickFolder?: () => Promise<FolderPickOutcome>;
+  readonly firstRun?: FirstRunProgress | null;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
   const savedUrls: string[] = [];
+  const firstRunWrites: (FirstRunProgress | null)[] = [];
+  const openedLinks: string[] = [];
+  let keptFirstRun = firstRun;
+  let starts = 0;
+  let logsFolderShows = 0;
   const menuListeners = new Set<(command: MenuCommand) => void>();
   const threadListeners = new Set<(payload: EncodedIpcPayload<"thread.open">) => void>();
   const goMenus: EncodedIpcRequest<"goMenu.set">[] = [];
@@ -125,29 +160,41 @@ export const createFakeBridge = ({
           return Promise.resolve(undefined);
         },
       },
-      // A Mac with no Hercule on it, no setup token, and no first run kept.
       localController: {
-        find: () => Promise.resolve({ _tag: "Fresh", problem: null }),
-        start: () => Promise.resolve({ _tag: "NotInstalled" }),
+        find,
+        start: () => {
+          starts += 1;
+          return start();
+        },
       },
       logsFolder: {
-        show: () => Promise.resolve(undefined),
+        show: () => {
+          logsFolderShows += 1;
+          return Promise.resolve(undefined);
+        },
       },
       setupToken: {
-        read: () => Promise.resolve({ _tag: "PasteNeeded" }),
+        read: () => Promise.resolve(setupToken),
       },
       macUser: {
         read: () => Promise.resolve({ username: "ada" }),
       },
       folder: {
-        pick: () => Promise.resolve({ _tag: "Cancelled" }),
+        pick: pickFolder,
       },
       firstRun: {
-        read: () => Promise.resolve(null),
-        write: () => Promise.resolve(undefined),
+        read: () => Promise.resolve(keptFirstRun),
+        write: (next) => {
+          firstRunWrites.push(next);
+          keptFirstRun = next;
+          return Promise.resolve(undefined);
+        },
       },
       link: {
-        open: () => Promise.resolve(undefined),
+        open: ({ url }) => {
+          openedLinks.push(url);
+          return Promise.resolve(undefined);
+        },
       },
       menu: {
         onCommand: (listener) => {
@@ -166,6 +213,10 @@ export const createFakeBridge = ({
     savedUrls,
     goMenus,
     waitingThreadLists,
+    firstRunWrites,
+    openedLinks,
+    startCount: () => starts,
+    logsFolderShowCount: () => logsFolderShows,
     // Main sends these from outside React, so the updates they cause are
     // wrapped in `act`, which applies them before the test goes on.
     sendMenuCommand: (command) => {

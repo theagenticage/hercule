@@ -15,7 +15,7 @@ const connectWith = async (
 ): Promise<ReturnType<typeof createFakeBridge>> => {
   const user = userEvent.setup();
   const fake = createFakeBridge({ save });
-  await renderApp(fake);
+  await renderApp(fake, { path: "/connect" });
   const field = screen.getByRole("textbox", { name: "Controller address" });
   await user.clear(field);
   await user.type(field, TYPED_URL);
@@ -25,7 +25,7 @@ const connectWith = async (
 
 describe("the connect screen", () => {
   it("offers a controller on this Mac when none is saved", async () => {
-    await renderApp(createFakeBridge());
+    await renderApp(createFakeBridge(), { path: "/connect" });
     expect(
       screen.getByRole<HTMLInputElement>("textbox", { name: "Controller address" }).value,
     ).toBe("http://127.0.0.1:4937");
@@ -98,7 +98,7 @@ describe("the connect screen", () => {
     // No delay between the presses, so the second arrives before React renders again.
     const user = userEvent.setup({ delay: null });
     const fake = createFakeBridge({ save: () => new Promise(() => {}) });
-    await renderApp(fake);
+    await renderApp(fake, { path: "/connect" });
     await user.keyboard("{Enter}{Enter}");
     expect(fake.savedUrls).toEqual(["http://127.0.0.1:4937"]);
     expect(document.activeElement).toBe(

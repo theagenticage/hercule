@@ -31,6 +31,65 @@ export const setupQuery = (client: HerculeClient) =>
   });
 
 /**
+ * The options of a read from main that the page reads once and then keeps:
+ * main's answer changes only through this page's own writes, or after a
+ * reload, which starts a new cache. It never retries, because main does not
+ * fail on its own.
+ */
+const KEPT_BRIDGE_READ_OPTIONS = {
+  staleTime: Infinity,
+  gcTime: Infinity,
+  retry: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
+/**
+ * Reads what main keeps of the first run for the saved controller: the steps
+ * the user put off, or null when no first run is in progress. The first run
+ * writes the cached value each time it writes main's, so the entry guard
+ * reads it from the cache.
+ */
+export const firstRunQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["first-run"],
+    queryFn: () => bridge.firstRun.read(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/**
+ * Looks for Hercule on this Mac, once per launch with no saved controller.
+ * When Hercule answers, main saves its URL and reloads the window, so the
+ * page never reads that answer.
+ */
+export const localControllerQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["local-controller"],
+    queryFn: () => bridge.localController.find(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/**
+ * Reads the saved controller's setup token from main. Main hands out a pasted
+ * token only once, so the answer is kept until the first run invalidates it,
+ * after the controller refuses the token.
+ */
+export const setupTokenQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["setup-token"],
+    queryFn: () => bridge.setupToken.read(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/** Reads the name of the user's account on this Mac, which the first run offers as the username. */
+export const macUserQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["mac-user"],
+    queryFn: () => bridge.macUser.read(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/**
  * The options of every read the live connection keeps current: the sidebar's
  * and the open thread's. Such a read is never fetched again because time
  * passed, the window got focus or the network came back. It is fetched again
@@ -191,6 +250,30 @@ export const startTasksQuery = (client: HerculeClient, projectId: string) =>
       });
       return page.items;
     },
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads the controller's own record, whose `localRunnerId` names the runner beside it. */
+export const controllerQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.controller(),
+    queryFn: () => client.controller.read(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every Connection, for the first run's GitHub step. */
+export const connectionsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.connections(),
+    queryFn: () => readEveryPage((page) => client.connection.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every assistant, for the one the first run's room seats in the lobby. */
+export const assistantsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.assistants(),
+    queryFn: () => readEveryPage((page) => client.assistant.query({ query: page })),
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
