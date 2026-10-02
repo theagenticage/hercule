@@ -1539,7 +1539,9 @@
             return (
               head +
               '<button class="pick-folder" data-act="pick"><span class="ico">' + icon("worktree", 20) + "</span><b>Choose a folder…</b><span>or drop one here</span></button>" +
-              '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own worktrees, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>"
+              (noRepo
+                ? '<p class="st-note">' + icon("worktree", 14) + "<span>Until the repository joins, threads work without a checkout. <b>The folder you pick stays as it is.</b></span></p>"
+                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own worktrees, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>")
             );
           }
           var card = function (sub, badge) {
