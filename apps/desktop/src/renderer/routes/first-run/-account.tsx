@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from "react";
+import { useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -35,14 +35,21 @@ const TOKEN_REFUSED =
  *
  * 1. `setup.complete`, with the setup token main hands over. The client
  *    keeps the login token from the reply, so the user is signed in.
- * 2. `settings.update`, which marks the web app's onboarding steps done, so
+ * 2. `firstRunProgress.save`, which tells main a first run is in progress, so a
+ *    relaunch resumes it. It comes straight after setup: a set-up controller
+ *    with no first-run record sends a relaunch home, past every later step.
+ * 3. `settings.update`, which marks the web app's onboarding steps done, so
  *    the web app never asks for them again.
- * 3. `firstRunProgress.save`, which tells main a first run is in progress, so a
- *    relaunch resumes it.
  *
  * Then it reads everything the next steps show, and only then marks setup
  * complete in the cache, which moves the first run on to the next step with
  * nothing left to wait for.
+ *
+ * When a write after `setup.complete` fails, the error shows and Create
+ * account tries again. The controller refuses a second `setup.complete`, so
+ * each try first asks the controller whether setup already went through.
+ * It asks the controller rather than the cache: the cache says setup is
+ * complete only once every read is done, because that moves the first run on.
  */
 export function AccountCard({ client }: { readonly client: HerculeClient }): JSX.Element {
   const { bridge } = useRouteContext({ from: "__root__" });
@@ -54,27 +61,21 @@ export function AccountCard({ client }: { readonly client: HerculeClient }): JSX
     timezone: resolveBrowserTimezone(),
   }));
   const [tooShort, setTooShort] = useState(false);
-  // Whether `setup.complete` went through. A later write can still fail, and
-  // its retry must not run setup again: the controller refuses that, because
-  // it is set up.
-  const setUp = useRef(false);
-
-  const create = useMutation({
+  const createAccount = useMutation({
     mutationFn: async (values: AccountForm) => {
-      if (!setUp.current) {
+      if (!(await client.setup.read()).complete) {
         const setupToken = await queryClient.fetchQuery(setupTokenQuery(bridge));
         // Main has no token: the first run shows the remote screen, which
         // asks for the setup address, as soon as the cache holds this answer.
         if (setupToken._tag === "PasteNeeded") throw new Error("Paste the setup address.");
         await completeSetup(client, setupToken.token, values);
-        setUp.current = true;
       }
-      await client.settings.update({
-        payload: { user: { "onboarding.completedSteps": [...ONBOARDING_STEPS] } },
-      });
       const progress: FirstRunProgress = { putOff: [] };
       await bridge.firstRunProgress.save(progress);
       queryClient.setQueryData(firstRunQuery(bridge).queryKey, progress);
+      await client.settings.update({
+        payload: { user: { "onboarding.completedSteps": [...ONBOARDING_STEPS] } },
+      });
       await ensureFirstRunData(queryClient, client, bridge);
     },
     onSuccess: () => {
@@ -91,10 +92,12 @@ export function AccountCard({ client }: { readonly client: HerculeClient }): JSX
 
   let error: AccountError | null = null;
   if (tooShort) error = { field: "password", message: TOO_SHORT };
-  else if (create.isError) {
+  else if (createAccount.isError) {
     error = {
       field: null,
-      message: isTokenRefusal(create.error) ? TOKEN_REFUSED : readErrorMessage(create.error),
+      message: isTokenRefusal(createAccount.error)
+        ? TOKEN_REFUSED
+        : readErrorMessage(createAccount.error),
     };
   }
 
@@ -103,7 +106,7 @@ export function AccountCard({ client }: { readonly client: HerculeClient }): JSX
       form={form}
       timezones={listSupportedTimezones()}
       error={error}
-      submitting={create.isPending}
+      submitting={createAccount.isPending}
       onChange={(next) => {
         setForm(next);
         if (next.password !== form.password) setTooShort(false);
@@ -111,7 +114,7 @@ export function AccountCard({ client }: { readonly client: HerculeClient }): JSX
       onSubmit={() => {
         const short = form.password.length < MIN_PASSWORD_LENGTH;
         setTooShort(short);
-        if (!short) create.mutate({ ...form, username: form.username.trim() });
+        if (!short) createAccount.mutate({ ...form, username: form.username.trim() });
       }}
     />
   );

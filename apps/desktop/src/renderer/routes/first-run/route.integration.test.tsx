@@ -321,12 +321,33 @@ describe("the first run on a controller that is not set up", () => {
     expect(readCalls(calls, "PATCH", "/api/v1/settings").map((call) => call.body)).toEqual([
       { user: { "onboarding.completedSteps": [...ONBOARDING_STEPS] } },
     ]);
-    // The settings are written before the first run is kept.
-    expect(firstRunWritesAtSettings).toBe(0);
+    // The first run is kept before the settings are written, so a quit
+    // between the two still resumes it.
+    expect(firstRunWritesAtSettings).toBe(1);
     expect(fake.firstRunWrites).toEqual([{ putOff: [] }]);
     // Nothing remounted: no fallback replaced the frame, and the room only moved its camera.
     expect(document.querySelector(".fr")).toBe(frame);
     expect(readRoom()).toBe(room);
+  });
+
+  it("tries a failed write after setup again without sending setup a second time", async () => {
+    const user = userEvent.setup();
+    let failSettings = true;
+    const { calls } = await openNotSetUp({
+      handlers: {
+        "PATCH /api/v1/settings": () =>
+          failSettings
+            ? { status: 500, body: buildErrorBody("internal", "settings are down") }
+            : { body: { controller: {}, user: {} } },
+      },
+    });
+    await user.type(screen.getByLabelText("Password"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByText("settings are down")).toBeTruthy();
+    failSettings = false;
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByRole("heading", { name: "Waiting for the runner" })).toBeTruthy();
+    expect(readCalls(calls, "POST", "/api/v1/setup/complete")).toHaveLength(1);
   });
 
   it("explains a refused setup token, and reads a new one for the next try", async () => {
