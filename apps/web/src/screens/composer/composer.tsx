@@ -51,7 +51,7 @@ export function Composer({
   /** Called after a message is sent; an active thread uses it to scroll back to the bottom. */
   readonly onSend?: () => void;
 }): JSX.Element {
-  const { client, detectLocalRunner } = useRouteContext({ from: "/_shell" });
+  const { client, live, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
@@ -78,7 +78,7 @@ export function Composer({
   const model = useComposerModel(thread, catalogs, client, onSend);
   const fields = model.fields;
   const pending = buildPendingModelNote(model.kind, model.picks);
-  const login = buildLoginSlot(client, () => {
+  const login = buildLoginSlot(client, live, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   });
   // A click that opens selector B is also a click outside selector A. So a

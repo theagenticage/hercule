@@ -95,7 +95,7 @@ function RunnerPage(): JSX.Element {
         )}
       </FormCard>
 
-      <Providers client={client} runner={runner} />
+      <Providers client={client} live={live} runner={runner} />
     </div>
   );
 }

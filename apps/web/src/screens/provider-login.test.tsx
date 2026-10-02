@@ -5,16 +5,17 @@
  * - the vendor gives the user a code in the browser, which the user pastes
  *   back here;
  * - the vendor printed a one-time code, and the browser completes the login
- *   on its own. The drawer only shows the code and sends nothing.
+ *   on its own. The drawer shows the code, sends nothing, and closes once a
+ *   snapshot taken after the login started says the harness is logged in.
  *
  * It also checks that the login address is a link only when it is a web
  * address.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createClient } from "@hercule/client-core";
+import { createClient, queryKeys, type Live, type LiveQueryKey } from "@hercule/client-core";
 import { ProviderLogin } from "./provider-login";
 import { expectInDocumentOrder, readPageText, stubApi, type Handler } from "../app/testing";
 
@@ -29,6 +30,7 @@ const USER_CODE = "CH61-0FI2N";
 
 const LOGIN = `POST /api/v1/providers/${INSTANCE}/login`;
 const LOGIN_CODE = `POST /api/v1/providers/${INSTANCE}/login-code`;
+const PROVIDERS = "GET /api/v1/providers";
 
 /** The probe result the login code endpoint returns; the drawer only needs it to be valid. */
 const SNAPSHOT = {
@@ -43,9 +45,71 @@ const SNAPSHOT = {
 const listSentCodes = (api: ReturnType<typeof stubApi>) =>
   api.calls.filter((call) => call.path.endsWith("/login-code"));
 
+/** Returns the Codex instance as the controller lists it, with `snapshot` as its only snapshot. */
+const buildCodex = (snapshot: object) => ({
+  id: INSTANCE,
+  providerId: "codex",
+  name: "Codex",
+  config: {},
+  displayName: "Codex",
+  binaryName: "codex",
+  declared: {
+    steering: "native",
+    fork: "native",
+    modelSwitch: "in-session",
+    accessModes: {
+      "approval-required": "native",
+      "auto-accept-edits": "native",
+      auto: "native",
+      "full-access": "native",
+    },
+    mcpPassthrough: "native",
+    disallowedTools: "native",
+    structuredOutput: "supported",
+  },
+  secretFields: [],
+  snapshots: [snapshot],
+  createdAt: "2026-09-14T09:00:00.000Z",
+  updatedAt: "2026-09-14T09:00:00.000Z",
+});
+
+/** The snapshot from before the login started: the harness is logged out. */
+const LOGGED_OUT = { ...SNAPSHOT, auth: { status: "unauthenticated" } };
+/** The snapshot the probe takes after the vendor's login ended. */
+const LOGGED_IN = { ...SNAPSHOT, probedAt: "2026-09-14T09:12:00.000Z" };
+
+/**
+ * Returns a live connection that only records subscriptions. `announce`
+ * delivers a push that lists `keys`, as the controller does when a topic's
+ * records change.
+ */
+const buildFakeLive = (): { live: Live; announce: (keys: readonly LiveQueryKey[]) => void } => {
+  const handlers = new Set<(keys: readonly LiveQueryKey[]) => void>();
+  const subscribe = (_topic: string, handler: (keys: readonly LiveQueryKey[]) => void) => {
+    handlers.add(handler);
+    return () => {
+      handlers.delete(handler);
+    };
+  };
+  const live: Live = {
+    start: () => undefined,
+    stop: () => Promise.resolve(),
+    subscribe: subscribe as Live["subscribe"],
+    onStatus: () => () => undefined,
+    serverVersion: null,
+  };
+  return {
+    live,
+    announce: (keys) => {
+      for (const handler of handlers) handler(keys);
+    },
+  };
+};
+
 /** Renders the Log in button and clicks it to start a login. */
 const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
   const api = stubApi(handlers);
+  const { live, announce } = buildFakeLive();
   const onLoggedIn = vi.fn();
   const user = userEvent.setup();
   render(
@@ -54,6 +118,7 @@ const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
     >
       <ProviderLogin
         client={createClient({ baseUrl: BASE, fetch: api.fetch, token: "held" })}
+        live={live}
         instanceId={INSTANCE}
         runnerId={RUNNER}
         subject="Codex on moss"
@@ -63,14 +128,34 @@ const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
     </QueryClientProvider>,
   );
   await user.click(screen.getByRole("button", { name: "Log in" }));
-  return { api, user, onLoggedIn };
+  return { api, user, onLoggedIn, announce };
+};
+
+/** Returns the instant a code expires, `minutesFromNow` minutes from now; negative is in the past. */
+const buildExpiresAt = (minutesFromNow: number): string =>
+  new Date(Date.now() + minutesFromNow * 60_000).toISOString();
+
+/**
+ * Answers the providers read with the logged-out snapshot until `loggedIn` is
+ * called, and with the fresh logged-in one after that.
+ */
+const stubProviders = (): { handler: Handler; loggedIn: () => void } => {
+  let snapshot: object = LOGGED_OUT;
+  return {
+    handler: () => ({ body: [buildCodex(snapshot)] }),
+    loggedIn: () => {
+      snapshot = LOGGED_IN;
+    },
+  };
 };
 
 describe("a login with a one-time code from the vendor", () => {
-  it("shows the code, asks for no input, and finishes when the user clicks Done", async () => {
-    const { api, user, onLoggedIn } = await openLoginPanel({
-      [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE } },
+  it("shows the code, asks for no input, and closes once a fresh snapshot is logged in", async () => {
+    const providers = stubProviders();
+    const { api, onLoggedIn, announce } = await openLoginPanel({
+      [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
       [LOGIN_CODE]: { body: SNAPSHOT },
+      [PROVIDERS]: providers.handler,
     });
 
     await waitFor(() => {
@@ -89,17 +174,50 @@ describe("a login with a one-time code from the vendor", () => {
     // A second login would kill the process whose code is on screen.
     expect(screen.getByRole("button", { name: "Log in" })).toHaveProperty("disabled", true);
 
-    // Nothing is sent and nothing is awaited: the browser and the vendor
-    // complete the login between them.
+    // Nothing is sent: the browser and the vendor complete the login between
+    // them. The drawer waits for the controller to announce the result.
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain(
+        "The code works for 15 more minutes.",
+      );
+    });
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
     expect(listSentCodes(api)).toEqual([]);
     expect(onLoggedIn).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Done" }));
+    // An announcement while the harness is still logged out keeps the drawer open.
+    act(() => {
+      announce([queryKeys.providers()]);
+    });
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path === "/api/v1/providers")).toHaveLength(2);
+    });
+    expect(screen.getByRole("dialog")).toBeDefined();
+
+    providers.loggedIn();
+    act(() => {
+      announce([queryKeys.providers()]);
+    });
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(onLoggedIn).toHaveBeenCalledTimes(1);
     expect(listSentCodes(api)).toEqual([]);
+  });
+
+  it("says the code expired and offers to start again", async () => {
+    const providers = stubProviders();
+    const { user, api } = await openLoginPanel({
+      [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(-1) } },
+      [PROVIDERS]: providers.handler,
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("The code expired before the login finished.");
+    await user.click(screen.getByRole("button", { name: "Start again" }));
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path.endsWith("/login"))).toHaveLength(2);
+    });
   });
 });
 

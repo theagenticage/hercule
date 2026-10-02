@@ -1,13 +1,19 @@
-import { useId, useState, type JSX } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useEffectEvent, useId, useState, type JSX } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Drawer, Field, Input, type ButtonVariant } from "@hercule/ui";
 import {
+  decideDeviceLoginStep,
   isWebLink,
   queryKeys,
+  readProbedAt,
+  type DeviceLogin,
   type HerculeClient,
+  type Live,
   type SecretFieldOffer,
   readErrorMessage,
 } from "@hercule/client-core";
+import { useLiveInvalidation } from "../app/live-invalidation";
+import { providersQuery } from "../app/queries";
 import { DeviceCode } from "./device-code";
 
 /**
@@ -26,11 +32,13 @@ import { DeviceCode } from "./device-code";
  *   pastes it here.
  * - One-time code: the vendor printed a code, the user enters it in the
  *   browser, and the browser completes the login with the vendor. Hercule has
- *   nothing to send and nothing to wait for, so the drawer only shows the
- *   instructions and the user closes it when done.
+ *   nothing to send. When the vendor's login ends, the controller probes the
+ *   instance again and announces the new snapshot, and the drawer closes by
+ *   itself once that snapshot says the harness is logged in.
  */
 export function ProviderLogin({
   client,
+  live,
   instanceId,
   runnerId,
   subject,
@@ -41,6 +49,8 @@ export function ProviderLogin({
 }: {
   readonly className?: string;
   readonly client: HerculeClient;
+  /** Tells a one-time-code login when the instance's snapshot changes. */
+  readonly live: Live;
   readonly instanceId: string;
   /** The machine the credential is stored on, and the only one it works on. */
   readonly runnerId: string;
@@ -50,11 +60,23 @@ export function ProviderLogin({
   readonly variant?: ButtonVariant;
   readonly onLoggedIn: () => void;
 }): JSX.Element {
+  const queryClient = useQueryClient();
   const codeField = useId();
   const [code, setCode] = useState("");
 
   const start = useMutation({
-    mutationFn: () => client.provider.login({ params: { id: instanceId }, payload: { runnerId } }),
+    mutationFn: async () => {
+      const started = await client.provider.login({
+        params: { id: instanceId },
+        payload: { runnerId },
+      });
+      if (started.userCode === undefined) return { ...started, probedAtStart: null };
+      // A one-time-code login is finished by a snapshot taken after this one.
+      // Reading it once the code is out is early enough: the vendor completes
+      // the login only after the user has typed that code.
+      const instances = await queryClient.ensureQueryData(providersQuery(client));
+      return { ...started, probedAtStart: readProbedAt(instances, instanceId, runnerId) };
+    },
   });
   const submit = useMutation({
     mutationFn: () =>
@@ -78,8 +100,8 @@ export function ProviderLogin({
   };
 
   /**
-   * Finishes a one-time-code login. The browser already completed the login
-   * with the vendor, so this only closes the drawer and notifies the caller.
+   * Finishes a one-time-code login once a fresh snapshot says the harness is
+   * logged in: closes the drawer and notifies the caller.
    */
   const finishLogin = (): void => {
     close();
@@ -187,11 +209,22 @@ export function ProviderLogin({
                 copy an authorized <code className="font-mono text-ink">auth.json</code> into the
                 instance&apos;s <code className="font-mono text-ink">$CODEX_HOME</code>.
               </p>
-              <div className="-ml-2">
-                <Button variant="primary" onClick={finishLogin}>
-                  Done
-                </Button>
-              </div>
+              {start.data === undefined ? null : (
+                <DeviceLoginWait
+                  client={client}
+                  live={live}
+                  login={{
+                    instanceId,
+                    runnerId,
+                    probedAtStart: start.data.probedAtStart,
+                    expiresAt: start.data.expiresAt,
+                  }}
+                  onDone={finishLogin}
+                  onRestart={() => {
+                    start.mutate();
+                  }}
+                />
+              )}
             </>
           )}
           {submit.error === null ? null : (
@@ -202,6 +235,79 @@ export function ProviderLogin({
         </div>
       </Drawer>
     </>
+  );
+}
+
+/**
+ * The end of a one-time-code login: waits until a fresh snapshot says the
+ * harness is logged in, then calls `onDone` once, or shows that the code
+ * expired. It keeps the instances current through the live connection while
+ * it is on screen, because the screen that hosts the login may not.
+ */
+function DeviceLoginWait({
+  client,
+  live,
+  login,
+  onDone,
+  onRestart,
+}: {
+  readonly client: HerculeClient;
+  readonly live: Live;
+  readonly login: DeviceLogin;
+  readonly onDone: () => void;
+  readonly onRestart: () => void;
+}): JSX.Element {
+  const queryClient = useQueryClient();
+  useLiveInvalidation(live, queryClient, "provider");
+  const instances = useQuery(providersQuery(client)).data ?? [];
+  const [now, setNow] = useState(() => Date.now());
+  const step = decideDeviceLoginStep(login, instances, now);
+
+  // The minutes left change at whole minutes before the expiry, not at the
+  // clock's minute, so the next update is timed from the expiry. The last
+  // one lands on the expiry itself.
+  useEffect(() => {
+    if (login.expiresAt === undefined) return;
+    const left = Date.parse(login.expiresAt) - now;
+    if (left <= 0) return;
+    const timer = setTimeout(
+      () => {
+        setNow(Date.now());
+      },
+      left % 60_000 || 60_000,
+    );
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [login.expiresAt, now]);
+
+  const finish = useEffectEvent(onDone);
+  useEffect(() => {
+    if (step.kind === "done") finish();
+  }, [step.kind]);
+
+  if (step.kind === "expired") {
+    return (
+      <>
+        <p className="text-row text-fail" role="alert">
+          The code expired before the login finished.
+        </p>
+        <div className="-ml-2">
+          <Button variant="primary" onClick={onRestart}>
+            Start again
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <p className="text-row text-muted" role="status">
+      Waiting for you to enter the code. This closes by itself once you have.
+      {step.kind === "waiting" && step.minutesLeft !== null
+        ? ` The code works for ${String(step.minutesLeft)} more ${step.minutesLeft === 1 ? "minute" : "minutes"}.`
+        : null}
+    </p>
   );
 }
 

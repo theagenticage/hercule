@@ -5,6 +5,7 @@ import {
   buildProviderRows,
   queryKeys,
   type HerculeClient,
+  type Live,
   type ProviderRow,
   readErrorMessage,
 } from "@hercule/client-core";
@@ -19,9 +20,11 @@ import { providersQuery } from "../../../app/queries";
  */
 export function Providers({
   client,
+  live,
   runner,
 }: {
   readonly client: HerculeClient;
+  readonly live: Live;
   readonly runner: RunnerDetail;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
@@ -65,6 +68,7 @@ export function Providers({
             key={row.id}
             row={row}
             client={client}
+            live={live}
             runnerId={runner.id}
             runnerName={runner.name}
             first={index === 0}
@@ -96,6 +100,7 @@ export function Providers({
 function Row({
   row,
   client,
+  live,
   runnerId,
   runnerName,
   first,
@@ -106,6 +111,7 @@ function Row({
 }: {
   readonly row: ProviderRow;
   readonly client: HerculeClient;
+  readonly live: Live;
   readonly runnerId: string;
   readonly runnerName: string;
   readonly first: boolean;
@@ -145,6 +151,7 @@ function Row({
         {row.logIn ? (
           <ProviderLogin
             client={client}
+            live={live}
             instanceId={row.id}
             runnerId={runnerId}
             subject={`${row.name} on ${runnerName}`}

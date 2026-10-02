@@ -142,6 +142,12 @@ export {
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
+export {
+  decideDeviceLoginStep,
+  readProbedAt,
+  type DeviceLogin,
+  type DeviceLoginStep,
+} from "./device-login";
 export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
 export {
