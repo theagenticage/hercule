@@ -3,12 +3,12 @@ import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { ControllerConnection } from "./controller-connection";
-import { FirstRun, makeFirstRunLayer } from "./first-run";
 import {
   makeFakeMainWindow,
   makeTemporarySettingsFile,
   type TemporarySettingsFile,
 } from "./testing";
+import { makeThisMacLayer, ThisMac } from "./this-mac";
 
 let settingsFile: TemporarySettingsFile;
 
@@ -17,10 +17,10 @@ beforeEach(() => {
   return settingsFile.remove;
 });
 
-describe("FirstRun", () => {
-  it("imports its services when first used, and runs each method on them", async () => {
+describe("ThisMac", () => {
+  it("runs each method on a Mac where Hercule is not installed", async () => {
     const window = makeFakeMainWindow();
-    const layer = makeFirstRunLayer({
+    const layer = makeThisMacLayer({
       // No binary is there, as on a Mac where Hercule is not installed.
       binaryPath: join(settingsFile.path, "..", "no-binary-here"),
       openFolder: () => Effect.die("not used"),
@@ -41,11 +41,13 @@ describe("FirstRun", () => {
     const outcomes = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const firstRun = yield* FirstRun;
+          const thisMac = yield* ThisMac;
           return {
-            found: yield* firstRun.findLocalController,
-            started: yield* firstRun.startLocalController,
-            picked: yield* firstRun.pickFolder,
+            found: yield* thisMac.findLocalController,
+            started: yield* thisMac.startLocalController,
+            logsShown: (yield* Effect.flip(thisMac.showLogsFolder))._tag,
+            tokenRead: (yield* Effect.flip(thisMac.readSetupToken))._tag,
+            picked: yield* thisMac.pickFolder,
           };
         }),
         layer,
@@ -54,6 +56,8 @@ describe("FirstRun", () => {
     expect(outcomes).toEqual({
       found: { _tag: "NotFound", line: null },
       started: { _tag: "NotInstalled" },
+      logsShown: "NoLogsFolderSeen",
+      tokenRead: "NoControllerSaved",
       picked: { _tag: "Cancelled" },
     });
     expect(window.calls).toEqual(["pickFolder"]);

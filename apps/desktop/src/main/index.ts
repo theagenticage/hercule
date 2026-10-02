@@ -34,7 +34,7 @@ import { AppScheme, makeAppSchemeLayer } from "./app-scheme";
 import { makeAppSettingsLayer } from "./app-settings";
 import { makeControllerConnectionLayer } from "./controller-connection";
 import { fetchWithoutRedirects } from "./fetch-without-redirects";
-import { makeFirstRunLayer } from "./first-run";
+import { makeThisMacLayer } from "./this-mac";
 import { registerIpcHandlers } from "./ipc";
 import { MainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
@@ -92,7 +92,7 @@ const startApp = (): void => {
   ).pipe(Layer.provideMerge(MainWindowLayer));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      makeFirstRunLayer({ binaryPath, openFolder }).pipe(
+      makeThisMacLayer({ binaryPath, openFolder }).pipe(
         Layer.provideMerge(makeControllerConnectionLayer(fetchWithoutRedirects)),
         Layer.provideMerge(StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage)))),
       ),

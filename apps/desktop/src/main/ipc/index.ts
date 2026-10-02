@@ -13,7 +13,7 @@ import {
 } from "../../ipc/contract";
 import { AppSettings, type NoControllerSaved } from "../app-settings";
 import { ControllerConnection } from "../controller-connection";
-import { FirstRun } from "../first-run";
+import { ThisMac } from "../this-mac";
 import type { ControllerAlreadySaved, NoLogsFolderSeen } from "../local-controller";
 import { MainWindow } from "../main-window";
 import { MainMenu } from "../menu";
@@ -30,11 +30,11 @@ import { answerIpcMessage } from "./message";
 type IpcHandlerServices =
   | AppSettings
   | ControllerConnection
-  | FirstRun
   | MainMenu
   | MainWindow
   | RunnerIdentity
   | StoredToken
+  | ThisMac
   | ThreadNotifications;
 
 /**
@@ -62,12 +62,12 @@ const IPC_HANDLERS: {
   "goMenu.set": (threads) => MainMenu.use((menu) => menu.setGoThreads(threads)),
   "waitingThreads.set": (threads) =>
     ThreadNotifications.use((notifications) => notifications.setWaitingThreads(threads)),
-  "localController.find": () => FirstRun.use((firstRun) => firstRun.findLocalController),
-  "localController.start": () => FirstRun.use((firstRun) => firstRun.startLocalController),
-  "logsFolder.show": () => FirstRun.use((firstRun) => firstRun.showLogsFolder),
-  "setupToken.read": () => FirstRun.use((firstRun) => firstRun.readSetupToken),
+  "localController.find": () => ThisMac.use((thisMac) => thisMac.findLocalController),
+  "localController.start": () => ThisMac.use((thisMac) => thisMac.startLocalController),
+  "logsFolder.show": () => ThisMac.use((thisMac) => thisMac.showLogsFolder),
+  "setupToken.read": () => ThisMac.use((thisMac) => thisMac.readSetupToken),
   "macUser.read": () => Effect.sync(() => ({ username: userInfo().username })),
-  "folder.pick": () => FirstRun.use((firstRun) => firstRun.pickFolder),
+  "folder.pick": () => ThisMac.use((thisMac) => thisMac.pickFolder),
   "firstRunProgress.read": () => AppSettings.use((settings) => settings.readFirstRunProgress),
   // The settings file is in the app's own folder, so a write that fails is a
   // defect.
