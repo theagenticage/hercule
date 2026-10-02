@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Checkout fails for EU cards · Hercule</title>
+    <style>
+      .doc {
+        padding: 6px 20px 340px;
+      }
+      .by {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .by b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .doc h1 {
+        margin: 12px 0 8px;
+        font-size: 22px;
+        font-weight: var(--w-bold);
+        line-height: 1.22;
+        letter-spacing: -0.015em;
+      }
+      .tags {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 14px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .gist {
+        margin: 0 0 20px;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      .gist code {
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: color-mix(in oklab, var(--ink) 6%, transparent);
+        font-size: 12.5px;
+      }
+      .made {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .ev {
+        display: grid;
+        gap: 1px;
+        padding: 9px 10px 10px;
+        border-radius: var(--r-md);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .ev-src {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .ev-num {
+        margin-top: 3px;
+        font-size: 18px;
+        font-weight: var(--w-bold);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+      }
+      .ev-line {
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.3;
+      }
+      .sheet {
+        padding: 10px 12px 30px;
+      }
+      .ask {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 6px 12px;
+        font-size: 15px;
+        font-weight: var(--w-bold);
+      }
+      .ask small {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-regular);
+      }
+      .m-ans .cr {
+        grid-row: 1 / 3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <header class="m-nav">
+        <a class="m-back" href="intake.html"><i data-i="chev-l" data-size="22"></i>Intake</a>
+        <span></span>
+        <button class="icon-btn" title="More"><i data-i="more" data-size="20"></i></button>
+      </header>
+
+      <div class="m-body">
+        <article class="doc">
+          <div class="by">
+            <i data-face="Triage" data-pose="idle" data-size="24"></i>
+            <span><b>Triage</b> · Proposal · 09:00</span>
+          </div>
+          <h1>Checkout fails for EU cards with 3&#8209;D Secure</h1>
+          <div class="tags">
+            <span class="chip chip--fail">Urgent</span>
+            <span class="bars" data-p="4"><i></i><i></i><i></i><i></i></span>
+            <span class="proj proj--webshop">webshop</span>
+            <span>first seen 08:52</span>
+          </div>
+          <p class="gist">Since deploy #1289, card payments that need 3&#8209;D Secure fail for EU customers. The new Stripe SDK returns <code>requires_action</code>, and the checkout treats it as a failure.</p>
+
+          <h2 class="section-h">Made from 4 sources</h2>
+          <div class="made">
+            <div class="ev"><span class="ev-src"><i data-brand="sentry" data-size="12"></i>Sentry</span><span class="ev-num">412</span><span class="ev-line">events</span></div>
+            <div class="ev"><span class="ev-src"><i data-brand="posthog" data-size="12"></i>PostHog</span><span class="ev-num fail-ink">-18%</span><span class="ev-line">in the EU</span></div>
+            <div class="ev"><span class="ev-src"><i data-brand="gmail" data-size="12"></i>Gmail</span><span class="ev-num">3</span><span class="ev-line">customers</span></div>
+            <div class="ev"><span class="ev-src"><i data-brand="github" data-size="12"></i>GitHub</span><span class="ev-num">#1289</span><span class="ev-line">Stripe v14</span></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="sheet">
+        <div class="ask"><i data-face="Triage" data-pose="idle" data-size="26"></i>What should happen?<small>Triage suggests Fix bug</small></div>
+        <div class="m-answers">
+          <button class="m-ans m-ans--accent"><i data-face="Fix bug" data-pose="idle" data-size="32"></i><b>Start "Fix bug"</b><span>Opus 5.5 · studio-mac</span><span class="haptic"><i data-i="wave" data-size="11"></i>success</span></button>
+          <button class="m-ans"><i data-i="tasks" data-size="20"></i><b>Accept</b><span>Adds it to the backlog as a Task</span></button>
+          <button class="m-ans m-ans--quiet"><i data-i="close" data-size="20"></i><b>Dismiss</b><span>Closes the Proposal</span><span class="haptic"><i data-i="wave" data-size="11"></i>light</span></button>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

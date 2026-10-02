@@ -1,0 +1,1820 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <link rel="stylesheet" href="../office.css" />
+    <meta charset="utf-8" />
+    <title>Welcome · Hercule</title>
+    <!--
+      PROTOTYPE - the first run (#313): what the desktop app shows the first time it opens on a Mac
+      where Hercule was just installed. The welcome starts Hercule on this Mac, unless the user says
+      it runs on another machine. Four steps then open the office: your account, a provider login,
+      GitHub, and a first project. Each finished step furnishes the room, and the run ends on your
+      first thread.
+
+      URL parameters:
+        ?variant=a|b|c   a: the bureau, a step column beside the room (the default)
+                         b: grand opening, the room fills the window and the camera visits each step
+                         c: letter of introduction, one engraved column and no room
+        ?step=welcome|account|harness|github|project|done
+        ?state=<a state of that step>, listed in STATES below
+        ?github=skipped  the GitHub step was skipped (shows what that changes later on)
+        ?harness=later   the provider step was put off
+      A page opened with ?step or ?state stands still: no timers, no arrivals. That keeps the book's
+      frames and screenshots deterministic. Without them, the page plays from the start.
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      .fr {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      .fr-tl {
+        position: absolute;
+        z-index: 20;
+        top: 18px;
+        left: 20px;
+      }
+
+      /* ---------- the room ---------- */
+      .fr-stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+      .fr-cam {
+        position: absolute;
+        inset: 0;
+        transform-origin: 0 0;
+      }
+      .fr-cam.is-moving {
+        transition: transform var(--dur-3) var(--ease-out);
+      }
+      /* Before the app has found a controller the office is closed: the room shows, dimmed. The
+         lights come on with the controller. */
+      .fr-veil {
+        position: absolute;
+        inset: 0;
+        background: var(--bg);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--dur-3) var(--ease-out);
+      }
+      .fr[data-lights="off"] .fr-veil {
+        opacity: 0.64;
+      }
+      /* The tube from GitHub to Triage is fitted, but nothing travels in it until Triage first
+         runs: nothing moves unless something is happening. */
+      .fr .capsule {
+        display: none;
+      }
+      .fr-arrive {
+        position: absolute;
+        inset: 0;
+        animation: fr-settle var(--dur-3) var(--ease-out) both;
+      }
+      .fr-arrive--char {
+        animation-timing-function: var(--ease-spring);
+      }
+      @keyframes fr-settle {
+        from {
+          opacity: 0;
+          transform: translateY(-14px);
+        }
+      }
+      .tag.is-new {
+        animation: fr-tag var(--dur-3) var(--ease-out) both;
+      }
+      /* While the camera moves, what arrives waits for it to stop. */
+      .fr-arrive.is-late,
+      .is-late .tag.is-new {
+        animation-delay: var(--dur-3);
+      }
+      @keyframes fr-tag {
+        from {
+          opacity: 0;
+          translate: 0 -10px;
+        }
+      }
+      .tag .cr-you {
+        align-self: center;
+        margin: -2px 1px -2px -4px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .fr-arrive,
+        .tag.is-new {
+          animation: none;
+        }
+      }
+
+      /* ---------- the panel that holds the steps ---------- */
+      .fr-panel {
+        display: flex;
+        flex-direction: column;
+      }
+      .fr-body {
+        display: grid;
+        gap: 0;
+      }
+
+      /* Variant A: the bureau. A column of steps beside the room. */
+      [data-variant="a"] .fr-stage {
+        left: 500px;
+      }
+      [data-variant="a"] .fr-panel {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 500px;
+        padding: 74px 56px 40px;
+        background: var(--surface);
+        box-shadow: 1px 0 0 var(--line-soft);
+      }
+      [data-variant="a"][data-step="welcome"] .fr-panel {
+        justify-content: center;
+        padding-bottom: 74px;
+      }
+      /* The steps start at one height, so the heading stays put from step to step. */
+      [data-variant="a"] .fr-ladder + .fr-body {
+        margin-top: 72px;
+      }
+
+      /* Variant B: grand opening. The room fills the window; the steps float on glass. */
+      [data-variant="b"] .fr-panel {
+        position: absolute;
+        z-index: 5;
+        top: 50%;
+        right: 32px;
+        width: 448px;
+        max-height: calc(100vh - 140px);
+        overflow: auto;
+        padding: 26px 30px 28px;
+        border-radius: var(--r-xl);
+        transform: translateY(-46%);
+      }
+      [data-variant="b"] .fr-ladder {
+        position: absolute;
+        z-index: 5;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        height: 36px;
+        padding: 0 14px;
+        border-radius: 12px;
+      }
+
+      /* Variant C: a letter of introduction. No room; one engraved column. */
+      [data-variant="c"] {
+        overflow: auto;
+      }
+      [data-variant="c"] .fr-stage {
+        display: none;
+      }
+      [data-variant="c"] .fr-panel {
+        position: relative;
+        width: 600px;
+        min-height: calc(100vh - 96px);
+        margin: 48px auto;
+        padding: 48px 64px 40px;
+        background: var(--raised);
+        border-radius: 4px;
+        /* a double brass rule inside the paper's edge */
+        box-shadow: inset 0 0 0 10px var(--raised), inset 0 0 0 11px color-mix(in oklab, var(--brass) 70%, transparent), inset 0 0 0 14px var(--raised),
+          inset 0 0 0 15px color-mix(in oklab, var(--brass) 45%, transparent), var(--shadow-2);
+      }
+
+      /* ---------- brand ---------- */
+      .fr-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .fr-brand .wordmark {
+        font-size: 26px;
+        line-height: 1;
+        padding-top: 2px;
+      }
+      .fr-brand--hero {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 18px;
+        margin-bottom: 26px;
+      }
+      .fr-brand--hero .wordmark {
+        font-size: 56px;
+        letter-spacing: 0.03em;
+      }
+      /* The welcome opens the letter with the full letterhead; the steps keep a short one. */
+      [data-variant="c"] .fr-brand {
+        justify-content: center;
+      }
+      [data-variant="c"] .fr-brand--hero {
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 0;
+      }
+      [data-variant="c"] .fr-brand--hero .wordmark {
+        font-size: 46px;
+      }
+      .rule {
+        display: block;
+        height: 5px;
+        border-top: 1px solid color-mix(in oklab, var(--brass) 75%, transparent);
+        border-bottom: 1px solid color-mix(in oklab, var(--brass) 75%, transparent);
+      }
+      [data-variant="c"] .fr-brand + .rule {
+        margin: 20px 0 8px;
+      }
+      [data-variant="c"] .fr-brand--hero + .rule {
+        margin: 26px 0 30px;
+      }
+      [data-variant="b"] .fr-brand--hero {
+        flex-direction: row;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 20px;
+      }
+      [data-variant="b"] .fr-brand--hero .wordmark {
+        font-size: 36px;
+      }
+
+      /* ---------- the step ladder ---------- */
+      .fr-ladder {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font-size: var(--t-12);
+        color: var(--faint);
+        white-space: nowrap;
+      }
+      [data-variant="a"] .fr-ladder {
+        margin-top: 34px;
+      }
+      .fr-ladder li {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .fr-ladder li + li::before {
+        content: "";
+        width: 18px;
+        height: 1px;
+        margin-right: 1px;
+        background: var(--line);
+      }
+      .fr-ladder .n {
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        box-shadow: inset 0 0 0 1px var(--line);
+        font-weight: var(--w-bold);
+        font-size: var(--t-11);
+        font-variant-numeric: tabular-nums;
+      }
+      .fr-ladder .is-now {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .fr-ladder .is-now .n {
+        background: var(--ink);
+        box-shadow: none;
+        color: var(--surface);
+      }
+      .fr-ladder .is-done {
+        color: var(--muted);
+      }
+      .fr-ladder .is-done .n {
+        background: var(--sunken);
+        box-shadow: none;
+        color: var(--ink);
+      }
+
+      /* ---------- a step ---------- */
+      .st-kicker {
+        margin: 0 0 8px;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        letter-spacing: 0.02em;
+      }
+      .st-h {
+        margin: 0;
+        font-size: var(--t-20);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+        line-height: 1.25;
+        text-wrap: balance;
+      }
+      /* Variant A shows the ladder right above the step, so the step does not count itself. */
+      [data-variant="a"] .st-count {
+        display: none;
+      }
+      .st-sub {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: var(--t-14);
+        line-height: 1.5;
+        text-wrap: pretty;
+      }
+      .st-form {
+        display: grid;
+        gap: 16px;
+        margin-top: 26px;
+      }
+      .st-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 26px;
+      }
+      .st-note {
+        display: flex;
+        gap: 9px;
+        margin: 22px 0 0;
+        padding-top: 16px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+        line-height: 1.5;
+      }
+      .st-note .ic,
+      .st-note .cr {
+        flex: none;
+        margin-top: 1px;
+      }
+      .st-note b {
+        color: var(--muted);
+        font-weight: var(--w-bold);
+      }
+
+      .fl {
+        display: grid;
+        gap: 6px;
+      }
+      .fl-label {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .fl-label .spacer {
+        flex: 1;
+      }
+      .fl-label a,
+      .link {
+        color: var(--accent-ink);
+        font-weight: var(--w-medium);
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .fl-label a:hover,
+      .link:hover {
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .fl-hint {
+        color: var(--faint);
+        font-size: var(--t-12);
+        line-height: 1.45;
+      }
+      .fl-err {
+        color: var(--fail-ink);
+        font-size: var(--t-12);
+        line-height: 1.45;
+      }
+      .field {
+        height: 36px;
+      }
+      .field input {
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+      .field input::placeholder {
+        color: var(--faint);
+      }
+      /* the input draws no ring of its own, so the field wears the system's focus ring */
+      .field:focus-within {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+      .field.is-bad {
+        box-shadow: inset 0 0 0 1.5px var(--fail);
+        outline-color: var(--fail);
+      }
+      /* An input sets font: inherit, which would undo the .mono font, so it is set again here. */
+      .field .mono,
+      .field input.mono {
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-size: var(--t-12);
+      }
+      .field-pre {
+        color: var(--faint);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .spin {
+        flex: none;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        border: 1.75px solid currentColor;
+        border-right-color: transparent;
+        animation: fr-spin 0.8s linear infinite;
+      }
+      @keyframes fr-spin {
+        to {
+          transform: rotate(1turn);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spin {
+          animation: none;
+          border-right-color: currentColor;
+          opacity: 0.5;
+        }
+      }
+      .btn[disabled] {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+      /* A button at work keeps its colour: it is busy, not unavailable. */
+      .btn[aria-busy="true"] {
+        pointer-events: none;
+      }
+
+      /* ---------- welcome ---------- */
+      .lead {
+        margin: 0;
+        font-size: var(--t-20);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+        line-height: 1.25;
+      }
+      .perks {
+        display: grid;
+        gap: 14px;
+        margin: 26px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .perks li {
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        gap: 12px;
+        align-items: start;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      .perks .ico {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+        color: var(--ink);
+      }
+      .perks b {
+        display: block;
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .reach {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin: 28px 0 0;
+        padding: 10px 12px;
+        border-radius: var(--r-md);
+        background: var(--sunken);
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.4;
+      }
+      .reach b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .reach .spacer {
+        flex: 1;
+      }
+      .reach .mono {
+        color: var(--faint);
+      }
+      .reach .dot-ok {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        margin: 0 2px;
+        border-radius: 50%;
+        background: var(--ok);
+      }
+      .reach--off .dot-ok {
+        background: var(--faint);
+      }
+      .cmd {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        padding: 0 6px 0 12px;
+        height: 36px;
+        border-radius: var(--r-md);
+        background: var(--sunken);
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-size: var(--t-12);
+      }
+      .cmd .spacer {
+        flex: 1;
+      }
+      /* The box is set in the code font for the command, but its button is not code. */
+      .cmd .btn {
+        font-family: var(--font-ui);
+        font-variation-settings: normal;
+      }
+      .fine {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+
+      /* ---------- providers ---------- */
+      .hx {
+        display: grid;
+        margin-top: 24px;
+        border-radius: var(--r-lg);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+        background: var(--raised);
+      }
+      [data-variant="b"] .hx {
+        background: color-mix(in oklab, var(--raised) 70%, transparent);
+      }
+      .hx-row + .hx-row {
+        border-top: 1px solid var(--line-soft);
+      }
+      .hx-head {
+        display: grid;
+        grid-template-columns: 34px 1fr auto;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 12px 12px 14px;
+      }
+      .hx-mark {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+        color: var(--ink);
+      }
+      .hx-mark .pi {
+        font-weight: var(--w-bold);
+        line-height: 1;
+      }
+      .hx-name {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+      .hx-name b {
+        font-weight: var(--w-bold);
+      }
+      .hx-name span {
+        overflow: hidden;
+        color: var(--faint);
+        font-size: var(--t-12);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .hx-ok {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding-right: 4px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .hx-ok .ic {
+        color: var(--ok);
+      }
+      .hx-more {
+        display: grid;
+        gap: 12px;
+        margin: -2px 14px 14px 60px;
+      }
+      .hx-step {
+        display: grid;
+        grid-template-columns: 18px 1fr;
+        gap: 8px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.5;
+      }
+      .hx-step > b {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+      }
+      .hx-step > span > .btn {
+        margin-top: 6px;
+      }
+      .code {
+        margin-top: 6px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 44px;
+        padding: 0 6px 0 14px;
+        border-radius: var(--r-md);
+        background: var(--sunken);
+      }
+      .code b {
+        flex: 1;
+        font-family: var(--font-mono);
+        font-variation-settings: var(--mono-axes);
+        font-size: var(--t-18);
+        font-weight: 600;
+        letter-spacing: 0.14em;
+      }
+      .wait {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+
+      /* ---------- GitHub and the project ---------- */
+      .card {
+        display: grid;
+        grid-template-columns: 34px 1fr auto;
+        align-items: center;
+        gap: 12px;
+        margin-top: 24px;
+        padding: 12px 14px;
+        border-radius: var(--r-lg);
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      [data-variant="b"] .card {
+        background: color-mix(in oklab, var(--raised) 70%, transparent);
+      }
+      .card .hx-mark {
+        color: var(--ink);
+      }
+      .card-text {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .card-text b {
+        font-weight: var(--w-bold);
+      }
+      .card-text span {
+        overflow: hidden;
+        color: var(--faint);
+        font-size: var(--t-12);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card + .st-form {
+        margin-top: 20px;
+      }
+      .warn {
+        display: grid;
+        grid-template-columns: 16px 1fr;
+        gap: 9px;
+        margin-top: 14px;
+        padding: 11px 12px;
+        border-radius: var(--r-md);
+        background: var(--sunken);
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.5;
+      }
+      .warn .ic {
+        margin-top: 1px;
+        color: var(--ink);
+      }
+      .warn b {
+        color: var(--ink);
+        font-weight: var(--w-bold);
+      }
+      .warn .btn {
+        margin-top: 8px;
+      }
+      .pick-folder {
+        display: grid;
+        justify-items: center;
+        gap: 8px;
+        width: 100%;
+        margin-top: 24px;
+        padding: 26px 20px 24px;
+        border-radius: var(--r-lg);
+        box-shadow: inset 0 0 0 1.5px var(--line);
+        background: transparent;
+        color: var(--muted);
+        text-align: center;
+        cursor: pointer;
+        transition: background var(--dur-1), box-shadow var(--dur-1);
+      }
+      .pick-folder:hover {
+        background: var(--hover);
+        box-shadow: inset 0 0 0 1.5px var(--faint);
+      }
+      .pick-folder .ico {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        margin-bottom: 2px;
+        border-radius: 12px;
+        background: var(--sunken);
+        color: var(--ink);
+      }
+      .pick-folder b {
+        color: var(--ink);
+        font-size: var(--t-14);
+        font-weight: var(--w-bold);
+      }
+      .pick-folder span {
+        font-size: var(--t-12);
+      }
+
+      /* ---------- done ---------- */
+      .recap {
+        display: grid;
+        gap: 2px;
+        margin: 24px 0 0;
+        padding: 6px;
+        list-style: none;
+        border-radius: var(--r-lg);
+        background: var(--sunken);
+      }
+      .recap li {
+        display: grid;
+        grid-template-columns: 28px 1fr auto;
+        align-items: center;
+        gap: 10px;
+        min-height: 40px;
+        padding: 0 8px;
+      }
+      .recap li > span:first-child {
+        display: grid;
+        place-items: center;
+      }
+      .recap b {
+        font-weight: var(--w-bold);
+      }
+      .recap li em {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-style: normal;
+      }
+      .recap li em.later {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .newbie {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 20px;
+      }
+      .newbie-face {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: var(--sunken);
+        flex: none;
+      }
+      .newbie-face::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+        border-radius: 50%;
+        border: 1.5px dashed var(--line);
+      }
+
+      /* ---------- the letter (variant C) ---------- */
+      .lt-steps {
+        display: grid;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .lt-step {
+        display: grid;
+        grid-template-columns: 40px 1fr;
+        gap: 0 8px;
+        padding: 16px 0;
+      }
+      .lt-step + .lt-step {
+        border-top: 1px solid var(--line-soft);
+      }
+      .lt-num {
+        font-size: var(--t-num);
+        line-height: 1;
+        color: var(--faint);
+      }
+      .lt-step.is-now .lt-num {
+        color: var(--ink);
+      }
+      .lt-step.is-done .lt-num {
+        color: var(--muted);
+      }
+      .lt-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 26px;
+      }
+      .lt-line b {
+        font-weight: var(--w-bold);
+      }
+      .lt-line span {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .lt-line .spacer {
+        flex: 1;
+      }
+      .lt-line .ic {
+        color: var(--ok);
+      }
+      .lt-step.is-next .lt-line b {
+        color: var(--faint);
+        font-weight: var(--w-medium);
+      }
+      .lt-step.is-now .st-kicker {
+        display: none;
+      }
+      .lt-step.is-now .st-h {
+        padding-top: 1px;
+      }
+      .lt-foot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-top: auto;
+        padding-top: 30px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .lt-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--ok);
+      }
+
+      /* ---------- the prototype's own controls: hidden inside the book's frames ---------- */
+      .proto {
+        position: fixed;
+        z-index: 50;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 40px;
+        padding: 0 6px 0 14px;
+        border-radius: 14px;
+        font-size: var(--t-12);
+      }
+      .proto > b {
+        margin-right: 4px;
+        color: var(--faint);
+        font-weight: var(--w-bold);
+      }
+      .proto select {
+        height: 28px;
+        padding: 0 6px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+        color: var(--ink);
+        font: inherit;
+      }
+      .proto .seg button {
+        min-width: 28px;
+      }
+      html.is-framed .proto {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="fr" data-variant="a">
+      <span class="tl fr-tl"><i></i><i></i><i></i></span>
+      <div class="fr-stage">
+        <div class="fr-cam"></div>
+        <div class="fr-veil"></div>
+      </div>
+      <ol class="fr-ladder glass" hidden></ol>
+      <section class="fr-panel"></section>
+    </div>
+
+    <nav class="proto glass" aria-label="Prototype controls">
+      <b>Prototype</b>
+      <span class="seg" role="group" aria-label="Variant">
+        <button data-variant="a" title="The bureau: steps beside the room">A</button>
+        <button data-variant="b" title="Grand opening: the room fills the window">B</button>
+        <button data-variant="c" title="Letter of introduction: no room">C</button>
+      </span>
+      <select data-proto="step" aria-label="Step"></select>
+      <select data-proto="state" aria-label="State"></select>
+      <button class="btn btn--sm btn--quiet" data-proto="theme">Dark</button>
+      <button class="btn btn--sm btn--quiet" data-proto="restart">Play from the start</button>
+    </nav>
+
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+    <script src="../office.js"></script>
+    <script>
+      (function () {
+        "use strict";
+        var Crew = window.Crew;
+        var Office = window.Office;
+        var root = document.querySelector(".fr");
+        var panel = root.querySelector(".fr-panel");
+        var ladderEl = root.querySelector(".fr-ladder");
+        var stage = root.querySelector(".fr-stage");
+        var cam = root.querySelector(".fr-cam");
+        var framed = window.top !== window;
+        if (framed) document.documentElement.classList.add("is-framed");
+        var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        /* ------------------------------------------------------------ the fixture world */
+
+        var ME = { user: "rogier", tz: "Europe/Amsterdam", machine: "studio-mac", address: "127.0.0.1:4937" };
+        // The other machine a user can connect to instead of this Mac. In free play, Hercule there is
+        // not set up yet; the remote-set-up state shows it after setup.
+        var REMOTE = { machine: "build-box-1", address: "build-box-1:4937" };
+        var REPO = { folder: "~/Dev/webshop", name: "webshop", slug: "rogier/webshop", remote: "git@github.com:rogier/webshop.git", branch: "main" };
+        var TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo,read:org,workflow,notifications&description=Hercule";
+
+        var STEPS = ["welcome", "account", "harness", "github", "project", "done"];
+        var LADDER = ["Account", "Providers", "GitHub", "Project"];
+        // The states each step can be shown in. The first is where a frame opens without ?state.
+        var STATES = {
+          welcome: ["fresh", "searching", "starting", "start-failed", "start-error", "runner", "found", "already-set-up", "remote", "remote-not-set-up", "remote-set-up"],
+          account: ["default", "error", "submitting"],
+          harness: ["idle", "claude-paste", "claude-error", "codex-device", "ready", "none-found"],
+          github: ["empty", "checking", "connected", "refused"],
+          project: ["empty", "picked", "no-remote", "not-git", "private"],
+          done: ["default"],
+        };
+
+        var q = new URLSearchParams(location.search);
+        var frozen = q.has("step") || q.has("state");
+        var S = {
+          variant: /^[abc]$/.test(q.get("variant")) ? q.get("variant") : "a",
+          step: STATES[q.get("step")] ? q.get("step") : "welcome",
+          state: "",
+          github: q.get("github") === "skipped" ? "skipped" : "connected",
+          harness: q.get("harness") === "later" ? "later" : "ready",
+          claude: "idle",
+          codex: "idle",
+          // The machine whose Hercule the app talks to: this Mac, or REMOTE once the user connects there.
+          host: ME,
+          form: { remote: "", user: ME.user, pass: "", code: "", token: "", topic: "github", name: REPO.name, setup: "", url: "" },
+        };
+        S.state = STATES[S.step].indexOf(q.get("state")) !== -1 ? q.get("state") : frozen ? STATES[S.step][0] : "searching";
+        applyState();
+
+        /** Fills in what the user had done to reach the named state of the current step. */
+        function applyState() {
+          var st = S.state;
+          // Before the providers step nobody has logged in yet; after it, both logins are done.
+          var harness = S.step === "harness" ? st : at(S.step) > at("harness") ? "ready" : "idle";
+          S.claude = { "claude-paste": "paste", "claude-error": "error", "codex-device": "ready", ready: "ready" }[harness] || "idle";
+          S.codex = { "codex-device": "device", ready: "ready" }[harness] || "idle";
+          S.form.code = S.step === "harness" && st === "claude-error" ? "4f9a" : "";
+          S.form.pass = S.step === "account" && st !== "default" ? (st === "error" ? "hunter2" : "correct horse") : "";
+          if (S.step === "welcome") S.host = st === "remote-set-up" ? REMOTE : ME;
+          S.form.remote = S.step === "welcome" && st === "remote-not-set-up" ? "http://" + REMOTE.address : "";
+          S.form.token = S.step === "github" && st !== "empty" ? (st === "refused" ? "ghp_2c41d9e0a7f3…" : "github_pat_11ABX3Q…") : "";
+        }
+
+        /** Returns how the copy names the machine that runs Hercule: "this Mac", or the other machine's name. */
+        function describeHost() {
+          return S.host === ME ? "this Mac" : S.host.machine;
+        }
+        function at(step) {
+          return STEPS.indexOf(step);
+        }
+        function icon(name, size) {
+          return Crew.icon(name, size);
+        }
+        function esc(text) {
+          return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+        }
+
+        /* ------------------------------------------------------------ the room */
+
+        // What stands in the room follows what the user has finished. Every flag reads from
+        // state the controller already holds, so the room could be drawn again on any later visit.
+        function world() {
+          var i = at(S.step);
+          // The lights come on once a Hercule answers that the user can sign in to or set up.
+          var closed = i === 0 && ["found", "already-set-up", "remote-set-up"].indexOf(S.state) === -1;
+          return {
+            lights: !closed,
+            runner: !closed,
+            you: i > at("account"),
+            desks: i > at("harness") && S.harness === "ready",
+            triage: i > at("github"),
+            github: i > at("github") && S.github === "connected",
+            thread: i > at("project") && S.harness === "ready",
+          };
+        }
+
+        // The Office gives the first runner the first wing, and a runner one desk per session it
+        // can host. studio-mac hosts six, seated the way the Office seats them.
+        var WING = Office.WINGS[0];
+        var SEATS = [0, 1, 2, 3, 4, 5].map(function (k) {
+          var row = k < WING.cols.length ? 0 : 1;
+          return { x: WING.cols[k % WING.cols.length] + (row ? WING.stagger : 0), y: WING.rows[row] };
+        });
+        // The first thread sits in the front row, nearest to you, where nothing hides it.
+        var THREAD_SEAT = 4;
+        var ROOM = { x0: 0, x1: 24, y0: 0, y1: 18.6 };
+        // Variant B opens each step on what the step before it added to the room: the camera
+        // moves there first, then the new pieces land.
+        var SHOTS = {
+          welcome: ROOM,
+          account: ROOM,
+          harness: { x0: 0, x1: 24, y0: 13.4, y1: 18.6 }, // your desk and the assistant
+          github: { x0: 9.4, x1: 23.4, y0: 0.9, y1: 7.2 }, // the wing and its desks
+          project: { x0: 0, x1: 11, y0: 0, y1: 9 }, // Triage and GitHub on the wall, with the whole wing plate in view
+          done: ROOM,
+        };
+
+        /**
+         * Returns the furniture and people the world puts in the room. Each piece has a key, a
+         * depth to sort by, its SVG, its labels, and whether it is a character. Characters settle
+         * with a spring, furniture without one.
+         */
+        function furnish(w) {
+          var O = Office;
+          var list = [];
+          var headZ = 0.42 + (O.spriteSize() * 0.9) / O.tileSize();
+          function piece(key, depth, svg, tags, character) {
+            list.push({ key: key, k: depth, svg: svg, tags: tags || [], character: !!character });
+          }
+          // the room's own furniture, there from the start
+          piece("dress", 1.4, O.sideboard(19.6, 2.2) + O.palm(22.9, 0.5, true));
+          piece("palm-r", 38.7, O.palm(23.1, 15.4, true));
+          piece("palm-l", 18.2, O.palm(0.25, 17.7, false));
+          if (w.runner) {
+            piece("wing", -100, O.wingField({ runner: S.host.machine, note: [S.host === ME ? "this Mac" : "", w.desks ? "6 desks" : ""].filter(Boolean).join(" · "), x: WING.x, y: WING.y, w: WING.w, d: WING.d, label: WING.label }));
+          }
+          if (w.you) {
+            piece("you", 3.0 + 15.8, O.yourDesk(1.4, 15.8, 0) + O.hatStand(0.6, 14.8), [{ x: 2.9, y: 16.4, z: 1.62, html: "<b>Your desk</b>", cls: "tag--you" }]);
+            // the assistant setup creates, asleep in the lobby where the Office keeps assistants
+            piece("assistant", 21.4 + 16.9, O.sideTable(20.0, 17.7) + O.clubChair(21.4, 16.9, "Hercule", "asleep"), [{ x: 21.4, y: 16.9, z: 0.38 + (O.spriteSize() * 0.9) / O.tileSize(), html: "<b>Hercule</b><span>your assistant</span>", cls: "tag--quiet" }], true);
+          }
+          if (w.desks) {
+            SEATS.forEach(function (s, n) {
+              // the first thread's desk takes its project's tint
+              var tint = n === THREAD_SEAT && w.thread ? "webshop" : undefined;
+              piece("desk-" + n, s.x + s.y, O.desk({ x: s.x, y: s.y, empty: true, proj: tint }));
+            });
+          }
+          if (w.thread) {
+            var s0 = SEATS[THREAD_SEAT];
+            piece("thread", s0.x + s0.y + 0.01, O.sprite("New thread in webshop", "idle", s0.x, s0.y, 0.42), [{ x: s0.x, y: s0.y, z: headZ, html: "<b>New thread</b><span>webshop</span>" }], true);
+          }
+          if (w.triage) {
+            var tri = { name: "Triage", pose: "idle", x: 3.5, y: O.TUBE_Y };
+            piece(w.github ? "triage+github" : "triage", tri.x + tri.y, O.desk(tri, w.github ? O.tubeToDesk(tri.x - 1.2) : null), [{ x: tri.x, y: tri.y, z: headZ, html: "<b>Triage</b><span>" + (w.github ? "next 11:00" : "no Connections yet") + "</span>" }], true);
+          }
+          if (w.github) {
+            piece("plaque", -50, "", [{ x: 0.02, y: 4.72, z: 3.38, html: Crew.brand("github", 12) + "<b>GitHub</b><span>rogier</span>", cls: "tag--quiet" }]);
+          }
+          return list;
+        }
+
+        var shot = null; // the framing last drawn: tile size and origin in pixels
+        var drawn = null; // the world last drawn
+
+        /**
+         * Draws the room for the current world. Pieces whose keys are in arriving are drawn on a
+         * layer of their own that settles into place. Variant B frames the step's shot, and with
+         * moveCamera it glides there from the last framing before the pieces land.
+         */
+        function drawRoom(arriving, moveCamera) {
+          if (S.variant === "c") return;
+          var w = world();
+          root.dataset.lights = w.lights ? "on" : "off";
+          var sw = stage.clientWidth;
+          var sh = stage.clientHeight;
+          if (!sw || !sh) return;
+          var region = S.variant === "b" ? SHOTS[S.step] : ROOM;
+          // Variant B frames a close shot in the part of the window the floating card leaves clear,
+          // and lets the whole room run on under the card's glass.
+          var clear = sw - 448 - 48;
+          var room = S.variant === "b" ? { w: region === ROOM ? sw - 200 : clear, pad: 56, maxU: 46 } : { w: sw, pad: 40, maxU: 34 };
+          Office.frame(room.w, sh, region, room.pad, room.maxU);
+          var origin = Office.P(0, 0, 0);
+          var U = Office.tileSize();
+
+          var pieces = furnish(w);
+          var floor = Office.room({ wings: [], board: false, sources: w.github ? [["github", 0]] : [], slots: 8 });
+          function svg(list, cls) {
+            list.sort(function (a, b) {
+              return a.k - b.k;
+            });
+            return (
+              '<svg class="floor" width="' + sw + '" height="' + sh + '" viewBox="0 0 ' + sw + " " + sh + '"' + (cls ? "" : ' role="img" aria-label="Your office, furnished as you set Hercule up"') + ">" +
+              (cls ? "" : floor) +
+              list
+                .map(function (p) {
+                  return p.svg;
+                })
+                .join("") +
+              "</svg>"
+            );
+          }
+          var still = [];
+          var things = [];
+          var characters = [];
+          pieces.forEach(function (p) {
+            if (arriving && arriving.indexOf(p.key) !== -1) (p.character ? characters : things).push(p);
+            else still.push(p);
+          });
+          var tags = pieces
+            .map(function (p) {
+              var isNew = arriving && arriving.indexOf(p.key) !== -1;
+              return p.tags
+                .map(function (t) {
+                  var at = Office.P(t.x, t.y, t.z);
+                  // Variant B leaves out a label the shot cuts at the edge of the window.
+                  if (S.variant === "b" && (at[0] < 72 || at[0] > clear || at[1] < 72 || at[1] > sh - 40)) return "";
+                  return '<div class="tag' + (t.cls ? " " + t.cls : "") + (isNew ? " is-new" : "") + '" style="left:' + at[0].toFixed(1) + "px;top:" + at[1].toFixed(1) + 'px">' + t.html + "</div>";
+                })
+                .join("");
+            })
+            .join("");
+          var late = moveCamera ? " is-late" : "";
+          cam.innerHTML =
+            svg(still) +
+            (things.length ? '<div class="fr-arrive' + late + '">' + svg(things, true) + "</div>" : "") +
+            (characters.length ? '<div class="fr-arrive fr-arrive--char' + late + '">' + svg(characters, true) + "</div>" : "") +
+            '<div class="tags' + late + '">' + tags + "</div>";
+
+          // The camera: draw crisp at the new framing, start from a transform that shows the old
+          // framing, and let the transform go. Only an HTML element's transform animates.
+          var next = { U: U, x: origin[0], y: origin[1] };
+          cam.classList.remove("is-moving");
+          if (moveCamera && shot && !reduced && (shot.U !== next.U || shot.x !== next.x || shot.y !== next.y)) {
+            var k = shot.U / next.U;
+            cam.style.transform = "translate(" + (shot.x - k * next.x).toFixed(1) + "px," + (shot.y - k * next.y).toFixed(1) + "px) scale(" + k.toFixed(4) + ")";
+            void cam.offsetWidth;
+            cam.classList.add("is-moving");
+            cam.style.transform = "none";
+          } else {
+            cam.style.transform = "none";
+          }
+          shot = next;
+          drawn = w;
+        }
+
+        /** Returns the keys of the pieces the current world has and the last drawn world did not. */
+        function newPieces() {
+          if (!drawn) return [];
+          var before = furnish(drawn).map(function (p) {
+            return p.key;
+          });
+          return furnish(world())
+            .map(function (p) {
+              return p.key;
+            })
+            .filter(function (k) {
+              return before.indexOf(k) === -1;
+            });
+        }
+
+        /**
+         * Moves to a step, or to another state of the same step, and lets what the change added
+         * settle into the room. In variant B the camera first moves to the new step's shot, and
+         * the pieces land when it stops. Once they have landed, the room is drawn again as one
+         * still picture, so every piece sorts by depth with the rest.
+         */
+        function go(step, state) {
+          var from = S.step;
+          S.step = step;
+          S.state = state;
+          render();
+          var arriving = reduced ? [] : newPieces();
+          var moving = S.variant === "b" && from !== step;
+          drawRoom(arriving.length ? arriving : null, moving);
+          if (!arriving.length) return;
+          setTimeout(function () {
+            drawRoom(null, false);
+          }, moving ? 760 : 400);
+        }
+
+        /* ------------------------------------------------------------ the steps */
+
+        function kicker(step) {
+          return '<p class="st-kicker st-count">Step ' + at(step) + " of 4</p>";
+        }
+        function field(opts) {
+          return (
+            '<label class="fl">' +
+            '<span class="fl-label">' + opts.label + (opts.aside ? '<span class="spacer"></span>' + opts.aside : "") + "</span>" +
+            '<span class="field' + (opts.bad ? " is-bad" : "") + '">' + (opts.pre || "") +
+            '<input data-f="' + opts.key + '" value="' + esc(S.form[opts.key]) + '"' + (opts.type ? ' type="' + opts.type + '"' : "") + (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : "") + (opts.mono ? ' class="mono"' : "") + (opts.focus ? " data-autofocus" : "") + ' spellcheck="false" autocomplete="off" />' +
+            (opts.after || "") + "</span>" +
+            (opts.error ? '<span class="fl-err">' + opts.error + "</span>" : opts.hint ? '<span class="fl-hint">' + opts.hint + "</span>" : "") +
+            "</label>"
+          );
+        }
+        function busyButton(label, busyLabel, act, busy) {
+          return '<button class="btn btn--accent btn--lg" data-act="' + act + '"' + (busy ? ' aria-busy="true"' : "") + ">" + (busy ? '<span class="spin"></span>' + busyLabel : label) + "</button>";
+        }
+
+        function viewWelcome() {
+          var st = S.state;
+          var off = '<p class="reach reach--off"><span class="dot-ok"></span><span><b>Hercule will run on this Mac</b></span><span class="spacer"></span><span>starts at login</span></p>';
+          var status = {
+            fresh: off,
+            searching: '<p class="reach"><span class="spin"></span>Looking for Hercule on this Mac…</p>',
+            starting: off,
+            found: '<p class="reach"><span class="dot-ok"></span><span><b>Hercule is running on this Mac</b></span><span class="spacer"></span><span class="mono">' + ME.address + "</span></p>",
+            "already-set-up": '<p class="reach"><span class="dot-ok"></span><span><b>Hercule on this Mac is already set up.</b> Sign in with the account you created.</span></p>',
+          }[st];
+          var perks =
+            '<ul class="perks">' +
+            '<li><span class="ico">' + icon("worktree") + "</span><span><b>A worktree for every thread</b>Each agent works on its own branch. Your checkout stays exactly as you left it.</span></li>" +
+            '<li><span class="ico">' + icon("intake") + "</span><span><b>Work arrives prepared</b>Triage reads what GitHub sends and brings you Proposals, not notifications.</span></li>" +
+            '<li><span class="ico">' + Crew.mark("waiting", 16) + "</span><span><b>You keep the decisions</b>When an agent needs you, it raises its hand and waits.</span></li>" +
+            "</ul>";
+          var lead = '<p class="lead">Hand off the work.<br />Keep the decisions.</p>' + '<p class="st-sub">Hercule gives coding agents desks of their own on this Mac. They work through the night, and come to you when a decision is yours.</p>';
+          var retry = '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="start">Try again</button><button class="btn btn--quiet" data-act="remote">It runs on another machine</button></div>';
+          if (st === "start-failed") {
+            return (
+              '<h1 class="st-h">Hercule didn’t start</h1>' +
+              '<p class="st-sub">The app started Hercule in the background, but it never answered. Its logs may say why:</p>' +
+              '<div class="cmd"><span>~/.hercule/logs</span><span class="spacer"></span><button class="btn btn--sm btn--quiet" data-act="noop">Show in Finder</button></div>' +
+              '<p class="reach reach--off"><span class="dot-ok"></span><span>Nothing answers at <span class="mono">' + ME.address + "</span></span></p>" +
+              retry
+            );
+          }
+          // The command's own error line, shown as it is: Try again stands for its "run this again".
+          if (st === "start-error") {
+            return (
+              '<h1 class="st-h">Hercule didn’t start</h1>' +
+              '<p class="st-sub">Starting Hercule on this Mac stopped with this error:</p>' +
+              '<div class="warn">' + icon("shield", 14) + '<span>/opt/tools/bin is on the PATH the service runs with, and every user on this machine can write to it, so anyone could put a program there that the service runs. Remove /opt/tools/bin from PATH, or run <span class="mono">chmod o-w /opt/tools/bin</span>, then run this again.</span></div>' +
+              retry
+            );
+          }
+          if (st === "runner") {
+            return (
+              '<h1 class="st-h">This Mac is a runner</h1>' +
+              '<p class="st-sub">It runs agents for Hercule on another machine, so Hercule itself doesn’t run here. Connect to that machine to open its office.</p>' +
+              '<p class="reach"><span class="dot-ok"></span><span><b>Hercule’s runner is running on this Mac</b></span><span class="spacer"></span><span>starts at login</span></p>' +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="remote">Connect to it</button></div>'
+            );
+          }
+          if (st === "remote" || st === "remote-not-set-up") {
+            var notSetUp = st === "remote-not-set-up";
+            return (
+              '<h1 class="st-h">Connect to Hercule on another machine</h1>' +
+              '<p class="st-sub">Paste the address of the machine that runs Hercule. If Hercule isn’t set up there yet, paste its setup address instead.</p>' +
+              '<div class="st-form">' +
+              field({
+                key: "remote",
+                label: "Address",
+                placeholder: "http://" + REMOTE.address,
+                mono: true,
+                focus: true,
+                bad: notSetUp,
+                error: notSetUp ? "Hercule on " + REMOTE.machine + " isn’t set up yet. On that machine, run <span class=\"mono\">hercule setup-url</span> and paste the address it prints." : "",
+                hint: "On that machine, <span class=\"mono\">hercule setup-url</span> prints the setup address.",
+              }) +
+              "</div>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="connect">Continue</button><button class="btn btn--quiet" data-act="this-mac">Use this Mac</button></div>'
+            );
+          }
+          if (st === "remote-set-up") {
+            return (
+              '<h1 class="st-h">Hercule on ' + REMOTE.machine + " is already set up</h1>" +
+              '<p class="st-sub">Sign in with the account you created there. The office lives on ' + REMOTE.machine + "; this Mac only opens it.</p>" +
+              '<p class="reach"><span class="dot-ok"></span><span><b>Hercule is running on ' + REMOTE.machine + '</b></span><span class="spacer"></span><span class="mono">' + REMOTE.address + "</span></p>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="noop">Sign in</button><button class="btn btn--quiet" data-act="remote">Use another address</button></div>'
+            );
+          }
+          if (st === "already-set-up") {
+            return lead + status + '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="noop">Sign in</button></div>';
+          }
+          return (
+            lead +
+            perks +
+            status +
+            '<div class="st-actions">' +
+            (st === "starting" ? busyButton("Open the office", "Starting Hercule…", "start", true) : '<button class="btn btn--accent btn--lg" data-act="start"' + (st === "searching" ? " disabled" : "") + ">Open the office</button>") +
+            '<span class="fine">Four steps, about three minutes</span></div>' +
+            '<p class="st-note">' + icon("server", 14) + '<span>Hercule already runs on another machine? <a class="link" data-act="remote">Connect to it</a></span></p>'
+          );
+        }
+
+        function viewAccount() {
+          var st = S.state;
+          return (
+            kicker("account") +
+            '<h1 class="st-h">Create your account</h1>' +
+            '<p class="st-sub">You sign in with it here, on the web and in the terminal. Everything Hercule does is signed with who did it: you, or one of your agents.</p>' +
+            '<div class="st-form">' +
+            field({ key: "user", label: "Username", hint: "Your Mac’s account name. Change it if you like." }) +
+            field({ key: "pass", label: "Password", type: "password", focus: true, bad: st === "error", error: st === "error" ? "Use at least 8 characters." : "", hint: "At least 8 characters." }) +
+            '<div class="row fine">' + icon("clock", 14) + "<span>Times show in <b style=\"color:var(--muted)\">" + ME.tz + '</b></span><a class="link" data-act="noop">Change</a></div>' +
+            "</div>" +
+            '<div class="st-actions">' + busyButton("Create account", "Creating your account…", "create-account", st === "submitting") + "</div>" +
+            '<p class="st-note">' + Crew.face("Hercule", { pose: "asleep", size: 18 }) + "<span>This also sets up <b>Hercule, your assistant</b>. Give it a chat channel later in Settings › Assistants.</span></p>"
+          );
+        }
+
+        function providerRow(id, name, path, state) {
+          var brand = id === "claude" ? "claude" : id === "codex" ? "openai" : "pi";
+          var action = {
+            idle: '<button class="btn btn--sm" data-act="' + id + '-login">Log in</button>',
+            paste: '<button class="btn btn--sm btn--quiet" data-act="' + id + '-cancel">Cancel</button>',
+            error: '<button class="btn btn--sm btn--quiet" data-act="' + id + '-cancel">Cancel</button>',
+            device: '<button class="btn btn--sm btn--quiet" data-act="' + id + '-cancel">Cancel</button>',
+            ready: '<span class="hx-ok">' + icon("check", 14) + "Logged in</span>",
+            install: '<button class="btn btn--sm" data-act="noop">Install</button>',
+          }[state];
+          var more = "";
+          if (state === "paste" || state === "error") {
+            more =
+              '<div class="hx-more">' +
+              '<div class="hx-step"><b>1</b><span>Open the sign-in page and approve Hercule.<br /><button class="btn btn--sm" data-act="noop">' + icon("external", 14) + "Open sign-in page</button></span></div>" +
+              '<div class="hx-step"><b>2</b><span>Paste the code it shows you.' +
+              '<span class="row" style="margin-top:6px">' +
+              '<span class="field' + (state === "error" ? " is-bad" : "") + '" style="flex:1;height:30px"><input data-f="code" class="mono" value="' + esc(S.form.code) + '" placeholder="Paste the code" data-autofocus spellcheck="false" /></span>' +
+              '<button class="btn btn--sm btn--accent" data-act="claude-submit">Submit</button></span>' +
+              (state === "error" ? '<span class="fl-err" style="margin-top:6px">That code wasn’t accepted. A code works once; open the sign-in page for a new one.</span>' : "") +
+              "</span></div></div>";
+          }
+          if (state === "device") {
+            more =
+              '<div class="hx-more">' +
+              '<div class="hx-step"><b>1</b><span>Copy this code.<span class="code"><b>K7QF-2MXD</b><button class="btn btn--sm btn--quiet" data-act="copy">Copy</button></span></span></div>' +
+              '<div class="hx-step"><b>2</b><span>Open the sign-in page and enter it.<br /><button class="btn btn--sm" data-act="noop">' + icon("external", 14) + "Open sign-in page</button></span></div>" +
+              '<span class="wait"><span class="spin"></span>Waiting for you to finish signing in. The code expires in 15 minutes.</span>' +
+              "</div>";
+          }
+          return (
+            '<div class="hx-row"><div class="hx-head"><span class="hx-mark">' + Crew.brand(brand, 18) + '</span><span class="hx-name"><b>' + name + "</b><span" + (path.charAt(0) === "/" ? ' class="mono"' : "") + ">" + path + "</span></span>" + action + "</div>" + more + "</div>"
+          );
+        }
+
+        function viewHarness() {
+          if (S.state === "none-found") {
+            return (
+              kicker("harness") +
+              '<h1 class="st-h">Your agents need a coding tool</h1>' +
+              '<p class="st-sub">Hercule drives Claude Code, Codex or pi, and found none of them on ' + describeHost() + '. Install one and log in to it; Hercule can install it for you.</p>' +
+              '<div class="hx">' +
+              providerRow("claude", "Claude Code", "Anthropic’s coding agent", "install") +
+              providerRow("codex", "Codex", "OpenAI’s coding agent", "install") +
+              providerRow("pi", "pi", "Uses a Z.ai API key", "install") +
+              "</div>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" disabled>Continue</button><button class="btn btn--quiet" data-act="harness-later">Do this later</button></div>'
+            );
+          }
+          var ready = S.claude === "ready" || S.codex === "ready";
+          return (
+            kicker("harness") +
+            '<h1 class="st-h">Claude Code and Codex are on ' + describeHost() + "</h1>" +
+            '<p class="st-sub">Log in to the ones you want your agents to use. The login runs on ' + describeHost() + " and its credential stays " + (S.host === ME ? "here" : "there") + ".</p>" +
+            '<div class="hx">' + providerRow("claude", "Claude Code", "/opt/homebrew/bin/claude", S.claude) + providerRow("codex", "Codex", "/opt/homebrew/bin/codex", S.codex) + "</div>" +
+            '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="harness-continue"' + (ready ? "" : " disabled") + ">Continue</button>" + (ready ? "" : '<button class="btn btn--quiet" data-act="harness-later">Do this later</button>') + "</div>"
+          );
+        }
+
+        function viewGithub() {
+          var st = S.state;
+          if (st === "connected") {
+            return (
+              kicker("github") +
+              '<h1 class="st-h">GitHub is connected</h1>' +
+              '<p class="st-sub">Triage first reads it at 11:00, then a few times a day. What deserves your attention shows up in Intake as a Proposal.</p>' +
+              '<div class="card"><span class="hx-mark">' + Crew.brand("github", 18) + '</span><span class="card-text"><b>Connected as rogier</b><span>12 repositories · topic github</span></span><span class="hx-ok">' + icon("check", 14) + "</span></div>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="github-continue">Continue</button></div>'
+            );
+          }
+          return (
+            kicker("github") +
+            '<h1 class="st-h">Connect GitHub</h1>' +
+            '<p class="st-sub">Hercule watches your repositories for new issues, reviews and failed checks. Triage reads them and brings you the ones that need work, ready to accept or dismiss.</p>' +
+            '<div class="st-form">' +
+            field({
+              key: "token",
+              label: "Personal access token",
+              aside: '<a class="link" data-act="noop" title="' + TOKEN_URL + '">Create one on GitHub ' + icon("external", 12) + "</a>",
+              placeholder: "github_pat_… or ghp_…",
+              mono: true,
+              focus: true,
+              bad: st === "refused",
+              error: st === "refused" ? "GitHub refused this token: Bad credentials. Check that it hasn’t expired, then paste it again." : "",
+              hint: "The link opens GitHub with the scopes Hercule needs already ticked. Hercule keeps the token encrypted.",
+            }) +
+            field({ key: "topic", label: "Topic in Intake", hint: "Intake groups what GitHub sends under this topic." }) +
+            "</div>" +
+            '<div class="st-actions">' + busyButton("Connect", "Checking the token…", "github-connect", st === "checking") + '<button class="btn btn--quiet" data-act="github-skip"' + (st === "checking" ? " disabled" : "") + ">Skip for now</button></div>"
+          );
+        }
+
+        function viewProject() {
+          var st = S.state;
+          var head = kicker("project") + '<h1 class="st-h">Add your first project</h1>' + '<p class="st-sub">A project is a set of repositories your agents work in. Pick one on this Mac; Hercule reads where it is hosted and clones it from there.</p>';
+          if (st === "empty") {
+            return (
+              head +
+              '<button class="pick-folder" data-act="pick"><span class="ico">' + icon("worktree", 20) + "</span><b>Choose a folder…</b><span>or drop one here</span></button>" +
+              '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own worktrees, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>"
+            );
+          }
+          var card = function (sub, badge) {
+            return '<div class="card"><span class="hx-mark">' + icon("worktree", 18) + '</span><span class="card-text"><b class="mono" style="font-size:var(--t-13)">' + REPO.folder + "</b><span>" + sub + "</span></span>" + (badge || '<button class="btn btn--sm btn--quiet" data-act="pick">Change</button>') + "</div>";
+          };
+          if (st === "not-git") {
+            return (
+              head +
+              card("Not a git repository") +
+              '<div class="warn">' + icon("question", 14) + "<span><b>This folder isn’t a git repository.</b> Hercule clones projects from a remote, so it needs one. Choose another folder, or create the project now and add a repository later." +
+              '<br /><button class="btn btn--sm" data-act="add">Create webshop without a repository</button></span></div>'
+            );
+          }
+          if (st === "no-remote") {
+            return (
+              head +
+              card("git · " + REPO.branch + " · no remote") +
+              '<div class="warn">' + icon("question", 14) + "<span><b>This repository has no remote.</b> Runners clone from a remote, never from this folder. Push it to GitHub first, or enter a remote URL below.</span></div>" +
+              '<div class="st-form">' + field({ key: "url", label: "Remote URL", placeholder: "git@github.com:you/webshop.git", mono: true }) + "</div>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" disabled>Add project</button></div>'
+            );
+          }
+          return (
+            head +
+            card(Crew.brand("github", 11) + " " + REPO.slug + " · " + REPO.branch) +
+            (st === "private"
+              ? '<div class="warn">' + icon("lock", 14) + "<span><b>" + REPO.slug + " is private.</b> Runners need a GitHub Connection to clone it, and you skipped that step.<br /><button class=\"btn btn--sm\" data-act=\"noop\">" + Crew.brand("github", 12) + "Connect GitHub</button></span></div>"
+              : "") +
+            '<div class="st-form">' +
+            field({ key: "name", label: "Project name" }) +
+            field({ key: "setup", label: "Setup command", aside: '<span class="fine" style="font-weight:400">optional</span>', placeholder: "pnpm install", mono: true, hint: "Runs in every new worktree before the agent starts." }) +
+            "</div>" +
+            '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="add">Add project</button></div>'
+          );
+        }
+
+        function viewDone() {
+          var noHarness = S.harness !== "ready";
+          var rows = [
+            [Crew.you(20), "<b>" + ME.user + "</b>", ME.tz],
+            [Crew.brand("claude", 16), noHarness ? "<b>No provider yet</b>" : "<b>Claude Code and Codex</b>", noHarness ? '<em class="later">Log in from Settings</em>' : "logged in"],
+            [Crew.brand("github", 16), S.github === "connected" ? "<b>GitHub</b> as rogier" : "<b>GitHub</b>", S.github === "connected" ? "topic github" : "skipped"],
+            ['<span class="proj proj--webshop"></span>', "<b>webshop</b>", REPO.slug],
+          ];
+          return (
+            '<div class="newbie"><span class="newbie-face">' + (noHarness ? Crew.logo(30) : Crew.face("New thread in webshop", { pose: "idle", size: 46 })) + "</span>" + '<span><p class="st-kicker" style="margin:0 0 4px">All set</p><h1 class="st-h">Your office is open</h1></span></div>' +
+            (noHarness
+              ? '<p class="st-sub">Agents need a provider before they can take a desk. Log in to Claude Code or Codex in Settings › Providers, and your first thread can start.</p>'
+              : '<p class="st-sub">Your first colleague is at its desk. Tell it what to do in webshop: it works in its own worktree, and raises its hand when it needs you.</p>') +
+            '<ul class="recap">' +
+            rows
+              .map(function (r) {
+                return "<li><span>" + r[0] + "</span><span>" + r[1] + "</span><em>" + r[2] + "</em></li>";
+              })
+              .join("") +
+            "</ul>" +
+            '<div class="st-actions">' + (noHarness ? '<button class="btn btn--accent btn--lg" data-act="noop">Log in to a provider</button><button class="btn btn--quiet" data-act="first-thread">Open Hercule</button>' : '<button class="btn btn--accent btn--lg" data-act="first-thread">Start your first thread</button>') + "</div>"
+          );
+        }
+
+        var VIEWS = { welcome: viewWelcome, account: viewAccount, harness: viewHarness, github: viewGithub, project: viewProject, done: viewDone };
+
+        // One line per finished step, for the letter (variant C).
+        /** Checks whether the user passed a step by putting it off: a check mark would claim it was done. */
+        function isPutOff(step) {
+          return (step === "harness" && S.harness !== "ready") || (step === "github" && S.github !== "connected");
+        }
+
+        function summary(step) {
+          return {
+            account: ["Account", ME.user + " · " + ME.tz],
+            harness: ["Providers", S.harness === "ready" ? "Claude Code and Codex" : "Later"],
+            github: ["GitHub", S.github === "connected" ? "rogier · topic github" : "Skipped"],
+            project: ["Project", "webshop · " + REPO.slug],
+          }[step];
+        }
+
+        function brand(hero) {
+          var size = hero ? { a: 72, b: 48, c: 64 }[S.variant] : 34;
+          return '<div class="fr-brand' + (hero ? " fr-brand--hero" : "") + '"><span class="app-icon" style="--size:' + size + 'px">' + Crew.logo(size) + '</span><span class="wordmark">Hercule</span></div>';
+        }
+
+        function ladder() {
+          var i = at(S.step);
+          return LADDER.map(function (label, n) {
+            var done = n + 1 < i;
+            var cls = done ? "is-done" : n + 1 === i ? "is-now" : "";
+            return '<li class="' + cls + '"><span class="n">' + (done && !isPutOff(STEPS[n + 1]) ? icon("check", 12) : n + 1) + "</span>" + label + "</li>";
+          }).join("");
+        }
+
+        function letter() {
+          var i = at(S.step);
+          if (S.step === "welcome" || S.step === "done") return '<div class="fr-body">' + VIEWS[S.step]() + "</div>";
+          return (
+            '<ol class="lt-steps">' +
+            ["account", "harness", "github", "project"]
+              .map(function (step, n) {
+                var cls = at(step) < i ? "is-done" : at(step) === i ? "is-now" : "is-next";
+                var line = summary(step);
+                var body =
+                  cls === "is-now"
+                    ? '<div class="fr-body">' + VIEWS[step]() + "</div>"
+                    : '<div class="lt-line"><b>' + LADDER[n] + "</b>" + (cls === "is-done" ? "<span>" + line[1] + '</span><span class="spacer"></span>' + (isPutOff(step) ? "" : icon("check", 14)) : "") + "</div>";
+                return '<li class="lt-step ' + cls + '"><span class="lt-num deco-num">' + (n + 1) + "</span>" + body + "</li>";
+              })
+              .join("") +
+            "</ol>"
+          );
+        }
+
+        function render() {
+          root.dataset.variant = S.variant;
+          root.dataset.step = S.step;
+          var steps = S.step !== "welcome";
+          if (S.variant === "a") {
+            panel.className = "fr-panel";
+            panel.innerHTML = brand(S.step === "welcome") + (steps ? '<ol class="fr-ladder">' + ladder() + "</ol>" : "") + '<div class="fr-body">' + VIEWS[S.step]() + "</div>";
+            ladderEl.hidden = true;
+          } else if (S.variant === "b") {
+            panel.className = "fr-panel glass";
+            panel.innerHTML = (S.step === "welcome" ? brand(true) : "") + '<div class="fr-body">' + VIEWS[S.step]() + "</div>";
+            ladderEl.hidden = !steps;
+            ladderEl.innerHTML = ladder();
+          } else {
+            panel.className = "fr-panel";
+            panel.innerHTML =
+              brand(S.step === "welcome") +
+              '<span class="rule"></span>' +
+              letter() +
+              (S.step === "welcome" ? "" : '<p class="lt-foot"><span class="lt-dot"></span><span>Hercule is running on ' + S.host.machine + '</span><span class="mono">' + S.host.address + "</span></p>");
+            ladderEl.hidden = true;
+          }
+          var focus = panel.querySelector("[data-autofocus]");
+          if (focus && !framed) focus.focus();
+          syncProto();
+        }
+
+        /* ------------------------------------------------------------ what the buttons do */
+
+        function later(ms, fn) {
+          if (!frozen) setTimeout(fn, ms);
+        }
+
+        var ACTS = {
+          noop: function () {},
+          copy: function (el) {
+            var keep = el.innerHTML;
+            el.textContent = "Copied";
+            setTimeout(function () {
+              el.innerHTML = keep;
+            }, 1200);
+          },
+          // A Hercule that already answers opens straight away. Otherwise the app installs Hercule's
+          // background service on this Mac and waits for it to answer; the lights come on with it. The
+          // real start takes 3 seconds at least, because the command waits for Hercule to keep running.
+          start: function () {
+            if (S.state === "found") return go("account", "default");
+            go("welcome", "starting");
+            later(3200, function () {
+              if (S.state === "starting") go("account", "default");
+            });
+          },
+          remote: function () {
+            go("welcome", "remote");
+          },
+          // A setup address opens the four steps on that machine. The fixture's other machine is not
+          // set up yet, so a plain address shows what the user is asked for instead.
+          connect: function () {
+            var address = S.form.remote.trim();
+            if (!address) return;
+            if (address.indexOf("/setup?token=") === -1) return go("welcome", "remote-not-set-up");
+            S.host = REMOTE;
+            go("account", "default");
+          },
+          "this-mac": function () {
+            S.host = ME;
+            go("welcome", "fresh");
+          },
+          "create-account": function () {
+            if (S.form.pass.length < 8) return go("account", "error");
+            go("account", "submitting");
+            later(900, function () {
+              go("harness", "idle");
+            });
+          },
+          "claude-login": function () {
+            S.claude = "paste";
+            render();
+          },
+          "claude-cancel": function () {
+            S.claude = "idle";
+            render();
+          },
+          "claude-submit": function () {
+            S.claude = S.form.code.trim().length < 8 ? "error" : "ready";
+            render();
+          },
+          "codex-login": function () {
+            S.codex = "device";
+            render();
+            // The live provider topic turns the row ready when the login finishes in the browser.
+            later(3200, function () {
+              if (S.codex === "device") {
+                S.codex = "ready";
+                render();
+              }
+            });
+          },
+          "codex-cancel": function () {
+            S.codex = "idle";
+            render();
+          },
+          "harness-continue": function () {
+            S.harness = "ready";
+            go("github", "empty");
+          },
+          "harness-later": function () {
+            S.harness = "later";
+            go("github", "empty");
+          },
+          "github-connect": function () {
+            if (!S.form.token.trim()) return;
+            go("github", "checking");
+            later(1000, function () {
+              go("github", /^(ghp_|github_pat_)/.test(S.form.token.trim()) ? "connected" : "refused");
+            });
+          },
+          "github-continue": function () {
+            S.github = "connected";
+            go("project", "empty");
+          },
+          "github-skip": function () {
+            S.github = "skipped";
+            go("project", "empty");
+          },
+          pick: function () {
+            go("project", S.github === "skipped" ? "private" : "picked");
+          },
+          add: function () {
+            go("done", "default");
+          },
+          "first-thread": function () {
+            location.href = "session-empty.html?state=first" + (q.get("theme") ? "&theme=" + q.get("theme") : "");
+          },
+        };
+
+        root.addEventListener("click", function (e) {
+          var el = e.target.closest("[data-act]");
+          if (!el || el.disabled) return;
+          e.preventDefault();
+          ACTS[el.dataset.act](el);
+        });
+        root.addEventListener("input", function (e) {
+          if (e.target.dataset.f) S.form[e.target.dataset.f] = e.target.value;
+        });
+        root.addEventListener("keydown", function (e) {
+          if (e.key !== "Enter" || !e.target.dataset.f) return;
+          var main = panel.querySelector(".btn--accent[data-act]");
+          if (main) main.click();
+        });
+
+        /* ------------------------------------------------------------ the prototype bar */
+
+        var stepSel = document.querySelector('[data-proto="step"]');
+        var stateSel = document.querySelector('[data-proto="state"]');
+        stepSel.innerHTML = STEPS.map(function (s) {
+          return '<option value="' + s + '">' + s + "</option>";
+        }).join("");
+        function syncProto() {
+          stepSel.value = S.step;
+          stateSel.innerHTML = STATES[S.step]
+            .map(function (s) {
+              return '<option value="' + s + '">' + s + "</option>";
+            })
+            .join("");
+          stateSel.value = S.state;
+          document.querySelectorAll(".proto [data-variant]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.variant === S.variant));
+          });
+          document.querySelector('[data-proto="theme"]').textContent = document.documentElement.dataset.theme === "orient-express" ? "Light" : "Dark";
+          var p = new URLSearchParams(location.search);
+          p.set("variant", S.variant);
+          history.replaceState(null, "", "?" + p.toString());
+        }
+        document.querySelectorAll(".proto [data-variant]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            setVariant(b.dataset.variant);
+          });
+        });
+        function setVariant(v) {
+          S.variant = v;
+          shot = null;
+          render();
+          drawRoom(null, false);
+        }
+        stepSel.addEventListener("change", function () {
+          jump(stepSel.value, STATES[stepSel.value][0]);
+        });
+        stateSel.addEventListener("change", function () {
+          jump(S.step, stateSel.value);
+        });
+        function jump(step, state) {
+          S.step = step;
+          S.state = state;
+          applyState();
+          render();
+          drawRoom(null, true);
+        }
+        document.querySelector('[data-proto="theme"]').addEventListener("click", function () {
+          var html = document.documentElement;
+          html.dataset.theme = html.dataset.theme === "orient-express" ? "whitehaven" : "orient-express";
+          syncProto();
+        });
+        document.querySelector('[data-proto="restart"]').addEventListener("click", function () {
+          location.href = "first-run.html?variant=" + S.variant + (q.get("theme") ? "&theme=" + q.get("theme") : "");
+        });
+        document.addEventListener("keydown", function (e) {
+          if (e.target.closest("input, select, textarea")) return;
+          var order = ["a", "b", "c"];
+          if (e.key === "ArrowRight") setVariant(order[(order.indexOf(S.variant) + 1) % 3]);
+          if (e.key === "ArrowLeft") setVariant(order[(order.indexOf(S.variant) + 2) % 3]);
+        });
+
+        /* ------------------------------------------------------------ start */
+
+        render();
+        new ResizeObserver(function () {
+          drawRoom(null, false);
+        }).observe(stage);
+        // At launch the app asks `hercule service status` for Hercule's address on this Mac
+        // and whether this Mac is already a runner. A runner shows the runner state instead of
+        // Open the office; otherwise the app checks whether Hercule answers at that address.
+        // The fixture is a fresh Mac.
+        if (!frozen) {
+          later(1300, function () {
+            go("welcome", "fresh");
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

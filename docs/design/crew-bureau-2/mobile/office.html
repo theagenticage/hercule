@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Office · Hercule</title>
+    <style>
+      /* On a phone the Office is the roster, topped by a floor plan small enough to read in one glance. */
+      .receipt {
+        display: flex;
+        gap: 6px;
+        padding: 0 20px 12px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        flex: none;
+        box-shadow: 0 1px 0 var(--line-soft);
+      }
+      .receipt b {
+        font-weight: var(--w-bold);
+      }
+
+      /* The floor plan: one inlaid field per runner, as on the desktop floor, with the colleagues
+         seated there. The lobby holds whoever is asleep. */
+      .plan {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 14px 12px 2px;
+      }
+      .wing {
+        position: relative;
+        display: grid;
+        grid-template-rows: 1fr auto;
+        gap: 6px;
+        height: 84px;
+        padding: 13px 13px 10px;
+        border-radius: 14px;
+        background: color-mix(in oklab, var(--room-floor) 78%, var(--room-inlay));
+        color: var(--ink);
+      }
+      /* the double inlay line of a desktop wing */
+      .wing::before,
+      .wing::after {
+        content: "";
+        position: absolute;
+        border-radius: 10px;
+        border: 1px solid color-mix(in oklab, var(--room-inlay-2) 30%, transparent);
+        pointer-events: none;
+      }
+      .wing::before {
+        inset: 4px;
+      }
+      .wing::after {
+        inset: 7px;
+        border-radius: 8px;
+        border-color: color-mix(in oklab, var(--room-inlay-2) 18%, transparent);
+      }
+      .wing--lobby {
+        background: var(--room-floor);
+      }
+      .wing .stack > * + * {
+        margin-left: -6px;
+      }
+      .wing .stack .cr {
+        --badge-ring: color-mix(in oklab, var(--room-floor) 78%, var(--room-inlay));
+      }
+      .wing--lobby .stack .cr {
+        --badge-ring: var(--room-floor);
+      }
+      .wing .stack-more {
+        background: color-mix(in oklab, var(--ink) 9%, transparent);
+        color: var(--ink);
+      }
+      .wing-name {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        color: color-mix(in oklab, var(--muted) 78%, var(--room-inlay-2));
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .wing-name span {
+        font-weight: var(--w-medium);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .list .m-lane {
+        padding: 18px 8px 8px;
+      }
+      .m-lane .count {
+        margin-left: -2px;
+      }
+      .m-lane .faint {
+        margin-left: auto;
+        font-weight: var(--w-regular);
+      }
+      .list {
+        padding: 0 12px 20px;
+      }
+
+      /* The head of the queue: the question and its answers, one thumb away. */
+      .ask {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        gap: 2px 12px;
+        align-items: center;
+        padding: 14px 14px 14px;
+        border-radius: 20px;
+        background: var(--raised);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+      }
+      .ask > .cr {
+        grid-row: span 2;
+      }
+      .ask-t {
+        font-size: 15px;
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ask-where {
+        grid-column: 2 / 4;
+        display: flex;
+        gap: 6px;
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .ask-q {
+        grid-column: 1 / -1;
+        margin: 10px 0 0;
+        font-size: 15px;
+        line-height: 1.45;
+      }
+      .ask-q code {
+        font-size: 13px;
+      }
+      .ask-go {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .ask-go .btn {
+        height: 46px;
+        border-radius: 14px;
+        font-size: 15px;
+      }
+
+      /* A colleague per row: face and pose first, then what it does, then how long. */
+      .row {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 1px 12px;
+        align-items: center;
+        min-height: 62px;
+        padding: 9px 8px;
+      }
+      .row + .row,
+      .ask + .row {
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .ask + .row {
+        margin-top: 6px;
+        box-shadow: none;
+      }
+      .row > .cr {
+        grid-row: span 2;
+      }
+      .row b {
+        font-weight: var(--w-medium);
+        font-size: 15px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row small {
+        grid-column: 2 / 4;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Inline, so the rug swatch and its name share the line's baseline with the text after them. */
+      .row small .proj {
+        display: inline;
+        font-size: var(--t-12);
+      }
+      .row small .proj::before {
+        display: inline-block;
+        margin-right: 6px;
+        vertical-align: -1px;
+      }
+      .row .when {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-variant-numeric: tabular-nums;
+      }
+      .row .k {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .row .k code {
+        font-size: 11.5px;
+      }
+      .more-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 54px;
+        padding: 8px 8px;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .more-row b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .more-row .spacer {
+        flex: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <div class="m-title">
+        <h1>Office</h1>
+      </div>
+      <div class="receipt"><b class="you-ink">3 waiting on you</b>·<span>8 working</span>·<span>1 paused</span>·<span>4 idle</span></div>
+
+      <div class="m-body">
+        <div class="plan" role="list" aria-label="Runners">
+          <a class="wing" role="listitem" href="#">
+            <span class="stack"><i data-face="Refactor cart totals" data-pose="working" data-size="30"></i><i data-face="Investigate backup timeouts" data-pose="working" data-size="30"></i><i data-face="Label new issues run" data-pose="paused" data-size="30"></i><i data-face="Tidy checkout CSS" data-pose="idle" data-size="30"></i><span class="stack-more">+4</span></span>
+            <span class="wing-name">build-box-1<span>8 of 8 · at cap</span></span>
+          </a>
+          <a class="wing" role="listitem" href="#">
+            <span class="stack"><i data-face="Ada" data-pose="working" data-size="30"></i><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="30"></i><i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="30"></i><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="30"></i><span class="stack-more">+1</span></span>
+            <span class="wing-name">studio-mac<span>5 of 6</span></span>
+          </a>
+          <a class="wing" role="listitem" href="#">
+            <span class="stack"><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="30"></i><i data-face="Add iDEAL research" data-pose="idle" data-size="30"></i><i data-face="Ship release v2.15" data-pose="waiting" data-size="30"></i></span>
+            <span class="wing-name">build-box-2<span>3 of 8</span></span>
+          </a>
+          <a class="wing wing--lobby" role="listitem" href="#">
+            <span class="stack"><i data-face="Juno" data-pose="asleep" data-size="30"></i></span>
+            <span class="wing-name">Lobby<span>Juno, asleep</span></span>
+          </a>
+        </div>
+
+        <div class="list">
+          <div class="m-lane">Waiting on you <b class="count count--you">3</b><span class="faint">oldest 10m</span></div>
+          <div class="ask">
+            <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="40"></i>
+            <a class="ask-t" href="session-active.html">Fix 3&#8209;D Secure checkout</a>
+            <span class="when faint">10m</span>
+            <span class="ask-where"><span class="proj proj--webshop">webshop</span>·<span>Claude Code</span>·<span>studio-mac</span></span>
+            <p class="ask-q">Run <code>git push -u origin fix/3ds-eu-cards</code>?</p>
+            <div class="ask-go">
+              <button class="btn btn--accent">Allow once</button>
+              <button class="btn btn--quiet">Deny</button>
+            </div>
+          </div>
+          <a class="row" href="#"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="36"></i><b>Migrate ops dashboards</b><span class="when">6m</span><small><span class="k">Keep the old Grafana folder?</span></small></a>
+          <a class="row" href="decision.html"><i data-face="Ship release v2.15" data-pose="waiting" data-size="36"></i><b>Ship release v2.15</b><span class="when">2m</span><small><span class="k">Publish payments-api 2.15.0 to npm?</span></small></a>
+
+          <div class="m-lane">Working <b class="count">8</b></div>
+          <a class="row" href="#"><i data-face="Refactor cart totals" data-pose="working" data-size="36"></i><b>Refactor cart totals</b><span class="when">22m</span><small><span class="proj proj--webshop">webshop</span> · running <code>pnpm test cart</code></small></a>
+          <a class="row" href="#"><i data-face="Investigate backup timeouts" data-pose="working" data-size="36"></i><b>Investigate backup timeouts</b><span class="when">6m</span><small><span class="proj proj--ops">ops</span> · reading the backup job's logs</small></a>
+          <a class="row" href="#"><i data-face="Webhook retry backoff" data-pose="working" data-size="36"></i><b>Webhook retry backoff</b><span class="when">3m</span><small><span class="proj proj--payments">payments-api</span> · step 2 of 4, write the fix</small></a>
+          <a class="row" href="assistant.html"><i data-face="Ada" data-pose="working" data-size="36"></i><b>Ada</b><span class="when">now</span><small>Assistant · answering your backup question</small></a>
+          <div class="more-row">
+            <span class="stack"><i data-face="Cart total rounding on discounts" data-pose="working" data-size="28"></i><i data-face="Payout report for September" data-pose="working" data-size="28"></i><i data-face="Rotate staging secrets" data-pose="working" data-size="28"></i><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="28"></i></span>
+            <span><b>4 more</b> working</span>
+            <span class="spacer"></span>
+            <i data-i="chev-d" data-size="16"></i>
+          </div>
+
+          <div class="m-lane">Paused <b class="count">1</b></div>
+          <a class="row" href="intake.html"><i data-face="Label new issues run" data-pose="paused" data-size="36"></i><b>Label new issues</b><span class="when">1h 27m</span><small><span class="proj proj--webshop">webshop</span> · the Spawn Bound tripped at 08:14</small></a>
+
+          <div class="m-lane">Idle <b class="count">4</b><span class="faint">and Juno, asleep</span></div>
+          <a class="row" href="#"><i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="36"></i><b>Read the Stripe v14 changelog</b><span class="when">20m</span><small><span class="proj proj--webshop">webshop</span> · finished its turn</small></a>
+          <a class="row" href="#"><i data-face="Add iDEAL research" data-pose="idle" data-size="36"></i><b>Add iDEAL research</b><span class="when">1h</span><small><span class="proj proj--payments">payments-api</span> · finished its turn</small></a>
+          <a class="row" href="#"><i data-face="Tidy checkout CSS" data-pose="idle" data-size="36"></i><b>Tidy checkout CSS</b><span class="when">2h</span><small><span class="proj proj--webshop">webshop</span> · finished its turn</small></a>
+          <a class="row" href="#"><i data-face="Milo" data-pose="idle" data-size="36"></i><b>Milo</b><span class="when">40m</span><small>Assistant · nothing on its list</small></a>
+          <a class="row" href="#"><i data-face="Juno" data-pose="asleep" data-size="36"></i><b>Juno</b><span class="when"></span><small>Assistant · asleep, wakes when Discord writes</small></a>
+        </div>
+      </div>
+
+      <nav data-tabbar="office"></nav>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>
