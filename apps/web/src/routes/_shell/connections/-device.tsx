@@ -89,6 +89,7 @@ export function DeviceSignIn({
   // status line stays up until the next reply.
   const [lastReply, setLastReply] = useState<ConnectionDevicePoll | undefined>(undefined);
   const [lastFailure, setLastFailure] = useState<unknown>(null);
+  const [settledPolls, setSettledPolls] = useState(0);
   const step = decideDeviceFlowStep(deviceStart, lastReply);
 
   // The callbacks are passed to `mutate`, not to `useMutation`, because React
@@ -102,12 +103,20 @@ export function DeviceSignIn({
         if (reply.status === "done") onDone();
       },
       onError: setLastFailure,
+      onSettled: () => {
+        setSettledPolls((count) => count + 1);
+      },
     });
   });
 
   // No poll is scheduled while one is in flight, or once the flow has ended.
-  // `submittedAt` changes with every poll, so the next poll is scheduled even
-  // when its delay equals the last one.
+  // `settledPolls` changes once per finished poll, so the next poll is
+  // scheduled even when its delay equals the last one. Neither `isPending` nor
+  // the mutation's `submittedAt` can be relied on for that: React Query may
+  // report the start and the end of a fast poll in one update, so `isPending`
+  // never shows as true, and `submittedAt` is the wall-clock time in
+  // milliseconds, which two polls share when the timers are faked and the
+  // wall clock does not move between them.
   const delay = step.kind === "waiting" && !poll.isPending ? step.delay : null;
   useEffect(() => {
     if (delay === null) return;
@@ -115,7 +124,7 @@ export function DeviceSignIn({
     return () => {
       clearTimeout(timer);
     };
-  }, [delay, poll.submittedAt]);
+  }, [delay, settledPolls]);
 
   if (step.kind === "ended") {
     return (
