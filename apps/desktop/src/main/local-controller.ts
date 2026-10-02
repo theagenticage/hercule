@@ -10,10 +10,10 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import type { LocalControllerFindOutcome, LocalControllerStartOutcome } from "../ipc/contract";
 import { AppSettings } from "./app-settings";
+import type { ControllerCheckOutcome } from "./controller-check";
 import { ControllerConnection, isAnswering } from "./controller-connection";
 import { InstalledBinary, type ServiceReport } from "./installed-binary";
 import { LoginShell } from "./login-shell-path";
@@ -151,6 +151,23 @@ export const makeLocalControllerLayer = (
       });
 
       /**
+       * Runs the connect check on `origin` until the outcome is anything but
+       * `Unreachable`, waiting ANSWER_CHECK_INTERVAL between two checks, and
+       * returns that outcome.
+       *
+       * It loops with Effect.sleep rather than Effect.repeat with a
+       * Schedule: the bundler keeps the code Effect.repeat needs in the
+       * Effect module, which is in main's startup file, so the Schedule
+       * module would load at every launch, 1.7 kB minified.
+       */
+      const checkUntilAnswered = (origin: string): Effect.Effect<ControllerCheckOutcome> =>
+        Effect.flatMap(connection.check(origin), (outcome) =>
+          outcome._tag === "Unreachable"
+            ? Effect.andThen(Effect.sleep(ANSWER_CHECK_INTERVAL), checkUntilAnswered(origin))
+            : Effect.succeed(outcome),
+        );
+
+      /**
        * Checks the controller `report` names every half second, while
        * nothing answers, for up to 30 seconds, and saves its URL once it
        * answers. Returns `Saved`; `NoAnswer` when nothing answered in time;
@@ -169,11 +186,7 @@ export const makeLocalControllerLayer = (
               line: "Hercule was started, but its config.toml names no address the app can open. Run `hercule service status` in Terminal to see why.",
             } as const;
           }
-          const outcome = yield* connection.check(origin).pipe(
-            Effect.repeat({
-              while: (outcome) => outcome._tag === "Unreachable",
-              schedule: Schedule.spaced(ANSWER_CHECK_INTERVAL),
-            }),
+          const outcome = yield* checkUntilAnswered(origin).pipe(
             Effect.timeoutOrElse({
               duration: ANSWER_TIME_LIMIT,
               orElse: () => Effect.succeed({ _tag: "Unreachable" } as const),
