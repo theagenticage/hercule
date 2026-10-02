@@ -25,7 +25,7 @@ const INSTALLER_COMMAND =
  * - `starting`: Open the office is starting Hercule.
  * - `found`: Hercule runs on this Mac at `address`, not set up yet.
  * - `no-answer`: Hercule started but nothing answered at `address`;
- *   its logs are in `logsDir`.
+ *   its logs are in `logsFolder`.
  * - `start-error`: starting Hercule failed with `line`.
  * - `not-installed`: there is no Hercule on this Mac to start.
  * - `runner`: this Mac is another machine's runner, `running` or stopped.
@@ -35,7 +35,7 @@ export type WelcomeState =
   | { readonly kind: "fresh" }
   | { readonly kind: "starting" }
   | { readonly kind: "found"; readonly address: string }
-  | { readonly kind: "no-answer"; readonly address: string; readonly logsDir: string }
+  | { readonly kind: "no-answer"; readonly address: string; readonly logsFolder: string }
   | { readonly kind: "start-error"; readonly line: string }
   | { readonly kind: "not-installed" }
   | { readonly kind: "runner"; readonly running: boolean };
@@ -75,7 +75,7 @@ export function Welcome({
             The app started Hercule in the background, but it never answered. Its logs may say why:
           </p>
           <div className="cmd">
-            <span>{state.logsDir}</span>
+            <span>{state.logsFolder}</span>
             <span className="spacer" />
             <button type="button" className="btn btn--sm btn--quiet" onClick={onShowLogs}>
               Show in Finder
