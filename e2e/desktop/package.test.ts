@@ -18,10 +18,16 @@ import {
   buildAppArgs,
   findExecutable,
   findPackagedApp,
+  writeSettings,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
 import { buildAppEnv } from "../../apps/desktop/scripts/processes";
-import { createUserDataDirForTest, runSecondInstance, waitForExit } from "./harness";
+import {
+  createUserDataDirForTest,
+  findUnusedLoopbackUrl,
+  runSecondInstance,
+  waitForExit,
+} from "./harness";
 
 /**
  * The fuses spec 17 sets, by name, and the state each must be in.
@@ -113,7 +119,13 @@ describe("the release package", () => {
     // Every other test runs the test package, so this is the one run of what
     // ships. It is started as a plain process: its inspect arguments are off,
     // so Playwright cannot drive it.
+    //
+    // It also refuses `--hercule-binary`, so with no controller saved its
+    // first run would look for Hercule with this Mac's own binary. A saved
+    // controller that nothing answers at keeps it from looking: the app opens
+    // on the connect screen instead.
     const userDataDir = createUserDataDirForTest();
+    writeSettings(userDataDir, { controllerUrl: await findUnusedLoopbackUrl() });
     const first = spawn(findExecutable("release"), buildAppArgs(userDataDir), {
       env: buildAppEnv(),
       stdio: "ignore",

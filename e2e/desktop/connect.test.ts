@@ -15,24 +15,13 @@ import { PASSWORD, USERNAME } from "../../scripts/controller-process";
 import {
   answerWithEmptyPage,
   connectTo,
+  findUnusedLoopbackUrl,
   launchForTest,
   readAlertText,
   recordExternalOpens,
   startControllerForTest,
-  startLoopbackServer,
   startServerForTest,
 } from "./harness";
-
-/**
- * Returns the address of a loopback port that nothing listens on: the port of
- * a server that has just stopped. Another process could bind the port in
- * between, but that is unlikely enough for a test.
- */
-async function findUnusedLoopbackUrl(): Promise<string> {
-  const server = await startLoopbackServer((_request, response) => response.end());
-  await server.close();
-  return server.url;
-}
 
 /**
  * Starts recording every uncaught exception in the app's main process, and

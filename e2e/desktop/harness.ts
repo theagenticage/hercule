@@ -572,6 +572,17 @@ export async function startLoopbackServer(
   return describeLoopbackServer(server);
 }
 
+/**
+ * Returns the address of a loopback port that nothing listens on: the port of
+ * a server that has just stopped. Another process could bind the port in
+ * between, but that is unlikely enough for a test.
+ */
+export async function findUnusedLoopbackUrl(): Promise<string> {
+  const server = await startLoopbackServer((_request, response) => response.end());
+  await server.close();
+  return server.url;
+}
+
 /** Returns the origin of `server`, which listens on 127.0.0.1, and a function that stops it. */
 function describeLoopbackServer(server: Server): LoopbackServer {
   const { port } = server.address() as AddressInfo;
