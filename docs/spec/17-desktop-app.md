@@ -990,7 +990,7 @@ Idle at each step of the first run, with the window visible, read from a plain l
 |---|---|---|---|
 | Welcome | 6 to 15 | 1 to 2 | |
 | Hercule starting | 309 to 320 | 64 to 73 | the spinner, 0.8% of a core in the GPU process and 0.15% in the renderer |
-| Account | 71 | 6 | the username field is focused |
+| Account | 62 to 65 | 4 | the password field is focused; three of four launches, sampled again on 8754b1dd |
 | Providers | 4 | 1 | |
 | A provider login waiting | 301 | 36 | the spinner; read with Playwright attached |
 | GitHub | 3 | 1 | |
@@ -1000,7 +1000,11 @@ Idle at each step of the first run, with the window visible, read from a plain l
 | After the first run: the draft, its composer focused | 60 to 65 | 4 to 5 | the Before reads 51 to 65 and 4 to 5 on the same screen |
 
 - **The waiting steps cost what rule 2's spinner costs,** about 300 GPU wakeups a second, for as long as the wait lasts. That is a 120 Hz display drawing every frame while something turns. Each wait ends by itself, as rule 2 requires. Between waits, every step is at the still-page level.
-- **The two focused screens read over the focused-field budget** of 63 GPU and 4 renderer wakeups a second. The account step read 71 and 6, from one sample: it needs a second sample before anyone decides whether the first run misses the budget. The draft read up to 65 and 5, and the Before reads the same on the draft, so that reading is not this change's.
+- **The two focused screens read at the focused-field budget** of 63 GPU and 4 renderer wakeups a second, and at most 2 GPU and 1 renderer wakeups over it. A focused field costs an empty window 62 to 63 and 4, and the app adds about 3 and 1 to that, as the first milestone's finish found on the new-thread screen.
+  - The account step was sampled again on 2026-10-03, on 8754b1dd after the review's fixes, in four plain launches, with a load average of 5 to 13. Three read 62, 63 and 65 GPU wakeups and 4 in the renderer.
+  - The first of the four, the launch that installed Hercule and reloaded the window, read 4 and 1, the still-page level. Its caret was most likely not blinking: whether macOS makes the app active at a plain launch varies ([Measuring](#measuring)).
+  - The first sample, 71 and 6 on 332a0f6f, was not repeated. Its load average was not recorded.
+  - The draft read up to 65 and 5, and the Before reads the same on the draft, so that reading is not this change's.
 - **The launch was measured as [Measuring](#measuring) describes,** with two differences: one launch under Playwright warms the code cache, and three plain launches follow, 3 seconds apart. The Before's third launch, 449 ms, was slow from main's first step. The load average was not recorded, and other end-to-end suites ran on the machine during the session, each with its own app and controllers, so a busy machine is the likely cause of the 449 ms. A second set of launches 10 minutes earlier read 355 to 379 ms for the After and 365 to 381 ms for the Before. Memory was not measured for this change.
 
 ## Slices
