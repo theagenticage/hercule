@@ -1,0 +1,19 @@
+/* The logo mark and the brand marks, as the Bureau book's system.css styles
+   them: each sits on the text line like a character, and never shrinks in a
+   flex row. The book fills the logo mark's parts through SVG attributes;
+   classes do the same here. */
+.logo,
+.br {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+}
+.logo {
+  overflow: visible;
+}
+.logo-head {
+  fill: oklch(var(--char-l) var(--char-c) var(--hue-lime));
+}
+.logo-face {
+  fill: var(--face-ink);
+}

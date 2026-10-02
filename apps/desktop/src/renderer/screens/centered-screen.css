@@ -42,21 +42,6 @@
   font-size: 32px;
   line-height: 1;
 }
-/* The logo mark, as the book spells it. The book fills the mark's parts
-   through SVG attributes; classes do the same here. */
-.logo {
-  flex: none;
-  display: inline-block;
-  vertical-align: middle;
-  overflow: visible;
-}
-.logo-head {
-  fill: oklch(var(--char-l) var(--char-c) var(--hue-lime));
-}
-.logo-face {
-  fill: var(--face-ink);
-}
-
 .centered-form {
   display: flex;
   flex-direction: column;

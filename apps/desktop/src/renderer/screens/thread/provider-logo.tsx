@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { BrandMark } from "../../logos";
 import "./provider-logo.css";
 
 /**
@@ -38,16 +39,5 @@ export function ProviderLogo({
   }
   const path = PROVIDER_MARKS[providerId];
   if (path === undefined) return null;
-  return (
-    <svg
-      className="br"
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d={path} />
-    </svg>
-  );
+  return <BrandMark path={path} size={size} />;
 }
