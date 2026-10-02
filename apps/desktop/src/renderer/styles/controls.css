@@ -377,6 +377,10 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 .field.is-bad {
   box-shadow: inset 0 0 0 1.5px var(--fail);
+}
+/* The focus ring's rule above outranks `.field.is-bad`, because `:has(> input)`
+   counts as an element, so the red ring needs a rule that outranks it. */
+.field.is-bad:focus-within {
   outline-color: var(--fail);
 }
 /* An input sets `font: inherit`, which would undo the code font, so it is
@@ -388,6 +392,13 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 
 /* ---------- Text ---------- */
+/* Code set in a sentence, such as a command or an address, in the code face
+   that `code` uses. */
+.mono {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 0.92em;
+}
 /* A link drawn as text in the accent's ink, underlined while hovered. */
 .link {
   color: var(--accent-ink);
