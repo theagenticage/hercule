@@ -48,7 +48,10 @@ export type CredentialField = Schema.Schema.Type<typeof CredentialField>;
  * Three steps each obtain the credential in their own way: `credentials` (the
  * user pastes it), `oauth` (a redirect flow) and `device` (a device flow). A
  * type that declares more than one of them lets the user pick one for each
- * connection. A `checklist` step applies whichever one the user picks.
+ * connection, with one exception: a type that declares both `oauth` and
+ * `device` is refused at registration, because a type offers a redirect flow
+ * or a device flow, not both. A `checklist` step applies whichever one the
+ * user picks, and a `pairing` step obtains no credential.
  */
 export const SetupStep = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("checklist"), markdown: Schema.String }),
@@ -99,9 +102,15 @@ export const ConnectionType = Schema.Struct({
   type: ContributionWord,
   displayName: Schema.String.check(Schema.isMinLength(1)),
   setup: Schema.Array(SetupStep),
-  /** Required when, and only when, `setup` has an `oauth` step. */
+  /**
+   * Required when, and only when, `setup` has an `oauth` step. A type that
+   * declares both `oauth` and `device` is refused at registration.
+   */
   oauth: Schema.optionalKey(OAuthDeclaration),
-  /** Required when, and only when, `setup` has a `device` step. */
+  /**
+   * Required when, and only when, `setup` has a `device` step. A type that
+   * declares both `oauth` and `device` is refused at registration.
+   */
   device: Schema.optionalKey(DeviceDeclaration),
   /** Per-connection plugin config, rendered as a generated form. */
   configSchema: Schema.optionalKey(SchemaValue),

@@ -27,6 +27,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -90,6 +91,7 @@ import {
 } from "./repository";
 import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
 import { oauthSetupRepository } from "./oauth-setups";
+import type { SetupTarget, StoredSetupTarget } from "./setup-target";
 
 /** The input of `connection.query`: filters, page size and sort order. */
 const QueryInput = Schema.Struct({
@@ -175,23 +177,64 @@ const listCredentialFields = (contribution: Contribution): ReadonlyArray<string>
 const hasCredentialsStep = (contribution: Contribution): boolean =>
   contribution.setup.some((step) => step.kind === "credentials");
 
-/** Returns the operation that starts a type's token flow, for a refusal to point the user to. */
-const nameTokenFlowStart = (contribution: Contribution): string =>
-  contribution.device === undefined ? "connection.startOAuth" : "connection.startDeviceFlow";
+/** Whether a refused request was creating a connection or reconnecting one. */
+type SetupPurpose = "create" | "reconnect";
+
+/**
+ * Builds the end of a refusal: the operations that do set up this type,
+ * which the caller should use instead. Each setup step that obtains
+ * credentials has its own operation:
+ *
+ * - `credentials`: `connection.create`, or `connection.setCredentials` for a
+ *   reconnect;
+ * - `oauth`: `connection.startOAuth`;
+ * - `device`: `connection.startDeviceFlow`.
+ *
+ * A `checklist` or `pairing` step obtains no credentials, so a type with only
+ * those steps has no operation to name, and the text says so.
+ */
+const describeSetupOperations = (contribution: Contribution, purpose: SetupPurpose): string => {
+  const operations = contribution.setup.flatMap((step) => {
+    switch (step.kind) {
+      case "credentials":
+        return [purpose === "create" ? "connection.create" : "connection.setCredentials"];
+      case "oauth":
+        return ["connection.startOAuth"];
+      case "device":
+        return ["connection.startDeviceFlow"];
+      default:
+        return [];
+    }
+  });
+  const goal = purpose === "create" ? "set it up" : "reconnect it";
+  return operations.length === 0
+    ? `no operation can ${goal}, because its setup has no credentials, oauth or device step`
+    : `${goal} with ${operations.join(" or ")} instead`;
+};
 
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
 const decodeDeviceStart = Schema.decodeUnknownEffect(ConnectionDeviceStartInput);
 const decodeDevicePoll = Schema.decodeUnknownEffect(ConnectionDevicePollInput);
 
-/** What a token flow writes when it creates a connection, or keeps when it reconnects one. */
-interface SetupTarget {
-  readonly label: string;
-  readonly labels: ReadonlyArray<string>;
-  readonly config: Record<string, Schema.Json>;
-}
-
 /** The answer to a poll of a device flow that is unknown, already ended, or expired. */
 const DEVICE_FLOW_EXPIRED = "this device flow has ended or expired: start a new one";
+
+/**
+ * The longest a device flow is kept, in seconds, and the longest pause
+ * between two polls, whatever the provider asks for. A hostile or broken
+ * provider could otherwise keep a setup row alive for years, or tell a client
+ * to wait forever before its next poll.
+ */
+const MAX_DEVICE_FLOW_SECONDS = 30 * 60;
+const MAX_POLL_INTERVAL_SECONDS = 60;
+
+/**
+ * How the account check is retried once a device flow's approval is spent:
+ * three attempts in all, one second and then two seconds apart. The provider
+ * cannot issue the token again, so a check that failed on a passing network
+ * error would otherwise cost the user a new code.
+ */
+const ACCOUNT_CHECK_RETRY = { schedule: Schedule.exponential("1 second"), times: 2 };
 
 /** Fails an OAuth callback with the outcome to show the user. */
 const failWithOutcome = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
@@ -388,7 +431,7 @@ const make = Effect.gen(function* () {
       const owner = buildSecretOwner(id);
       const held = (yield* secrets.refs("connection", [id])).get(id) ?? [];
       yield* Effect.forEach(
-        held.filter((ref) => !(ref.name in credentials)),
+        held.filter((ref) => !Object.hasOwn(credentials, ref.name)),
         (ref) => secrets.delete(owner, ref.name),
         { discard: true },
       );
@@ -409,7 +452,7 @@ const make = Effect.gen(function* () {
    * has another type, when a new connection has no label or no topic, or when
    * the config does not suit the type.
    */
-  const readSetupTarget = (
+  const buildSetupTarget = (
     input: {
       readonly type: string;
       readonly label?: string;
@@ -466,13 +509,19 @@ const make = Effect.gen(function* () {
    * `actor` is passed in rather than read, because the redirect flow's
    * callback arrives without a credential.
    */
-  const writeTokenConnection = (
-    setup: SetupTarget & { readonly type: string; readonly connectionId: string | undefined },
-    pluginId: string,
-    displayName: string,
-    tokens: TokenSet,
-    actor: string,
-  ): Effect.Effect<Option.Option<Connection>, SqlError> =>
+  const writeConnectionFromTokens = ({
+    setup,
+    pluginId,
+    displayName,
+    tokens,
+    actor,
+  }: {
+    readonly setup: StoredSetupTarget;
+    readonly pluginId: string;
+    readonly displayName: string;
+    readonly tokens: TokenSet;
+    readonly actor: string;
+  }): Effect.Effect<Option.Option<Connection>, SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -530,10 +579,11 @@ const make = Effect.gen(function* () {
         failWithOutcome("expired"),
       );
       if (params.state === undefined) return yield* failWithOutcome("expired");
-      const at = yield* nowIso;
       // Consume the setup in its own transaction, before anything waits on the
       // provider, so a state presented twice finds nothing the second time.
-      const pending = yield* Effect.orDie(withTransaction(sql, setups.consume(params.state, at)));
+      const pending = yield* Effect.orDie(
+        withTransaction(sql, setups.consume(params.state, yield* nowIso)),
+      );
       if (Option.isNone(pending)) return yield* failWithOutcome("expired");
       const setup = pending.value;
       // The provider sent the user back with an error instead of a code, or
@@ -573,16 +623,16 @@ const make = Effect.gen(function* () {
         );
 
       const written = yield* Effect.orDie(
-        writeTokenConnection(
+        writeConnectionFromTokens({
           setup,
-          registered.pluginId,
-          account.displayName,
+          pluginId: registered.pluginId,
+          displayName: account.displayName,
           tokens,
           // The user started this setup with an authenticated request. The
           // browser comes back without a credential, but the actor is still
           // the user.
-          USER_ACTOR,
-        ),
+          actor: USER_ACTOR,
+        }),
       );
       if (Option.isNone(written)) return yield* failWithOutcome("expired");
       return "ok" as const;
@@ -633,8 +683,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Creates a connection from credentials the user pasted, once the type has
-     * validated them. Fails with `validation` for an OAuth type, which has no
-     * credentials to paste: that type is set up with `connection.startOAuth`.
+     * validated them. Fails with `validation` for a type whose setup has no
+     * credentials step, such as one that signs in only through a redirect
+     * flow: the message names the operations that set that type up.
      */
     create: (
       input: ConnectionCreateInput,
@@ -644,7 +695,9 @@ const make = Effect.gen(function* () {
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const { pluginId, contribution } = yield* readTypeOrFail(decoded.type);
         if (!hasCredentialsStep(contribution)) {
-          const message = `the type ${decoded.type} takes no pasted credentials: set it up with ${nameTokenFlowStart(contribution)}`;
+          const message =
+            `the type ${decoded.type} takes no pasted credentials, because its setup has no ` +
+            `credentials step: ${describeSetupOperations(contribution, "create")}`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
         const config = decoded.config ?? {};
@@ -740,7 +793,9 @@ const make = Effect.gen(function* () {
         const row = yield* readStoredConnectionOrFail(decoded.id);
         const { contribution } = yield* readStoredTypeOrFail(row);
         if (!hasCredentialsStep(contribution)) {
-          const message = `the type ${row.type} takes no pasted credentials: reconnect it with ${nameTokenFlowStart(contribution)}`;
+          const message =
+            `the type ${row.type} takes no pasted credentials, because its setup has no ` +
+            `credentials step: ${describeSetupOperations(contribution, "reconnect")}`;
           return yield* Effect.fail(
             createValidationError([{ path: ["credentials"], message }], message),
           );
@@ -788,10 +843,12 @@ const make = Effect.gen(function* () {
         const { pluginId, contribution } = yield* readTypeOrFail(decoded.type);
         const oauth = contribution.oauth;
         if (oauth === undefined) {
-          const message = `the type ${decoded.type} is not set up through an OAuth flow: create it with connection.create`;
+          const message =
+            `the type ${decoded.type} has no redirect flow, because its setup has no oauth ` +
+            `step: ${describeSetupOperations(contribution, decoded.connectionId === undefined ? "create" : "reconnect")}`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
-        const target = yield* readSetupTarget(decoded, contribution);
+        const target = yield* buildSetupTarget(decoded, contribution);
         const client = yield* findOAuthClient(pluginId);
         if (Option.isNone(client)) {
           return yield* Effect.fail(
@@ -802,13 +859,13 @@ const make = Effect.gen(function* () {
           );
         }
 
-        const at = yield* nowIso;
+        const now = yield* nowIso;
         const state = mintToken();
         const codeVerifier = mintToken();
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* setups.sweep(at);
+            yield* setups.deleteExpired(now);
             yield* setups.insert({
               state,
               type: decoded.type,
@@ -816,8 +873,8 @@ const make = Effect.gen(function* () {
               ...target,
               origin: decoded.origin,
               codeVerifier,
-              expiresAt: new Date(Date.parse(at) + SETUP_LIFETIME_MS).toISOString(),
-              at,
+              expiresAt: new Date(Date.parse(now) + SETUP_LIFETIME_MS).toISOString(),
+              createdAt: now,
             });
           }),
         );
@@ -857,6 +914,9 @@ const make = Effect.gen(function* () {
      * does not suit it, and with `invalid_state` when the provider refuses to
      * start a flow or cannot be reached. The provider is called before the
      * transaction, never inside it.
+     *
+     * The flow's lifetime is capped at 30 minutes and the poll interval at 60
+     * seconds, whatever the provider sends.
      */
     startDeviceFlow: (
       input: ConnectionDeviceStartInput,
@@ -873,33 +933,37 @@ const make = Effect.gen(function* () {
         const { contribution } = yield* readTypeOrFail(decoded.type);
         const device = contribution.device;
         if (device === undefined) {
-          const message = `the type ${decoded.type} has no device flow`;
+          const message =
+            `the type ${decoded.type} has no device flow, because its setup has no device ` +
+            `step: ${describeSetupOperations(contribution, decoded.connectionId === undefined ? "create" : "reconnect")}`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
-        const target = yield* readSetupTarget(decoded, contribution);
+        const target = yield* buildSetupTarget(decoded, contribution);
         const code = yield* requestDeviceCode(device).pipe(
           Effect.provide(FetchHttpClient.layer),
           Effect.mapError((error) => createInvalidStateError(error.message)),
         );
 
-        const at = yield* nowIso;
+        const now = yield* nowIso;
         const setupId = mintToken();
-        const expiresAt = new Date(Date.parse(at) + code.expiresIn * 1000).toISOString();
+        const lifetime = Math.min(code.expiresIn, MAX_DEVICE_FLOW_SECONDS);
+        const interval = Math.min(code.interval, MAX_POLL_INTERVAL_SECONDS);
+        const expiresAt = new Date(Date.parse(now) + lifetime * 1000).toISOString();
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* deviceSetups.sweep(at);
+            yield* deviceSetups.deleteExpired(now);
             yield* deviceSetups.insert({
               setupId,
               type: decoded.type,
               connectionId: decoded.connectionId,
               ...target,
               deviceCode: code.deviceCode,
-              interval: code.interval,
+              interval,
               // The provider wants one interval before the first poll too.
-              nextPollAt: new Date(Date.parse(at) + code.interval * 1000).toISOString(),
+              nextPollAt: new Date(Date.parse(now) + interval * 1000).toISOString(),
               expiresAt,
-              at,
+              createdAt: now,
             });
           }),
         );
@@ -908,14 +972,14 @@ const make = Effect.gen(function* () {
           userCode: code.userCode,
           verificationUri: code.verificationUri,
           expiresAt,
-          interval: code.interval,
+          interval,
         };
       }),
 
     /**
-     * Asks the provider once whether the user has approved a device flow, and
-     * returns where the flow stands. Every way the flow can end is a status in
-     * the answer rather than an error.
+     * Returns where a device flow stands, asking the provider at most once.
+     * Every way the flow can end is a status in the answer rather than an
+     * error.
      *
      * The steps are ordered so that a flow ends only once, and no transaction
      * waits on the provider:
@@ -926,7 +990,9 @@ const make = Effect.gen(function* () {
      * 2. The device code is exchanged, outside any transaction.
      * 3. When tokens come back, a transaction deletes the setup. If another
      *    poll deleted it first, this one answers `expired`.
-     * 4. The type checks the account, and the connection is written.
+     * 4. The type checks the account, up to three times, and the connection
+     *    is written. If every check fails, the answer is `failed`: the
+     *    approval is spent, so the user has to start again.
      */
     pollDeviceFlow: (
       input: ConnectionDevicePollInput,
@@ -938,11 +1004,13 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const expired = { status: "expired", message: DEVICE_FLOW_EXPIRED } as const;
+        // One exchange per interval, however many polls arrive together:
+        // `claimPoll` explains why its transaction makes that hold.
         const claim = yield* withTransaction(sql, deviceSetups.claimPoll(setupId, yield* nowIso));
         if (claim._tag === "expired") return expired;
         if (claim._tag === "early") return { status: "pending", interval: claim.interval } as const;
         const setup = claim.setup;
-        const endFlow = withTransaction(sql, deviceSetups.spend(setupId));
+        const endFlow = withTransaction(sql, deviceSetups.delete(setupId));
 
         const registered = Option.getOrUndefined(yield* types.named(setup.type));
         const device = registered?.contribution.device;
@@ -965,8 +1033,11 @@ const make = Effect.gen(function* () {
           case "unreachable":
             return { status: exchange.status, interval: setup.interval } as const;
           case "slow-down": {
-            const interval = exchange.interval ?? setup.interval + SLOW_DOWN_STEP_SECONDS;
-            yield* withTransaction(sql, deviceSetups.slowDown(setupId, interval, yield* nowIso));
+            const interval = Math.min(
+              exchange.interval ?? setup.interval + SLOW_DOWN_STEP_SECONDS,
+              MAX_POLL_INTERVAL_SECONDS,
+            );
+            yield* withTransaction(sql, deviceSetups.setInterval(setupId, interval, yield* nowIso));
             return { status: "slow-down", interval } as const;
           }
           case "expired":
@@ -979,22 +1050,30 @@ const make = Effect.gen(function* () {
         }
 
         if (!(yield* endFlow)) return expired;
-        const account = yield* Effect.result(
-          Effect.provide(
-            registered.contribution.validate({ accessToken: exchange.tokens.accessToken }),
-            FetchHttpClient.layer,
-          ),
-        );
+        // The provider will not issue this token again, so a check that fails
+        // once is tried again before the approval is given up.
+        const account = yield* registered.contribution
+          .validate({ accessToken: exchange.tokens.accessToken })
+          .pipe(
+            Effect.provide(FetchHttpClient.layer),
+            Effect.retry(ACCOUNT_CHECK_RETRY),
+            Effect.result,
+          );
         if (Result.isFailure(account)) {
-          return { status: "rejected", message: account.failure.message } as const;
+          return {
+            status: "failed",
+            message:
+              `the provider approved the sign-in, but checking the account failed: ` +
+              `${account.failure.message}. Start again to get a new code`,
+          } as const;
         }
-        const written = yield* writeTokenConnection(
+        const written = yield* writeConnectionFromTokens({
           setup,
-          registered.pluginId,
-          account.success.displayName,
-          exchange.tokens,
-          yield* currentStamp,
-        );
+          pluginId: registered.pluginId,
+          displayName: account.success.displayName,
+          tokens: exchange.tokens,
+          actor: yield* currentStamp,
+        });
         return Option.match(written, {
           onNone: () => ({
             status: "expired" as const,

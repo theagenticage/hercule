@@ -6,9 +6,13 @@
  * `setup_id` is the row's identity. It is what the client polls with, and it
  * is minted by the controller rather than taken from the provider, so the
  * provider's device code never leaves the controller: anyone who held it could
- * collect the token once the user approves. The device code is stored as
- * plain text, like the redirect flow's PKCE verifier, because the controller
- * has to send it back to the provider as it is.
+ * collect the token once the user approves. Even so, the device code is stored
+ * unencrypted, like the redirect flow's PKCE verifier:
+ *
+ * - it lives for minutes, and is used once;
+ * - it is useless until the user approves at the provider;
+ * - its row is deleted when a poll ends the flow, or by the next start once
+ *   the code has expired.
  *
  * A row is deleted as soon as a poll ends the flow, so a flow ends only once.
  * Rows for flows nobody finished are deleted on the next start.

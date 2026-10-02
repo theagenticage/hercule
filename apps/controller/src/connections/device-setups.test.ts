@@ -31,7 +31,7 @@ const buildSetup = (setupId: string): NewDeviceSetup => ({
   interval: 5,
   nextPollAt: afterStart(5),
   expiresAt: afterStart(900),
-  at: START,
+  createdAt: START,
 });
 
 describe("claimPoll", () => {
@@ -97,14 +97,14 @@ describe("claimPoll", () => {
   });
 });
 
-describe("slowDown", () => {
+describe("setInterval", () => {
   it("stores the new interval and moves the next poll one new interval past now", async () => {
     const result = await run(
       Effect.gen(function* () {
         const setups = yield* deviceSetupRepository;
         yield* setups.insert(buildSetup("a"));
         yield* setups.claimPoll("a", afterStart(5));
-        yield* setups.slowDown("a", 12, afterStart(6));
+        yield* setups.setInterval("a", 12, afterStart(6));
         return {
           early: yield* setups.claimPoll("a", afterStart(17)),
           claimed: yield* setups.claimPoll("a", afterStart(18)),
@@ -117,15 +117,15 @@ describe("slowDown", () => {
   });
 });
 
-describe("spend", () => {
-  it("ends a flow once: the second spend finds nothing, and a poll answers expired", async () => {
+describe("delete", () => {
+  it("ends a flow once: the second delete finds nothing, and a poll answers expired", async () => {
     const result = await run(
       Effect.gen(function* () {
         const setups = yield* deviceSetupRepository;
         yield* setups.insert(buildSetup("a"));
         return {
-          first: yield* setups.spend("a"),
-          second: yield* setups.spend("a"),
+          first: yield* setups.delete("a"),
+          second: yield* setups.delete("a"),
           claim: yield* setups.claimPoll("a", afterStart(5)),
         };
       }),
@@ -135,15 +135,15 @@ describe("spend", () => {
   });
 });
 
-describe("sweep", () => {
+describe("deleteExpired", () => {
   it("deletes the flows that have expired and keeps the others", async () => {
     const result = await run(
       Effect.gen(function* () {
         const setups = yield* deviceSetupRepository;
         yield* setups.insert(buildSetup("old"));
         yield* setups.insert({ ...buildSetup("new"), expiresAt: afterStart(2000) });
-        yield* setups.sweep(afterStart(900));
-        return { old: yield* setups.spend("old"), new: yield* setups.spend("new") };
+        yield* setups.deleteExpired(afterStart(900));
+        return { old: yield* setups.delete("old"), new: yield* setups.delete("new") };
       }),
     );
 

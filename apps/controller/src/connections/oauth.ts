@@ -141,8 +141,9 @@ export class ProviderRefused extends Schema.TaggedError<ProviderRefused>()("Prov
 }) {}
 
 /**
- * The provider could not be reached, failed with a server error, or answered
- * with a body that is neither tokens nor an OAuth error. This error says
+ * The provider could not be reached, failed with a server error, rate limited
+ * the request, or answered with a body that is neither tokens nor an OAuth
+ * error. This error says
  * nothing about the credential: a DNS failure or a dropped network is not
  * something the user can fix by reconnecting.
  */
@@ -265,14 +266,15 @@ export const oauthClients: Effect.Effect<
  * - Fails with `ProviderRefused` when the body is an OAuth error, whatever the
  *   status, or when the status is any other client error.
  * - Fails with `ProviderUnreachable` when the endpoint cannot be reached, answers
- *   with a server error, or answers with a body that is not JSON.
+ *   with a server error, answers with a body that is not JSON, or answers 403
+ *   or 429 with no OAuth error.
  *
- * `endpoint` names the endpoint in the error messages.
+ * `endpointName` names the endpoint in the error messages.
  */
 const postForm = (
   url: string,
   form: Record<string, string>,
-  endpoint: string,
+  endpointName: string,
 ): Effect.Effect<unknown, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const response = yield* HttpClient.post(url, {
@@ -281,32 +283,41 @@ const postForm = (
     });
     const status = String(response.status);
     if (response.status >= 500) {
-      return yield* failProviderUnreachable(`the ${endpoint} returned HTTP ${status}`);
+      return yield* failProviderUnreachable(`the ${endpointName} returned HTTP ${status}`);
     }
     const body = yield* Effect.catch(response.json, () =>
       response.status === 200
-        ? failProviderUnreachable(`the ${endpoint} returned a response that is not JSON`)
+        ? failProviderUnreachable(`the ${endpointName} returned a response that is not JSON`)
         : Effect.succeed(undefined),
     );
     const refusal = decodeErrorResponse(body);
     if (Option.isSome(refusal)) {
       return yield* Effect.fail(
         new ProviderRefused({
-          message: `the ${endpoint} refused the request: ${refusal.value.error}`,
+          message: `the ${endpointName} refused the request: ${refusal.value.error}`,
           code: refusal.value.error,
           ...(refusal.value.interval === undefined ? {} : { interval: refusal.value.interval }),
         }),
       );
     }
+    // A 403 or 429 with no OAuth error is a rate limit or a temporary block,
+    // as GitHub sends when a client polls too often. It says nothing about the
+    // request itself, so the same request may work later.
+    if (response.status === 403 || response.status === 429) {
+      return yield* failProviderUnreachable(
+        `the ${endpointName} returned HTTP ${status}: it is rate limiting requests or is ` +
+          "temporarily unavailable",
+      );
+    }
     if (response.status !== 200) {
       return yield* Effect.fail(
-        new ProviderRefused({ message: `the ${endpoint} returned HTTP ${status}` }),
+        new ProviderRefused({ message: `the ${endpointName} returned HTTP ${status}` }),
       );
     }
     return body;
   }).pipe(
     Effect.catchTag("HttpClientError", (error) =>
-      failProviderUnreachable(`the ${endpoint} could not be reached: ${error.message}`),
+      failProviderUnreachable(`the ${endpointName} could not be reached: ${error.message}`),
     ),
   );
 
@@ -386,10 +397,24 @@ const DEFAULT_POLL_INTERVAL_SECONDS = 5;
 export const SLOW_DOWN_STEP_SECONDS = 5;
 
 /**
- * Converts an interval the provider sent into whole seconds of at least one,
- * the form the contract carries it in.
+ * Rounds an interval the provider sent up to whole seconds, and to at least
+ * one second, the form the contract carries it in.
  */
-const toPollInterval = (seconds: number): number => Math.max(1, Math.ceil(seconds));
+const roundPollInterval = (seconds: number): number => Math.max(1, Math.ceil(seconds));
+
+/**
+ * The error code a provider sends when device flow is turned off on the OAuth
+ * App, as GitHub does until the app's owner enables it.
+ */
+const DEVICE_FLOW_DISABLED = "device_flow_disabled";
+
+/**
+ * The message for a provider that has device flow turned off. The user cannot
+ * change the OAuth App's settings, so the message points to the other way in.
+ */
+const DEVICE_FLOW_DISABLED_MESSAGE =
+  "device flow is turned off on the provider's OAuth App for this type, so signing in " +
+  "with a code cannot work: paste a token instead";
 
 /** A device code the provider issued, and what the user needs to approve it. */
 export interface DeviceCode {
@@ -416,6 +441,12 @@ export const requestDeviceCode = (
       device.deviceCodeUrl,
       { client_id: device.clientId, scope: device.scopes.join(" ") },
       "device authorization endpoint",
+    ).pipe(
+      Effect.mapError((error) =>
+        error._tag === "ProviderRefused" && error.code === DEVICE_FLOW_DISABLED
+          ? new ProviderRefused({ message: DEVICE_FLOW_DISABLED_MESSAGE, code: error.code })
+          : error,
+      ),
     );
     const body = yield* decodeDeviceCodeResponse(answer).pipe(
       Effect.catchTag("SchemaError", () =>
@@ -427,7 +458,7 @@ export const requestDeviceCode = (
       userCode: body.user_code,
       verificationUri: body.verification_uri,
       expiresIn: body.expires_in,
-      interval: toPollInterval(body.interval ?? DEFAULT_POLL_INTERVAL_SECONDS),
+      interval: roundPollInterval(body.interval ?? DEFAULT_POLL_INTERVAL_SECONDS),
     };
   });
 
@@ -459,16 +490,18 @@ const decideDeviceRefusal = (refusal: ProviderRefused): DeviceExchange => {
     case "slow_down":
       return {
         status: "slow-down",
-        interval: refusal.interval === undefined ? undefined : toPollInterval(refusal.interval),
+        interval: refusal.interval === undefined ? undefined : roundPollInterval(refusal.interval),
       };
     case "expired_token":
       return { status: "expired", message: "the code expired before it was approved" };
     case "access_denied":
       return { status: "denied", message: "the request was declined at the provider" };
+    case DEVICE_FLOW_DISABLED:
+      return { status: "failed", message: DEVICE_FLOW_DISABLED_MESSAGE };
     default:
-      // Every other code, such as `incorrect_client_credentials` or
-      // `device_flow_disabled`, is a problem with the type's OAuth app rather
-      // than with this flow. The code is the most precise thing to show.
+      // Every other code, such as `incorrect_client_credentials`, is a problem
+      // with the type's OAuth app rather than with this flow. The code is the
+      // most precise thing to show.
       return {
         status: "failed",
         message:

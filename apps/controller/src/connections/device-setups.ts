@@ -11,21 +11,14 @@
  * writes, so the caller runs it in a transaction of its own.
  */
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { uuidFromString, uuidToString } from "../db";
+import { uuidFromString } from "../db";
+import { parseSetupTargetRow, type SetupTargetRow, type StoredSetupTarget } from "./setup-target";
 
 /** A pending device flow, with its JSON columns read. */
-export interface StoredDeviceSetup {
+export interface StoredDeviceSetup extends StoredSetupTarget {
   readonly setupId: string;
-  /** The qualified connection type, which also identifies the plugin that owns the flow. */
-  readonly type: string;
-  /** Set when the flow reconnects a connection that already exists. */
-  readonly connectionId: string | undefined;
-  readonly label: string;
-  readonly labels: ReadonlyArray<string>;
-  readonly config: Record<string, Schema.Json>;
   /** The provider's device code, which only the controller ever sends back to it. */
   readonly deviceCode: string;
   /** Seconds the provider wants between two polls. */
@@ -36,7 +29,7 @@ export interface StoredDeviceSetup {
 export interface NewDeviceSetup extends StoredDeviceSetup {
   readonly nextPollAt: string;
   readonly expiresAt: string;
-  readonly at: string;
+  readonly createdAt: string;
 }
 
 /**
@@ -53,13 +46,8 @@ export type PollClaim =
   | { readonly _tag: "early"; readonly interval: number }
   | { readonly _tag: "claimed"; readonly setup: StoredDeviceSetup };
 
-interface DeviceSetupRow {
+interface DeviceSetupRow extends SetupTargetRow {
   readonly setup_id: string;
-  readonly type: string;
-  readonly connection_id: Uint8Array | null;
-  readonly label: string;
-  readonly labels: string;
-  readonly config: string;
   readonly device_code: string;
   readonly interval_seconds: number;
   readonly next_poll_at: string;
@@ -70,26 +58,16 @@ const COLUMNS =
   "setup_id, type, connection_id, label, labels, config, device_code, interval_seconds, " +
   "next_poll_at, expires_at";
 
-/**
- * Parses a JSON column. Only this repository writes these columns, so a column
- * that does not parse means the database is broken.
- */
-const parseJson = <A>(text: string): A => JSON.parse(text) as A;
-
-const toDeviceSetup = (row: DeviceSetupRow): StoredDeviceSetup => ({
+const parseDeviceSetupRow = (row: DeviceSetupRow): StoredDeviceSetup => ({
+  ...parseSetupTargetRow(row),
   setupId: row.setup_id,
-  type: row.type,
-  connectionId: row.connection_id === null ? undefined : uuidToString(row.connection_id),
-  label: row.label,
-  labels: parseJson<ReadonlyArray<string>>(row.labels),
-  config: parseJson<Record<string, Schema.Json>>(row.config),
   deviceCode: row.device_code,
   interval: row.interval_seconds,
 });
 
-/** Returns the timestamp `seconds` after `at`. */
-const addSeconds = (at: string, seconds: number): string =>
-  new Date(Date.parse(at) + seconds * 1000).toISOString();
+/** Returns the timestamp `seconds` after `timestamp`. */
+const addSeconds = (timestamp: string, seconds: number): string =>
+  new Date(Date.parse(timestamp) + seconds * 1000).toISOString();
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -105,40 +83,45 @@ const make = Effect.gen(function* () {
            ${setup.connectionId === undefined ? null : uuidFromString(setup.connectionId)},
            ${setup.label}, ${JSON.stringify(setup.labels)}, ${JSON.stringify(setup.config)},
            ${setup.deviceCode}, ${setup.interval}, ${setup.nextPollAt}, ${setup.expiresAt},
-           ${setup.at})
+           ${setup.createdAt})
       `),
 
     /**
-     * Decides whether a poll at `at` may ask the provider, and when it may,
+     * Decides whether a poll at `now` may ask the provider, and when it may,
      * pushes the next poll back by one interval before returning the setup.
-     * The caller runs this in its own transaction, so two polls that arrive
-     * together cannot both claim the same moment.
+     *
+     * The caller runs this in its own transaction, which makes the read and
+     * the write one step: the controller has a single database connection, and
+     * a transaction holds it until it commits. Of two polls that arrive
+     * together, the second reads the pushed-back time and answers `early`, so
+     * the provider is asked at most once per interval.
      */
-    claimPoll: (setupId: string, at: string): Effect.Effect<PollClaim, SqlError> =>
+    claimPoll: (setupId: string, now: string): Effect.Effect<PollClaim, SqlError> =>
       Effect.gen(function* () {
         const rows = yield* sql<DeviceSetupRow>`
           SELECT ${sql.literal(COLUMNS)} FROM device_setups WHERE setup_id = ${setupId}
         `;
         const row = rows[0];
-        if (row === undefined || row.expires_at <= at) return { _tag: "expired" } as const;
-        if (at < row.next_poll_at) {
+        if (row === undefined || row.expires_at <= now) return { _tag: "expired" } as const;
+        if (now < row.next_poll_at) {
           return { _tag: "early", interval: row.interval_seconds } as const;
         }
         yield* sql`
-          UPDATE device_setups SET next_poll_at = ${addSeconds(at, row.interval_seconds)}
+          UPDATE device_setups SET next_poll_at = ${addSeconds(now, row.interval_seconds)}
           WHERE setup_id = ${setupId}
         `;
-        return { _tag: "claimed", setup: toDeviceSetup(row) } as const;
+        return { _tag: "claimed", setup: parseDeviceSetupRow(row) } as const;
       }),
 
     /**
-     * Stores the longer interval the provider asked for, and pushes the next
-     * poll back to one new interval after `at`.
+     * Stores a new interval, such as the longer one a provider asks for with
+     * `slow_down`, and pushes the next poll back to one new interval after
+     * `now`.
      */
-    slowDown: (setupId: string, interval: number, at: string): Effect.Effect<void, SqlError> =>
+    setInterval: (setupId: string, interval: number, now: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE device_setups
-        SET interval_seconds = ${interval}, next_poll_at = ${addSeconds(at, interval)}
+        SET interval_seconds = ${interval}, next_poll_at = ${addSeconds(now, interval)}
         WHERE setup_id = ${setupId}
       `),
 
@@ -146,7 +129,7 @@ const make = Effect.gen(function* () {
      * Deletes the setup, which ends the flow, and returns whether there was a
      * row to delete. `false` means another poll ended the flow first.
      */
-    spend: (setupId: string): Effect.Effect<boolean, SqlError> =>
+    delete: (setupId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql`DELETE FROM device_setups WHERE setup_id = ${setupId} RETURNING setup_id`,
         (deleted) => deleted.length > 0,
@@ -156,8 +139,8 @@ const make = Effect.gen(function* () {
      * Deletes the expired rows: flows the user never finished. Called on each
      * new start rather than on a timer.
      */
-    sweep: (at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`DELETE FROM device_setups WHERE expires_at <= ${at}`),
+    deleteExpired: (now: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`DELETE FROM device_setups WHERE expires_at <= ${now}`),
   };
 });
 

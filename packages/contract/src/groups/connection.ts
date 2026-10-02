@@ -166,7 +166,7 @@ export const ConnectionDeviceStartInput = Schema.Struct({
 
 export type ConnectionDeviceStartInput = Schema.Schema.Type<typeof ConnectionDeviceStartInput>;
 
-/** The shortest pause between two polls, in whole seconds, that a provider can ask for. */
+/** A poll interval: a whole number of seconds, greater than zero. */
 const PollInterval = Schema.Int.check(Schema.isGreaterThan(0));
 
 /**
@@ -201,12 +201,11 @@ export type ConnectionDevicePollInput = Schema.Schema.Type<typeof ConnectionDevi
  * - `done`: the connection is written, and is returned.
  * - `expired`: the code ran out, or the flow is unknown or already finished.
  * - `denied`: the user declined at the provider.
- * - `rejected`: the provider issued a token, but the type's own check refused
- *   the account it belongs to.
  * - `failed`: the provider refused the flow for another reason, such as device
- *   flow being disabled on its app.
+ *   flow being turned off on its app; or the provider approved, but the
+ *   type's own check of the account failed every time it was tried.
  *
- * The last four end the flow: polling again answers `expired`.
+ * The last three end the flow: polling again answers `expired`.
  */
 export const ConnectionDevicePoll = Schema.Union([
   Schema.Struct({
@@ -215,7 +214,7 @@ export const ConnectionDevicePoll = Schema.Union([
   }),
   Schema.Struct({ status: Schema.Literal("done"), connection: Connection }),
   Schema.Struct({
-    status: Schema.Literals(["expired", "denied", "rejected", "failed"]),
+    status: Schema.Literals(["expired", "denied", "failed"]),
     message: Schema.String,
   }),
 ]);

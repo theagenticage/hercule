@@ -73,7 +73,6 @@ import {
   type WorkspaceStatus,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
-import type { ConnectionTypes } from "../connections";
 import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
@@ -85,6 +84,7 @@ import {
   type StoredRepo,
 } from "../resources";
 import { NO_SUCH_RUNNER, runnerRepository } from "../runners";
+import type { Secrets } from "../secrets";
 import { Settings, type ScopeSettings } from "../settings";
 import { githubAccounts, gitCredentials, type WorkspaceStepActivity } from "./credentials";
 import {
@@ -1028,10 +1028,5 @@ export class WorkspaceService extends Context.Service<
 export const WorkspaceServiceLayer: Layer.Layer<
   WorkspaceService,
   never,
-  | SqlClient.SqlClient
-  | AuditLog
-  | Settings
-  | ConnectionTypes
-  | SessionTokens
-  | WorkspaceStepActivity
+  SqlClient.SqlClient | AuditLog | Settings | Secrets | SessionTokens | WorkspaceStepActivity
 > = Layer.effect(WorkspaceService)(make);

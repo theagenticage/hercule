@@ -30,21 +30,12 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
-
-/** A connection as the API returns it. */
-interface ConnectionRecord {
-  readonly id: string;
-  readonly type: string;
-  readonly label: string;
-  readonly displayName: string;
-  readonly status: string;
-  readonly statusDetail?: string;
-  readonly labels: ReadonlyArray<string>;
-  readonly config: Record<string, unknown>;
-  readonly credentials: ReadonlyArray<{ readonly name: string; readonly rotatedAt?: string }>;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
+import {
+  buildAccountName,
+  readConnectionsSurface,
+  type ConnectionRecord,
+  type TestPlugin,
+} from "./testing";
 
 /** The error envelope every failing operation returns. */
 interface ErrorBody {
@@ -65,12 +56,6 @@ const BAD = "nope-1";
 
 /** A valid id that no record was ever created with. */
 const ABSENT = "0198e4b0-0000-7000-8000-0000000000ff";
-
-/** A plugin and the activation contexts the host passed to it. */
-interface TestPlugin {
-  readonly plugin: Plugin;
-  readonly contexts: Array<ActivationContext>;
-}
 
 /**
  * Builds a plugin that owns one connection type. `validate` accepts a token
@@ -119,7 +104,7 @@ const buildConnectionPlugin = (options: {
         validate: (credentials: Record<string, string>) => {
           const token = credentials["token"] ?? "";
           return token.startsWith("good-")
-            ? Effect.succeed({ displayName: `acct:${token}` })
+            ? Effect.succeed({ displayName: buildAccountName(token) })
             : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
         },
       }),
@@ -192,14 +177,6 @@ const readConnection = async (
 const readError = async (response: Response): Promise<ErrorBody["error"]> =>
   ((await response.json()) as ErrorBody).error;
 
-/** Returns the `ConnectionsRuntime` the host passed to a plugin at its last activation. */
-const readConnectionsSurface = (of: TestPlugin) => {
-  const ctx = of.contexts.at(-1);
-  if (ctx === undefined) throw new Error("the plugin was never activated");
-  if (ctx.connections === undefined) throw new Error("the plugin was given no connections surface");
-  return ctx.connections;
-};
-
 describe("POST /connections", () => {
   it("creates a connected connection once the type accepts the token, and returns no credential value", async () => {
     await withConnections(async ({ base, audit, sql }, _registry, token) => {
@@ -217,7 +194,7 @@ describe("POST /connections", () => {
       expect(record).toMatchObject({
         type: "main/main-type",
         label: "work",
-        displayName: `acct:${GOOD}`,
+        displayName: buildAccountName(GOOD),
         status: "connected",
         labels: ["Code"],
         config: {},
@@ -226,9 +203,7 @@ describe("POST /connections", () => {
       expect(record.id).toEqual(expect.any(String));
       expect(record.createdAt).toEqual(expect.any(String));
       expect(record.updatedAt).toEqual(expect.any(String));
-      // The display name is derived from the token, so the token may appear
-      // there and nowhere else in the body.
-      expect(text.split(`acct:${GOOD}`).join("")).not.toContain(GOOD);
+      expect(text).not.toContain(GOOD);
 
       const rows = await Effect.runPromise(
         Effect.orDie(
@@ -330,7 +305,7 @@ describe("GET /connections", () => {
       const one = await get(base, `/api/v1/connections/${mine.id}`, token);
       const text = await one.clone().text();
       expect(((await one.json()) as ConnectionRecord).credentials).toEqual([{ name: "token" }]);
-      expect(text.split(`acct:${GOOD}`).join("")).not.toContain(GOOD);
+      expect(text).not.toContain(GOOD);
     });
   });
 
@@ -457,7 +432,7 @@ describe("POST /connections/:id/credentials", () => {
       expect(after).toMatchObject({
         id: one.id,
         status: "connected",
-        displayName: `acct:${ROTATED}`,
+        displayName: buildAccountName(ROTATED),
       });
       expect(after.credentials[0]?.name).toBe("token");
       expect(after.credentials[0]?.rotatedAt).toEqual(expect.any(String));

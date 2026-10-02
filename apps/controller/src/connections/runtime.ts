@@ -99,7 +99,7 @@ const make = Effect.gen(function* () {
    * Marks the connection `needs-reauth`, with `message` as the status detail,
    * and fails with a `ConnectionUnavailable` that carries the same message.
    */
-  const needsReauth = (
+  const markNeedsReauth = (
     connectionId: string,
     message: string,
   ): Effect.Effect<never, ConnectionUnavailable> =>
@@ -108,9 +108,14 @@ const make = Effect.gen(function* () {
       Effect.fail(new ConnectionUnavailable({ message })),
     );
 
-  /** Returns the OAuth declaration of the connection's type, or `undefined` when it has none. */
-  const readDeclaredOAuth = (row: StoredConnection): Effect.Effect<OAuthDeclaration | undefined> =>
-    Effect.map(Ref.get(declared), (all) => all.get(row.type)?.contribution.oauth);
+  /**
+   * Returns the registered type of the connection, or `undefined` when no
+   * plugin in this build declares it.
+   */
+  const findRegisteredType = (
+    row: StoredConnection,
+  ): Effect.Effect<RegisteredConnectionType | undefined> =>
+    Effect.map(Ref.get(declared), (all) => all.get(row.type));
 
   /** Parses a stored token set, or marks the connection `needs-reauth` and fails. */
   const parseStoredTokens = (
@@ -120,7 +125,7 @@ const make = Effect.gen(function* () {
     parseTokens(Redacted.value(stored)).pipe(
       // New tokens replace the unreadable ones when the user reconnects.
       Effect.catchTag("StoredTokensUnreadable", (error) =>
-        needsReauth(connectionId, error.message),
+        markNeedsReauth(connectionId, error.message),
       ),
     );
 
@@ -129,7 +134,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       Effect.orDie(secrets.get({ kind: "connection", id: connectionId }, OAUTH_TOKENS)),
       Option.match({
-        onNone: () => needsReauth(connectionId, "this connection holds no tokens"),
+        onNone: () => markNeedsReauth(connectionId, "this connection holds no tokens"),
         onSome: (stored) => parseStoredTokens(connectionId, stored),
       }),
     );
@@ -180,7 +185,7 @@ const make = Effect.gen(function* () {
 
       const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
       if (tokens.refreshToken === undefined || Option.isNone(client)) {
-        return yield* needsReauth(row.id, "this connection cannot be refreshed");
+        return yield* markNeedsReauth(row.id, "this connection cannot be refreshed");
       }
       const answer = yield* refreshAccess({
         tokenUrl: oauth.tokenUrl,
@@ -188,7 +193,7 @@ const make = Effect.gen(function* () {
         refreshToken: tokens.refreshToken,
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
-        Effect.catchTag("ProviderRefused", (error) => needsReauth(row.id, error.message)),
+        Effect.catchTag("ProviderRefused", (error) => markNeedsReauth(row.id, error.message)),
         Effect.catchTag("ProviderUnreachable", (error) =>
           Effect.fail(new ConnectionUnavailable({ message: error.message })),
         ),
@@ -223,9 +228,9 @@ const make = Effect.gen(function* () {
       const tokens = yield* parseStoredTokens(row.id, stored);
       const millis = yield* Clock.currentTimeMillis;
       if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
-      const oauth = yield* readDeclaredOAuth(row);
+      const oauth = (yield* findRegisteredType(row))?.contribution.oauth;
       if (oauth === undefined) {
-        return yield* needsReauth(row.id, "this connection's access token has expired");
+        return yield* markNeedsReauth(row.id, "this connection's access token has expired");
       }
       const fresh = yield* readOrCreateRefreshPermit(row.id).withPermits(1)(
         refreshTokens(row, oauth),
@@ -243,7 +248,10 @@ const make = Effect.gen(function* () {
    * - any other connection returns the fields the user pasted, keyed by name.
    *
    * Fails with `ConnectionUnavailable` when the connection holds no secrets,
-   * or when its token cannot be used, as `readFreshAccessToken` explains.
+   * or when its token cannot be used, as `readFreshAccessToken` explains. A
+   * connection with no secrets whose type signs in through a redirect flow or
+   * a device flow is also marked `needs-reauth`: signing in again is how the
+   * user gives it a token.
    */
   const readStoredCredentials = (
     row: StoredConnection,
@@ -253,9 +261,12 @@ const make = Effect.gen(function* () {
       const tokens = stored.find((one) => one.name === OAUTH_TOKENS);
       if (tokens !== undefined) return yield* readFreshAccessToken(row, tokens.value);
       if (stored.length === 0) {
-        return yield* Effect.fail(
-          new ConnectionUnavailable({ message: `the connection ${row.id} holds no credentials` }),
-        );
+        const message = `the connection ${row.id} holds no credentials`;
+        const type = (yield* findRegisteredType(row))?.contribution;
+        if (type?.oauth !== undefined || type?.device !== undefined) {
+          return yield* markNeedsReauth(row.id, message);
+        }
+        return yield* Effect.fail(new ConnectionUnavailable({ message }));
       }
       return Object.fromEntries(stored.map((one) => [one.name, Redacted.value(one.value)]));
     });
@@ -314,31 +325,6 @@ const make = Effect.gen(function* () {
       Effect.map(Ref.get(declared), (all) => [...all.values()]),
 
     runtimeFor,
-
-    /**
-     * Returns a connection's credentials for another domain of the core,
-     * whichever plugin owns it: the fields the user pasted, or
-     * `{ accessToken }` for a connection set up through a redirect flow or a
-     * device flow. An access token is refreshed first when it has expired or
-     * is about to, which may call the provider, so a caller does not hold a
-     * transaction open around this read.
-     *
-     * Fails with `ConnectionUnavailable` when there is no such connection, when
-     * it holds no credentials, or when its token cannot be used.
-     */
-    readCredentials: (
-      connectionId: string,
-    ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
-      Effect.flatMap(
-        Effect.orDie(connections.one(connectionId)),
-        Option.match({
-          onNone: () =>
-            Effect.fail(
-              new ConnectionUnavailable({ message: `there is no connection ${connectionId}` }),
-            ),
-          onSome: readStoredCredentials,
-        }),
-      ),
   };
 });
 

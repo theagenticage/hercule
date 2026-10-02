@@ -10,10 +10,13 @@
  * how it reads each answer. The answers mimic GitHub, which returns its errors
  * with status 200.
  *
- * A poll before the provider's interval has passed never reaches the provider.
- * A test cannot wait out the interval, so `allowPoll` moves the setup's next
- * poll time into the past. It is the only step these tests take outside the
- * API.
+ * These tests take two steps outside the API:
+ *
+ * - A poll before the provider's interval has passed never reaches the
+ *   provider. A test cannot wait out the interval, so `allowPoll` moves the
+ *   setup's next poll time into the past.
+ * - No operation removes a connection's last credential, so the tests of a
+ *   connection that holds none delete its secrets in the database.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -26,18 +29,18 @@ import {
   type ActivationContext,
   type Plugin,
 } from "@hercule/plugin-host";
-import { completeSetup, get, post, withServer, type ServerHarness } from "../http/testing";
-
-/** A connection as the API returns it; only the fields these tests read. */
-interface ConnectionRecord {
-  readonly id: string;
-  readonly type: string;
-  readonly label: string;
-  readonly displayName: string;
-  readonly status: string;
-  readonly labels: ReadonlyArray<string>;
-  readonly credentials: ReadonlyArray<{ readonly name: string }>;
-}
+import { completeSetup, del, post, withServer, type ServerHarness } from "../http/testing";
+import {
+  buildAccountName,
+  buildJsonResponse,
+  createDeviceProvider,
+  DEVICE_CODE,
+  listConnections,
+  readConnectionsSurface,
+  type ConnectionRecord,
+  type DeviceProvider,
+  type TestPlugin,
+} from "./testing";
 
 /** The start's response body. */
 interface DeviceStart {
@@ -51,9 +54,6 @@ interface DeviceStart {
 /** The client id the test type declares. A device flow sends no client secret. */
 const CLIENT_ID = "device-client-1";
 
-/** The provider's device code, which only the controller sends back. */
-const DEVICE_CODE = "the-device-code";
-
 /** The type accepts access tokens that start with `good-` and rejects the others. */
 const GOOD_TOKEN = "good-device";
 
@@ -62,84 +62,6 @@ const REJECTED = "that account is not one this type can act as";
 
 /** The qualified name of the test type. */
 const DEVICE_TYPE = "devicey/device-type";
-
-const buildJsonResponse = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-
-/** A response to the token endpoint, which a test may make wait. */
-type TokenAnswer = () => Response | Promise<Response>;
-
-interface DeviceProvider {
-  /** The origin the type's `deviceCodeUrl` and `tokenUrl` are built from. */
-  readonly base: string;
-  /** Every form body posted to the device code endpoint, in order. */
-  readonly codeRequests: ReadonlyArray<Record<string, string>>;
-  /** Every form body posted to the token endpoint, in order. */
-  readonly tokenRequests: ReadonlyArray<Record<string, string>>;
-  /** The next responses of the two endpoints, which a test can replace. */
-  readonly answers: { code: () => Response; token: TokenAnswer };
-  readonly stop: () => Promise<void>;
-}
-
-/**
- * Starts a provider with a device code endpoint and a token endpoint. By
- * default the device code endpoint issues a code with a five-second interval,
- * and the token endpoint answers that the user has not approved yet.
- */
-const createDeviceProvider = (): DeviceProvider => {
-  const codeRequests: Array<Record<string, string>> = [];
-  const tokenRequests: Array<Record<string, string>> = [];
-  const answers: DeviceProvider["answers"] = {
-    code: () =>
-      buildJsonResponse({
-        device_code: DEVICE_CODE,
-        user_code: "WDJB-MJHT",
-        verification_uri: "https://provider.test/device",
-        expires_in: 900,
-        interval: 5,
-      }),
-    token: () => buildJsonResponse({ error: "authorization_pending" }),
-  };
-
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    fetch: async (request) => {
-      const url = new URL(request.url);
-      const form = Object.fromEntries(new URLSearchParams(await request.text()));
-      if (url.pathname === "/device/code") {
-        codeRequests.push(form);
-        return answers.code();
-      }
-      if (url.pathname === "/token") {
-        tokenRequests.push(form);
-        return answers.token();
-      }
-      return new Response("not here", { status: 404 });
-    },
-  });
-
-  let stopped = false;
-  return {
-    base: `http://127.0.0.1:${server.port}`,
-    codeRequests,
-    tokenRequests,
-    answers,
-    // A test may stop the provider to simulate an unreachable one, and the
-    // harness stops it again afterwards, so a second call does nothing.
-    stop: async () => {
-      if (stopped) return;
-      stopped = true;
-      await server.stop(true);
-    },
-  };
-};
-
-/** A plugin and the activation contexts the host passed to it. */
-interface TestPlugin {
-  readonly plugin: Plugin;
-  readonly contexts: Array<ActivationContext>;
-}
 
 /**
  * Builds a plugin that owns one connection type. The device type offers a
@@ -186,7 +108,7 @@ const buildConnectionTypePlugin = (options: {
         validate: (credentials: Record<string, string>) => {
           const value = credentials["pat"] ?? credentials["accessToken"] ?? "";
           return value.startsWith("good-")
-            ? Effect.succeed({ displayName: `acct:${value}` })
+            ? Effect.succeed({ displayName: buildAccountName(value) })
             : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
         },
       }),
@@ -275,23 +197,6 @@ const allowPoll = (sql: SqlClient.SqlClient, setupId: string): Promise<void> =>
     ),
   );
 
-const listConnections = async (
-  base: string,
-  token: string,
-): Promise<ReadonlyArray<ConnectionRecord>> => {
-  const response = await get(base, "/api/v1/connections", token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { items: ReadonlyArray<ConnectionRecord> }).items;
-};
-
-/** Returns the `ConnectionsRuntime` the host passed to a plugin at its last activation. */
-const readConnectionsSurface = (of: TestPlugin) => {
-  const ctx = of.contexts.at(-1);
-  if (ctx === undefined) throw new Error("the plugin was never activated");
-  if (ctx.connections === undefined) throw new Error("the plugin was given no connections surface");
-  return ctx.connections;
-};
-
 /** Makes the token endpoint issue a token, as it does once the user approves. */
 const approve = (provider: DeviceProvider, accessToken = GOOD_TOKEN): void => {
   provider.answers.token = () =>
@@ -323,11 +228,17 @@ describe("POST /oauth/device/start", () => {
       const response = await startDeviceFlow(base, token, { type: "pasted/pasted-type" });
 
       expect(response.status).toBe(400);
+      const { error } = (await response.json()) as { error: { message: string } };
+      // The refusal names the operation that does set up this type.
+      expect(error.message).toBe(
+        "the type pasted/pasted-type has no device flow, because its setup has no device step: " +
+          "set it up with connection.create instead",
+      );
       expect(provider.codeRequests).toEqual([]);
     });
   });
 
-  it("fails with invalid_state when the provider refuses to start a flow", async () => {
+  it("fails with invalid_state, and points to a pasted token, when device flow is turned off", async () => {
     await withDevice(async ({ base }, _registry, token, provider) => {
       provider.answers.code = () => buildJsonResponse({ error: "device_flow_disabled" });
 
@@ -336,7 +247,54 @@ describe("POST /oauth/device/start", () => {
       expect(response.status).toBe(409);
       const { error } = (await response.json()) as { error: { code: string; message: string } };
       expect(error.code).toBe("invalid_state");
-      expect(error.message).toContain("device_flow_disabled");
+      expect(error.message).toContain("device flow is turned off");
+      expect(error.message).toContain("paste a token instead");
+    });
+  });
+
+  it("fails with invalid_state, naming the provider's error, when the provider refuses for another reason", async () => {
+    await withDevice(async ({ base }, _registry, token, provider) => {
+      provider.answers.code = () => buildJsonResponse({ error: "unauthorized_client" }, 400);
+
+      const response = await startDeviceFlow(base, token);
+
+      expect(response.status).toBe(409);
+      const { error } = (await response.json()) as { error: { code: string; message: string } };
+      expect(error.message).toContain("unauthorized_client");
+    });
+  });
+
+  it("caps the flow's lifetime at 30 minutes and the poll interval at 60 seconds", async () => {
+    await withDevice(async ({ base }, _registry, token, provider) => {
+      provider.answers.code = () =>
+        buildJsonResponse({
+          device_code: DEVICE_CODE,
+          user_code: "WDJB-MJHT",
+          verification_uri: "https://provider.test/device",
+          expires_in: 365 * 24 * 60 * 60,
+          interval: 3600,
+        });
+
+      const before = Date.now();
+      const started = await startDeviceOrFail(base, token);
+
+      expect(started.interval).toBe(60);
+      const lifetime = Date.parse(started.expiresAt) - before;
+      expect(lifetime).toBeGreaterThan(29 * 60 * 1000);
+      expect(lifetime).toBeLessThanOrEqual(30 * 60 * 1000 + 1000);
+    });
+  });
+
+  it("fails with invalid_state when the provider is rate limiting requests", async () => {
+    await withDevice(async ({ base }, _registry, token, provider) => {
+      provider.answers.code = () => buildJsonResponse({ message: "API rate limit exceeded" }, 429);
+
+      const response = await startDeviceFlow(base, token);
+
+      expect(response.status).toBe(409);
+      const { error } = (await response.json()) as { error: { code: string; message: string } };
+      expect(error.code).toBe("invalid_state");
+      expect(error.message).toContain("rate limiting");
     });
   });
 
@@ -410,6 +368,19 @@ describe("POST /oauth/device/poll", () => {
     });
   });
 
+  it("caps the longer interval the provider asks for at 60 seconds", async () => {
+    await withDevice(async ({ base, sql }, _registry, token, provider) => {
+      const { setupId } = await startDeviceOrFail(base, token);
+      await allowPoll(sql, setupId);
+      provider.answers.token = () => buildJsonResponse({ error: "slow_down", interval: 3600 });
+
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "slow-down",
+        interval: 60,
+      });
+    });
+  });
+
   it("adds five seconds to the interval when the provider asks to slow down without naming one", async () => {
     await withDevice(async ({ base, sql }, _registry, token, provider) => {
       const { setupId } = await startDeviceOrFail(base, token);
@@ -445,6 +416,43 @@ describe("POST /oauth/device/poll", () => {
         expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "expired" });
         expect(provider.tokenRequests).toHaveLength(1);
         expect(await listConnections(base, token)).toEqual([]);
+      });
+    },
+  );
+
+  it("ends the flow and points to a pasted token when device flow has been turned off", async () => {
+    await withDevice(async ({ base, sql }, _registry, token, provider) => {
+      const { setupId } = await startDeviceOrFail(base, token);
+      await allowPoll(sql, setupId);
+      provider.answers.token = () => buildJsonResponse({ error: "device_flow_disabled" });
+
+      const answer = await pollDeviceFlow(base, token, setupId);
+
+      expect(answer).toMatchObject({ status: "failed" });
+      expect(answer["message"]).toContain("paste a token instead");
+    });
+  });
+
+  it.each([403, 429])(
+    "answers unreachable and keeps the flow open when the provider answers HTTP %i with no OAuth error",
+    async (status) => {
+      await withDevice(async ({ base, sql }, _registry, token, provider) => {
+        const { setupId } = await startDeviceOrFail(base, token);
+        await allowPoll(sql, setupId);
+        // GitHub's rate limit answer: a JSON body with a message, but no
+        // OAuth error code.
+        provider.answers.token = () =>
+          buildJsonResponse({ message: "API rate limit exceeded" }, status);
+
+        expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+          status: "unreachable",
+          interval: 5,
+        });
+        // A rate limit says nothing about the approval, so a later poll may
+        // still collect the token.
+        await allowPoll(sql, setupId);
+        approve(provider);
+        expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "done" });
       });
     },
   );
@@ -486,22 +494,6 @@ describe("POST /oauth/device/poll", () => {
     });
   });
 
-  it("answers rejected, creates nothing and ends the flow when the type rejects the account", async () => {
-    await withDevice(async ({ base, sql }, _registry, token, provider) => {
-      const { setupId } = await startDeviceOrFail(base, token);
-      await allowPoll(sql, setupId);
-      approve(provider, "nope-1");
-
-      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
-        status: "rejected",
-        message: REJECTED,
-      });
-      expect(await listConnections(base, token)).toEqual([]);
-      await allowPoll(sql, setupId);
-      expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "expired" });
-    });
-  });
-
   it("creates the connection the start described once the user approves", async () => {
     await withDevice(async ({ base, sql }, registry, token, provider) => {
       const { setupId } = await startDeviceOrFail(base, token);
@@ -516,13 +508,13 @@ describe("POST /oauth/device/poll", () => {
           type: DEVICE_TYPE,
           label: "work",
           labels: ["Code"],
-          displayName: `acct:${GOOD_TOKEN}`,
+          displayName: buildAccountName(GOOD_TOKEN),
           status: "connected",
           credentials: [{ name: "oauth.tokens" }],
         },
       });
       // The answer names the credential, never its value.
-      expect(JSON.stringify(answer).split(`acct:${GOOD_TOKEN}`).join("")).not.toContain(GOOD_TOKEN);
+      expect(JSON.stringify(answer)).not.toContain(GOOD_TOKEN);
       const [one] = await listConnections(base, token);
       if (one === undefined) throw new Error("the poll created no connection");
       // A token with no expiry and no refresh token is used as it is.
@@ -558,7 +550,7 @@ describe("POST /oauth/device/poll", () => {
         connection: {
           id: before.id,
           label: "work",
-          displayName: `acct:${GOOD_TOKEN}`,
+          displayName: buildAccountName(GOOD_TOKEN),
           credentials: [{ name: "oauth.tokens" }],
         },
       });
@@ -568,6 +560,32 @@ describe("POST /oauth/device/poll", () => {
       expect(
         await Effect.runPromise(readConnectionsSurface(registry.device).credentials(before.id)),
       ).toEqual({ accessToken: GOOD_TOKEN });
+    });
+  });
+
+  it("answers expired, and creates nothing, when the connection it reconnects was deleted meanwhile", async () => {
+    await withDevice(async ({ base, sql }, _registry, token, provider) => {
+      const created = await post(
+        base,
+        "/api/v1/connections",
+        { type: DEVICE_TYPE, label: "work", labels: ["Code"], credentials: { pat: "good-pasted" } },
+        token,
+      );
+      expect(created.status, await created.clone().text()).toBe(201);
+      const { id } = (await created.json()) as ConnectionRecord;
+      const { setupId } = await startDeviceOrFail(base, token, { connectionId: id });
+      const deleted = await del(base, `/api/v1/connections/${id}`, token);
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+
+      await allowPoll(sql, setupId);
+      approve(provider);
+
+      expect(await pollDeviceFlow(base, token, setupId)).toEqual({
+        status: "expired",
+        message: "the connection this flow was reconnecting has been deleted",
+      });
+      // The flow does not bring the deleted connection back as a new one.
+      expect(await listConnections(base, token)).toEqual([]);
     });
   });
 
@@ -598,6 +616,58 @@ describe("POST /oauth/device/poll", () => {
       const statuses = (await Promise.all([first, second])).map((answer) => answer["status"]);
       expect(statuses.toSorted()).toEqual(["done", "expired"]);
       expect(await listConnections(base, token)).toHaveLength(1);
+    });
+  });
+});
+
+describe("ConnectionsRuntime.credentials", () => {
+  /** Creates a connection with a pasted token, then deletes its secrets behind the API's back. */
+  const createConnectionWithoutSecrets = async (
+    base: string,
+    sql: SqlClient.SqlClient,
+    token: string,
+    type: string,
+  ): Promise<string> => {
+    const created = await post(
+      base,
+      "/api/v1/connections",
+      { type, label: "work", labels: ["Code"], credentials: { pat: "good-pasted" } },
+      token,
+    );
+    expect(created.status, await created.clone().text()).toBe(201);
+    const { id } = (await created.json()) as ConnectionRecord;
+    await Effect.runPromise(
+      Effect.orDie(sql`DELETE FROM secrets WHERE owner_kind = 'connection' AND owner_id = ${id}`),
+    );
+    return id;
+  };
+
+  it("marks a connection that holds no credentials needs-reauth when its type can sign in again", async () => {
+    await withDevice(async ({ base, sql }, registry, token) => {
+      const id = await createConnectionWithoutSecrets(base, sql, token, DEVICE_TYPE);
+
+      const read = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.device).credentials(id)),
+      );
+
+      expect(read.message).toBe(`the connection ${id} holds no credentials`);
+      expect(await listConnections(base, token)).toMatchObject([
+        { id, status: "needs-reauth", statusDetail: `the connection ${id} holds no credentials` },
+      ]);
+    });
+  });
+
+  it("leaves a connection that holds no credentials alone when its type has no sign-in flow", async () => {
+    await withDevice(async ({ base, sql }, registry, token) => {
+      const id = await createConnectionWithoutSecrets(base, sql, token, "pasted/pasted-type");
+
+      const read = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.pasted).credentials(id)),
+      );
+
+      expect(read.message).toBe(`the connection ${id} holds no credentials`);
+      // No flow could sign this type in again, so its status stays as it is.
+      expect(await listConnections(base, token)).toMatchObject([{ id, status: "connected" }]);
     });
   });
 });

@@ -136,21 +136,31 @@ describe("a credential asked for by a provisioning workspace", () => {
     });
   });
 
+  /**
+   * Replaces a GitHub connection's pasted token with a device flow's token
+   * set. The test GitHub type has no device flow, so the test swaps the
+   * connection's secrets through the secrets API to arrive at the same state.
+   */
+  const storeDeviceTokens = async (
+    arranged: Arranged,
+    connectionId: string,
+    tokens: { readonly accessToken: string; readonly expiresAt?: string },
+  ): Promise<void> => {
+    const { base } = arranged.harness;
+    const owner = `/api/v1/secrets/connection/${connectionId}`;
+    const stored = await send("PUT", base, `${owner}/oauth.tokens`, {
+      body: { value: JSON.stringify(tokens) },
+      token: arranged.token,
+    });
+    expect(stored.status, await stored.clone().text()).toBe(200);
+    const dropped = await send("DELETE", base, `${owner}/pat`, { token: arranged.token });
+    expect(dropped.status, await dropped.clone().text()).toBe(200);
+  };
+
   it("answers with the access token of a connection set up through the device flow", async () => {
     await withCredentials(async (arranged) => {
       const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
-      // A device flow stores a token set rather than a pasted token. The test
-      // GitHub type has no device flow, so the test swaps the connection's
-      // secrets through the secrets API to arrive at the same state.
-      const { base } = arranged.harness;
-      const owner = `/api/v1/secrets/connection/${github}`;
-      const stored = await send("PUT", base, `${owner}/oauth.tokens`, {
-        body: { value: JSON.stringify({ accessToken: DEVICE_TOKEN }) },
-        token: arranged.token,
-      });
-      expect(stored.status, await stored.clone().text()).toBe(200);
-      const dropped = await send("DELETE", base, `${owner}/pat`, { token: arranged.token });
-      expect(dropped.status, await dropped.clone().text()).toBe(200);
+      await storeDeviceTokens(arranged, github, { accessToken: DEVICE_TOKEN });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
       const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
@@ -164,6 +174,36 @@ describe("a credential asked for by a provisioning workspace", () => {
       expect(answer["token"]).toBe(DEVICE_TOKEN);
       expect(answer["username"]).toBe(GITHUB_LOGIN);
       expect(answer["error"]).toBeUndefined();
+    });
+  });
+
+  it("answers no_connection, and leaves the connection's status alone, when the device flow's token has expired", async () => {
+    await withCredentials(async (arranged) => {
+      const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+      await storeDeviceTokens(arranged, github, {
+        accessToken: DEVICE_TOKEN,
+        expiresAt: "2020-01-01T00:00:00.000Z",
+      });
+      const web = await createRepo(arranged, "https://github.com/acme/web", github);
+      const workspace = await provisionWorkspaceOrFail(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
+
+      const answer = await askForCredential(arranged.wire, {
+        remote: "github.com/acme/web",
+        workspaceId: workspace.id,
+      });
+      expect(answer["error"]).toBe("no_connection");
+      expect(answer["token"]).toBeUndefined();
+      // Reading the token is a plain read: it does not mark the connection.
+      const read = await get(
+        arranged.harness.base,
+        `/api/v1/connections/${github}`,
+        arranged.token,
+      );
+      expect(read.status, await read.clone().text()).toBe(200);
+      expect(await read.json()).toMatchObject({ status: "connected" });
     });
   });
 
