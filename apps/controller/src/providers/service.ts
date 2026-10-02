@@ -420,9 +420,9 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
         }
         if (!answer.ok) {
-          const said = answer.message ?? "that code was rejected";
+          const refusal = answer.message ?? "that code was rejected";
           return yield* Effect.fail(
-            createValidationError([{ path: ["code"], message: said }], said),
+            createValidationError([{ path: ["code"], message: refusal }], refusal),
           );
         }
         // Records who put a credential on which runner. Never the URL or the

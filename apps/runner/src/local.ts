@@ -32,9 +32,9 @@ const decodeEnrolment = Schema.decodeUnknownEffect(LocalEnrolment);
  * that is copied to its logs, so a third announcement would be read as log
  * output.
  */
-const announce = (said: LocalAnnouncement): Effect.Effect<void> =>
+const announce = (announcement: LocalAnnouncement): Effect.Effect<void> =>
   Effect.sync(() => {
-    process.stdout.write(`${JSON.stringify(encodeAnnouncement(said))}\n`);
+    process.stdout.write(`${JSON.stringify(encodeAnnouncement(announcement))}\n`);
   });
 
 /**
