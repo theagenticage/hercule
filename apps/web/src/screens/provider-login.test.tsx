@@ -136,11 +136,12 @@ const buildExpiresAt = (minutesFromNow: number): string =>
   new Date(Date.now() + minutesFromNow * 60_000).toISOString();
 
 /**
- * Answers the providers read with the logged-out snapshot until `loggedIn` is
- * called, and with the fresh logged-in one after that.
+ * Answers the providers read with the `before` snapshot, logged out unless
+ * given, until `loggedIn` is called, and with the fresh logged-in one after
+ * that.
  */
-const stubProviders = (): { handler: Handler; loggedIn: () => void } => {
-  let snapshot: object = LOGGED_OUT;
+const stubProviders = (before: object = LOGGED_OUT): { handler: Handler; loggedIn: () => void } => {
+  let snapshot: object = before;
   return {
     handler: () => ({ body: [buildCodex(snapshot)] }),
     loggedIn: () => {
@@ -177,8 +178,8 @@ describe("a login with a one-time code from the vendor", () => {
     // Nothing is sent: the browser and the vendor complete the login between
     // them. The drawer waits for the controller to announce the result.
     await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain(
-        "The code works for 15 more minutes.",
+      expect(screen.getByRole("status").textContent).toBe(
+        "Waiting for you to finish signing in. The code expires in 15 minutes. This closes by itself once you have.",
       );
     });
     expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
@@ -206,6 +207,58 @@ describe("a login with a one-time code from the vendor", () => {
     });
     expect(onLoggedIn).toHaveBeenCalledTimes(1);
     expect(listSentCodes(api)).toEqual([]);
+  });
+
+  it("counts the minutes the code has left down", async () => {
+    // Only the timers and the clock are faked, and they also move with real
+    // time, so the stubbed API and the clicks run as usual.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    try {
+      await openLoginPanel({
+        [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(2) } },
+        [PROVIDERS]: stubProviders().handler,
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("status").textContent).toContain("The code expires in 2 minutes.");
+      });
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByRole("status").textContent).toContain("The code expires in 1 minute.");
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByRole("alert").textContent).toBe(
+        "The code expired before the login finished.",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays open when the user logs in again, since no snapshot can tell the login ended", async () => {
+    // Logged in before the login started: the old credential still checks as
+    // logged in, so a fresh snapshot that says so proves nothing.
+    const providers = stubProviders(SNAPSHOT);
+    const { onLoggedIn, announce } = await openLoginPanel({
+      [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
+      [PROVIDERS]: providers.handler,
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toBe(
+        "Waiting for you to finish signing in. The code expires in 15 minutes. You were logged in already, so Hercule cannot tell when you finish. Close this once you have.",
+      );
+    });
+
+    providers.loggedIn();
+    act(() => {
+      announce([queryKeys.providers()]);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain("Close this once you have.");
+    });
+    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(onLoggedIn).not.toHaveBeenCalled();
   });
 
   it("says the code expired and offers to start again", async () => {

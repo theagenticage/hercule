@@ -12,6 +12,8 @@ import {
   listSetupFlows,
   decideDeviceFlowStep,
   describeDeviceFlowWait,
+  describeGitHubSignInEnding,
+  describeGitHubSignInFailure,
   waitForDeviceFlow,
   type ConnectionType,
   type DeviceFlowStep,
@@ -445,5 +447,44 @@ describe("waitForDeviceFlow", () => {
 
     expect(await wait.last).toEqual({ kind: "done", connection: CONNECTION });
     expect(wait.steps).toEqual([]);
+  });
+});
+
+describe("describeGitHubSignInEnding", () => {
+  it("says how long a code lasts when it expired", () => {
+    expect(
+      describeGitHubSignInEnding({ kind: "ended", status: "expired", message: "" }, 15),
+    ).toEqual({
+      kind: "ended",
+      status: "expired",
+      line: "The sign-in expired before it was approved.",
+      next: "A code lasts 15 minutes. Start again for a new one.",
+    });
+  });
+
+  it("says where the sign-in was declined", () => {
+    expect(
+      describeGitHubSignInEnding({ kind: "ended", status: "denied", message: "" }, 15).next,
+    ).toBe("Hercule was declined on GitHub’s approval page. Start again if that was a mistake.");
+  });
+
+  it("passes on the controller's message when the sign-in failed", () => {
+    expect(
+      describeGitHubSignInEnding(
+        { kind: "ended", status: "failed", message: "GitHub could not be reached." },
+        15,
+      ),
+    ).toEqual(describeGitHubSignInFailure("GitHub could not be reached."));
+  });
+});
+
+describe("describeGitHubSignInFailure", () => {
+  it("says nothing changed, then gives the controller's reason", () => {
+    expect(describeGitHubSignInFailure("GitHub could not be reached.")).toEqual({
+      kind: "ended",
+      status: "failed",
+      line: "The sign-in did not finish, so nothing changed.",
+      next: "GitHub could not be reached.",
+    });
   });
 });

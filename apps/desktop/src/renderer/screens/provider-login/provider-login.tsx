@@ -13,12 +13,13 @@ import {
   isWebLink,
   queryKeys,
   readErrorMessage,
-  readProbedAt,
+  startProviderLogin,
   type DeviceLogin,
   type HerculeClient,
   type ProviderRow,
   type SecretFieldOffer,
 } from "@hercule/client-core";
+import { useMinutesLeft } from "../../app/age-clock";
 import { providersQuery } from "../../app/queries";
 import { ExternalIcon } from "../../icons/external";
 import { DeviceCodeSteps, DoneMark, FormField, MarkedRow, NumberedStep, WaitLine } from "../step";
@@ -81,19 +82,7 @@ export function ProviderLogin({
   const [keyField, setKeyField] = useState<SecretFieldOffer | null>(null);
 
   const start = useMutation({
-    mutationFn: async () => {
-      const started = await client.provider.login({
-        params: { id: row.id },
-        payload: { runnerId },
-      });
-      if (started.userCode === undefined) return { ...started, probedAtStart: null };
-      // A device-code login is finished by a snapshot taken after this one.
-      // It is read from the controller, not the cache, which may be older
-      // than the newest snapshot and would make that snapshot look like the
-      // login's result.
-      const instances = await queryClient.fetchQuery(providersQuery(client));
-      return { ...started, probedAtStart: readProbedAt(instances, row.id, runnerId) };
-    },
+    mutationFn: () => startProviderLogin(client, row.id, runnerId),
   });
   const submit = useMutation({
     mutationFn: () =>
@@ -197,7 +186,7 @@ export function ProviderLogin({
       }
     >
       {started !== undefined ? (
-        started.userCode === undefined ? (
+        started.deviceLogin === null ? (
           <PasteCodeSteps
             url={started.url}
             code={code}
@@ -209,19 +198,14 @@ export function ProviderLogin({
           />
         ) : (
           <DeviceCodeSteps
-            code={started.userCode}
+            code={started.deviceLogin.userCode}
             openText="Open the sign-in page and enter it."
             openLabel="Open sign-in page"
             onOpen={() => void bridge.link.open({ url: started.url })}
             end={
               <DeviceLoginWait
                 client={client}
-                login={{
-                  instanceId: row.id,
-                  runnerId,
-                  probedAtStart: started.probedAtStart,
-                  expiresAt: started.expiresAt,
-                }}
+                login={started.deviceLogin}
                 onDone={finish}
                 onRestart={() => start.mutate()}
               />
@@ -340,10 +324,11 @@ function SignInPageButton({
  * Renders the end of a device-code login: the wait line with the minutes
  * the code has left, or, once the code has expired, that line and Start
  * again. Calls `onDone` once when a fresh snapshot says the harness is
- * logged in.
+ * logged in, which never happens for a harness that was logged in when the
+ * login started (`DeviceLogin.loggedInAtStart`); the user presses Cancel.
  *
  * It reads the instances from the cache, which the `provider` live topic
- * keeps current. The only timer is the one that moves the minutes on.
+ * keeps current. The minutes move on with the age clock.
  */
 function DeviceLoginWait({
   client,
@@ -357,19 +342,7 @@ function DeviceLoginWait({
   readonly onRestart: () => void;
 }): JSX.Element {
   const instances = useQuery(providersQuery(client)).data ?? [];
-  const [now, setNow] = useState(() => Date.now());
-  const step = decideDeviceLoginStep(login, instances, now);
-
-  // The minutes left change at whole minutes before the expiry, not at the
-  // clock's minute, so the next update is timed from the expiry. The last
-  // one lands on the expiry itself.
-  useEffect(() => {
-    if (login.expiresAt === undefined) return;
-    const left = Date.parse(login.expiresAt) - now;
-    if (left <= 0) return;
-    const timer = setTimeout(() => setNow(Date.now()), left % 60_000 || 60_000);
-    return () => clearTimeout(timer);
-  }, [login.expiresAt, now]);
+  const step = decideDeviceLoginStep(login, instances, useMinutesLeft(login.expiresAt));
 
   const finish = useEffectEvent(onDone);
   useEffect(() => {
@@ -387,9 +360,8 @@ function DeviceLoginWait({
       </span>
     );
   }
-  return (
-    <WaitLine text={describeDeviceLoginWait(step.kind === "waiting" ? step.minutesLeft : null)} />
-  );
+  // A login that is done shows so until `onDone` clears the steps.
+  return <WaitLine text={step.kind === "done" ? "Logged in." : describeDeviceLoginWait(step)} />;
 }
 
 /**

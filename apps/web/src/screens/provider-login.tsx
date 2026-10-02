@@ -2,10 +2,13 @@ import { useEffect, useEffectEvent, useId, useState, type JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Drawer, Field, Input, type ButtonVariant } from "@hercule/ui";
 import {
+  computeNextMinuteTick,
+  countMinutesLeft,
   decideDeviceLoginStep,
+  describeDeviceLoginWait,
   isWebLink,
   queryKeys,
-  readProbedAt,
+  startProviderLogin,
   type DeviceLogin,
   type HerculeClient,
   type Live,
@@ -34,7 +37,10 @@ import { DeviceCode } from "./device-code";
  *   browser, and the browser completes the login with the vendor. Hercule has
  *   nothing to send. When the vendor's login ends, the controller probes the
  *   instance again and announces the new snapshot, and the drawer closes by
- *   itself once that snapshot says the harness is logged in.
+ *   itself once that snapshot says the harness is logged in. When the user
+ *   logs in again, the harness was logged in before the login started, so no
+ *   snapshot can tell that the login ended: the drawer stays open until the
+ *   user closes it.
  */
 export function ProviderLogin({
   client,
@@ -60,25 +66,11 @@ export function ProviderLogin({
   readonly variant?: ButtonVariant;
   readonly onLoggedIn: () => void;
 }): JSX.Element {
-  const queryClient = useQueryClient();
   const codeField = useId();
   const [code, setCode] = useState("");
 
   const start = useMutation({
-    mutationFn: async () => {
-      const started = await client.provider.login({
-        params: { id: instanceId },
-        payload: { runnerId },
-      });
-      if (started.userCode === undefined) return { ...started, probedAtStart: null };
-      // A one-time-code login is finished by a snapshot taken after this one.
-      // Reading it once the code is out is early enough: the vendor completes
-      // the login only after the user has typed that code. It is read from
-      // the controller, not the cache, which may be older than the newest
-      // snapshot and would make that snapshot look like the login's result.
-      const instances = await queryClient.fetchQuery(providersQuery(client));
-      return { ...started, probedAtStart: readProbedAt(instances, instanceId, runnerId) };
-    },
+    mutationFn: () => startProviderLogin(client, instanceId, runnerId),
   });
   const submit = useMutation({
     mutationFn: () =>
@@ -111,7 +103,7 @@ export function ProviderLogin({
   };
 
   const url = start.data?.url;
-  const userCode = start.data?.userCode;
+  const deviceLogin = start.data?.deviceLogin ?? null;
 
   return (
     <>
@@ -137,7 +129,7 @@ export function ProviderLogin({
       <Drawer open={url !== undefined} onClose={close} title={`Log in to ${subject}`}>
         <div className="flex flex-col gap-3.5">
           <p className="text-row text-muted">
-            {userCode === undefined
+            {deviceLogin === null
               ? "Open this address in any browser, sign in, and paste the code it gives you back here."
               : "Open this address in any browser, sign in, and enter this one-time code there. Nothing is typed back here."}
           </p>
@@ -174,7 +166,7 @@ export function ProviderLogin({
             </Button>
           </div>
 
-          {userCode === undefined ? (
+          {deviceLogin === null ? (
             <>
               <Field id={codeField} label="Code">
                 <Input
@@ -203,7 +195,7 @@ export function ProviderLogin({
             </>
           ) : (
             <>
-              <DeviceCode code={userCode} />
+              <DeviceCode code={deviceLogin.userCode} />
               <p className="text-fine text-muted">
                 If the code does not work, log in on the machine itself: forward its login port with{" "}
                 <code className="font-mono text-ink">ssh -L 1455:localhost:1455</code> and run{" "}
@@ -211,22 +203,15 @@ export function ProviderLogin({
                 copy an authorized <code className="font-mono text-ink">auth.json</code> into the
                 instance&apos;s <code className="font-mono text-ink">$CODEX_HOME</code>.
               </p>
-              {start.data === undefined ? null : (
-                <DeviceLoginWait
-                  client={client}
-                  live={live}
-                  login={{
-                    instanceId,
-                    runnerId,
-                    probedAtStart: start.data.probedAtStart,
-                    expiresAt: start.data.expiresAt,
-                  }}
-                  onDone={finishLogin}
-                  onRestart={() => {
-                    start.mutate();
-                  }}
-                />
-              )}
+              <DeviceLoginWait
+                client={client}
+                live={live}
+                login={deviceLogin}
+                onDone={finishLogin}
+                onRestart={() => {
+                  start.mutate();
+                }}
+              />
             </>
           )}
           {submit.error === null ? null : (
@@ -243,8 +228,10 @@ export function ProviderLogin({
 /**
  * The end of a one-time-code login: waits until a fresh snapshot says the
  * harness is logged in, then calls `onDone` once, or shows that the code
- * expired. It keeps the instances current through the live connection while
- * it is on screen, because the screen that hosts the login may not.
+ * expired. A login of a harness that was logged in already never calls
+ * `onDone`, and the line asks the user to close the drawer instead. It keeps
+ * the instances current through the live connection while it is on screen,
+ * because the screen that hosts the login may not.
  */
 function DeviceLoginWait({
   client,
@@ -263,21 +250,17 @@ function DeviceLoginWait({
   useLiveInvalidation(live, queryClient, "provider");
   const instances = useQuery(providersQuery(client)).data ?? [];
   const [now, setNow] = useState(() => Date.now());
-  const step = decideDeviceLoginStep(login, instances, now);
+  const minutesLeft = login.expiresAt === undefined ? null : countMinutesLeft(login.expiresAt, now);
+  const step = decideDeviceLoginStep(login, instances, minutesLeft);
 
-  // The minutes left change at whole minutes before the expiry, not at the
-  // clock's minute, so the next update is timed from the expiry. The last
-  // one lands on the expiry itself.
+  // Draws the line again each time the code loses a minute.
   useEffect(() => {
     if (login.expiresAt === undefined) return;
-    const left = Date.parse(login.expiresAt) - now;
-    if (left <= 0) return;
-    const timer = setTimeout(
-      () => {
-        setNow(Date.now());
-      },
-      left % 60_000 || 60_000,
-    );
+    const tick = computeNextMinuteTick(login.expiresAt, now);
+    if (tick === null) return;
+    const timer = setTimeout(() => {
+      setNow(Date.now());
+    }, tick - now);
     return () => {
       clearTimeout(timer);
     };
@@ -305,10 +288,9 @@ function DeviceLoginWait({
 
   return (
     <p className="text-row text-muted" role="status">
-      Waiting for you to enter the code. This closes by itself once you have.
-      {step.kind === "waiting" && step.minutesLeft !== null
-        ? ` The code works for ${String(step.minutesLeft)} more ${step.minutesLeft === 1 ? "minute" : "minutes"}.`
-        : null}
+      {step.kind === "done"
+        ? "Logged in."
+        : `${describeDeviceLoginWait(step)} ${step.endsByItself ? "This closes by itself once you have." : "Close this once you have."}`}
     </p>
   );
 }

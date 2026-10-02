@@ -1,6 +1,7 @@
 /**
- * Tests the age clock: one timer for the earliest label change, ages and
- * durations alike, none when nothing is watched or the window is hidden, and
+ * Tests the age clock: one timer for the earliest label change, ages,
+ * durations and a code's minutes alike, none when nothing is watched or the
+ * window is hidden, and
  * a fresh read of the time on show and on focus. Timers and the date are
  * faked, so each test says exactly when the clock wakes.
  */
@@ -12,6 +13,7 @@ import {
   useAgeLabel,
   useAgeWords,
   useDurationText,
+  useMinutesLeft,
   type AgeClock,
 } from "./age-clock";
 import { setVisibility } from "./testing";
@@ -255,5 +257,33 @@ describe("useAgeLabel, useAgeWords and useDurationText", () => {
       vi.advanceTimersByTime(30_000);
     });
     expect(result.current).toEqual({ label: "1m", words: "1 minute ago" });
+  });
+});
+
+describe("useMinutesLeft", () => {
+  it("counts a code's minutes down, and stops at 0 when the code expires", () => {
+    // 1 minute and 20 seconds left: the count turns to 1 at 09:00:20.
+    const expiresAt = "2026-09-10T09:01:20.000Z";
+    const { result } = renderHook(() => useMinutesLeft(expiresAt));
+    expect(result.current).toBe(2);
+
+    act(() => {
+      vi.advanceTimersByTime(19_999);
+    });
+    expect(result.current).toBe(2);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(result.current).toBe(1);
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(result.current).toBe(0);
+  });
+
+  it("returns null, and sets no timer, for a code with no expiry", () => {
+    const { result } = renderHook(() => useMinutesLeft(undefined));
+    expect(result.current).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

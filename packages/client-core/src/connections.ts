@@ -17,6 +17,7 @@ import {
 } from "@hercule/contract";
 import type { HerculeClient } from "./client";
 import { readJsonObject } from "./json-shape";
+import { describeMinutes } from "./minutes-left";
 
 /**
  * Returns the GitHub connections: the accounts a repo can be cloned through.
@@ -226,6 +227,57 @@ export const DEVICE_FLOW_ENDINGS: Readonly<
   expired: "The sign-in expired before it was approved.",
   denied: "The sign-in was declined, so nothing changed.",
   failed: "The sign-in did not finish, so nothing changed.",
+};
+
+/** How a GitHub sign-in with a code ended without a Connection, as the first run shows it. */
+export interface GitHubSignInEnding {
+  readonly kind: "ended";
+  readonly status: Extract<DeviceFlowStep, { kind: "ended" }>["status"];
+  /** What happened. */
+  readonly line: string;
+  /** What the user can do next. */
+  readonly next: string;
+}
+
+/**
+ * Returns the ending of a GitHub sign-in that failed with `message`, the
+ * controller's own reason, which differs from case to case. A sign-in fails
+ * when its code cannot be started, or when the flow ends `failed`.
+ */
+export const describeGitHubSignInFailure = (message: string): GitHubSignInEnding => ({
+  kind: "ended",
+  status: "failed",
+  line: DEVICE_FLOW_ENDINGS.failed,
+  next: message,
+});
+
+/**
+ * Returns how the GitHub sign-in with a code ended, from the flow's `ending`.
+ * `codeMinutes` is how long the code lasted when it was handed out, which an
+ * expired sign-in names.
+ */
+export const describeGitHubSignInEnding = (
+  ending: Extract<DeviceFlowStep, { kind: "ended" }>,
+  codeMinutes: number,
+): GitHubSignInEnding => {
+  switch (ending.status) {
+    case "expired":
+      return {
+        kind: "ended",
+        status: "expired",
+        line: DEVICE_FLOW_ENDINGS.expired,
+        next: `A code lasts ${describeMinutes(codeMinutes)}. Start again for a new one.`,
+      };
+    case "denied":
+      return {
+        kind: "ended",
+        status: "denied",
+        line: DEVICE_FLOW_ENDINGS.denied,
+        next: "Hercule was declined on GitHub’s approval page. Start again if that was a mistake.",
+      };
+    case "failed":
+      return describeGitHubSignInFailure(ending.message);
+  }
 };
 
 /**

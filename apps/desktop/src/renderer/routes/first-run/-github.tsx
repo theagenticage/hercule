@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  countCodeMinutes,
+  countMinutesLeft,
+  describeCodeExpiry,
   describeDeviceFlowWait,
   describeGitHubSignInEnding,
+  describeGitHubSignInFailure,
   findGitHubAccount,
   queryKeys,
   readErrorMessage,
@@ -12,11 +14,9 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import { GITHUB_CONNECTION_TYPE, type ConnectionDeviceStart } from "@hercule/contract";
+import { useMinutesLeft } from "../../app/age-clock";
 import { connectionsQuery } from "../../app/queries";
 import { GitHubStep, type GitHubStepState } from "../../screens/first-run";
-
-/** The name the device flow's wait line gives GitHub. */
-const GITHUB_NAME = "GitHub";
 
 /**
  * Where the GitHub sign-in stands:
@@ -25,8 +25,8 @@ const GITHUB_NAME = "GitHub";
  * - `starting`: the step waits for the controller's code, asked for by the
  *   sign-in numbered `request`;
  * - `code`: the user enters the code of `deviceStart` on GitHub, which the
- *   step polls for; `codeMinutes` is how long the code lasts, and `wait`
- *   the line under it;
+ *   step polls for; `codeMinutes` is how long the code lasted when it was
+ *   handed out, and `wait` the line under it;
  * - `ended`: the sign-in ended without a Connection;
  * - `token`: the user chose to paste a token instead.
  */
@@ -88,21 +88,12 @@ export function GitHubCard({
         settleStart(request, {
           kind: "code",
           deviceStart,
-          codeMinutes: countCodeMinutes(deviceStart.expiresAt, Date.now()),
-          wait: describeDeviceFlowWait("pending", GITHUB_NAME),
+          codeMinutes: countMinutesLeft(deviceStart.expiresAt, Date.now()),
+          wait: describeDeviceFlowWait("pending", "GitHub"),
         });
       },
       onError: (error) => {
-        const ending = {
-          kind: "ended",
-          status: "failed",
-          message: readErrorMessage(error),
-        } as const;
-        settleStart(request, {
-          ...describeGitHubSignInEnding(ending, 0),
-          kind: "ended",
-          status: "failed",
-        });
+        settleStart(request, describeGitHubSignInFailure(readErrorMessage(error)));
       },
     });
   };
@@ -125,21 +116,17 @@ export function GitHubCard({
     void waitForDeviceFlow(client, deviceStart, {
       signal: stop.signal,
       onStep: (step) => {
-        if (step.kind === "waiting") showWait(describeDeviceFlowWait(step.status, GITHUB_NAME));
+        if (step.kind === "waiting") showWait(describeDeviceFlowWait(step.status, "GitHub"));
         if (step.kind === "ended") {
           setFlow((current) =>
             current.kind === "code"
-              ? {
-                  ...describeGitHubSignInEnding(step, current.codeMinutes),
-                  kind: "ended",
-                  status: step.status,
-                }
+              ? describeGitHubSignInEnding(step, current.codeMinutes)
               : current,
           );
         }
       },
       onRequestFailure: () => {
-        showWait(describeDeviceFlowWait("request-failed", GITHUB_NAME));
+        showWait(describeDeviceFlowWait("request-failed", "GitHub"));
       },
     }).then(async (last) => {
       // The Connection exists from a `done` reply on, even when the user has
@@ -153,9 +140,12 @@ export function GitHubCard({
     };
   }, [client, deviceStart, queryClient]);
 
+  // The age clock draws the step again each time the code loses a minute.
+  const minutesLeft = useMinutesLeft(deviceStart?.expiresAt);
+
   return (
     <GitHubStep
-      state={decideStepState(account, flow, connect)}
+      state={decideStepState(account, flow, minutesLeft, connect)}
       token={token}
       actions={{
         onSignIn: () => {
@@ -189,11 +179,13 @@ export function GitHubCard({
 
 /**
  * Decides what the GitHub step shows. A GitHub Connection, once there, wins
- * over whatever the sign-in was doing.
+ * over whatever the sign-in was doing. `minutesLeft` is how long the code on
+ * screen still works, or null when no code is on screen.
  */
 const decideStepState = (
   account: string | null,
   flow: GitHubFlow,
+  minutesLeft: number | null,
   connect: {
     readonly isPending: boolean;
     readonly isSuccess: boolean;
@@ -211,7 +203,7 @@ const decideStepState = (
         kind: "code",
         code: flow.deviceStart.userCode,
         verificationUri: flow.deviceStart.verificationUri,
-        wait: `${flow.wait} The code expires in ${String(flow.codeMinutes)} ${flow.codeMinutes === 1 ? "minute" : "minutes"}.`,
+        wait: minutesLeft === null ? flow.wait : `${flow.wait} ${describeCodeExpiry(minutesLeft)}`,
       };
     case "ended":
       return flow;

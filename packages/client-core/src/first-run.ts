@@ -14,7 +14,7 @@ import type {
   Resource,
   Runner,
 } from "@hercule/contract";
-import { DEVICE_FLOW_ENDINGS, filterGitHubConnections, type DeviceFlowStep } from "./connections";
+import { filterGitHubConnections } from "./connections";
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
 import { parseRepositoryName } from "./remote";
 import { formatRepoName, listProjectRepos } from "./threads/workspaces";
@@ -207,41 +207,6 @@ export const buildProvidersStepText = (
     sub: `Log in to the ones you want your agents to use. The login runs on ${host.name} and its credential stays ${host.isThisMac ? "here" : "there"}.`,
     rows: found,
   };
-};
-
-/**
- * Returns how many whole minutes a device code still works at `now`, rounded
- * up, from its `expiresAt`. Returns at least 1, so a screen never says a code
- * that still works expires in 0 minutes.
- */
-export const countCodeMinutes = (expiresAt: string, now: number): number =>
-  Math.max(1, Math.ceil((Date.parse(expiresAt) - now) / 60_000));
-
-/**
- * Returns what the GitHub step says when signing in with a code ends without
- * a Connection: the line for the ending, then what to do next. A failed
- * sign-in gives the controller's own `message`, which differs from case to
- * case. `codeMinutes` is how long the code lasted when it was handed out.
- */
-export const describeGitHubSignInEnding = (
-  ending: Extract<DeviceFlowStep, { kind: "ended" }>,
-  codeMinutes: number,
-): { readonly line: string; readonly next: string } => {
-  const line = DEVICE_FLOW_ENDINGS[ending.status];
-  switch (ending.status) {
-    case "expired":
-      return {
-        line,
-        next: `A code lasts ${String(codeMinutes)} ${codeMinutes === 1 ? "minute" : "minutes"}. Start again for a new one.`,
-      };
-    case "denied":
-      return {
-        line,
-        next: "Hercule was declined on GitHub’s approval page. Start again if that was a mistake.",
-      };
-    case "failed":
-      return { line, next: ending.message };
-  }
 };
 
 /** Triage's note in the room when no Connection brings it anything to read. */

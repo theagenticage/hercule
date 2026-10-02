@@ -49,10 +49,13 @@ export {
   decideDeviceFlowStep,
   describeDeviceFlowWait,
   DEVICE_FLOW_ENDINGS,
+  describeGitHubSignInEnding,
+  describeGitHubSignInFailure,
   waitForDeviceFlow,
   type ConnectionType,
   type DeviceFlowStep,
   type DeviceFlowWatcher,
+  type GitHubSignInEnding,
   type SetupFlow,
 } from "./connections";
 export {
@@ -145,10 +148,17 @@ export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./pr
 export {
   decideDeviceLoginStep,
   describeDeviceLoginWait,
-  readProbedAt,
+  startProviderLogin,
   type DeviceLogin,
   type DeviceLoginStep,
+  type StartedProviderLogin,
 } from "./device-login";
+export {
+  computeNextMinuteTick,
+  countMinutesLeft,
+  describeCodeExpiry,
+  describeMinutes,
+} from "./minutes-left";
 export { isLoginCodeRejected } from "./login-code";
 export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
@@ -169,9 +179,7 @@ export {
   buildFirstRunLadder,
   buildProvidersStepText,
   buildRoomContents,
-  countCodeMinutes,
   decideFirstRunStep,
-  describeGitHubSignInEnding,
   FIRST_RUN_STEPS,
   formatControllerAddress,
   isLoopbackOrigin,

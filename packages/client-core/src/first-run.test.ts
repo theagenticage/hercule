@@ -8,9 +8,7 @@ import {
   buildFirstRunLadder,
   buildProvidersStepText,
   buildRoomContents,
-  countCodeMinutes,
   decideFirstRunStep,
-  describeGitHubSignInEnding,
   formatControllerAddress,
   isLoopbackOrigin,
   TRIAGE_READING_GITHUB,
@@ -380,48 +378,6 @@ describe("buildProvidersStepText", () => {
       "Hercule drives Claude Code, Codex or pi, and found none of them on this Mac. Install one and log in to it; Hercule can install it for you.",
     );
     expect(text.rows).toHaveLength(3);
-  });
-});
-
-describe("countCodeMinutes", () => {
-  const NOW = Date.parse("2026-10-02T09:00:00.000Z");
-
-  it("rounds the time a code has left up to whole minutes", () => {
-    expect(countCodeMinutes("2026-10-02T09:15:00.000Z", NOW)).toBe(15);
-    expect(countCodeMinutes("2026-10-02T09:14:01.000Z", NOW)).toBe(15);
-  });
-
-  it("never says less than a minute", () => {
-    expect(countCodeMinutes("2026-10-02T08:59:00.000Z", NOW)).toBe(1);
-  });
-});
-
-describe("describeGitHubSignInEnding", () => {
-  it("says how long a code lasts when it expired", () => {
-    expect(
-      describeGitHubSignInEnding({ kind: "ended", status: "expired", message: "" }, 15),
-    ).toEqual({
-      line: "The sign-in expired before it was approved.",
-      next: "A code lasts 15 minutes. Start again for a new one.",
-    });
-  });
-
-  it("says where the sign-in was declined", () => {
-    expect(
-      describeGitHubSignInEnding({ kind: "ended", status: "denied", message: "" }, 15).next,
-    ).toBe("Hercule was declined on GitHub’s approval page. Start again if that was a mistake.");
-  });
-
-  it("passes on the controller's message when the sign-in failed", () => {
-    expect(
-      describeGitHubSignInEnding(
-        { kind: "ended", status: "failed", message: "GitHub could not be reached." },
-        15,
-      ),
-    ).toEqual({
-      line: "The sign-in did not finish, so nothing changed.",
-      next: "GitHub could not be reached.",
-    });
   });
 });
 
