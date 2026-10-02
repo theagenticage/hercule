@@ -55,7 +55,7 @@ export function ProviderLogin({
 }: {
   readonly className?: string;
   readonly client: HerculeClient;
-  /** Tells a one-time-code login when the instance's snapshot changes. */
+  /** Delivers the instance's new snapshots, which end a device login. */
   readonly live: Live;
   readonly instanceId: string;
   /** The machine the credential is stored on, and the only one it works on. */
@@ -94,7 +94,7 @@ export function ProviderLogin({
   };
 
   /**
-   * Finishes a one-time-code login once a fresh snapshot shows the harness
+   * Finishes a device login once a fresh snapshot shows the harness
    * logged in: closes the drawer and notifies the caller.
    */
   const finishLogin = (): void => {
@@ -226,7 +226,7 @@ export function ProviderLogin({
 }
 
 /**
- * The end of a one-time-code login: waits until a fresh snapshot shows the
+ * The end of a device login: waits until a fresh snapshot shows the
  * harness logged in, then calls `onDone` once, or shows that the code
  * expired. A login of a harness that was logged in already never calls
  * `onDone`, and the line asks the user to close the drawer instead. It keeps

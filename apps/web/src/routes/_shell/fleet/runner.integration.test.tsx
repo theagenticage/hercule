@@ -692,7 +692,7 @@ describe("Runner > providers", () => {
     expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
-  it("finishes a device-code login by itself once the controller announces the new snapshot", async () => {
+  it("finishes a device login by itself once the controller announces the new snapshot", async () => {
     const user = userEvent.setup();
     let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
     // Probed after the login started, so it is proof the login worked.

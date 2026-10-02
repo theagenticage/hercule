@@ -1,6 +1,6 @@
 /**
  * Tests the provider login as the draft's Log in button opens it: the
- * dialog, the paste-back login of Claude Code, a refused code, a device-code
+ * dialog, the paste-back login of Claude Code, a refused code, a device
  * login that ends when the `provider` live topic brings a fresh snapshot, and
  * a device code that expires.
  */

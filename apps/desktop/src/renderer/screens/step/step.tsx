@@ -154,10 +154,10 @@ export function CopyButton({
 }
 
 /**
- * Renders the two steps of a device-code sign-in: copy `code`, then open the
- * sign-in page. `openText` is the second step's text and `openLabel` its
- * button's label; `onOpen` runs when that button is pressed. `end` goes under
- * the two steps, such as a `WaitLine`.
+ * Renders the two steps of a sign-in with a device code: copy `code`, then
+ * open the sign-in page. `openText` is the second step's text and `openLabel`
+ * its button's label; `onOpen` runs when that button is pressed. `end` goes
+ * under the two steps, such as a `WaitLine`.
  */
 export function DeviceCodeSteps({
   code,

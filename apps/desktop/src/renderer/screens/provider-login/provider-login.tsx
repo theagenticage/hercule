@@ -330,7 +330,7 @@ function SignInPageButton({
 }
 
 /**
- * Renders the end of a device-code login: the wait line with the minutes
+ * Renders the end of a device login: the wait line with the minutes
  * the code has left, or, once the code has expired, that line and Start
  * again. Calls `onDone` once when a fresh snapshot shows the harness
  * logged in, which never happens for a harness that was logged in when the
