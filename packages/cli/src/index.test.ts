@@ -527,6 +527,33 @@ describe("running an operation", () => {
     });
   });
 
+  it("creates a connection from credentials alone, sending no label and no topics", async () => {
+    const created = {
+      id: buildId("aaaaaaa1"),
+      type: "github/github",
+      label: "octocat",
+      displayName: "octocat",
+      status: "connected",
+      labels: [],
+      config: {},
+      credentials: [{ name: "pat" }],
+      createdAt: "2026-09-04T10:00:00.000Z",
+      updatedAt: "2026-09-04T10:00:00.000Z",
+    };
+    const fetch = stubFetch(() => Response.json(created, { status: 201 }));
+    const io = stubIo({
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
+      fetch,
+      stdin: '{"pat":"x"}\n',
+    });
+
+    expect(
+      await main(["--home", home, "connection", "create", "--type", "github/github"], io),
+    ).toBe(0);
+    expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
+    expect(fetch.calls[0]?.body).toEqual({ type: "github/github", credentials: { pat: "x" } });
+  });
+
   it("reads two passwords as two lines of stdin, in schema order", async () => {
     const fetch = stubFetch(() => ({}));
     const io = stubIo({

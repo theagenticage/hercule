@@ -1,9 +1,10 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@hercule/ui";
+import { Button, Field, Input } from "@hercule/ui";
 import {
   buildConfigDraft,
   buildConfigFields,
+  buildTopicsUpdate,
   readConfigIssues,
   buildConfigPayload,
   queryKeys,
@@ -15,10 +16,15 @@ import {
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
 import { SaveStatus } from "../../../screens/save-status";
-import { Naming } from "./-naming";
 
 /**
- * The form that edits an existing connection: its label, its topic, and the
+ * Suggested topics for a connection. They are suggestions, not a closed list:
+ * a topic is an ordinary label, so the user can type any other topic.
+ */
+const TOPICS = ["Code", "Business", "Personal", "Ops"];
+
+/**
+ * The form that edits an existing connection: its name, its topic, and the
  * settings its type declares. The account and the credential are fixed at
  * setup, so this form does not edit them.
  */
@@ -41,22 +47,26 @@ export function ConfigureConnection({
     buildConfigDraft(fields, connection.config),
   );
   const [label, setLabel] = useState(connection.label);
+  // The form shows only the first topic. Any topics after it, set through the
+  // CLI or the API, are kept when the user saves.
   const [topic, setTopic] = useState(connection.labels[0] ?? "");
 
   const save = useMutation({
-    mutationFn: () =>
-      client.connection.update({
+    mutationFn: () => {
+      const labels = buildTopicsUpdate(connection.labels, topic);
+      return client.connection.update({
         params: { id: connection.id },
         payload: {
           label,
-          labels: [topic],
+          ...(labels === undefined ? {} : { labels }),
           // A type no longer in the binary has no schema to read its settings
           // against, so they are left exactly as they are stored.
           ...(type === undefined
             ? {}
             : { config: buildConfigPayload(fields, draft, connection.config) }),
         },
-      }),
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
   });
 
@@ -80,19 +90,36 @@ export function ConfigureConnection({
 
   return (
     <form className="flex flex-col gap-3 border-t border-line-soft pt-3" onSubmit={send}>
-      <Naming
-        idPrefix={connection.id}
-        label={label}
-        topic={topic}
-        onLabel={(next) => {
-          edit();
-          setLabel(next);
-        }}
-        onTopic={(next) => {
-          edit();
-          setTopic(next);
-        }}
-      />
+      <Field id={`${connection.id}-label`} label="Name">
+        <Input
+          id={`${connection.id}-label`}
+          // The controller refuses an empty name, so the browser stops the
+          // save before it sends a request that would fail.
+          required
+          placeholder="work"
+          value={label}
+          onChange={(event) => {
+            edit();
+            setLabel(event.target.value);
+          }}
+        />
+      </Field>
+      <Field id={`${connection.id}-topic`} label="Topic">
+        <Input
+          id={`${connection.id}-topic`}
+          list={`${connection.id}-topics`}
+          value={topic}
+          onChange={(event) => {
+            edit();
+            setTopic(event.target.value);
+          }}
+        />
+        <datalist id={`${connection.id}-topics`}>
+          {TOPICS.map((suggestion) => (
+            <option key={suggestion} value={suggestion} />
+          ))}
+        </datalist>
+      </Field>
       {fields.map((field) => (
         <ConfigFieldRow
           key={field.name}

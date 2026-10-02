@@ -1,21 +1,35 @@
 /**
- * Tests the rules the device-setups migration puts in the table itself, on a
- * migrated in-memory database:
+ * Tests the rules the device-setups migration puts in the table itself, on an
+ * in-memory database migrated up to and including this migration:
  *
  * - a well-formed row is accepted, with or without a connection to reconnect;
  * - the poll interval is a positive number of seconds;
  * - the JSON columns hold valid JSON.
  *
- * The rows are written in plain SQL, so the table's checks are tested on their
- * own rather than behind the repository that already follows them.
+ * The setup-targets migration later rebuilt the table with rules of its own,
+ * so the tests stop at this migration, and that migration's test covers the
+ * later rules. The rows are written in plain SQL, so the table's checks are
+ * tested on their own rather than behind the repository that already follows
+ * them.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../testing";
+import { MEMORY, openDatabase } from "../client";
+import { runMigrations } from "../migrate";
+import { migrations } from "./index";
 
+/** The migrations up to and including the one under test. */
+const MIGRATIONS_UP_TO_DEVICE_SETUPS = migrations.filter(([id]) => id <= 38);
+
+/** Runs the effect on a fresh in-memory database that has the schema as of this migration. */
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(Effect.provide(effect, TestDatabase));
+  Effect.runPromise(
+    Effect.andThen(runMigrations(MIGRATIONS_UP_TO_DEVICE_SETUPS), effect).pipe(
+      Effect.provide(openDatabase(MEMORY)),
+      Effect.orDie,
+    ),
+  );
 
 const at = "2026-09-01T00:00:00.000Z";
 

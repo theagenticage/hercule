@@ -344,24 +344,22 @@ describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () =
   it("clones the private repo, pushes a branch with the workspace's own env, and keeps no token", async () => {
     // The account, from the token alone. Creating the connection asks GitHub
     // who the token belongs to, so a connection that exists has a working
-    // token.
-    const connection = expectJsonOutput<{ id: string; displayName: string }>(
+    // token. Given no name and no topic, the connection is named after that
+    // account and has no topic.
+    const connection = expectJsonOutput<{
+      id: string;
+      displayName: string;
+      label: string;
+      labels: ReadonlyArray<string>;
+    }>(
       await runLoggedInCli(
-        [
-          "connection",
-          "create",
-          "--type",
-          "github/github",
-          "--label",
-          "e2e",
-          "--topic",
-          "e2e",
-          "--json",
-        ],
+        ["connection", "create", "--type", "github/github", "--json"],
         JSON.stringify({ pat: token }),
       ),
     );
     expect(connection.displayName.length).toBeGreaterThan(0);
+    expect(connection.label).toBe(connection.displayName);
+    expect(connection.labels).toEqual([]);
 
     const resource = expectJsonOutput<{ id: string; canonicalRemote: string | null }>(
       await runLoggedInCli([

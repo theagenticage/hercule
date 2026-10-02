@@ -94,7 +94,7 @@ Rendering (bars and weight, never color) is pinned in [../design-language.md](..
 Two conventional labels are load-bearing for Intake ([./10](./10-triage-intake-and-notifications.md)):
 
 - **`proposed`** - a Task carrying `proposed` together with its pending go/no-go Notification is a Proposal, the unit Intake presents. Proposal is vocabulary, not an entity.
-- **Topic labels** - a Topic is a label that groups Intake (for example `code`, `business`, `personal`, `ops`). Each Connection files its events into one default topic chosen at setup ([./08](./08-events-and-connections.md)); triage labels a proposal with the connection's topic unless the content says otherwise. Topics are user-defined and user-ordered; the ordering is presentation state, not a task field.
+- **Topic labels** - a Topic is a label that groups Intake (for example `code`, `business`, `personal`, `ops`). ~~Each Connection files its events into one default topic chosen at setup~~ A Connection may carry a topic its events file into, and may have none ([./08](./08-events-and-connections.md)); triage labels a proposal with the connection's topic, when it has one, unless the content says otherwise *(amended 2026-10-02, [#323](https://github.com/theagenticage/hercule/issues/323))*. Topics are user-defined and user-ordered; the ordering is presentation state, not a task field.
 
 Which labels a triage workflow sets, and when `proposed` is removed, is owned by [./10](./10-triage-intake-and-notifications.md).
 

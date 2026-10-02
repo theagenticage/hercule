@@ -19,11 +19,12 @@ const connection = (
   type: string,
   label: string,
   status: Connection["status"],
+  displayName = "octocat",
 ): Connection => ({
   id,
   type,
   label,
-  displayName: "octocat",
+  displayName,
   status,
   labels: [],
   config: {},
@@ -35,6 +36,10 @@ const connection = (
 const CONNECTIONS = [
   connection("c1", "github/github", "work", "connected"),
   connection("c2", "github/github", "old", "disabled"),
+  // Named after its account, as a connection the user never named is.
+  connection("c4", "github/github", "octocat", "connected"),
+  // An account with no name, so the connection is named after its type.
+  connection("c5", "github/github", "GitHub", "connected", ""),
   connection("c3", "gmail/gmail", "mail", "connected"),
 ];
 
@@ -104,6 +109,8 @@ describe("buildRunForm", () => {
     assert.deepStrictEqual(account?.kind === "connection" ? account.connections : [], [
       { id: "c1", label: "work · octocat", disabled: false },
       { id: "c2", label: "old · octocat", disabled: true },
+      { id: "c4", label: "octocat", disabled: false },
+      { id: "c5", label: "GitHub", disabled: false },
     ]);
   });
 

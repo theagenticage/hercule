@@ -82,6 +82,7 @@ import {
   type Outcome,
   type TokenSet,
 } from "./oauth";
+import { buildDefaultLabel } from "./default-label";
 import { PluginConfigs } from "./plugin-configs";
 import { ConnectionReferences, type ConnectionReference } from "./references";
 import {
@@ -128,6 +129,18 @@ const DEFAULT_SORT: { field: ConnectionSortField; direction: SortDirection } = {
 };
 
 const NO_SUCH_CONNECTION = "no such connection";
+
+/**
+ * The refusal of a reconnect that was given a label, topics or config. A
+ * reconnect only replaces the connection's credentials, so it would otherwise
+ * drop those fields without a word.
+ */
+const RECONNECT_KEEPS_SETTINGS =
+  "a reconnect keeps the connection's label, topics and config, so it takes none of them: " +
+  "change them with connection.update instead";
+
+/** The setting each field of a reconnect refusal names, as its issue message spells it. */
+const RECONNECT_KEPT_SETTING = { label: "label", labels: "topics", config: "config" } as const;
 
 /**
  * Builds the refusal for a connection that other records still name. It lists
@@ -453,14 +466,18 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.catchTag("SecretNameError", Effect.die));
 
   /**
-   * Returns the label, topics and config a token flow will write, after
-   * checking the input that starts it. A new connection takes them from the
-   * input. A reconnect keeps what the connection already has, unless the
-   * input replaces it.
+   * Checks the input that starts a token flow, and returns what the flow does
+   * once it has tokens.
    *
-   * Fails with `validation` when the reconnected connection does not exist or
-   * has another type, when a new connection has no label or no topic, or when
-   * the config does not suit the type.
+   * - A new connection takes its label, topics and config from the input. The
+   *   topics default to none and the config to empty; a missing label is
+   *   decided when the connection is written, from the account name.
+   * - A reconnect keeps the connection's own label, topics and config.
+   *
+   * Fails with `validation` when the config does not suit the type, when the
+   * reconnected connection does not exist or has another type, or when a
+   * reconnect is given a label, topics or config. That last refusal has one
+   * issue per field given.
    */
   const buildSetupTarget = (
     input: {
@@ -473,11 +490,13 @@ const make = Effect.gen(function* () {
     contribution: Contribution,
   ): Effect.Effect<SetupTarget, Validation | SqlError> =>
     Effect.gen(function* () {
-      const existing =
-        input.connectionId === undefined
-          ? undefined
-          : Option.getOrUndefined(yield* connections.one(input.connectionId));
-      if (input.connectionId !== undefined && existing === undefined) {
+      if (input.connectionId === undefined) {
+        const config = input.config ?? {};
+        yield* readConfig(contribution, config);
+        return { kind: "create", label: input.label, labels: input.labels ?? [], config } as const;
+      }
+      const existing = Option.getOrUndefined(yield* connections.one(input.connectionId));
+      if (existing === undefined) {
         return yield* Effect.fail(
           createValidationError([{ path: ["connectionId"], message: NO_SUCH_CONNECTION }]),
         );
@@ -485,7 +504,7 @@ const make = Effect.gen(function* () {
       // A reconnect replaces the connection's tokens, so it must use the
       // connection's own type: tokens from another type's provider would not
       // belong to this connection's account.
-      if (existing !== undefined && existing.type !== input.type) {
+      if (existing.type !== input.type) {
         return yield* Effect.fail(
           createValidationError([
             {
@@ -495,18 +514,21 @@ const make = Effect.gen(function* () {
           ]),
         );
       }
-      const label = input.label ?? existing?.label;
-      const labels = input.labels ?? existing?.labels;
-      if (label === undefined || labels === undefined) {
+      const given = (["label", "labels", "config"] as const).filter(
+        (field) => input[field] !== undefined,
+      );
+      if (given.length > 0) {
         return yield* Effect.fail(
-          createValidationError([
-            { path: ["label"], message: "a new connection needs a label and a topic" },
-          ]),
+          createValidationError(
+            given.map((field) => ({
+              path: [field],
+              message: `a reconnect keeps the connection's ${RECONNECT_KEPT_SETTING[field]}`,
+            })),
+            RECONNECT_KEEPS_SETTINGS,
+          ),
         );
       }
-      const config = input.config ?? existing?.config ?? {};
-      yield* readConfig(contribution, config);
-      return { label, labels, config };
+      return { kind: "reconnect", connectionId: input.connectionId } as const;
     });
 
   /**
@@ -516,18 +538,23 @@ const make = Effect.gen(function* () {
    * or `None` when the connection being reconnected was deleted while the
    * user was at the provider; nothing is written then.
    *
+   * A new connection the user did not name gets the account name as its
+   * label. A reconnect changes only the account name and the status, and
+   * keeps the connection's label, topics and config.
+   *
    * `actor` is passed in rather than read, because the redirect flow's
    * callback arrives without a credential.
    */
   const writeConnectionFromTokens = ({
     setup,
-    pluginId,
+    connectionType,
     displayName,
     tokens,
     actor,
   }: {
     readonly setup: StoredSetupTarget;
-    readonly pluginId: string;
+    readonly connectionType: RegisteredConnectionType;
+    /** The account name the type's `validate` returned for the new tokens. */
     readonly displayName: string;
     readonly tokens: TokenSet;
     readonly actor: string;
@@ -536,39 +563,35 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const now = yield* nowIso;
-        // A reconnect keeps the connection's id, so anything that refers to
-        // it stays attached; only the account and the tokens are replaced.
-        const reconnected = setup.connectionId;
-        // Checked inside the transaction, so nothing is written under an id
-        // that no longer exists.
-        if (reconnected !== undefined && Option.isNone(yield* connections.one(reconnected))) {
-          return Option.none();
+        const { pluginId, contribution } = connectionType;
+        let id: string;
+        if (setup.kind === "create") {
+          const row = yield* connections.insert({
+            pluginId,
+            type: setup.type,
+            label: setup.label ?? buildDefaultLabel(displayName, contribution.displayName),
+            displayName,
+            labels: setup.labels,
+            config: setup.config,
+            at: now,
+          });
+          id = row.id;
+        } else {
+          // A reconnect keeps the connection's id, so anything that refers to
+          // it stays attached; only the account and the tokens are replaced.
+          // The check runs inside the transaction, so nothing is written under
+          // an id that no longer exists.
+          id = setup.connectionId;
+          if (Option.isNone(yield* connections.one(id))) return Option.none();
+          yield* connections.update(
+            id,
+            { displayName, status: "connected", statusDetail: null },
+            now,
+          );
         }
-        const id =
-          reconnected === undefined
-            ? yield* Effect.map(
-                connections.insert({
-                  pluginId,
-                  type: setup.type,
-                  label: setup.label,
-                  displayName,
-                  labels: setup.labels,
-                  config: setup.config,
-                  at: now,
-                }),
-                (row) => row.id,
-              )
-            : yield* Effect.as(
-                connections.update(
-                  reconnected,
-                  { displayName, status: "connected", statusDetail: null },
-                  now,
-                ),
-                reconnected,
-              );
         yield* replaceSecrets(id, { [OAUTH_TOKENS]: serializeTokens(tokens) });
         yield* audit.append({
-          kind: reconnected === undefined ? "connection.created" : "connection.credentialsSet",
+          kind: setup.kind === "create" ? "connection.created" : "connection.credentialsSet",
           actor,
           payload: { connectionId: id, pluginId, type: setup.type, credentials: [OAUTH_TOKENS] },
           record: { topic: "connection", id },
@@ -635,7 +658,7 @@ const make = Effect.gen(function* () {
       const written = yield* Effect.orDie(
         writeConnectionFromTokens({
           setup,
-          pluginId: registered.pluginId,
+          connectionType: registered,
           displayName: account.displayName,
           tokens,
           // The user started this setup with an authenticated request. The
@@ -693,9 +716,12 @@ const make = Effect.gen(function* () {
 
     /**
      * Creates a connection from credentials the user pasted, once the type has
-     * validated them. Fails with `validation` for a type whose setup has no
-     * credentials step, such as one that signs in only through a redirect
-     * flow: the message names the operations that set that type up.
+     * validated them. With no label, the connection is named after the account
+     * the credentials belong to; with no topics, it has none.
+     *
+     * Fails with `validation` for a type whose setup has no credentials step,
+     * such as one that signs in only through a redirect flow: the message
+     * names the operations that set that type up.
      */
     create: (
       input: ConnectionCreateInput,
@@ -722,9 +748,10 @@ const make = Effect.gen(function* () {
             const row = yield* connections.insert({
               pluginId,
               type: decoded.type,
-              label: decoded.label,
+              label:
+                decoded.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
               displayName: account.displayName,
-              labels: decoded.labels,
+              labels: decoded.labels ?? [],
               config,
               at,
             });
@@ -879,7 +906,6 @@ const make = Effect.gen(function* () {
             yield* setups.insert({
               state,
               type: decoded.type,
-              connectionId: decoded.connectionId,
               ...target,
               origin: decoded.origin,
               codeVerifier,
@@ -969,7 +995,6 @@ const make = Effect.gen(function* () {
             yield* deviceSetups.insert({
               setupId,
               type: decoded.type,
-              connectionId: decoded.connectionId,
               ...target,
               deviceCode: code.deviceCode,
               interval,
@@ -1089,7 +1114,7 @@ const make = Effect.gen(function* () {
         }
         const written = yield* writeConnectionFromTokens({
           setup,
-          pluginId: registered.pluginId,
+          connectionType: registered,
           displayName: account.success.displayName,
           tokens: exchange.tokens,
           actor: yield* currentStamp,

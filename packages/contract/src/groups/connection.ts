@@ -43,16 +43,16 @@ export { ConnectionStatus } from "@hercule/plugin-host";
  */
 export const GITHUB_CONNECTION_TYPE = "github/github";
 
-/** The longest user-given label: "work", "personal". */
+/**
+ * The longest name a connection can have: "work", "personal", or the account
+ * name it gets when the user gives none.
+ */
 export const MAX_CONNECTION_LABEL_LENGTH = 128;
 
 const ConnectionLabel = bounded(1, MAX_CONNECTION_LABEL_LENGTH);
 
-/**
- * The topics a connection's events file into. At least one, because the first
- * is the connection's default topic and triage has nothing to fall back on.
- */
-const Topics = atMost(Label, MAX_TASK_LABELS).check(Schema.isMinLength(1));
+/** The topics a connection's events file into. A connection may have none. */
+const Topics = atMost(Label, MAX_TASK_LABELS);
 
 /**
  * The browser's origin and nothing else: scheme and host, with no path and no
@@ -83,8 +83,15 @@ export type CredentialRef = Schema.Schema.Type<typeof CredentialRef>;
 export const Connection = Schema.Struct({
   id: Id,
   type: Schema.String,
+  /**
+   * The connection's name: the one the user gave at setup, or the account name
+   * when they gave none. The user can change it later.
+   */
   label: ConnectionLabel,
-  /** The account name the type's own `validate` returned. */
+  /**
+   * The account name the type's own `validate` returned. Only a new sign-in
+   * changes it; renaming the connection does not.
+   */
   displayName: Schema.String,
   status: ConnectionStatus,
   statusDetail: Schema.optionalKey(Schema.String),
@@ -100,10 +107,14 @@ export type Connection = Schema.Schema.Type<typeof Connection>;
 /** What a connection listing may be sorted by. */
 export const CONNECTION_SORT_FIELDS = ["createdAt", "label"] as const;
 
+/**
+ * The payload of `connection.create`. `label` defaults to the account name the
+ * credentials belong to, and `labels` to no topic.
+ */
 export const ConnectionCreateInput = Schema.Struct({
   type: Schema.String,
-  label: ConnectionLabel,
-  labels: Topics,
+  label: Schema.optionalKey(ConnectionLabel),
+  labels: Schema.optionalKey(Topics),
   config: Schema.optionalKey(Config),
   credentials: Credentials,
 });
@@ -130,8 +141,9 @@ export type ConnectionCredentialsInput = Schema.Schema.Type<typeof ConnectionCre
  * what the user registered with the provider, so it has to come from the
  * browser.
  *
- * `label`, `labels` and `config` are optional because on a reconnect, the
- * existing connection already has them.
+ * `label`, `labels` and `config` describe a new connection, and default as
+ * they do on `connection.create`. A reconnect keeps the connection's own and
+ * is refused when it is given any of them: `connection.update` changes them.
  */
 export const ConnectionOAuthStartInput = Schema.Struct({
   type: Schema.String,

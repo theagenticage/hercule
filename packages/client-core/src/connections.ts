@@ -27,6 +27,38 @@ export const filterGitHubConnections = (
 ): readonly Connection[] =>
   connections.filter((connection) => connection.type === GITHUB_CONNECTION_TYPE);
 
+/**
+ * Checks whether a screen shows the connection's account beside its name.
+ * The account is shown only when it adds something the name does not:
+ *
+ * - A connection the user never named is named after its account, so the
+ *   account would repeat the name.
+ * - An account with no name, or a name of only spaces, has nothing to show.
+ *   Such a connection is named after its type instead.
+ */
+export const showsAccountBesideLabel = (connection: Connection): boolean =>
+  connection.displayName.trim() !== "" && connection.displayName !== connection.label;
+
+/**
+ * Builds the connection's topics after the user edits the first one, the only
+ * topic the settings form shows. Returns `undefined` when the first topic is
+ * unchanged, so a save that leaves it alone sends no topics at all.
+ *
+ * The typed topic is trimmed, so stray spaces never make a topic of their
+ * own, and text of only spaces clears the first topic. The topics after the
+ * first, which only the CLI or the API can set, are kept. A kept topic that
+ * equals the new first topic is dropped, so no topic is listed twice.
+ */
+export const buildTopicsUpdate = (
+  topics: readonly string[],
+  firstTopic: string,
+): readonly string[] | undefined => {
+  const typed = firstTopic.trim();
+  if (typed === (topics[0] ?? "")) return undefined;
+  const rest = topics.slice(1);
+  return typed === "" ? rest : [typed, ...rest.filter((topic) => topic !== typed)];
+};
+
 /** The path the controller serves the provider's redirect on. */
 const CALLBACK_PATH = "/oauth/callback";
 
@@ -61,7 +93,7 @@ export interface ConnectionType {
   /**
    * The name of the plugin that declares the type, for the line under the
    * type's name. Two plugins may each declare a type called Gmail, so the type
-   * name alone is not enough to tell them apart.
+   * name alone is not enough to tell them apart. See `showsPluginName`.
    */
   readonly pluginName: string;
   readonly setup: ReadonlyArray<SetupStep>;
@@ -100,6 +132,15 @@ export const listConnectionTypes = (
         ];
       }),
   );
+
+/**
+ * Checks whether a screen shows the plugin's name under the type's name. The
+ * plugin's name is there to tell apart two plugins that declare a type of the
+ * same name. When the plugin is named like its type, as a GitHub plugin that
+ * declares a GitHub type is, the plugin's name would only repeat the type's.
+ */
+export const showsPluginName = (type: ConnectionType): boolean =>
+  type.pluginName !== type.displayName;
 
 /**
  * One way to obtain a connection's credential:

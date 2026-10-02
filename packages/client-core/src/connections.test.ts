@@ -3,11 +3,74 @@ import type { Connection, PluginDetail } from "@hercule/contract";
 import {
   listConnectionTypes,
   listCredentialFields,
+  showsAccountBesideLabel,
+  showsPluginName,
+  buildTopicsUpdate,
   buildRedirectUri,
   listSetupFlows,
   decideDeviceFlowStep,
   type ConnectionType,
 } from "./connections";
+
+describe("showsAccountBesideLabel", () => {
+  const connection = {
+    id: "0199c0ff-aaaa-7000-8000-000000000001",
+    type: "github/github",
+    label: "octocat",
+    displayName: "octocat",
+    status: "connected",
+    labels: [],
+    config: {},
+    credentials: [],
+    createdAt: "2026-10-02T08:15:00.000Z",
+    updatedAt: "2026-10-02T08:15:00.000Z",
+  } satisfies Connection;
+
+  it("is false for a connection whose name is its account name", () => {
+    expect(showsAccountBesideLabel(connection)).toBe(false);
+  });
+
+  it("is true once the connection is renamed, though the account stays the same", () => {
+    expect(showsAccountBesideLabel({ ...connection, label: "personal" })).toBe(true);
+  });
+
+  it("is false for an account with no name, which the type's name stands in for", () => {
+    expect(showsAccountBesideLabel({ ...connection, label: "GitHub", displayName: "" })).toBe(
+      false,
+    );
+    expect(showsAccountBesideLabel({ ...connection, label: "GitHub", displayName: "  " })).toBe(
+      false,
+    );
+  });
+});
+
+describe("buildTopicsUpdate", () => {
+  it("returns nothing when the first topic is unchanged", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "Code")).toBeUndefined();
+    expect(buildTopicsUpdate([], "")).toBeUndefined();
+  });
+
+  it("replaces the first topic and keeps the others", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "Business")).toEqual(["Business", "Ops"]);
+    expect(buildTopicsUpdate([], "Code")).toEqual(["Code"]);
+  });
+
+  it("removes only the first topic when the field is cleared", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "")).toEqual(["Ops"]);
+    expect(buildTopicsUpdate(["Code"], "")).toEqual([]);
+  });
+
+  it("trims the typed topic, and reads text of only spaces as cleared", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], " Code ")).toBeUndefined();
+    expect(buildTopicsUpdate(["Code", "Ops"], "Business ")).toEqual(["Business", "Ops"]);
+    expect(buildTopicsUpdate(["Code", "Ops"], "   ")).toEqual(["Ops"]);
+    expect(buildTopicsUpdate([], "   ")).toBeUndefined();
+  });
+
+  it("lists a topic once when the new first topic is one of the others", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "Ops")).toEqual(["Ops"]);
+  });
+});
 
 describe("buildRedirectUri", () => {
   it("is the callback path on the browser's origin", () => {
@@ -91,6 +154,18 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   displayName: "T",
   pluginName: "P",
   setup,
+});
+
+describe("showsPluginName", () => {
+  it("is true when the plugin's name differs from the type's", () => {
+    expect(showsPluginName(withSetup([]))).toBe(true);
+  });
+
+  it("is false when the plugin is named like its type", () => {
+    expect(showsPluginName({ ...withSetup([]), displayName: "GitHub", pluginName: "GitHub" })).toBe(
+      false,
+    );
+  });
 });
 
 describe("listSetupFlows", () => {

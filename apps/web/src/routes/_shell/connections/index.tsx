@@ -5,6 +5,7 @@ import { EmptyState, Group, LaneLabel } from "@hercule/ui";
 import {
   listConnectionTypes,
   listSetupFlows,
+  showsPluginName,
   type ConnectionType,
   type SetupFlow,
 } from "@hercule/client-core";
@@ -60,6 +61,7 @@ const describeSetupFlow = (flow: SetupFlow, type: ConnectionType): string => {
  * declares it, then what setting it up takes, such as "sign in with GitHub or
  * paste a token". The plugin comes first because two plugins may each declare
  * a type called Gmail, and the name above does not show which one this is.
+ * A plugin named like its type is left out, because it would repeat the name.
  */
 const summarizeConnectionType = (type: ConnectionType): string => {
   const flows = listSetupFlows(type);
@@ -68,7 +70,7 @@ const summarizeConnectionType = (type: ConnectionType): string => {
   // A device flow and a redirect flow read the same in a row, so one is enough.
   const gists = new Set(flows.map((flow) => describeSetupFlow(flow, type)));
   const gist = gists.size === 0 ? type.type : [...gists].join(" or ");
-  return `${type.pluginName} · ${gist}`;
+  return showsPluginName(type) ? `${type.pluginName} · ${gist}` : gist;
 };
 
 /**
