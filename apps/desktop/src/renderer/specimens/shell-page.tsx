@@ -41,6 +41,7 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import type {
+  Connection,
   Input,
   Project,
   ProviderInstance,
@@ -60,6 +61,7 @@ import {
 } from "@hercule/client-core";
 import type { Bridge } from "../../ipc/bridge";
 import {
+  connectionsQuery,
   localRunnerQuery,
   profilesQuery,
   projectsQuery,
@@ -111,6 +113,8 @@ export interface DraftScreenRecords {
   readonly projectId: string;
   /** The project's open tasks the start cards offer, most urgent first, as the start cards' query returns them. */
   readonly startTasks: ReadonlyArray<Task>;
+  /** The Connections, which decide the line under the starters that show when there is no open task. */
+  readonly connections: ReadonlyArray<Connection>;
   /** What the user picked in the draft's composer, which the draft's pending submission holds. */
   readonly picks: ThreadPicks;
 }
@@ -228,6 +232,7 @@ const seedQueryCache = (
   queryClient.setQueryData(localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey, null);
   if (draft !== undefined) {
     queryClient.setQueryData(startTasksQuery(client, draft.projectId).queryKey, draft.startTasks);
+    queryClient.setQueryData(connectionsQuery(client).queryKey, draft.connections);
   }
   if (thread !== undefined) {
     const sessionId = thread.session.id;
@@ -339,7 +344,7 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
   if (screens.draft !== undefined) {
     if (document.querySelector(".start") === null) {
       throw new Error(
-        "The draft screen drew no start card. Check the page's console for the error.",
+        "The draft screen drew no start card and no starter. Check the page's console for the error.",
       );
     }
     // The app's draft screen puts the focus in its message field as it opens,
@@ -424,9 +429,10 @@ export async function mountThreadSpecimen(
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with the Draft Thread of `draft` open: the sidebar draws it as a row, and
  * the main pane shows the app's real draft screen, with `draft`'s picks made
- * and its project's start cards, and the focus in the message field, as the
- * app puts it there. Returns once the start cards are in the document. Fails
- * when the page has no `#root`, draws no sidebar row or no start card, leaves
+ * and its project's start cards, or the starters when `draft` has no open
+ * task, and the focus in the message field, as the app puts it there.
+ * Returns once the cards are in the document. Fails when the page has no
+ * `#root`, draws no sidebar row or no card, leaves
  * the message field without the focus, or tries to read a record the cache
  * does not hold.
  */
