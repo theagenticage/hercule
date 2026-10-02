@@ -185,14 +185,17 @@ describe("ControllerConnection.save", () => {
     expect(() => readFileSync(settingsFile.path)).toThrow();
   });
 
-  it("asks for the setup address of a controller that is not set up, and saves nothing", async () => {
+  it("saves the origin of a controller that is not set up, with no setup token", async () => {
     setUp = false;
-    expect(await save(origin)).toEqual({
-      outcome: { _tag: "SetupIncomplete", origin },
-      tokenWrites: [],
-      reloads: 0,
-    });
-    expect(() => readFileSync(settingsFile.path)).toThrow();
+    const { outcome, reloads } = await runOnConnection((connection) =>
+      Effect.gen(function* () {
+        const saved = yield* connection.save(origin);
+        return { saved, token: yield* connection.takePastedSetupToken(origin) };
+      }),
+    );
+    expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, token: null });
+    expect(reloads).toBe(1);
+    expect(readFileObject()).toEqual({ controllerUrl: origin });
   });
 
   it("saves the setup address of a controller that is not set up, and keeps its token once", async () => {

@@ -59,9 +59,9 @@ export interface RendererToMainIpcChannel {
  * The screen shows it rather than the text, which may differ in spaces,
  * capitals, a trailing `/` or a default port.
  *
- * - `Saved`: a controller answered, and its URL is saved. The controller is
- *   set up, or the text was a setup address: main then keeps the address's
- *   token in memory, for `setupToken.read`.
+ * - `Saved`: a controller answered, set up or not, and its URL is saved.
+ *   When the controller is not set up and the text was a setup address, main
+ *   keeps the address's token in memory, for `setupToken.read`.
  * - `InvalidUrl`: the text is neither an http or https URL with nothing
  *   after the host and port, nor a setup address: such a URL followed by
  *   `/setup?token=<token>`, as `hercule setup-url` prints it.
@@ -76,10 +76,6 @@ export interface RendererToMainIpcChannel {
  * - `PreflightRefused`: the controller accepts the desktop app, but the CORS
  *   preflight refuses the app's calls with each method in `methods`, such as
  *   `DELETE`, as a proxy in front of the controller can.
- * - `SetupIncomplete`: the controller is not set up yet, and the text was a
- *   plain address, which holds no setup token. Nothing is saved: the user
- *   runs `hercule setup-url` on the controller's machine and pastes the
- *   setup address it prints.
  */
 export const ControllerUrlSaveOutcome = Schema.TaggedUnion({
   Saved: { origin: Schema.String },
@@ -89,7 +85,6 @@ export const ControllerUrlSaveOutcome = Schema.TaggedUnion({
   NotController: { origin: Schema.String },
   OriginNotAllowed: { origin: Schema.String },
   PreflightRefused: { origin: Schema.String, methods: Schema.Array(Schema.String) },
-  SetupIncomplete: { origin: Schema.String },
 });
 export type ControllerUrlSaveOutcome = typeof ControllerUrlSaveOutcome.Type;
 

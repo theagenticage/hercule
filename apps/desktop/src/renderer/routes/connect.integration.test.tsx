@@ -71,11 +71,6 @@ describe("the connect screen", () => {
       { _tag: "PreflightRefused", origin: CHECKED_ORIGIN, methods: ["DELETE", "PATCH", "PUT"] },
       `${CHECKED_ORIGIN} does not accept the desktop app's DELETE, PATCH, and PUT requests. Update the controller, or check any proxy in front of it.`,
     ],
-    [
-      "SetupIncomplete",
-      { _tag: "SetupIncomplete", origin: CHECKED_ORIGIN },
-      "This controller is not set up yet. Run `hercule setup-url` on its machine, and paste the setup address it prints here.",
-    ],
   ])("explains the outcome %s with the origin main checked", async (_tag, outcome, line) => {
     await connectWith(() => Promise.resolve(outcome));
     expect((await screen.findByRole("alert")).textContent).toBe(line);

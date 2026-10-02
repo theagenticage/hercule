@@ -110,9 +110,7 @@ describe("where the app starts", () => {
       createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
     );
     expect(router.state.location.pathname).toBe("/connect");
-    expect(screen.getByRole("alert").textContent).toBe(
-      "This controller is not set up yet. Run `hercule setup-url` on its machine, and paste the setup address it prints here.",
-    );
+    expect(screen.getByRole("alert").textContent).toBe("This controller is not set up yet.");
   });
 
   it("opens the thread that was open last on this controller", async () => {

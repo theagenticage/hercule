@@ -88,14 +88,14 @@ export class ControllerConnection extends Context.Service<
      *
      * - `InvalidUrl` when `input` is not a controller address; see
      *   parseControllerAddress. Nothing is requested;
-     * - `Saved` when the controller is ready for the app, or is not set up
-     *   and `input` is a setup address. The URL is saved as
-     *   `saveIfAnswering` saves it, and a setup address's token is kept in
-     *   memory, for `takePastedSetupToken`;
-     * - `SetupIncomplete` when the controller is not set up and `input` is a
-     *   plain address. The user needs the setup address, which only the
-     *   controller's machine can print;
+     * - `Saved` when a controller answered, set up or not. The URL is saved
+     *   as `saveIfAnswering` saves it. When the controller is not set up and
+     *   `input` is a setup address, its token is kept in memory, for
+     *   `takePastedSetupToken`;
      * - the check's outcome otherwise; see ControllerCheckOutcome.
+     *
+     * A controller that is not set up is saved too, because the app sets it
+     * up in its first run; no browser opens.
      *
      * Only `Saved` changes the saved URL. Never fails.
      */
@@ -170,10 +170,11 @@ export const makeControllerConnectionLayer = (
             if (address === null) return { _tag: "InvalidUrl" } as const;
             const { origin, setupToken } = address;
             const outcome = yield* checkOrigin(origin);
+            if (outcome._tag !== "Ready" && outcome._tag !== "SetupIncomplete") {
+              return { ...outcome, origin };
+            }
             if (outcome._tag === "SetupIncomplete" && setupToken !== null) {
               pastedSetupAddress = { origin, token: setupToken };
-            } else if (outcome._tag !== "Ready") {
-              return { ...outcome, origin };
             }
             yield* saveAndReload(origin);
             return { _tag: "Saved", origin } as const;

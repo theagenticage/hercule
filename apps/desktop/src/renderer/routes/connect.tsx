@@ -25,10 +25,6 @@ export const Route = createFileRoute("/connect")({
   component: Connect,
 });
 
-/** The line that asks for the setup address of a controller that is not set up. */
-const SETUP_ADDRESS_NEEDED =
-  "This controller is not set up yet. Run `hercule setup-url` on its machine, and paste the setup address it prints here.";
-
 /**
  * Returns the line that explains why the entry guard sent the user back here
  * from the saved controller at `url`.
@@ -36,7 +32,9 @@ const SETUP_ADDRESS_NEEDED =
 const describeProblem = (problem: ConnectProblem, url: string): string =>
   problem === "unreachable"
     ? `Could not reach ${url}. Check that the controller is running.`
-    : SETUP_ADDRESS_NEEDED;
+    : // The first run sets the controller up. Until it is built, nothing in the
+      // app can, so this line only says so.
+      "This controller is not set up yet.";
 
 /**
  * Returns the line that explains the outcome of connecting, or `null` for
@@ -62,8 +60,6 @@ const describeOutcome = (outcome: ControllerUrlSaveOutcome): string | null => {
       const methods = new Intl.ListFormat("en", { type: "conjunction" }).format(outcome.methods);
       return `${outcome.origin} does not accept the desktop app's ${methods} requests. Update the controller, or check any proxy in front of it.`;
     }
-    case "SetupIncomplete":
-      return SETUP_ADDRESS_NEEDED;
   }
 };
 
