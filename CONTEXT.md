@@ -333,7 +333,7 @@ A plugin's static self-description: identity, host API version, requested plugin
 ### Automation
 
 **Connection**:
-A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label (the external account's name unless the user renames it), credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
+A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label (the external account's name unless the user names it, at setup or later), credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
 _Avoid_: account (reserved for a future Hercule user concept), instance
 
 **Event Source**:
