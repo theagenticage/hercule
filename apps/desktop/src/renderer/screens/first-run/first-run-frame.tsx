@@ -56,15 +56,7 @@ export function FirstRunFrame({
               className={RUNG_CLASSES[status]}
               aria-current={status === "now" ? "step" : undefined}
             >
-              <span className="n">
-                {status === "done" ? (
-                  <CheckIcon size={12} />
-                ) : status === "put-off" ? (
-                  <PauseIcon size={12} />
-                ) : (
-                  index + 1
-                )}
-              </span>
+              <RungMark status={status} number={index + 1} />
               {RUNG_LABELS[step]}
             </li>
           ))}
@@ -83,6 +75,38 @@ export function FirstRunFrame({
       </main>
     </div>
   );
+}
+
+/**
+ * Renders the mark at the start of a rung: a tick for a step done, a pause
+ * mark for a step put off, and the step's `number` otherwise. The tick and
+ * the pause mark are icons, so they carry their meaning in words for a
+ * screen reader, which reads a rung as "Done Account".
+ */
+function RungMark({
+  status,
+  number,
+}: {
+  readonly status: FirstRunRungStatus;
+  readonly number: number;
+}): JSX.Element {
+  switch (status) {
+    case "done":
+      return (
+        <span className="n" role="img" aria-label="Done">
+          <CheckIcon size={12} />
+        </span>
+      );
+    case "put-off":
+      return (
+        <span className="n" role="img" aria-label="Put off">
+          <PauseIcon size={12} />
+        </span>
+      );
+    case "now":
+    case "next":
+      return <span className="n">{number}</span>;
+  }
 }
 
 /** Renders the kicker over a step's heading: "Step 2 of 4". */

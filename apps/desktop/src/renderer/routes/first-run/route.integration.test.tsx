@@ -414,11 +414,14 @@ describe("the first run's steps", () => {
     const rungs = within(screen.getByRole("list", { name: "Steps" })).getAllByRole("listitem");
     const [account, providers, github] = rungs;
     expect(github?.getAttribute("aria-current")).toBe("step");
-    // A step put off draws a pause mark where a finished one draws a tick.
+    // A step put off draws a pause mark where a finished one draws a tick,
+    // and each mark is named in words for a screen reader.
     expect(providers?.className).toBe("is-done");
     expect(providers?.querySelector("svg")?.innerHTML).not.toBe(
       account?.querySelector("svg")?.innerHTML,
     );
+    expect(within(account as HTMLElement).getByRole("img", { name: "Done" })).toBeTruthy();
+    expect(within(providers as HTMLElement).getByRole("img", { name: "Put off" })).toBeTruthy();
   });
 
   describe("GitHub", () => {
