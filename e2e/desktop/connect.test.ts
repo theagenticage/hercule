@@ -123,18 +123,18 @@ describe("the connect screen", () => {
     expect(readSettings(userDataDir)).not.toHaveProperty("controllerUrl");
   });
 
-  it("opens setup in the browser for a controller that is not set up, and saves nothing", async () => {
+  it("saves a controller that is not set up, and opens no browser", async () => {
     const controller = await startControllerForTest({ setUp: false });
     const { app, page, userDataDir } = await launchForTest();
     const readOpened = await recordExternalOpens(app);
 
     await connectTo(page, controller.url);
 
-    expect(await readAlertText(page)).toBe(
-      "This controller is not set up yet. Finish setup in the browser window that just opened, then connect again.",
-    );
-    expect(await readOpened()).toEqual([`${controller.url}/setup`]);
-    expect(readSettings(userDataDir)).not.toHaveProperty("controllerUrl");
+    // The app sets the controller up in its first run, so main saves it and
+    // reloads the window. Which screen the reloaded window shows is the first
+    // run's to test.
+    await expect.poll(() => readSettings(userDataDir)["controllerUrl"]).toBe(controller.url);
+    expect(await readOpened()).toEqual([]);
   });
 
   it("is where a signed-in app opens when its controller is down, saying so", async () => {
