@@ -232,9 +232,11 @@ jobs:
       # for the master key would hold the boot with the process still up. So
       # the step waits for `<home>/setup-url`, which the boot writes after it
       # has read the master key, and calls `setup.read` at the address in it.
-      # That is also how the desktop app finds a local controller. The unit is
-      # removed again afterwards, though the runner is thrown away after the
-      # job anyway.
+      # The desktop app does not read that file: it asks the binary, taking
+      # the address from `controllerUrl` in `hercule service status --json`
+      # and the setup token from `hercule setup-url`. The unit is removed
+      # again afterwards, though the runner is thrown away after the job
+      # anyway.
       - name: Run Hercule as a service with the installed binary
         env:
           HERCULE_HOME: ${{ runner.temp }}/hercule-home
