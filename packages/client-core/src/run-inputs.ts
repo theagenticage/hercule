@@ -13,6 +13,7 @@ import {
   type RunInputs,
   type WorkflowDefinition,
 } from "@hercule/contract";
+import { isNamedAfterAccount } from "./connections";
 import { readValidationIssues } from "./errors";
 import { parseWorkflowSourceWithRanges } from "./workflow-source";
 import { readJsonObject, readStringList } from "./json-shape";
@@ -22,7 +23,10 @@ type InputDeclaration = NonNullable<WorkflowDefinition["inputs"]>[number];
 /** One Connection a `connection` field offers. */
 export interface ConnectionChoice {
   readonly id: string;
-  /** The Connection's label and its account: `work · octocat`. */
+  /**
+   * The Connection's label and its account, `work · octocat`, or the label
+   * alone, `octocat`, when the Connection is named after its account.
+   */
   readonly label: string;
   /** A disabled Connection is shown but cannot be chosen, because the controller refuses it. */
   readonly disabled: boolean;
@@ -107,7 +111,9 @@ const buildField = (
         .filter((connection) => connection.type === connectionType)
         .map((connection) => ({
           id: connection.id,
-          label: `${connection.label} · ${connection.displayName}`,
+          label: isNamedAfterAccount(connection)
+            ? connection.label
+            : `${connection.label} · ${connection.displayName}`,
           disabled: connection.status === "disabled",
         })),
     };

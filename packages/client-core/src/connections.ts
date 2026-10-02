@@ -27,6 +27,14 @@ export const filterGitHubConnections = (
 ): readonly Connection[] =>
   connections.filter((connection) => connection.type === GITHUB_CONNECTION_TYPE);
 
+/**
+ * Checks whether the connection's name is its account name. A connection the
+ * user never named is named after its account, so a screen that shows both
+ * the name and the account shows that account once rather than twice.
+ */
+export const isNamedAfterAccount = (connection: Connection): boolean =>
+  connection.label === connection.displayName;
+
 /** The path the controller serves the provider's redirect on. */
 const CALLBACK_PATH = "/oauth/callback";
 

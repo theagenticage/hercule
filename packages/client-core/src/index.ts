@@ -41,6 +41,7 @@ export {
   listConnectionTypes,
   listCredentialFields,
   filterGitHubConnections,
+  isNamedAfterAccount,
   buildRedirectUri,
   listSetupFlows,
   decideDeviceFlowStep,

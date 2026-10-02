@@ -15,7 +15,6 @@ import {
 import type { Connection } from "@hercule/contract";
 import { SaveStatus } from "../../../screens/save-status";
 import { DeviceSignIn } from "./-device";
-import { Naming } from "./-naming";
 
 /**
  * Returns the label of the button that switches the setup to `flow`, for a
@@ -41,11 +40,10 @@ const buildFlowSwitchLabel = (flow: SetupFlow, type: ConnectionType): string => 
  * A type can offer several flows. The form starts with the first one the type
  * declares, and offers the others as quieter buttons under it.
  *
- * - A reconnect with a pasted credential or a device flow asks for no label
- *   or topic. The request leaves them out, and the connection keeps its own;
- *   they are edited under Configure.
- * - A reconnect through a provider redirect also asks for the label and
- *   topic, because it runs the whole setup again and sends them along.
+ * Every flow asks only for the credential or the sign-in, never for a name or
+ * a topic, so that connecting an account is as short as it can be. A new
+ * connection is named after its account and has no topic; a reconnect keeps
+ * the connection's own. Both are edited under Configure.
  */
 export function ConnectionSetup({
   client,
@@ -66,8 +64,6 @@ export function ConnectionSetup({
   // Undefined when the type offers no flow this build can show.
   const [flow, setFlow] = useState<SetupFlow | undefined>(flows[0]);
   const [pasted, setPasted] = useState<Readonly<Record<string, string>>>({});
-  const [label, setLabel] = useState(connection?.label ?? "");
-  const [topic, setTopic] = useState(connection?.labels[0] ?? "");
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -76,8 +72,6 @@ export function ConnectionSetup({
           payload: {
             type: type.type,
             origin: window.location.origin,
-            label,
-            labels: [topic],
             ...(connection === undefined ? {} : { connectionId: connection.id }),
           },
         });
@@ -94,7 +88,7 @@ export function ConnectionSetup({
         return;
       }
       await client.connection.create({
-        payload: { type: type.type, label, labels: [topic], config: {}, credentials: pasted },
+        payload: { type: type.type, credentials: pasted },
       });
     },
     // The connection exists from this reply on, even when the form is gone, so
@@ -104,16 +98,13 @@ export function ConnectionSetup({
   });
 
   // The device flow finishes in its own panel, which polls until the user
-  // approves the code, so starting it only fetches the code. A reconnect sends
-  // no label or topic, because the connection keeps its own.
+  // approves the code, so starting it only fetches the code.
   const startDeviceFlow = useMutation({
     mutationFn: () =>
       client.connection.startDeviceFlow({
         payload: {
           type: type.type,
-          ...(connection === undefined
-            ? { label, labels: [topic] }
-            : { connectionId: connection.id }),
+          ...(connection === undefined ? {} : { connectionId: connection.id }),
         },
       }),
   });
@@ -209,7 +200,7 @@ export function ConnectionSetup({
       {flow === "oauth" ? (
         <p className="max-w-[52ch] text-row text-muted">
           Register this redirect URI with the provider:{" "}
-          <code className="font-mono text-fine break-all text-ink">
+          <code className="font-mono text-fine wrap-break-word text-ink">
             {buildRedirectUri(window.location.origin)}
           </code>
         </p>
@@ -244,16 +235,6 @@ export function ConnectionSetup({
             </Field>
           ))
         : null}
-
-      {connection === undefined || flow === "oauth" ? (
-        <Naming
-          idPrefix={idPrefix}
-          label={label}
-          topic={topic}
-          onLabel={setLabel}
-          onTopic={setTopic}
-        />
-      ) : null}
 
       <div className="flex items-center gap-2">
         {/* A quiet button's text is pulled back to line up with the fields above it. */}

@@ -190,6 +190,20 @@ const GLASS: Connection = {
   updatedAt: "2026-10-02T08:15:00.000Z",
 };
 
+/** A connection the user never named or gave a topic, so it is named after its account. */
+const UNNAMED: Connection = {
+  id: "0199c0ff-eeee-7000-8000-000000000005",
+  type: "glasshouse/glass",
+  label: "octo-glass",
+  displayName: "octo-glass",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [{ name: "oauth.tokens" }],
+  createdAt: "2026-10-02T08:15:00.000Z",
+  updatedAt: "2026-10-02T08:15:00.000Z",
+};
+
 /** Builds a stub controller that returns `connections` and the catalog above. */
 const buildController = (
   connections: () => readonly Connection[],
@@ -250,9 +264,16 @@ const findGroupOffering = (inner: HTMLElement, name: string): HTMLElement => {
   return group;
 };
 
-/** Finds the row of one connection, starting from its account name. */
-const findConnectionRow = async (connection: Connection): Promise<HTMLElement> =>
-  findGroupOffering(await screen.findByText(connection.displayName), "Delete");
+/**
+ * Finds the row of one connection, starting from its account name. The
+ * account is on the line under the name, or is the name itself when the
+ * connection is named after it, so the row is found as the list item around it.
+ */
+const findConnectionRow = async (connection: Connection): Promise<HTMLElement> => {
+  const row = (await screen.findByText(connection.displayName)).closest("li");
+  if (row === null) throw new Error(`${connection.displayName} is in no row`);
+  return row;
+};
 
 /** Finds the offer row of one catalogued type. */
 const findTypeOffer = async (displayName: string): Promise<HTMLElement> =>
@@ -272,6 +293,12 @@ const readSuggestions = (label: string): readonly string[] => {
   const list = id === null ? null : document.getElementById(id);
   if (list === null) throw new Error(`${label} offers no suggestions`);
   return [...list.querySelectorAll("option")].map((option) => option.value);
+};
+
+/** Checks that the open setup form asks for neither a name nor a topic. */
+const expectNoNameOrTopic = (): void => {
+  expect(screen.queryByLabelText("Name")).toBeNull();
+  expect(screen.queryByLabelText("Topic")).toBeNull();
 };
 
 /**
@@ -377,6 +404,24 @@ describe("Connections", () => {
     expect(sky).toContain("Business");
   });
 
+  it("shows the account once when the connection is named after it, and no topic when it has none", async () => {
+    await openApp([UNNAMED]);
+
+    const row = await findConnectionRow(UNNAMED);
+    expect(within(row).getAllByText(UNNAMED.displayName)).toHaveLength(1);
+    // The line under the name holds only the plugin: no account, no topic, no separator.
+    expect(readPageText(row)).toContain("glasshouse plugin");
+    expect(readPageText(row)).not.toContain("·");
+  });
+
+  it("shows both the name and the account once the connection is renamed", async () => {
+    await openApp([{ ...UNNAMED, label: "personal" }]);
+
+    const row = readPageText(await findConnectionRow(UNNAMED));
+    expect(row).toContain("personal");
+    expect(row).toContain("octo-glass");
+  });
+
   it("still offers every type once something is connected", async () => {
     await openApp([PAPER, SKY]);
 
@@ -404,13 +449,7 @@ describe("Connections", () => {
 describe("Connections > setting up a connection", () => {
   const created: Connection = { ...PAPER, id: "0199c0ff-cccc-7000-8000-000000000003" };
 
-  const fill = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
-    await user.type(screen.getByLabelText("Access token"), "pt-secret-9931");
-    await user.type(screen.getByLabelText("Label"), "work");
-    await user.type(screen.getByLabelText("Default topic"), "Code");
-  };
-
-  it("shows the fields the type asks for, as password inputs", async () => {
+  it("shows the fields the type asks for, as password inputs, and nothing else", async () => {
     const user = userEvent.setup();
     await openApp([]);
 
@@ -422,13 +461,12 @@ describe("Connections > setting up a connection", () => {
     expect(readPageText()).toContain("Connect Paper Trail");
     expect(readPageText()).toContain(CHECKLIST);
     expect(screen.getByLabelText<HTMLInputElement>("Access token").type).toBe("password");
-    expect(screen.getByLabelText("Label")).toBeDefined();
-    expect(readSuggestions("Default topic")).toEqual(
-      expect.arrayContaining(["Code", "Business", "Personal", "Ops"]),
-    );
+    // The new connection is named after its account and has no topic, so
+    // setup asks for neither.
+    expectNoNameOrTopic();
   });
 
-  it("sends the filled-in values, and shows the new connection", async () => {
+  it("sends only the credential, and shows the new connection", async () => {
     const user = userEvent.setup();
     const { api, hold } = await openApp([], {
       "POST /api/v1/connections": { status: 201, body: created },
@@ -437,14 +475,12 @@ describe("Connections > setting up a connection", () => {
     await user.click(
       within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
-    await fill(user);
+    await user.type(screen.getByLabelText("Access token"), "pt-secret-9931");
     hold([created]);
     // Cancel comes before Connect.
-    const connect = within(getFormWithField("Label")).getByRole("button", { name: "Connect" });
-    expectInDocumentOrder([
-      within(getFormWithField("Label")).getByRole("button", { name: "Cancel" }),
-      connect,
-    ]);
+    const form = getFormWithField("Access token");
+    const connect = within(form).getByRole("button", { name: "Connect" });
+    expectInDocumentOrder([within(form).getByRole("button", { name: "Cancel" }), connect]);
     await user.click(connect);
 
     await waitFor(() => {
@@ -453,9 +489,6 @@ describe("Connections > setting up a connection", () => {
     expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
     expect(listWrites(api)[0]?.body).toEqual({
       type: "paper-trail/paper",
-      label: "work",
-      labels: ["Code"],
-      config: {},
       credentials: { token: "pt-secret-9931" },
     });
 
@@ -478,14 +511,16 @@ describe("Connections > setting up a connection", () => {
     await user.click(
       within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
-    await fill(user);
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+    await user.type(screen.getByLabelText("Access token"), "pt-secret-9931");
+    await user.click(
+      within(getFormWithField("Access token")).getByRole("button", { name: "Connect" }),
+    );
 
     await screen.findByText(new RegExp(complaint));
     expectMessageAtField(
       complaint,
       screen.getByLabelText("Access token"),
-      screen.getByLabelText("Label"),
+      screen.getByRole("button", { name: "Connect" }),
     );
   });
 
@@ -527,10 +562,10 @@ describe("Connections > a redirect flow", () => {
     );
 
     expect(readPageText()).toContain(`${window.location.origin}/oauth/callback`);
+    expectNoNameOrTopic();
 
-    await user.type(screen.getByLabelText("Label"), "personal");
-    await user.type(screen.getByLabelText("Default topic"), "Business");
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+    // The offers are gone while the form is open, so its button is the only Connect.
+    await user.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
       expect(listWrites(api)).toHaveLength(1);
@@ -539,8 +574,6 @@ describe("Connections > a redirect flow", () => {
     expect(listWrites(api)[0]?.body).toEqual({
       type: "skyline/mail",
       origin: window.location.origin,
-      label: "personal",
-      labels: ["Business"],
     });
     await waitFor(() => {
       expect(assign.mock.calls).toEqual([[AUTHORIZATION_URL]]);
@@ -582,6 +615,7 @@ describe("Connections > reconnecting and removing", () => {
       within(await findConnectionRow(STALE)).getByRole("button", { name: "Reconnect" }),
     );
     expect(readPageText()).toContain("Reconnect Paper Trail");
+    expectNoNameOrTopic();
     await user.type(await screen.findByLabelText("Access token"), "pt-secret-fresh");
     await user.click(
       within(getFormWithField("Access token")).getByRole("button", { name: "Connect" }),
@@ -610,17 +644,19 @@ describe("Connections > reconnecting and removing", () => {
       "POST /api/v1/oauth/start": { body: { authorizationUrl: "https://skyline.test/again" } },
     });
 
-    await user.click(
-      within(await findConnectionRow(SKY)).getByRole("button", { name: "Reconnect" }),
-    );
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+    const row = await findConnectionRow(SKY);
+    await user.click(within(row).getByRole("button", { name: "Reconnect" }));
+    // The connection keeps its name and topic, so a reconnect does not ask for them.
+    expectNoNameOrTopic();
+    await user.click(within(row).getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
       expect(listWrites(api)).toHaveLength(1);
     });
     expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
-    expect(listWrites(api)[0]?.body).toMatchObject({
+    expect(listWrites(api)[0]?.body).toEqual({
       type: "skyline/mail",
+      origin: window.location.origin,
       connectionId: SKY.id,
     });
     vi.unstubAllGlobals();
@@ -660,7 +696,7 @@ describe("Connections > reconnecting and removing", () => {
 });
 
 describe("Connections > configuring a connection", () => {
-  it("shows the type's own settings beside the label and the topic", async () => {
+  it("shows the type's own settings beside the name and the topic", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([PAPER], {
       [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
@@ -671,16 +707,17 @@ describe("Connections > configuring a connection", () => {
     );
 
     expect(screen.getByLabelText<HTMLInputElement>(/folder/i).value).toBe("inbox");
-    expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("work");
-    expect(screen.getByLabelText<HTMLInputElement>("Default topic").value).toBe("Code");
+    expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("work");
+    expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("Code");
+    expect(readSuggestions("Topic")).toEqual(
+      expect.arrayContaining(["Code", "Business", "Personal", "Ops"]),
+    );
 
     await user.clear(screen.getByLabelText(/folder/i));
     await user.type(screen.getByLabelText(/folder/i), "archive");
-    const save = within(getFormWithField("Label")).getByRole("button", { name: "Save" });
-    expectInDocumentOrder([
-      within(getFormWithField("Label")).getByRole("button", { name: "Cancel" }),
-      save,
-    ]);
+    const form = getFormWithField("Name");
+    const save = within(form).getByRole("button", { name: "Save" });
+    expectInDocumentOrder([within(form).getByRole("button", { name: "Cancel" }), save]);
     await user.click(save);
 
     await waitFor(() => {
@@ -690,11 +727,77 @@ describe("Connections > configuring a connection", () => {
       method: "PATCH",
       path: `/api/v1/connections/${PAPER.id}`,
     });
+    // The topic was not touched, so the connection keeps all its topics: the
+    // form shows only the first of `Code` and `Ops`, and sending it alone
+    // would drop the other.
     expect(api.calls.find((call) => call.method === "PATCH")?.body).toEqual({
       label: "work",
-      labels: ["Code"],
       config: { folder: "archive" },
     });
+  });
+
+  it("renames a connection named after its account and gives it a topic", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([UNNAMED], {
+      [`PATCH /api/v1/connections/${UNNAMED.id}`]: { body: UNNAMED },
+    });
+
+    await user.click(
+      within(await findConnectionRow(UNNAMED)).getByRole("button", { name: "Configure" }),
+    );
+    expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("octo-glass");
+    expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("");
+
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "personal");
+    await user.type(screen.getByLabelText("Topic"), "Code");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({
+      label: "personal",
+      labels: ["Code"],
+      config: {},
+    });
+  });
+
+  it("keeps every topic when only the name changes", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([PAPER], {
+      [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
+    });
+
+    await user.click(
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
+    );
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "office");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({ label: "office", config: { folder: "inbox" } });
+  });
+
+  it("sends no topics once the user clears the topic", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([SKY], {
+      [`PATCH /api/v1/connections/${SKY.id}`]: { body: SKY },
+    });
+
+    await user.click(
+      within(await findConnectionRow(SKY)).getByRole("button", { name: "Configure" }),
+    );
+    await user.clear(screen.getByLabelText("Topic"));
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({ label: "personal", labels: [], config: {} });
   });
 
   it("shows a rejected setting's error under that setting", async () => {
@@ -709,17 +812,17 @@ describe("Connections > configuring a connection", () => {
     await user.click(
       within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
     );
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Save" }));
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
 
     await screen.findByText(new RegExp(complaint));
     expectMessageAtField(
       complaint,
       screen.getByLabelText(/folder/i),
-      screen.getByLabelText("Label"),
+      screen.getByLabelText("Name"),
     );
   });
 
-  it("shows only the label and the topic for a type with no settings of its own", async () => {
+  it("shows only the name and the topic for a type with no settings of its own", async () => {
     const user = userEvent.setup();
     await openApp([SKY]);
 
@@ -727,8 +830,8 @@ describe("Connections > configuring a connection", () => {
       within(await findConnectionRow(SKY)).getByRole("button", { name: "Configure" }),
     );
 
-    expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("personal");
-    expect(screen.getByLabelText<HTMLInputElement>("Default topic").value).toBe("Business");
+    expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("personal");
+    expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("Business");
     expect(screen.queryByLabelText(/folder/i)).toBeNull();
   });
 });
@@ -779,8 +882,7 @@ describe("Connections > a device flow", () => {
   const isCodeShown = (code: string) => () => screen.queryByText(code) !== null;
 
   /**
-   * Opens the Glasshouse setup, fills in the label and topic, and starts the
-   * device flow under a fake clock. The clock is faked only now, because
+   * Opens the Glasshouse setup and starts the device flow under a fake clock. The clock is faked only now, because
    * user-event waits on timers that a fake clock never fires.
    */
   const startSignIn = async (extra: Readonly<Record<string, Handler>>) => {
@@ -789,8 +891,6 @@ describe("Connections > a device flow", () => {
     await user.click(
       within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
     );
-    await user.type(screen.getByLabelText("Label"), "work");
-    await user.type(screen.getByLabelText("Default topic"), "Code");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
     await pumpUntil(isCodeShown(START.userCode));
@@ -812,7 +912,8 @@ describe("Connections > a device flow", () => {
     const paste = screen.getByRole("button", { name: "Paste a token instead" });
     expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), signIn, paste]);
     expect(screen.queryByLabelText("Personal access token")).toBeNull();
-    expect(screen.getByLabelText("Label")).toBeDefined();
+    // The sign-in is the whole setup: no name, no topic.
+    expectNoNameOrTopic();
   });
 
   it("does not offer a choice for a type with one flow", async () => {
@@ -836,11 +937,7 @@ describe("Connections > a device flow", () => {
     });
 
     expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: START_PATH });
-    expect(listWrites(api)[0]?.body).toEqual({
-      type: "glasshouse/glass",
-      label: "work",
-      labels: ["Code"],
-    });
+    expect(listWrites(api)[0]?.body).toEqual({ type: "glasshouse/glass" });
     expect(readPageText()).toContain("Connect Glasshouse");
     expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
     const open = screen.getByRole("link", { name: "Open Glasshouse" });
@@ -913,8 +1010,6 @@ describe("Connections > a device flow", () => {
     expect(starts).toBe(2);
     expect(listWrites(api).filter((call) => call.path === START_PATH)[1]?.body).toEqual({
       type: "glasshouse/glass",
-      label: "work",
-      labels: ["Code"],
     });
   });
 
@@ -991,14 +1086,10 @@ describe("Connections > a device flow", () => {
     await user.click(
       within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
     );
-    await user.type(screen.getByLabelText("Label"), "work");
-    await user.type(screen.getByLabelText("Default topic"), "Code");
 
     await user.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
 
     expect(readPageText(await screen.findByRole("alert"))).toContain("the database is locked");
-    // The form keeps what the user typed, so trying again is one click.
-    expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("work");
 
     await user.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
 
@@ -1057,10 +1148,11 @@ describe("Connections > a device flow", () => {
 
     // The way back to the preferred flow stays on offer.
     expect(screen.getByRole("button", { name: "Sign in with Glasshouse instead" })).toBeDefined();
+    expectNoNameOrTopic();
     await user.type(screen.getByLabelText("Personal access token"), "ghp-glass-1");
-    await user.type(screen.getByLabelText("Label"), "work");
-    await user.type(screen.getByLabelText("Default topic"), "Code");
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+    await user.click(
+      within(getFormWithField("Personal access token")).getByRole("button", { name: "Connect" }),
+    );
 
     await waitFor(() => {
       expect(listWrites(api)).toHaveLength(1);
@@ -1068,9 +1160,6 @@ describe("Connections > a device flow", () => {
     expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
     expect(listWrites(api)[0]?.body).toEqual({
       type: "glasshouse/glass",
-      label: "work",
-      labels: ["Code"],
-      config: {},
       credentials: { token: "ghp-glass-1" },
     });
   });
@@ -1087,8 +1176,8 @@ describe("Connections > a device flow", () => {
       within(await findConnectionRow(stale)).getByRole("button", { name: "Reconnect" }),
     );
     expect(readPageText()).toContain("Reconnect Glasshouse");
-    // The connection keeps its label and topic, so a reconnect does not ask for them.
-    expect(screen.queryByLabelText("Label")).toBeNull();
+    // The connection keeps its name and topic, so a reconnect does not ask for them.
+    expectNoNameOrTopic();
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));

@@ -35,6 +35,8 @@ const connection = (
 const CONNECTIONS = [
   connection("c1", "github/github", "work", "connected"),
   connection("c2", "github/github", "old", "disabled"),
+  // Named after its account, as a connection the user never named is.
+  connection("c4", "github/github", "octocat", "connected"),
   connection("c3", "gmail/gmail", "mail", "connected"),
 ];
 
@@ -104,6 +106,7 @@ describe("buildRunForm", () => {
     assert.deepStrictEqual(account?.kind === "connection" ? account.connections : [], [
       { id: "c1", label: "work · octocat", disabled: false },
       { id: "c2", label: "old · octocat", disabled: true },
+      { id: "c4", label: "octocat", disabled: false },
     ]);
   });
 

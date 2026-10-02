@@ -3,11 +3,35 @@ import type { Connection, PluginDetail } from "@hercule/contract";
 import {
   listConnectionTypes,
   listCredentialFields,
+  isNamedAfterAccount,
   buildRedirectUri,
   listSetupFlows,
   decideDeviceFlowStep,
   type ConnectionType,
 } from "./connections";
+
+describe("isNamedAfterAccount", () => {
+  const connection = {
+    id: "0199c0ff-aaaa-7000-8000-000000000001",
+    type: "github/github",
+    label: "octocat",
+    displayName: "octocat",
+    status: "connected",
+    labels: [],
+    config: {},
+    credentials: [],
+    createdAt: "2026-10-02T08:15:00.000Z",
+    updatedAt: "2026-10-02T08:15:00.000Z",
+  } satisfies Connection;
+
+  it("is true for a connection whose name is its account name", () => {
+    expect(isNamedAfterAccount(connection)).toBe(true);
+  });
+
+  it("is false once the connection is renamed, though the account stays the same", () => {
+    expect(isNamedAfterAccount({ ...connection, label: "personal" })).toBe(false);
+  });
+});
 
 describe("buildRedirectUri", () => {
   it("is the callback path on the browser's origin", () => {

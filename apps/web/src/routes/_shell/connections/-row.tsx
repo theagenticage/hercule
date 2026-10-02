@@ -2,6 +2,7 @@ import { Fragment, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, cn } from "@hercule/ui";
 import {
+  isNamedAfterAccount,
   queryKeys,
   type ConnectionType,
   type HerculeClient,
@@ -50,12 +51,16 @@ export function ConnectionRow({
    * The parts of the secondary line: the plugin that declares the type, the
    * account, and the connection's topic. The plugin comes first, because two
    * plugins may declare the same type name and the name above does not show
-   * which one this is. The line is built from parts so that each separator is
-   * its own element, spaced by the row's gap rather than by spaces in the text.
+   * which one this is. The account is left out when the connection is named
+   * after it, because the name above already shows it. The line is built from
+   * parts so that each separator is its own element, spaced by the row's gap
+   * rather than by spaces in the text.
    */
   const facts = [
     ...(type === undefined ? [] : [{ key: "plugin", text: type.pluginName, tone: "text-faint" }]),
-    { key: "account", text: connection.displayName, tone: "text-muted" },
+    ...(isNamedAfterAccount(connection)
+      ? []
+      : [{ key: "account", text: connection.displayName, tone: "text-muted" }]),
     ...(connection.labels[0] === undefined
       ? []
       : [{ key: "topic", text: connection.labels[0], tone: "text-faint" }]),
@@ -107,14 +112,18 @@ export function ConnectionRow({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
-        {facts.map((fact, index) => (
-          <Fragment key={fact.key}>
-            {index === 0 ? null : <span className="text-faint">·</span>}
-            <span className={fact.tone}>{fact.text}</span>
-          </Fragment>
-        ))}
-      </div>
+      {/* With no plugin, no topic, and the account shown as the name, there
+          are no facts, and an empty line would leave a gap. */}
+      {facts.length === 0 ? null : (
+        <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
+          {facts.map((fact, index) => (
+            <Fragment key={fact.key}>
+              {index === 0 ? null : <span className="text-faint">·</span>}
+              <span className={fact.tone}>{fact.text}</span>
+            </Fragment>
+          ))}
+        </div>
+      )}
 
       {connection.statusDetail === undefined ? null : (
         <p className="text-fine text-muted">{connection.statusDetail}</p>
