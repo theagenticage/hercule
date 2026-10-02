@@ -69,7 +69,7 @@ describe("the connect screen", () => {
     [
       "PreflightRefused",
       { _tag: "PreflightRefused", origin: CHECKED_ORIGIN, methods: ["DELETE", "PATCH", "PUT"] },
-      `${CHECKED_ORIGIN} does not accept the desktop app's DELETE, PATCH, and PUT requests. Update the controller, or check any proxy in front of it.`,
+      `${CHECKED_ORIGIN} does not accept the desktop app's DELETE, PATCH and PUT requests. Update the controller, or check any proxy in front of it.`,
     ],
   ])("explains the outcome %s with the origin main checked", async (_tag, outcome, line) => {
     await connectWith(() => Promise.resolve(outcome));

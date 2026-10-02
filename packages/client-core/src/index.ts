@@ -181,9 +181,6 @@ export {
   buildRoomContents,
   decideFirstRunStep,
   FIRST_RUN_STEPS,
-  formatControllerAddress,
-  isLoopbackOrigin,
-  joinNames,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type AllSetRecap,
@@ -196,6 +193,8 @@ export {
   type RoomContents,
   type RoomWing,
 } from "./first-run";
+export { formatControllerAddress, isLoopbackOrigin } from "./controller-origin";
+export { formatNameList } from "./name-list";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export {
   addCompletedStep,

@@ -1,3 +1,4 @@
+import { formatNameList } from "@hercule/client-core";
 import type { ControllerUrlSaveOutcome } from "../../ipc/contract";
 
 /** The address of a controller on this Mac at the default port, as the connect screen prefills it. */
@@ -26,7 +27,7 @@ export const describeControllerUrlOutcome = (outcome: ControllerUrlSaveOutcome):
     case "OriginNotAllowed":
       return `${outcome.origin} does not accept the desktop app yet. Update the controller.`;
     case "PreflightRefused": {
-      const methods = new Intl.ListFormat("en", { type: "conjunction" }).format(outcome.methods);
+      const methods = formatNameList(outcome.methods, "and");
       return `${outcome.origin} does not accept the desktop app's ${methods} requests. Update the controller, or check any proxy in front of it.`;
     }
   }

@@ -9,8 +9,6 @@ import {
   buildProvidersStepText,
   buildRoomContents,
   decideFirstRunStep,
-  formatControllerAddress,
-  isLoopbackOrigin,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunFacts,
@@ -137,20 +135,6 @@ describe("addPutOffStep", () => {
   it("returns the list itself when the step is already put off", () => {
     const putOff = ["providers"] as const;
     expect(addPutOffStep(putOff, "providers")).toBe(putOff);
-  });
-});
-
-describe("isLoopbackOrigin", () => {
-  it("accepts an origin on this machine", () => {
-    for (const origin of ["http://127.0.0.1:4937", "http://localhost:4937", "http://[::1]:4937"]) {
-      expect(isLoopbackOrigin(origin)).toBe(true);
-    }
-  });
-
-  it("refuses an origin on another machine, and one that does not parse", () => {
-    for (const origin of ["http://10.0.0.2:4937", "https://hercule.example", "not a url"]) {
-      expect(isLoopbackOrigin(origin)).toBe(false);
-    }
   });
 });
 
@@ -408,16 +392,6 @@ describe("buildFirstRunLadder", () => {
         ["github"],
       ).map((rung) => rung.status),
     ).toEqual(["done", "done", "put-off", "done"]);
-  });
-});
-
-describe("formatControllerAddress", () => {
-  it("drops the scheme", () => {
-    expect(formatControllerAddress("http://127.0.0.1:4937")).toBe("127.0.0.1:4937");
-  });
-
-  it("returns what does not parse unchanged", () => {
-    expect(formatControllerAddress("not an origin")).toBe("not an origin");
   });
 });
 

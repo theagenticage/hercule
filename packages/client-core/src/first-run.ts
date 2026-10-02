@@ -15,6 +15,8 @@ import type {
   Runner,
 } from "@hercule/contract";
 import { filterGitHubConnections } from "./connections";
+import { isLoopbackOrigin } from "./controller-origin";
+import { formatNameList } from "./name-list";
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
 import { parseRepositoryName } from "./remote";
 import { formatRepoName, listProjectRepos } from "./threads/workspaces";
@@ -107,27 +109,6 @@ export const buildFirstRunLadder = (
   }));
 
 /**
- * Returns the host and port of a controller's origin, such as
- * `127.0.0.1:4937` for `http://127.0.0.1:4937`, as the welcome shows it.
- * Returns `origin` unchanged when it does not parse.
- */
-export const formatControllerAddress = (origin: string): string =>
-  URL.canParse(origin) ? new URL(origin).host : origin;
-
-/**
- * Checks whether a controller's origin, such as `http://127.0.0.1:4937`, is
- * on this machine: its host is `127.0.0.1`, `localhost` or `[::1]`. Returns
- * false for an origin that does not parse.
- *
- * The first run's welcome greets a controller on this Mac as Hercule found
- * running here, and a controller elsewhere goes straight to the account step.
- */
-export const isLoopbackOrigin = (origin: string): boolean => {
-  if (!URL.canParse(origin)) return false;
-  return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname);
-};
-
-/**
  * The machine the first run's copy names as the one that runs Hercule: "this
  * Mac", or the name of the controller's runner when Hercule runs on another
  * machine.
@@ -147,15 +128,6 @@ export const buildFirstRunHost = (origin: string, localRunner: Runner | null): F
   isLoopbackOrigin(origin)
     ? { name: "this Mac", isThisMac: true }
     : { name: localRunner?.name ?? "the machine that runs Hercule", isThisMac: false };
-
-/** Joins names as a reader would list them: "A", "A and B", "A, B and C". */
-export const joinNames = (names: readonly string[], conjunction: "and" | "or"): string =>
-  new Intl.ListFormat("en", {
-    type: conjunction === "and" ? "conjunction" : "disjunction",
-  })
-    .format(names)
-    // A list of three or more gets no comma before the conjunction, as the book writes it.
-    .replace(/, (and|or) /, " $1 ");
 
 /** The heading, the line under it, and the rows of the providers step. */
 export interface ProvidersStepText {
@@ -192,7 +164,7 @@ export const buildProvidersStepText = (
   if (found.length === 0) {
     return {
       heading: "Your agents need a coding tool",
-      sub: `Hercule drives ${joinNames(
+      sub: `Hercule drives ${formatNameList(
         rows.map((row) => row.name),
         "or",
       )}, and found none of them on ${host.name}. Install one and log in to it; Hercule can install it for you.`,
@@ -200,7 +172,7 @@ export const buildProvidersStepText = (
     };
   }
   return {
-    heading: `${joinNames(
+    heading: `${formatNameList(
       found.map((row) => row.name),
       "and",
     )} ${found.length === 1 ? "is" : "are"} on ${host.name}`,
@@ -394,7 +366,7 @@ export const buildAllSetRecap = (
     providerNames:
       loggedIn.length === 0
         ? null
-        : joinNames(
+        : formatNameList(
             loggedIn.map((row) => row.name),
             "and",
           ),
