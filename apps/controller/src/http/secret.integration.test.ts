@@ -148,8 +148,16 @@ describe("controller.read", () => {
 
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
-      expect(Object.keys(body).sort()).toEqual(["defaultRunnerId", "id", "publicKey", "version"]);
+      expect(Object.keys(body).sort()).toEqual([
+        "defaultRunnerId",
+        "id",
+        "localRunnerId",
+        "publicKey",
+        "version",
+      ]);
       expect(body["version"]).toBe(VERSION);
+      // No local runner is set up in this test.
+      expect(body["localRunnerId"]).toBeNull();
       expect(body["id"]).toEqual(expect.stringMatching(/^[0-9a-f]{8}-/));
     });
   });
