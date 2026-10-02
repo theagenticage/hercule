@@ -1,30 +1,27 @@
-import { useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type JSX, type KeyboardEvent } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   createProjectWithRepositories,
   filterGitHubConnections,
   isClonableRemote,
-  isGitHubRemote,
   isNewProjectCreated,
-  parseRepositoryName,
   queryKeys,
   readErrorMessage,
   type HerculeClient,
   type NewProjectDraft,
 } from "@hercule/client-core";
-import type { FolderPickOutcome } from "../../../ipc/contract";
 import { connectionsQuery } from "../../app/queries";
-import { BranchIcon } from "../../icons/branch";
-import { PauseIcon } from "../../icons/pause";
-import { QuestionIcon } from "../../icons/question";
-import { WorkspaceIcon } from "../../icons/workspace";
-import { GitHubMark } from "../../logos";
-import { FormField, MarkedCard, Warning } from "../step";
+import { FormField } from "../step";
+import {
+  ChooseFolder,
+  FolderCard,
+  NoGitHubWarning,
+  NotGitWarning,
+  RemoteWarning,
+  type PickedFolder,
+} from "./folder-parts";
 import "./new-project.css";
-
-/** A folder the user picked, as git describes it. */
-type PickedFolder = Exclude<FolderPickOutcome, { readonly _tag: "Cancelled" }>;
 
 /** Calls `submit` when Enter is pressed in a field, as a form's own submit would. */
 const submitOnEnter =
@@ -120,41 +117,12 @@ export function NewProjectForm({
 
   if (folder === null) {
     return (
-      <>
-        <button
-          type="button"
-          className="pick-folder"
-          disabled={pick.isPending}
-          onClick={() => pick.mutate()}
-        >
-          <span className="ico">
-            <WorkspaceIcon size={20} />
-          </span>
-          <b>Choose a folder…</b>
-        </button>
-        {pick.error === null ? null : (
-          <p className="fl-err" role="alert">
-            The folder dialog did not open: {readErrorMessage(pick.error)}
-          </p>
-        )}
-        {gitHub === undefined ? (
-          <p className="st-note">
-            <WorkspaceIcon size={14} />
-            <span>
-              Until the repository joins, threads work without a checkout.{" "}
-              <b>The folder you pick stays as it is.</b>
-            </span>
-          </p>
-        ) : (
-          <p className="st-note">
-            <BranchIcon size={14} />
-            <span>
-              Threads work in their own worktrees, cloned from the remote.{" "}
-              <b>The folder you pick stays as it is.</b>
-            </span>
-          </p>
-        )}
-      </>
+      <ChooseFolder
+        pending={pick.isPending}
+        error={pick.error === null ? null : readErrorMessage(pick.error)}
+        hasGitHub={gitHub !== undefined}
+        onPick={() => pick.mutate()}
+      />
     );
   }
 
@@ -186,23 +154,11 @@ export function NewProjectForm({
   };
 
   const card = (
-    <MarkedCard
-      mark={<WorkspaceIcon size={18} />}
-      name={<b className="mono">{folder.name}</b>}
-      detail={describeFolder(folder)}
-      end={
-        // Once the project exists, another folder would make a second one.
-        projectId === null ? (
-          <button
-            type="button"
-            className="btn btn--sm btn--quiet"
-            disabled={pending}
-            onClick={() => pick.mutate()}
-          >
-            Change
-          </button>
-        ) : null
-      }
+    <FolderCard
+      folder={folder}
+      pending={pending}
+      // Once the project exists, another folder would make a second one.
+      onChange={projectId === null ? () => pick.mutate() : undefined}
     />
   );
 
@@ -210,26 +166,11 @@ export function NewProjectForm({
     return (
       <>
         {card}
-        <Warning icon={<QuestionIcon size={14} />}>
-          {folder._tag === "NotGit" ? (
-            <b>This folder isn’t a git repository.</b>
-          ) : (
-            <>
-              <b>Git could not read this folder.</b> It stopped with “{folder.line}”.
-            </>
-          )}{" "}
-          Hercule clones projects from a remote, so it needs one. Choose another folder, or create
-          the project now and add a repository later.
-          <br />
-          <button
-            type="button"
-            className="btn btn--sm"
-            disabled={pending}
-            onClick={() => submit(false)}
-          >
-            Create {folder.name} without a repository
-          </button>
-        </Warning>
+        <NotGitWarning
+          folder={folder}
+          pending={pending}
+          onCreateWithoutRepository={() => submit(false)}
+        />
         {sent === null || sent.failure === null ? null : (
           <p className="fl-err new-project-err" role="alert">
             {sent.failure}
@@ -261,25 +202,7 @@ export function NewProjectForm({
     return (
       <>
         {card}
-        <Warning icon={<PauseIcon size={14} />}>
-          <b>{projectName} starts without its repository.</b> Runners clone it through a GitHub
-          Connection,{" "}
-          {onConnectGitHub === undefined ? (
-            <>
-              and there is none yet. Connect GitHub in the web app, then add {projectName}’s
-              repository there.
-            </>
-          ) : (
-            <>
-              and you skipped that step. Connect GitHub, then add {projectName}’s repository.
-              <br />
-              <button type="button" className="btn btn--sm" onClick={onConnectGitHub}>
-                <GitHubMark size={12} />
-                Connect GitHub now
-              </button>
-            </>
-          )}
-        </Warning>
+        <NoGitHubWarning projectName={projectName} onConnectGitHub={onConnectGitHub} />
         <div className="st-form">{nameField}</div>
         <div className="st-actions">
           <button
@@ -300,21 +223,7 @@ export function NewProjectForm({
   return (
     <>
       {card}
-      {asksForRemote ? (
-        <Warning icon={<QuestionIcon size={14} />}>
-          {folder._tag === "NoRemote" ? (
-            <>
-              <b>This repository has no remote.</b> Runners clone from a remote, never from this
-              folder. Push it to GitHub first, or enter a remote URL below.
-            </>
-          ) : (
-            <>
-              <b>Runners can’t clone from this remote.</b> They clone over https:// or SSH, never
-              from this Mac. Enter a remote URL below.
-            </>
-          )}
-        </Warning>
-      ) : null}
+      {asksForRemote ? <RemoteWarning folder={folder} /> : null}
       <div className="st-form">
         {asksForRemote ? (
           <FormField
@@ -379,32 +288,4 @@ export function NewProjectForm({
       </div>
     </>
   );
-}
-
-/**
- * Returns the line under the folder's name on its card: where its
- * repository is hosted and its branch, or why it has no repository Hercule
- * can use.
- */
-function describeFolder(folder: PickedFolder): ReactNode {
-  switch (folder._tag) {
-    case "NotGit":
-      return "Not a git repository";
-    case "GitFailed":
-      return "Git could not read this folder";
-    case "NoRemote":
-      return folder.branch === null ? "git · no remote" : `git · ${folder.branch} · no remote`;
-    case "Repository": {
-      // A detached HEAD is on no branch, so none is named.
-      const onBranch = folder.branch === null ? "" : ` · ${folder.branch}`;
-      return isGitHubRemote(folder.remote) ? (
-        <>
-          <GitHubMark size={11} /> {parseRepositoryName(folder.remote) ?? folder.remote}
-          {onBranch}
-        </>
-      ) : (
-        `${folder.remote}${onBranch}`
-      );
-    }
-  }
 }
