@@ -44,7 +44,7 @@ const countReads = (calls: readonly Call[], path: string): number =>
 /**
  * Starts the app signed in, at `path`, with the sidebar fixture and
  * `handlers` on top, and waits until the live connection holds the shell's
- * four subscriptions and every read has settled, including the reads the
+ * five subscriptions and every read has settled, including the reads the
  * first connection makes.
  */
 const startShell = async ({
@@ -58,10 +58,16 @@ const startShell = async ({
   return { calls, fake, ...app };
 };
 
-/** Waits until the live connection holds the shell's four subscriptions and no read is running. */
+/** Waits until the live connection holds the shell's five subscriptions and no read is running. */
 const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promise<void> => {
   await waitFor(() => {
-    expect([...live.readTopics()].sort()).toEqual(["provider", "runner", "session", "task"]);
+    expect([...live.readTopics()].sort()).toEqual([
+      "connection",
+      "provider",
+      "runner",
+      "session",
+      "task",
+    ]);
     expect(queryClient.isFetching()).toBe(0);
   });
 };
