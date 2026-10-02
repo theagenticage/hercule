@@ -91,3 +91,22 @@ HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
   this.open = false;
   this.dispatchEvent(new Event("close"));
 };
+
+/**
+ * jsdom has no `AnimationEvent`. Without it, React listens for the old
+ * `webkitAnimationEnd` in place of `animationend`, and an event fired with
+ * `fireEvent.animationEnd` never reaches an `onAnimationEnd` handler. jsdom
+ * runs no animations, so a test that waits for one to end fires the event
+ * itself: the Office settles its new pieces when their animation ends.
+ */
+window.AnimationEvent = class extends Event {
+  readonly animationName: string;
+  readonly elapsedTime: number;
+  readonly pseudoElement: string;
+  constructor(type: string, init: AnimationEventInit = {}) {
+    super(type, init);
+    this.animationName = init.animationName ?? "";
+    this.elapsedTime = init.elapsedTime ?? 0;
+    this.pseudoElement = init.pseudoElement ?? "";
+  }
+};
