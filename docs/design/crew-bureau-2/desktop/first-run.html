@@ -263,6 +263,11 @@
         color: var(--faint);
         white-space: nowrap;
       }
+      /* The flex display above would otherwise outrank the hidden attribute,
+         and the ladder would show on the welcome. */
+      .fr-ladder[hidden] {
+        display: none;
+      }
       [data-variant="a"] .fr-ladder {
         margin-top: 34px;
       }
