@@ -1,7 +1,6 @@
 import { useRef, type JSX } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage } from "@hercule/client-core";
 import { connectionsQuery } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
 import { NewProjectForm } from "./new-project-form";
@@ -30,11 +29,9 @@ export function NewProjectDialog({
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const dialogRef = useRef<HTMLDialogElement>(null);
-  // The form needs the Connections to know whether runners can clone. No
-  // route loader read them first, so the dialog reads them without suspending:
-  // a failed read shows in the dialog instead of replacing the screen behind
-  // it. The picker reads them as it opens, so this rarely waits.
-  const connections = useQuery(connectionsQuery(controller.client));
+  // The form reads the Connections to know whether runners can clone. The
+  // shell's loader read them already, so the dialog opens with the form.
+  useSuspenseQuery(connectionsQuery(controller.client));
   return (
     <GlassDialog
       dialogRef={dialogRef}
@@ -46,21 +43,15 @@ export function NewProjectDialog({
         <b>New project</b>
       </div>
       <div className="pop-sec new-project-body">
-        {connections.isSuccess ? (
-          <NewProjectForm
-            client={controller.client}
-            onAdded={(projectId) => {
-              // The dialog closes first, because an open modal dialog keeps
-              // the focus inside it, and the draft takes the focus.
-              dialogRef.current?.close();
-              onAdded(projectId);
-            }}
-          />
-        ) : connections.isError ? (
-          <p className="fl-err" role="alert">
-            Could not read your Connections: {readErrorMessage(connections.error)}
-          </p>
-        ) : null}
+        <NewProjectForm
+          client={controller.client}
+          onAdded={(projectId) => {
+            // The dialog closes first, because an open modal dialog keeps
+            // the focus inside it, and the draft takes the focus.
+            dialogRef.current?.close();
+            onAdded(projectId);
+          }}
+        />
       </div>
     </GlassDialog>
   );

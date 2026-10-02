@@ -357,9 +357,12 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
   });
 
 /**
- * Reads everything the shell shows into `queryClient`: the sidebar's records
- * and the signed-in user. Resolves once every read is cached, and fails with
- * the first read that fails.
+ * Reads everything the shell shows into `queryClient`: the sidebar's records,
+ * the Connections and the signed-in user. Resolves once every read is cached,
+ * and fails with the first read that fails.
+ *
+ * The New project form and the starter threads read the Connections, to know
+ * whether a GitHub Connection exists, so neither waits for them when it opens.
  *
  * The shell's loader calls it, and so does a test that renders one part of a
  * screen alone, so the part finds the same records cached as in the app.
@@ -375,6 +378,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(resourcesQuery(client)),
     queryClient.ensureQueryData(runnersQuery(client)),
     queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
   ]);
 };

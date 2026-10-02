@@ -1,5 +1,5 @@
 import { useId, type JSX } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   chooseStarterThreads,
@@ -34,8 +34,8 @@ const STARTER_ICONS: Readonly<
  * A click hands the starter's message to `onStart`, which adds it to the
  * Message Draft without sending it, so the user can finish the sentence.
  *
- * The line depends on whether a GitHub Connection exists, and is left out
- * until the Connections are read, so a failed read costs only the line.
+ * The line depends on whether a GitHub Connection exists. The shell's loader
+ * read the Connections, so the line never waits for them.
  */
 export function StarterThreads({
   projectName,
@@ -47,7 +47,7 @@ export function StarterThreads({
   readonly onStart: (message: string) => void;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
-  const connections = useQuery(connectionsQuery(controller.client)).data;
+  const connections = useSuspenseQuery(connectionsQuery(controller.client)).data;
   const headingId = useId();
   const icons = STARTER_ICONS[hasRepository ? "code" : "knowledgeWork"];
   return (
@@ -77,12 +77,10 @@ export function StarterThreads({
           );
         })}
       </div>
-      {connections === undefined ? null : (
-        <p className="intake-note">
-          <IntakeIcon size={14} />
-          {describeEmptyIntake(filterGitHubConnections(connections).length > 0)}
-        </p>
-      )}
+      <p className="intake-note">
+        <IntakeIcon size={14} />
+        {describeEmptyIntake(filterGitHubConnections(connections).length > 0)}
+      </p>
     </section>
   );
 }

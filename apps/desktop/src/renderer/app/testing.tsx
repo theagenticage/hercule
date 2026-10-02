@@ -337,7 +337,7 @@ export const buildSidebarHandlers = (
   "GET /api/v1/settings": { body: { controller: {}, user: {} } },
   "GET /api/v1/profiles": { body: { items: [] } },
   "GET /api/v1/tasks": { body: { items: [] } },
-  // The project picker reads the Connections as it opens, for New project.
+  // The shell reads the Connections, for New project and the starter threads.
   "GET /api/v1/connections": { body: { items: [] } },
 });
 

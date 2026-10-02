@@ -1,14 +1,8 @@
 import { useEffect, useRef, type JSX, type KeyboardEvent } from "react";
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildProjectPickerRows } from "@hercule/client-core";
-import {
-  connectionsQuery,
-  projectsQuery,
-  resourcesQuery,
-  threadsQuery,
-  workspacesQuery,
-} from "../../app/queries";
+import { projectsQuery, resourcesQuery, threadsQuery, workspacesQuery } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
 import { pickProjectTint, ProjectTile } from "../project-tile";
 import "./project-picker.css";
@@ -64,7 +58,6 @@ export function ProjectPicker({
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const queryClient = useQueryClient();
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
@@ -72,12 +65,6 @@ export function ProjectPicker({
   const rows = buildProjectPickerRows({ projects, resources, workspaces, sessions: threads });
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // The New project form reads the Connections. Reading them now means the
-    // form rarely waits for them when the user picks New project.
-    void queryClient.prefetchQuery(connectionsQuery(client));
-  }, [queryClient, client]);
 
   useEffect(() => {
     // Which element a modal dialog focuses when it opens has changed between
