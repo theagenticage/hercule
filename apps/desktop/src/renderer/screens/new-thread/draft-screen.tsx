@@ -16,6 +16,7 @@ import {
   findDraftSubject,
   isMutationRunning,
   joinPhraseText,
+  listProjectRepos,
   listWorkspaceThreads,
   queryKeys,
   readErrorMessage,
@@ -61,7 +62,8 @@ interface SentDraft {
  *   start yet. When the reason is a provider instance that is not logged in,
  *   a Log in button follows it and opens the login in a dialog;
  * - the composer, see `DraftComposer`;
- * - the start cards, when the draft is in a project, see `StartCards`.
+ * - the start cards, or the starter threads while the project has no open
+ *   task, when the draft is in a project, see `StartCards`.
  *
  * ⏎ or Send starts the thread with what the composer shows, and opens it once
  * the controller has started it. A failed start keeps the draft and shows
@@ -239,9 +241,11 @@ export function DraftScreen({
             onPick={pick}
             onSubmit={submit}
           />
-          {projectId === null ? null : (
+          {project === undefined ? null : (
             <StartCards
-              projectId={projectId}
+              projectId={project.id}
+              projectName={project.name}
+              hasRepository={listProjectRepos(catalogs.resources, project.id).length > 0}
               onStart={(message) => {
                 const { text } = pendingSubmissions.read(key).message;
                 pendingSubmissions.writeText(key, appendToMessage(text, message));

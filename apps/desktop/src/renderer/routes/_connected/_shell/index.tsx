@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { isId } from "@hercule/contract";
 import { buildDraftKey } from "../../../app/pending-submissions";
 import {
+  connectionsQuery,
   localRunnerQuery,
   profilesQuery,
   runnersQuery,
@@ -56,6 +57,9 @@ export const Route = createFileRoute("/_connected/_shell/")({
     const { client } = controller;
     if (deps.project !== undefined) {
       void queryClient.prefetchQuery(startTasksQuery(client, deps.project));
+      // The starters that replace the start cards name what fills Intake,
+      // which depends on whether a GitHub Connection exists.
+      void queryClient.prefetchQuery(connectionsQuery(client));
     }
     const probeLocalRunner = async (): Promise<void> => {
       const runners = await queryClient.ensureQueryData(runnersQuery(client));

@@ -133,3 +133,11 @@ button.lip-pick:hover,
 .starts-h {
   margin: 0 0 10px 2px;
 }
+.intake-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 0 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
