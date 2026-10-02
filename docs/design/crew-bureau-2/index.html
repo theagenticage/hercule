@@ -2585,7 +2585,7 @@
         <ul class="bk-points">
           <li><span class="icon"><i data-i="office" data-size="18"></i></span><span><b>The room is the promise</b>Before you type anything you see where your agents will work. Progress is furniture, not a counter.</span></li>
           <li><span class="icon"><i data-i="crew" data-size="18"></i></span><span><b>Every step pays off on screen</b>Account: your desk, and Hercule asleep in the lobby. Providers: six free desks. GitHub: Triage and its tube. Project: your first thread.</span></li>
-          <li><span class="icon"><i data-i="key" data-size="18"></i></span><span><b>No address, no token, no terminal</b>Open the office starts Hercule on this Mac, and the app reads its address and setup token from the Hercule Home. You never see either.</span></li>
+          <li><span class="icon"><i data-i="key" data-size="18"></i></span><span><b>No address, no token, no terminal</b>Open the office starts Hercule on this Mac, and the app asks the <code>hercule</code> command for its address and setup token. You never see either.</span></li>
           <li><span class="icon"><i data-i="pause" data-size="18"></i></span><span><b>Skipping is said, not hidden</b>A step you put off keeps its number in the ladder instead of a tick, and the last screen says where to finish it.</span></li>
           <li><span class="icon"><i data-i="branch" data-size="18"></i></span><span><b>Your folder stays as it is</b>Picking <code>~/Dev/webshop</code> reads its origin remote. Threads clone from the remote into worktrees of their own.</span></li>
           <li><span class="icon"><i data-i="eye" data-size="18"></i></span><span><b>Why B over A</b>The same room and the same cost. B shows it at full size, and the close shot of what you just added is the reward for the step.</span></li>
@@ -2625,7 +2625,7 @@
             <tr><th style="width: 300px">What you do</th><th style="width: 500px">What the app does</th><th>What runs on this Mac</th></tr>
           </thead>
           <tbody>
-            <tr><td>Open the office, the default</td><td>Runs <code>hercule service install</code>, waits for Hercule to answer, then reads the setup address from the Hercule Home.</td><td>Hercule and its local runner, from login</td></tr>
+            <tr><td>Open the office, the default</td><td>Runs <code>hercule service install</code>, waits for Hercule to answer, then asks <code>hercule setup-url</code> for the setup token.</td><td>Hercule and its local runner, from login</td></tr>
             <tr><td>Connect to it, with a plain address</td><td>Checks Hercule there. If it is set up, the app keeps the address and you sign in.</td><td>Only the app</td></tr>
             <tr><td>Connect to it, with a setup address</td><td>Checks Hercule there, keeps the address, and runs the four steps on that machine.</td><td>Only the app</td></tr>
             <tr><td>Open the app, on a runner</td><td>Finds the runner's service at launch and starts nothing. It shows Connect to it, never Open the office.</td><td>The runner, as before</td></tr>
@@ -2673,7 +2673,7 @@
           <tbody>
             <tr><td><b>Scope</b></td><td>A and B draw a still subset of the office in v1: the room, one wing, free desks, your desk, the lobby chair, Triage's desk and tube, a plaque. Spec 17 keeps the office post-v1. C draws none of it.</td><td>The variant decides it</td></tr>
             <tr><td>Bundle bytes</td><td>The first run and its room load only on a first run, as a chunk of their own.</td><td>The bundle budget check lists the chunk on its own line</td></tr>
-            <tr><td>Processes</td><td>None that stays. At launch, when nothing answers, main runs <code>hercule service status</code> once. Open the office runs your login shell once to read your <code>PATH</code>, then <code>hercule service install</code>; launchd runs Hercule, not the app. Main reads two files in the Hercule Home, and runs <code>git</code> once on the folder you pick.</td><td>The process count during and after the run: the app's own count is back to its baseline once the command exits</td></tr>
+            <tr><td>Processes</td><td>None that stays. At a launch with no saved address, main runs <code>hercule service status</code> once: about 80 ms, then it exits. Open the office runs your login shell once to read your <code>PATH</code>, then <code>hercule service install</code>; launchd runs Hercule, not the app. Main reads no file in the Hercule Home: it asks <code>hercule</code>. It runs <code>git</code> once on the folder you pick.</td><td>The process count during and after the run: the app's own count is back to its baseline once the command exits</td></tr>
             <tr><td>Work while idle</td><td>None. No animation repeats while a step waits for you.</td><td>The perf script's idle CPU, on each step</td></tr>
             <tr><td>After the first run</td><td>Nothing: the chunk is never loaded again, and no timer is left.</td><td>A warm launch after the first run matches the baseline</td></tr>
           </tbody>
@@ -2864,7 +2864,7 @@
       <section class="bk-sec" id="spec">
         <header class="bk-h">
           <span class="bk-kick"><i data-face="Label new issues" data-pose="idle" data-size="22"></i>What this design asks the spec to change</span>
-          <h2>Fifteen changes, none to the domain's meaning.</h2>
+          <h2>Sixteen changes, none to the domain's meaning.</h2>
         </header>
         <ul class="bk-asks">
           <li><span class="bk-qn">1</span><span><b>Waiting on you tops both faces</b>The section sits above the sidebar's two faces, Threads and Hercule, instead of inside one (spec 14, App shell).</span></li>
@@ -2880,7 +2880,7 @@
         <ul class="bk-asks">
           <li><span class="bk-qn">9</span><span><b>The desktop app sets Hercule up</b>Spec 17 leaves onboarding to the browser and opens <code>&lt;url&gt;/setup</code> when setup is not complete. The first run replaces both. Spec 14 and spec 15 §7 expected the desktop to reuse the web's setup views; it draws its own, as spec 17 requires.</span></li>
           <li><span class="bk-qn">10</span><span><b>The app starts Hercule on this Mac</b>Open the office runs <code>hercule service install</code>, and Hercule then starts at login. The installer starts nothing (#100), and a Mac that connects to another machine runs nothing. Spec 15 §7 and its Post-v1 list leave starting Hercule to the CLI until the desktop app becomes the installer; installing the binary stays post-v1.</span></li>
-          <li><span class="bk-qn">11</span><span><b>Main reads two files in the Hercule Home</b>The address and the token from <code>setup-url</code>, or the address from <code>config.toml</code> once setup is done, and nothing else. The token crosses the bridge once, is never stored, and is read again on Try again, because each start of Hercule mints a new one.</span></li>
+          <li><span class="bk-qn">11</span><span><b>Main asks the binary, not the Hercule Home</b>The app links only the contract and client-core (ADR 0037), so main reads no file in the Home. <code>hercule service status --json</code> gives the address and whether this Mac is a runner; it gains <code>controllerUrl</code> and <code>logsDir</code> for this (spec 15 §4). <code>hercule setup-url</code> gives the token. The token crosses the bridge once, is never stored, and is asked for again on Try again, because each start of Hercule mints a new one.</span></li>
           <li><span class="bk-qn">12</span><span><b>On the desktop, the first run is a sequence</b>Spec 14 has no "get started" checklist and derives every step. The desktop runs four steps in order, with Skip. The app keeps its place in its own settings file, so the controller stores nothing new.</span></li>
           <li><span class="bk-qn">13</span><span><b>The web's onboarding steps are marked done</b>After setup, the desktop records <code>"timezone"</code> and <code>"assistant"</code>, so the web app does not ask again. The assistant keeps the name Hercule: there is no rename step, and Settings renames it later.</span></li>
           <li><span class="bk-qn">14</span><span><b>Log in and New project come into v1</b>Spec 17 draws no Log in button and no New project row. The first run builds both, and the draft's Log in and the project picker reuse them.</span></li>

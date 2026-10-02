@@ -1805,9 +1805,10 @@
         new ResizeObserver(function () {
           drawRoom(null, false);
         }).observe(stage);
-        // At launch the app looks for Hercule on this Mac. When nothing answers, it asks
-        // `hercule service status` whether this Mac is already a runner, which shows the runner
-        // state instead of Open the office. The fixture is a fresh Mac.
+        // At launch the app asks `hercule service status` for Hercule's address on this Mac
+        // and whether this Mac is already a runner. A runner shows the runner state instead of
+        // Open the office; otherwise the app checks whether Hercule answers at that address.
+        // The fixture is a fresh Mac.
         if (!frozen) {
           later(1300, function () {
             go("welcome", "fresh");
