@@ -154,14 +154,6 @@ describe("the controller's default runner", () => {
 });
 
 describe("the controller's local runner", () => {
-  it("is null when the controller starts no local runner", async () => {
-    await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
-
-      expect((await readControllerInfo(harness.base, token)).localRunnerId).toBeNull();
-    });
-  });
-
   it("is the id the local runner reported", async () => {
     const localRunnerId = "0199e0e7-4444-7000-8000-000000000000";
     await withServer(

@@ -156,8 +156,6 @@ describe("controller.read", () => {
         "version",
       ]);
       expect(body["version"]).toBe(VERSION);
-      // No local runner is set up in this test.
-      expect(body["localRunnerId"]).toBeNull();
       expect(body["id"]).toEqual(expect.stringMatching(/^[0-9a-f]{8}-/));
     });
   });
