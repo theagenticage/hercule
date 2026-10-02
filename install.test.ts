@@ -204,10 +204,13 @@ describe("install.sh", () => {
       // its version.
       expect(release.readBinaryCalls().map((call) => call.args)).toEqual(["--version"]);
       expect(existsSync(join(home, "Library"))).toBe(false);
-      // The next steps carry the Home this run was given.
+      // The next steps carry the Home this run was given, and the binary's
+      // full path, because its folder is not on PATH. Both are quoted, so a
+      // path with a space pastes as one word.
       expect(stdout).toContain("Nothing is running yet");
-      expect(stdout).toContain(`HERCULE_HOME='${join(home, "scratch-home")}' `);
-      expect(stdout).toMatch(/hercule service install\n/);
+      expect(stdout).toContain(
+        `HERCULE_HOME='${join(home, "scratch-home")}' '${join(home, ".local", "bin", "hercule")}' service install\n`,
+      );
       expect(stdout).toContain('"Add machine"');
     },
   );

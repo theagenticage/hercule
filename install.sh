@@ -84,6 +84,12 @@ is_app_running() {
   pgrep -U "$(id -u)" -f "$app_process_pattern" > /dev/null
 }
 
+# Prints a word single-quoted, so a path with a space or a `$` in it pastes
+# into a shell as one word. A single quote inside the word is written '\''.
+quote_shell_word() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 # Prints the Hercule Home the installed unit passes to Hercule, or nothing when
 # there is no unit or it names none.
 read_installed_hercule_home() {
@@ -188,12 +194,9 @@ main() {
     *":$bin_dir:"*) bin_dir_on_path=true ;;
   esac
   hercule_command=hercule
-  $bin_dir_on_path || hercule_command="$bin_dir/hercule"
+  $bin_dir_on_path || hercule_command=$(quote_shell_word "$bin_dir/hercule")
   if [ "$hercule_home" != "$HOME/.hercule" ]; then
-    # Single-quoted, so a Home with a space or a `$` in its path pastes as
-    # one word; a single quote inside it is written '\''.
-    quoted_home=$(printf '%s' "$hercule_home" | sed "s/'/'\\\\''/g")
-    hercule_command="HERCULE_HOME='$quoted_home' $hercule_command"
+    hercule_command="HERCULE_HOME=$(quote_shell_word "$hercule_home") $hercule_command"
   fi
 
   # The new binary rewrites the unit, so it runs the new binary, and restarts
