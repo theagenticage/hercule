@@ -116,12 +116,14 @@ export function ControllerFirstRun({
     () =>
       buildRoomContents({
         ...data.reads,
-        answered: true,
+        // The remote screen asks for a setup address before anyone can
+        // sign in, so the room stays dark there, as before Hercule answers.
+        canSignInOrSetUp: card !== "remote",
         controllerOnThisMac: onThisMac,
         assistants: data.assistants,
         putOff: data.putOff,
       }),
-    [data, onThisMac],
+    [data, onThisMac, card],
   );
 
   let body: ReactNode;

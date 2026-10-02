@@ -267,7 +267,10 @@ export interface RoomWing {
 
 /** What stands in the Office room. Each piece is null, or false, until its step adds it. */
 export interface RoomContents {
-  /** False until Hercule answers; the room is drawn dimmed until then. */
+  /**
+   * False until a Hercule answers that the user can sign in to or set up; the
+   * room is drawn dimmed until then.
+   */
   readonly lightsOn: boolean;
   readonly wing: RoomWing | null;
   /** The user's desk and hat stand. */
@@ -319,7 +322,8 @@ const buildWing = (
 /**
  * Returns what stands in the Office room, from the first run's reads:
  *
- * - the lights, once Hercule answers;
+ * - the lights, once a Hercule answers that the user can sign in to or set
+ *   up;
  * - the local runner's wing as soon as that runner is known, with "this Mac"
  *   on its plate when the controller runs on this Mac;
  * - after `account`: your desk, the hat stand, and the assistant;
@@ -335,8 +339,12 @@ const buildWing = (
  */
 export const buildRoomContents = (
   reads: FirstRunReads & {
-    /** Whether Hercule answers at the address the app knows. */
-    readonly answered: boolean;
+    /**
+     * Whether Hercule answers at the address the app knows, and the user can
+     * sign in to it or set it up there. A Hercule elsewhere that waits for its
+     * setup address to be pasted does not count yet.
+     */
+    readonly canSignInOrSetUp: boolean;
     /** Whether the controller runs on this Mac, which the wing's plate says. */
     readonly controllerOnThisMac: boolean;
     readonly assistants: readonly Assistant[];
@@ -348,7 +356,7 @@ export const buildRoomContents = (
   const project = findOldest(reads.projects);
   const assistant = findOldest(reads.assistants);
   return {
-    lightsOn: reads.answered,
+    lightsOn: reads.canSignInOrSetUp,
     wing:
       reads.localRunner === null
         ? null

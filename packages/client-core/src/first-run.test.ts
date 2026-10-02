@@ -156,14 +156,14 @@ describe("buildRoomContents", () => {
     updatedAt: "2026-09-05T09:00:00.000Z",
   };
   const ROOM = {
-    answered: true,
+    canSignInOrSetUp: true,
     controllerOnThisMac: true,
     assistants: [HERCULE],
     putOff: [],
   } as const;
 
   it("draws a dimmed, empty room until Hercule answers", () => {
-    expect(buildRoomContents({ ...NOTHING, ...ROOM, answered: false })).toEqual({
+    expect(buildRoomContents({ ...NOTHING, ...ROOM, canSignInOrSetUp: false })).toEqual({
       lightsOn: false,
       wing: null,
       yourDesk: false,
