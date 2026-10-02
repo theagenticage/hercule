@@ -59,6 +59,40 @@ export const decideFirstRunStep = (
   FIRST_RUN_STEPS.find((step) => !done[step] && !putOff.includes(step)) ?? "done";
 
 /**
+ * How a step stands in the first run's ladder:
+ *
+ * - `now`: the step on screen;
+ * - `done`: the step's fact is true;
+ * - `put-off`: the user put the step off and it is not done;
+ * - `next`: none of these yet.
+ */
+export type FirstRunRungStatus = "now" | "done" | "put-off" | "next";
+
+/**
+ * Returns each step's status in the ladder, in step order, while the first
+ * run shows `now`. A step's tick or pause mark follows its fact, not its
+ * place in the order, so a step done after the user went back to an earlier
+ * one still shows its tick.
+ */
+export const buildFirstRunLadder = (
+  now: FirstRunStep | "done",
+  done: FirstRunFacts,
+  putOff: readonly FirstRunStep[],
+): readonly { readonly step: FirstRunStep; readonly status: FirstRunRungStatus }[] =>
+  FIRST_RUN_STEPS.map((step) => ({
+    step,
+    status: step === now ? "now" : done[step] ? "done" : putOff.includes(step) ? "put-off" : "next",
+  }));
+
+/**
+ * Returns the host and port of a controller's origin, such as
+ * `127.0.0.1:4937` for `http://127.0.0.1:4937`, as the welcome shows it.
+ * Returns `origin` unchanged when it does not parse.
+ */
+export const formatControllerAddress = (origin: string): string =>
+  URL.canParse(origin) ? new URL(origin).host : origin;
+
+/**
  * Checks whether a controller's origin, such as `http://127.0.0.1:4937`, is
  * on this machine: its host is `127.0.0.1`, `localhost` or `[::1]`. Returns
  * false for an origin that does not parse.

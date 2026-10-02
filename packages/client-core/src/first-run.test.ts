@@ -2,11 +2,13 @@ import { GITHUB_CONNECTION_TYPE, type Assistant, type Connection } from "@hercul
 import { describe, expect, it } from "vitest";
 import {
   buildFirstRunFacts,
+  buildFirstRunLadder,
   buildProvidersStepText,
   buildRoomContents,
   countCodeMinutes,
   decideFirstRunStep,
   describeGitHubSignInEnding,
+  formatControllerAddress,
   isLoopbackOrigin,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
@@ -373,5 +375,45 @@ describe("describeGitHubSignInEnding", () => {
       line: "The sign-in did not finish, so nothing changed.",
       next: "GitHub could not be reached.",
     });
+  });
+});
+
+describe("buildFirstRunLadder", () => {
+  const NONE: FirstRunFacts = { account: false, providers: false, github: false, project: false };
+
+  it("marks the step on screen, the steps done, and the steps put off", () => {
+    expect(
+      buildFirstRunLadder("github", { ...NONE, account: true }, ["providers"]).map(
+        (rung) => rung.status,
+      ),
+    ).toEqual(["done", "put-off", "now", "next"]);
+  });
+
+  it("ticks a step done after the current one, when the user went back", () => {
+    expect(
+      buildFirstRunLadder("providers", { ...NONE, account: true, project: true }, []).map(
+        (rung) => rung.status,
+      ),
+    ).toEqual(["done", "now", "next", "done"]);
+  });
+
+  it("shows every step as done or put off on All set", () => {
+    expect(
+      buildFirstRunLadder(
+        "done",
+        { account: true, providers: true, github: false, project: true },
+        ["github"],
+      ).map((rung) => rung.status),
+    ).toEqual(["done", "done", "put-off", "done"]);
+  });
+});
+
+describe("formatControllerAddress", () => {
+  it("drops the scheme", () => {
+    expect(formatControllerAddress("http://127.0.0.1:4937")).toBe("127.0.0.1:4937");
+  });
+
+  it("returns what does not parse unchanged", () => {
+    expect(formatControllerAddress("not an origin")).toBe("not an origin");
   });
 });
