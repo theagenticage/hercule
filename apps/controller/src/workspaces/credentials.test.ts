@@ -10,7 +10,10 @@
  * wire is the whole authorization boundary.
  */
 import { describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import type { SessionStart } from "@hercule/protocol";
+import { OAUTH_TOKENS } from "../connections";
 import { get, post, send } from "../http/testing";
 import { findStepRecords, startSentWorkflow, waitForRun } from "../runs/testing";
 import {
@@ -138,23 +141,24 @@ describe("a credential asked for by a provisioning workspace", () => {
 
   /**
    * Replaces a GitHub connection's pasted token with a device flow's token
-   * set. The test GitHub type has no device flow, so the test swaps the
-   * connection's secrets through the secrets API to arrive at the same state.
+   * set. The test GitHub type has no device flow, and the API refuses to
+   * write a connection's secrets, so the test swaps them in the secrets
+   * repository to arrive at the same state.
    */
   const storeDeviceTokens = async (
     arranged: Arranged,
     connectionId: string,
     tokens: { readonly accessToken: string; readonly expiresAt?: string },
   ): Promise<void> => {
-    const { base } = arranged.harness;
-    const owner = `/api/v1/secrets/connection/${connectionId}`;
-    const stored = await send("PUT", base, `${owner}/oauth.tokens`, {
-      body: { value: JSON.stringify(tokens) },
-      token: arranged.token,
-    });
-    expect(stored.status, await stored.clone().text()).toBe(200);
-    const dropped = await send("DELETE", base, `${owner}/pat`, { token: arranged.token });
-    expect(dropped.status, await dropped.clone().text()).toBe(200);
+    const { secrets } = arranged.harness;
+    const owner = { kind: "connection", id: connectionId } as const;
+    const droppedPat = await Effect.runPromise(
+      Effect.andThen(
+        secrets.set(owner, OAUTH_TOKENS, Redacted.make(JSON.stringify(tokens))),
+        secrets.delete(owner, "pat"),
+      ),
+    );
+    expect(droppedPat).toBe(true);
   };
 
   it("answers with the access token of a connection set up through the device flow", async () => {

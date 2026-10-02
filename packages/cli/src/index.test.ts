@@ -507,7 +507,7 @@ describe("running an operation", () => {
 
   it("takes a secret's value from stdin and never from argv", async () => {
     const fetch = stubFetch(() => ({
-      ownerKind: "connection",
+      ownerKind: "plugin",
       ownerId: "github",
       name: "token",
       createdAt: "2026-09-04T10:00:00.000Z",
@@ -517,12 +517,10 @@ describe("running an operation", () => {
       fetch,
       stdin: "s3cret\n",
     });
-    expect(await main(["--home", home, "secret", "set", "connection", "github", "token"], io)).toBe(
-      0,
-    );
+    expect(await main(["--home", home, "secret", "set", "plugin", "github", "token"], io)).toBe(0);
     expect(fetch.calls[0]).toMatchObject({
       method: "PUT",
-      path: "/api/v1/secrets/connection/github/token",
+      path: "/api/v1/secrets/plugin/github/token",
       body: { value: "s3cret" },
     });
   });
@@ -574,9 +572,7 @@ describe("running an operation", () => {
 
   it("rejects --value on a secret and says how to give the value", async () => {
     const { io, run } = createStubCli();
-    expect(await run("secret", "set", "connection", "github", "token", "--value", "s3cret")).toBe(
-      2,
-    );
+    expect(await run("secret", "set", "plugin", "github", "token", "--value", "s3cret")).toBe(2);
     expect(io.stderr.join("\n")).toContain("--value-stdin");
   });
 });

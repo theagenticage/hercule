@@ -27,7 +27,7 @@ import { completeSetup, get, post, send, withServer, PASSWORD, USERNAME } from "
 /** Long enough to start a fleet and a session for each test. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
-const SECRET_OWNER = "connection/0198e4b0-0000-7000-8000-000000000001";
+const SECRET_OWNER = "runner/0198e4b0-0000-7000-8000-000000000001";
 
 /** One page of the log, as the API returns it. */
 interface EventPage {
@@ -68,7 +68,7 @@ const writeTheLog = async (arranged: Arranged): Promise<void> => {
   });
   expect(login.status).toBe(401);
 
-  // `secret.created`: a secret stored under a connection.
+  // `secret.created`: a secret stored under a runner.
   const secret = await send("PUT", base, `/api/v1/secrets/${SECRET_OWNER}/api-token`, {
     body: { value: "ghp_a-real-looking-token" },
     token: arranged.token,

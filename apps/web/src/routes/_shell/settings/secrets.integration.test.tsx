@@ -29,7 +29,10 @@ interface Ref {
   readonly rotatedAt?: string;
 }
 
-/** A connection's personal access token, rotated once since it was set. */
+/**
+ * A connection's personal access token, rotated once since it was set. The
+ * user may not write a connection's secrets on this screen.
+ */
 const PAT: Ref = {
   ownerKind: "connection",
   ownerId: "0199c0ff-eeee-7000-8000-000000000001",
@@ -54,7 +57,7 @@ const SIGNING_KEY: Ref = {
   createdAt: "2026-08-20T06:00:00.000Z",
 };
 
-/** A secret owned by a plugin, so a second owner of a second kind. */
+/** A secret owned by a plugin: a second owner, and one the user may write. */
 const CLIENT_SECRET: Ref = {
   ownerKind: "plugin",
   ownerId: "github",
@@ -158,7 +161,7 @@ describe("Settings > Secrets", () => {
     const VALUE = "ghp-zzz-never-shown-4f19d";
     const { api } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
 
-    const row = await findSecretRow(PAT);
+    const row = await findSecretRow(CLIENT_SECRET);
     await user.click(within(row).getByRole("button", { name: "Rotate" }));
     await user.type(await screen.findByLabelText("New value"), VALUE);
     const save = screen.getByRole("button", { name: "Save" });
@@ -179,7 +182,7 @@ describe("Settings > Secrets", () => {
     const { api } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
     const before = countSecretReads(api);
 
-    const row = await findSecretRow(PAT);
+    const row = await findSecretRow(CLIENT_SECRET);
     await user.click(within(row).getByRole("button", { name: "Rotate" }));
     await user.type(await screen.findByLabelText("New value"), "rotated-1");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -188,7 +191,7 @@ describe("Settings > Secrets", () => {
       expect(listWrites(api)).toHaveLength(1);
     });
     const written = api.calls.filter((call) => call.method === "PUT");
-    expect(written.map((call) => call.path)).toEqual([buildSecretPath(PAT)]);
+    expect(written.map((call) => call.path)).toEqual([buildSecretPath(CLIENT_SECRET)]);
     expect(written[0]?.body).toEqual({ value: "rotated-1" });
 
     // The row comes from a refetched list, not from the write's response.
@@ -199,9 +202,11 @@ describe("Settings > Secrets", () => {
 
   it("asks for a new value before it writes anything", async () => {
     const user = userEvent.setup();
-    const { api } = await openApp([PAT]);
+    const { api } = await openApp([CLIENT_SECRET]);
 
-    await user.click(within(await findSecretRow(PAT)).getByRole("button", { name: "Rotate" }));
+    await user.click(
+      within(await findSecretRow(CLIENT_SECRET)).getByRole("button", { name: "Rotate" }),
+    );
 
     expect(await screen.findByLabelText("New value")).toBeDefined();
     expect(listWrites(api)).toEqual([]);
@@ -211,7 +216,7 @@ describe("Settings > Secrets", () => {
     const user = userEvent.setup();
     const { api } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
 
-    const row = await findSecretRow(TOKENS);
+    const row = await findSecretRow(CLIENT_SECRET);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
 
     expect(readPageText(row)).toContain("Delete this secret? Its value cannot be recovered.");
@@ -223,25 +228,25 @@ describe("Settings > Secrets", () => {
     await user.click(cancel);
 
     expect(listWrites(api)).toEqual([]);
-    expect(screen.getByText(TOKENS.name)).toBeDefined();
+    expect(screen.getByText(CLIENT_SECRET.name)).toBeDefined();
   });
 
   it("deletes a secret once confirmed, and removes its row", async () => {
     const user = userEvent.setup();
     const { api, drop } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
 
-    const row = await findSecretRow(TOKENS);
+    const row = await findSecretRow(CLIENT_SECRET);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
-    drop(TOKENS);
+    drop(CLIENT_SECRET);
     await user.click(within(row).getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => {
       expect(listWrites(api).map((call) => `${call.method} ${call.path}`)).toEqual([
-        `DELETE ${buildSecretPath(TOKENS)}`,
+        `DELETE ${buildSecretPath(CLIENT_SECRET)}`,
       ]);
     });
     await waitFor(() => {
-      expect(screen.queryByText(TOKENS.name)).toBeNull();
+      expect(screen.queryByText(CLIENT_SECRET.name)).toBeNull();
     });
     expect(screen.getByText(PAT.name)).toBeDefined();
   });
@@ -293,26 +298,31 @@ describe("Settings > Secrets > setting a secret", () => {
     expect(screen.queryByDisplayValue("jt-never-shown-771")).toBeNull();
   });
 
-  it("shows no actions for the controller's own key material", async () => {
-    await openApp([PAT, SIGNING_KEY]);
+  it("shows no actions for the controller's own key material or a connection's credentials", async () => {
+    await openApp([PAT, SIGNING_KEY, CLIENT_SECRET]);
 
-    const core = await findSecretRow(SIGNING_KEY);
-    expect(within(core).queryByRole("button", { name: "Rotate" })).toBeNull();
-    expect(within(core).queryByRole("button", { name: "Delete" })).toBeNull();
+    for (const [ref, note] of [
+      [SIGNING_KEY, "controller key"],
+      [PAT, "connection credential"],
+    ] as const) {
+      const row = await findSecretRow(ref);
+      expect(within(row).queryByRole("button", { name: "Rotate" })).toBeNull();
+      expect(within(row).queryByRole("button", { name: "Delete" })).toBeNull();
+      expect(readPageText(row)).toContain(note);
+    }
     // Rows the user may write still show both buttons.
-    expect(within(await findSecretRow(PAT)).getByRole("button", { name: "Rotate" })).toBeDefined();
+    const plugin = await findSecretRow(CLIENT_SECRET);
+    expect(within(plugin).getByRole("button", { name: "Rotate" })).toBeDefined();
+    expect(within(plugin).getByRole("button", { name: "Delete" })).toBeDefined();
   });
 
-  it("offers the owner kinds a user may write, and not the controller's own", async () => {
+  it("offers only the owner kinds a user may write", async () => {
     await openApp([PAT]);
 
     const kinds = [...screen.getByLabelText<HTMLSelectElement>("Owner kind").options].map(
       (option) => option.value,
     );
-    expect(kinds).toEqual(
-      expect.arrayContaining(["plugin", "connection", "runner", "provider-instance"]),
-    );
-    expect(kinds).not.toContain("core");
+    expect(kinds).toEqual(["plugin", "runner", "provider-instance"]);
   });
 });
 

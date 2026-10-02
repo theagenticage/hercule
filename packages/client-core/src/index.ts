@@ -138,6 +138,7 @@ export {
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
+export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";

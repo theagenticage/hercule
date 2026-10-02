@@ -1,7 +1,13 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input } from "@hercule/ui";
-import { formatStamp, queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
+import {
+  describeReadOnlySecret,
+  formatStamp,
+  queryKeys,
+  type HerculeClient,
+  readErrorMessage,
+} from "@hercule/client-core";
 import type { SecretRef } from "@hercule/contract";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus } from "../../../screens/save-status";
@@ -16,6 +22,14 @@ import { SaveStatus } from "../../../screens/save-status";
  * - Delete asks for confirmation inline. Hercule holds the only copy of the
  *   value (nobody can retype a pasted token from memory), and the Delete
  *   button sits right next to Rotate.
+ *
+ * A secret the API refuses to write shows a short note instead of either
+ * button:
+ *
+ * - the controller's own key material, which only the controller writes;
+ * - a connection's credentials, which only a reconnect or
+ *   `connection.setCredentials` may replace, because both check that the new
+ *   credentials belong to the same account.
  */
 export function SecretRow({
   client,
@@ -54,6 +68,7 @@ export function SecretRow({
   });
 
   const written = secret.rotatedAt ?? secret.createdAt;
+  const readOnlyNote = describeReadOnlySecret(secret.ownerKind);
   // Only the last action's status is shown. Pressing Rotate or Delete clears
   // the other one's state, so an old failure does not stay on screen.
   const failure = rotate.error ?? remove.error;
@@ -75,10 +90,8 @@ export function SecretRow({
           {secret.rotatedAt === undefined ? "set" : "rotated"}{" "}
           {formatStamp(new Date(written), timezone) ?? written}
         </span>
-        {/* Only the controller writes its own key material. The secret service
-            rejects both a rotate and a delete, so neither button is shown. */}
-        {secret.ownerKind === "core" ? (
-          <span className="text-fine text-faint">controller key</span>
+        {readOnlyNote !== undefined ? (
+          <span className="text-fine text-faint">{readOnlyNote}</span>
         ) : (
           <div className="flex items-center gap-1.5">
             <Button
