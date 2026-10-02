@@ -117,7 +117,6 @@ describe("the New project dialog", () => {
     const { calls, view, router } = await pickFolder({ folder: REPOSITORY });
 
     expect(view.getByText("rogier/shop · main", { exact: false })).toBeTruthy();
-    expect(document.activeElement).toBe(view.getByRole("textbox", { name: "Project name" }));
     await userEvent.type(view.getByRole("textbox", { name: /^Setup command/ }), " pnpm install ");
     await userEvent.click(view.getByRole("button", { name: "Add project" }));
 
@@ -181,7 +180,6 @@ describe("the New project dialog", () => {
     const add = view.getByRole<HTMLButtonElement>("button", { name: "Add project" });
     expect(add.disabled).toBe(true);
     const remote = view.getByRole("textbox", { name: "Remote URL" });
-    expect(document.activeElement).toBe(remote);
 
     await userEvent.type(remote, "/Users/rogier/code/shop{Enter}");
     expect((await view.findByRole("alert")).textContent).toBe(REMOTE_REFUSAL);

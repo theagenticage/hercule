@@ -55,6 +55,10 @@ const submitOnEnter =
  *
  * The folder itself is never changed: threads clone from the remote.
  *
+ * Once a folder is picked, no field takes the focus, as in the book. The
+ * name is already filled in, and a focused text field costs the GPU process
+ * memory and wakeups for as long as it has the focus (spec 17, Measured).
+ *
  * Once everything is created, the project and resource reads are refreshed
  * and then `onAdded` is called with the project's id, so the caller finds
  * the project in the cache. When the project is created but its repository
@@ -220,7 +224,6 @@ export function NewProjectForm({
           <button
             type="button"
             className="btn btn--sm"
-            autoFocus
             disabled={pending}
             onClick={() => submit(false)}
           >
@@ -245,8 +248,6 @@ export function NewProjectForm({
     <FormField label="Project name" error={sent?.failure ?? null}>
       <input
         value={name}
-        // The first field takes the focus, and the remote comes first when it is asked for.
-        autoFocus={!asksForRemote}
         disabled={projectId !== null}
         spellCheck={false}
         autoComplete="off"
@@ -324,7 +325,6 @@ export function NewProjectForm({
               className="mono"
               value={remote}
               placeholder={`git@github.com:you/${folder.name}.git`}
-              autoFocus
               spellCheck={false}
               autoComplete="off"
               onChange={(event) => setRemote(event.target.value)}
