@@ -7,8 +7,8 @@
  * first run's own is the list of steps the user put off.
  */
 import type { Assistant, Connection, ProviderInstance, Project, Runner } from "@hercule/contract";
-import { filterGitHubConnections } from "./connections";
-import { buildProviderRows } from "./provider-rows";
+import { DEVICE_FLOW_ENDINGS, filterGitHubConnections, type DeviceFlowStep } from "./connections";
+import { buildProviderRows, type ProviderRow } from "./provider-rows";
 
 /** The first run's steps, in the order the user takes them. */
 export const FIRST_RUN_STEPS = ["account", "providers", "github", "project"] as const;
@@ -69,6 +69,102 @@ export const decideFirstRunStep = (
 export const isLoopbackOrigin = (origin: string): boolean => {
   if (!URL.canParse(origin)) return false;
   return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname);
+};
+
+/**
+ * The machine the first run's copy names as the one that runs Hercule: "this
+ * Mac", or the name of the controller's runner when Hercule runs on another
+ * machine.
+ */
+export interface FirstRunHost {
+  readonly name: string;
+  readonly isThisMac: boolean;
+}
+
+/** Joins names as a reader would list them: "A", "A and B", "A, B and C". */
+const joinNames = (names: readonly string[], conjunction: "and" | "or"): string =>
+  new Intl.ListFormat("en", {
+    type: conjunction === "and" ? "conjunction" : "disjunction",
+  })
+    .format(names)
+    // A list of three or more gets no comma before the conjunction, as the book writes it.
+    .replace(/, (and|or) /, " $1 ");
+
+/** The heading, the line under it, and the rows of the providers step. */
+export interface ProvidersStepText {
+  readonly heading: string;
+  readonly sub: string;
+  /** The rows the step lists: the harnesses found, or every harness when none was found. */
+  readonly rows: readonly ProviderRow[];
+}
+
+/**
+ * Builds the providers step's text from the provider rows of the controller's
+ * runner, and the machine that runner is on:
+ *
+ * - When some harnesses are on that machine, the step names them and lists
+ *   them, so the user logs in to the ones they want.
+ * - When none is, the step lists every harness, each with its Install.
+ */
+export const buildProvidersStepText = (
+  rows: readonly ProviderRow[],
+  host: FirstRunHost,
+): ProvidersStepText => {
+  // A harness the runner found has its binary's path, or `installed` when the runner did not say where.
+  const found = rows.filter((row) => row.path !== null || row.location === "installed");
+  if (found.length === 0) {
+    return {
+      heading: "Your agents need a coding tool",
+      sub: `Hercule drives ${joinNames(
+        rows.map((row) => row.name),
+        "or",
+      )}, and found none of them on ${host.name}. Install one and log in to it; Hercule can install it for you.`,
+      rows,
+    };
+  }
+  return {
+    heading: `${joinNames(
+      found.map((row) => row.name),
+      "and",
+    )} ${found.length === 1 ? "is" : "are"} on ${host.name}`,
+    sub: `Log in to the ones you want your agents to use. The login runs on ${host.name} and its credential stays ${host.isThisMac ? "here" : "there"}.`,
+    rows: found,
+  };
+};
+
+/**
+ * Returns how many whole minutes a device code still works at `now`, rounded
+ * up, from its `expiresAt`. Returns at least 1, so a screen never says a code
+ * that still works expires in 0 minutes.
+ */
+export const countCodeMinutes = (expiresAt: string, now: number): number =>
+  Math.max(1, Math.ceil((Date.parse(expiresAt) - now) / 60_000));
+
+/**
+ * Returns what the GitHub step says when signing in with a code ends without
+ * a Connection: the line for the ending, then what to do next. A failed
+ * sign-in gives the controller's own `message`, which differs from case to
+ * case. `codeMinutes` is how long the code lasted when it was handed out.
+ */
+export const describeGitHubSignInEnding = (
+  ending: Extract<DeviceFlowStep, { kind: "ended" }>,
+  codeMinutes: number,
+): { readonly line: string; readonly next: string } => {
+  const line = DEVICE_FLOW_ENDINGS[ending.status];
+  switch (ending.status) {
+    case "expired":
+      return {
+        line,
+        next: `A code lasts ${String(codeMinutes)} ${codeMinutes === 1 ? "minute" : "minutes"}. Start again for a new one.`,
+      };
+    case "denied":
+      return {
+        line,
+        next: "Hercule was declined on GitHub’s approval page. Start again if that was a mistake.",
+      };
+    case "failed":
+      return { line, next: ending.message };
+  }
 };
 
 /** Triage's note in the room when no Connection brings it anything to read. */

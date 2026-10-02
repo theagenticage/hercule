@@ -2,15 +2,19 @@ import { GITHUB_CONNECTION_TYPE, type Assistant, type Connection } from "@hercul
 import { describe, expect, it } from "vitest";
 import {
   buildFirstRunFacts,
+  buildProvidersStepText,
   buildRoomContents,
+  countCodeMinutes,
   decideFirstRunStep,
+  describeGitHubSignInEnding,
   isLoopbackOrigin,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunFacts,
   type FirstRunReads,
 } from "./first-run";
-import { BARE, buildInstance, buildSnapshot } from "./providers.testing";
+import { buildProviderRows } from "./provider-rows";
+import { BARE, buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
 import { buildProject } from "./threads/workspaces.testing";
 
 const GITHUB: Connection = {
@@ -277,5 +281,97 @@ describe("buildRoomContents", () => {
     expect(
       buildRoomContents({ ...EVERYTHING, ...ROOM, instances: [] }).wing?.firstThread,
     ).toBeNull();
+  });
+});
+
+describe("buildProvidersStepText", () => {
+  const INSTANCES = [
+    buildInstance("claude-code", "Claude Code"),
+    buildInstance("codex", "Codex"),
+    buildInstance("pi", "pi"),
+  ];
+  const THIS_MAC = { name: "this Mac", isThisMac: true };
+
+  it("names and lists only the harnesses found on the machine", () => {
+    const text = buildProvidersStepText(buildProviderRows(WITH_CLAUDE, INSTANCES), THIS_MAC);
+
+    expect(text.heading).toBe("Claude Code is on this Mac");
+    expect(text.sub).toBe(
+      "Log in to the ones you want your agents to use. The login runs on this Mac and its credential stays here.",
+    );
+    expect(text.rows.map((row) => row.name)).toEqual(["Claude Code"]);
+  });
+
+  it("joins several found harnesses with and, and says the credential stays on another machine", () => {
+    const runner = {
+      ...WITH_CLAUDE,
+      facts: {
+        ...WITH_CLAUDE.facts!,
+        providers: [
+          { name: "claude", present: true, path: "/usr/local/bin/claude" },
+          { name: "codex", present: true },
+          { name: "pi", present: false },
+        ],
+      },
+    };
+    const text = buildProvidersStepText(buildProviderRows(runner, INSTANCES), {
+      name: "moss",
+      isThisMac: false,
+    });
+
+    expect(text.heading).toBe("Claude Code and Codex are on moss");
+    expect(text.sub).toContain("The login runs on moss and its credential stays there.");
+  });
+
+  it("lists every harness when none was found", () => {
+    const text = buildProvidersStepText(buildProviderRows(BARE, INSTANCES), THIS_MAC);
+
+    expect(text.heading).toBe("Your agents need a coding tool");
+    expect(text.sub).toBe(
+      "Hercule drives Claude Code, Codex or pi, and found none of them on this Mac. Install one and log in to it; Hercule can install it for you.",
+    );
+    expect(text.rows).toHaveLength(3);
+  });
+});
+
+describe("countCodeMinutes", () => {
+  const NOW = Date.parse("2026-10-02T09:00:00.000Z");
+
+  it("rounds the time a code has left up to whole minutes", () => {
+    expect(countCodeMinutes("2026-10-02T09:15:00.000Z", NOW)).toBe(15);
+    expect(countCodeMinutes("2026-10-02T09:14:01.000Z", NOW)).toBe(15);
+  });
+
+  it("never says less than a minute", () => {
+    expect(countCodeMinutes("2026-10-02T08:59:00.000Z", NOW)).toBe(1);
+  });
+});
+
+describe("describeGitHubSignInEnding", () => {
+  it("says how long a code lasts when it expired", () => {
+    expect(
+      describeGitHubSignInEnding({ kind: "ended", status: "expired", message: "" }, 15),
+    ).toEqual({
+      line: "The sign-in expired before it was approved.",
+      next: "A code lasts 15 minutes. Start again for a new one.",
+    });
+  });
+
+  it("says where the sign-in was declined", () => {
+    expect(
+      describeGitHubSignInEnding({ kind: "ended", status: "denied", message: "" }, 15).next,
+    ).toBe("Hercule was declined on GitHub’s approval page. Start again if that was a mistake.");
+  });
+
+  it("passes on the controller's message when the sign-in failed", () => {
+    expect(
+      describeGitHubSignInEnding(
+        { kind: "ended", status: "failed", message: "GitHub could not be reached." },
+        15,
+      ),
+    ).toEqual({
+      line: "The sign-in did not finish, so nothing changed.",
+      next: "GitHub could not be reached.",
+    });
   });
 });

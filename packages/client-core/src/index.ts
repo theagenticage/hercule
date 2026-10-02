@@ -162,15 +162,20 @@ export {
 export { completeSetup } from "./setup";
 export {
   buildFirstRunFacts,
+  buildProvidersStepText,
   buildRoomContents,
+  countCodeMinutes,
   decideFirstRunStep,
+  describeGitHubSignInEnding,
   FIRST_RUN_STEPS,
   isLoopbackOrigin,
   TRIAGE_READING_GITHUB,
   TRIAGE_WITHOUT_CONNECTIONS,
   type FirstRunFacts,
+  type FirstRunHost,
   type FirstRunReads,
   type FirstRunStep,
+  type ProvidersStepText,
   type RoomContents,
   type RoomWing,
 } from "./first-run";
