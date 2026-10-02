@@ -163,6 +163,7 @@ export { completeSetup } from "./setup";
 export {
   buildAllSetRecap,
   buildFirstRunFacts,
+  buildFirstRunHost,
   buildFirstRunLadder,
   buildProvidersStepText,
   buildRoomContents,

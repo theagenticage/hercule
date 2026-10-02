@@ -124,6 +124,17 @@ export interface FirstRunHost {
   readonly isThisMac: boolean;
 }
 
+/**
+ * Returns the machine that runs the controller at `origin`: this Mac when the
+ * origin is on this machine, else the machine of the controller's
+ * `localRunner`. Without a local runner, Hercule knows no name for that
+ * machine, so the copy calls it "the machine that runs Hercule".
+ */
+export const buildFirstRunHost = (origin: string, localRunner: Runner | null): FirstRunHost =>
+  isLoopbackOrigin(origin)
+    ? { name: "this Mac", isThisMac: true }
+    : { name: localRunner?.name ?? "the machine that runs Hercule", isThisMac: false };
+
 /** Joins names as a reader would list them: "A", "A and B", "A, B and C". */
 export const joinNames = (names: readonly string[], conjunction: "and" | "or"): string =>
   new Intl.ListFormat("en", {
@@ -148,11 +159,21 @@ export interface ProvidersStepText {
  * - When some harnesses are on that machine, the step names them and lists
  *   them, so the user logs in to the ones they want.
  * - When none is, the step lists every harness, each with its Install.
+ * - When `rows` is null, the controller's runner has not joined yet, as
+ *   happens in the seconds after Hercule starts, so there is nothing to list
+ *   until it does.
  */
 export const buildProvidersStepText = (
-  rows: readonly ProviderRow[],
+  rows: readonly ProviderRow[] | null,
   host: FirstRunHost,
 ): ProvidersStepText => {
+  if (rows === null) {
+    return {
+      heading: "Waiting for the runner",
+      sub: `Your agents run on a runner, and the one on ${host.name} hasn’t joined Hercule yet. Its coding tools show here once it does.`,
+      rows: [],
+    };
+  }
   // A harness the runner found has its binary's path, or `installed` when the runner did not say where.
   const found = rows.filter((row) => row.path !== null || row.location === "installed");
   if (found.length === 0) {

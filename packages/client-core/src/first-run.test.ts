@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAllSetRecap,
   buildFirstRunFacts,
+  buildFirstRunHost,
   buildFirstRunLadder,
   buildProvidersStepText,
   buildRoomContents,
@@ -287,6 +288,25 @@ describe("buildRoomContents", () => {
   });
 });
 
+describe("buildFirstRunHost", () => {
+  it("names this Mac for a controller on this machine", () => {
+    expect(buildFirstRunHost("http://127.0.0.1:4937", null)).toEqual({
+      name: "this Mac",
+      isThisMac: true,
+    });
+  });
+
+  it("names the controller's runner for a controller elsewhere", () => {
+    expect(buildFirstRunHost("http://build-box:4937", WITH_CLAUDE)).toEqual({
+      name: WITH_CLAUDE.name,
+      isThisMac: false,
+    });
+    expect(buildFirstRunHost("http://build-box:4937", null).name).toBe(
+      "the machine that runs Hercule",
+    );
+  });
+});
+
 describe("buildProvidersStepText", () => {
   const INSTANCES = [
     buildInstance("claude-code", "Claude Code"),
@@ -294,6 +314,14 @@ describe("buildProvidersStepText", () => {
     buildInstance("pi", "pi"),
   ];
   const THIS_MAC = { name: "this Mac", isThisMac: true };
+
+  it("waits for the runner while the controller has none", () => {
+    const text = buildProvidersStepText(null, THIS_MAC);
+
+    expect(text.heading).toBe("Waiting for the runner");
+    expect(text.sub).toContain("the one on this Mac hasn’t joined Hercule yet");
+    expect(text.rows).toEqual([]);
+  });
 
   it("names and lists only the harnesses found on the machine", () => {
     const text = buildProvidersStepText(buildProviderRows(WITH_CLAUDE, INSTANCES), THIS_MAC);
