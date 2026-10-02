@@ -57,6 +57,7 @@ export function ProviderLoginDialog({
         ) : (
           <MarkedRows>
             <ProviderLogin
+              client={controller.client}
               row={row}
               runnerId={runner.id}
               startOnOpen

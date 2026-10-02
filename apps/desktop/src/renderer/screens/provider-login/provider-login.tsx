@@ -15,6 +15,7 @@ import {
   readErrorMessage,
   readProbedAt,
   type DeviceLogin,
+  type HerculeClient,
   type ProviderRow,
   type SecretFieldOffer,
 } from "@hercule/client-core";
@@ -56,20 +57,25 @@ import { ProviderLogo } from "../thread/provider-logo";
  * row offers one. The login dialog uses it because the user opened the
  * dialog with a Log in button already, and a second Log in would be one
  * click too many.
+ *
+ * `client` is the client of the controller the runner belongs to. It is
+ * passed in because the first run renders the row outside the routes that
+ * hold a saved controller.
  */
 export function ProviderLogin({
+  client,
   row,
   runnerId,
   startOnOpen = false,
   onLoggedIn,
 }: {
+  readonly client: HerculeClient;
   readonly row: ProviderRow;
   readonly runnerId: string;
   readonly startOnOpen?: boolean;
   readonly onLoggedIn?: () => void;
 }): JSX.Element {
-  const { bridge, controller } = useRouteContext({ from: "/_connected" });
-  const { client } = controller;
+  const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
   const [code, setCode] = useState("");
   const [keyField, setKeyField] = useState<SecretFieldOffer | null>(null);
@@ -209,6 +215,7 @@ export function ProviderLogin({
             onOpen={() => void bridge.link.open({ url: started.url })}
             end={
               <DeviceLoginWait
+                client={client}
                 login={{
                   instanceId: row.id,
                   runnerId,
@@ -222,7 +229,7 @@ export function ProviderLogin({
           />
         )
       ) : keyField !== null ? (
-        <SecretFieldEntry instanceId={row.id} field={keyField} onSaved={finish} />
+        <SecretFieldEntry client={client} instanceId={row.id} field={keyField} onSaved={finish} />
       ) : start.error !== null ? (
         <span className="fl-err" role="alert">
           {readErrorMessage(start.error)}
@@ -339,16 +346,17 @@ function SignInPageButton({
  * keeps current. The only timer is the one that moves the minutes on.
  */
 function DeviceLoginWait({
+  client,
   login,
   onDone,
   onRestart,
 }: {
+  readonly client: HerculeClient;
   readonly login: DeviceLogin;
   readonly onDone: () => void;
   readonly onRestart: () => void;
 }): JSX.Element {
-  const { controller } = useRouteContext({ from: "/_connected" });
-  const instances = useQuery(providersQuery(controller.client)).data ?? [];
+  const instances = useQuery(providersQuery(client)).data ?? [];
   const [now, setNow] = useState(() => Date.now());
   const step = decideDeviceLoginStep(login, instances, now);
 
@@ -390,20 +398,21 @@ function DeviceLoginWait({
  * the instance and never read back. Calls `onSaved` once it is stored.
  */
 function SecretFieldEntry({
+  client,
   instanceId,
   field,
   onSaved,
 }: {
+  readonly client: HerculeClient;
   readonly instanceId: string;
   readonly field: SecretFieldOffer;
   readonly onSaved: () => void;
 }): JSX.Element {
-  const { controller } = useRouteContext({ from: "/_connected" });
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
   const save = useMutation({
     mutationFn: () =>
-      controller.client.secret.set({
+      client.secret.set({
         params: { ownerKind: "provider-instance", ownerId: instanceId, name: field.name },
         // A pasted credential often has a stray space or newline, and the
         // vendor would treat it as a different credential.

@@ -48,6 +48,7 @@ export function NewProjectDialog({
       <div className="pop-sec new-project-body">
         {connections.isSuccess ? (
           <NewProjectForm
+            client={controller.client}
             onAdded={(projectId) => {
               // The dialog closes first, because an open modal dialog keeps
               // the focus inside it, and the draft takes the focus.

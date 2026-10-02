@@ -10,6 +10,7 @@ import {
   parseRepositoryName,
   queryKeys,
   readErrorMessage,
+  type HerculeClient,
   type NewProjectDraft,
 } from "@hercule/client-core";
 import type { FolderPickOutcome } from "../../../ipc/contract";
@@ -57,17 +58,23 @@ const submitOnEnter =
  * is not, the form says why: Add project sends the repository again, and
  * "Continue without the repository" calls `onAdded` with the project as it
  * is.
+ *
+ * `client` is the client of the controller the project is created on. It
+ * is passed in because the first run renders the form outside the routes
+ * that hold a saved controller.
  */
 export function NewProjectForm({
+  client,
   onAdded,
   onConnectGitHub,
 }: {
+  readonly client: HerculeClient;
   readonly onAdded: (projectId: string) => void;
   readonly onConnectGitHub?: () => void;
 }): JSX.Element {
-  const { bridge, controller } = useRouteContext({ from: "/_connected" });
+  const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
-  const connections = useSuspenseQuery(connectionsQuery(controller.client)).data;
+  const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const gitHubConnections = filterGitHubConnections(connections);
   const gitHub = gitHubConnections[0];
 
@@ -91,7 +98,7 @@ export function NewProjectForm({
   });
 
   const create = useMutation({
-    mutationFn: (draft: NewProjectDraft) => createProjectWithRepositories(controller.client, draft),
+    mutationFn: (draft: NewProjectDraft) => createProjectWithRepositories(client, draft),
     onSuccess: async (next) => {
       setSent(next);
       // Projects and resources have no live topic yet, so they are read again
