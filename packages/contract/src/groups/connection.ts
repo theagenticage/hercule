@@ -83,7 +83,10 @@ export type CredentialRef = Schema.Schema.Type<typeof CredentialRef>;
 export const Connection = Schema.Struct({
   id: Id,
   type: Schema.String,
-  /** The connection's name. The user can change it; it starts as the account name. */
+  /**
+   * The connection's name: the one the user gave at setup, or the account name
+   * when they gave none. The user can change it later.
+   */
   label: ConnectionLabel,
   /**
    * The account name the type's own `validate` returned. Only a new sign-in

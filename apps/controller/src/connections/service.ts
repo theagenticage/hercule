@@ -136,8 +136,11 @@ const NO_SUCH_CONNECTION = "no such connection";
  * drop those fields without a word.
  */
 const RECONNECT_KEEPS_SETTINGS =
-  "a reconnect keeps the connection's label, topics and config: leave this field off, " +
-  "and change them with connection.update (hercule connection update)";
+  "a reconnect keeps the connection's label, topics and config, so it takes none of them: " +
+  "change them with connection.update instead";
+
+/** The setting each field of a reconnect refusal names, as its issue message spells it. */
+const RECONNECT_KEPT_SETTING = { label: "label", labels: "topics", config: "config" } as const;
 
 /**
  * Builds the refusal for a connection that other records still name. It lists
@@ -517,7 +520,10 @@ const make = Effect.gen(function* () {
       if (given.length > 0) {
         return yield* Effect.fail(
           createValidationError(
-            given.map((field) => ({ path: [field], message: RECONNECT_KEEPS_SETTINGS })),
+            given.map((field) => ({
+              path: [field],
+              message: `a reconnect keeps the connection's ${RECONNECT_KEPT_SETTING[field]}`,
+            })),
             RECONNECT_KEEPS_SETTINGS,
           ),
         );
@@ -542,14 +548,14 @@ const make = Effect.gen(function* () {
   const writeConnectionFromTokens = ({
     setup,
     connectionType,
-    accountName,
+    displayName,
     tokens,
     actor,
   }: {
     readonly setup: StoredSetupTarget;
     readonly connectionType: RegisteredConnectionType;
     /** The account name the type's `validate` returned for the new tokens. */
-    readonly accountName: string;
+    readonly displayName: string;
     readonly tokens: TokenSet;
     readonly actor: string;
   }): Effect.Effect<Option.Option<Connection>, SqlError> =>
@@ -563,8 +569,8 @@ const make = Effect.gen(function* () {
           const row = yield* connections.insert({
             pluginId,
             type: setup.type,
-            label: setup.label ?? buildDefaultLabel(accountName, contribution.displayName),
-            displayName: accountName,
+            label: setup.label ?? buildDefaultLabel(displayName, contribution.displayName),
+            displayName,
             labels: setup.labels,
             config: setup.config,
             at: now,
@@ -579,7 +585,7 @@ const make = Effect.gen(function* () {
           if (Option.isNone(yield* connections.one(id))) return Option.none();
           yield* connections.update(
             id,
-            { displayName: accountName, status: "connected", statusDetail: null },
+            { displayName, status: "connected", statusDetail: null },
             now,
           );
         }
@@ -653,7 +659,7 @@ const make = Effect.gen(function* () {
         writeConnectionFromTokens({
           setup,
           connectionType: registered,
-          accountName: account.displayName,
+          displayName: account.displayName,
           tokens,
           // The user started this setup with an authenticated request. The
           // browser comes back without a credential, but the actor is still
@@ -1109,7 +1115,7 @@ const make = Effect.gen(function* () {
         const written = yield* writeConnectionFromTokens({
           setup,
           connectionType: registered,
-          accountName: account.success.displayName,
+          displayName: account.success.displayName,
           tokens: exchange.tokens,
           actor: yield* currentStamp,
         });

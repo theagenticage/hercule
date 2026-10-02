@@ -8,10 +8,10 @@ import { MAX_CONNECTION_LABEL_LENGTH } from "@hercule/contract";
 const isHighSurrogate = (codeUnit: number): boolean => codeUnit >= 0xd800 && codeUnit <= 0xdbff;
 
 /**
- * Builds the label of a new connection the user did not name. Returns the
- * account name the type's `validate` returned, or the type's own display name
- * when the account name is empty or only whitespace, so the label is never
- * blank.
+ * Builds the label of a new connection the user did not name. Returns
+ * `displayName`, the account name the type's `validate` returned, or
+ * `typeDisplayName`, the type's own name, when the account name is empty or
+ * only whitespace, so the label is never blank.
  *
  * A label is at most `MAX_CONNECTION_LABEL_LENGTH` UTF-16 code units, and the
  * account name is the provider's to choose, so a longer name is cut to fit.
@@ -19,8 +19,8 @@ const isHighSurrogate = (codeUnit: number): boolean => codeUnit >= 0xd800 && cod
  * whole rather than leaving half a character behind. The connection keeps
  * the whole account name in its own field.
  */
-export const buildDefaultLabel = (accountName: string, typeDisplayName: string): string => {
-  const name = accountName.trim() === "" ? typeDisplayName : accountName;
+export const buildDefaultLabel = (displayName: string, typeDisplayName: string): string => {
+  const name = displayName.trim() === "" ? typeDisplayName : displayName;
   if (name.length <= MAX_CONNECTION_LABEL_LENGTH) return name;
   const clipped = name.slice(0, MAX_CONNECTION_LABEL_LENGTH);
   return isHighSurrogate(clipped.charCodeAt(clipped.length - 1)) ? clipped.slice(0, -1) : clipped;

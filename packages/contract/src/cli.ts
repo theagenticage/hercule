@@ -1888,7 +1888,7 @@ export const CLI = {
       label: { flag: "label", help: "A new name for this account." },
       labels: {
         flag: "topic",
-        help: "A Topic to file its events into. The list is replaced whole, so send every topic it is to keep.",
+        help: "A Topic to file its events into. The list is replaced whole, so send every topic it is to keep. The CLI cannot clear every topic, because a flag given zero times sends nothing; clear them in the web app or through the API.",
       },
       config: { flag: "config", help: "A replacement config as inline JSON." },
     },

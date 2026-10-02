@@ -4,19 +4,24 @@
  *
  * - the rows of flows in progress are copied across, and a reconnect row
  *   loses the label, topics and config it never used;
+ * - the setup repositories read both kinds of migrated row back;
  * - the table accepts a create row with no label, and a reconnect row with
  *   none of the three;
  * - the table refuses a row that mixes the two kinds.
  *
- * The first test migrates to the schema before this migration, writes rows
- * only that schema allows, and then runs the remaining migrations. The rows
+ * The first tests migrate to the schema before this migration, write rows
+ * only that schema allows, and then run the remaining migrations. The rows
  * are written in plain SQL, so the tables' checks are tested on their own
  * rather than behind the repositories that already follow them.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { deviceSetupRepository } from "../../connections/device-setups";
+import { oauthSetupRepository } from "../../connections/oauth-setups";
 import { MEMORY, openDatabase } from "../client";
+import { uuidToString } from "../id";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -24,6 +29,9 @@ import { migrations } from "./index";
 const BEFORE = migrations.filter(([id]) => id < 39);
 
 const at = "2026-09-01T00:00:00.000Z";
+
+/** When the seeded flows expire: after `at`, so a read at `at` still finds them. */
+const expiresAt = "2026-09-01T01:00:00.000Z";
 
 /** The id of the connection the seeded reconnect rows name. */
 const CONNECTION_ID = new Uint8Array(16).fill(7);
@@ -36,29 +44,42 @@ interface TargetColumns {
   readonly config: string | null;
 }
 
-/** Seeds one create row and one reconnect row in each table, then migrates to the head. */
-const migrated = Effect.gen(function* () {
+/**
+ * Seeds one create row and one reconnect row in each table on the schema
+ * before this migration, migrates to the head, and then runs the effect.
+ * Returns what the effect returns.
+ */
+const seedFlowsAndMigrate = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations(BEFORE);
+      yield* sql`
+        INSERT INTO oauth_setups
+          (state, type, connection_id, label, labels, config, origin, code_verifier,
+           expires_at, created_at)
+        VALUES
+          ('create', 'gmail/gmail', NULL, 'work', '["Code"]', '{"watch":"inbox"}',
+           'https://h.test', 'verifier-1', ${expiresAt}, ${at}),
+          ('reconnect', 'gmail/gmail', ${CONNECTION_ID}, 'work', '["Code"]', '{}',
+           'https://h.test', 'verifier-2', ${expiresAt}, ${at})`;
+      yield* sql`
+        INSERT INTO device_setups
+          (setup_id, type, connection_id, label, labels, config, device_code,
+           interval_seconds, next_poll_at, expires_at, created_at)
+        VALUES
+          ('create', 'github/github', NULL, 'work', '["Code"]', '{"org":"acme"}', 'code-1',
+           5, ${at}, ${expiresAt}, ${at}),
+          ('reconnect', 'github/github', ${CONNECTION_ID}, 'work', '["Code"]', '{}', 'code-2',
+           7, ${at}, ${expiresAt}, ${at})`;
+      yield* runMigrations();
+      return yield* effect;
+    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+  );
+
+/** Reads the columns this migration rewrote, in both tables. */
+const readTargetColumns = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* runMigrations(BEFORE);
-  yield* sql`
-    INSERT INTO oauth_setups
-      (state, type, connection_id, label, labels, config, origin, code_verifier,
-       expires_at, created_at)
-    VALUES
-      ('create', 'gmail/gmail', NULL, 'work', '["Code"]', '{"watch":"inbox"}',
-       'https://h.test', 'verifier-1', ${at}, ${at}),
-      ('reconnect', 'gmail/gmail', ${CONNECTION_ID}, 'work', '["Code"]', '{}',
-       'https://h.test', 'verifier-2', ${at}, ${at})`;
-  yield* sql`
-    INSERT INTO device_setups
-      (setup_id, type, connection_id, label, labels, config, device_code,
-       interval_seconds, next_poll_at, expires_at, created_at)
-    VALUES
-      ('create', 'github/github', NULL, 'work', '["Code"]', '{"org":"acme"}', 'code-1',
-       5, ${at}, ${at}, ${at}),
-      ('reconnect', 'github/github', ${CONNECTION_ID}, 'work', '["Code"]', '{}', 'code-2',
-       7, ${at}, ${at}, ${at})`;
-  yield* runMigrations();
   const oauth = yield* sql<
     TargetColumns & { readonly state: string; readonly code_verifier: string }
   >`
@@ -70,11 +91,11 @@ const migrated = Effect.gen(function* () {
     SELECT setup_id, connection_id, label, labels, config, interval_seconds
     FROM device_setups ORDER BY setup_id`;
   return { oauth, device };
-}).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie);
+});
 
 describe("the flows in progress during the upgrade", () => {
   it("are copied across, and a reconnect row keeps only the connection it names", async () => {
-    const { oauth, device } = await Effect.runPromise(migrated);
+    const { oauth, device } = await seedFlowsAndMigrate(readTargetColumns);
 
     expect(oauth).toEqual([
       {
@@ -112,6 +133,35 @@ describe("the flows in progress during the upgrade", () => {
         interval_seconds: 7,
       },
     ]);
+  });
+
+  it("read back through the setup repositories as a create and a reconnect", async () => {
+    const read = await seedFlowsAndMigrate(
+      Effect.gen(function* () {
+        const oauth = yield* oauthSetupRepository;
+        const device = yield* deviceSetupRepository;
+        return {
+          oauthCreate: yield* oauth.consume("create", at),
+          oauthReconnect: yield* oauth.consume("reconnect", at),
+          deviceCreate: yield* device.claimPoll("create", at),
+          deviceReconnect: yield* device.claimPoll("reconnect", at),
+        };
+      }),
+    );
+
+    const reconnect = { kind: "reconnect", connectionId: uuidToString(CONNECTION_ID) };
+    expect(Option.getOrThrow(read.oauthCreate)).toMatchObject({
+      kind: "create",
+      label: "work",
+      labels: ["Code"],
+      config: { watch: "inbox" },
+    });
+    expect(Option.getOrThrow(read.oauthReconnect)).toMatchObject(reconnect);
+    expect(read.deviceCreate).toMatchObject({
+      _tag: "claimed",
+      setup: { kind: "create", label: "work", labels: ["Code"], config: { org: "acme" } },
+    });
+    expect(read.deviceReconnect).toMatchObject({ _tag: "claimed", setup: reconnect });
   });
 });
 

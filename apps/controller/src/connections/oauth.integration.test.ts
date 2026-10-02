@@ -40,7 +40,9 @@ interface ErrorBody {
   readonly error: {
     readonly code: string;
     readonly message: string;
-    readonly details?: { readonly issues?: ReadonlyArray<{ path: ReadonlyArray<string> }> };
+    readonly details?: {
+      readonly issues?: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>;
+    };
   };
 }
 
@@ -384,11 +386,14 @@ describe("POST /oauth/start", () => {
       expect(response.status).toBe(400);
       const error = await readError(response);
       expect(error.code).toBe("validation");
-      expect(error.message).toContain("connection.update");
-      expect(error.details?.issues?.map((issue) => issue.path)).toEqual([
-        ["label"],
-        ["labels"],
-        ["config"],
+      expect(error.message).toBe(
+        "a reconnect keeps the connection's label, topics and config, so it takes none of " +
+          "them: change them with connection.update instead",
+      );
+      expect(error.details?.issues).toEqual([
+        { path: ["label"], message: "a reconnect keeps the connection's label" },
+        { path: ["labels"], message: "a reconnect keeps the connection's topics" },
+        { path: ["config"], message: "a reconnect keeps the connection's config" },
       ]);
       const rows = await Effect.runPromise(Effect.orDie(sql`SELECT state FROM oauth_setups`));
       expect(rows).toEqual([]);
