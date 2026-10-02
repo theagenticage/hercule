@@ -84,8 +84,7 @@ const toMessage = (row: MessageRow): ConversationMessage => ({
  */
 const buildCursorScope = (conversationId: string, direction: SortDirection): CursorScope => ({
   op: "conversation.queryMessages",
-  field: `position:${conversationId}`,
-  direction,
+  sort: [{ field: `position:${conversationId}`, direction }],
 });
 
 const make = Effect.gen(function* () {
@@ -139,9 +138,9 @@ const make = Effect.gen(function* () {
             : yield* decodeIntegerKeyCursor(request.cursor, scope);
         const { keyset, order } = buildKeyset(
           sql,
-          ["position"],
+          [{ column: "position", direction: request.direction }],
+          [],
           after === undefined ? undefined : [after],
-          request.direction,
         );
         const rows = yield* sql<MessageRow>`
           SELECT ${sql.literal(COLUMNS)} FROM conversation_messages

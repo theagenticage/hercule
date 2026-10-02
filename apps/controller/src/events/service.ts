@@ -43,10 +43,9 @@ import {
   type EventId,
   Id,
   MAX_EVENT_KIND_LENGTH,
-  MAX_PAGE_LIMIT,
   listDecodeIssues,
   createNotFoundError,
-  SortDirection,
+  type SortDirection,
   Timestamp,
   createValidationError,
   createDecodeValidationError,
@@ -64,6 +63,8 @@ import {
   buildKeyset,
   nowIso,
   buildPage,
+  buildPageInputFields,
+  resolveSortDirection,
   uuidFromString,
   withTransaction,
 } from "../db";
@@ -79,16 +80,7 @@ const QueryInput = Schema.Struct({
   kind: Schema.optionalKey(bounded(1, MAX_EVENT_KIND_LENGTH)),
   since: Schema.optionalKey(Timestamp),
   until: Schema.optionalKey(Timestamp),
-  limit: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
-  ),
-  cursor: Schema.optionalKey(Schema.NonEmptyString),
-  sort: Schema.optionalKey(
-    Schema.Struct({
-      field: Schema.Literals(EVENT_SORT_FIELDS),
-      direction: Schema.optionalKey(SortDirection),
-    }),
-  ),
+  ...buildPageInputFields(EVENT_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -171,9 +163,9 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns one page of the log, newest first unless the caller sets another
-     * sort direction. Fails with `Validation` for invalid input or a cursor
-     * from another listing.
+     * Returns one page of the log, newest first unless the caller sends a sort
+     * key. A key with no direction sorts oldest first. Fails with `Validation`
+     * for invalid input or a cursor from another listing.
      */
     query: (
       input: QueryInput,
@@ -181,9 +173,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const actor = yield* requireGrant("event.query");
         const decoded = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
-        const direction = decoded.sort?.direction ?? DEFAULT_DIRECTION;
+        const direction = resolveSortDirection(decoded.sort, DEFAULT_DIRECTION);
         const limit = decoded.limit ?? DEFAULT_PAGE_LIMIT;
-        const scope = { op: "event.query", field: "id", direction } as const;
+        const scope = { op: "event.query", sort: [{ field: "id", direction }] } as const;
 
         const after =
           decoded.cursor === undefined
@@ -213,9 +205,9 @@ const make = Effect.gen(function* () {
         // a tie: the id is the whole key.
         const { keyset, order } = buildKeyset(
           sql,
-          ["id"],
+          [{ column: "id", direction }],
+          [],
           after === undefined ? undefined : [after],
-          direction,
         );
         where.push(keyset);
 

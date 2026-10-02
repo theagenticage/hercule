@@ -113,7 +113,7 @@ describe("profile.query", () => {
       Effect.gen(function* () {
         const profiles = yield* Profiles;
         for (const name of ["alpha", "bravo"]) yield* profiles.create({ name, grants: [] });
-        const page = yield* profiles.query({ sort: { field: "name", direction: "desc" } });
+        const page = yield* profiles.query({ sort: [{ field: "name", direction: "desc" }] });
         return page.items.map((profile) => profile.name);
       }),
     );

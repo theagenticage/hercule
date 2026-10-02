@@ -226,7 +226,7 @@ describe("secret.query", () => {
         for (const name of ["a", "b"]) {
           yield* secret.set({ ...buildOwnerFields(RUNNER), name, value: VALUE });
         }
-        return yield* secret.query({ sort: { field: "name", direction: "desc" } });
+        return yield* secret.query({ sort: [{ field: "name", direction: "desc" }] });
       }),
     );
 

@@ -77,31 +77,25 @@ describe("the Task and Project tables", () => {
     }
   });
 
-  it("serves both status queries from an index, without a temporary b-tree", async () => {
-    const plans = await run(
+  // The other status query, a sort on status, is tested with the index that
+  // serves it now, in `0041-task-sort-ranks.test.ts`.
+  it("serves a status filter from an index, without a temporary b-tree", async () => {
+    const plan = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const explainQueryPlan = (statement: string) =>
-          Effect.map(
-            sql<{ readonly detail: string }>`${sql.literal(`EXPLAIN QUERY PLAN ${statement}`)}`,
-            (rows) => rows.map((row) => row.detail).join(" / "),
-          );
-        return {
-          sorted: yield* explainQueryPlan(`SELECT id FROM tasks WHERE deleted_at IS NULL
-                               ORDER BY status ASC, id ASC LIMIT 51`),
-          filtered: yield* explainQueryPlan(`SELECT id FROM tasks
-                                 WHERE deleted_at IS NULL AND status IN ('open')
-                                 ORDER BY updated_at DESC, id DESC LIMIT 51`),
-        };
+        const rows = yield* sql<{ readonly detail: string }>`
+          EXPLAIN QUERY PLAN
+          SELECT id FROM tasks
+          WHERE deleted_at IS NULL AND status IN ('open')
+          ORDER BY updated_at DESC, id DESC LIMIT 51
+        `;
+        return rows.map((row) => row.detail).join(" / ");
       }),
     );
     // A temporary b-tree sorts the whole matching set for every page, so page
     // one hundred costs as much as page one.
-    expect(plans.sorted).toContain("SCAN tasks USING INDEX tasks_status");
-    expect(plans.sorted).not.toContain("tasks_status_updated_at");
-    expect(plans.sorted).not.toContain("TEMP B-TREE");
-    expect(plans.filtered).toContain("tasks_status_updated_at");
-    expect(plans.filtered).not.toContain("TEMP B-TREE");
+    expect(plan).toContain("tasks_status_updated_at");
+    expect(plan).not.toContain("TEMP B-TREE");
   });
 
   it("keys project_resources on the pair, so one link is written once", async () => {

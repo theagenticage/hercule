@@ -25,10 +25,16 @@ export {
   buildPageInputFields,
   buildPage,
   refuseCursor,
+  resolveSortDirection,
+  resolveSortKeys,
   type CursorScope,
   type Page,
   type PageRequest,
-  type SortKey,
+  type ResolvedSortKey,
+  type SortColumn,
+  type SortValue,
+  type SortValueType,
+  type SortableField,
 } from "./page";
 export { nowIso } from "./time";
 export {

@@ -72,7 +72,13 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog, CRON_TICK_EVENT_KIND, EventKinds } from "../events";
 import { Notifier } from "../notifications";
 import { PluginHost } from "../plugins";
@@ -120,9 +126,9 @@ export interface TriggerPage {
 }
 
 /**
- * Both listings return the newest first when the caller gives no sort
- * direction: the most recently changed workflow, and the most recently added
- * trigger. People usually open a listing to find what they worked on last.
+ * Both listings return the newest first when the caller gives no sort: the
+ * most recently changed workflow, and the most recently added trigger. People
+ * usually open a listing to find what they worked on last.
  */
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
@@ -471,7 +477,7 @@ const make = Effect.gen(function* () {
           workflows.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             enabled,
           }),
         );
@@ -666,7 +672,7 @@ const make = Effect.gen(function* () {
           workflows.listTriggers({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             workflowId: filter.workflowId,
             kind: filter.kind,
             on: filter.on,

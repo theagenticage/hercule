@@ -35,11 +35,12 @@ import {
   type NotFound,
   type Profile,
   type SortDirection,
+  type SortKey,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { afterCommit, withTransaction } from "../db";
+import { afterCommit, resolveSortDirection, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "./profiles";
 import { SessionTokens } from "./tokens";
@@ -48,7 +49,7 @@ import { SessionTokens } from "./tokens";
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
-  readonly sort?: { readonly field: "name"; readonly direction?: SortDirection };
+  readonly sort?: ReadonlyArray<SortKey<"name">>;
 }
 
 /** One page of profiles, in the contract's shape. */
@@ -112,7 +113,7 @@ const make = Effect.gen(function* () {
           .list({
             limit: input.limit ?? DEFAULT_PAGE_LIMIT,
             cursor: input.cursor,
-            direction: input.sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(input.sort, DEFAULT_DIRECTION),
           })
           .pipe(
             Effect.catchTag("CursorError", (error) =>

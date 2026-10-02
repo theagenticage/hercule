@@ -219,6 +219,25 @@ describe("hercule task list --help", () => {
     expect(findSection(out, "paging:"), "no paging section").toBeGreaterThan(-1);
     expect(out.slice(findSection(out, "returns:")).join("\n")).toContain("items[]");
   });
+
+  it("says --sort repeats and what a repeat means", async () => {
+    const flags = readBetweenSections(await runHelp("task", "list"), "flags:", "paging:");
+    const text = flags.replace(/\s+/g, " ");
+    expect(text).toContain("optional, repeatable; one of: updatedAt, createdAt, priority, status");
+    expect(text).toContain(
+      "Repeat to break ties: the first --sort orders the list, and each later one orders only the rows the ones before it leave equal. No direction means asc.",
+    );
+  });
+});
+
+describe("hercule profile list --help", () => {
+  // A list with one sort field cannot take a second --sort, because the API
+  // refuses a field named twice.
+  it("does not offer to repeat --sort", async () => {
+    const flags = readBetweenSections(await runHelp("profile", "list"), "flags:", "paging:");
+    expect(flags).not.toContain("repeatable");
+    expect(flags).toContain("No direction means asc.");
+  });
 });
 
 describe("hercule session respond-to-approval-request --help", () => {
@@ -298,6 +317,7 @@ describe("hercule --help", () => {
     expect(text.replace(/\s+/g, " ")).toContain(
       "unless the command's help says only the user may make the call",
     );
+    expect(text.replace(/\s+/g, " ")).toContain("--sort repeats, one flag per key in order");
   });
 
   it("has no auth noun at all", async () => {
@@ -638,6 +658,30 @@ describe("paging", () => {
     const { fetch, run } = createStubCli(() => ({ items: [] }));
     await run("profile", "list", "--sort", "name");
     expect(fetch.calls[0]?.query.get("sort")).toBe("name");
+  });
+
+  it("sends one sort parameter per --sort, in the order written", async () => {
+    const { fetch, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("task", "list", "--sort", "priority:desc", "--sort", "createdAt:desc")).toBe(
+      0,
+    );
+    expect(fetch.calls[0]?.query.getAll("sort")).toEqual(["priority:desc", "createdAt:desc"]);
+  });
+
+  it("exits 2 naming the field when --sort repeats one, and sends nothing", async () => {
+    // The CLI does not check for a repeated field itself: the client encodes
+    // the query with the contract's schema, which refuses it before sending.
+    const { fetch, io, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("task", "list", "--sort", "priority", "--sort", "priority:desc")).toBe(2);
+    expect(io.stderr.join("\n")).toContain("--sort: priority appears more than once");
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("exits 2 naming --limit when the page size is out of range, and sends nothing", async () => {
+    const { fetch, io, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("task", "list", "--limit", "0")).toBe(2);
+    expect(io.stderr.join("\n")).toContain("--limit: ");
+    expect(fetch.calls).toEqual([]);
   });
 
   it("rejects a sort direction that is neither asc nor desc", async () => {

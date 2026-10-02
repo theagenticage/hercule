@@ -40,12 +40,12 @@ import {
   type NotFound,
   type OwnerKind,
   type SecretRef,
-  type SortDirection,
+  type SortKey,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
-import { withTransaction, type CursorError } from "../db";
+import { resolveSortDirection, withTransaction, type CursorError } from "../db";
 import { AuditLog } from "../events";
 import {
   Secrets,
@@ -60,7 +60,7 @@ export interface SecretQueryInput {
   readonly ownerId?: string;
   readonly limit?: number;
   readonly cursor?: string;
-  readonly sort?: { readonly field: "name"; readonly direction?: SortDirection };
+  readonly sort?: ReadonlyArray<SortKey<"name">>;
 }
 
 /** A value to store under an owner and a name. Rotation is the same call. */
@@ -145,7 +145,7 @@ const make = Effect.gen(function* () {
           ownerId: input.ownerId,
           limit: input.limit ?? DEFAULT_PAGE_LIMIT,
           cursor: input.cursor,
-          direction: input.sort?.direction ?? "asc",
+          direction: resolveSortDirection(input.sort, "asc"),
         });
         return {
           items: page.items.map(toRef),

@@ -876,7 +876,7 @@ describe("paging", () => {
   it("rejects a search that also has a sort, and names both fields", async () => {
     const error = await runError(
       Effect.flatMap(TaskService, (tasks) =>
-        tasks.query({ text: "prose", sort: { field: "updatedAt" } }),
+        tasks.query({ text: "prose", sort: [{ field: "updatedAt" }] }),
       ),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
@@ -884,6 +884,16 @@ describe("paging", () => {
       error as { error: { details: { issues: ReadonlyArray<{ path: ReadonlyArray<string> }> } } }
     ).error.details.issues.flatMap((issue) => issue.path);
     expect(paths.sort()).toEqual(["sort", "text"]);
+  });
+
+  it("accepts a search with an empty sort list, which is no sort at all", async () => {
+    const { items } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* withSeven;
+        return yield* tasks.query({ text: "prose", sort: [] });
+      }),
+    );
+    expect(items).toHaveLength(7);
   });
 });
 
@@ -981,20 +991,189 @@ describe("the project a task belongs to", () => {
   });
 });
 
-describe("the priority order", () => {
-  it("orders urgent to low rather than alphabetically, one row per page", async () => {
-    const walked = await run(
+/**
+ * Reads the issues of a `Validation` error. Fails the test when the error is
+ * not one.
+ */
+const readValidationIssues = (
+  error: unknown,
+): ReadonlyArray<{ readonly path: ReadonlyArray<string>; readonly message: string }> => {
+  expect(error).toMatchObject({ error: { code: "validation" } });
+  return (
+    error as {
+      error: {
+        details: {
+          issues: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>;
+        };
+      };
+    }
+  ).error.details.issues;
+};
+
+describe("the order of the sort keys", () => {
+  it("sorts by the first key, breaks its ties with the second, and breaks the rest by id", async () => {
+    const { walked, created } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        for (const priority of ["low", "urgent", "normal", "high"] as const) {
-          yield* tasks.create({ title: priority, description: "d", priority });
-        }
-        return yield* walkPages(yield* TaskService, {
+        const create = (title: string, priority: "urgent" | "normal" | "low") =>
+          tasks.create({ title, description: "d", priority });
+        // The tasks created before one `TestClock.adjust` share `createdAt`,
+        // so some rows are equal on both keys and only the id orders them.
+        const created = [
+          yield* create("normal 1", "normal"),
+          yield* create("urgent 1", "urgent"),
+          yield* create("urgent 2", "urgent"),
+        ];
+        yield* TestClock.adjust(A_MINUTE);
+        created.push(
+          yield* create("low", "low"),
+          yield* create("normal 2", "normal"),
+          yield* create("urgent 3", "urgent"),
+          yield* create("normal 3", "normal"),
+        );
+        const walked = yield* walkPages(tasks, {
           limit: 1,
-          sort: { field: "priority", direction: "asc" },
+          sort: [
+            { field: "priority", direction: "desc" },
+            { field: "createdAt", direction: "asc" },
+          ],
+        });
+        return { walked, created };
+      }),
+    );
+    // The id breaks the ties left by both keys, in the direction of the last
+    // key. Ids are random within one millisecond, so the order of each tie
+    // is read from the ids rather than written down.
+    const idOf = (title: string) => created.find((task) => task.title === title)?.id ?? "";
+    const inIdOrder = (...titles: ReadonlyArray<string>) =>
+      // A lowercase hex id sorts as a string the way its bytes sort in SQLite.
+      [...titles].sort((a, b) => (idOf(a) < idOf(b) ? -1 : 1));
+    expect(walked).toEqual([
+      ...inIdOrder("urgent 1", "urgent 2"),
+      "urgent 3",
+      "normal 1",
+      ...inIdOrder("normal 2", "normal 3"),
+      "low",
+    ]);
+  });
+
+  it("lists the most urgent open tasks newest first within one priority", async () => {
+    const { items } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        for (const [title, priority] of [
+          ["A", "urgent"],
+          ["B", "urgent"],
+          ["C", "high"],
+          ["D", "low"],
+        ] as const) {
+          yield* tasks.create({ title, description: "d", priority });
+          yield* TestClock.adjust(A_MINUTE);
+        }
+        return yield* tasks.query({
+          status: ["open"],
+          sort: [
+            { field: "priority", direction: "desc" },
+            { field: "createdAt", direction: "desc" },
+          ],
+          limit: 3,
         });
       }),
     );
-    expect(walked).toEqual(["urgent", "high", "normal", "low"]);
+    expect(items.map((task) => task.title)).toEqual(["B", "A", "C"]);
+  });
+
+  it("reads a key with no direction as asc", async () => {
+    const { bare, ascending } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* withSeven;
+        return {
+          bare: yield* walkPages(tasks, { limit: 2, sort: [{ field: "createdAt" }] }),
+          ascending: yield* walkPages(tasks, {
+            limit: 2,
+            sort: [{ field: "createdAt", direction: "asc" }],
+          }),
+        };
+      }),
+    );
+    expect(bare).toEqual(ascending);
+    expect(bare).toEqual([0, 1, 2, 3, 4, 5, 6].map((index) => `report ${index}`));
+  });
+
+  it("refuses a field that appears twice, and names it", async () => {
+    const error = await runError(
+      Effect.flatMap(TaskService, (tasks) =>
+        tasks.query({
+          sort: [{ field: "priority" }, { field: "priority", direction: "desc" }],
+        }),
+      ),
+    );
+    const messages = readValidationIssues(error).map((issue) => issue.message);
+    expect(messages.some((message) => message.includes("priority appears more than once"))).toBe(
+      true,
+    );
+  });
+
+  it("refuses a cursor issued under another list of keys", async () => {
+    const error = await runError(
+      Effect.gen(function* () {
+        const tasks = yield* withSeven;
+        const { nextCursor } = yield* tasks.query({
+          limit: 1,
+          sort: [
+            { field: "priority", direction: "desc" },
+            { field: "createdAt", direction: "desc" },
+          ],
+        });
+        if (nextCursor === undefined) return yield* Effect.die("the listing has a second page");
+        return yield* tasks.query({
+          limit: 1,
+          sort: [{ field: "priority", direction: "desc" }],
+          cursor: nextCursor,
+        });
+      }),
+    );
+    expect(readValidationIssues(error).map((issue) => issue.path)).toEqual([["cursor"]]);
+  });
+});
+
+describe("the priority order", () => {
+  it("ascends low, normal, high, urgent rather than alphabetically, one row per page", async () => {
+    const { ascending, descending } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        for (const priority of ["normal", "urgent", "low", "high"] as const) {
+          yield* tasks.create({ title: priority, description: "d", priority });
+        }
+        return {
+          ascending: yield* walkPages(tasks, {
+            limit: 1,
+            sort: [{ field: "priority", direction: "asc" }],
+          }),
+          descending: yield* walkPages(tasks, {
+            limit: 1,
+            sort: [{ field: "priority", direction: "desc" }],
+          }),
+        };
+      }),
+    );
+    expect(ascending).toEqual(["low", "normal", "high", "urgent"]);
+    expect(descending).toEqual(["urgent", "high", "normal", "low"]);
+  });
+});
+
+describe("the status order", () => {
+  it("ascends open, in-progress, done, cancelled rather than alphabetically, one row per page", async () => {
+    const walked = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        for (const status of ["done", "cancelled", "open", "in-progress"] as const) {
+          const task = yield* tasks.create({ title: status, description: "d" });
+          if (status !== "open") yield* tasks.update({ id: task.id, status });
+        }
+        return yield* walkPages(tasks, { limit: 1, sort: [{ field: "status", direction: "asc" }] });
+      }),
+    );
+    expect(walked).toEqual(["open", "in-progress", "done", "cancelled"]);
   });
 });

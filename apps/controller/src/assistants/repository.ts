@@ -73,8 +73,7 @@ const toAssistantFields = (row: AssistantRow): StoredAssistantFields => ({
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "assistant.query",
-  field: "createdAt",
-  direction,
+  sort: [{ field: "createdAt", direction }],
 });
 
 const make = Effect.gen(function* () {
@@ -129,12 +128,12 @@ const make = Effect.gen(function* () {
         const after =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["created_at", "agent_id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          [{ column: "created_at", direction: request.direction }],
+          ["agent_id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const rows = yield* sql<AssistantRow>`
           SELECT ${sql.literal(COLUMNS)} FROM assistants WHERE ${keyset} ${order}
@@ -144,7 +143,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toAssistantFields)),
-          (last) => encodeCursor(scope, last.createdAt, last.agentId),
+          (last) => encodeCursor(scope, [last.createdAt], last.agentId),
         );
       }),
   };

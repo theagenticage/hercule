@@ -203,12 +203,18 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       });
     }
     if (command.paged) {
+      // A list with one sort field never offers a repeat: the API refuses a
+      // field named twice, so a second --sort could only fail.
+      const tieBreaks = command.sortFields.length > 1;
       rows.push(
         { label: "--limit <number>", notes: "optional; the page size" },
         { label: "--cursor <cursor>", notes: "optional; the nextCursor of the page before" },
         {
           label: "--sort <field>[:asc|desc]",
-          notes: `optional; one of: ${command.sortFields.join(", ")}`,
+          notes: `${tieBreaks ? "optional, repeatable" : "optional"}; one of: ${command.sortFields.join(", ")}`,
+          help: tieBreaks
+            ? "Repeat to break ties: the first --sort orders the list, and each later one orders only the rows the ones before it leave equal. No direction means asc."
+            : "No direction means asc.",
         },
         {
           label: "--all",
@@ -251,7 +257,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       "",
       "paging:",
       ...wrapParagraph(
-        "One page at a time, newest first unless --sort says otherwise. The response includes nextCursor while more pages remain; pass it back as --cursor, or use --all to follow it to the end.",
+        "One page at a time, in the command's default order unless --sort says otherwise. The response includes nextCursor while more pages remain; pass it back as --cursor, or use --all to follow it to the end.",
         "  ",
       ),
     );
@@ -398,8 +404,8 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
     "  stdin     A description, a prompt, a password, a config or a workflow's source is",
     "            piped in, never passed as a flag. A required one is always read from stdin;",
     "            an optional one only when its --<flag>-stdin flag is given.",
-    "  paging    A list takes --limit, --cursor and --sort; --all follows nextCursor to",
-    "            the end.",
+    "  paging    A list takes --limit, --cursor and --sort; --sort repeats, one flag per key",
+    "            in order, and --all follows nextCursor to the end.",
     "  exit      0 succeeded, 1 the controller returned an error envelope or `workflow",
     "            validate` found errors, 2 the command line was wrong and nothing was sent, 3",
     "            no credential or no controller. `hercule service` acts on this machine",

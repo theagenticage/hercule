@@ -76,7 +76,9 @@ export {
   page,
   pageParams,
   readSortFields,
+  refuseRepeatedSortField,
   sortParam,
+  type SortKey,
 } from "./pagination";
 
 export { ACCESS_MODE_CHAIN, findNearestSupportedAccessMode } from "./access-modes";

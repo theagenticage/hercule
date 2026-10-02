@@ -65,13 +65,19 @@ import {
   type Forbidden,
   type InvalidState,
   type NotFound,
-  type SortDirection,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, USER_ACTOR } from "../actor";
 import { mintToken } from "../credentials";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortKeys,
+  withTransaction,
+  type ResolvedSortKey,
+} from "../db";
 import { AuditLog } from "../events";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
 import { deviceSetupRepository } from "./device-setups";
@@ -132,10 +138,9 @@ export interface ConnectionPage {
 }
 
 /** Oldest first, so the Connections screen lists connections in the order the user added them. */
-const DEFAULT_SORT: { field: ConnectionSortField; direction: SortDirection } = {
-  field: "createdAt",
-  direction: "asc",
-};
+const DEFAULT_SORT: ReadonlyArray<ResolvedSortKey<ConnectionSortField>> = [
+  { field: "createdAt", direction: "asc" },
+];
 
 const NO_SUCH_CONNECTION = "no such connection";
 
@@ -741,17 +746,13 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           createDecodeValidationError,
         );
-        const order =
-          sort === undefined
-            ? DEFAULT_SORT
-            : { field: sort.field, direction: sort.direction ?? "asc" };
         const listing = yield* refuseCursor(
           connections.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
             type,
             status,
-            ...order,
+            sort: resolveSortKeys(sort, DEFAULT_SORT),
           }),
         );
         const refs = yield* secrets.refs(

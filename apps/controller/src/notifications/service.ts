@@ -52,7 +52,13 @@ import {
   type Actor,
   type SessionActor,
 } from "../actor";
-import { buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
+import {
+  buildPageInputFields,
+  nowIso,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { BindableOperations, type BindableOperationError } from "./bindable-operations";
 import { Notifier } from "./notifier";
@@ -224,7 +230,7 @@ const make = Effect.gen(function* () {
           notifications.list(filter, {
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? "desc",
+            direction: resolveSortDirection(sort, "desc"),
           }),
         );
         return {

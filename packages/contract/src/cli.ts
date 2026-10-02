@@ -378,11 +378,23 @@ export const CLI = {
 
   "task.query": {
     command: "task list",
-    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. Use it to find the id that `hercule task read` and `hercule task update` take.",
+    help: "Lists tasks. Repeating a filter flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. Use it to find the id that `hercule task read` and `hercule task update` take.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--status", "open", "--status", "in-progress", "--label", "triage"] },
       { args: ["--text", "flaky login"] },
+      {
+        args: [
+          "--status",
+          "open",
+          "--sort",
+          "priority:desc",
+          "--sort",
+          "createdAt:desc",
+          "--limit",
+          "3",
+        ],
+      },
     ],
     fields: {
       refs: {

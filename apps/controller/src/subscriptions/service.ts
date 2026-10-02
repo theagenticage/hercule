@@ -46,7 +46,13 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { validateExpression } from "../expressions";
 import { isUnfinished, RunService } from "../runs";
 import { expandTarget } from "./targets";
@@ -251,7 +257,7 @@ const make = Effect.gen(function* () {
           subscriptions.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             holder: whose,
           }),
         );

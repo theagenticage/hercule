@@ -56,9 +56,9 @@ describe("sort over the wire", () => {
       expect(await listApiKeyNames(base, token, "")).toEqual(["c", "b", "a"]);
       expect(await listApiKeyNames(base, token, "?sort=createdAt:asc")).toEqual(["a", "b", "c"]);
       expect(await listApiKeyNames(base, token, "?sort=createdAt:desc")).toEqual(["c", "b", "a"]);
-      // No direction: the service's default applies, and the request does not
-      // fail.
-      expect(await listApiKeyNames(base, token, "?sort=createdAt")).toEqual(["c", "b", "a"]);
+      // A key with no direction means `asc`, whatever the listing's default
+      // order, and the request does not fail.
+      expect(await listApiKeyNames(base, token, "?sort=createdAt")).toEqual(["a", "b", "c"]);
 
       const unknownField = await send("GET", base, "/api/v1/api-keys?sort=bogus:asc", { token });
       expect(unknownField.status).toBe(400);

@@ -32,7 +32,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { buildPageInputFields, refuseCursor, type AfterCommit } from "../db";
+import { buildPageInputFields, refuseCursor, resolveSortDirection, type AfterCommit } from "../db";
 import type { PlatformEvents } from "../events";
 import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
@@ -96,7 +96,7 @@ const make = Effect.gen(function* () {
           runs.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? "desc",
+            direction: resolveSortDirection(sort, "desc"),
             ...filter,
           }),
         );

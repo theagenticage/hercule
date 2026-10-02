@@ -668,7 +668,7 @@ describe("notification.query", () => {
           newest: yield* actAs(USER, notifications.query({})),
           oldest: yield* actAs(
             USER,
-            notifications.query({ sort: { field: "createdAt", direction: "asc" } }),
+            notifications.query({ sort: [{ field: "createdAt", direction: "asc" }] }),
           ),
         };
       }),
@@ -723,7 +723,7 @@ describe("notification.query", () => {
                 USER,
                 notifications.query({
                   limit: 2,
-                  sort: { field: "createdAt", direction },
+                  sort: [{ field: "createdAt", direction }],
                   ...(cursor === undefined ? {} : { cursor }),
                 }),
               );
@@ -755,7 +755,7 @@ describe("notification.query", () => {
               USER,
               notifications.query({
                 cursor: first.nextCursor!,
-                sort: { field: "createdAt", direction: "asc" },
+                sort: [{ field: "createdAt", direction: "asc" }],
               }),
             ),
           ),

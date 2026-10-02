@@ -6,7 +6,12 @@
  * `text`, and the tests check only the response.
  */
 import { describe, expect, it } from "vitest";
-import type { Task } from "@hercule/contract";
+import * as Effect from "effect/Effect";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
+import { api, type Task, type TaskPriority } from "@hercule/contract";
 import { completeSetup, get, post, send, withServer } from "./testing";
 
 interface TaskPage {
@@ -23,7 +28,11 @@ const listTasks = async (base: string, token: string, query = ""): Promise<TaskP
 const createTask = async (
   base: string,
   token: string,
-  fields: { readonly title: string; readonly description?: string },
+  fields: {
+    readonly title: string;
+    readonly description?: string;
+    readonly priority?: TaskPriority;
+  },
 ): Promise<Task> => {
   const response = await post(base, "/api/v1/tasks", { description: "", ...fields }, token);
   expect(response.status).toBe(200);
@@ -35,6 +44,23 @@ const listTitles = (page: TaskPage): ReadonlyArray<string> => page.items.map((ta
 /** Waits long enough that the next write gets a later millisecond. */
 const waitForNextMillisecond = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 10));
+
+/**
+ * Creates four open tasks, in order and each a few milliseconds after the one
+ * before: A and B urgent, C high, D low. The three most urgent, newest first
+ * within one priority, are B, A, C.
+ */
+const createUrgencyExample = async (base: string, token: string): Promise<void> => {
+  for (const [title, priority] of [
+    ["A", "urgent"],
+    ["B", "urgent"],
+    ["C", "high"],
+    ["D", "low"],
+  ] as const) {
+    await createTask(base, token, { title, priority });
+    await waitForNextMillisecond();
+  }
+};
 
 /** Pages through a listing to its end, and returns every id it returned. */
 const walkPages = async (
@@ -92,6 +118,80 @@ describe("the order of a task listing", () => {
         "second",
         "first",
       ]);
+    });
+  });
+
+  it("sorts by each repeated sort parameter in order: the most urgent, newest first within one priority", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      await createUrgencyExample(base, token);
+
+      const page = await listTasks(
+        base,
+        token,
+        "?status=open&sort=priority:desc&sort=createdAt:desc&limit=3",
+      );
+      expect(listTitles(page)).toEqual(["B", "A", "C"]);
+    });
+  });
+
+  it("rejects a sort field that appears twice, and names it", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const response = await get(base, "/api/v1/tasks?sort=priority&sort=priority:desc", token);
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as {
+        error: { code: string; details: { issues: ReadonlyArray<{ message: string }> } };
+      };
+      expect(body.error.code).toBe("validation");
+      const messages = body.error.details.issues.map((issue) => issue.message);
+      expect(messages.some((message) => message.includes("priority appears more than once"))).toBe(
+        true,
+      );
+    });
+  });
+
+  it("receives a list of sort keys from the derived client as one parameter per key, in order", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      await createUrgencyExample(base, token);
+
+      const urls: Array<string> = [];
+      const recordingFetch: typeof globalThis.fetch = Object.assign(
+        (...[input, init]: Parameters<typeof globalThis.fetch>) => {
+          urls.push(input instanceof Request ? input.url : String(input));
+          return globalThis.fetch(input, init);
+        },
+        { preconnect: globalThis.fetch.preconnect },
+      );
+      const page = await Effect.runPromise(
+        Effect.gen(function* () {
+          const client = yield* HttpApiClient.make(api, {
+            baseUrl: base,
+            transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(token)),
+          });
+          return yield* client.task.query({
+            query: {
+              status: ["open"],
+              sort: [
+                { field: "priority", direction: "desc" },
+                { field: "createdAt", direction: "desc" },
+              ],
+              limit: 3,
+            },
+          });
+        }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.provideService(FetchHttpClient.Fetch, recordingFetch),
+        ),
+      );
+
+      expect(urls).toHaveLength(1);
+      expect(new URL(urls[0] ?? "").searchParams.getAll("sort")).toEqual([
+        "priority:desc",
+        "createdAt:desc",
+      ]);
+      expect(page.items.map((task) => task.title)).toEqual(["B", "A", "C"]);
     });
   });
 

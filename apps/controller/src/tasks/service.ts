@@ -47,10 +47,18 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { announce, nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  announce,
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortKeys,
+  withTransaction,
+  type ResolvedSortKey,
+} from "../db";
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
-import { taskRepository, type TaskEdit, type TaskOrder } from "./repository";
+import { taskRepository, type TaskEdit, type TaskOrder, type TaskSortField } from "./repository";
 
 /** The input of `task.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -82,7 +90,9 @@ export interface TaskPage {
 }
 
 /** Newest work first: a task list is read to see what is going on now. */
-const DEFAULT_ORDER: TaskOrder = { _tag: "column", field: "updatedAt", direction: "desc" };
+const DEFAULT_SORT: ReadonlyArray<ResolvedSortKey<TaskSortField>> = [
+  { field: "updatedAt", direction: "desc" },
+];
 
 const NO_SUCH_TASK = "no such task";
 const NO_SUCH_PROJECT = "no such project";
@@ -96,18 +106,20 @@ const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...
 
 /**
  * Returns how a listing is ordered: by relevance for a full-text search,
- * otherwise by the requested column or the default. Fails with `Validation` if
- * the request has both a search and a sort.
+ * otherwise by the requested sort keys, or by the default when there are
+ * none. A key with no direction is `asc`. Fails with `Validation` if the
+ * request has both a search and a sort key.
  *
  * Relevance is not a column, so a search cannot also be sorted. Supporting
  * both would need two paging strategies chosen per request, and ignoring the
- * sort would silently return an order nobody asked for.
+ * sort would silently return an order nobody asked for. An empty sort list is
+ * no sort at all, so a search may come with one.
  */
 const chooseOrder = (
   text: QueryInput["text"],
   sort: QueryInput["sort"],
 ): Effect.Effect<TaskOrder, Validation> => {
-  if (text !== undefined && sort !== undefined) {
+  if (text !== undefined && sort !== undefined && sort.length > 0) {
     return Effect.fail(
       createValidationError([
         { path: ["sort"], message: "a full-text search is ordered by relevance" },
@@ -116,8 +128,7 @@ const chooseOrder = (
     );
   }
   if (text !== undefined) return Effect.succeed({ _tag: "relevance", text });
-  if (sort === undefined) return Effect.succeed(DEFAULT_ORDER);
-  return Effect.succeed({ _tag: "column", field: sort.field, direction: sort.direction ?? "desc" });
+  return Effect.succeed({ _tag: "column", keys: resolveSortKeys(sort, DEFAULT_SORT) });
 };
 
 const make = Effect.gen(function* () {

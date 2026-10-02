@@ -23,11 +23,12 @@ import {
   type Forbidden,
   type NotFound,
   type SortDirection,
+  type SortKey,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
-import { withTransaction } from "../db";
+import { resolveSortDirection, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Credentials, type ApiKeyRecord } from "./repository";
 import { hashToken, mintToken } from "./token";
@@ -36,7 +37,7 @@ import { hashToken, mintToken } from "./token";
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
-  readonly sort?: { readonly field: "createdAt"; readonly direction?: SortDirection };
+  readonly sort?: ReadonlyArray<SortKey<"createdAt">>;
 }
 
 /** One page of keys, in the contract's shape. */
@@ -120,7 +121,7 @@ const make = Effect.gen(function* () {
           .listApiKeys(actor.userId, {
             limit: input.limit ?? DEFAULT_PAGE_LIMIT,
             cursor: input.cursor,
-            direction: input.sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(input.sort, DEFAULT_DIRECTION),
           })
           .pipe(
             Effect.catchTag("CursorError", (error) =>

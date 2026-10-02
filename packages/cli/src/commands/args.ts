@@ -18,14 +18,9 @@
  * line each, in the order its schema declares them. Never in the order the
  * markers were written, or the two passwords could silently swap.
  */
+import type { SortKey } from "@hercule/contract";
 import { UsageError } from "../exit";
 import type { Command, Field } from "./tree";
-
-export interface SortArgument {
-  readonly field: string;
-  /** Absent when `--sort` has no direction, so the operation's default order applies. */
-  readonly direction?: "asc" | "desc";
-}
 
 export interface Arguments {
   /** The positional arguments, in order, as written. */
@@ -34,7 +29,8 @@ export interface Arguments {
   readonly query: Record<string, unknown>;
   readonly limit: number | undefined;
   readonly cursor: string | undefined;
-  readonly sort: SortArgument | undefined;
+  /** One key per `--sort`, in the order written; `undefined` when none was given. */
+  readonly sort: ReadonlyArray<SortKey> | undefined;
   /** Whether to follow `nextCursor` to the last page. */
   readonly all: boolean;
   readonly json: boolean;
@@ -129,14 +125,16 @@ const assignFieldValue = (into: Record<string, unknown>, field: Field, value: un
 };
 
 /**
- * Parses `--sort <field>[:<asc|desc>]`. Throws a `UsageError` for a field the
- * command cannot sort on, or an unknown direction.
+ * Parses one `--sort <field>[:<asc|desc>]` into a sort key. Throws a
+ * `UsageError` for a field the command cannot sort on, or an unknown
+ * direction.
  *
- * A field with no direction leaves the direction unset rather than assuming
- * `asc`: the operation declares its own default order, and choosing one here
- * would silently override it.
+ * A field with no direction leaves the direction unset, and the API reads a
+ * key with no direction as `asc`. A field named twice is not refused here:
+ * the client encodes the query with the contract's schema, which refuses it
+ * with a message naming the field before anything is sent.
  */
-const parseSort = (text: string, command: Command, help: string): SortArgument => {
+const parseSort = (text: string, command: Command, help: string): SortKey => {
   const colon = text.indexOf(":");
   const field = colon === -1 ? text : text.slice(0, colon);
   if (!command.sortFields.includes(field)) {
@@ -233,7 +231,7 @@ export const parseArguments = async (
   const marked = new Set<Field>();
   let limit: number | undefined;
   let cursor: string | undefined;
-  let sort: SortArgument | undefined;
+  let sort: Array<SortKey> | undefined;
   let all = false;
   let json = false;
   let setupToken: string | undefined;
@@ -266,7 +264,9 @@ export const parseArguments = async (
       continue;
     }
     if (command.paged && name === "sort") {
-      sort = parseSort(value(), command, help);
+      // Each `--sort` adds a key after the ones before it, so the first one
+      // written orders the list and each later one breaks its ties.
+      (sort ??= []).push(parseSort(value(), command, help));
       continue;
     }
     if (command.requires === "setup-token" && name === "setup-token") {
