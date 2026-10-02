@@ -56,6 +56,20 @@ describe("FormField", () => {
     // The input is named by its label alone, not by the error under it.
     expect(screen.getByLabelText("Remote URL")).toBe(container.querySelector("input"));
   });
+
+  it("keeps the input's label when the aside holds a button", () => {
+    // A label belongs to the first control inside it, so a button in the
+    // label would take the label from the input.
+    const { container } = render(
+      <FormField label="Personal access token" aside={<button type="button">Create one</button>}>
+        <input />
+      </FormField>,
+    );
+    expect(screen.getByRole("textbox", { name: "Personal access token" })).toBe(
+      container.querySelector("input"),
+    );
+    expect(screen.getByRole("button", { name: "Create one" })).toBeTruthy();
+  });
 });
 
 describe("DeviceCodeSteps", () => {

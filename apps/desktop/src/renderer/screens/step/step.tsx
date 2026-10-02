@@ -232,8 +232,11 @@ export function Warning({
  * `error` is `null` when there is none. The hint and the error can hold
  * markup, such as a command set in monospace.
  *
- * The `<label>` holds the label and the field but not the hint or the
- * error, so the input's accessible name is the label alone. The error is an
+ * The `<label>` holds the label and the field but not the aside, the hint
+ * or the error, so the input's accessible name is the label alone. The aside
+ * stays out for a second reason: a label belongs to the first control inside
+ * it, so a button in the aside would take the label from the input. The
+ * stylesheet draws the aside in the label's row. The error is an
  * alert, so a screen reader reads it out when it appears.
  */
 export function FormField({
@@ -254,17 +257,10 @@ export function FormField({
   return (
     <div className="fl">
       <label>
-        <span className="fl-label">
-          {label}
-          {aside === undefined ? null : (
-            <>
-              <span className="spacer" />
-              {aside}
-            </>
-          )}
-        </span>
+        <span className="fl-label">{label}</span>
         <span className={bad || error !== null ? "field is-bad" : "field"}>{children}</span>
       </label>
+      {aside === undefined ? null : <span className="fl-aside">{aside}</span>}
       {error !== null ? (
         <span className="fl-err" role="alert">
           {error}

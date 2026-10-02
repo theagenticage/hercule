@@ -323,7 +323,8 @@ input.field[type="password"]:not(:placeholder-shown) {
 .fl > label {
   display: contents;
 }
-.fl-label {
+.fl-label,
+.fl-aside {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -331,8 +332,17 @@ input.field[type="password"]:not(:placeholder-shown) {
   font-size: var(--t-12);
   font-weight: var(--w-bold);
 }
-.fl-label .spacer {
-  flex: 1;
+/* The aside sits outside the label element (see FormField), and shares the
+   label's grid cell, at its far end. Both are placed in the first row, so
+   the field and the line under it fill the rows after. Their text shares a
+   baseline, as it did in one flex row. */
+.fl-label,
+.fl-aside {
+  grid-area: 1 / 1;
+  align-self: baseline;
+}
+.fl-aside {
+  justify-self: end;
 }
 .fl-hint {
   color: var(--faint);
