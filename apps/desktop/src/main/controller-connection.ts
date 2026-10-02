@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import type { ControllerUrlSaveOutcome } from "../ipc/contract";
 import { isHttpUrl } from "../ipc/http-url";
 import { AppSettings } from "./app-settings";
+import type { ControllerCheckOutcome } from "./controller-check";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
 import { MainWindow } from "./main-window";
 import { StoredToken } from "./stored-token";
@@ -77,6 +78,15 @@ export const parseControllerAddress = (text: string): ControllerAddress | null =
   return isSetupAddress ? { origin: url.origin, setupToken } : null;
 };
 
+/**
+ * Checks whether the connect check's `outcome` found a controller that
+ * answers and accepts the app, set up or not: one whose URL the app saves.
+ */
+export const isAnswering = (
+  outcome: ControllerCheckOutcome,
+): outcome is Extract<ControllerCheckOutcome, { readonly _tag: "Ready" | "SetupIncomplete" }> =>
+  outcome._tag === "Ready" || outcome._tag === "SetupIncomplete";
+
 /** The connection to a controller. */
 export class ControllerConnection extends Context.Service<
   ControllerConnection,
@@ -89,7 +99,7 @@ export class ControllerConnection extends Context.Service<
      * - `InvalidUrl` when `input` is not a controller address; see
      *   parseControllerAddress. Nothing is requested;
      * - `Saved` when a controller answered, set up or not. The URL is saved
-     *   as `saveIfAnswering` saves it. When the controller is not set up and
+     *   as `saveAndReload` saves it. When the controller is not set up and
      *   `input` is a setup address, its token is kept in memory, for
      *   `takePastedSetupToken`;
      * - the check's outcome otherwise; see ControllerCheckOutcome.
@@ -102,13 +112,19 @@ export class ControllerConnection extends Context.Service<
     readonly save: (input: string) => Effect.Effect<ControllerUrlSaveOutcome>;
 
     /**
-     * Checks the controller at `origin`, a controller's origin, and saves its
-     * URL when it answers, set up or not. A URL other than the saved one
-     * signs the user out first, as Sign Out does. The window then reloads,
-     * so the page's Content Security Policy names the new controller.
-     * Returns whether it saved the URL. Never fails.
+     * Runs the connect check on the controller at `origin`, a controller's
+     * origin, and returns its outcome. Saves nothing. Never fails.
      */
-    readonly saveIfAnswering: (origin: string) => Effect.Effect<boolean>;
+    readonly check: (origin: string) => Effect.Effect<ControllerCheckOutcome>;
+
+    /**
+     * Saves `origin`, a controller's origin, as the controller URL, without
+     * checking it: the caller has checked it. A URL other than the saved one
+     * signs the user out first, as Sign Out does. The window then reloads,
+     * so the page's Content Security Policy names the new controller. Never
+     * fails.
+     */
+    readonly saveAndReload: (origin: string) => Effect.Effect<void>;
 
     /**
      * Returns the token of the setup address the user pasted for `origin`,
@@ -135,8 +151,8 @@ export const makeControllerConnectionLayer = (
       // so it outlives the window's reload, and is gone when main quits.
       let pastedSetupAddress: { readonly origin: string; readonly token: string } | null = null;
 
-      /** Checks the controller at `origin`, with the check imported when it is first needed. */
-      const checkOrigin = (origin: string) =>
+      /** Runs the connect check on `origin`, with the check imported when it is first needed. */
+      const check = (origin: string): Effect.Effect<ControllerCheckOutcome> =>
         Effect.promise(() => import("./controller-check")).pipe(
           Effect.flatMap(({ checkController }) => checkController(origin, fetchWithoutRedirects)),
         );
@@ -169,23 +185,16 @@ export const makeControllerConnectionLayer = (
             const address = parseControllerAddress(input);
             if (address === null) return { _tag: "InvalidUrl" } as const;
             const { origin, setupToken } = address;
-            const outcome = yield* checkOrigin(origin);
-            if (outcome._tag !== "Ready" && outcome._tag !== "SetupIncomplete") {
-              return { ...outcome, origin };
-            }
+            const outcome = yield* check(origin);
+            if (!isAnswering(outcome)) return { ...outcome, origin };
             if (outcome._tag === "SetupIncomplete" && setupToken !== null) {
               pastedSetupAddress = { origin, token: setupToken };
             }
             yield* saveAndReload(origin);
             return { _tag: "Saved", origin } as const;
           }),
-        saveIfAnswering: (origin) =>
-          Effect.gen(function* () {
-            const outcome = yield* checkOrigin(origin);
-            if (outcome._tag !== "Ready" && outcome._tag !== "SetupIncomplete") return false;
-            yield* saveAndReload(origin);
-            return true;
-          }),
+        check,
+        saveAndReload,
         takePastedSetupToken: (origin) =>
           Effect.sync(() => {
             if (pastedSetupAddress?.origin !== origin) return null;

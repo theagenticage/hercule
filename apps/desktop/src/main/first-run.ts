@@ -18,12 +18,7 @@ import type {
 import type { AppSettings, NoControllerSaved } from "./app-settings";
 import type { ControllerConnection } from "./controller-connection";
 import type { InstalledBinary } from "./installed-binary";
-import type {
-  ControllerAlreadySaved,
-  LocalController,
-  NoLogsFolderSeen,
-  StartAlreadyRunning,
-} from "./local-controller";
+import type { ControllerAlreadySaved, LocalController, NoLogsFolderSeen } from "./local-controller";
 import type { MainWindow } from "./main-window";
 
 type FirstRunServicesModule = typeof import("./first-run-services");
@@ -38,7 +33,7 @@ export class FirstRun extends Context.Service<
     /** Starts Hercule on this Mac; see LocalController's `start`. */
     readonly startLocalController: Effect.Effect<
       LocalControllerStartOutcome,
-      ControllerAlreadySaved | StartAlreadyRunning
+      ControllerAlreadySaved
     >;
 
     /** Opens the Hercule Home's logs folder; see LocalController's `showLogsFolder`. */

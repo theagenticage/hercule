@@ -31,7 +31,8 @@ describe("FirstRun", () => {
           window.layer,
           Layer.succeed(ControllerConnection)({
             save: () => Effect.die("not used"),
-            saveIfAnswering: () => Effect.die("not used"),
+            check: () => Effect.die("not used"),
+            saveAndReload: () => Effect.die("not used"),
             takePastedSetupToken: () => Effect.die("not used"),
           }),
         ),

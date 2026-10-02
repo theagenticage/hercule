@@ -76,7 +76,7 @@ describe("parseControllerAddress", () => {
   ])("refuses %s", (_case, text) => expect(parseControllerAddress(text)).toBeNull());
 });
 
-describe("ControllerConnection.save", () => {
+describe("ControllerConnection", () => {
   let settingsFile: TemporarySettingsFile;
   let server: FakeHttpServer;
   let origin: string;
@@ -152,155 +152,137 @@ describe("ControllerConnection.save", () => {
 
   const readFileObject = (): unknown => JSON.parse(readFileSync(settingsFile.path, "utf8"));
 
-  it("signs the user out, saves the origin of a ready controller, and reloads the window", async () => {
-    writeFileSync(
-      settingsFile.path,
-      JSON.stringify({ controllerUrl: "http://127.0.0.1:1", token: "AAEC" }),
-    );
-    expect(await save(` ${origin.toUpperCase()}/ `)).toEqual({
-      outcome: { _tag: "Saved", origin },
-      tokenWrites: [null],
-      reloads: 1,
+  describe("save", () => {
+    it("signs the user out, saves the origin of a ready controller, and reloads the window", async () => {
+      writeFileSync(
+        settingsFile.path,
+        JSON.stringify({ controllerUrl: "http://127.0.0.1:1", token: "AAEC" }),
+      );
+      expect(await save(` ${origin.toUpperCase()}/ `)).toEqual({
+        outcome: { _tag: "Saved", origin },
+        tokenWrites: [null],
+        reloads: 1,
+      });
+      expect(readFileObject()).toEqual({ controllerUrl: origin });
     });
-    expect(readFileObject()).toEqual({ controllerUrl: origin });
-  });
 
-  it("keeps the user signed in when the ready controller is the one already saved", async () => {
-    writeFileSync(settingsFile.path, JSON.stringify({ controllerUrl: origin, token: "AAEC" }));
-    expect(await save(origin)).toEqual({
-      outcome: { _tag: "Saved", origin },
-      tokenWrites: [],
-      reloads: 1,
+    it("keeps the user signed in when the ready controller is the one already saved", async () => {
+      writeFileSync(settingsFile.path, JSON.stringify({ controllerUrl: origin, token: "AAEC" }));
+      expect(await save(origin)).toEqual({
+        outcome: { _tag: "Saved", origin },
+        tokenWrites: [],
+        reloads: 1,
+      });
+      expect(readFileObject()).toEqual({ controllerUrl: origin, token: "AAEC" });
     });
-    expect(readFileObject()).toEqual({ controllerUrl: origin, token: "AAEC" });
-  });
 
-  it("refuses an invalid URL without a request, and saves nothing", async () => {
-    expect(await save(`${origin}/api`)).toEqual({
-      outcome: { _tag: "InvalidUrl" },
-      tokenWrites: [],
-      reloads: 0,
+    it("refuses an invalid URL without a request, and saves nothing", async () => {
+      expect(await save(`${origin}/api`)).toEqual({
+        outcome: { _tag: "InvalidUrl" },
+        tokenWrites: [],
+        reloads: 0,
+      });
+      expect(requestCount).toBe(0);
+      expect(() => readFileSync(settingsFile.path)).toThrow();
     });
-    expect(requestCount).toBe(0);
-    expect(() => readFileSync(settingsFile.path)).toThrow();
-  });
 
-  it("saves the origin of a controller that is not set up, with no setup token", async () => {
-    setUp = false;
-    const { outcome, reloads } = await runOnConnection((connection) =>
-      Effect.gen(function* () {
-        const saved = yield* connection.save(origin);
-        return { saved, token: yield* connection.takePastedSetupToken(origin) };
-      }),
-    );
-    expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, token: null });
-    expect(reloads).toBe(1);
-    expect(readFileObject()).toEqual({ controllerUrl: origin });
-  });
-
-  it("saves the setup address of a controller that is not set up, and keeps its token once", async () => {
-    setUp = false;
-    const { outcome, reloads } = await runOnConnection((connection) =>
-      Effect.gen(function* () {
-        const saved = yield* connection.save(`${origin}/setup?token=abc`);
-        const tokens = [
-          yield* connection.takePastedSetupToken("http://127.0.0.1:1"),
-          yield* connection.takePastedSetupToken(origin),
-          yield* connection.takePastedSetupToken(origin),
-        ];
-        return { saved, tokens };
-      }),
-    );
-    expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, tokens: [null, "abc", null] });
-    expect(reloads).toBe(1);
-    expect(readFileObject()).toEqual({ controllerUrl: origin });
-  });
-
-  it("saves the setup address of a controller that is set up, without its token", async () => {
-    const { outcome } = await runOnConnection((connection) =>
-      Effect.gen(function* () {
-        const saved = yield* connection.save(`${origin}/setup?token=abc`);
-        return { saved, token: yield* connection.takePastedSetupToken(origin) };
-      }),
-    );
-    expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, token: null });
-  });
-
-  it("returns any other outcome of the check with the origin, and saves nothing", async () => {
-    redirectTo = "https://hercule.example.com/api/v1/setup";
-    expect(await save(origin)).toEqual({
-      outcome: { _tag: "Redirected", origin, targetOrigin: "https://hercule.example.com" },
-      tokenWrites: [],
-      reloads: 0,
+    it("saves the origin of a controller that is not set up, with no setup token", async () => {
+      setUp = false;
+      const { outcome, reloads } = await runOnConnection((connection) =>
+        Effect.gen(function* () {
+          const saved = yield* connection.save(origin);
+          return { saved, token: yield* connection.takePastedSetupToken(origin) };
+        }),
+      );
+      expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, token: null });
+      expect(reloads).toBe(1);
+      expect(readFileObject()).toEqual({ controllerUrl: origin });
     });
-    expect(() => readFileSync(settingsFile.path)).toThrow();
-  });
-});
 
-describe("ControllerConnection.saveIfAnswering", () => {
-  let settingsFile: TemporarySettingsFile;
-  let server: FakeHttpServer;
-  /** Whether the fake controller is set up. */
-  let setUp: boolean;
-
-  beforeEach(() => {
-    settingsFile = makeTemporarySettingsFile();
-    return settingsFile.remove;
-  });
-
-  beforeEach(async () => {
-    setUp = true;
-    server = await startFakeHttpServer((request, response) => {
-      const allowsApp = { "access-control-allow-origin": "app://hercule" };
-      if (request.method === "OPTIONS") {
-        response
-          .writeHead(204, {
-            ...allowsApp,
-            "access-control-allow-methods": "DELETE, GET, PATCH, POST, PUT",
-            "access-control-allow-headers": "authorization, content-type",
-          })
-          .end();
-      } else {
-        response
-          .writeHead(200, { ...allowsApp, "content-type": "application/json" })
-          .end(JSON.stringify({ complete: setUp }));
-      }
+    it("saves the setup address of a controller that is not set up, and keeps its token once", async () => {
+      setUp = false;
+      const { outcome, reloads } = await runOnConnection((connection) =>
+        Effect.gen(function* () {
+          const saved = yield* connection.save(`${origin}/setup?token=abc`);
+          const tokens = [
+            yield* connection.takePastedSetupToken("http://127.0.0.1:1"),
+            yield* connection.takePastedSetupToken(origin),
+            yield* connection.takePastedSetupToken(origin),
+          ];
+          return { saved, tokens };
+        }),
+      );
+      expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, tokens: [null, "abc", null] });
+      expect(reloads).toBe(1);
+      expect(readFileObject()).toEqual({ controllerUrl: origin });
     });
-    return server.close;
-  });
 
-  /** Runs saveIfAnswering on `origin`, and returns its answer and how many times the window reloaded. */
-  const saveIfAnswering = async (origin: string) => {
-    const window = makeFakeMainWindow();
-    const storedToken = Layer.succeed(StoredToken)({
-      read: Effect.succeed(null),
-      write: () => Effect.void,
+    it("saves the setup address of a controller that is set up, without its token", async () => {
+      const { outcome } = await runOnConnection((connection) =>
+        Effect.gen(function* () {
+          const saved = yield* connection.save(`${origin}/setup?token=abc`);
+          return { saved, token: yield* connection.takePastedSetupToken(origin) };
+        }),
+      );
+      expect(outcome).toEqual({ saved: { _tag: "Saved", origin }, token: null });
     });
-    const saved = await Effect.runPromise(
-      Effect.provide(
-        ControllerConnection.use((connection) => connection.saveIfAnswering(origin)),
-        makeControllerConnectionLayer(nodeFetchWithoutRedirects).pipe(
-          Layer.provide(Layer.mergeAll(settingsFile.layer, storedToken, window.layer)),
-        ),
-      ),
-    );
-    return { saved, reloads: window.calls.filter((call) => call === "reload").length };
-  };
 
-  it.each([
-    ["set up", true],
-    ["not set up", false],
-  ])("saves a controller that is %s and reloads the window", async (_case, complete) => {
-    setUp = complete;
-    expect(await saveIfAnswering(server.origin)).toEqual({ saved: true, reloads: 1 });
-    expect(JSON.parse(readFileSync(settingsFile.path, "utf8"))).toEqual({
-      controllerUrl: server.origin,
+    it("returns any other outcome of the check with the origin, and saves nothing", async () => {
+      redirectTo = "https://hercule.example.com/api/v1/setup";
+      expect(await save(origin)).toEqual({
+        outcome: { _tag: "Redirected", origin, targetOrigin: "https://hercule.example.com" },
+        tokenWrites: [],
+        reloads: 0,
+      });
+      expect(() => readFileSync(settingsFile.path)).toThrow();
     });
   });
 
-  it("saves nothing when nothing answers", async () => {
-    await server.close();
-    expect(await saveIfAnswering(server.origin)).toEqual({ saved: false, reloads: 0 });
-    expect(() => readFileSync(settingsFile.path)).toThrow();
+  describe("check", () => {
+    it.each([
+      ["Ready", true],
+      ["SetupIncomplete", false],
+    ])("returns %s for a controller, and saves nothing", async (tag, complete) => {
+      setUp = complete;
+      expect(await runOnConnection((connection) => connection.check(origin))).toEqual({
+        outcome: { _tag: tag },
+        tokenWrites: [],
+        reloads: 0,
+      });
+      expect(() => readFileSync(settingsFile.path)).toThrow();
+    });
+
+    it("returns Unreachable when nothing answers", async () => {
+      await server.close();
+      expect((await runOnConnection((connection) => connection.check(origin))).outcome).toEqual({
+        _tag: "Unreachable",
+      });
+    });
+  });
+
+  describe("saveAndReload", () => {
+    it("signs the user out, saves a new origin without a request, and reloads the window", async () => {
+      writeFileSync(
+        settingsFile.path,
+        JSON.stringify({ controllerUrl: "http://127.0.0.1:1", token: "AAEC" }),
+      );
+      expect(await runOnConnection((connection) => connection.saveAndReload(origin))).toEqual({
+        outcome: undefined,
+        tokenWrites: [null],
+        reloads: 1,
+      });
+      expect(requestCount).toBe(0);
+      expect(readFileObject()).toEqual({ controllerUrl: origin });
+    });
+
+    it("keeps the user signed in when the origin is the one already saved", async () => {
+      writeFileSync(settingsFile.path, JSON.stringify({ controllerUrl: origin, token: "AAEC" }));
+      expect(await runOnConnection((connection) => connection.saveAndReload(origin))).toEqual({
+        outcome: undefined,
+        tokenWrites: [],
+        reloads: 1,
+      });
+      expect(readFileObject()).toEqual({ controllerUrl: origin, token: "AAEC" });
+    });
   });
 });

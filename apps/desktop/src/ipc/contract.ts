@@ -51,6 +51,18 @@ export interface RendererToMainIpcChannel {
 }
 
 /**
+ * The outcomes of the connect check for a controller origin, `origin`, where
+ * something answered but the app cannot connect. ControllerUrlSaveOutcome
+ * describes each; LocalControllerStartOutcome has them too.
+ */
+const ControllerRefusalCases = {
+  Redirected: { origin: Schema.String, targetOrigin: Schema.String },
+  NotController: { origin: Schema.String },
+  OriginNotAllowed: { origin: Schema.String },
+  PreflightRefused: { origin: Schema.String, methods: Schema.Array(Schema.String) },
+};
+
+/**
  * What happened when main was asked to save the controller URL the user
  * typed. Only `Saved` saves anything.
  *
@@ -81,10 +93,7 @@ export const ControllerUrlSaveOutcome = Schema.TaggedUnion({
   Saved: { origin: Schema.String },
   InvalidUrl: {},
   Unreachable: { origin: Schema.String },
-  Redirected: { origin: Schema.String, targetOrigin: Schema.String },
-  NotController: { origin: Schema.String },
-  OriginNotAllowed: { origin: Schema.String },
-  PreflightRefused: { origin: Schema.String, methods: Schema.Array(Schema.String) },
+  ...ControllerRefusalCases,
 });
 export type ControllerUrlSaveOutcome = typeof ControllerUrlSaveOutcome.Type;
 
@@ -111,7 +120,7 @@ export type LocalControllerFindOutcome = typeof LocalControllerFindOutcome.Type;
 
 /**
  * What happened when main started Hercule on this Mac with
- * `hercule service install --json`.
+ * `hercule service install --json`, or found it already running.
  *
  * - `Saved`: Hercule answered. Main saved its URL and reloaded the window.
  * - `Runner`: this Mac's Service Unit runs a runner; `running` tells whether
@@ -126,6 +135,10 @@ export type LocalControllerFindOutcome = typeof LocalControllerFindOutcome.Type;
  *   within 30 seconds, or the command still ran after 90 seconds and main
  *   stopped it. `logsDir` is the Hercule Home's logs folder, which may say
  *   why; `logsFolder.show` opens it.
+ * - `Redirected`, `NotController`, `OriginNotAllowed` and
+ *   `PreflightRefused`: something answered at `origin`, but the connect
+ *   check refused it, as for `controllerUrl.save`. Main stops waiting at
+ *   once: waiting would not change the answer.
  */
 export const LocalControllerStartOutcome = Schema.TaggedUnion({
   Saved: { origin: Schema.String },
@@ -133,6 +146,7 @@ export const LocalControllerStartOutcome = Schema.TaggedUnion({
   NotInstalled: {},
   StartError: { line: Schema.String },
   NoAnswer: { address: Schema.String, logsDir: Schema.String },
+  ...ControllerRefusalCases,
 });
 export type LocalControllerStartOutcome = typeof LocalControllerStartOutcome.Type;
 

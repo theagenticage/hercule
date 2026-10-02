@@ -170,6 +170,11 @@ describe("the welcome, with no controller saved", () => {
       "launchctl: service not found",
     ],
     [
+      "NotController",
+      () => Promise.resolve({ _tag: "NotController", origin: LOCAL_URL }),
+      `${LOCAL_URL} answered, but it is not a Hercule controller.`,
+    ],
+    [
       "NotInstalled",
       () => Promise.resolve({ _tag: "NotInstalled" }),
       "Hercule is not installed on this Mac.",

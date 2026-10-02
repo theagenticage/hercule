@@ -119,6 +119,13 @@ const decideStartState = (
       return { kind: "start-error", line: outcome.line };
     case "NoAnswer":
       return { kind: "start-failed", address: outcome.address, logsDir: outcome.logsDir };
+    // Something answered at Hercule's address but the connect check refused
+    // it, so the line is the one the connect screen shows for the same check.
+    case "Redirected":
+    case "NotController":
+    case "OriginNotAllowed":
+    case "PreflightRefused":
+      return { kind: "start-error", line: describeControllerUrlOutcome(outcome) ?? "" };
   }
 };
 

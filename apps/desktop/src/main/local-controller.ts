@@ -4,15 +4,17 @@
  * it as a Service Unit, through the installed binary. Spec 17 (§First run)
  * owns the rules.
  */
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
+import * as Semaphore from "effect/Semaphore";
 import type { LocalControllerFindOutcome, LocalControllerStartOutcome } from "../ipc/contract";
 import { AppSettings } from "./app-settings";
-import { ControllerConnection } from "./controller-connection";
+import { ControllerConnection, isAnswering } from "./controller-connection";
 import { InstalledBinary, type ServiceReport } from "./installed-binary";
 import { LoginShell } from "./login-shell-path";
 
@@ -31,15 +33,6 @@ export class ControllerAlreadySaved extends Data.TaggedError("ControllerAlreadyS
   }
 }
 
-/** The error `start` fails with while another start runs. */
-export class StartAlreadyRunning extends Data.TaggedError("StartAlreadyRunning")<{
-  readonly message: string;
-}> {
-  constructor() {
-    super({ message: "Hercule is already being started; wait for that start to finish" });
-  }
-}
-
 /** The error `showLogsFolder` fails with before the binary has reported a logs folder. */
 export class NoLogsFolderSeen extends Data.TaggedError("NoLogsFolderSeen")<{
   readonly message: string;
@@ -53,13 +46,13 @@ export class NoLogsFolderSeen extends Data.TaggedError("NoLogsFolderSeen")<{
  * How long `hercule service install` may run. The command gives up by
  * itself after about a minute; this limit is for a command that hangs.
  */
-const INSTALL_LIMIT = "90 seconds";
+const INSTALL_TIME_LIMIT = "90 seconds";
 
 /** How long main waits for Hercule to answer once it was started. */
-const ANSWER_LIMIT_MILLIS = 30_000;
+const ANSWER_TIME_LIMIT = "30 seconds";
 
 /** How long main waits between two checks of whether Hercule answers. */
-const ANSWER_POLL_INTERVAL = "500 millis";
+const ANSWER_CHECK_INTERVAL = "500 millis";
 
 /** Hercule on this Mac. */
 export class LocalController extends Context.Service<
@@ -79,17 +72,13 @@ export class LocalController extends Context.Service<
      * Starts Hercule's controller on this Mac with `hercule service install`,
      * with the `PATH` of the user's login shell, then waits up to 30 seconds
      * for it to answer and saves its URL. Installs nothing when the Service
-     * Unit runs a runner. Returns what happened; see
+     * Unit runs a runner, or runs Hercule already: installing would restart
+     * it, and end the sessions it hosts. Returns what happened; see
      * LocalControllerStartOutcome.
      *
-     * Fails with ControllerAlreadySaved when a controller URL is saved, and
-     * with StartAlreadyRunning while another start runs: two installs at
-     * once would race on one Service Unit.
+     * Fails with ControllerAlreadySaved when a controller URL is saved.
      */
-    readonly start: Effect.Effect<
-      LocalControllerStartOutcome,
-      ControllerAlreadySaved | StartAlreadyRunning
-    >;
+    readonly start: Effect.Effect<LocalControllerStartOutcome, ControllerAlreadySaved>;
 
     /**
      * Opens in Finder the logs folder the binary last reported. Fails with
@@ -102,6 +91,11 @@ export class LocalController extends Context.Service<
 /**
  * Builds the service on the installed binary, the login shell and the
  * controller connection. `openFolder` opens a folder in Finder.
+ *
+ * `find` and `start` run one at a time, and a second waits for the first.
+ * A reload of the window while Hercule starts runs `find` again, and both
+ * would otherwise save the URL and reload the window. The second one then
+ * finds the URL saved, and is refused.
  */
 export const makeLocalControllerLayer = (
   openFolder: (path: string) => Effect.Effect<void>,
@@ -116,9 +110,9 @@ export const makeLocalControllerLayer = (
       const connection = yield* ControllerConnection;
       const binary = yield* InstalledBinary;
       const loginShell = yield* LoginShell;
+      const oneAtATime = yield* Semaphore.make(1);
       // The logs folder the binary reported last, from any command.
       let logsDir: string | null = null;
-      let starting = false;
 
       /** Remembers the logs folder `report` names, and returns `report`. */
       const rememberLogsFolder = (report: ServiceReport): ServiceReport => {
@@ -126,47 +120,99 @@ export const makeLocalControllerLayer = (
         return report;
       };
 
-      const refuseWhenSaved = Effect.gen(function* () {
+      const refuseWhenControllerSaved = Effect.gen(function* () {
         if ((yield* settings.readControllerUrl) !== null) {
           return yield* new ControllerAlreadySaved();
         }
       });
 
       /**
-       * Checks `origin` every half second, for up to 30 seconds, until
-       * Hercule answers there, and saves its URL then. Returns whether it
-       * saved it.
+       * Looks for Hercule's controller on this Mac, as `find` does, and saves
+       * nothing. Returns `Answering` with the controller's origin when the
+       * connect check passes there, set up or not.
        */
-      const waitForAnswer = (origin: string): Effect.Effect<boolean> =>
+      const findController: Effect.Effect<
+        | Exclude<LocalControllerFindOutcome, { readonly _tag: "Saved" }>
+        | { readonly _tag: "Answering"; readonly origin: string }
+      > = Effect.gen(function* () {
+        const status = yield* binary.readStatus.pipe(Effect.map(rememberLogsFolder), Effect.result);
+        if (status._tag === "Failure") {
+          return {
+            _tag: "Fresh",
+            problem: status.failure._tag === "BinaryNotFound" ? null : status.failure.line,
+          } as const;
+        }
+        const { role, running, controllerUrl } = status.success;
+        if (role === "runner") return { _tag: "Runner", running } as const;
+        if (controllerUrl === null) return { _tag: "Fresh", problem: null } as const;
+        return isAnswering(yield* connection.check(controllerUrl))
+          ? ({ _tag: "Answering", origin: controllerUrl } as const)
+          : ({ _tag: "Fresh", problem: null } as const);
+      });
+
+      /**
+       * Checks the controller `report` names every half second, while
+       * nothing answers, for up to 30 seconds, and saves its URL once it
+       * answers. Returns `Saved`; `NoAnswer` when nothing answered in time;
+       * the check's outcome when something answered that is not a
+       * controller the app can connect to; or `StartError` when `report`
+       * names no controller.
+       */
+      const saveWhenAnswering = (
+        report: ServiceReport,
+      ): Effect.Effect<LocalControllerStartOutcome> =>
         Effect.gen(function* () {
-          const deadline = (yield* Clock.currentTimeMillis) + ANSWER_LIMIT_MILLIS;
-          while (true) {
-            if (yield* connection.saveIfAnswering(origin)) return true;
-            if ((yield* Clock.currentTimeMillis) >= deadline) return false;
-            yield* Effect.sleep(ANSWER_POLL_INTERVAL);
+          const origin = report.controllerUrl;
+          if (origin === null) {
+            return {
+              _tag: "StartError",
+              line: "Hercule was started, but its config.toml names no address the app can open. Run `hercule service status` in Terminal to see why.",
+            } as const;
           }
+          const outcome = yield* connection.check(origin).pipe(
+            Effect.repeat({
+              while: (outcome) => outcome._tag === "Unreachable",
+              schedule: Schedule.spaced(ANSWER_CHECK_INTERVAL),
+            }),
+            Effect.timeoutOrElse({
+              duration: ANSWER_TIME_LIMIT,
+              orElse: () => Effect.succeed({ _tag: "Unreachable" } as const),
+            }),
+          );
+          if (outcome._tag === "Unreachable") {
+            return { _tag: "NoAnswer", address: origin, logsDir: report.logsDir } as const;
+          }
+          if (!isAnswering(outcome)) return { ...outcome, origin };
+          yield* connection.saveAndReload(origin);
+          return { _tag: "Saved", origin } as const;
         });
 
-      /** Starts Hercule; see `start`. Runs once the checks have passed. */
-      const startOnce: Effect.Effect<LocalControllerStartOutcome> = Effect.gen(function* () {
+      /** Starts Hercule's controller; see `start`. */
+      const startController: Effect.Effect<LocalControllerStartOutcome> = Effect.gen(function* () {
         const status = yield* binary.readStatus.pipe(Effect.map(rememberLogsFolder), Effect.result);
         if (status._tag === "Failure") {
           return status.failure._tag === "BinaryNotFound"
             ? ({ _tag: "NotInstalled" } as const)
             : ({ _tag: "StartError", line: status.failure.line } as const);
         }
+        const { role, running } = status.success;
         // Installing over a runner would restart it and end its sessions.
-        if (status.success.role === "runner") {
-          return { _tag: "Runner", running: status.success.running } as const;
-        }
+        if (role === "runner") return { _tag: "Runner", running } as const;
+        // Installing again would restart Hercule, and end the sessions its
+        // local runner hosts, so a running Hercule is only checked.
+        if (role === "serve" && running) return yield* saveWhenAnswering(status.success);
 
         const path = yield* loginShell.readPath.pipe(Effect.result);
-        if (path._tag === "Failure")
+        if (path._tag === "Failure") {
           return { _tag: "StartError", line: path.failure.reason } as const;
-
+        }
         const installed = yield* binary
           .install(path.success)
-          .pipe(Effect.map(rememberLogsFolder), Effect.timeoutOption(INSTALL_LIMIT), Effect.result);
+          .pipe(
+            Effect.map(rememberLogsFolder),
+            Effect.timeoutOption(INSTALL_TIME_LIMIT),
+            Effect.result,
+          );
         if (installed._tag === "Failure") {
           return installed.failure._tag === "BinaryNotFound"
             ? ({ _tag: "NotInstalled" } as const)
@@ -179,55 +225,26 @@ export const makeLocalControllerLayer = (
           return address === null
             ? ({
                 _tag: "StartError",
-                line: "`hercule service install` did not finish within 90 seconds, so the app stopped it.",
+                line: `\`hercule service install\` did not finish within ${String(Duration.toSeconds(INSTALL_TIME_LIMIT))} seconds, so the app stopped it.`,
               } as const)
             : ({ _tag: "NoAnswer", address, logsDir: status.success.logsDir } as const);
         }
         const report = installed.success.value;
         if (report.role === "runner") return { _tag: "Runner", running: report.running } as const;
-        if (report.controllerUrl === null) {
-          return {
-            _tag: "StartError",
-            line: "Hercule was started, but its config.toml names no address the app can open. Run `hercule service status` in Terminal to see why.",
-          } as const;
-        }
-        return (yield* waitForAnswer(report.controllerUrl))
-          ? ({ _tag: "Saved", origin: report.controllerUrl } as const)
-          : ({ _tag: "NoAnswer", address: report.controllerUrl, logsDir: report.logsDir } as const);
+        return yield* saveWhenAnswering(report);
       });
 
       return LocalController.of({
-        find: Effect.gen(function* () {
-          yield* refuseWhenSaved;
-          const status = yield* binary.readStatus.pipe(
-            Effect.map(rememberLogsFolder),
-            Effect.result,
-          );
-          if (status._tag === "Failure") {
-            return {
-              _tag: "Fresh",
-              problem: status.failure._tag === "BinaryNotFound" ? null : status.failure.line,
-            } as const;
-          }
-          const { role, running, controllerUrl } = status.success;
-          if (role === "runner") return { _tag: "Runner", running } as const;
-          if (controllerUrl === null) return { _tag: "Fresh", problem: null } as const;
-          return (yield* connection.saveIfAnswering(controllerUrl))
-            ? ({ _tag: "Saved", origin: controllerUrl } as const)
-            : ({ _tag: "Fresh", problem: null } as const);
-        }),
-        start: Effect.gen(function* () {
-          yield* refuseWhenSaved;
-          if (starting) return yield* new StartAlreadyRunning();
-          starting = true;
-          return yield* startOnce.pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                starting = false;
-              }),
-            ),
-          );
-        }),
+        find: oneAtATime.withPermit(
+          Effect.gen(function* () {
+            yield* refuseWhenControllerSaved;
+            const found = yield* findController;
+            if (found._tag !== "Answering") return found;
+            yield* connection.saveAndReload(found.origin);
+            return { _tag: "Saved", origin: found.origin } as const;
+          }),
+        ),
+        start: oneAtATime.withPermit(Effect.andThen(refuseWhenControllerSaved, startController)),
         showLogsFolder: Effect.suspend(() =>
           logsDir === null ? Effect.fail(new NoLogsFolderSeen()) : openFolder(logsDir),
         ),

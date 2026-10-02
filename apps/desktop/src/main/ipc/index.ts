@@ -14,11 +14,7 @@ import {
 import { AppSettings, type NoControllerSaved } from "../app-settings";
 import { ControllerConnection } from "../controller-connection";
 import { FirstRun } from "../first-run";
-import type {
-  ControllerAlreadySaved,
-  NoLogsFolderSeen,
-  StartAlreadyRunning,
-} from "../local-controller";
+import type { ControllerAlreadySaved, NoLogsFolderSeen } from "../local-controller";
 import { MainWindow } from "../main-window";
 import { MainMenu } from "../menu";
 import { RunnerIdentity } from "../runner-identity";
@@ -46,8 +42,7 @@ type IpcHandlerServices =
  * current state. Main refuses the message, and the error's message is the
  * reason. An outcome the user can cause is part of the response instead.
  */
-type IpcHandlerError =
-  NoControllerSaved | ControllerAlreadySaved | StartAlreadyRunning | NoLogsFolderSeen;
+type IpcHandlerError = NoControllerSaved | ControllerAlreadySaved | NoLogsFolderSeen;
 
 /**
  * What main does for each channel, given the decoded request. The table is
