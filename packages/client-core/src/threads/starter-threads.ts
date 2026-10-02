@@ -27,14 +27,25 @@ export const STARTER_THREADS: Readonly<
     },
   ],
   knowledgeWork: [
-    { title: "Make a presentation", message: "Make me a short presentation about …" },
+    { title: "Something to present", message: "Make me a short presentation about …" },
     {
-      title: "Research a question",
+      title: "Something to find out",
       message: "Research … and summarise what you find, with sources",
     },
-    { title: "Write a plan", message: "Write a one-page plan for …" },
+    { title: "Something to plan", message: "Write a one-page plan for …" },
   ],
 };
+
+/**
+ * Returns the line under the starters that says what fills Intake: Triage
+ * brings work from GitHub, so without a GitHub Connection the line says to
+ * connect GitHub. It names no time of day, because Triage does not run on a
+ * schedule yet, and a time would be a promise nothing keeps.
+ */
+export const describeEmptyIntake = (hasGitHubConnection: boolean): string =>
+  hasGitHubConnection
+    ? "Intake is empty for now. Triage reads GitHub and brings what needs work here."
+    : "Intake is empty for now. Connect GitHub, and Triage brings what needs work here.";
 
 /**
  * Returns the three starters for a project: the code starters when the

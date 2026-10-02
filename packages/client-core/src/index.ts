@@ -326,6 +326,7 @@ export { buildSubmission } from "./threads/submission";
 export { appendToMessage, buildStartCards } from "./threads/start-cards";
 export {
   chooseStarterThreads,
+  describeEmptyIntake,
   STARTER_THREADS,
   type StarterThread,
 } from "./threads/starter-threads";
