@@ -37,6 +37,13 @@ export interface ProviderRow {
    * runner did not say where.
    */
   readonly path: string | null;
+  /**
+   * Where the harness is on the runner, in words for the row's second line:
+   * the path of its binary, `installed` when the runner found it but did not
+   * say where, `not installed`, or that the runner's build has no adapter
+   * for it.
+   */
+  readonly location: string;
   /** The harness version it reported, or `not reported`. */
   readonly version: string;
   /** How that version compares with the versions this build was tested with. */
@@ -105,6 +112,7 @@ export const buildProviderRows = (
       providerId: instance.providerId,
       name: instance.displayName,
       path: binary?.path ?? null,
+      location: binary?.path ?? (present ? "installed" : adapter ? "not installed" : NO_ADAPTER),
       version: snapshot?.harnessVersion ?? "not reported",
       verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
       // Without an adapter, show that instead of what a stale snapshot reported.

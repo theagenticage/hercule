@@ -117,8 +117,32 @@ describe("buildProviderRows for a provider with a secret field", () => {
   });
 
   it("gives where the runner found the harness, and no path where it is not installed", () => {
-    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).path).toBe("/usr/local/bin/pi");
-    expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false)).path).toBeNull();
+    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false))).toMatchObject({
+      path: "/usr/local/bin/pi",
+      location: "/usr/local/bin/pi",
+    });
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
+      path: null,
+      location: "no adapter in this runner build",
+    });
+    const withPiAdapter: Runner = {
+      ...WITH_CLAUDE,
+      facts: { ...WITH_CLAUDE.facts!, adapters: ["claude-code", "pi"] },
+    };
+    expect(buildProviderRow(withPiAdapter, buildKeyedInstance(false)).location).toBe(
+      "not installed",
+    );
+  });
+
+  it("says installed when the runner found the harness but did not say where", () => {
+    const pathless: Runner = {
+      ...WITH_PI,
+      facts: { ...WITH_PI.facts!, providers: [{ name: "pi", present: true }] },
+    };
+    expect(buildProviderRow(pathless, buildKeyedInstance(false))).toMatchObject({
+      path: null,
+      location: "installed",
+    });
   });
 
   it("offers neither on a runner where the harness is not installed", () => {
