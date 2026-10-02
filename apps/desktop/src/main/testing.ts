@@ -71,15 +71,9 @@ export const writeShellScript = (path: string, body: string): void => {
   chmodSync(path, 0o755);
 };
 
-/** Returns whether a process with `pid` runs. */
-export const isProcessRunning = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+// The desktop scripts and the end-to-end suite check for a running process
+// too, and they cannot import this file, so the one copy lives with them.
+export { isProcessRunning } from "../../scripts/processes.ts";
 
 /**
  * Waits until `check` returns true, checking every 20 milliseconds, and

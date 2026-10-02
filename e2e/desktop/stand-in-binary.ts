@@ -6,7 +6,7 @@
  * `hercule service status` reads this Mac's launchd, and `hercule service
  * install` writes `~/Library/LaunchAgents` whatever the Hercule Home is. So
  * every launch names another binary with `--hercule-binary` (see
- * `locateHerculeBinary`), and a test that needs one writes a stand-in there:
+ * `buildStandInBinaryPath`), and a test that needs one writes a stand-in there:
  * a shell script with a scratch Hercule Home of its own, which answers the
  * three commands main runs as the real binary does.
  *
@@ -22,11 +22,8 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { onTestFinished } from "vitest";
-import {
-  isRunning,
-  locateHerculeBinary,
-  waitForExitOrKill,
-} from "../../apps/desktop/scripts/packaged-app";
+import { buildStandInBinaryPath, waitForExitOrKill } from "../../apps/desktop/scripts/packaged-app";
+import { isProcessRunning } from "../../apps/desktop/scripts/processes";
 import { findCompiledBinary } from "../../scripts/controller-process";
 import { createTemporaryHome } from "../harness";
 
@@ -185,7 +182,7 @@ export async function writeStandInBinaryForTest(
     "exit 2",
     "",
   ].join("\n");
-  const binary = locateHerculeBinary(userDataDir);
+  const binary = buildStandInBinaryPath(userDataDir);
   writeFileSync(binary, script);
   chmodSync(binary, 0o755);
 
@@ -193,7 +190,7 @@ export async function writeStandInBinaryForTest(
     try {
       if (existsSync(pidFile)) {
         const pid = Number(readFileSync(pidFile, "utf8"));
-        if (isRunning(pid)) {
+        if (isProcessRunning(pid)) {
           process.kill(pid, "SIGTERM");
           await waitForExitOrKill(pid, "the stand-in's controller", "SIGTERM");
         }

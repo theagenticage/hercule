@@ -28,7 +28,7 @@ import {
   USERNAME,
 } from "../../../scripts/controller-process.ts";
 import { pollUntil } from "./poll.ts";
-import { buildAppEnv } from "./processes.ts";
+import { buildAppEnv, isProcessRunning } from "./processes.ts";
 import type { WindowState } from "../src/main/app-settings.ts";
 
 /**
@@ -83,7 +83,7 @@ export function buildAppArgs(userDataDir: string): string[] {
 }
 
 /**
- * Returns the path of the Hercule binary a launch on `userDataDir` runs in
+ * Builds the path of the stand-in binary a launch on `userDataDir` runs in
  * place of `~/.local/bin/hercule`, to find and start Hercule on this Mac.
  * There is no file at the path until a test writes a stand-in binary there
  * (see `e2e/desktop/stand-in-binary.ts`). Without one, main finds no binary,
@@ -95,13 +95,13 @@ export function buildAppArgs(userDataDir: string): string[] {
  * `hercule service install` writes `~/Library/LaunchAgents`. A release
  * package, whose inspector stays closed, refuses the switch.
  */
-export function locateHerculeBinary(userDataDir: string): string {
+export function buildStandInBinaryPath(userDataDir: string): string {
   return join(userDataDir, "hercule-binary");
 }
 
-/** Builds the `--hercule-binary` switch for a launch on `userDataDir`; see `locateHerculeBinary`. */
-export function buildHerculeBinaryArg(userDataDir: string): string {
-  return `--hercule-binary=${locateHerculeBinary(userDataDir)}`;
+/** Builds the `--hercule-binary` switch for a launch on `userDataDir`; see `buildStandInBinaryPath`. */
+export function buildBinaryPathArgument(userDataDir: string): string {
+  return `--hercule-binary=${buildStandInBinaryPath(userDataDir)}`;
 }
 
 /**
@@ -194,7 +194,11 @@ export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
 export function launchTestPackage(userDataDir: string): Promise<ElectronApplication> {
   return _electron.launch({
     executablePath: findExecutable("test"),
-    args: [...buildAppArgs(userDataDir), MOCK_KEYCHAIN_SWITCH, buildHerculeBinaryArg(userDataDir)],
+    args: [
+      ...buildAppArgs(userDataDir),
+      MOCK_KEYCHAIN_SWITCH,
+      buildBinaryPathArgument(userDataDir),
+    ],
     env: buildAppEnv(),
     // Playwright otherwise makes every page match `prefers-color-scheme:
     // light`, whatever the macOS appearance, and the page's theme follows
@@ -242,7 +246,7 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
     [
       ...buildAppArgs(userDataDir),
       MOCK_KEYCHAIN_SWITCH,
-      buildHerculeBinaryArg(userDataDir),
+      buildBinaryPathArgument(userDataDir),
       "--inspect=0",
       "--remote-debugging-port=0",
     ],
@@ -520,16 +524,6 @@ export async function evaluateInMain(inspectorUrl: string, expression: string): 
   }
 }
 
-/** Checks whether the process `pid` is still running. */
-export function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Waits up to 10 s for the process `pid` to end. Kills it when it is still
  * running then, and fails saying that `name` was still running 10 s after
@@ -541,7 +535,7 @@ export function isRunning(pid: number): boolean {
  */
 export async function waitForExitOrKill(pid: number, name: string, since: string): Promise<void> {
   try {
-    await pollUntil(() => (isRunning(pid) ? undefined : true), {
+    await pollUntil(() => (isProcessRunning(pid) ? undefined : true), {
       timeoutMs: 10_000,
       intervalMs: 50,
       timeoutMessage: `${name} was still running 10 s after ${since}, so it was killed`,
@@ -565,7 +559,7 @@ export async function waitForExitOrKill(pid: number, name: string, since: string
  * afterwards.
  */
 export async function stopApp(pid: number): Promise<void> {
-  if (!isRunning(pid)) return;
+  if (!isProcessRunning(pid)) return;
   process.kill(pid, "SIGTERM");
   await waitForExitOrKill(pid, `the app (process ${String(pid)})`, "SIGTERM");
 }
