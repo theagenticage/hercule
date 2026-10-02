@@ -113,7 +113,9 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
 ];
 
 /** Every icon at each of its sizes other than 16, in one list the sheet splits into two rows. */
-const SIZED_ICONS = ICONS.flatMap(([icon, sizes]) => sizes.map((size) => buildIconCell(icon, size)));
+const SIZED_ICONS = ICONS.flatMap(([icon, sizes]) =>
+  sizes.map((size) => buildIconCell(icon, size)),
+);
 
 // Session ids as the controller makes them: UUIDv7 strings.
 const SEEDS = [
