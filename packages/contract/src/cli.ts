@@ -1843,6 +1843,10 @@ export const CLI = {
     help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` or `hercule connection start-device-flow` instead.",
     examples: [
       {
+        args: ["--type", "github/github"],
+        stdin: '{"pat":"ghp_xxx"}',
+      },
+      {
         args: ["--type", "github/github", "--label", "work", "--topic", "engineering"],
         stdin: '{"pat":"ghp_xxx"}',
       },
@@ -1852,10 +1856,13 @@ export const CLI = {
         flag: "type",
         help: "The connection type as a Qualified Id, such as github/github; take it from the plugin catalog and never parse it.",
       },
-      label: { flag: "label", help: "What to call this account: work, personal." },
+      label: {
+        flag: "label",
+        help: "What to call this account: work, personal. Leave it off to use the account name.",
+      },
       labels: {
         flag: "topic",
-        help: "A Topic this connection's events file into. The first one given is its default, and at least one is required.",
+        help: "A Topic this connection's events file into. Leave it off for none; `hercule connection update` adds one later.",
       },
       config: {
         flag: "config",
@@ -1920,16 +1927,7 @@ export const CLI = {
     help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it must match the one registered with the provider byte for byte. Give --connection to reconnect an existing account instead of creating a second one.",
     examples: [
       {
-        args: [
-          "--type",
-          "gmail/gmail",
-          "--origin",
-          "https://hercule.example",
-          "--label",
-          "work",
-          "--topic",
-          "inbox",
-        ],
+        args: ["--type", "gmail/gmail", "--origin", "https://hercule.example"],
       },
       {
         args: [
@@ -1948,12 +1946,18 @@ export const CLI = {
         flag: "origin",
         help: "Where the browser is: scheme and host with no path, like https://hercule.example.",
       },
-      label: { flag: "label", help: "What to call the new account; a reconnect already has one." },
+      label: {
+        flag: "label",
+        help: "What to call the new account. Leave it off to use the account name. A reconnect keeps its own and refuses this.",
+      },
       labels: {
         flag: "topic",
-        help: "A Topic the new account's events file into. A reconnect already has its own and needs none.",
+        help: "A Topic the new account's events file into. Leave it off for none. A reconnect keeps its own and refuses this.",
       },
-      config: { flag: "config", help: "The new account's config as inline JSON." },
+      config: {
+        flag: "config",
+        help: "The new account's config as inline JSON. A reconnect keeps its own and refuses this.",
+      },
       connectionId: {
         flag: "connection",
         help: "The Connection whose tokens this flow replaces; leave it off to create one.",
@@ -1968,17 +1972,23 @@ export const CLI = {
     command: "connection start-device-flow",
     help: "Starts a device flow and returns a code to enter at the provider. Enter it at the page the reply names, such as github.com/login/device. The connection exists only once you approve there and `hercule connection poll-device-flow` sees it. Give --connection to reconnect an existing account instead of creating a second one.",
     examples: [
-      { args: ["--type", "github/github", "--label", "personal", "--topic", "github"] },
+      { args: ["--type", "github/github"] },
       { args: ["--type", "github/github", "--connection", "1f3a9c2e"] },
     ],
     fields: {
       type: { flag: "type", help: "The connection type as a Qualified Id, such as github/github." },
-      label: { flag: "label", help: "What to call the new account; a reconnect already has one." },
+      label: {
+        flag: "label",
+        help: "What to call the new account. Leave it off to use the account name. A reconnect keeps its own and refuses this.",
+      },
       labels: {
         flag: "topic",
-        help: "A Topic the new account's events file into. A reconnect already has its own and needs none.",
+        help: "A Topic the new account's events file into. Leave it off for none. A reconnect keeps its own and refuses this.",
       },
-      config: { flag: "config", help: "The new account's config as inline JSON." },
+      config: {
+        flag: "config",
+        help: "The new account's config as inline JSON. A reconnect keeps its own and refuses this.",
+      },
       connectionId: {
         flag: "connection",
         help: "The Connection whose credentials this flow replaces; leave it off to create one.",

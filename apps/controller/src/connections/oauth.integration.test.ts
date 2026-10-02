@@ -37,7 +37,11 @@ import {
 
 /** The error envelope every failing operation returns. */
 interface ErrorBody {
-  readonly error: { readonly code: string; readonly message: string };
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly details?: { readonly issues?: ReadonlyArray<{ path: ReadonlyArray<string> }> };
+  };
 }
 
 /** The client credentials the tests give the plugin. */
@@ -241,12 +245,7 @@ const startOAuth = (
   token: string,
   body: Record<string, unknown>,
 ): Promise<Response> =>
-  post(
-    base,
-    "/api/v1/oauth/start",
-    { type: "oauthy/oauth-type", origin: ORIGIN, label: "work", labels: ["Code"], ...body },
-    token,
-  );
+  post(base, "/api/v1/oauth/start", { type: "oauthy/oauth-type", origin: ORIGIN, ...body }, token);
 
 /** Starts an OAuth flow and returns the authorization URL from the response. */
 const startOAuthOrFail = async (
@@ -371,6 +370,31 @@ describe("POST /oauth/start", () => {
     });
   });
 
+  it("refuses a reconnect given a label, topics or config, and stores no flow", async () => {
+    await withOAuth(async ({ base, sql }, _registry, token) => {
+      const before = await connect(base, token);
+
+      const response = await startOAuth(base, token, {
+        connectionId: before.id,
+        label: "renamed",
+        labels: ["Inbox"],
+        config: {},
+      });
+
+      expect(response.status).toBe(400);
+      const error = await readError(response);
+      expect(error.code).toBe("validation");
+      expect(error.message).toContain("connection.update");
+      expect(error.details?.issues?.map((issue) => issue.path)).toEqual([
+        ["label"],
+        ["labels"],
+        ["config"],
+      ]);
+      const rows = await Effect.runPromise(Effect.orDie(sql`SELECT state FROM oauth_setups`));
+      expect(rows).toEqual([]);
+    });
+  });
+
   it("rejects a type whose setup takes pasted credentials", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "pasted");
@@ -425,6 +449,19 @@ describe("GET /oauth/callback", () => {
       const text = await (await get(base, "/api/v1/connections", token)).text();
       expect(text).not.toContain(FIRST_TOKEN);
       expect(text).not.toContain("refresh-1");
+    });
+  });
+
+  it("names a connection the start gave no label after its account, and gives it no topic", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      const one = await connect(base, token);
+
+      expect(one).toMatchObject({
+        label: buildAccountName(FIRST_TOKEN),
+        displayName: buildAccountName(FIRST_TOKEN),
+        labels: [],
+        config: {},
+      });
     });
   });
 
@@ -552,9 +589,14 @@ describe("GET /oauth/callback", () => {
     });
   });
 
-  it("reconnects the connection the start named, and keeps its id", async () => {
+  it("reconnects the connection the start named, and keeps its id, label and topics", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       const before = await connect(base, token);
+      const renamed = await send("PATCH", base, `/api/v1/connections/${before.id}`, {
+        body: { label: "personal", labels: ["Inbox"] },
+        token,
+      });
+      expect(renamed.status, await renamed.clone().text()).toBe(200);
       await Effect.runPromise(
         readConnectionsSurface(registry.oauth).report(before.id, { status: "needs-reauth" }),
       );
@@ -578,6 +620,8 @@ describe("GET /oauth/callback", () => {
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({
         id: before.id,
+        label: "personal",
+        labels: ["Inbox"],
         status: "connected",
         displayName: buildAccountName("good-second"),
       });

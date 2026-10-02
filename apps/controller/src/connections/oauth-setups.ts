@@ -10,21 +10,25 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { uuidFromString } from "../db";
-import { parseSetupTargetRow, type SetupTargetRow, type StoredSetupTarget } from "./setup-target";
+import {
+  buildSetupTargetRow,
+  parseSetupTargetRow,
+  type SetupTargetRow,
+  type StoredSetupTarget,
+} from "./setup-target";
 
 /** A pending setup, with its JSON columns read. */
-export interface StoredSetup extends StoredSetupTarget {
+export type StoredSetup = StoredSetupTarget & {
   readonly state: string;
   readonly origin: string;
   readonly codeVerifier: string;
-}
+};
 
 /** Everything a new flow stores. */
-export interface NewSetup extends StoredSetup {
+export type NewSetup = StoredSetup & {
   readonly expiresAt: string;
   readonly createdAt: string;
-}
+};
 
 interface SetupRow extends SetupTargetRow {
   readonly state: string;
@@ -45,17 +49,18 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    insert: (setup: NewSetup): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
+    insert: (setup: NewSetup): Effect.Effect<void, SqlError> => {
+      const target = buildSetupTargetRow(setup);
+      return Effect.asVoid(sql`
         INSERT INTO oauth_setups
           (state, type, connection_id, label, labels, config, origin, code_verifier,
            expires_at, created_at)
         VALUES
-          (${setup.state}, ${setup.type},
-           ${setup.connectionId === undefined ? null : uuidFromString(setup.connectionId)},
-           ${setup.label}, ${JSON.stringify(setup.labels)}, ${JSON.stringify(setup.config)},
-           ${setup.origin}, ${setup.codeVerifier}, ${setup.expiresAt}, ${setup.createdAt})
-      `),
+          (${setup.state}, ${target.type}, ${target.connection_id}, ${target.label},
+           ${target.labels}, ${target.config}, ${setup.origin}, ${setup.codeVerifier},
+           ${setup.expiresAt}, ${setup.createdAt})
+      `);
+    },
 
     /**
      * Returns the setup for this `state` if it has not expired, and deletes the

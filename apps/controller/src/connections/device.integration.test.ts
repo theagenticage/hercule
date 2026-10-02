@@ -157,12 +157,7 @@ const startDeviceFlow = (
   token: string,
   body: Record<string, unknown> = {},
 ): Promise<Response> =>
-  post(
-    base,
-    "/api/v1/oauth/device/start",
-    { type: DEVICE_TYPE, label: "work", labels: ["Code"], ...body },
-    token,
-  );
+  post(base, "/api/v1/oauth/device/start", { type: DEVICE_TYPE, ...body }, token);
 
 /** Starts a device flow and returns the start's response body. */
 const startDeviceOrFail = async (
@@ -235,6 +230,45 @@ describe("POST /oauth/device/start", () => {
           "set it up with connection.create instead",
       );
       expect(provider.codeRequests).toEqual([]);
+    });
+  });
+
+  it("refuses a reconnect given a label, topics or config, before it asks the provider", async () => {
+    await withDevice(async ({ base, sql }, _registry, token, provider) => {
+      const created = await post(
+        base,
+        "/api/v1/connections",
+        { type: DEVICE_TYPE, credentials: { pat: "good-pasted" } },
+        token,
+      );
+      expect(created.status, await created.clone().text()).toBe(201);
+      const { id } = (await created.json()) as ConnectionRecord;
+
+      const response = await startDeviceFlow(base, token, {
+        connectionId: id,
+        label: "renamed",
+        labels: ["Inbox"],
+        config: {},
+      });
+
+      expect(response.status).toBe(400);
+      const { error } = (await response.json()) as {
+        error: {
+          code: string;
+          message: string;
+          details: { issues: ReadonlyArray<{ path: ReadonlyArray<string> }> };
+        };
+      };
+      expect(error.code).toBe("validation");
+      expect(error.message).toContain("connection.update");
+      expect(error.details.issues.map((issue) => issue.path)).toEqual([
+        ["label"],
+        ["labels"],
+        ["config"],
+      ]);
+      expect(provider.codeRequests).toEqual([]);
+      const rows = await Effect.runPromise(Effect.orDie(sql`SELECT setup_id FROM device_setups`));
+      expect(rows).toEqual([]);
     });
   });
 
@@ -532,7 +566,10 @@ describe("POST /oauth/device/poll", () => {
 
   it("creates the connection the start described once the user approves", async () => {
     await withDevice(async ({ base, sql }, registry, token, provider) => {
-      const { setupId } = await startDeviceOrFail(base, token);
+      const { setupId } = await startDeviceOrFail(base, token, {
+        label: "work",
+        labels: ["Code"],
+      });
       await allowPoll(sql, setupId);
       approve(provider);
 
@@ -560,7 +597,25 @@ describe("POST /oauth/device/poll", () => {
     });
   });
 
-  it("reconnects the connection the start named, keeps its id, and drops its pasted token", async () => {
+  it("names a connection the start gave no label after its account, and gives it no topic", async () => {
+    await withDevice(async ({ base, sql }, _registry, token, provider) => {
+      const { setupId } = await startDeviceOrFail(base, token);
+      await allowPoll(sql, setupId);
+      approve(provider);
+
+      expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({
+        status: "done",
+        connection: {
+          label: buildAccountName(GOOD_TOKEN),
+          displayName: buildAccountName(GOOD_TOKEN),
+          labels: [],
+          config: {},
+        },
+      });
+    });
+  });
+
+  it("reconnects the connection the start named, keeps its id, label and topics, and drops its pasted token", async () => {
     await withDevice(async ({ base, sql }, registry, token, provider) => {
       const created = await post(
         base,
@@ -586,6 +641,7 @@ describe("POST /oauth/device/poll", () => {
         connection: {
           id: before.id,
           label: "work",
+          labels: ["Code"],
           displayName: buildAccountName(GOOD_TOKEN),
           credentials: [{ name: "oauth.tokens" }],
         },

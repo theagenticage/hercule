@@ -246,12 +246,42 @@ describe("POST /connections", () => {
     });
   });
 
-  it("rejects an unknown type, a missing declared field and an empty topic list", async () => {
+  it("names a connection given no label after its account, and gives it no topic", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const response = await createConnection(base, token, {
+        type: "main/main-type",
+        credentials: { token: GOOD },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(201);
+      expect(await response.json()).toMatchObject({
+        label: buildAccountName(GOOD),
+        displayName: buildAccountName(GOOD),
+        labels: [],
+        config: {},
+      });
+    });
+  });
+
+  it("accepts an empty topic list", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const response = await createConnection(base, token, {
+        type: "main/main-type",
+        label: "work",
+        labels: [],
+        credentials: { token: GOOD },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(201);
+      expect(await response.json()).toMatchObject({ label: "work", labels: [] });
+    });
+  });
+
+  it("rejects an unknown type and a missing declared field", async () => {
     await withConnections(async ({ base }, _registry, token) => {
       const bodies = [
         { type: "nobody-type", label: "work", labels: ["Code"], credentials: { token: GOOD } },
         { type: "main/main-type", label: "work", labels: ["Code"], credentials: {} },
-        { type: "main/main-type", label: "work", labels: [], credentials: { token: GOOD } },
       ];
 
       for (const body of bodies) {
@@ -355,17 +385,40 @@ describe("PATCH /connections/:id", () => {
     });
   });
 
-  it("rejects an empty topic list and a config that does not match the type's schema", async () => {
+  it("renames a connection named after its account, and keeps the account name", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const created = await createConnection(base, token, {
+        type: "main/main-type",
+        credentials: { token: GOOD },
+      });
+      const before = (await created.json()) as ConnectionRecord;
+
+      const response = await patchConnection(base, token, before.id, { label: "personal" });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({
+        label: "personal",
+        displayName: buildAccountName(GOOD),
+      });
+    });
+  });
+
+  it("removes every topic when given an empty topic list", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+
+      const response = await patchConnection(base, token, one.id, { labels: [] });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ label: one.label, labels: [] });
+    });
+  });
+
+  it("rejects a config that does not match the type's schema", async () => {
     await withConnections(async ({ base }, _registry, token) => {
       const one = await createConnectionOrFail(base, token, {
         type: "configured/configured-type",
         config: { watch: "a" },
-      });
-
-      expect(
-        await readError(await patchConnection(base, token, one.id, { labels: [] })),
-      ).toMatchObject({
-        code: "validation",
       });
 
       const wrong = await readError(
@@ -418,7 +471,7 @@ describe("POST /connections/:id/credentials", () => {
   ): Promise<Response> =>
     post(base, `/api/v1/connections/${id}/credentials`, { credentials }, token);
 
-  it("sets a connection that needed reauthentication back to connected, and keeps its id", async () => {
+  it("sets a connection that needed reauthentication back to connected, and keeps its id, label and topics", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       await Effect.runPromise(
@@ -431,6 +484,8 @@ describe("POST /connections/:id/credentials", () => {
       const after = (await response.json()) as ConnectionRecord;
       expect(after).toMatchObject({
         id: one.id,
+        label: one.label,
+        labels: one.labels,
         status: "connected",
         displayName: buildAccountName(ROTATED),
       });

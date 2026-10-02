@@ -46,6 +46,7 @@ import originalRunId from "./0035-original-run-id";
 import notifications from "./0036-notifications";
 import triggerEffects from "./0037-trigger-effects";
 import deviceSetups from "./0038-device-setups";
+import setupTargetsByKind from "./0039-setup-targets-by-kind";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -86,6 +87,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [36, "notifications", Effect.succeed(notifications)],
   [37, "trigger-effects", Effect.succeed(triggerEffects)],
   [38, "device-setups", Effect.succeed(deviceSetups)],
+  [39, "setup-targets-by-kind", Effect.succeed(setupTargetsByKind)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

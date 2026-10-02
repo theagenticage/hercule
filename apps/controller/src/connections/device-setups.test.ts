@@ -19,19 +19,27 @@ const START = "2026-09-01T00:00:00.000Z";
 const afterStart = (seconds: number): string =>
   new Date(Date.parse(START) + seconds * 1000).toISOString();
 
-/** A flow with a five-second interval that may first poll at 5s and expires at 900s. */
-const buildSetup = (setupId: string): NewDeviceSetup => ({
+/** The columns of a flow that do not depend on what it writes. */
+const buildFlow = (setupId: string) => ({
   setupId,
   type: "github/github",
-  connectionId: undefined,
-  label: "work",
-  labels: ["Code"],
-  config: { org: "acme" },
   deviceCode: "a-device-code",
   interval: 5,
   nextPollAt: afterStart(5),
   expiresAt: afterStart(900),
   createdAt: START,
+});
+
+/**
+ * A flow that creates a connection, with a five-second interval: it may
+ * first poll at 5s and expires at 900s.
+ */
+const buildSetup = (setupId: string): NewDeviceSetup => ({
+  ...buildFlow(setupId),
+  kind: "create",
+  label: "work",
+  labels: ["Code"],
+  config: { org: "acme" },
 });
 
 describe("claimPoll", () => {
@@ -56,7 +64,7 @@ describe("claimPoll", () => {
       setup: {
         setupId: "a",
         type: "github/github",
-        connectionId: undefined,
+        kind: "create",
         label: "work",
         labels: ["Code"],
         config: { org: "acme" },
@@ -84,17 +92,49 @@ describe("claimPoll", () => {
     expect(result).toEqual([{ _tag: "expired" }, { _tag: "expired" }]);
   });
 
-  it("keeps the connection a reconnect names", async () => {
-    const connectionId = "0199e0e7-0000-7000-8000-00000000c001";
+  it("keeps a new connection's missing label missing, to be decided from the account", async () => {
     const claim = await run(
       Effect.gen(function* () {
         const setups = yield* deviceSetupRepository;
-        yield* setups.insert({ ...buildSetup("a"), connectionId });
+        yield* setups.insert({
+          ...buildFlow("a"),
+          kind: "create",
+          label: undefined,
+          labels: [],
+          config: {},
+        });
         return yield* setups.claimPoll("a", afterStart(5));
       }),
     );
 
-    expect(claim).toMatchObject({ _tag: "claimed", setup: { connectionId } });
+    expect(claim).toMatchObject({
+      _tag: "claimed",
+      setup: { kind: "create", label: undefined, labels: [], config: {} },
+    });
+  });
+
+  it("keeps the connection a reconnect names, and nothing a reconnect does not write", async () => {
+    const connectionId = "0199e0e7-0000-7000-8000-00000000c001";
+    const claim = await run(
+      Effect.gen(function* () {
+        const setups = yield* deviceSetupRepository;
+        yield* setups.insert({ ...buildFlow("a"), kind: "reconnect", connectionId });
+        return yield* setups.claimPoll("a", afterStart(5));
+      }),
+    );
+
+    expect(claim).toEqual({
+      _tag: "claimed",
+      setup: {
+        setupId: "a",
+        type: "github/github",
+        kind: "reconnect",
+        connectionId,
+        deviceCode: "a-device-code",
+        interval: 5,
+        expiresAt: afterStart(900),
+      },
+    });
   });
 });
 

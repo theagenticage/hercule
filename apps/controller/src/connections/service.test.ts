@@ -8,8 +8,9 @@
  *   the service with no current actor provided;
  * - the waits between the tries of a device flow's account check, which run
  *   on a `TestClock`;
- * - the messages that refuse a setup operation a type does not offer, and a
- *   device flow whose type changed while the user was approving it. Both need
+ * - the messages that refuse a setup operation a type does not offer, a
+ *   device flow whose type changed while the user was approving it, and the
+ *   label of a connection whose account name is too long or empty. These need
  *   connection types the tests can register and replace at will.
  */
 import { mkdtempSync, rmSync } from "node:fs";
@@ -18,6 +19,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Clock, Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import { MAX_CONNECTION_LABEL_LENGTH } from "@hercule/contract";
 import { ConnectionValidationFailed, type SetupStep } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
@@ -111,7 +113,7 @@ const USER: Actor = {
 const DEVICE_TYPE = "test/device-type";
 
 /** The input that starts a flow that creates a connection of the test type. */
-const START = { type: DEVICE_TYPE, label: "work", labels: ["Code"] };
+const START = { type: DEVICE_TYPE };
 
 /**
  * Builds a registered type with a device flow against the provider, and the
@@ -346,6 +348,69 @@ describe("the refusal of a setup operation the type does not offer", () => {
             `the type ${DEVICE_TYPE} has no redirect flow, because its setup has no oauth step: ` +
             "set it up with connection.startDeviceFlow instead",
         },
+      });
+    } finally {
+      await provider.stop();
+    }
+  });
+});
+
+describe("the label of a connection the user did not name", () => {
+  const PASTED_TYPE = "test/pasted-type";
+
+  /** Builds a type whose `validate` accepts any token and returns this account name. */
+  const buildPastedType = (accountName: string): RegisteredConnectionType => ({
+    pluginId: "test",
+    contribution: {
+      type: PASTED_TYPE,
+      displayName: "Pasted type",
+      setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
+      validate: () => Effect.succeed({ displayName: accountName }),
+    },
+  });
+
+  /** Creates a connection of the pasted type with no label, for this account name. */
+  const createForAccount = (accountName: string) =>
+    runAsUser(
+      [buildPastedType(accountName)],
+      Effect.flatMap(ConnectionService, (connection) =>
+        connection.create({ type: PASTED_TYPE, credentials: { pat: "a-token" } }),
+      ),
+    );
+
+  it("is the account name cut to the longest label, while the account name stays whole", async () => {
+    const account = "a".repeat(MAX_CONNECTION_LABEL_LENGTH + 20);
+
+    const created = await createForAccount(account);
+
+    expect(created.label).toBe("a".repeat(MAX_CONNECTION_LABEL_LENGTH));
+    expect(created.displayName).toBe(account);
+  });
+
+  it("is the type's name when the account name is empty", async () => {
+    const created = await createForAccount("");
+
+    expect(created).toMatchObject({ label: "Pasted type", displayName: "" });
+  });
+
+  it("is the type's name at the end of a device flow whose account name is empty", async () => {
+    const provider = createDeviceProvider();
+    try {
+      const answer = await runAsUser(
+        [buildDeviceType(provider, () => Effect.succeed({ displayName: "" }))],
+        Effect.gen(function* () {
+          const connection = yield* ConnectionService;
+          const { setupId, interval } = yield* connection.startDeviceFlow(START);
+          provider.answers.token = () =>
+            buildJsonResponse({ access_token: "the-token", token_type: "bearer" });
+          yield* TestClock.adjust(Duration.seconds(interval));
+          return yield* connection.pollDeviceFlow({ setupId });
+        }),
+      );
+
+      expect(answer).toMatchObject({
+        status: "done",
+        connection: { label: "Device type", displayName: "", labels: [] },
       });
     } finally {
       await provider.stop();

@@ -13,11 +13,15 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { uuidFromString } from "../db";
-import { parseSetupTargetRow, type SetupTargetRow, type StoredSetupTarget } from "./setup-target";
+import {
+  buildSetupTargetRow,
+  parseSetupTargetRow,
+  type SetupTargetRow,
+  type StoredSetupTarget,
+} from "./setup-target";
 
 /** A pending device flow, with its JSON columns read. */
-export interface StoredDeviceSetup extends StoredSetupTarget {
+export type StoredDeviceSetup = StoredSetupTarget & {
   readonly setupId: string;
   /** The provider's device code, which only the controller ever sends back to it. */
   readonly deviceCode: string;
@@ -25,13 +29,13 @@ export interface StoredDeviceSetup extends StoredSetupTarget {
   readonly interval: number;
   /** When the device code expires, after which no poll can finish the flow. */
   readonly expiresAt: string;
-}
+};
 
 /** Everything a new flow stores. */
-export interface NewDeviceSetup extends StoredDeviceSetup {
+export type NewDeviceSetup = StoredDeviceSetup & {
   readonly nextPollAt: string;
   readonly createdAt: string;
-}
+};
 
 /**
  * What a poll may do now.
@@ -75,18 +79,18 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    insert: (setup: NewDeviceSetup): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
+    insert: (setup: NewDeviceSetup): Effect.Effect<void, SqlError> => {
+      const target = buildSetupTargetRow(setup);
+      return Effect.asVoid(sql`
         INSERT INTO device_setups
           (setup_id, type, connection_id, label, labels, config, device_code,
            interval_seconds, next_poll_at, expires_at, created_at)
         VALUES
-          (${setup.setupId}, ${setup.type},
-           ${setup.connectionId === undefined ? null : uuidFromString(setup.connectionId)},
-           ${setup.label}, ${JSON.stringify(setup.labels)}, ${JSON.stringify(setup.config)},
-           ${setup.deviceCode}, ${setup.interval}, ${setup.nextPollAt}, ${setup.expiresAt},
-           ${setup.createdAt})
-      `),
+          (${setup.setupId}, ${target.type}, ${target.connection_id}, ${target.label},
+           ${target.labels}, ${target.config}, ${setup.deviceCode}, ${setup.interval},
+           ${setup.nextPollAt}, ${setup.expiresAt}, ${setup.createdAt})
+      `);
+    },
 
     /**
      * Decides whether a poll at `now` may ask the provider, and when it may,
