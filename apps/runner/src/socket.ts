@@ -354,7 +354,7 @@ export const connect = (
     // Credential requests go out on this connection while it is up. With no
     // connection there is no credential, which git treats as "try the next
     // helper", not as a failure.
-    yield* options.credentials.attached((frame) => write(encodeFrameText(frame)));
+    yield* options.credentials.attachConnection((frame) => write(encodeFrameText(frame)));
 
     /**
      * Runs a workspace operation and sends its report. Provisioning takes as
@@ -529,14 +529,14 @@ export const connect = (
           // started on an earlier connection can finish at any moment, and a
           // peer that has not proved its identity must not learn of it.
           yield* options.workspaceSteps
-            .attached((frame) => write(encodeFrameText(frame)))
+            .attachConnection((frame) => write(encodeFrameText(frame)))
             .pipe(Scope.provide(connection));
           // An older controller closes the connection on a frame it cannot
           // read, so the end of a device login is reported only to a
           // controller that lists the frame.
           if (message.capabilities.includes(LOGIN_ENDED_CAPABILITY)) {
             yield* providerLogins
-              .attached((frame) => write(encodeFrameText(frame)))
+              .attachConnection((frame) => write(encodeFrameText(frame)))
               .pipe(Scope.provide(connection));
           }
           proven.openUnsafe();

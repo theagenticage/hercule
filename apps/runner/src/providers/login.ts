@@ -10,7 +10,7 @@
  * through.
  *
  * A device login reads nothing back, so no request is waiting when it ends.
- * Its end is reported instead, through `attached`, so the controller can probe
+ * Its end is reported instead, through `attachConnection`, so the controller can probe
  * the instance and learn whether the user finished it in the browser.
  */
 import * as Clock from "effect/Clock";
@@ -175,7 +175,7 @@ export interface Logins {
    * reported: the controller probes every instance when a runner connects, so
    * the next connection makes up for it.
    */
-  readonly attached: (report: ReportLoginEnded) => Effect.Effect<void, never, Scope.Scope>;
+  readonly attachConnection: (report: ReportLoginEnded) => Effect.Effect<void, never, Scope.Scope>;
   readonly stopAll: Effect.Effect<void>;
 }
 
@@ -367,7 +367,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         };
       }),
 
-    attached: (report) =>
+    attachConnection: (report) =>
       Effect.acquireRelease(
         Effect.sync(() => {
           reporting = report;

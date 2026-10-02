@@ -56,7 +56,7 @@ export interface WorkspaceSteps {
    * result finished while no connection is attached is not sent; its result
    * file answers the controller's next start of the step.
    */
-  readonly attached: (send: Send) => Effect.Effect<void, never, Scope.Scope>;
+  readonly attachConnection: (send: Send) => Effect.Effect<void, never, Scope.Scope>;
   /**
    * Starts a step, unless this runner already knows it:
    *
@@ -320,7 +320,7 @@ export const makeWorkspaceSteps = (options: {
     });
 
   return {
-    attached: (sendResult) =>
+    attachConnection: (sendResult) =>
       Effect.asVoid(
         Effect.acquireRelease(
           Effect.sync(() => {

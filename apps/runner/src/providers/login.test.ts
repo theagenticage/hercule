@@ -686,7 +686,7 @@ describe("a device-code login", () => {
       return run(
         Effect.scoped(
           Effect.gen(function* () {
-            yield* driver.attached((frame) =>
+            yield* driver.attachConnection((frame) =>
               Effect.sync(() => {
                 reported.push(frame.instanceId);
               }),
@@ -783,7 +783,7 @@ describe("a device-code login", () => {
       await run(
         Effect.gen(function* () {
           yield* Effect.scoped(
-            driver.attached((frame) =>
+            driver.attachConnection((frame) =>
               Effect.sync(() => {
                 reported.push(frame.instanceId);
               }),

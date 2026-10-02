@@ -115,7 +115,9 @@ const makeRunner = (
   const scope = Effect.runSync(Scope.make());
   attachments.push(scope);
   Effect.runSync(
-    steps.attached((frame) => Effect.sync(() => void sent.push(frame))).pipe(Scope.provide(scope)),
+    steps
+      .attachConnection((frame) => Effect.sync(() => void sent.push(frame)))
+      .pipe(Scope.provide(scope)),
   );
 
   const provisionWorkspace = async (
