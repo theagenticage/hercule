@@ -5,6 +5,7 @@ import {
   JoinAnswer,
   LocalAnnouncement,
   LocalEnrolment,
+  MAX_LOGIN_CODE_SECONDS,
   PROTOCOL_VERSION,
   RunnerToController,
   Sequenced,
@@ -333,6 +334,19 @@ describe("the runner-to-controller catalogue", () => {
         expiresInSeconds: 0,
       })._tag,
     ).toBe("Failure");
+  });
+
+  it("accepts a device login code that lasts a day, and rejects one that lasts longer", () => {
+    const device = (expiresInSeconds: number) =>
+      decodeFromRunner({
+        _tag: "loginUrl",
+        requestId: REQUEST_ID,
+        url: "https://auth.openai.com/codex/device",
+        userCode: "ABCD-1234",
+        expiresInSeconds,
+      })._tag;
+    expect(device(MAX_LOGIN_CODE_SECONDS)).toBe("Success");
+    expect(device(MAX_LOGIN_CODE_SECONDS + 1)).toBe("Failure");
   });
 
   it("rejects a tag outside the union, including one from the other direction", () => {

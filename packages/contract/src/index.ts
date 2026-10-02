@@ -148,6 +148,7 @@ export {
   ProviderInstanceUpdateInput,
   ProviderLoginCodeInput,
   ProviderLoginInput,
+  ProviderLoginStarted,
   ProviderSecretField,
   SnapshotAuth,
   VersionVerdict,

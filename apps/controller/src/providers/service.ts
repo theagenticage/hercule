@@ -42,6 +42,7 @@ import {
   type InvalidState,
   type NotFound,
   type ProviderInstance,
+  type ProviderLoginStarted,
   type RunnerDetail,
   type Unauthenticated,
   type Validation,
@@ -345,12 +346,7 @@ const make = Effect.gen(function* () {
      * browser, since the runner's machine may have none. For a device login it
      * also returns the code to type there and when that code expires.
      */
-    login: (
-      input: LoginInput,
-    ): Effect.Effect<
-      { readonly url: string; readonly userCode?: string; readonly expiresAt?: string },
-      AskError
-    > =>
+    login: (input: LoginInput): Effect.Effect<ProviderLoginStarted, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.login");
         const { id, runnerId } = yield* Effect.mapError(

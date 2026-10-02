@@ -426,6 +426,9 @@ export const LoginCode = Schema.Struct({
 export type LoginCode = Schema.Schema.Type<typeof LoginCode>;
 
 /** The URL the user opens to authorize, in their own browser, on any machine. */
+/** The longest a printed login code may stay valid, in seconds: one day. */
+export const MAX_LOGIN_CODE_SECONDS = 86_400;
+
 export const LoginUrl = Schema.Struct({
   _tag: Schema.Literal("loginUrl"),
   requestId: RequestId,
@@ -437,8 +440,13 @@ export const LoginUrl = Schema.Struct({
    * frame was sent. Present with `userCode`. A duration rather than an instant,
    * so the runner's clock never has to agree with the controller's. Optional,
    * because a runner on an older build does not send it.
+   *
+   * At most a day. No vendor's code lasts that long, and the bound keeps the
+   * instant the controller computes from it a valid date.
    */
-  expiresInSeconds: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  expiresInSeconds: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(MAX_LOGIN_CODE_SECONDS)),
+  ),
 });
 
 export type LoginUrl = Schema.Schema.Type<typeof LoginUrl>;

@@ -116,6 +116,24 @@ export const ProviderLoginInput = Schema.Struct({ runnerId: Id });
 
 export type ProviderLoginInput = Schema.Schema.Type<typeof ProviderLoginInput>;
 
+/** A login the runner started: what the user opens, and for a device login what they type there. */
+export const ProviderLoginStarted = Schema.Struct({
+  url: Schema.String,
+  /**
+   * Present when the harness printed a code to type in the browser. Such a
+   * device login finishes by itself: the instance's snapshot is probed again
+   * when it ends, and announced on the `provider` topic.
+   */
+  userCode: Schema.optionalKey(Schema.String),
+  /**
+   * When the printed code stops being valid, at most a day after the call.
+   * Present with `userCode`, unless the runner's build is too old to say.
+   */
+  expiresAt: Schema.optionalKey(Timestamp),
+});
+
+export type ProviderLoginStarted = Schema.Schema.Type<typeof ProviderLoginStarted>;
+
 /**
  * The code the user copied from the browser they opened the URL in. It must
  * be a single line: it is written to the vendor CLI's stdin, where a second
@@ -163,20 +181,7 @@ export const provider = HttpApiGroup.make("provider")
     HttpApiEndpoint.post("login", "/providers/:id/login", {
       params: { id: Id },
       payload: ProviderLoginInput,
-      success: Schema.Struct({
-        url: Schema.String,
-        /**
-         * Present when the harness printed a code to type in the browser. Such
-         * a device login finishes by itself: the instance's snapshot is
-         * probed again when it ends, and announced on the `provider` topic.
-         */
-        userCode: Schema.optionalKey(Schema.String),
-        /**
-         * When the printed code stops being valid. Present with `userCode`,
-         * unless the runner's build is too old to say.
-         */
-        expiresAt: Schema.optionalKey(Timestamp),
-      }),
+      success: ProviderLoginStarted,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("submitLoginCode", "/providers/:id/login-code", {
