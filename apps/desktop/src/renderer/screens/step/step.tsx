@@ -217,9 +217,12 @@ export function Warning({
  * `children` (an `<input>`, and anything drawn after it), and under the box
  * either `error` or `hint`. `aside` sits at the label's far end, such as
  * "optional". A `bad` field, or one with an `error`, draws a red edge.
+ * `error` is `null` when there is none. The hint and the error can hold
+ * markup, such as a command set in monospace.
  *
  * The `<label>` holds the label and the field but not the hint or the
- * error, so the input's accessible name is the label alone.
+ * error, so the input's accessible name is the label alone. The error is an
+ * alert, so a screen reader reads it out when it appears.
  */
 export function FormField({
   label,
@@ -231,8 +234,8 @@ export function FormField({
 }: {
   readonly label: string;
   readonly aside?: ReactNode;
-  readonly hint?: string;
-  readonly error?: string | null;
+  readonly hint?: ReactNode;
+  readonly error?: ReactNode;
   readonly bad?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -251,7 +254,9 @@ export function FormField({
         <span className={bad || error !== null ? "field is-bad" : "field"}>{children}</span>
       </label>
       {error !== null ? (
-        <span className="fl-err">{error}</span>
+        <span className="fl-err" role="alert">
+          {error}
+        </span>
       ) : hint === undefined ? null : (
         <span className="fl-hint">{hint}</span>
       )}

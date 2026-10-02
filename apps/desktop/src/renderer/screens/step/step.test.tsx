@@ -50,6 +50,7 @@ describe("FormField", () => {
       </FormField>,
     );
     expect(screen.queryByText("Where runners clone from.")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("Not a remote.");
     expect(screen.getByText("Not a remote.").className).toBe("fl-err");
     expect(container.querySelector(".field")?.className).toBe("field is-bad");
     // The input is named by its label alone, not by the error under it.
