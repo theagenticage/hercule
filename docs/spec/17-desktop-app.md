@@ -1005,7 +1005,34 @@ Idle at each step of the first run, with the window visible, read from a plain l
   - The first of the four, the launch that installed Hercule and reloaded the window, read 4 and 1, the still-page level. Its caret was most likely not blinking: whether macOS makes the app active at a plain launch varies ([Measuring](#measuring)).
   - The first sample, 71 and 6 on 332a0f6f, was not repeated. Its load average was not recorded.
   - The draft read up to 65 and 5, and the Before reads the same on the draft, so that reading is not this change's.
-- **The launch was measured as [Measuring](#measuring) describes,** with two differences: one launch under Playwright warms the code cache, and three plain launches follow, 3 seconds apart. The Before's third launch, 449 ms, was slow from main's first step. The load average was not recorded, and other end-to-end suites ran on the machine during the session, each with its own app and controllers, so a busy machine is the likely cause of the 449 ms. A second set of launches 10 minutes earlier read 355 to 379 ms for the After and 365 to 381 ms for the Before. Memory was not measured for this change.
+- **The launch was measured as [Measuring](#measuring) describes,** with two differences: one launch under Playwright warms the code cache, and three plain launches follow, 3 seconds apart. The Before's third launch, 449 ms, was slow from main's first step. The load average was not recorded, and other end-to-end suites ran on the machine during the session, each with its own app and controllers, so a busy machine is the likely cause of the 449 ms. A second set of launches 10 minutes earlier read 355 to 379 ms for the After and 365 to 381 ms for the Before.
+
+Memory at each step of the first run, and after it, read as [Measuring](#measuring) describes, 2026-10-03 on the reference machine, on 24b95a9f (After) and on main's 83446e6b (Before), in one session with no other suite running. Each screen was read in two plain launches, each the third launch or later on its user data directory. In every launch the window was active; the second column names the field that had the focus. Sizes are in MB; the processes are the browser, GPU, network utility and renderer, in that order.
+
+| Screen | Focused | Summed physical footprint (budget 220) | Footprint by process (renderer's budget 100) | Working set, summed; renderer |
+|---|---|---|---|---|
+| Welcome | nothing | **270 to 271** | 49 to 50, 178, 7, 37 | 380 to 381; 113 |
+| Account | the password field | **701** | 53, 588, 7, 53 | 411; 136 |
+| Providers | nothing | **295 to 296** | 54 to 55, 189, 7, 44 to 45 | 397; 121 |
+| GitHub | nothing | **280** | 54, 176, 7, 42 | 392; 118 |
+| Project | nothing | **289** | 54, 185, 7 to 8, 42 | 393 to 394; 118 to 119 |
+| All set | nothing | **290 to 293** | 54, 185 to 186, 7 to 8, 44 to 45 | 395; 120 to 121 |
+| After the first run: the draft | the composer | **667** | 54, 565, 7, 41 | 387 to 388; 117 to 118 |
+| Before: the connect screen | the address field | 161 to 164 | 49 to 50, 74, 7, 31 to 34 | 354 to 362; 107 |
+| Before: sign-in | the username field | 158 to 166 | 50, 68 to 76, 7, 33 | 369; 109 |
+| Before: the draft, after sign-in | the composer | **658** | 49 to 50, 560 to 561, 7, 41 | 388; 119 |
+
+- **Every first-run screen is over the summed budget,** by 50 to 76 MB with nothing focused. The excess is in the GPU process, which holds 176 to 189 MB. On main's connect and sign-in screens it holds 68 to 76 MB, and in an empty window 54 MB ([Baseline](#baseline)). The first run draws the office room behind every card. What in the first run's screens holds the extra memory was not traced. The renderer stays under its own budget, at 37 to 53 MB. All six first-run readings are under the 306 MB the first milestone's finish entry above recorded for the new-thread screen with nothing focused.
+- **The account step reads 701 MB, 535 MB over main's sign-in screen,** although both open with a field focused. The GPU process holds 588 MB on the account step. That is the cost the first milestone's finish entry above describes for a caret blinking over the glass blur, which was accepted for the first prototype until [#301](https://github.com/theagenticage/hercule/issues/301) decides. Main's connect and sign-in screens, each with a field focused, read 158 to 166 MB, with 68 to 76 MB in the GPU process. That is about the empty window's 54 MB plus the up to 20 MB a focused field costs it ([Baseline](#baseline)). So a focused field alone does not cost the 400 MB: of the screens in this table, the 400 MB shows on the account step and on the draft, on both sides, and not on main's connect and sign-in screens.
+- **Nothing of the first run stays after it.** A plain launch after the first run parsed only the first-screen chunk, the bundler's runtime and `theme-init.js`, read from the page's DevTools connection after memory was read. Idle from 30 seconds for 10 seconds, it read 63 GPU and 5 renderer wakeups a second, and the Before read 63 and 4 to 5. So no first-run timer is left.
+- **The draft reads 9 MB over the Before,** 667 MB against 658 MB, both with the composer focused, and both over the budget as the first milestone's finish found. The browser process holds 4 to 5 MB more, the GPU process 4 to 5 MB more, and the renderer the same 41 MB. Where the browser process's extra comes from was not traced.
+- **How each screen was reached:**
+  - The welcome: no controller saved, and a stand-in `hercule` binary that reports nothing installed.
+  - The steps after the account: a set-up scratch controller on loopback, signed in once, with the first run's put-off list in the settings file set to the steps before the one measured. The controller ran with a `PATH` that holds no coding agent, so the providers step was not done.
+  - The draft: the same controller, with the first run's progress removed from the settings file, as leaving All set does.
+  - The Before: no controller saved for the connect screen, and a set-up scratch controller saved for sign-in and, after one sign-in, the draft.
+- **The account step is read after a reload, not straight after a plain launch,** because a plain launch cannot open on it. With a controller on this Mac that is not set up, the app opens on the welcome, which greets Hercule as found. So each launch set the mark Open the office leaves in the page's session storage, through the page's DevTools connection, and then main reloaded the window with `webContents.reload()`, as it does once Hercule answers. Memory was read 13 seconds after the reload. The install did not run, because Hercule was already running.
+- **The one-minute load average was 4.0 to 6.1** at each launch, and 4.7 at the start of the session.
 
 ## Slices
 
