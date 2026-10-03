@@ -40,8 +40,12 @@ import { buildBureau } from "./variants/bureau";
 import { computeDeskKey } from "./world/build-world";
 import type { Colleague, World } from "./world/types";
 
-/** One built office: what a new world replaces. */
-interface Built {
+/**
+ * The office built from one world: the rooms, a rig per colleague, the sim
+ * that moves them, their name tags and the picker. A new world with other
+ * desks tears it down and builds another.
+ */
+interface BuiltOffice {
   readonly layout: OfficeLayout;
   readonly rigs: ReadonlyMap<string, ColleagueRig>;
   readonly sim: Sim;
@@ -123,7 +127,7 @@ export function mountOfficeScene(
   let state = readOffice();
   let world = initialWorld;
   let deskKey = computeDeskKey(world);
-  let built: Built;
+  let built: BuiltOffice;
   // True while the Mac runs on its battery or the user asks to reduce motion:
   // the office then stands still, whatever its liveliness. The battery's
   // answer comes later, through `watchStillness` below.
@@ -131,7 +135,7 @@ export function mountOfficeScene(
   /** Returns the liveliness the office runs at now. */
   const decideLiveliness = (): 0 | 1 | 2 => (still ? 0 : OFFICE_SETTINGS.liveliness);
 
-  const build = (): Built => {
+  const build = (): BuiltOffice => {
     const layout = buildBureau({ world, nav: createNavBuilder() });
     stage.scene.add(layout.root);
     const rigs = new Map<string, ColleagueRig>();
@@ -179,7 +183,7 @@ export function mountOfficeScene(
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 
-  const teardown = ({ layout, rigs, sim, overlay }: Built): void => {
+  const teardown = ({ layout, rigs, sim, overlay }: BuiltOffice): void => {
     sim.dispose();
     overlay.dispose();
     for (const rig of rigs.values()) {
