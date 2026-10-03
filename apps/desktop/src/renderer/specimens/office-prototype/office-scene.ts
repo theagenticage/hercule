@@ -75,7 +75,7 @@ function mergeStatic(root: Object3D, keep: (object: Object3D) => boolean): [numb
       !Array.isArray(mesh.material) &&
       mesh.geometry.morphAttributes.position === undefined
     ) {
-      const material = mesh.material as Material;
+      const material = mesh.material;
       const geometry = mesh.geometry;
       const key = [
         material.uuid,
@@ -265,6 +265,7 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
 
   setAmbientMotion(state.liveliness > 0);
   built = build();
+  stage.glassLabels = () => built.overlay.readShownLabelBoxes();
   switchLamps();
   focusFloor();
   // The office opens with a short glide down onto the first view, so it reads

@@ -36,6 +36,7 @@ import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { OfficeGlass, readPanelBoxes, type GlassBox } from "./glass";
 import { isDarkTheme, readColor, readToken, refreshPalette, writeOklch } from "./palette";
 
 /** How much the GPU is asked to do. */
@@ -165,6 +166,11 @@ const QUALITY: Readonly<
  * - `glass=0`: no backdrop blur on the office's panels and labels.
  * - `glass=top`: backdrop blur on the top bar's pills only, to measure
  *   whether one blurred element costs as much as all of them.
+ * - `glass=dot`: no backdrop blur on the panels, and one blurred 8 x 8 pixel
+ *   dot in the middle of the window. It measures what any backdrop filter
+ *   costs, apart from the cost of blurring large areas.
+ * - `glass=webgl`: no backdrop blur on the page; the office draws its own
+ *   glass under the panels and room labels instead (engine/glass.ts).
  * - `gputime=1`: reads the GPU time of each frame with a timer query.
  * - `ao=off`: no ambient occlusion, whatever the quality.
  */
@@ -176,8 +182,7 @@ export const SPIKE = {
   staticShadows: spikeParams.get("shadows") === "static" || spikeParams.get("cache") === "1",
   cache: spikeParams.get("cache") === "1",
   lowPower: spikeParams.get("lowpower") === "1",
-  glass: spikeParams.get("glass") !== "0",
-  glassTopOnly: spikeParams.get("glass") === "top",
+  glass: (spikeParams.get("glass") ?? "all") as "all" | "0" | "top" | "dot" | "webgl",
   gpuTime: spikeParams.get("gputime") === "1",
   merge: spikeParams.get("merge") === "1",
   animHz: Number(spikeParams.get("animhz") ?? 0),
@@ -235,6 +240,10 @@ export class Stage {
   private lastCpuMs = 0;
 
   private readonly container: HTMLElement;
+  /** SPIKE - the glass the office draws itself, with `glass=webgl`. */
+  private readonly glass: OfficeGlass | null = SPIKE.glass === "webgl" ? new OfficeGlass() : null;
+  /** SPIKE - returns the room labels showing now, for the glass the office draws itself. */
+  glassLabels: (() => GlassBox[]) | null = null;
 
   // SPIKE fields.
   readonly spike: SpikeCounters = {
@@ -292,12 +301,17 @@ export class Stage {
       powerPreference: SPIKE.lowPower ? "low-power" : "high-performance",
     });
     if (SPIKE.staticShadows) this.renderer.shadowMap.autoUpdate = false;
-    if (!SPIKE.glass || SPIKE.glassTopOnly) document.documentElement.style.setProperty("--glass-filter", "none");
-    if (SPIKE.glassTopOnly) {
+    if (SPIKE.glass !== "all") document.documentElement.style.setProperty("--glass-filter", "none");
+    const blur = "blur(var(--glass-blur)) saturate(var(--glass-sat))";
+    if (SPIKE.glass === "top") {
       const style = document.createElement("style");
-      const blur = "blur(var(--glass-blur)) saturate(var(--glass-sat))";
       style.textContent = `.office-top .pill { -webkit-backdrop-filter: ${blur}; backdrop-filter: ${blur}; }`;
       document.head.append(style);
+    }
+    if (SPIKE.glass === "dot") {
+      const dot = document.createElement("div");
+      dot.style.cssText = `position: fixed; left: 50%; top: 50%; z-index: 100; width: 8px; height: 8px; pointer-events: none; backdrop-filter: ${blur};`;
+      document.body.append(dot);
     }
     this.sun.layers.enableAll();
     this.sky.layers.enableAll();
@@ -349,6 +363,7 @@ export class Stage {
     });
     this.aoPass.blendIntensity = 0.85;
     this.composer.addPass(this.aoPass);
+    if (this.glass !== null) this.composer.addPass(this.glass.pass);
     this.composer.addPass(new OutputPass());
 
     const copyQuad = new Mesh(new PlaneGeometry(2, 2), this.copyMaterial);
@@ -478,6 +493,7 @@ export class Stage {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.composer.dispose();
     this.aoPass.dispose();
+    this.glass?.dispose();
     this.environmentTexture.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -527,6 +543,10 @@ export class Stage {
     this.renderer.setSize(width, height);
     this.composer.setPixelRatio(this.renderer.getPixelRatio());
     this.composer.setSize(width, height);
+    this.glass?.setSize(
+      this.renderer.getDrawingBufferSize(new Vector2()),
+      this.renderer.getPixelRatio(),
+    );
     if (SPIKE.cache) this.resizeStaticTargets();
     this.invalidateStatic();
   }
@@ -560,12 +580,21 @@ export class Stage {
     this.elapsed += dt;
     const frame: Frame = { dt, time: this.elapsed };
     this.renderer.info.reset();
+    // The panels are read before the listeners write this frame's styles, so
+    // reading them does not make the page lay out a second time.
+    const glassBoxes = this.glass === null ? [] : readPanelBoxes(this.renderer.domElement);
     let again = false;
     for (const listener of this.listeners) again = listener(frame) || again;
+    if (this.glass !== null) {
+      glassBoxes.push(...(this.glassLabels?.() ?? []));
+      // With no glass on screen, the frame need not be blurred.
+      this.glass.pass.enabled = glassBoxes.length > 0;
+    }
     const listened = performance.now();
     const query = this.beginGpuQuery();
     if (SPIKE.cache) this.drawCached(dt);
     else this.composer.render(dt);
+    this.glass?.draw(this.renderer, glassBoxes);
     if (query !== null) {
       this.gl.endQuery(0x88bf /* TIME_ELAPSED_EXT */);
       this.pendingQueries.push(query);
@@ -652,7 +681,7 @@ export class Stage {
       renderer.setRenderTarget(this.staticTarget);
       renderer.clear();
       renderer.render(this.scene, camera);
-      if (drawAo) this.aoPass.render(renderer, this.staticAoTarget!, this.staticTarget!);
+      if (drawAo) this.aoPass.render(renderer, this.staticAoTarget!, this.staticTarget!, 0, false);
       camera.layers.set(0);
       this.aoPending = wantsAo && !drawAo;
       this.staticDirty = false;

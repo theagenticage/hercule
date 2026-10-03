@@ -61,6 +61,7 @@ import {
 import { isCameraMoving, isShown, readCameraView } from "./camera-rig";
 import { isColleagueHidden, registerTagHitTest } from "./picking";
 import { readColleagueStates, sendOfficeCommand, type TagMode } from "../office-store";
+import type { GlassBox } from "./glass";
 import "./overlay.css";
 
 export interface Overlay {
@@ -77,6 +78,11 @@ export interface Overlay {
    * float over the focused storey's floor.
    */
   setFocusedFloor(floor: number | null): void;
+  /**
+   * SPIKE - returns where each room label showing now sits, for the glass
+   * the office draws itself with `glass=webgl`.
+   */
+  readShownLabelBoxes(): GlassBox[];
   dispose(): void;
 }
 
@@ -745,6 +751,18 @@ export function createOverlay(
     setFocusedFloor(floor) {
       focusedFloor = floor;
       update();
+    },
+    readShownLabelBoxes() {
+      // A label is centred on its anchor (`translate: -50% -50%` in overlay.css).
+      return labels
+        .filter((label) => label.shown)
+        .map((label) => ({
+          left: label.writtenX - label.width / 2,
+          top: label.writtenY - label.height / 2,
+          width: label.width,
+          height: label.height,
+          radius: label.height / 2,
+        }));
     },
     dispose() {
       disposed = true;
