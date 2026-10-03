@@ -36,7 +36,7 @@ The question: which rendering techniques let the 3D Office draw on almost no CPU
 - **The machine:**
   - Apple M4 Max, 16 logical CPUs, macOS 15.8, Electron 44.4.5 (Chromium 152);
   - the built-in display at 120 Hz, on AC power;
-  - load average between 3.9 and 7.6, from other work on the machine. The later sessions were quieter than the first, so each table says which session it comes from, and the second session repeats two rows of the first as a bridge.
+  - load average between 3.9 and 7.6, from other work on the machine. The load differed between sessions, and the same row read up to 3 points apart across them, higher in some rows and lower in others. So each table says which session it comes from, and the 21:58 session repeats two rows of the first as a bridge.
 - **The window** is 1440 x 900 points on the built-in display. The canvas is 2336 x 1744 pixels at pixel ratio 2.
 - **The scene** is the prototype's Bureau floor:
   - Calm liveliness, day light, Smart name tags, Bean characters;
@@ -162,6 +162,7 @@ What the table shows:
 - **Shadows drawn once save little without AO.** 9.2 / 7.6 against 9.1 / 7.7 in one session, 8.5 / 6.8 against 6.7 / 5.6 (one run) in the other. The draw calls fall from 900 to 573 either way.
 - **The v1 row's two runs spread more than the others:** renderer 7.6-10.6, GPU process 6.5-8.9. The working set read 481 MB in one run and 779 MB in the other; the reason is unknown.
 - **Glass on the top bar only costs about 4 points,** against 14 for all of the glass. See "Glass over the canvas".
+- **The renderer read lower with glass on than off:** 7.9 against 9.1 here, and 18.8 against 21.4 at Ten times (one run). Here it is within the v1 row's spread. The cause is unknown; do not read it as glass saving renderer CPU.
 
 ### Ten times fleet (142 sessions)
 
@@ -182,7 +183,7 @@ One run each, so the spread is unknown; read differences under 2 points as noise
 What the table shows:
 
 - **At Ten times the renderer's JavaScript is the cost.** At High, a frame takes 15.6 ms of JavaScript, and the uncapped prototype manages only 63 fps. The 30 fps cap still halves the cost.
-- **Merging matters here,** unlike at Today's fleet: Medium alone is 25 / 17, merged with shadows drawn once it is 15 / 10.
+- **Merging matters here,** unlike at Today's fleet: Medium alone is 25 / 17, merged with shadows drawn once it is 15 / 10. The v1 settings unmerged read 21.4 in the renderer (one run), above spec 17's limit of 20% of one core. That limit is set for Today's fleet, but it shows merging is needed before fleets grow.
 - **The building cache does not help at Ten times.** 142 colleagues are about 300 draw calls of their own, so drawing only the colleagues is no longer cheap. Instanced skinned characters are what would help next.
 - **Merging's memory** shows clearly here: about +400 MB of working set. Part of that is the spike keeping the original geometry (see "The spike").
 
