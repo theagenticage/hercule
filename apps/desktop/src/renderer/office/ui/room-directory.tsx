@@ -31,13 +31,13 @@ interface RoomGroup {
 
 /**
  * Returns the rooms of `rooms` in the directory's groups: the project rooms
- * under "Projects", then every other room under "The office", each in the
+ * under "Projects", then every other room under "The Office", each in the
  * layout's order. Groups with no rooms are left out.
  */
 export function groupRooms(rooms: ReadonlyArray<RoomInfo>): ReadonlyArray<RoomGroup> {
   const groups: ReadonlyArray<RoomGroup> = [
     { heading: "Projects", rooms: rooms.filter((room) => room.kind === "project") },
-    { heading: "The office", rooms: rooms.filter((room) => room.kind !== "project") },
+    { heading: "The Office", rooms: rooms.filter((room) => room.kind !== "project") },
   ];
   return groups.filter((group) => group.rooms.length > 0);
 }
