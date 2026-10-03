@@ -5,16 +5,18 @@
 import type { JSX, ReactNode } from "react";
 import type { AllSetRecap, FirstRunStep } from "@hercule/client-core";
 import { buildLook, Face, UserAvatar } from "../../faces";
+import { QuestionIcon } from "../../icons/question";
 import { GitHubMark, LogoMark } from "../../logos";
 import type { ProjectTint } from "../project-tile";
 import "../project-tile.css";
+import { Warning } from "../step";
 import { ProviderLogo } from "../thread/provider-logo";
 
 /**
  * Renders All set for `username` in `timezone`, from `recap`. `tint` is the
  * project's tint. A step with nothing to show links back to it with Do it
  * now, through `onDoItNow`. Every other button calls `onLeave`, which opens
- * the new project's draft.
+ * the new project's draft. `error` is why the last leave failed, or null.
  *
  * Without a logged-in provider, no agent can take a desk, so the main button
  * is Log in to a provider and Open Hercule is the quiet one. Both open the
@@ -25,6 +27,7 @@ export function AllSet({
   timezone,
   recap,
   tint,
+  error,
   onDoItNow,
   onLeave,
 }: {
@@ -32,6 +35,7 @@ export function AllSet({
   readonly timezone: string;
   readonly recap: AllSetRecap;
   readonly tint: ProjectTint | null;
+  readonly error: string | null;
   readonly onDoItNow: (step: FirstRunStep) => void;
   readonly onLeave: () => void;
 }): JSX.Element {
@@ -107,6 +111,7 @@ export function AllSet({
           </RecapRow>
         )}
       </ul>
+      {error === null ? null : <Warning icon={<QuestionIcon size={14} />}>{error}</Warning>}
       <div className="st-actions">
         {recap.providerNames === null ? (
           <>

@@ -74,10 +74,20 @@ const buildControllerInfo = (localRunnerId: string | null) => ({
   localRunnerId,
 });
 
-/** The reads the first run makes once signed in that `stubApi` does not answer. */
+/** The settings of a user whose account step marked the web app's onboarding done. */
+const ONBOARDING_DONE = {
+  controller: {},
+  user: { "onboarding.completedSteps": [...ONBOARDING_STEPS] },
+};
+
+/**
+ * The reads the first run makes once signed in, where `stubApi` does not
+ * answer them or answers them for a user outside a first run.
+ */
 const FIRST_RUN_HANDLERS: Readonly<Record<string, Handler>> = {
   "GET /api/v1/controller": { body: buildControllerInfo(null) },
   "GET /api/v1/assistants": { body: { items: [] } },
+  "GET /api/v1/settings": { body: ONBOARDING_DONE },
 };
 
 /** Returns the requests sent to `path` with `method`. */
@@ -619,7 +629,7 @@ describe("the first run's steps", () => {
   describe("All set", () => {
     it("ends the first run and opens the New thread draft in the project on Start your first thread", async () => {
       const user = userEvent.setup();
-      const { fake, router } = await openSignedIn({
+      const { calls, fake, router } = await openSignedIn({
         firstRun: { putOff: [] },
         handlers: {
           "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
@@ -631,6 +641,63 @@ describe("the first run's steps", () => {
       });
       expect(screen.getByText("Your office is open")).toBeTruthy();
       await user.click(screen.getByRole("button", { name: "Start your first thread" }));
+      await waitFor(() => {
+        expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
+      });
+      expect(fake.firstRunWrites).toEqual([null]);
+      // The account step already marked onboarding done, so nothing writes it again.
+      expect(readCalls(calls, "PATCH", "/api/v1/settings")).toHaveLength(0);
+    });
+
+    it("marks onboarding done before it ends a first run whose account step could not", async () => {
+      const user = userEvent.setup();
+      let firstRunWritesAtSettings = -1;
+      // A relaunch after the account step's onboarding write failed: setup
+      // went through and main kept the first run, but the settings lack the steps.
+      const { calls, fake, router } = await openSignedIn({
+        firstRun: { putOff: ["providers", "github"] },
+        handlers: {
+          "GET /api/v1/settings": { body: { controller: {}, user: {} } },
+          "PATCH /api/v1/settings": () => {
+            firstRunWritesAtSettings = fake.firstRunWrites.length;
+            return { body: ONBOARDING_DONE };
+          },
+          "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "Log in to a provider" }));
+      await waitFor(() => {
+        expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
+      });
+      expect(readCalls(calls, "PATCH", "/api/v1/settings").map((call) => call.body)).toEqual([
+        { user: { "onboarding.completedSteps": [...ONBOARDING_STEPS] } },
+      ]);
+      // The first run ends only after the write, so a failed write leaves it to try again.
+      expect(firstRunWritesAtSettings).toBe(0);
+      expect(fake.firstRunWrites).toEqual([null]);
+    });
+
+    it("explains a failed onboarding write, keeps the first run, and tries again", async () => {
+      const user = userEvent.setup();
+      let failSettings = true;
+      const { fake, router } = await openSignedIn({
+        firstRun: { putOff: ["providers", "github"] },
+        handlers: {
+          "GET /api/v1/settings": { body: { controller: {}, user: {} } },
+          "PATCH /api/v1/settings": () =>
+            failSettings
+              ? { status: 500, body: buildErrorBody("internal", "settings are down") }
+              : { body: ONBOARDING_DONE },
+          "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "Log in to a provider" }));
+      expect(await screen.findByText("settings are down")).toBeTruthy();
+      expect(fake.firstRunWrites).toEqual([]);
+      expect(router.state.location.pathname).toBe("/first-run");
+
+      failSettings = false;
+      await user.click(screen.getByRole("button", { name: "Log in to a provider" }));
       await waitFor(() => {
         expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
       });

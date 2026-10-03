@@ -36,7 +36,8 @@ const TOKEN_REFUSED =
  *    progress, so a relaunch resumes it. It comes straight after setup: a set-up controller
  *    with no first-run record sends a relaunch home, past every later step.
  * 3. `settings.update`, which marks the web app's onboarding steps done, so
- *    the web app never asks for them again.
+ *    the web app never asks for them again. When a quit or a relaunch comes
+ *    between steps 2 and 3, All set marks them before the first run ends.
  *
  * Then it reads everything the next steps show, and only then marks setup
  * complete in the cache and calls `onSignedIn`, which moves the first run on
