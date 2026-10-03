@@ -679,7 +679,7 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
 
 **The pointer,** a Mac trackpad first and a mouse second: two-finger scroll pans; a pinch zooms toward the pointer, as a mouse wheel does; a left drag grabs the floor; a right or ⌥ drag orbits; a double click on the floor glides there. Walls between the camera and the room in view drop to the dado rail, so the room can always be seen.
 
-**Fixed settings.** v1 has no controls. The theme follows the app's theme, and the light follows the theme: day in a light theme, evening in a dark one. Name tags are the prototype's Smart setting, and its characters are Bean. Its quality is sharp on a Retina display, with the sun's shadows drawn once and redrawn only when the building changes, and no ambient occlusion, which would double the cost of every frame. Its liveliness is Calm, and Still when the Office stands still ([Performance](#performance)).
+**Fixed settings.** v1 has no controls. The theme follows the app's theme, and the light follows the theme: day in a light theme, evening in a dark one. Name tags are the prototype's Smart setting, and its characters are Bean. Its quality is sharp on a Retina display, with the sun's shadows drawn once and redrawn only when the building changes, and no ambient occlusion, which draws the whole Office a second time in every frame. Its liveliness is Calm, and Still when the Office stands still ([Performance](#performance)).
 
 **Printer rage** is the Office's one activity. At random, and at most once every 5 minutes for the whole Office, a working colleague walks to the printer, kicks it and walks back. A colleague that waits on the user never goes. The printer is furniture in the Office Map that offers a spot and an animation, the pattern later activities follow. It never happens while the Office stands still. A trigger on a thread's failed tool calls is left to the Office Map system, because it could fire too often.
 
@@ -778,14 +778,17 @@ These are starting budgets. The first performance pass measures the real thread 
 | The first screen's JavaScript | The Office and three.js are a chunk of their own, loaded the first time the Office opens. The first screen grows only by the sidebar's Office button, the Go menu item and the route |
 | Memory with the Office open, and the Office chunk's size | The first measurement records each. From then on, each limit is that reading plus 10% |
 
-- **The idle row and the Office.** The idle row allows the renderer no wakeups from the app and the GPU at most 12 a second. An Office drawing 30 frames a second wakes the renderer about 65 times a second and the GPU process about 300, so a living Office can never meet the idle row. The idle row is the limit for the app while nothing happens. On mains power, a visible Office is something happening: its colleagues live, and the CPU row above holds its cost instead. When the Office stands still, the idle row applies to it again.
+- **The idle row and the Office.** The idle row allows the renderer no wakeups from the app and the GPU at most 12 a second. An Office drawing 30 frames a second wakes the renderer about 65 times a second, and the GPU process about 300 with the glass and about 430 without it, though its CPU then falls from 31% to 12% of one core. A living Office can never meet the idle row. The idle row is the limit for the app while nothing happens. On mains power, a visible Office is something happening: its colleagues live, and the CPU row above holds its cost instead. When the Office stands still, the idle row applies to it again.
 - **An unfocused window keeps its 30 frames a second** while it is visible. A living Office on a second screen is what the Office is for. Whether the Office should stand still in more cases is decided after the first measurement.
 - **Why the CPU limits are what they are.** The research for #332 ([#333](https://github.com/theagenticage/hercule/issues/333)) measured the prototype with the reference fleet, in % of one core for the renderer and the GPU process:
   - as it was, with no cap: 88 frames a second, 45 and 85;
   - capped at 30 frames a second: 16 and 31;
   - capped, and without the glass: 14 and 12, so the glass costs the GPU process about 19;
-  - capped, without the glass, and without ambient occlusion at a pixel ratio of 1.5: 9 to 10 and 7 to 8;
-  - standing still: 0 and 0, with no wakeups.
+  - capped, without the glass, and at the prototype's Medium quality (no ambient occlusion, a pixel ratio of 1.5, shadows drawn every frame): 9 to 10 and 7 to 8;
+  - standing still: 0 and 0, with no wakeups;
+  - hidden, and covered by another of the app's windows: 0 frames. A minimized window was not measured, because the research's harness could not minimize its window; Chromium's source treats it as hidden.
+
+  The settings v1 ships (a pixel ratio of 2, shadows drawn once, no ambient occlusion) were not measured as one set; the first measurement records them.
 
   The limits sit above the capped reading, so v1 can ship with the cap alone. They come down to the first measurement plus 10%, as every budget does.
 - **Memory and the chunk have no limit for the first merge.** No measurement of the Office inside the packaged app exists yet, so a limit set now would be a guess, and a limit set from the measurement it gates would hold nothing. The first run's room already reads above the app's memory budget ([#330](https://github.com/theagenticage/hercule/issues/330)).
@@ -824,7 +827,9 @@ These rules keep the budgets:
      - The connect check after `hercule service install`: main checks every half second for at most 30 seconds, because the controller announces nothing while it starts.
      - A provider's login does not poll: its end arrives on the `provider` live topic.
 5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0, and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
-   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Glass over the Office costs far more than glass over a still page. The page under a blur changes with every frame the Office draws, so the blur is drawn again each time. On the reference machine, the Office's glass costs the GPU process about 19 points of one core at 30 frames a second. Its top bar and room labels keep their glass, and the Office's measurement records that cost.
+   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Glass over the Office costs far more than glass over a still page. On the reference machine, the Office's glass (its top bar, room labels and panels) costs the GPU process about 19 points of one core at 30 frames a second. Two causes add up:
+     - the page under a blur changes with every frame the Office draws, so the blur is drawn again each time;
+     - by Chromium's source, one `backdrop-filter` anywhere in the window turns off macOS's own compositing of the window's layers (Core Animation), so the GPU process composites every layer of the window for each frame the Office draws. Keeping glass on only part of the Office then likely keeps most of the cost. This cause was read from the source, not measured; only all of the Office's glass against none was measured. Its top bar and room labels keep their glass, and the Office's measurement records that cost.
 6. **The first paint is cheap:**
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
@@ -834,7 +839,7 @@ These rules keep the budgets:
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
 7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
 
-**Verify at build time:** that a macOS window fully covered by other windows stops animation frames, as a minimized one does. Rule 3 then also covers a covered window.
+**Verify at build time:** that a macOS window fully covered by other windows stops animation frames, as a minimized one does. Rule 3 then also covers a covered window. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The research for the Office found the reverse gap: a window covered by another of the app's windows stopped its frames, and a minimized one could not be measured. The Office's first measurement checks a minimized window, and a window covered by another app's window.
 
 **Verify at build time:** the cost of glass on the slowest Mac the app supports, before the first release. The M4 Max measurement cannot show that cost.
 
@@ -1111,7 +1116,7 @@ Idle at each step of the first run, with the window visible, read from a plain l
 | Step | GPU wakeups a second | Renderer wakeups a second | Notes |
 |---|---|---|---|
 | Welcome | 6 to 15 | 1 to 2 | |
-| Hercule starting | 309 to 320 | 64 to 73 | the spinner, 0.8% of a core in the GPU process and 0.15% in the renderer |
+| Hercule starting | 309 to 320 | 64 to 73 | the spinner, 0.8% of a core in the GPU process and 0.15% in the renderer. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* These were likely read from `percentCPUUsage`, a share of the whole machine (see [Measuring](#measuring)), so about 13% and 2.4% of one core; [#339](https://github.com/theagenticage/hercule/issues/339) checks them |
 | Account | 62 to 65 | 4 | the password field is focused; three of four launches, sampled again on 8754b1dd |
 | Providers | 4 | 1 | |
 | A provider login waiting | 301 | 36 | the spinner; read with Playwright attached |
