@@ -66,7 +66,7 @@ export interface Frame {
  * A listener called before each drawn frame. It returns true while it still
  * moves something and wants the next frame drawn too.
  */
-export type FrameListener = (frame: Frame) => boolean;
+type FrameListener = (frame: Frame) => boolean;
 
 /** The light settings of one time of day. */
 interface Light {

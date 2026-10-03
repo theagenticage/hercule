@@ -12,16 +12,7 @@
  * between happenings.
  */
 import { Vector3 } from "three";
-import type {
-  Action,
-  BuildSim,
-  ColleagueRig,
-  ColleagueState,
-  Seat,
-  Sim,
-  SimContext,
-  Spot,
-} from "./contracts";
+import type { Action, BuildSim, ColleagueRig, ColleagueState, Seat, Spot } from "./contracts";
 import { WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
@@ -166,8 +157,6 @@ type Leg = WalkLeg | GlideLeg;
 /** A walk in progress, which the frames advance. */
 interface Walk {
   readonly legs: ReadonlyArray<Leg>;
-  /** Every point the walk passes, from start to end, for drawing it. */
-  readonly route: ReadonlyArray<Vector3>;
   leg: number;
   /** Metres along a walk leg, or seconds into a glide. */
   progress: number;
@@ -214,17 +203,6 @@ interface SimTimer {
   startedAt: number;
   /** The browser timer while the window is shown. */
   handle: number;
-}
-
-/** What the lab reads of the sim, besides the contract. */
-export interface SimInspector {
-  /**
-   * Returns the route each walking colleague follows now, its corners
-   * rounded, by colleague id. A route keeps its identity for the whole walk.
-   */
-  readWalkPaths(): ReadonlyMap<string, ReadonlyArray<Vector3>>;
-  /** Returns the ids of the colleagues waiting on the user: the queue from its head, then the rest, longest waiting first. */
-  listWaitingColleagues(): ReadonlyArray<string>;
 }
 
 /** Fails an awaited step of a script that a newer script replaced. */
@@ -370,10 +348,8 @@ function sampleLeg(leg: WalkLeg, distance: number, target: Vector3): Vector3 {
 // ---------------------------------------------------------------------------
 // The sim.
 
-export const buildSim: BuildSim = (context) => createSim(context);
-
-/** Builds the sim, with the inspector the lab draws walking paths from. */
-export function createSim({ world, layout, rigs, stage }: SimContext): Sim & SimInspector {
+/** Builds the sim that runs the office's colleagues. */
+export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
   const { spots } = layout;
   const nav = layout.nav;
   const officeNav = isOfficeNavGraph(nav) ? nav : null;
@@ -713,10 +689,8 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     }
     if (sitDown !== null) legs.push(sitDown);
     actor.place = "elsewhere";
-    const route = [start, ...legs.flatMap((leg) => (leg.kind === "walk" ? leg.points : [leg.to]))];
     return startWalk(actor, (finish) => ({
       legs,
-      route,
       leg: 0,
       progress: 0,
       speed: 0,
@@ -1383,21 +1357,6 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       };
     },
 
-    readWalkPaths() {
-      const paths = new Map<string, ReadonlyArray<Vector3>>();
-      for (const actor of actors.values()) {
-        if (actor.motion !== null) paths.set(actor.colleague.id, actor.motion.route);
-      }
-      return paths;
-    },
-
-    listWaitingColleagues() {
-      return [
-        ...queue.filter((member): member is Actor => member !== null),
-        ...listDeskWaiters(),
-      ].map((actor) => actor.colleague.id);
-    },
-
     dispose() {
       disposed = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -1411,4 +1370,4 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       stateListeners.clear();
     },
   };
-}
+};

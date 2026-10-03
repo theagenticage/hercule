@@ -14,7 +14,6 @@
 import { Box3, Group, Vector3, type Object3D } from "three";
 import {
   CUTAWAY,
-  LAMP,
   WALL_HEIGHT,
   type BuildOfficeLayout,
   type CameraView,
@@ -298,11 +297,7 @@ function createFitter(root: Group, walls: ReadonlyArray<BuiltWall>, solids: Rect
       nearest.hung.push(object);
     },
     placeLamp(x, z) {
-      const lamp = buildFloorLamp();
-      if (lamp.object.userData[LAMP] === undefined) {
-        lamp.object.userData[LAMP] = { setOn: (on: boolean) => lamp.setOn(on) };
-      }
-      fitter.place(lamp.object, x, z);
+      fitter.place(buildFloorLamp().object, x, z);
     },
     readSpot(marker) {
       marker.updateWorldMatrix(true, false);

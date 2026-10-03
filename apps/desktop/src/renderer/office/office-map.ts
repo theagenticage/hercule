@@ -41,7 +41,7 @@ export type Furniture =
 export type SpotKind = "seat" | "stand" | "queue";
 
 /** The kinds of fixed room the code can build. Each has its geometry in code. */
-export type FixedRoomKind = "triage-room" | "lounge" | "your-office" | "lobby";
+type FixedRoomKind = "triage-room" | "lounge" | "your-office" | "lobby";
 
 /** A room every Office has, whatever threads it seats. */
 export interface FixedRoom {

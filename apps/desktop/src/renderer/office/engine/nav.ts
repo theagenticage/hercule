@@ -54,7 +54,7 @@ const SQRT2 = Math.SQRT2;
 const FAR_CLEARANCE = 1e6;
 
 /** What the nav graph offers beyond the contract, for the sim. */
-export interface OfficeNavGraph extends NavGraph {
+interface OfficeNavGraph extends NavGraph {
   /** Returns true when a colleague can stand at the spot without touching a wall or furniture. */
   isWalkable(spot: Spot): boolean;
   /**

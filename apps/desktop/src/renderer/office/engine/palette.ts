@@ -97,13 +97,13 @@ export interface Shift {
 }
 
 /** The parts of a colleague each get their own tone of the colleague's hue. */
-export type HuePart = "body" | "shade" | "tint" | "ink";
+type HuePart = "body" | "shade" | "tint" | "ink";
 
 const OKLCH_PATTERN =
   /oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)(?:deg)?\s*(?:\/\s*([\d.]+)(%?))?\s*\)/;
 
 /** Parses an `oklch(...)` string; returns null for anything else. */
-export function parseOklch(text: string): Oklch | null {
+function parseOklch(text: string): Oklch | null {
   const match = OKLCH_PATTERN.exec(text);
   if (match === null) return null;
   const l = Number(match[1]) / (match[2] === "%" ? 100 : 1);
@@ -164,7 +164,7 @@ function convertLinearToOklch(color: Color): Omit<Oklch, "alpha"> {
 }
 
 /** Reads a number token such as `--char-l` or `--hue-iris`. */
-export function readNumber(name: string): number {
+function readNumber(name: string): number {
   return Number(getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim());
 }
 

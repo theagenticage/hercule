@@ -996,7 +996,7 @@ function addSuit(list: PartList<Surface>, anatomy: Anatomy): void {
 // The whole look.
 
 /** What decides a colleague's shared geometry: everything in its look but its hue. */
-export interface Build {
+interface Build {
   readonly anatomy: Anatomy;
   readonly accessories: ReadonlyArray<Accessory>;
   readonly headwear: Headwear | null;

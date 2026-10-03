@@ -21,8 +21,6 @@ import type { Frame, Stage } from "./stage";
 // ---------------------------------------------------------------------------
 // Scale. Furniture is built to the colleagues' size, like a doll's house.
 
-/** A standing colleague's height, top of the head, without a hat. */
-export const COLLEAGUE_HEIGHT = 1.0;
 /** The height of a chair's seat. A sitting colleague's hips rest here. */
 export const SEAT_HEIGHT = 0.42;
 /** The height of a desk's top. */
@@ -246,7 +244,7 @@ export function findFloorRoom(room: RoomInfo, rooms: ReadonlyArray<RoomInfo>): R
 }
 
 /** The fixed places the sim sends colleagues to. */
-export interface OfficeSpots {
+interface OfficeSpots {
   /** Where the user's desk is; the queue faces it. */
   readonly yourDesk: Spot;
   /** The queue of colleagues waiting on the user, head of the queue first. */
@@ -281,7 +279,7 @@ export interface OfficeLayout {
 }
 
 /** What a variant gets to build its office. */
-export interface LayoutContext {
+interface LayoutContext {
   readonly world: World;
   /** The nav graph the variant fills with floors, obstacles and doors. */
   readonly nav: NavBuilder;
