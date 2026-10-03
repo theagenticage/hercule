@@ -8,13 +8,7 @@
  * every one of them in place when the theme changes, so a theme switch
  * rebuilds nothing.
  */
-import {
-  Color,
-  LinearSRGBColorSpace,
-  MeshPhysicalMaterial,
-  MeshStandardMaterial,
-  type Material,
-} from "three";
+import { Color, LinearSRGBColorSpace, MeshPhysicalMaterial, MeshStandardMaterial } from "three";
 import type { Hue } from "../../faces/look";
 
 /** A colour in OKLCH, as the tokens write them. */
@@ -346,9 +340,4 @@ export function readColor(token: Token, shift: Shift = {}): Color {
 /** Whether the current theme is a dark one, which the office draws as evening. */
 export function isDarkTheme(): boolean {
   return getComputedStyle(document.documentElement).colorScheme.includes("dark");
-}
-
-/** Every shared material, for the performance overlay's count and for disposal. */
-export function listMaterials(): ReadonlyArray<Material> {
-  return [...paintables.values()].map((paintable) => paintable.material);
 }

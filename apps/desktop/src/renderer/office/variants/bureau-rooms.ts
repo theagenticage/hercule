@@ -108,13 +108,13 @@ export interface Fittings {
 }
 
 /** One room the world needs: what it asks of the plan, and how it is furnished once placed. */
-export interface RoomDesign {
+interface RoomDesign {
   readonly request: RoomRequest;
   furnish(room: PlannedRoom, fitter: Fitter, fittings: Fittings): void;
 }
 
 /** Everything `designRooms` decides: the plan's request, and the furnishing of each room by id. */
-export interface RoomDesigns {
+interface RoomDesigns {
   readonly request: PlanRequest;
   readonly designs: ReadonlyMap<string, RoomDesign>;
 }

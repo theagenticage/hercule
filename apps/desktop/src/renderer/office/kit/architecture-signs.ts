@@ -1,6 +1,6 @@
 /**
  * The Office's lettering: brass-framed plaques with a room's name in the UI
- * face, and the large wordmark over an entrance in the Deco display face.
+ * face.
  *
  * A plaque's text is drawn on a canvas texture that redraws when the theme
  * changes and when the face has loaded. A plaque is sized from an estimate of
@@ -11,26 +11,21 @@
 import {
   BufferGeometry,
   CylinderGeometry,
-  ExtrudeGeometry,
   Group,
   Mesh,
   MeshStandardMaterial,
   Object3D,
   PlaneGeometry,
-  Vector2,
 } from "three";
 import type { Hue } from "../../faces/look";
 import { paint, paintHue } from "../engine/palette";
-import { traceShapes } from "./architecture-outline";
+
 import {
   buildCanvasLabel,
   buildPaintedMesh,
-  decoFont,
-  isDecoFontReady,
   placeBox,
   readCssColor,
   uiFont,
-  waitForDecoFont,
   type PaintedParts,
 } from "./architecture-shared";
 
@@ -67,14 +62,6 @@ function estimatePlaqueAdvance(text: string): number {
   return advance;
 }
 
-/**
- * Returns a plaque's width for `text` in metres, frame included. A layout can
- * call it to space plaques before it builds them.
- */
-export function measurePlaque(text: string, options: { readonly hue?: Hue } = {}): number {
-  return plaqueFaceWidth(text.toUpperCase(), options.hue !== undefined) + 2 * PLAQUE_RIM;
-}
-
 /** Returns the width of a plaque's enamel face for `text`, which is already upper case. */
 function plaqueFaceWidth(text: string, hasChip: boolean): number {
   const characters = [...text].length;
@@ -91,7 +78,7 @@ function plaqueFaceWidth(text: string, hasChip: boolean): number {
  *
  * The plaque's back is at z = 0 and its centre at y = 0, so a layout hangs it
  * flat on a wall. Its face is 0.12 tall and about 0.04 wide per letter, plus
- * 0.124 for the padding and the frame; `measurePlaque` returns the exact width.
+ * 0.124 for the padding and the frame.
  */
 export function buildPlaque(text: string, options: { readonly hue?: Hue } = {}): Object3D {
   const label = text.toUpperCase();
@@ -157,74 +144,4 @@ export function buildPlaque(text: string, options: { readonly hue?: Hue } = {}):
   });
   object.add(new Mesh(faceGeometry, material));
   return object;
-}
-
-/** A wordmark's depth, from its back to its face. */
-const WORDMARK_DEPTH = 0.06;
-/** The extra space between a wordmark's letters, as a share of the em. */
-const WORDMARK_TRACKING = 0.06;
-/** The em, in canvas pixels, that a wordmark's letters are drawn at to be traced. */
-const WORDMARK_TRACE_EM = 256;
-
-/**
- * Builds a wordmark: `text` in large Deco capitals of solid brass, 0.06 deep,
- * `height` tall from the foot of the capitals to their top, standing on y = 0,
- * centred on x = 0, with its back at z = 0 and facing +z. Each letter is
- * about `height` wide, spacing included: "Hercule" at 0.55 is 3.8 wide.
- *
- * The letters are real geometry, traced from the display face drawn on a
- * canvas. Until the face has loaded they are traced from a fallback face, and
- * traced again once it arrives.
- */
-export function buildWordmark(text: string, height: number): Object3D {
-  const label = text.toUpperCase();
-  const mesh = new Mesh(buildWordmarkGeometry(label, height), paint("brass", "brass"));
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  if (!isDecoFontReady()) {
-    void waitForDecoFont().then(() => {
-      mesh.geometry.dispose();
-      mesh.geometry = buildWordmarkGeometry(label, height);
-    });
-  }
-  const object = new Group();
-  object.add(mesh);
-  return object;
-}
-
-/**
- * Returns the wordmark's letters as one extruded geometry: `label` drawn in
- * the display face on a canvas, traced, scaled so the capitals are `height`
- * tall, and centred on x = 0. Returns an empty geometry for blank text.
- */
-function buildWordmarkGeometry(label: string, height: number): BufferGeometry {
-  if (label.trim() === "") return new BufferGeometry();
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (context === null) throw new Error("The architecture kit could not create a 2D canvas.");
-  const setStyle = () => {
-    context.font = decoFont(WORDMARK_TRACE_EM);
-    context.letterSpacing = `${String(Math.round(WORDMARK_TRACKING * WORDMARK_TRACE_EM))}px`;
-  };
-  setStyle();
-  const ink = context.measureText(label);
-  const margin = 4;
-  canvas.width = Math.ceil(ink.actualBoundingBoxLeft + ink.actualBoundingBoxRight) + 2 * margin;
-  canvas.height =
-    Math.ceil(ink.actualBoundingBoxAscent + ink.actualBoundingBoxDescent) + 2 * margin;
-  // Resizing a canvas resets its drawing state.
-  setStyle();
-  const baseline = margin + ink.actualBoundingBoxAscent;
-  context.fillText(label, margin + ink.actualBoundingBoxLeft, baseline);
-  // The capitals rise `actualBoundingBoxAscent` pixels above the baseline, which becomes y = 0.
-  const metresPerPixel = height / ink.actualBoundingBoxAscent;
-  const shapes = traceShapes(
-    context.getImageData(0, 0, canvas.width, canvas.height),
-    (x, y) => new Vector2(x * metresPerPixel, (baseline - y) * metresPerPixel),
-  );
-  const geometry = new ExtrudeGeometry(shapes, { depth: WORDMARK_DEPTH, bevelEnabled: false });
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox!;
-  geometry.translate(-(box.min.x + box.max.x) / 2, 0, 0);
-  return geometry;
 }

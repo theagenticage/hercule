@@ -9,8 +9,8 @@
  * merged into one mesh per finish, with its colours painted into the vertices.
  */
 export { buildDesk, buildYourDesk } from "./desk";
-export { buildArmchair, buildBench, buildLongTable, buildStool } from "./seating";
-export { buildBookshelf, buildCabinet, buildParcels, buildPigeonholes } from "./storage";
+export { buildArmchair, buildBench } from "./seating";
+export { buildCabinet } from "./storage";
 export {
   buildCaseBoard,
   buildNowServing,
@@ -19,4 +19,4 @@ export {
   type NowServingHandle,
 } from "./walls";
 export { buildCoatStand, buildPlant, buildRug, buildTeaTrolley } from "./decor";
-export { buildFloorLamp, buildWallSconce, type FloorLampHandle } from "./lights";
+export { buildFloorLamp } from "./lights";

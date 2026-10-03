@@ -509,7 +509,7 @@ export function measureDamping(stiffness: number, ratio: number): number {
 // The motion of one rig.
 
 /** What a rig's motion is told each frame besides the time. */
-export interface MotionInput {
+interface MotionInput {
   readonly dt: number;
   /** The ambient amplitude, 0 still to 1 fully alive. */
   readonly ambient: number;

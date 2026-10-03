@@ -153,7 +153,7 @@ interface LayerRange<Layer extends string> {
 }
 
 /** A merged geometry and the vertices each of its layers owns, before it is painted. */
-export interface LayeredGeometry<Layer extends string> {
+interface LayeredGeometry<Layer extends string> {
   readonly geometry: BufferGeometry;
   readonly ranges: ReadonlyArray<LayerRange<Layer>>;
 }
@@ -220,7 +220,7 @@ function mergeParts(parts: ReadonlyArray<BufferGeometry>): BufferGeometry {
 }
 
 /** Returns a transform: a translation, an XYZ rotation and a scale. */
-export function composeMatrix(
+function composeMatrix(
   x: number,
   y: number,
   z: number,
@@ -340,7 +340,7 @@ export function wrapOntoEgg(geometry: BufferGeometry, egg: Egg, lift: number): B
 }
 
 /** Builds a lathed egg, its seam at the back, `segments` around. */
-export function buildEggGeometry(egg: Egg, segments: number): BufferGeometry {
+function buildEggGeometry(egg: Egg, segments: number): BufferGeometry {
   const points = egg.outline.map(([radius, height]) => new Vector2(radius, height));
   const geometry = new LatheGeometry(points, segments, Math.PI);
   geometry.scale(1, 1, egg.depth);
@@ -426,7 +426,7 @@ function buildLimb(radius: number, length: number): BufferGeometry {
  * thumb points along the hand's -z, the side the elbow bends toward, and
  * the palm faces the left hand's +x (the right hand's -x).
  */
-export function buildMitten(radius: number): BufferGeometry {
+function buildMitten(radius: number): BufferGeometry {
   const palm = new SphereGeometry(radius, 11, 8);
   palm.scale(0.8, 1, 0.92);
   palm.translate(0, -radius * 0.72, 0);
@@ -802,7 +802,7 @@ function addHeadset(list: PartList<Surface>, egg: Egg): void {
 // Accessories below the face: on a bean's body, on a suited colleague's chest.
 
 /** Where the accessories below the face sit: on a bean's body, on a suited colleague's suit. */
-export interface Chest {
+interface Chest {
   /** The egg they sit on. */
   readonly egg: Egg;
   /** The bone they follow. */
@@ -863,7 +863,7 @@ function addBowtie(list: PartList<Surface>, anatomy: Anatomy): void {
 }
 
 /** Reverses the winding of every triangle of a non-indexed geometry. */
-export function flipWinding(geometry: BufferGeometry): void {
+function flipWinding(geometry: BufferGeometry): void {
   for (const name of ["position", "normal"]) {
     const attribute = geometry.getAttribute(name);
     for (let i = 0; i < attribute.count; i += 3) {
@@ -991,13 +991,13 @@ export interface Build {
 }
 
 /** Returns the key two rigs with the same shared geometry have in common. */
-export function readBuildKey(build: Build): string {
+function readBuildKey(build: Build): string {
   const { anatomy, accessories, headwear } = build;
   return `${anatomy.style}|${anatomy.shape}|${[...accessories].sort().join(",")}|${headwear ?? ""}`;
 }
 
 /** A colleague's body, without its face, as the geometry of its two meshes. */
-export interface BodyGeometry {
+interface BodyGeometry {
   /** Everything but the hat, for the vinyl body mesh. */
   readonly body: BufferGeometry;
   /** The hat, for a satin mesh of its own, or null without a hat. */

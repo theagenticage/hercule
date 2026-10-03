@@ -6,7 +6,7 @@
 import type { ColleagueState, RoomInfo, Seat } from "./contracts";
 
 /** The counts a room shows. */
-export interface RoomCount {
+interface RoomCount {
   /** How many colleagues belong in the room now. */
   readonly colleagues: number;
   /** How many of those colleagues wait on the user. */

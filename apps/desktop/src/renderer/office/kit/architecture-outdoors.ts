@@ -1,11 +1,9 @@
 /**
- * PROTOTYPE - the outdoors round the campus: toy trees, Deco lampposts,
- * paved paths and striped lawns.
+ * PROTOTYPE - the outdoors round the campus: Deco lampposts and paved paths.
  */
 import {
   BufferGeometry,
   CylinderGeometry,
-  Float32BufferAttribute,
   Group,
   Mesh,
   Object3D,
@@ -14,61 +12,7 @@ import {
 } from "three";
 import { LAMP, type Lamp } from "../engine/contracts";
 import { paint, readColor, subscribePalette } from "../engine/palette";
-import {
-  buildMergedMesh,
-  buildPaintedMesh,
-  buildSlabSides,
-  paintMix,
-  placeBox,
-} from "./architecture-shared";
-
-/** How many trees have been built, so each next one varies its shape the same way every time. */
-let treesBuilt = 0;
-
-/**
- * Builds a toy tree about 2.3 tall: a tapered trunk under a rounded canopy
- * of a few overlapping balls in two greens. Trees vary their canopy in the
- * order they are built, so a layout looks the same on every load.
- *
- * A tree is three meshes, one per palette material, rather than one painted
- * mesh: the campus merges all its trees into one mesh per material, and that
- * merge keeps only each vertex's position and normal.
- */
-export function buildTree(): Object3D {
-  const variant = treesBuilt++;
-  // A cheap, repeatable scatter: the golden angle turns each tree's canopy.
-  const turn = variant * 2.39996;
-  const size = 0.92 + ((variant * 7) % 5) * 0.04;
-  const trunk = [
-    new CylinderGeometry(0.05, 0.085, 1.05, 10).translate(0, 0.525, 0),
-    new CylinderGeometry(0.11, 0.13, 0.05, 12).translate(0, 0.025, 0),
-  ];
-  const light: BufferGeometry[] = [
-    new SphereGeometry(0.58 * size, 18, 12).translate(0, 1.55 * size, 0),
-  ];
-  const dark: BufferGeometry[] = [];
-  const lobes = 3 + (variant % 2);
-  for (let index = 0; index < lobes; index++) {
-    const angle = turn + (index * 2 * Math.PI) / lobes;
-    const radius = (0.36 + 0.05 * ((variant + index) % 3)) * size;
-    const ball = new SphereGeometry(radius, 16, 10).translate(
-      Math.cos(angle) * 0.36 * size,
-      (1.28 + 0.12 * ((index + variant) % 2)) * size,
-      Math.sin(angle) * 0.36 * size,
-    );
-    (index % 2 === 0 ? dark : light).push(ball);
-  }
-  light.push(new SphereGeometry(0.3 * size, 14, 10).translate(0.08, 2.0 * size, -0.05));
-  const object = new Group();
-  for (const mesh of [
-    buildMergedMesh(paint("room-wood", "satin", { dl: -0.1 }), trunk),
-    buildMergedMesh(paint("room-plant", "matte"), light),
-    buildMergedMesh(paint("room-plant", "matte", { dl: -0.07, dc: 0.01 }), dark),
-  ]) {
-    if (mesh !== null) object.add(mesh);
-  }
-  return object;
-}
+import { buildPaintedMesh, placeBox } from "./architecture-shared";
 
 /** The lamppost's lantern centre, above its foot. */
 const LANTERN_HEIGHT = 2.2;
@@ -172,51 +116,6 @@ export function buildPath(width: number, length: number): Object3D {
         [paint("room-inlay-2", "satin", { dl: 0.04 }), kerbs],
         [paint("room-inlay", "matte", { dl: 0.04 }), slabs[0]],
         [paint("room-inlay", "matte", { dl: -0.02 }), slabs[1]],
-      ],
-      { cast: false },
-    )!,
-  );
-  return object;
-}
-
-/** The width of one mown stripe on a lawn. */
-const STRIPE = 1.1;
-
-/**
- * Builds a patch of lawn `width` by `depth`, its top at y = 0: mown stripes
- * in two greens along z, on a slab of soil 0.1 deep.
- */
-export function buildLawn(width: number, depth: number): Object3D {
-  const stripes: [number[], number[]] = [[], []];
-  const count = Math.max(1, Math.round(width / STRIPE));
-  const stripe = width / count;
-  for (let index = 0; index < count; index++) {
-    const ax = -width / 2 + index * stripe;
-    const bx = ax + stripe;
-    const az = -depth / 2;
-    const bz = depth / 2;
-    stripes[index % 2]!.push(ax, 0, az, ax, 0, bz, bx, 0, bz, ax, 0, az, bx, 0, bz, bx, 0, az);
-  }
-  const [mown, unmown] = stripes.map((positions) => {
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
-    geometry.setAttribute(
-      "normal",
-      new Float32BufferAttribute(
-        positions.map((_, index) => (index % 3 === 1 ? 1 : 0)),
-        3,
-      ),
-    );
-    return positions.length === 0 ? [] : [geometry];
-  }) as [BufferGeometry[], BufferGeometry[]];
-  const object = new Group();
-  object.add(
-    buildPaintedMesh(
-      [
-        // The greens lean toward the floor's colour, so a lawn is pale in a light theme and deep in a dark one.
-        [paintMix("room-plant", "room-floor", 0.3, "matte"), mown],
-        [paintMix("room-plant", "room-floor", 0.38, "matte"), unmown],
-        [paint("room-wood", "matte", { dl: -0.12 }), [buildSlabSides(width, depth, 0.1)]],
       ],
       { cast: false },
     )!,

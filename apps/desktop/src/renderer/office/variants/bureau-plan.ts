@@ -29,7 +29,7 @@ export interface Rect {
 }
 
 /** The rows of the plan a room can sit in, plus the corridors. */
-export type Band = "north-code" | "south-code" | "back" | "front" | "hall";
+type Band = "north-code" | "south-code" | "back" | "front" | "hall";
 
 export type Side = "north" | "south" | "east" | "west";
 
@@ -59,7 +59,7 @@ export interface PlannedRoom extends RoomRequest {
 }
 
 /** A doorway in a wall: its centre along the wall's axis, in world metres, and its width. */
-export interface Doorway {
+interface Doorway {
   readonly at: number;
   readonly width: number;
 }
@@ -109,12 +109,12 @@ export interface PlanRequest {
 }
 
 /** The corridors' widths. Two colleagues pass each other with room to spare. */
-export const ARCADE_WIDTH = 2.0;
-export const GALLERY_WIDTH = 2.2;
-export const EAST_HALL_WIDTH = 2.2;
+const ARCADE_WIDTH = 2.0;
+const GALLERY_WIDTH = 2.2;
+const EAST_HALL_WIDTH = 2.2;
 /** A room's door, and the Lobby's front door. */
-export const DOOR_WIDTH = 1.0;
-export const FRONT_DOOR_WIDTH = 1.4;
+const DOOR_WIDTH = 1.0;
+const FRONT_DOOR_WIDTH = 1.4;
 /** The opening from the Lobby into the Gallery. */
 const LOBBY_OPENING = 2.6;
 

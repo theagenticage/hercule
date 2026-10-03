@@ -22,7 +22,7 @@ import { isHiddenByWall, isShown } from "./camera-rig";
 import type { ColleagueRig } from "./contracts";
 
 /** The key under which a rig's root object stores its colleague's id. */
-export const COLLEAGUE_ID = "colleagueId";
+const COLLEAGUE_ID = "colleagueId";
 
 export interface Picker {
   /** Returns the id of the colleague drawn at a point of the canvas, or null. */

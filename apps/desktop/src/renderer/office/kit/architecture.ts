@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the office's architecture: floors, walls, columns, signs, the
+ * PROTOTYPE - the office's architecture: floors, walls, signs, the
  * lift, the tubes, and the outdoors. The layouts import every builder from
  * this module; the larger builders live in `architecture-<topic>.ts` files
  * next to it and are re-exported here.
@@ -46,17 +46,17 @@ import {
   placeBox,
 } from "./architecture-shared";
 
-export { buildPlaque, buildWordmark, measurePlaque } from "./architecture-signs";
-export { buildLamppost, buildLawn, buildPath, buildTree } from "./architecture-outdoors";
+export { buildPlaque } from "./architecture-signs";
+export { buildLamppost, buildPath } from "./architecture-outdoors";
 
 /** The thickness of every wall. */
 export const WALL_THICKNESS = 0.12;
 /** The clear height of a doorway. */
-export const DOOR_HEIGHT = 1.72;
+const DOOR_HEIGHT = 1.72;
 /** The width of one window. */
-export const WINDOW_WIDTH = 0.8;
+const WINDOW_WIDTH = 0.8;
 /** The distance between the centres of two windows on a wall. */
-export const WINDOW_PITCH = 1.7;
+const WINDOW_PITCH = 1.7;
 
 // ---------------------------------------------------------------------------
 // Floors.
@@ -190,7 +190,7 @@ export function buildFloor(
 // Walls.
 
 /** What a wall has: its height, its doors and windows, and whether the camera may lower it. */
-export interface WallOptions {
+interface WallOptions {
   /** Default WALL_HEIGHT. */
   readonly height?: number;
   /** The doorways, by their centre's distance from the wall's middle along x, and their width. */
@@ -604,60 +604,4 @@ function fanArc(radius: number, bar: number): BufferGeometry {
     );
   }
   return mergeParts(parts)!;
-}
-
-// ---------------------------------------------------------------------------
-// Columns.
-
-/**
- * Builds a Deco pilaster `height` tall, 0.37 across at its capital: a dark
- * stepped base, a fluted shaft, and a stepped capital with a brass band.
- * Free-standing it reads as a square column; set into a wall, as a pilaster.
- */
-export function buildColumn(height: number = WALL_HEIGHT): Object3D {
-  const object = new Group();
-  const base: BufferGeometry[] = [placeBox(0.37, 0.08, 0.37), placeBox(0.32, 0.06, 0.32, 0, 0.08)];
-  const shaft: BufferGeometry[] = [];
-  const brass: BufferGeometry[] = [];
-  const shaftBottom = 0.14;
-  const shaftTop = height - 0.3;
-  const core = 0.24;
-  shaft.push(placeBox(core, shaftTop - shaftBottom, core, 0, shaftBottom));
-  // Four fillets per face stand proud of the core; the gaps between them read as flutes.
-  const fillet = 0.026;
-  for (let face = 0; face < 4; face++) {
-    for (let index = 0; index < 4; index++) {
-      const along = -core / 2 + fillet / 2 + (index * (core - fillet)) / 3;
-      const geometry = placeBox(
-        fillet,
-        shaftTop - shaftBottom,
-        0.016,
-        along,
-        shaftBottom,
-        core / 2,
-      );
-      shaft.push(geometry.rotateY((face * Math.PI) / 2));
-    }
-  }
-  brass.push(placeBox(0.285, 0.03, 0.285, 0, shaftTop));
-  brass.push(placeBox(0.3, 0.012, 0.3, 0, shaftBottom - 0.006));
-  const steps = [
-    { size: 0.27, rise: 0.08 },
-    { size: 0.31, rise: 0.07 },
-    { size: 0.35, rise: 0.06 },
-  ];
-  let y = shaftTop + 0.03;
-  for (const step of steps) {
-    shaft.push(placeBox(step.size, step.rise, step.size, 0, y));
-    y += step.rise;
-  }
-  base.push(placeBox(0.37, height - y, 0.37, 0, y));
-  object.add(
-    buildPaintedMesh([
-      [paint("room-inlay-2", "gloss"), base],
-      [paint("room-wall", "satin"), shaft],
-      [paint("brass", "brass"), brass],
-    ])!,
-  );
-  return object;
 }

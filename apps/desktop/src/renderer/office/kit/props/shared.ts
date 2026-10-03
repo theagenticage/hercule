@@ -63,7 +63,7 @@ export interface Placement {
 }
 
 /** Builds the matrix that moves a part from its own space into its prop's space. */
-export function buildPlacementMatrix(placement: Placement): Matrix4 {
+function buildPlacementMatrix(placement: Placement): Matrix4 {
   const rotation = new Quaternion().setFromEuler(
     new Euler(placement.rx ?? 0, placement.ry ?? 0, placement.rz ?? 0, "YXZ"),
   );
@@ -115,7 +115,7 @@ export function paintSurface(surface: Surface): ReturnType<typeof paint> {
 }
 
 /** The surfaces of a prop that share a finish and whether they cast a shadow, merged into one geometry. */
-export interface SurfaceBatch {
+interface SurfaceBatch {
   readonly finish: Finish;
   readonly shadow: boolean;
   /** Every part of the batch's surfaces, with each surface's colour painted into its vertices. */
@@ -123,7 +123,7 @@ export interface SurfaceBatch {
 }
 
 /** A surface that changes at runtime, merged into a geometry of its own. */
-export interface SeparateSurface {
+interface SeparateSurface {
   readonly surface: Surface;
   readonly geometry: BufferGeometry;
 }

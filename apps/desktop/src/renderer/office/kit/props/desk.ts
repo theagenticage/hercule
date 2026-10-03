@@ -40,7 +40,7 @@ const DESK_SURFACES = {
 } as const satisfies Record<string, Surface>;
 
 /** The surfaces of the things that come and go on a desk: the note and the cup. */
-export const EXTRA_SURFACES = {
+const EXTRA_SURFACES = {
   note: { token: "you", finish: "paper", shadow: false },
   china: { token: "room-paper", finish: "gloss", shadow: false },
   tisane: {
@@ -52,21 +52,21 @@ export const EXTRA_SURFACES = {
 } as const satisfies Record<string, Surface>;
 
 /** The lit green glass of a banker's lamp: the book's `--lamp-on`, a touch lighter and yellower than the dark glass. */
-export function paintLitShade() {
+function paintLitShade() {
   return paint("room-lamp", "glow", { dl: 0.06, dc: -0.01, dh: -4 });
 }
 
 // ---------------------------------------------------------------------------
 // Parts shared by several props: the chair, the banker's lamp, the cup.
 
-export type ChairSurface = "wood" | "fabric";
+type ChairSurface = "wood" | "fabric";
 
 /**
  * Adds a clerk's chair: a round upholstered seat on four legs, with a curved
  * wooden back. Its seat's centre is at the origin, its top at `SEAT_HEIGHT`,
  * and its sitter faces +z.
  */
-export function addChairParts(parts: PartSink<ChairSurface>): void {
+function addChairParts(parts: PartSink<ChairSurface>): void {
   const seatTop = SEAT_HEIGHT;
   parts.add("fabric", buildBlock(0.44, 0.075, 0.42, 0.035, 2), { y: seatTop - 0.075 });
   parts.add("wood", buildBlock(0.42, 0.05, 0.4, 0.018, 1), { y: seatTop - 0.12 });
@@ -103,7 +103,7 @@ export function addChairParts(parts: PartSink<ChairSurface>): void {
   }
 }
 
-export type LampSurface = "brass" | "shade";
+type LampSurface = "brass" | "shade";
 
 /** Builds a banker's lamp's shade: half a capsule lying along x, flat underneath. */
 function buildShadeGeometry() {
@@ -128,7 +128,7 @@ const SHADE_HEIGHT = 0.21;
  * A lamp with no tilt hangs its shade level over the stem, to light both sides
  * of a table.
  */
-export function addBankersLampParts(parts: PartSink<LampSurface>, tilt = 0.28): void {
+function addBankersLampParts(parts: PartSink<LampSurface>, tilt = 0.28): void {
   parts.add(
     "brass",
     buildLathe([
@@ -159,7 +159,7 @@ const readPoolGeometry = memoizeByKey((size: string) => {
  * Builds the pool of light a lit banker's lamp throws, `width` by `depth`,
  * lying flat and centred at the origin. It starts hidden.
  */
-export function buildPoolMesh(width: number, depth: number): Mesh {
+function buildPoolMesh(width: number, depth: number): Mesh {
   const mesh = new Mesh(readPoolGeometry(`${width}x${depth}`), readPoolMaterial());
   mesh.renderOrder = 1;
   mesh.visible = false;
@@ -167,7 +167,7 @@ export function buildPoolMesh(width: number, depth: number): Mesh {
   return mesh;
 }
 
-export type CupSurface = "china" | "tisane";
+type CupSurface = "china" | "tisane";
 
 /** Adds a cup of tisane on its saucer, standing at the origin, its handle toward +x. */
 export function addCupParts(parts: PartSink<CupSurface>): void {
@@ -336,7 +336,7 @@ const readCupGeometry = memoize(() => {
 });
 
 /** Adds an instance of `merged` that shows only while it is switched on. Returns its group. */
-export function addToggle<S extends string>(
+function addToggle<S extends string>(
   parent: Object3D,
   merged: MergedProp<S>,
   x: number,

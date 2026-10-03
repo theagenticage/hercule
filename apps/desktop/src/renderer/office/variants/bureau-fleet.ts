@@ -85,7 +85,7 @@ export function buildDirectory(world: World): Object3D {
 }
 
 /** The desk tags: one object holding every tag, and what frees the plaques they were cut from. */
-export interface DeskTags {
+interface DeskTags {
   readonly object: Object3D;
   dispose(): void;
 }

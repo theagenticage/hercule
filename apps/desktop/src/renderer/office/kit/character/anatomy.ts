@@ -246,8 +246,3 @@ export function readAnatomy(style: CharacterStyle, shape: Shape): Anatomy {
   }
   return anatomy;
 }
-
-/** Returns the height of the top of the egg above the floor when the colleague stands. */
-export function measureStandingHeight(anatomy: Anatomy): number {
-  return anatomy.standingPelvis + anatomy.neck.y + anatomy.egg.height;
-}

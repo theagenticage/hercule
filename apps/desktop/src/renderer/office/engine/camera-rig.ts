@@ -36,7 +36,7 @@ import type { Frame } from "./stage";
 import { prefersReducedMotion } from "./stillness";
 import { readOffice } from "../office-store";
 
-export interface CameraRig {
+interface CameraRig {
   /** Advances any flight or damping. Returns true while the camera moves. */
   update(frame: Frame): boolean;
   /** Flies to a view. */

@@ -41,7 +41,7 @@ import {
 import { readColor } from "../../engine/palette";
 
 /** The colours of a face, each painted into the vertices of its parts. */
-export type FaceLayer = "ink" | "paper" | "badge" | "blush" | "brass";
+type FaceLayer = "ink" | "paper" | "badge" | "blush" | "brass";
 
 /** The face's layers, in vertex order. */
 const FACE_LAYERS: ReadonlyArray<FaceLayer> = ["ink", "paper", "badge", "blush", "brass"];
@@ -74,7 +74,7 @@ export function hasOpenEyes(pose: Pose): boolean {
  * without a badge. The paused and away badges are pale, as the book's
  * outlined badges are.
  */
-export function readBadgeToken(pose: Pose): "ok" | "fail" | "room-paper" | null {
+function readBadgeToken(pose: Pose): "ok" | "fail" | "room-paper" | null {
   switch (pose) {
     case "done":
       return "ok";

@@ -85,7 +85,7 @@ export function mergeParts(parts: ReadonlyArray<BufferGeometry>): BufferGeometry
 }
 
 /** How a merged mesh takes part in shadows. */
-export interface ShadowRole {
+interface ShadowRole {
   readonly cast?: boolean;
   readonly receive?: boolean;
 }
@@ -310,15 +310,10 @@ export function readCssColor(token: Token, lightness = 0): string {
   return `oklch(${String(l + lightness)} ${String(c)} ${String(h)} / ${String(alpha)})`;
 }
 
-/** The display face's CSS shorthand at a pixel size. */
-export function decoFont(pixels: number): string {
-  return `${String(pixels)}px Limelight`;
-}
-
 /**
  * Returns the UI face's CSS shorthand at a pixel size, in the app's bold
  * weight (`--w-bold`). Room names are drawn in the UI face, like every name
- * in the app; the display face is kept for the wordmark and numerals. The
+ * in the app; the display face is kept for numerals. The
  * generic family keeps a canvas drawn before the face loads in a sans-serif.
  */
 export function uiFont(pixels: number): string {
@@ -326,7 +321,7 @@ export function uiFont(pixels: number): string {
 }
 
 /** A canvas texture that redraws itself when the theme changes and when the display face arrives. */
-export interface CanvasLabel {
+interface CanvasLabel {
   readonly texture: CanvasTexture;
   readonly canvas: HTMLCanvasElement;
 }
@@ -379,28 +374,4 @@ export function buildCanvasLabel(
     void document.fonts.load(font).then(redraw);
   }
   return { texture, canvas };
-}
-
-/**
- * Returns whether the display face is ready, so a builder can measure text
- * in it. It also returns true while no stylesheet in the page declares the
- * face, because `document.fonts.check` then finds nothing to wait for: a
- * sign built before the page's stylesheets have loaded stays in a fallback
- * face.
- */
-export function isDecoFontReady(): boolean {
-  return document.fonts.check(decoFont(64));
-}
-
-/**
- * Starts loading the display face if nothing has yet, and resolves when it
- * can be drawn on a canvas. Never fails: a face that will not load leaves the
- * text in a fallback face.
- *
- * The load starts when the first sign is built, not when this module is
- * imported: a page may add the stylesheet that declares the face after the
- * kit's modules have run, and a load asked for before then finds no face.
- */
-export function waitForDecoFont(): Promise<unknown> {
-  return document.fonts.load(decoFont(64)).catch(() => undefined);
 }
