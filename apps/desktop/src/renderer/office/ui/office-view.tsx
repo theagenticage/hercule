@@ -13,6 +13,7 @@
  * in what is left of the Office.
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from "react";
+import type { OfficeLayout } from "../engine/contracts";
 import { mountOfficeScene, type OfficeScene } from "../office-scene";
 import { readOffice, subscribeOffice } from "../office-store";
 import type { World } from "../world/types";
@@ -27,15 +28,24 @@ export function OfficeView({ world }: { readonly world: World }): JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);
   const deckRef = useRef<HTMLDivElement>(null);
   const [scene, setScene] = useState<OfficeScene | null>(null);
+  // The office as built now, which the panels read the rooms from. The scene
+  // sets it after each build, so the panels follow a rebuilt office.
+  const [layout, setLayout] = useState<OfficeLayout | null>(null);
   const state = useSyncExternalStore(subscribeOffice, readOffice);
   useOfficeKeys(world);
   // The scene is built once, from the first world; later worlds go to `setWorld`.
   const firstWorld = useRef(world);
   useEffect(() => {
-    const mounted = mountOfficeScene(stageRef.current!, deckRef.current!, firstWorld.current);
+    const mounted = mountOfficeScene(
+      stageRef.current!,
+      deckRef.current!,
+      firstWorld.current,
+      setLayout,
+    );
     setScene(mounted);
     return () => {
       setScene(null);
+      setLayout(null);
       mounted.dispose();
     };
   }, []);
@@ -46,8 +56,8 @@ export function OfficeView({ world }: { readonly world: World }): JSX.Element {
     <div className="office" data-drawer={findDrawerThreadId(state) !== null}>
       <div className="office-stage" ref={stageRef} />
       <div className="office-deck" ref={deckRef}>
-        <TopBar world={world} scene={scene} />
-        <DossierCard world={world} scene={scene} />
+        <TopBar world={world} layout={layout} />
+        <DossierCard world={world} layout={layout} />
       </div>
       <ThreadDrawer />
     </div>

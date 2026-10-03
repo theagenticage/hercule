@@ -54,8 +54,6 @@ interface Built {
 /** What the page and the tools read of a mounted office. */
 export interface OfficeScene {
   readonly stage: Stage;
-  /** The office as built now. */
-  readLayout(): OfficeLayout;
   /**
    * Moves the office to a new world: the colleagues walk to their new
    * states, or the office is rebuilt when the desks changed.
@@ -107,14 +105,17 @@ function countWaiting(world: World): number {
 }
 
 /**
- * Builds the office for `world` into `container`, and returns its handle.
- * `viewport` is the element whose box is the part of the office the user
- * sees; the name tags and room labels stay inside it.
+ * Builds the office for `initialWorld` into `container`, and returns its
+ * handle. `viewport` is the element whose box is the part of the office the
+ * user sees; the name tags and room labels stay inside it. `onBuild` is
+ * called with the office's layout after every build: once here, and again
+ * whenever a new world rebuilds the office.
  */
 export function mountOfficeScene(
   container: HTMLElement,
   viewport: HTMLElement,
   initialWorld: World,
+  onBuild: (layout: OfficeLayout) => void,
 ): OfficeScene {
   const stage = new Stage(container);
   const camera = createCameraRig(stage.camera, stage.renderer.domElement, () =>
@@ -161,6 +162,7 @@ export function mountOfficeScene(
     camera.setBounds(layout.bounds);
     camera.trackWalls(layout.root);
     const lamps = findLamps(layout.root);
+    onBuild(layout);
     return {
       layout,
       rigs,
@@ -361,7 +363,6 @@ export function mountOfficeScene(
 
   return {
     stage,
-    readLayout: () => built.layout,
     setWorld(next) {
       const previous = world;
       const nextKey = computeDeskKey(next);
