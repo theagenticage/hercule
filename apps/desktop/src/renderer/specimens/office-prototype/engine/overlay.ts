@@ -6,6 +6,7 @@
 import { Vector3, type PerspectiveCamera } from "three";
 import type { ColleagueRig } from "./contracts";
 import type { TagMode } from "../office-store";
+import "./overlay.css";
 
 export interface Overlay {
   /** Places every tag at its colleague's head, as the camera now sees it. */

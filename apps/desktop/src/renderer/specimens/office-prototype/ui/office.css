@@ -19,31 +19,6 @@
   touch-action: none;
 }
 
-/* The name tags, placed over the canvas by engine/overlay.ts. */
-.office-tags {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.office-tag {
-  position: absolute;
-  top: 0;
-  left: 0;
-  padding: 2px 7px;
-  border-radius: var(--r-pill);
-  background: var(--glass-fill-thin);
-  box-shadow:
-    inset 0 0 0 1px var(--glass-rim),
-    var(--shadow-1);
-  color: var(--ink);
-  font-size: var(--t-11);
-  font-weight: var(--w-medium);
-  white-space: nowrap;
-  will-change: transform;
-}
-
 /* The prototype's variant switcher: a pill floating at the bottom centre. */
 .variant-bar {
   position: fixed;

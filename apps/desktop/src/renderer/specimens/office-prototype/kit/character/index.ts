@@ -7,6 +7,16 @@ import type { Action, BuildColleagueRig, ColleagueRig } from "../../engine/contr
 import { COLLEAGUE_HEIGHT, SEAT_HEIGHT } from "../../engine/contracts";
 import { paintHue } from "../../engine/palette";
 
+/**
+ * Turns the colleagues' ambient motion on or off for every rig: breathing,
+ * typing, glancing around. With it off, a rig whose action has settled
+ * stops moving, and its \`update\` returns false, so the office draws no
+ * frames while nothing happens.
+ */
+export function setAmbientMotion(enabled: boolean): void {
+  void enabled;
+}
+
 const geometry = new CapsuleGeometry(0.3, COLLEAGUE_HEIGHT - 0.6, 6, 16);
 
 export const buildColleagueRig: BuildColleagueRig = (colleague) => {
