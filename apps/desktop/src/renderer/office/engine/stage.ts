@@ -210,7 +210,12 @@ export class Stage {
     const target = new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new OutputPass());
+    const output = new OutputPass();
+    // The output pass draws onto the canvas, so the composer need not swap its
+    // two targets after it: the scene then always draws into the same one, and
+    // the other is never allocated on the GPU.
+    output.needsSwap = false;
+    this.composer.addPass(output);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
