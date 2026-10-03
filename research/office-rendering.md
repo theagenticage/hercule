@@ -13,29 +13,30 @@ The question: which rendering techniques let the 3D Office draw on almost no CPU
   2. **Standing still.** When nothing happens, the Office draws no frames at all. That is 0% CPU and 0 wakeups. Use it on battery.
   3. **At most 30 frames a second for ambient life.** The prototype draws at 88. Capping it cuts the CPU cost to about a third.
 - **Then the cost of one frame:**
-  - **Glass over the canvas.** `backdrop-filter` costs the GPU process about 19 points of one core.
-  - **Ambient occlusion (GTAO).** It draws the scene a second time.
+  - **Glass over the canvas.** `backdrop-filter` costs the GPU process 14-19 points of one core.
+  - **Ambient occlusion (GTAO).** It draws the scene a second time, and costs 4-8 points in each process.
   - **The number of draw calls.** It matters most at Ten times.
-- **Recommended for v1** (Today's fleet; % of one core, renderer / GPU process; all measured):
+- **Recommended for v1** (Today's fleet, camera at rest; % of one core, renderer / GPU process; all measured). These are the settings spec 17 on `spec/office-v1` now fixes: pixel ratio 2, no ambient occlusion, sun shadows drawn once, and no blur while the Office is open.
 
   | Step | Renderer | GPU process |
   |---|---|---|
-  | The prototype as it is (88 fps) | 45 | 85 |
+  | The prototype as it is (88 fps, High, glass on) | 45 | 85 |
   | + 30 fps cap | 16 | 31 |
   | + no glass over the canvas | 14 | 12 |
-  | + no ambient occlusion, pixel ratio 1.5 (the prototype's Medium) | 9-10 | 7-8 |
+  | + no ambient occlusion, sun shadows drawn once (the v1 settings) | 9 | 8 |
   | Standing still (on battery, between happenings) | 0 | 0 |
 
-  That is about 17 points of one core in total, against 130 today. It takes a few hours to build.
+  That is about 17 points of one core in total, against 130 today. It takes a few hours to build. The fourth row comes from a later session; within that session, the same step took High without glass from 16.6 / 15.2 to 9.1 / 7.7.
+- **Glass, if it comes back:** the v1 settings with all of the prototype's glass read 7.9 / 21.8, and with glass on the top bar only 9.2 / 11.6. Glass on the top bar alone costs about a quarter of all the glass.
 - **For later:** merging the building's meshes (it matters at Ten times), the building cached into a texture, instanced skinned characters, impostors and LOD, and baked light.
-- **Measured, not estimated:** every number in the tables below, on one M4 Max. Each row was run twice, interleaved. Estimates are marked as estimates.
+- **Measured, not estimated:** every number in the tables below, on one M4 Max. The main tables ran each row twice, interleaved; the rest ran once, and each table says which. Estimates are marked as estimates.
 
 ## How to read the numbers
 
 - **The machine:**
   - Apple M4 Max, 16 logical CPUs, macOS 15.8, Electron 44.4.5 (Chromium 152);
   - the built-in display at 120 Hz, on AC power;
-  - load average 6 to 7.6, from other work on the machine.
+  - load average between 3.9 and 7.6, from other work on the machine. The later sessions were quieter than the first, so each table says which session it comes from, and the second session repeats two rows of the first as a bridge.
 - **The window** is 1440 x 900 points on the built-in display. The canvas is 2336 x 1744 pixels at pixel ratio 2.
 - **The scene** is the prototype's Bureau floor:
   - Calm liveliness, day light, Smart name tags, Bean characters;
@@ -44,10 +45,10 @@ The question: which rendering techniques let the 3D Office draw on almost no CPU
 - **The fleets:**
   - Today: 16 sessions;
   - Ten times: 142 sessions.
-- **CPU is in % of one core.** 100 means one core busy all the time. "Renderer" is the page's process. "GPU process" is Chromium's process that draws the window and talks to the GPU. The browser process stayed at 1-2% in every run, so the tables leave it out.
+- **CPU is in % of one core.** 100 means one core busy all the time. "Renderer" is the page's process. "GPU process" is Chromium's process that draws the window and talks to the GPU. The browser process stayed between 0.2 and 2% in every run, so the tables leave it out.
 - **Wakeups** are interrupt wakeups a second, the number Activity Monitor shows.
 - **GPU time** is the GPU's own time for one frame, from a timer query. It is only comparable between runs at the same frame rate, because the GPU clocks down when it has little to do.
-- **Spread.** Two runs of the same row differed by up to about 1.5 points of CPU. A difference smaller than that is noise.
+- **Spread.** Two runs of the same row differed by up to about 2 points of CPU. A difference smaller than that is noise.
 - **A slower Mac costs more.** A MacBook Air has a much smaller GPU. Its GPU time per frame will be several times higher. The ranking should hold; the absolute numbers will not.
 
 ## The ranked list
@@ -59,9 +60,9 @@ Ranked by what each saves on its own, at Today's fleet, from the prototype as it
 | 1 | No frames while hidden, minimized or covered | Everything: 0% and 0 wakeups, hidden and covered. Minimized not measured | Nothing, if `backgroundThrottling` stays on and frames come from rAF | Already true |
 | 2 | Stand still when nothing happens (on battery) | Everything between happenings: 0% and 0 wakeups | Colleagues freeze between happenings | 1 hour, with `navigator.getBattery()` |
 | 3 | 30 fps cap for ambient life | 45 → 16 renderer, 85 → 31 GPU process (about 130 → 47) | Ambient motion is less smooth; the camera can still glide at full rate | Under 1 hour |
-| 4 | No `backdrop-filter` over the canvas | 19 points of the GPU process (31 → 12) | The top bar and room labels lose their glass; use a solid or translucent fill | Under 1 hour |
-| 5 | No live ambient occlusion | Draw calls halve (1803 → 900); GPU time per frame drops by more than half; renderer about -4, GPU process about -4 (from High to Medium) | Less contact darkness in corners and under desks | Minutes |
-| 6 | Sun shadows drawn once, not every frame | Renderer about -1.5, GPU process about -1.3; draw calls 1803 → 1149 | Colleagues cast no sun shadow, unless blob shadows are added | Under 1 hour, plus blob shadows |
+| 4 | No `backdrop-filter` over the canvas | 14-19 points of the GPU process (31 → 12 at High; 21.8 → 7.7 at the v1 settings). Glass on the top bar only costs about 4 | The top bar and room labels lose their glass; use a solid fill | Under 1 hour |
+| 5 | No live ambient occlusion | Renderer 16.6 → 9.2, GPU process 15.2 → 7.6 (in one session); draw calls 1800 → 900; GPU time 8.4 → 4.9 ms | Less contact darkness in corners and under desks | Minutes |
+| 6 | Sun shadows drawn once, not every frame | With AO: renderer about -1.5, GPU process about -1.3, draw calls 1803 → 1149. Without AO: 0 to -2, within the spread; draw calls 900 → 573 | Colleagues cast no sun shadow, unless blob shadows are added | Under 1 hour, plus blob shadows |
 | 7 | Merging static meshes by material | At Today: renderer about -2. At Ten times: renderer 25 → 15, draw calls 2620 → 598 (with static shadows) | Memory (see below), coarser frustum culling; walls that drop away need care | Half a day to a day |
 | 8 | The building cached into colour and depth textures | At High's look: renderer 14 → 7, GPU process 12 → 5.5, 51 draw calls, GPU time 0.6 ms | Redraws every frame while the camera moves or follows a colleague; colleagues lose sun shadow and AO; every change must invalidate the cache | 1-2 days |
 | 9 | Lower pixel ratio | Pixel ratio 1 at High: GPU time per frame -28%; CPU unchanged | A softer picture on Retina | Minutes |
@@ -81,9 +82,10 @@ Ranked by what each saves on its own, at Today's fleet, from the prototype as it
 3. **No ambient occlusion.**
 4. **Sun shadows drawn once,** and again only when the building, the light or the theme changes. Optionally a blob shadow under each colleague.
 5. **Keep `backgroundThrottling` on,** and keep the loop on rAF, so hidden and covered windows cost nothing.
-6. **Glass off over the canvas,** if the design allows it. Spec 17 on `spec/office-v1` keeps the glass on the top bar and the room labels instead, and records its cost. See "Glass" below for why removing only some of it probably saves little.
+6. **No glass over the canvas.** Spec 17 on `spec/office-v1` now decides this: the window draws no blur while the Office is open.
+7. **Pixel ratio 2,** as spec 17 fixes it. Pixel ratio 1.5 (the prototype's Medium) measured no cheaper in CPU (8.8 / 7.2 against 9.2 / 7.6 in one session).
 
-Expected (measured as "medium" and "high-noao" below): renderer about 9-14 and GPU process about 7-12 at Today's fleet, at 30 fps, camera at rest. Glass on adds about 19 to the GPU process. With pixel ratio 2 kept, see the "high-noao" rows.
+Expected, measured as "v1" in the later-session table below: renderer about 9 and GPU process about 8 at Today's fleet, at 30 fps, camera at rest. All of the prototype's glass would add about 14 to the GPU process; glass on the top bar only, about 4. At Ten times: renderer about 21 and GPU process about 15 (one run). Merging the building is the next step there.
 
 **Leave for later, in this order:**
 
@@ -112,8 +114,6 @@ All at High quality, glass off, 30 fps cap from rAF, unless the row says otherwi
 | Pixel ratio 1 | 30.1 | 14.2 | 11.8 | 65 | 368 | 3.4 | 6.0 | 1803 | 729 |
 | Sun shadows drawn once | 30.0 | 12.7 | 10.8 | 71 | 414 | 2.8 | 7.8 | 1149 | 731 |
 | Merged | 30.1 | 12.1 | 12.2 | 61 | 413 | 2.4 | 8.4 | 777 | 857 |
-| HIGH_NOAO_ROW
-| HIGH_NOAO_MS_ROW
 | Medium (no AO, pixel ratio 1.5, 2048 shadow map) | 29.9 | 9.9 | 7.9 | 68 | 329 | 2.1 | 3.1 | 900 | 727 |
 | Medium, again | 30.0 | 9.0 | 7.2 | 68 | 362 | 1.9 | 3.8 | 900 | 727 |
 | Medium, sim and skeletons at 15 Hz | 29.9 | 8.7 | 7.3 | 72 | 364 | 1.9 | 4.1 | 900 | 726 |
@@ -132,6 +132,37 @@ What the table shows:
 - **Evening light** doubles the GPU time per frame at Medium (3 → 6 ms), from the lamps' point lights. The CPU does not change.
 - **Working set** grows by about 130 MB with merging. The spike keeps the original meshes' geometry after merging, so part of that rise is the spike's, not merging's. A real merge would dispose of the originals.
 
+### Today's fleet, later sessions: the v1 settings and the glass
+
+Two later sessions measured the settings spec 17 fixes for v1 (pixel ratio 2, no AO, sun shadows drawn once) and the glass. Glass off and 30 fps cap from rAF unless the row says otherwise.
+
+- **21:58-22:04:** each row twice, interleaved; the mean is shown.
+- **21:21-21:24:** "High, no AO" twice; the other two rows once.
+
+The first two rows of the 21:58 session repeat rows of the table above, as a bridge. "High, AO" read 2-3 points higher than in the first session, and Medium about 1 point lower. So compare rows within one session, not across sessions.
+
+| Row | fps | Renderer % | GPU process % | Renderer wakeups/s | GPU wakeups/s | JS ms/frame | GPU ms/frame | Draw calls | Working set MB |
+|---|---|---|---|---|---|---|---|---|---|
+| **21:58 session** | | | | | | | | | |
+| High, AO (the "Cap" row above) | 30.0 | 16.6 | 15.2 | 73 | 419 | 3.7 | 8.4 | 1800 | 734 |
+| Medium (as above) | 30.0 | 8.8 | 7.2 | 69 | 386 | 1.9 | 4.4 | 900 | 727 |
+| High, no AO | 30.0 | 9.2 | 7.6 | 69 | 403 | 1.9 | 4.9 | 899 | 737 |
+| v1: High, no AO, shadows once | 30.0 | 9.1 | 7.7 | 66 | 389 | 1.8 | 4.7 | 573 | 481-779 |
+| v1, glass on the top bar only | 30.0 | 9.2 | 11.6 | 68 | 290 | 1.8 | 4.5 | 573 | 777 |
+| v1, all glass on | 30.0 | 7.9 | 21.8 | 61 | 294 | 1.6 | 4.0 | 570 | 786 |
+| **21:21 session** | | | | | | | | | |
+| High, no AO | 30.0 | 8.5 | 6.8 | 65 | 389 | 2.0 | 4.9 | 900 | 729 |
+| v1: High, no AO, shadows once (once) | 30.0 | 6.7 | 5.6 | 66 | 351 | 1.5 | 4.5 | 573 | 724 |
+| v1, merged (once) | 30.0 | 5.2 | 4.4 | 74 | 373 | 1.0 | 4.6 | 233 | 847 |
+
+What the table shows:
+
+- **AO is the biggest cost of a frame** once the cap and the glass are dealt with: 16.6 / 15.2 with it, 9.2 / 7.6 without, in this session.
+- **Pixel ratio 2 costs no more CPU than 1.5.** High without AO and Medium read the same in both processes. Only the GPU time differs (4.9 against 4.4 ms).
+- **Shadows drawn once save little without AO.** 9.2 / 7.6 against 9.1 / 7.7 in one session, 8.5 / 6.8 against 6.7 / 5.6 (one run) in the other. The draw calls fall from 900 to 573 either way.
+- **The v1 row's two runs spread more than the others:** renderer 7.6-10.6, GPU process 6.5-8.9. The working set read 481 MB in one run and 779 MB in the other; the reason is unknown.
+- **Glass on the top bar only costs about 4 points,** against 14 for all of the glass. See "Glass over the canvas".
+
 ### Ten times fleet (142 sessions)
 
 One run each, so the spread is unknown; read differences under 2 points as noise. Glass off and 30 fps cap from rAF unless the row says otherwise.
@@ -145,7 +176,8 @@ One run each, so the spread is unknown; read differences under 2 points as noise
 | Medium, merged, shadows once | 30.1 | 14.6 | 10.3 | 66 | 373 | 3.6 | 4.5 | 598 | 1292 |
 | Medium, merged, shadows once, sim at 15 Hz | 30.0 | 14.6 | 11.0 | 64 | 383 | 3.6 | 5.0 | 598 | 1284 |
 | Building cache (High's look), merged | 30.0 | 17.9 | 9.4 | 61 | 316 | 4.7 | 2.5 | 350 | 1290 |
-TENX_V1
+| v1: High, no AO, shadows once (21:58 session) | 30.0 | 21.4 | 14.9 | 70 | 400 | 5.4 | 5.3 | 1648 | 891 |
+| v1, all glass on (21:58 session) | 30.0 | 18.8 | 31.4 | 76 | 313 | 4.9 | 3.9 | 1648 | 923 |
 
 What the table shows:
 
@@ -166,7 +198,7 @@ One run each. The spike caps these frames at 30 too; v1 allows up to 60 while th
 | Medium, merged, shadows once | 30.0 | 9.3 | 6.5 | 74 | 390 | 1.2 | 4.3 | 346 | - |
 | Building cache (High's look) | 30.0 | 12.6 | 7.5 | 73 | 389 | 2.6 | 4.5 | 859 | 30 |
 | Building cache, merged | 30.0 | 10.7 | 6.8 | 77 | 385 | 1.8 | 4.4 | 346 | 30 |
-PAN_V1
+| v1, all glass on (21:58 session) | 30.1 | 11.9 | 43.4 | 82 | 398 | 1.9 | 3.6 | 856 | - |
 
 What the table shows:
 
@@ -202,15 +234,24 @@ The window-state runs were one run each, in an earlier, quieter session (the bro
 
 ### Glass over the canvas
 
-- **What it saves.** All `backdrop-filter` off: the GPU process falls from 31 to 12 points at 30 fps. The renderer does not change. Measured.
+- **What it saves (measured).** All `backdrop-filter` off, at 30 fps, camera at rest:
+  - at High with AO: the GPU process falls from 31 to 12 points;
+  - at the v1 settings: from 21.8 to 7.7.
+  - The renderer does not change.
+- **While the camera moves, glass costs far more.** The v1 settings with all glass read 43.4 in the GPU process while the camera glides (one run). Every frame then changes the whole picture under every blur. No run without glass was made in that session; Medium without glass read 6.8 while moving in an earlier one.
 - **Why it costs so much (from Chromium's source, not measured).** On macOS, Chromium can hand the canvas and the page's layers to the window server as CALayers, and then composite nothing itself. Apple offers no partial hand-off. One element anywhere in the window that cannot be a CALayer makes Chromium composite the whole window on the GPU, every frame. `backdrop-filter` is one such element. So are blend modes, masks, non-uniform corner radii, `preserve-3d`, and more than 30 render passes.
-- **So removing only some glass probably saves little.** The prototype has `backdrop-filter` on the top bar's glass, on the bottom bar and on every room label. All three were turned off together. Keeping it on the top bar alone was not measured. By the source, one remaining element is enough to lose the hand-off.
+- **Where the glass is.** In the prototype, "glass on" means `backdrop-filter` on the top bar's pills, the room labels, the selected colleague's card and the variant bar. In the app (spec 17 on `spec/office-v1`) it would be the top bar and the room labels, plus the drawer's composer and dock while the drawer is open. `glass=0` turns all of it off.
+- **Glass on the top bar only (measured, `glass=top`).** The GPU process read 11.6, against 7.7 with no glass and 21.8 with all of it. So the top bar's glass costs about 4 points, a quarter of all the glass. This contradicts what the source suggests and what spec 17 on `spec/office-v1` says ("keeping glass on only part of the Office then likely keeps most of the cost"). Both readings fit the data:
+  - The GPU process's wakeups fell to about 290 with any glass (all of it, or the top bar only), against about 390 with none. So one `backdrop-filter` does change how the window is composited, as the source says.
+  - But the CPU cost grows with how much is blurred. The room labels are about 20 blurred areas over the moving picture; the top bar is 4 pills over the empty floor.
+  - The screenshots cannot show the top bar's blur: the pills sit over the empty floor, where a blur changes no pixel (the `glass=top` and `glass=0` screenshots are identical). The wakeup change is the evidence that the filter was on.
+  - This is one session, two runs each, with the camera at rest. The top bar would also sit over a moving picture while the camera moves.
 - **Spec 17's Baseline** said "Glass costs almost nothing on this machine". That was measured over a page that changes little. It does not hold over a canvas that draws every frame. The spec on `spec/office-v1` is already amended.
 
 ### Ambient occlusion (GTAO)
 
 - **What it is.** The prototype's High quality runs three.js's `GTAOPass` in an `EffectComposer`. `GTAOPass` draws the whole scene a second time with `MeshNormalMaterial`, which repeats the matrix updates, the bone uploads and, with live shadows, the shadow maps. Then it adds 4 full-screen passes. The prototype's frame at High is: 2 scene renders, 2 shadow renders, an MSAA resolve and 5 full-screen passes.
-- **What it saves.** Draw calls halve, 1803 → 900. HIGH_NOAO_SAVING
+- **What it saves.** Draw calls halve, 1803 → 900. Measured in one session, both at High without glass: renderer 16.6 → 9.2, GPU process 15.2 → 7.6, GPU time 8.4 → 4.9 ms, JavaScript 3.7 → 1.9 ms a frame. It is the largest saving after the cap and the glass.
 - **What it costs.** Contact darkness under desks and in corners. Static shadows carry most of the depth. If AO comes back, it comes back through the building cache, drawn once when the camera rests.
 
 ### Shadows drawn once
@@ -396,34 +437,40 @@ One table per Office measurement:
 
 ## Surprises, and where this contradicts the spec or the ticket
 
-- **`percentCPUUsage` is not a share of one core.** Electron divides it by the number of logical CPUs. `apps/desktop/scripts/perf.ts` records it as `cpuPercent`, so its CPU numbers read a sixteenth of the share of one core on this Mac. Spec 17's "the spinner, 0.8% of a core in the GPU process" probably came from it (about 13% of one core, if so). Before `perf.ts` checks the Office's CPU limits, it should use `cumulativeCPUUsage`, as spec 17 on `spec/office-v1` now says.
-- **Glass over a live canvas is expensive.** About 19 points of one core in the GPU process at 30 fps. Spec 17's Baseline said glass costs almost nothing; that holds only over a still page. Already amended on `spec/office-v1`.
+- **`percentCPUUsage` is not a share of one core.** Electron divides it by the number of logical CPUs. `apps/desktop/scripts/perf.ts` records it as `cpuPercent`, so its CPU numbers read a sixteenth of the share of one core on this Mac. Spec 17's "the spinner, 0.8% of a core in the GPU process" probably came from it (about 13% of one core, if so); [#339](https://github.com/theagenticage/hercule/issues/339), the Office's measuring script, takes it up. Before `perf.ts` checks the Office's CPU limits, it should use `cumulativeCPUUsage`, as spec 17 on `spec/office-v1` now says.
+- **Glass over a live canvas is expensive.** 14-19 points of one core in the GPU process at 30 fps with the camera at rest, and about 43 in all while the camera moves. Spec 17's Baseline said glass costs almost nothing; that holds only over a still page. Already amended on `spec/office-v1`.
+- **Glass on the top bar only costs about a quarter of all the glass** (about 4 points of the GPU process), not most of it as Chromium's source suggests and spec 17 on `spec/office-v1` says. Its wakeups match all-glass, so the compositing does change; the cost follows the blurred area. This matters for [#341](https://github.com/theagenticage/hercule/issues/341).
+- **The cost of ambient occlusion moved between sessions.** High against Medium, without glass, read about 4 points apart in each process in the first session, and about 8 in the 21:58 session. Both ran twice, interleaved. The cause of the gap is unknown, so take AO's cost as 4-8 points in each process.
 - **A 30 fps Office cannot meet the idle budget.** It wakes the renderer about 65 times a second and the GPU process 300-430 times, whatever a frame costs. Only standing still meets it. Spec 17 on `spec/office-v1` now gives the Office its own budget row.
 - **The GPU process costs more than the renderer** in most rows. A budget on the renderer alone would miss the larger half.
 - **A timer loop saves nothing** against a rAF loop that skips frames. The display link keeps running either way.
 - **A blurred window is not throttled.** That matches the ticket's decision (an unfocused window keeps 30 fps), so nothing needs to be built.
-- **The ticket assumed battery needs main.** It does not: `navigator.getBattery()` works in the renderer.
+- **Battery needs no IPC.** The Electron docs suggest `powerMonitor`, which lives in main, but `navigator.getBattery()` works in the renderer.
 - **Following a walking colleague defeats the building cache,** because the camera moves every frame.
 - **`powerPreference` and 15 Hz sim** do nothing measurable on this machine.
 
 ## What was measured and what was estimated
 
-- **Measured,** on the machine above, two interleaved rounds per row: every row of every table under "Measured results", the loop comparison, the window states except minimized, `getBattery()`, and the screenshot diffs of the building cache.
-- **Measured once:** MEASURED_ONCE
+- **Measured,** on the machine above, two interleaved rounds per row: the first Today table, and the 21:58 session of the later-sessions table. Also measured: the loop comparison, `getBattery()`, and the screenshot diffs of the building cache.
+- **Measured once:** the Ten times table, the camera-moving table, the window states, and the rows marked "once" in the later-sessions table.
 - **From source, not measured:** why glass costs what it does (delegated compositing), the display link's 20-vsync keep-alive, minimized being treated as hidden, the occlusion checker's details, three.js's bone uploads per `render()`.
 - **Estimated:** instanced skinning, impostors and LOD, baked light, `BatchedMesh`, `matrixAutoUpdate`, blob shadows, partial redraws, and every number for a Mac other than this one.
 - **Not measured:** GPU power in milliwatts (needs `sudo powermetrics`), battery drain, minimized windows, a window covered by another app, unplugging the power.
 
 ## The spike
 
-Branch `spike/office-rendering`, local only, on top of `prototype/office-3d`. It adds URL switches to the prototype, and the harness.
+Branch `spike/office-rendering`, local only, on top of `prototype/office-3d` (6fcb3634). It adds URL switches to the prototype, and the harness, in two commits:
+
+- `42db434c`: the switches and the harness;
+- `ff149158`: the `ao=off` and `glass=top` switches, and a harness that also reads a blank page.
 
 Switches, read from the page's URL in `engine/stage.ts`:
 
 | Switch | What it does |
 |---|---|
 | `cap=raf\|timer\|timerraf`, `fps=` | Caps the frame rate with one of the three loops (default 30) |
-| `glass=0` | Turns off every `backdrop-filter` in the Office |
+| `glass=0` | Sets `--glass-filter: none` on the root element, so every `backdrop-filter` in the page reads `none`: the top bar's pills, the card, the room labels and the variant bar. The fills and `--glass-level` stay. This is the path the app takes at glass level 0 (`base.css`) |
+| `glass=top` | Glass on the top bar's pills only, `none` everywhere else |
 | `quality=medium` | The prototype's Medium: pixel ratio 1.5, 2048 shadow map, no AO |
 | `ao=off` | No ambient occlusion, at any quality |
 | `pr=` | Sets the pixel ratio |
