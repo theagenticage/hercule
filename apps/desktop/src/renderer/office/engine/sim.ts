@@ -226,10 +226,22 @@ interface Actor {
   loungeSeat: Seat | null;
   /** Frees the disc it holds in the queue. */
   releaseDisc: (() => void) | null;
+  /** The ids of the sim timers its script waits on. */
   readonly timers: Set<number>;
   /** The rejecters of the promises its script awaits, so a cancel can fail them. */
   readonly pending: Set<(error: Error) => void>;
   walkCadence: number;
+}
+
+/** A timer on the sim's clock, which counts only the time the window is shown. */
+interface SimTimer {
+  readonly callback: () => void;
+  /** The time left to wait, as of `startedAt`, in ms. */
+  remainingMs: number;
+  /** When the browser timer last started, by `performance.now()`. */
+  startedAt: number;
+  /** The browser timer while the window is shown. */
+  handle: number;
 }
 
 /** What the lab reads of the sim, besides the contract. */
@@ -413,13 +425,15 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   const actors = new Map<string, Actor>();
   const queue: Array<Actor | null> = spots.queue.map(() => null);
   const loungeTaken = new Map<Seat, Actor>();
-  const timers = new Set<number>();
+  const timers = new Map<number, SimTimer>();
+  let lastTimerId = 0;
   const warned = new Set<string>();
   let disposed = false;
   let liveliness: 0 | 1 | 2 = 0;
   let happeningTimer = 0;
   let glanceTimer = 0;
   let adaVisitScheduled = false;
+  let adaVisitTimer = 0;
   let nextTicket = 0;
   // The colleagues' states the UI reads. The map is replaced on every change,
   // never edited, so a reader sees a change as a new map.
@@ -436,23 +450,58 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   const scratch = new Vector3();
 
   // -- Timers --------------------------------------------------------------
+  //
+  // The sim's timers count only the time the window is shown. While it is
+  // hidden, no frames are drawn, so a walk stands still where it is; the
+  // timers stand still with it, so no happening starts unseen and nothing
+  // jumps ahead when the window is shown again.
+
+  /** Starts the browser timer for the time `timer` has left. */
+  const armTimer = (id: number, timer: SimTimer): void => {
+    timer.startedAt = performance.now();
+    timer.handle = window.setTimeout(() => {
+      timers.delete(id);
+      timer.callback();
+    }, timer.remainingMs);
+  };
+
+  /** Runs `callback` once the window has been shown for `seconds`. Returns the timer's id. */
+  const startTimer = (seconds: number, callback: () => void): number => {
+    const id = ++lastTimerId;
+    const timer: SimTimer = { callback, remainingMs: seconds * 1000, startedAt: 0, handle: 0 };
+    timers.set(id, timer);
+    if (!document.hidden) armTimer(id, timer);
+    return id;
+  };
+
+  /** Stops a timer `startTimer` started. Does nothing when it already ran or was stopped. */
+  const stopTimer = (id: number): void => {
+    const timer = timers.get(id);
+    if (timer === undefined) return;
+    window.clearTimeout(timer.handle);
+    timers.delete(id);
+  };
+
+  /** Holds every timer while the window is hidden, and starts them again for what they had left. */
+  const onVisibilityChange = (): void => {
+    for (const [id, timer] of timers) {
+      window.clearTimeout(timer.handle);
+      if (document.hidden) {
+        timer.remainingMs = Math.max(0, timer.remainingMs - (performance.now() - timer.startedAt));
+      } else {
+        armTimer(id, timer);
+      }
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   /** Runs `callback` after `seconds`, and draws a frame for what it changes. */
-  const schedule = (seconds: number, callback: () => void): number => {
-    const timer = window.setTimeout(() => {
-      timers.delete(timer);
+  const schedule = (seconds: number, callback: () => void): number =>
+    startTimer(seconds, () => {
       if (disposed) return;
       callback();
       stage.requestRender();
-    }, seconds * 1000);
-    timers.add(timer);
-    return timer;
-  };
-
-  const unschedule = (timer: number): void => {
-    window.clearTimeout(timer);
-    timers.delete(timer);
-  };
+    });
 
   // -- An actor's state ----------------------------------------------------
 
@@ -522,7 +571,7 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
 
   /** Cancels a colleague's script: its timers stop and every step it awaits fails. */
   const cancelScript = (actor: Actor): void => {
-    for (const timer of actor.timers) window.clearTimeout(timer);
+    for (const timer of actor.timers) stopTimer(timer);
     actor.timers.clear();
     actor.motion = null;
     const pending = [...actor.pending];
@@ -563,12 +612,12 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
         reject(new ScriptCancelled());
         return;
       }
-      const timer = window.setTimeout(() => {
+      const timer = startTimer(seconds, () => {
         actor.timers.delete(timer);
         actor.pending.delete(reject);
         stage.requestRender();
         resolve();
-      }, seconds * 1000);
+      });
       actor.timers.add(timer);
       actor.pending.add(reject);
     });
@@ -1459,13 +1508,23 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
 
     setLiveliness(level) {
       liveliness = level;
-      unschedule(happeningTimer);
-      unschedule(glanceTimer);
+      stopTimer(happeningTimer);
+      stopTimer(glanceTimer);
       scheduleHappening();
       scheduleGlance();
+      // Ada's scripted visit is ambient life too: an office that stands still
+      // does not send her, and sends her later if it comes to life again.
+      if (level === 0 && adaVisitTimer !== 0) {
+        stopTimer(adaVisitTimer);
+        adaVisitTimer = 0;
+        adaVisitScheduled = false;
+      }
       if (level > 0 && !adaVisitScheduled) {
         adaVisitScheduled = true;
-        schedule(ADA_VISIT_DELAY_SECONDS, () => triggerVisit());
+        adaVisitTimer = schedule(ADA_VISIT_DELAY_SECONDS, () => {
+          adaVisitTimer = 0;
+          triggerVisit();
+        });
       }
     },
 
@@ -1501,7 +1560,8 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
 
     dispose() {
       disposed = true;
-      for (const timer of timers) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      for (const timer of timers.values()) window.clearTimeout(timer.handle);
       timers.clear();
       for (const actor of actors.values()) {
         cancelScript(actor);

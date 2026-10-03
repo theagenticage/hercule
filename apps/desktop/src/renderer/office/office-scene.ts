@@ -7,6 +7,7 @@
  */
 import { Vector3, type Mesh, type Object3D } from "three";
 import { createCameraRig, placeCamera } from "./engine/camera-rig";
+import { addContactShadow } from "./engine/contact-shadow";
 import {
   LAMP,
   type CameraView,
@@ -20,6 +21,7 @@ import { createOverlay, type Overlay } from "./engine/overlay";
 import { createPicker, type Picker } from "./engine/picking";
 import { buildSim } from "./engine/sim";
 import { Stage } from "./engine/stage";
+import { prefersReducedMotion, watchStillness } from "./engine/stillness";
 import { buildColleagueRig, setAmbientMotion } from "./kit/character";
 import {
   OFFICE_SETTINGS,
@@ -106,6 +108,12 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
   let world = initialWorld;
   let worldKey = computeWorldKey(world);
   let built: Built;
+  // True while the Mac runs on its battery or the user asks to reduce motion:
+  // the office then stands still, whatever its liveliness. The battery's
+  // answer comes later, through `watchStillness` below.
+  let still = prefersReducedMotion();
+  /** Returns the liveliness the office runs at now. */
+  const decideLiveliness = (): 0 | 1 | 2 => (still ? 0 : OFFICE_SETTINGS.liveliness);
 
   const build = (): Built => {
     const layout = buildBureau({ world, nav: createNavBuilder() });
@@ -113,11 +121,12 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     const rigs = new Map<string, ColleagueRig>();
     for (const colleague of world.colleagues) {
       const rig = buildColleagueRig(colleague, OFFICE_SETTINGS.style);
+      addContactShadow(rig.object);
       rigs.set(colleague.id, rig);
       stage.scene.add(rig.object);
     }
     const sim = buildSim({ world, layout, rigs, stage });
-    sim.setLiveliness(OFFICE_SETTINGS.liveliness);
+    sim.setLiveliness(decideLiveliness());
     // The panels and the sidebar read the colleagues' states from the store,
     // so they follow whichever office is built now.
     publishColleagueStates(sim.readStates());
@@ -125,6 +134,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     const overlay = createOverlay(container, stage.camera, rigs, layout.rooms);
     overlay.setMode(OFFICE_SETTINGS.tags);
     stage.setShadowBounds(layout.bounds);
+    stage.setBuilding(layout.root);
     camera.setBounds(layout.bounds);
     camera.trackWalls(layout.root);
     const lamps = findLamps(layout.root);
@@ -210,7 +220,20 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     }
   };
 
-  setAmbientMotion(OFFICE_SETTINGS.liveliness > 0);
+  /**
+   * Moves the camera to `view`: a glide, or a jump while the user asks to
+   * reduce motion. The camera's own moves, such as a turn by a key, still glide.
+   */
+  const moveCamera = (view: CameraView): void => {
+    if (prefersReducedMotion()) {
+      placeCamera(stage.camera, view);
+      stage.requestRender();
+    } else {
+      camera.flyTo(view);
+    }
+  };
+
+  setAmbientMotion(decideLiveliness() > 0);
   built = build();
   switchLamps();
   focusFloor();
@@ -223,7 +246,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     azimuth: opening.azimuth - 24,
     elevation: Math.min(opening.elevation + 12, 70),
   });
-  camera.flyTo(opening);
+  moveCamera(opening);
   applySelection(null);
   // Signs drawn on canvases redraw once their typeface loads, after the first frames.
   void document.fonts.ready.then(() => stage.requestRender());
@@ -249,7 +272,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     applySelection(previous);
     if (previous.selectedId !== state.selectedId || previous.roomId !== state.roomId) {
       focusFloor();
-      camera.flyTo(decideView());
+      moveCamera(decideView());
     }
     stage.requestRender();
   });
@@ -262,11 +285,25 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
   });
   themeObserver.observe(document.documentElement, { attributeFilter: ["data-theme"] });
 
+  /** Sets the liveliness the office runs at now on the sim and on every colleague. */
+  function applyLiveliness(): void {
+    const level = decideLiveliness();
+    setAmbientMotion(level > 0);
+    built.sim.setLiveliness(level);
+    stage.requestRender();
+  }
+
+  const stopStillness = watchStillness((next) => {
+    if (next === still) return;
+    still = next;
+    applyLiveliness();
+  });
+
   const stopCommands = onOfficeCommand((command) => {
     switch (command.kind) {
       case "overview":
         setOffice({ selectedId: null, roomId: null, drawer: false });
-        camera.flyTo(built.layout.overview);
+        moveCamera(built.layout.overview);
         break;
       case "focus-room":
         setOffice({ selectedId: null, roomId: command.roomId, drawer: false });
@@ -328,6 +365,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
       canvas.removeEventListener("pointerleave", onPointerLeave);
       stopFrames();
       stopState();
+      stopStillness();
       stopCommands();
       themeObserver.disconnect();
       teardown(built);

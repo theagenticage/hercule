@@ -3,9 +3,18 @@
  * the camera, the light of the time of day, and a render loop that draws only
  * while something moves.
  *
- * The loop follows spec 17's performance rules: nothing draws unless a frame
- * listener asks for one (something moves) or `requestRender` is called (the
- * theme or the camera changed), and nothing draws while the window is hidden.
+ * The loop follows spec 17's performance rules:
+ *
+ * - nothing draws unless a frame listener asks for one (something moves) or
+ *   `requestRender` is called (the theme or the camera changed);
+ * - ambient life (colleagues walking, typing, breathing) draws at most 30
+ *   frames a second; a moving camera draws at most 60, so a glide or a drag
+ *   stays smooth, and drops back to 30 when the camera rests;
+ * - nothing draws while the window is hidden or minimized: the browser stops
+ *   calling `requestAnimationFrame` then, and the stage cancels its request.
+ *
+ * With the still building declared (`setBuilding`), the sun's shadows are
+ * drawn once and redrawn only when the building changes, not every frame.
  */
 import {
   Box3,
@@ -22,6 +31,8 @@ import {
   Vector3,
   WebGLRenderer,
   WebGLRenderTarget,
+  type Matrix4,
+  type Object3D,
   type Texture,
 } from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -30,9 +41,14 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { isDarkTheme, readColor, readToken, refreshPalette, writeOklch } from "./palette";
+import { StillBuilding } from "./still-building";
 
-/** How much the GPU is asked to do. */
-export type Quality = "low" | "medium" | "high";
+/**
+ * How much the GPU is asked to do. `auto` is what the app runs: sharp on a
+ * Retina display, with shadows that are drawn once, and never ambient
+ * occlusion, which would double the cost of every frame.
+ */
+export type Quality = "auto" | "low" | "medium" | "high";
 
 /** The light the office is drawn in. `auto` follows the theme: day in a light theme, evening in a dark one. */
 export type TimeOfDay = "auto" | "morning" | "noon" | "evening" | "night";
@@ -63,6 +79,8 @@ export interface StageStats {
   readonly textures: number;
   /** Every frame drawn since the stage started. */
   readonly framesDrawn: number;
+  /** Every time the sun's shadows were drawn since the stage started. */
+  readonly shadowsDrawn: number;
   /** The drawing buffer's size in device pixels. */
   readonly bufferSize: string;
   readonly quality: Quality;
@@ -134,10 +152,23 @@ const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
 const QUALITY: Readonly<
   Record<Quality, { readonly pixelRatio: number; readonly shadowMap: number; readonly ao: boolean }>
 > = {
+  auto: { pixelRatio: 2, shadowMap: 4096, ao: false },
   low: { pixelRatio: 1, shadowMap: 1024, ao: false },
   medium: { pixelRatio: 1.5, shadowMap: 2048, ao: false },
   high: { pixelRatio: 2, shadowMap: 4096, ao: true },
 };
+
+/** The most frames a second ambient life draws: colleagues walking, typing and breathing. */
+const AMBIENT_FRAME_RATE = 30;
+/** The most frames a second a moving camera draws, so a glide or a drag stays smooth. */
+const CAMERA_FRAME_RATE = 60;
+/**
+ * How early a frame may come and still be drawn, in ms. Animation frames come
+ * on the display's beat: a 30 frames a second cap on a 120 Hz display draws on
+ * every fourth beat, and without this slack a beat that comes a little early
+ * would push the frame to the fifth.
+ */
+const FRAME_SLACK_MS = 4;
 
 declare global {
   interface Window {
@@ -165,7 +196,22 @@ export class Stage {
   private readonly environmentTexture: Texture;
   private readonly bounds = new Box3(new Vector3(-10, 0, -10), new Vector3(10, 4, 10));
   private frameRequest = 0;
-  private quality: Quality = "high";
+  /** When the last frame was drawn, by the animation frame clock, or -Infinity before the first. */
+  private lastDrawnAt = -Infinity;
+  /**
+   * True when the next frame should come at the camera's rate rather than
+   * ambient life's: the camera moved in the last frame, or `requestRender`
+   * asked for a frame from outside the loop, such as a pointer or a key.
+   */
+  private urgent = true;
+  /** True while a frame is being drawn, so a listener asking for a frame does not make it urgent. */
+  private drawing = false;
+  /** The camera's view and projection at the last drawn frame, to tell whether it moved since. */
+  private readonly drawnCamera = { world: new Float64Array(16), projection: new Float64Array(16) };
+  /** The still building, once `setBuilding` declares it; null draws the shadows every frame. */
+  private building: StillBuilding | null = null;
+  private shadowsDrawn = 0;
+  private quality: Quality = "auto";
   private timeOfDay: TimeOfDay = "auto";
   private framesDrawn = 0;
   private recentFrames: number[] = [];
@@ -175,7 +221,9 @@ export class Stage {
 
   constructor(container: HTMLElement) {
     this.container = container;
-    this.renderer = new WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+    // No power preference: on a Mac with two GPUs, asking for high performance
+    // would wake the discrete GPU for an office that mostly holds still.
+    this.renderer = new WebGLRenderer({ antialias: false });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = NeutralToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -241,10 +289,27 @@ export class Stage {
     return () => this.listeners.delete(listener);
   }
 
-  /** Draws one more frame, unless one is already on its way or the window is hidden. */
+  /**
+   * Draws one more frame soon, unless the window is hidden. Called from
+   * outside the loop (a pointer, a key, a change of theme), the frame comes
+   * at the camera's rate, so the office answers input at once.
+   */
   requestRender(): void {
-    if (this.frameRequest !== 0 || document.hidden) return;
-    this.frameRequest = requestAnimationFrame(this.drawFrame);
+    if (!this.drawing) this.urgent = true;
+    this.scheduleFrame();
+  }
+
+  /**
+   * Declares the still building: the part of the scene that holds still, such
+   * as the walls and the furniture, but not the colleagues. The sun's shadows
+   * are then drawn only when the building changes, so nothing outside the
+   * building may cast a shadow: it would stay where it was when the shadows
+   * were last drawn. Pass null to draw the shadows every frame again.
+   */
+  setBuilding(root: Object3D | null): void {
+    this.building = root === null ? null : new StillBuilding(root);
+    this.renderer.shadowMap.autoUpdate = root === null;
+    this.redrawShadows();
   }
 
   /** Sets the quality level and draws again. */
@@ -317,20 +382,32 @@ export class Stage {
       geometries: info.memory.geometries,
       textures: info.memory.textures,
       framesDrawn: this.framesDrawn,
+      shadowsDrawn: this.shadowsDrawn,
       bufferSize: `${String(size.x)} × ${String(size.y)}`,
       quality: this.quality,
     };
   }
 
-  /** Stops drawing and frees the GPU's memory. */
+  /**
+   * Stops drawing and frees everything the stage holds on the GPU: the
+   * composer's targets and passes, the shadow map, the environment, and the
+   * WebGL context itself, so the app is back to idle once the office closes.
+   */
   dispose(): void {
     cancelAnimationFrame(this.frameRequest);
+    this.frameRequest = 0;
+    this.listeners.clear();
+    this.building = null;
     this.resizeObserver.disconnect();
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    for (const pass of this.composer.passes) pass.dispose();
     this.composer.dispose();
-    this.aoPass.dispose();
+    this.sun.shadow.dispose();
     this.environmentTexture.dispose();
     this.renderer.dispose();
+    // dispose() frees what three.js allocated, but the browser keeps the
+    // context, and its GPU process keeps working for it, until it is lost.
+    this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
   }
 
@@ -356,6 +433,13 @@ export class Stage {
     shadow.near = radius * 0.5;
     shadow.far = radius * 3.5;
     shadow.updateProjectionMatrix();
+    this.redrawShadows();
+  }
+
+  /** Draws the sun's shadows again with the next frame. */
+  private redrawShadows(): void {
+    this.renderer.shadowMap.needsUpdate = true;
+    this.requestRender();
   }
 
   private applyQuality(): void {
@@ -365,7 +449,7 @@ export class Stage {
     this.sun.shadow.map?.dispose();
     this.sun.shadow.map = null;
     this.aoPass.enabled = settings.ao;
-    this.requestRender();
+    this.redrawShadows();
   }
 
   private resize(): void {
@@ -389,8 +473,46 @@ export class Stage {
     }
   };
 
-  private readonly drawFrame = (): void => {
+  /** Asks for an animation frame, unless one is already on its way or the window is hidden. */
+  private scheduleFrame(): void {
+    if (this.frameRequest !== 0 || document.hidden) return;
+    this.frameRequest = requestAnimationFrame(this.onAnimationFrame);
+  }
+
+  /**
+   * Draws a frame when enough time has passed since the last one for the
+   * rate the office runs at now, and otherwise waits for the next beat.
+   * Waiting on animation frames rather than a timer keeps the frames evenly
+   * spaced, and the browser stops them by itself while the window is hidden.
+   */
+  private readonly onAnimationFrame = (now: number): void => {
     this.frameRequest = 0;
+    const rate = this.urgent ? CAMERA_FRAME_RATE : AMBIENT_FRAME_RATE;
+    if (now - this.lastDrawnAt < 1000 / rate - FRAME_SLACK_MS) {
+      this.scheduleFrame();
+      return;
+    }
+    this.lastDrawnAt = now;
+    this.drawFrame();
+  };
+
+  /** Records the camera's view and projection. Returns true when either differs from the last frame's. */
+  private recordCamera(): boolean {
+    const record = (matrix: Matrix4, into: Float64Array): boolean => {
+      let changed = false;
+      for (let index = 0; index < 16; index++) {
+        if (into[index] !== matrix.elements[index]) {
+          into[index] = matrix.elements[index]!;
+          changed = true;
+        }
+      }
+      return changed;
+    };
+    const moved = record(this.camera.matrixWorld, this.drawnCamera.world);
+    return record(this.camera.projectionMatrix, this.drawnCamera.projection) || moved;
+  }
+
+  private drawFrame(): void {
     const started = performance.now();
     // The first frame after a pause advances by one 60 Hz frame, not by the whole pause.
     const dt =
@@ -399,16 +521,26 @@ export class Stage {
     this.elapsed += dt;
     const frame: Frame = { dt, time: this.elapsed };
     this.renderer.info.reset();
+    this.urgent = false;
+    this.drawing = true;
     let again = false;
     for (const listener of this.listeners) again = listener(frame) || again;
+    this.drawing = false;
+    if (this.building?.detectChange() === true) this.renderer.shadowMap.needsUpdate = true;
+    if (this.renderer.shadowMap.needsUpdate || this.renderer.shadowMap.autoUpdate) {
+      this.shadowsDrawn++;
+    }
+    this.camera.updateMatrixWorld();
+    // A camera that moved in this frame will likely move in the next one too.
+    if (this.recordCamera()) this.urgent = true;
     this.composer.render(dt);
     this.framesDrawn++;
     this.recentFrames.push(performance.now());
     this.lastCpuMs = performance.now() - started;
-    if (again) {
-      this.requestRender();
+    if (again || this.urgent) {
+      this.scheduleFrame();
     } else {
       this.lastFrameAt = null;
     }
-  };
+  }
 }
