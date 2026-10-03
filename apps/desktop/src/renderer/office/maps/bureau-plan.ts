@@ -414,7 +414,10 @@ function planWalls(
           const opening = Math.min(LOBBY_OPENING, piece.to - piece.from - 1.2);
           doors.push({ at: (piece.from + piece.to) / 2, width: opening });
         }
-        if (before?.id === lobbyId && after === null) doors.push(frontDoor);
+        // The front door belongs in the lobby's south wall, the front of the
+        // building, and in none of the lobby's other outer walls.
+        const lobbyFront = axis === "x" && before?.id === lobbyId && after === null;
+        if (lobbyFront) doors.push(frontDoor);
         for (const connection of connections) {
           const ids = [before?.id, after?.id];
           if (!ids.includes(connection.between[0]) || !ids.includes(connection.between[1]))
