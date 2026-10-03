@@ -16,7 +16,7 @@
  * - Q and E turn 45 degrees, + and - zoom, F finds the followed colleague again.
  *
  * While the user asks the system to reduce motion, the camera jumps wherever
- * it would glide or fly.
+ * it would glide or fly, and a wall drops or rises at once.
  */
 import {
   Box3,
@@ -886,10 +886,14 @@ export function createCameraRig(
    *
    * A wall already cut needs a clear margin to rise again, so a wall seen
    * edge-on does not flicker during an orbit.
+   *
+   * Under Reduce motion a wall takes its new height at once instead of
+   * moving there over a quarter of a second.
    */
   const decideWalls = (): void => {
     const eye = camera.position;
     const close = followed !== null || distance.value < CLOSE_UP_DISTANCE;
+    const snap = snapWalls || prefersReducedMotion();
     for (const wall of walls) {
       const band = wall.goal > 0.5 ? -WALL_DEADBAND : WALL_DEADBAND;
       const eyeSide =
@@ -904,7 +908,7 @@ export function createCameraRig(
         cut = !wall.cutaway.exterior || eyeSide > band;
       }
       const goal = cut ? 1 : 0;
-      if (snapWalls) {
+      if (snap) {
         wall.goal = wall.progress = goal;
         setWallCut(wall, goal);
         animatingWalls.delete(wall);
