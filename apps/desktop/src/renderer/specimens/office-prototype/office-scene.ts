@@ -4,7 +4,8 @@
  * one office the current variant builds; a change of variant or character
  * style tears the office down and builds the new one in place.
  */
-import { Vector3, type Mesh, type Object3D } from "three";
+import { Mesh, Vector3, type Light, type Material, type Object3D } from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { createCameraRig, placeCamera } from "./engine/camera-rig";
 import {
   LAMP,
@@ -18,7 +19,7 @@ import { createNavBuilder } from "./engine/nav";
 import { createOverlay, type Overlay } from "./engine/overlay";
 import { createPicker, type Picker } from "./engine/picking";
 import { buildSim } from "./engine/sim";
-import { Stage } from "./engine/stage";
+import { SPIKE, STATIC_LAYER, Stage } from "./engine/stage";
 import { buildColleagueRig, setAmbientMotion } from "./kit/character";
 import {
   onOfficeCommand,
@@ -54,6 +55,60 @@ export interface OfficeScene {
 
 /** The distance a click may travel and still count as a click, not a drag. */
 const CLICK_SLOP = 5;
+
+/**
+ * SPIKE - merges the still meshes under `root` that share a material into one
+ * mesh per material, baking each mesh's place into its vertices. Lamps and
+ * walls the camera cuts away stay as they are, because they change. Returns
+ * how many meshes were merged into how many.
+ */
+function mergeStatic(root: Object3D, keep: (object: Object3D) => boolean): [number, number] {
+  root.updateMatrixWorld(true);
+  const groups = new Map<string, { material: Material; meshes: Mesh[] }>();
+  const visit = (object: Object3D): void => {
+    if (keep(object) || !object.visible) return;
+    const mesh = object as Mesh;
+    if (
+      mesh.isMesh &&
+      !(mesh as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh &&
+      !(mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh &&
+      !Array.isArray(mesh.material) &&
+      mesh.geometry.morphAttributes.position === undefined
+    ) {
+      const material = mesh.material as Material;
+      const geometry = mesh.geometry;
+      const key = [
+        material.uuid,
+        mesh.castShadow,
+        mesh.receiveShadow,
+        geometry.index === null ? "flat" : "indexed",
+        Object.keys(geometry.attributes).sort().join(","),
+      ].join("|");
+      const group = groups.get(key) ?? { material, meshes: [] };
+      group.meshes.push(mesh);
+      groups.set(key, group);
+    }
+    for (const child of object.children) visit(child);
+  };
+  visit(root);
+  let before = 0;
+  let after = 0;
+  for (const { material, meshes } of groups.values()) {
+    if (meshes.length < 2) continue;
+    const geometries = meshes.map((mesh) => mesh.geometry.clone().applyMatrix4(mesh.matrixWorld));
+    const merged = mergeGeometries(geometries);
+    if (merged === null) continue;
+    const mesh = new Mesh(merged, material);
+    mesh.castShadow = meshes[0]!.castShadow;
+    mesh.receiveShadow = meshes[0]!.receiveShadow;
+    mesh.matrixAutoUpdate = false;
+    root.add(mesh);
+    for (const original of meshes) original.removeFromParent();
+    before += meshes.length;
+    after++;
+  }
+  return [before, after];
+}
 
 /** Frees the geometry of every mesh under `root`. Materials are shared by the palette and stay. */
 function disposeGeometry(root: Object3D): void {
@@ -106,6 +161,25 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     camera.setBounds(layout.bounds);
     camera.trackWalls(layout.root);
     const lamps = findLamps(layout.root);
+    if (SPIKE.merge) {
+      const [before, after] = mergeStatic(
+        layout.root,
+        (object) => object.userData[LAMP] !== undefined || object.userData.cutaway !== undefined,
+      );
+      (window as unknown as { spikeMerged: string }).spikeMerged = `${before} -> ${after}`;
+    }
+    if (SPIKE.cache) {
+      layout.root.traverse((object) => {
+        object.layers.set(STATIC_LAYER);
+        if ((object as Light).isLight) object.layers.enableAll();
+      });
+    }
+    if (SPIKE.staticShadows) {
+      for (const rig of rigs.values())
+        rig.object.traverse((object) => {
+          object.castShadow = false;
+        });
+    }
     return {
       layout,
       rigs,
@@ -121,6 +195,7 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     const time = stage.resolveTimeOfDay();
     const on = time === "evening" || time === "night";
     for (const lamp of built.lamps) lamp.setOn(on);
+    stage.invalidateStatic();
   };
 
   // The storey the building shows now, so the frame loop can tell when the
@@ -204,10 +279,19 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
   camera.flyTo(opening);
   applySelection(null);
   // Signs drawn on canvases redraw once their typeface loads, after the first frames.
-  void document.fonts.ready.then(() => stage.requestRender());
+  void document.fonts.ready.then(() => stage.invalidateStatic());
 
+  // SPIKE - with `animhz`, the sim and the skeletons move on at that rate only.
+  let simDebt = 0;
   const stopFrames = stage.onFrame((frame) => {
-    let moving = built.sim.update(frame);
+    let moving: boolean;
+    if (SPIKE.animHz > 0) {
+      simDebt += frame.dt;
+      if (simDebt >= 1 / SPIKE.animHz - 0.004) {
+        moving = built.sim.update({ dt: simDebt, time: frame.time });
+        simDebt = 0;
+      } else moving = true;
+    } else moving = built.sim.update(frame);
     if (
       built.layout.focusFloor !== undefined &&
       state.selectedId !== null &&
@@ -215,8 +299,10 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     ) {
       focusFloor();
     }
-    moving = (built.layout.update?.(frame) ?? false) || moving;
-    moving = camera.update(frame) || moving;
+    const layoutMoving = built.layout.update?.(frame) ?? false;
+    const cameraMoving = camera.update(frame);
+    if (layoutMoving || cameraMoving) stage.invalidateStatic();
+    moving = layoutMoving || cameraMoving || moving;
     built.overlay.update();
     return moving;
   });

@@ -8,9 +8,16 @@
  * theme or the camera changed), and nothing draws while the window is hidden.
  */
 import {
+  AlwaysDepth,
   Box3,
+  DepthTexture,
   DirectionalLight,
   HalfFloatType,
+  Mesh,
+  OrthographicCamera,
+  PlaneGeometry,
+  ShaderMaterial,
+  Matrix4,
   HemisphereLight,
   NeutralToneMapping,
   PCFShadowMap,
@@ -139,6 +146,57 @@ const QUALITY: Readonly<
   high: { pixelRatio: 2, shadowMap: 4096, ao: true },
 };
 
+/**
+ * SPIKE - the power experiments, each switched by a URL parameter so one
+ * build can be measured in every combination:
+ *
+ * - `cap=raf|timer|timerraf` with `fps=30`: caps the frame rate. `raf` keeps
+ *   asking for animation frames and skips the ones that come too soon;
+ *   `timer` waits on a timer and draws in the timer's task; `timerraf` waits
+ *   on a timer and then asks for one animation frame.
+ * - `pr=1`: the pixel ratio, in place of the quality level's.
+ * - `shadows=static`: the sun's shadow map is drawn only when the building or
+ *   the light changes, and colleagues cast no shadow into it.
+ * - `cache=1`: the still building is drawn once into a colour and a depth
+ *   texture; each frame copies both to the canvas and draws only the
+ *   colleagues over them. Ambient occlusion is drawn into the copy only when
+ *   the camera rests.
+ * - `lowpower=1`: asks for the low-power GPU.
+ * - `glass=0`: no backdrop blur on the office's panels and labels.
+ * - `gputime=1`: reads the GPU time of each frame with a timer query.
+ */
+const spikeParams = new URLSearchParams(location.search);
+export const SPIKE = {
+  cap: spikeParams.get("cap") ?? "none",
+  fps: Number(spikeParams.get("fps") ?? 30),
+  pixelRatio: spikeParams.has("pr") ? Number(spikeParams.get("pr")) : null,
+  staticShadows: spikeParams.get("shadows") === "static" || spikeParams.get("cache") === "1",
+  cache: spikeParams.get("cache") === "1",
+  lowPower: spikeParams.get("lowpower") === "1",
+  glass: spikeParams.get("glass") !== "0",
+  gpuTime: spikeParams.get("gputime") === "1",
+  merge: spikeParams.get("merge") === "1",
+  animHz: Number(spikeParams.get("animhz") ?? 0),
+  aoAlways: spikeParams.get("ao") === "always",
+} as const;
+
+/** The layer the still building is drawn on in cache mode; colleagues stay on layer 0. */
+export const STATIC_LAYER = 1;
+
+/** What the measuring harness reads, accumulated since the stage started. */
+export interface SpikeCounters {
+  frames: number;
+  cpuMs: number;
+  listenersMs: number;
+  renderMs: number;
+  gpuMs: number;
+  gpuFrames: number;
+  staticRedraws: number;
+  skippedRafs: number;
+  drawCalls: number;
+  triangles: number;
+}
+
 declare global {
   interface Window {
     /** The mounted office or lab page, for the screenshot tool and the console. */
@@ -173,9 +231,68 @@ export class Stage {
 
   private readonly container: HTMLElement;
 
+  // SPIKE fields.
+  readonly spike: SpikeCounters = {
+    frames: 0,
+    cpuMs: 0,
+    listenersMs: 0,
+    renderMs: 0,
+    gpuMs: 0,
+    gpuFrames: 0,
+    staticRedraws: 0,
+    skippedRafs: 0,
+    drawCalls: 0,
+    triangles: 0,
+  };
+  private readonly gl: WebGL2RenderingContext;
+  private readonly timerExt: unknown;
+  private readonly pendingQueries: WebGLQuery[] = [];
+  private lastDrawAt = 0;
+  private capTimer = 0;
+  private staticDirty = true;
+  private aoPending = false;
+  private readonly lastView = new Matrix4();
+  private readonly lastProjection = new Matrix4();
+  private staticTarget: WebGLRenderTarget | null = null;
+  private staticAoTarget: WebGLRenderTarget | null = null;
+  private readonly copyScene = new Scene();
+  private readonly copyCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private readonly copyMaterial = new ShaderMaterial({
+    uniforms: { tColor: { value: null }, tDepth: { value: null } },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D tColor;
+      uniform sampler2D tDepth;
+      varying vec2 vUv;
+      void main() {
+        gl_FragColor = texture2D(tColor, vUv);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        gl_FragDepth = texture2D(tDepth, vUv).x;
+      }`,
+    depthTest: true,
+    depthWrite: true,
+    depthFunc: AlwaysDepth,
+  });
+
   constructor(container: HTMLElement) {
     this.container = container;
-    this.renderer = new WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+    this.renderer = new WebGLRenderer({
+      antialias: SPIKE.cache,
+      powerPreference: SPIKE.lowPower ? "low-power" : "high-performance",
+    });
+    if (SPIKE.staticShadows) this.renderer.shadowMap.autoUpdate = false;
+    if (!SPIKE.glass) document.documentElement.style.setProperty("--glass-filter", "none");
+    this.sun.layers.enableAll();
+    this.sky.layers.enableAll();
+    this.gl = this.renderer.getContext() as WebGL2RenderingContext;
+    this.timerExt = SPIKE.gpuTime ? this.gl.getExtension("EXT_disjoint_timer_query_webgl2") : null;
+    (window as unknown as { spikeGpuTimer: boolean }).spikeGpuTimer = this.timerExt !== null;
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = NeutralToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -223,6 +340,10 @@ export class Stage {
     this.composer.addPass(this.aoPass);
     this.composer.addPass(new OutputPass());
 
+    const copyQuad = new Mesh(new PlaneGeometry(2, 2), this.copyMaterial);
+    copyQuad.frustumCulled = false;
+    this.copyScene.add(copyQuad);
+
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     document.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -243,8 +364,25 @@ export class Stage {
 
   /** Draws one more frame, unless one is already on its way or the window is hidden. */
   requestRender(): void {
-    if (this.frameRequest !== 0 || document.hidden) return;
+    if (this.frameRequest !== 0 || this.capTimer !== 0 || document.hidden) return;
+    if (SPIKE.cap === "timer" || SPIKE.cap === "timerraf") {
+      const wait = Math.max(0, this.lastDrawAt + 1000 / SPIKE.fps - performance.now());
+      this.capTimer = window.setTimeout(() => {
+        this.capTimer = 0;
+        if (document.hidden) return;
+        if (SPIKE.cap === "timer") this.drawFrame();
+        else this.frameRequest = requestAnimationFrame(this.drawFrame);
+      }, wait);
+      return;
+    }
     this.frameRequest = requestAnimationFrame(this.drawFrame);
+  }
+
+  /** SPIKE - marks the cached building as out of date, so the next frame draws it again. */
+  invalidateStatic(): void {
+    this.staticDirty = true;
+    if (SPIKE.staticShadows) this.renderer.shadowMap.needsUpdate = true;
+    this.requestRender();
   }
 
   /** Sets the quality level and draws again. */
@@ -300,7 +438,7 @@ export class Stage {
     writeOklch(this.sun.color, { l, c, h });
     this.sun.intensity = light.sunIntensity;
     this.placeSun(light);
-    this.requestRender();
+    this.invalidateStatic();
   }
 
   /** Returns what the performance overlay shows. */
@@ -360,12 +498,14 @@ export class Stage {
 
   private applyQuality(): void {
     const settings = QUALITY[this.quality];
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, settings.pixelRatio));
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, SPIKE.pixelRatio ?? settings.pixelRatio),
+    );
     this.sun.shadow.mapSize.set(settings.shadowMap, settings.shadowMap);
     this.sun.shadow.map?.dispose();
     this.sun.shadow.map = null;
     this.aoPass.enabled = settings.ao;
-    this.requestRender();
+    this.invalidateStatic();
   }
 
   private resize(): void {
@@ -376,13 +516,16 @@ export class Stage {
     this.renderer.setSize(width, height);
     this.composer.setPixelRatio(this.renderer.getPixelRatio());
     this.composer.setSize(width, height);
-    this.requestRender();
+    if (SPIKE.cache) this.resizeStaticTargets();
+    this.invalidateStatic();
   }
 
   private readonly onVisibilityChange = (): void => {
     if (document.hidden) {
       cancelAnimationFrame(this.frameRequest);
       this.frameRequest = 0;
+      window.clearTimeout(this.capTimer);
+      this.capTimer = 0;
       this.lastFrameAt = null;
     } else {
       this.requestRender();
@@ -392,23 +535,133 @@ export class Stage {
   private readonly drawFrame = (): void => {
     this.frameRequest = 0;
     const started = performance.now();
+    if (SPIKE.cap === "raf" && started - this.lastDrawAt < 1000 / SPIKE.fps - 4) {
+      // Too soon: skip this animation frame and wait for the next one.
+      this.spike.skippedRafs++;
+      this.frameRequest = requestAnimationFrame(this.drawFrame);
+      return;
+    }
+    this.lastDrawAt = started;
     // The first frame after a pause advances by one 60 Hz frame, not by the whole pause.
     const dt =
-      this.lastFrameAt === null ? 1 / 60 : Math.min((started - this.lastFrameAt) / 1000, 1 / 20);
+      this.lastFrameAt === null ? 1 / 60 : Math.min((started - this.lastFrameAt) / 1000, 1 / 10);
     this.lastFrameAt = started;
     this.elapsed += dt;
     const frame: Frame = { dt, time: this.elapsed };
     this.renderer.info.reset();
     let again = false;
     for (const listener of this.listeners) again = listener(frame) || again;
-    this.composer.render(dt);
+    const listened = performance.now();
+    const query = this.beginGpuQuery();
+    if (SPIKE.cache) this.drawCached(dt);
+    else this.composer.render(dt);
+    if (query !== null) {
+      this.gl.endQuery(0x88bf /* TIME_ELAPSED_EXT */);
+      this.pendingQueries.push(query);
+    }
+    this.readGpuQueries();
     this.framesDrawn++;
-    this.recentFrames.push(performance.now());
-    this.lastCpuMs = performance.now() - started;
+    const ended = performance.now();
+    this.recentFrames.push(ended);
+    this.lastCpuMs = ended - started;
+    this.spike.frames++;
+    this.spike.cpuMs += ended - started;
+    this.spike.listenersMs += listened - started;
+    this.spike.renderMs += ended - listened;
+    this.spike.drawCalls = this.renderer.info.render.calls;
+    this.spike.triangles = this.renderer.info.render.triangles;
     if (again) {
       this.requestRender();
     } else {
       this.lastFrameAt = null;
     }
   };
+
+  /** SPIKE - starts a GPU timer query for this frame, or returns null without the extension. */
+  private beginGpuQuery(): WebGLQuery | null {
+    if (this.timerExt === null) return null;
+    const query = this.gl.createQuery();
+    this.gl.beginQuery(0x88bf /* TIME_ELAPSED_EXT */, query);
+    return query;
+  }
+
+  /** SPIKE - adds the GPU time of every finished query to the counters. */
+  private readGpuQueries(): void {
+    const gl = this.gl;
+    while (this.pendingQueries.length > 0) {
+      const query = this.pendingQueries[0]!;
+      if (!(gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE) as boolean)) return;
+      const disjoint = gl.getParameter(0x8fbb /* GPU_DISJOINT_EXT */) as boolean;
+      const ns = gl.getQueryParameter(query, gl.QUERY_RESULT) as number;
+      if (!disjoint) {
+        this.spike.gpuMs += ns / 1e6;
+        this.spike.gpuFrames++;
+      }
+      gl.deleteQuery(query);
+      this.pendingQueries.shift();
+    }
+  }
+
+  /** SPIKE - sizes the targets the still building is drawn into to the drawing buffer. */
+  private resizeStaticTargets(): void {
+    const size = this.renderer.getDrawingBufferSize(new Vector2());
+    this.staticTarget?.dispose();
+    this.staticAoTarget?.dispose();
+    this.staticTarget = new WebGLRenderTarget(size.x, size.y, {
+      type: HalfFloatType,
+      samples: 4,
+      depthTexture: new DepthTexture(size.x, size.y),
+    });
+    this.staticAoTarget = new WebGLRenderTarget(size.x, size.y, { type: HalfFloatType });
+    this.aoPass.setSize(size.x, size.y);
+  }
+
+  /**
+   * SPIKE - draws one frame in cache mode: the still building again only when
+   * it or the camera changed, then a copy of it and the colleagues over it.
+   */
+  private drawCached(dt: number): void {
+    const renderer = this.renderer;
+    const camera = this.camera;
+    camera.updateMatrixWorld();
+    const moved =
+      !this.lastView.equals(camera.matrixWorld) ||
+      !this.lastProjection.equals(camera.projectionMatrix);
+    if (moved) {
+      this.lastView.copy(camera.matrixWorld);
+      this.lastProjection.copy(camera.projectionMatrix);
+    }
+    const wantsAo = this.aoPass.enabled;
+    // While the camera moves, the building is drawn without ambient occlusion;
+    // once it rests, one more drawing adds it.
+    const drawAo = wantsAo && (SPIKE.aoAlways || !moved);
+    if (moved || this.staticDirty || (this.aoPending && !moved)) {
+      if (this.staticTarget === null) this.resizeStaticTargets();
+      camera.layers.set(STATIC_LAYER);
+      renderer.setRenderTarget(this.staticTarget);
+      renderer.clear();
+      renderer.render(this.scene, camera);
+      if (drawAo) this.aoPass.render(renderer, this.staticAoTarget!, this.staticTarget!);
+      camera.layers.set(0);
+      this.aoPending = wantsAo && !drawAo;
+      this.staticDirty = false;
+      this.spike.staticRedraws++;
+      this.copyMaterial.uniforms.tColor!.value = drawAo
+        ? this.staticAoTarget!.texture
+        : this.staticTarget!.texture;
+      this.copyMaterial.uniforms.tDepth!.value = this.staticTarget!.depthTexture;
+      if (this.aoPending) this.requestRender();
+    }
+    renderer.setRenderTarget(null);
+    const autoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.clear();
+    renderer.render(this.copyScene, this.copyCamera);
+    const background = this.scene.background;
+    this.scene.background = null;
+    renderer.render(this.scene, camera);
+    this.scene.background = background;
+    renderer.autoClear = autoClear;
+    void dt;
+  }
 }
