@@ -5,8 +5,9 @@
  * A layout declares each storey's floor, marks walls and furniture as solid,
  * opens doors through the walls, and links storeys by lifts. `build()` then
  * turns that into one grid per storey whose free cells are the places where a
- * colleague's body centre may be: every solid cell is grown by the body's
- * clearance, so a path that keeps to free cells never clips a wall or a desk.
+ * colleague's body centre may be: every cell knows how far it is from the
+ * nearest solid cell, and only cells a body's half width away are free, so a
+ * path that keeps to free cells never clips a wall or a desk.
  *
  * Paths start and end exactly at the spots asked for, even when a spot sits
  * inside an obstacle (a chair behind a desk): the walker steps from the spot
@@ -17,8 +18,12 @@ import type { NavBuilder, NavGraph, Spot, Waypoint } from "./contracts";
 
 /** The side of one grid cell, in metres. */
 const CELL_SIZE = 0.12;
-/** How far a body centre keeps from walls and furniture: about a colleague's half width. */
-const BODY_CLEARANCE = 0.22;
+/**
+ * How far a body centre keeps from walls and furniture: a colleague's half
+ * width, about 0.3 m for the widest body shape, so a body passing a door
+ * jamb or a wall's corner never sinks into it.
+ */
+const BODY_CLEARANCE = 0.3;
 /** How far from a spot the nearest free cell may be, in metres. */
 const NEAREST_FREE_RADIUS = 1.6;
 /** Free areas smaller than this many cells are pockets (between a desk and a wall), never a start. */
@@ -28,6 +33,8 @@ const LIFT_COST = 6;
 /** How much the search's distance estimate is weighted, see `searchCells`. */
 const HEURISTIC_WEIGHT = 1.5;
 const SQRT2 = Math.SQRT2;
+/** The clearance of a cell with no solid cell anywhere on its storey, in metres. */
+const FAR_CLEARANCE = 1e6;
 
 /** What the nav graph offers beyond the contract, for the sim. */
 export interface OfficeNavGraph extends NavGraph {
@@ -70,6 +77,8 @@ interface Storey {
   readonly rows: number;
   /** 1 where a body centre may stand. */
   readonly free: Uint8Array;
+  /** How far each cell's centre is from the nearest solid cell, in metres. */
+  readonly clearance: Float32Array;
   /** The free area each free cell belongs to, or -1. */
   readonly component: Int32Array;
   readonly componentSize: ReadonlyArray<number>;
@@ -161,20 +170,64 @@ interface SearchBuffers {
 }
 
 /**
- * Returns the cell offsets within `clearance` of a cell, measured from the
- * cell's centre to the nearest point of the other cell.
+ * Measures how far each cell's centre is from the nearest point of a solid
+ * cell, in metres; a solid cell measures 0, and every cell measures
+ * `FAR_CLEARANCE` when nothing is solid. Two sweeps over the grid, one forward and one back,
+ * pass each cell's nearest solid cell on to its neighbours. That can miss the
+ * true nearest cell by a little in rare shapes, never by more than a cell.
  */
-function listClearanceOffsets(clearance: number): ReadonlyArray<readonly [number, number]> {
-  const reach = Math.ceil(clearance / CELL_SIZE + 0.5);
-  const offsets: Array<readonly [number, number]> = [];
-  for (let dz = -reach; dz <= reach; dz++) {
-    for (let dx = -reach; dx <= reach; dx++) {
-      const gapX = Math.max(0, Math.abs(dx) - 0.5);
-      const gapZ = Math.max(0, Math.abs(dz) - 0.5);
-      if (Math.hypot(gapX, gapZ) * CELL_SIZE < clearance) offsets.push([dx, dz]);
+function measureClearance(solid: Uint8Array, cols: number, rows: number): Float32Array {
+  const count = cols * rows;
+  const clearance = new Float32Array(count).fill(FAR_CLEARANCE);
+  // The nearest solid cell found so far for each cell, by column and row.
+  const nearestCol = new Int32Array(count).fill(-1);
+  const nearestRow = new Int32Array(count);
+  /** Takes the neighbour's nearest solid cell for `cell` when it is nearer. */
+  const offerNeighbour = (cell: number, col: number, row: number, neighbour: number): void => {
+    const siteCol = nearestCol[neighbour]!;
+    if (siteCol === -1) return;
+    const siteRow = nearestRow[neighbour]!;
+    const gapX = Math.max(0, Math.abs(col - siteCol) - 0.5);
+    const gapZ = Math.max(0, Math.abs(row - siteRow) - 0.5);
+    const distance = Math.hypot(gapX, gapZ) * CELL_SIZE;
+    if (distance >= clearance[cell]!) return;
+    clearance[cell] = distance;
+    nearestCol[cell] = siteCol;
+    nearestRow[cell] = siteRow;
+  };
+  for (let cell = 0; cell < count; cell++) {
+    if (solid[cell] === 0) continue;
+    clearance[cell] = 0;
+    nearestCol[cell] = cell % cols;
+    nearestRow[cell] = (cell - (cell % cols)) / cols;
+  }
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const cell = row * cols + col;
+      if (col > 0) offerNeighbour(cell, col, row, cell - 1);
+      if (row === 0) continue;
+      offerNeighbour(cell, col, row, cell - cols);
+      if (col > 0) offerNeighbour(cell, col, row, cell - cols - 1);
+      if (col < cols - 1) offerNeighbour(cell, col, row, cell - cols + 1);
+    }
+    for (let col = cols - 2; col >= 0; col--) {
+      offerNeighbour(row * cols + col, col, row, row * cols + col + 1);
     }
   }
-  return offsets;
+  for (let row = rows - 1; row >= 0; row--) {
+    for (let col = cols - 1; col >= 0; col--) {
+      const cell = row * cols + col;
+      if (col < cols - 1) offerNeighbour(cell, col, row, cell + 1);
+      if (row === rows - 1) continue;
+      offerNeighbour(cell, col, row, cell + cols);
+      if (col > 0) offerNeighbour(cell, col, row, cell + cols - 1);
+      if (col < cols - 1) offerNeighbour(cell, col, row, cell + cols + 1);
+    }
+    for (let col = 1; col < cols; col++) {
+      offerNeighbour(row * cols + col, col, row, row * cols + col - 1);
+    }
+  }
+  return clearance;
 }
 
 /** Returns the rectangle a set of rectangles covers together. */
@@ -194,8 +247,8 @@ function unionRects(rects: ReadonlyArray<Rect>): Rect {
 
 /**
  * Rasterizes one storey: its floor rectangles, then every block and open in
- * call order, then grows the solid cells by the body clearance, then labels
- * the free areas. The grid has a border of one unwalkable cell, so a free
+ * call order, then measures every cell's clearance from the solid cells, then
+ * labels the free areas. The grid has a border of one unwalkable cell, so a free
  * cell's eight neighbours are always inside it.
  */
 function rasterizeStorey(
@@ -203,7 +256,6 @@ function rasterizeStorey(
   y: number,
   floors: ReadonlyArray<Rect>,
   marks: ReadonlyArray<Mark>,
-  offsets: ReadonlyArray<readonly [number, number]>,
 ): Storey {
   const extent = unionRects(floors);
   const originX = extent.minX - CELL_SIZE;
@@ -224,13 +276,19 @@ function rasterizeStorey(
     for (let row = row0; row <= row1; row++)
       floorCells.fill(1, row * cols + col0, row * cols + col1 + 1);
   }
-  // A block or an open covers every cell it touches, so a wall thinner than a
-  // cell still blocks, and a door through it still opens.
+  // A block covers every cell it touches, so a wall thinner than a cell still
+  // blocks. An open covers only the cells that lie wholly inside it, so a
+  // door is never wider on the grid than it is in the room: a cell the door
+  // jamb runs through stays solid.
   for (const { solid: isSolid, rect } of marks) {
-    const col0 = Math.max(1, Math.floor((rect.minX - originX) / CELL_SIZE));
-    const col1 = Math.min(cols - 2, Math.floor((rect.maxX - originX) / CELL_SIZE));
-    const row0 = Math.max(1, Math.floor((rect.minZ - originZ) / CELL_SIZE));
-    const row1 = Math.min(rows - 2, Math.floor((rect.maxZ - originZ) / CELL_SIZE));
+    const firstCol = (rect.minX - originX) / CELL_SIZE;
+    const lastCol = (rect.maxX - originX) / CELL_SIZE;
+    const firstRow = (rect.minZ - originZ) / CELL_SIZE;
+    const lastRow = (rect.maxZ - originZ) / CELL_SIZE;
+    const col0 = Math.max(1, isSolid ? Math.floor(firstCol) : Math.ceil(firstCol - 1e-9));
+    const col1 = Math.min(cols - 2, isSolid ? Math.floor(lastCol) : Math.floor(lastCol + 1e-9) - 1);
+    const row0 = Math.max(1, isSolid ? Math.floor(firstRow) : Math.ceil(firstRow - 1e-9));
+    const row1 = Math.min(rows - 2, isSolid ? Math.floor(lastRow) : Math.floor(lastRow + 1e-9) - 1);
     for (let row = row0; row <= row1; row++) {
       solid.fill(isSolid ? 1 : 0, row * cols + col0, row * cols + col1 + 1);
       if (!isSolid) floorCells.fill(1, row * cols + col0, row * cols + col1 + 1);
@@ -239,22 +297,12 @@ function rasterizeStorey(
 
   // Only solid cells push a body away. The floor's own edge does not: an
   // entrance often sits right on it, and the layout walls the edge anyway.
+  const clearance = measureClearance(solid, cols, rows);
   const free = new Uint8Array(count);
   for (let row = 1; row < rows - 1; row++) {
     for (let col = 1; col < cols - 1; col++) {
       const cell = row * cols + col;
-      if (floorCells[cell] === 0 || solid[cell] === 1) continue;
-      let clear = true;
-      for (const [dx, dz] of offsets) {
-        const x = col + dx;
-        const z = row + dz;
-        if (x < 0 || z < 0 || x >= cols || z >= rows) continue;
-        if (solid[z * cols + x] === 1) {
-          clear = false;
-          break;
-        }
-      }
-      if (clear) free[cell] = 1;
+      if (floorCells[cell] === 1 && clearance[cell]! >= BODY_CLEARANCE) free[cell] = 1;
     }
   }
 
@@ -292,6 +340,7 @@ function rasterizeStorey(
     cols,
     rows,
     free,
+    clearance,
     component,
     componentSize,
     occupied: new Uint8Array(count),
@@ -321,6 +370,26 @@ function isPassable(storey: Storey, cell: number, avoidance: Avoidance): boolean
   return (
     storey.free[cell] === 1 && (avoidance === "ignore-occupied" || storey.occupied[cell] === 0)
   );
+}
+
+/**
+ * Returns a world point's clearance from the solid cells, in metres,
+ * interpolated between the four nearest cell centres. Between two centres
+ * that are clear, a point can still pass close to a wall's corner; this is
+ * how a straight leg finds out.
+ */
+function sampleClearance(storey: Storey, x: number, z: number): number {
+  const { cols, clearance } = storey;
+  const u = (x - storey.originX) / CELL_SIZE - 0.5;
+  const v = (z - storey.originZ) / CELL_SIZE - 0.5;
+  const col = Math.max(0, Math.min(cols - 2, Math.floor(u)));
+  const row = Math.max(0, Math.min(storey.rows - 2, Math.floor(v)));
+  const fx = Math.max(0, Math.min(1, u - col));
+  const fz = Math.max(0, Math.min(1, v - row));
+  const cell = row * cols + col;
+  const near = clearance[cell]! * (1 - fx) + clearance[cell + 1]! * fx;
+  const far = clearance[cell + cols]! * (1 - fx) + clearance[cell + cols + 1]! * fx;
+  return near * (1 - fz) + far * fz;
 }
 
 /**
@@ -366,12 +435,20 @@ function findNearestFreeCell(
 }
 
 /**
- * Returns true when the straight line between two world points crosses only
- * passable cells. It walks every cell the line touches, and where the line
- * passes exactly through a cell corner it checks both cells beside it, so it
- * never cuts a corner the search would refuse to cut.
+ * Returns true when a body can walk the straight line between two world
+ * points: every cell the line touches is passable, and every point along it,
+ * sampled each half cell, keeps `BODY_CLEARANCE` from walls and furniture.
+ * Where the line passes exactly through a cell corner it checks both cells
+ * beside it, so it never cuts a corner the search would refuse to cut.
  */
 function hasLineOfSight(storey: Storey, from: Vector3, to: Vector3, avoidance: Avoidance): boolean {
+  const samples = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / (CELL_SIZE / 2));
+  for (let sample = 1; sample < samples; sample++) {
+    const t = sample / samples;
+    const x = from.x + (to.x - from.x) * t;
+    const z = from.z + (to.z - from.z) * t;
+    if (sampleClearance(storey, x, z) < BODY_CLEARANCE) return false;
+  }
   const x0 = (from.x - storey.originX) / CELL_SIZE;
   const z0 = (from.z - storey.originZ) / CELL_SIZE;
   const x1 = (to.x - storey.originX) / CELL_SIZE;
@@ -593,10 +670,9 @@ function buildGraph(
   marks: ReadonlyMap<number, ReadonlyArray<Mark>>,
   links: ReadonlyArray<readonly [Spot, Spot]>,
 ): OfficeNavGraph {
-  const offsets = listClearanceOffsets(BODY_CLEARANCE);
   const storeys = new Map<number, Storey>();
   for (const [floor, { y, rects }] of floorRects) {
-    storeys.set(floor, rasterizeStorey(floor, y, rects, marks.get(floor) ?? [], offsets));
+    storeys.set(floor, rasterizeStorey(floor, y, rects, marks.get(floor) ?? []));
   }
   let largest = 0;
   for (const storey of storeys.values()) largest = Math.max(largest, storey.cols * storey.rows);
@@ -706,8 +782,9 @@ function buildGraph(
   };
 
   const findPathAvoiding = (from: Spot, to: Spot, avoidance: Avoidance): Waypoint[] | null => {
-    const start = buildPortal(from, null);
-    if (start === null) return null;
+    const nearStart = buildPortal(from, null);
+    if (nearStart === null) return null;
+    let start: Portal = nearStart;
     const goalStorey = storeys.get(to.floor);
     if (goalStorey === undefined) return null;
     // The goal's free cell is the nearest one in the start's own area when
@@ -725,6 +802,22 @@ function buildGraph(
       );
     }
     if (goalCell === -1) return null;
+    // A start beside a closed-off area, such as the space between a desk and
+    // a wall, can pick its free cell in there. When the goal's cell is in
+    // another area, the start's free cell is picked again, in the goal's area.
+    if (
+      goalStorey === start.storey &&
+      goalStorey.component[goalCell] !== start.storey.component[start.cell]
+    ) {
+      const goalArea = goalStorey.component[goalCell];
+      const cell = findNearestFreeCell(
+        goalStorey,
+        from.position.x,
+        from.position.z,
+        (candidate) => goalStorey.component[candidate] === goalArea,
+      );
+      if (cell !== -1) start = { ...start, cell };
+    }
     const goal: Portal = {
       storey: goalStorey,
       position: new Vector3(to.position.x, goalStorey.y, to.position.z),

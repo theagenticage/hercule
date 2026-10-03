@@ -84,6 +84,8 @@ const ARRIVAL_SPEED = 0.16;
 const TURNING_CADENCE = 0.35;
 /** How far each corner of a path is rounded off, at most, in metres. */
 const CORNER_RADIUS = 0.32;
+/** How far inside a corner of a path the rounded curve may pass, in metres. */
+const CORNER_CUT = 0.04;
 const CORNER_SAMPLES = 6;
 /** How far ahead along the path a walker looks to choose its heading, in metres. */
 const LOOK_AHEAD = 0.22;
@@ -328,8 +330,9 @@ function decideHomeAction(pose: Pose, seat: Seat["kind"]): Action {
 
 /**
  * Rounds each inner corner of a polyline with a quadratic curve, so a walker
- * following it turns smoothly. The rounding stays within a few centimetres
- * of the corner, well inside the body clearance the nav graph keeps.
+ * following it turns smoothly. The curve passes at most `CORNER_CUT` inside
+ * the corner, because the corner of a path often sits as close to a wall or
+ * a desk as a body may come, and the curve bends toward it.
  */
 function roundCorners(points: ReadonlyArray<Vector3>): Vector3[] {
   if (points.length < 3) return points.map((point) => point.clone());
@@ -342,9 +345,13 @@ function roundCorners(points: ReadonlyArray<Vector3>): Vector3[] {
     const after = points[index + 1]!;
     incoming.subVectors(corner, before);
     outgoing.subVectors(after, corner);
-    const radius = Math.min(CORNER_RADIUS, incoming.length() * 0.45, outgoing.length() * 0.45);
+    const longest = Math.min(incoming.length(), outgoing.length()) * 0.45;
     incoming.normalize();
     outgoing.normalize();
+    // The curve's middle sits a quarter of the radius times the length of
+    // (outgoing - incoming) inside the corner.
+    const bend = outgoing.distanceTo(incoming);
+    const radius = Math.min(CORNER_RADIUS, (4 * CORNER_CUT) / Math.max(bend, 1e-6), longest);
     if (radius < 0.02 || incoming.dot(outgoing) > 0.995) {
       rounded.push(corner.clone());
       continue;

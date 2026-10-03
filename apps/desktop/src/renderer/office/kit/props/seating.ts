@@ -43,13 +43,22 @@ const ARMCHAIR_SURFACES = {
 
 /** How far the armchair's seat centre stands in front of its origin. */
 const ARMCHAIR_SEAT_Z = 0.05;
+/**
+ * Where the armchair's front ends, in z: 0.19 m in front of the seat centre,
+ * just behind a seated colleague's knees. The thighs rest on the cushion and
+ * the shins and feet hang over its edge, instead of sinking into a deeper seat.
+ */
+const ARMCHAIR_FRONT_Z = 0.24;
 
 const readArmchairGeometry = memoize(() => {
   const parts = new PartList(ARMCHAIR_SURFACES);
-  const z = ARMCHAIR_SEAT_Z;
-  // The deep base, the loose seat cushion on it, and the rounded back.
-  parts.add("fabric", buildBlock(0.6, 0.27, 0.74, 0.06, 2), { y: 0.06, z: -0.01 });
-  parts.add("fabric", buildBlock(0.58, 0.1, 0.58, 0.045, 2), { y: SEAT_HEIGHT - 0.1, z: z + 0.04 });
+  const front = ARMCHAIR_FRONT_Z;
+  // The base, the loose seat cushion on it, and the rounded back.
+  parts.add("fabric", buildBlock(0.6, 0.27, 0.6, 0.06, 2), { y: 0.06, z: front - 0.32 });
+  parts.add("fabric", buildBlock(0.58, 0.1, 0.44, 0.045, 2), {
+    y: SEAT_HEIGHT - 0.1,
+    z: front - 0.22,
+  });
   parts.add("fabric", buildBlock(0.86, 0.58, 0.2, 0.09, 3), {
     y: 0.2,
     z: -0.32,
@@ -63,21 +72,21 @@ const readArmchairGeometry = memoize(() => {
   });
   // The rolled arms, one either side.
   for (const side of [-1, 1]) {
-    parts.add("fabric", buildBlock(0.15, 0.5, 0.76, 0.07, 3), {
+    parts.add("fabric", buildBlock(0.15, 0.5, 0.62, 0.07, 3), {
       x: side * 0.355,
       y: 0.06,
-      z: -0.01,
+      z: front - 0.32,
     });
-    parts.add("fabric", buildCylinder(0.085, 0.085, 0.72, 20), {
+    parts.add("fabric", buildCylinder(0.085, 0.085, 0.58, 20), {
       x: side * 0.36,
       y: 0.52,
-      z: 0.35,
+      z: front - 0.03,
       rx: -Math.PI / 2,
     });
   }
   // Four short, turned feet.
   for (const x of [-0.34, 0.34]) {
-    for (const footZ of [-0.3, 0.29]) {
+    for (const footZ of [-0.3, front - 0.09]) {
       parts.add(
         "wood",
         buildLathe(
@@ -98,8 +107,8 @@ const readArmchairGeometry = memoize(() => {
 });
 
 /**
- * Builds a deep club armchair, 0.89 wide, 0.8 deep (z from -0.42 to 0.38)
- * and 0.8 tall. Its sitter faces +z; the seat's centre is above the marker at
+ * Builds a club armchair, 0.89 wide, 0.66 deep (z from -0.42 to 0.24) and
+ * 0.8 tall. Its sitter faces +z; the seat's centre is above the marker at
  * (0, 0, 0.05), its top at `SEAT_HEIGHT`.
  */
 export function buildArmchair(): SeatProp {
