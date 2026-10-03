@@ -73,8 +73,8 @@ export type Token =
  * - `paper`: paper and card;
  * - `glass`: window and lamp glass, see-through;
  * - `vinyl`: the colleagues, a soft toy finish with a light clear coat;
- * - `glow`: a lit surface, a lamp's shade or a window at night. Not a bloom:
- *   it only stops the surface from going dark in shadow.
+ * - `glow`: a lit surface, a lamp's shade or a window in the evening. Not a
+ *   bloom: it only stops the surface from going dark in shadow.
  */
 export type Finish =
   | "matte"

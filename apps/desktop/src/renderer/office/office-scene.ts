@@ -183,10 +183,9 @@ export function mountOfficeScene(
     };
   };
 
-  /** Lights the room lamps in the evening and at night, and puts them out by day. The theme decides which. */
+  /** Lights the room lamps in the evening, and puts them out in the morning. The theme decides which. */
   const switchLamps = (): void => {
-    const time = stage.resolveTimeOfDay();
-    const on = time === "evening" || time === "night";
+    const on = stage.resolveTimeOfDay() === "evening";
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 

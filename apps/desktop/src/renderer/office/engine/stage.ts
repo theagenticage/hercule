@@ -35,22 +35,24 @@ import {
   type Texture,
 } from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { isDarkTheme, readColor, readToken, refreshPalette, writeOklch } from "./palette";
 import { StillBuilding } from "./still-building";
 
-/**
- * How much the GPU is asked to do. `auto` is what the app runs: sharp on a
- * Retina display, with shadows that are drawn once, and never ambient
- * occlusion, which would double the cost of every frame.
- */
-export type Quality = "auto" | "low" | "medium" | "high";
+/** The most device pixels drawn per CSS pixel: sharp on a Retina display, and no more. */
+const MAX_PIXEL_RATIO = 2;
 
-/** The light the office is drawn in. `auto` follows the theme: day in a light theme, evening in a dark one. */
-export type TimeOfDay = "auto" | "morning" | "noon" | "evening" | "night";
+/**
+ * The side of the sun's shadow map, in texels. The shadows are drawn once
+ * and redrawn only when the building changes (`setBuilding`), so a large map
+ * costs GPU memory, not frame time.
+ */
+const SHADOW_MAP_SIZE = 4096;
+
+/** The light the office is drawn in, which follows the theme: morning in a light theme, evening in a dark one. */
+type TimeOfDay = "morning" | "evening";
 
 /** What a frame listener is told about the frame being drawn. */
 export interface Frame {
@@ -75,22 +77,10 @@ interface Light {
   /** The sun's colour, as an OKLCH lightness, chroma and hue. */
   readonly sun: readonly [number, number, number];
   readonly skyIntensity: number;
-  /**
-   * The sky light's hue in place of the theme's, or undefined to follow the
-   * theme. Night takes a moonlit blue in every theme, so it reads as night
-   * even where the theme's rooms are pale.
-   */
-  readonly skyHue?: number;
   readonly environment: number;
-  /**
-   * Scales the sky and the environment in a light theme, or 1 when undefined.
-   * A light theme paints its rooms pale, so the same light that reads as dusk
-   * in a dark theme reads as an overcast day in a light one.
-   */
-  readonly lightThemeScale?: number;
 }
 
-const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
+const LIGHTS: Readonly<Record<TimeOfDay, Light>> = {
   morning: {
     azimuth: 60,
     elevation: 24,
@@ -99,14 +89,6 @@ const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
     skyIntensity: 1.05,
     environment: 0.32,
   },
-  noon: {
-    azimuth: 330,
-    elevation: 52,
-    sunIntensity: 2.4,
-    sun: [0.98, 0.025, 95],
-    skyIntensity: 1.15,
-    environment: 0.36,
-  },
   evening: {
     azimuth: 285,
     elevation: 16,
@@ -114,28 +96,7 @@ const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
     sun: [0.86, 0.11, 58],
     skyIntensity: 0.85,
     environment: 0.3,
-    lightThemeScale: 0.65,
   },
-  night: {
-    azimuth: 320,
-    elevation: 38,
-    sunIntensity: 0.55,
-    sun: [0.82, 0.04, 250],
-    skyIntensity: 0.38,
-    skyHue: 255,
-    environment: 0.12,
-    lightThemeScale: 0.45,
-  },
-};
-
-/** The settings each quality level changes. */
-const QUALITY: Readonly<
-  Record<Quality, { readonly pixelRatio: number; readonly shadowMap: number; readonly ao: boolean }>
-> = {
-  auto: { pixelRatio: 2, shadowMap: 4096, ao: false },
-  low: { pixelRatio: 1, shadowMap: 1024, ao: false },
-  medium: { pixelRatio: 1.5, shadowMap: 2048, ao: false },
-  high: { pixelRatio: 2, shadowMap: 4096, ao: true },
 };
 
 /** The most frames a second ambient life draws: colleagues walking, typing and breathing. */
@@ -159,7 +120,6 @@ export class Stage {
   readonly sky = new HemisphereLight();
 
   private readonly composer: EffectComposer;
-  private readonly aoPass: GTAOPass;
   /** When the last frame was drawn, or null while the loop is stopped. */
   private lastFrameAt: number | null = null;
   /** Seconds of animation so far. It does not advance while the loop is stopped. */
@@ -183,8 +143,6 @@ export class Stage {
   private readonly drawnCamera = { world: new Float64Array(16), projection: new Float64Array(16) };
   /** The still building, once `setBuilding` declares it; null draws the shadows every frame. */
   private building: StillBuilding | null = null;
-  private quality: Quality = "auto";
-  private timeOfDay: TimeOfDay = "auto";
 
   private readonly container: HTMLElement;
 
@@ -193,6 +151,7 @@ export class Stage {
     // No power preference: on a Mac with two GPUs, asking for high performance
     // would wake the discrete GPU for an office that mostly holds still.
     this.renderer = new WebGLRenderer({ antialias: false });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = NeutralToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -209,41 +168,24 @@ export class Stage {
     this.scene.environment = this.environmentTexture;
 
     this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
     this.sun.shadow.bias = -0.0005;
     this.sun.shadow.normalBias = 0.025;
     this.sun.shadow.radius = 3;
     this.sun.shadow.blurSamples = 12;
     this.scene.add(this.sun, this.sun.target, this.sky);
 
-    // The composer draws into a multisampled target, so edges stay smooth
-    // with the ambient occlusion pass in the chain.
+    // The canvas has no antialiasing of its own: the composer draws the scene
+    // into this multisampled target, which smooths the edges, and the output
+    // pass tone-maps the result onto the canvas.
     const target = new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.aoPass = new GTAOPass(this.scene, this.camera, 1, 1);
-    this.aoPass.updateGtaoMaterial({
-      radius: 0.55,
-      distanceExponent: 1.4,
-      thickness: 1.2,
-      scale: 1,
-      samples: 16,
-    });
-    this.aoPass.updatePdMaterial({
-      lumaPhi: 10,
-      depthPhi: 2,
-      normalPhi: 3,
-      radius: 6,
-      rings: 2,
-      samples: 16,
-    });
-    this.aoPass.blendIntensity = 0.85;
-    this.composer.addPass(this.aoPass);
     this.composer.addPass(new OutputPass());
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     document.addEventListener("visibilitychange", this.onVisibilityChange);
-    this.applyQuality();
     this.applyTheme();
     this.resize();
   }
@@ -281,22 +223,8 @@ export class Stage {
     this.redrawShadows();
   }
 
-  /** Sets the quality level and draws again. */
-  setQuality(quality: Quality): void {
-    this.quality = quality;
-    this.applyQuality();
-    this.resize();
-  }
-
-  /** Sets the time of day and draws again. */
-  setTimeOfDay(timeOfDay: TimeOfDay): void {
-    this.timeOfDay = timeOfDay;
-    this.applyTheme();
-  }
-
-  /** Returns the time of day the stage draws now, with `auto` resolved from the theme. */
-  resolveTimeOfDay(): Exclude<TimeOfDay, "auto"> {
-    if (this.timeOfDay !== "auto") return this.timeOfDay;
+  /** Returns the time of day the stage draws now: morning in a light theme, evening in a dark one. */
+  resolveTimeOfDay(): TimeOfDay {
     return isDarkTheme() ? "evening" : "morning";
   }
 
@@ -319,17 +247,11 @@ export class Stage {
     // dark theme paints its rooms dark already, and a dark light on top would
     // draw them nearly black. How bright the sky is comes from the time of day.
     const sunToken = readToken("room-sun");
-    writeOklch(
-      this.sky.color,
-      light.skyHue === undefined
-        ? { l: 0.96, c: Math.min(sunToken.c, 0.05), h: sunToken.h }
-        : { l: 0.9, c: 0.06, h: light.skyHue },
-    );
+    writeOklch(this.sky.color, { l: 0.96, c: Math.min(sunToken.c, 0.05), h: sunToken.h });
     const floorToken = readToken("room-floor");
     writeOklch(this.sky.groundColor, { l: 0.62, c: floorToken.c, h: floorToken.h });
-    const scale = isDarkTheme() ? 1 : (light.lightThemeScale ?? 1);
-    this.sky.intensity = light.skyIntensity * scale;
-    this.scene.environmentIntensity = light.environment * scale;
+    this.sky.intensity = light.skyIntensity;
+    this.scene.environmentIntensity = light.environment;
     const [l, c, h] = light.sun;
     writeOklch(this.sun.color, { l, c, h });
     this.sun.intensity = light.sunIntensity;
@@ -389,16 +311,6 @@ export class Stage {
   private redrawShadows(): void {
     this.renderer.shadowMap.needsUpdate = true;
     this.requestRender();
-  }
-
-  private applyQuality(): void {
-    const settings = QUALITY[this.quality];
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, settings.pixelRatio));
-    this.sun.shadow.mapSize.set(settings.shadowMap, settings.shadowMap);
-    this.sun.shadow.map?.dispose();
-    this.sun.shadow.map = null;
-    this.aoPass.enabled = settings.ao;
-    this.redrawShadows();
   }
 
   private resize(): void {

@@ -258,8 +258,8 @@ interface WallParts {
  * bead; above, plaster up to a stepped crown and a cap. Doorways get a
  * stepped Deco architrave and a brass threshold. With `windows`, tall Deco
  * windows with a fan transom are spaced along the wall clear of the doors;
- * their outer panes store a `Lamp` in `userData[LAMP]`, so at night they glow
- * warm, lit from inside.
+ * their outer panes store a `Lamp` in `userData[LAMP]`, so in the evening
+ * they glow warm, lit from inside.
  *
  * A wall built with `cutaway` stores a `Cutaway` in its `userData[CUTAWAY]`.
  * Cutting it squashes everything above the dado, cap included, down onto the

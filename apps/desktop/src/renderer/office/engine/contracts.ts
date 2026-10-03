@@ -142,10 +142,11 @@ export interface Cutaway {
 export const LAMP = "lamp";
 
 /**
- * A light the office switches on in the evening and at night: a floor lamp, a
- * wall sconce, a pendant, a street lamp. The director finds every `Lamp`
- * under a layout's root and switches them all with the time of day. A desk's
- * banker's lamp is not one: the sim lights it while the desk's owner works.
+ * A light the office switches on in the evening, such as a standard lamp, a
+ * lantern outdoors, or a window's outer panes. The director finds every
+ * `Lamp` under a layout's root and switches them all with the time of day. A
+ * desk's banker's lamp is not one: the sim lights it while the desk's owner
+ * works.
  */
 export interface Lamp {
   /**
