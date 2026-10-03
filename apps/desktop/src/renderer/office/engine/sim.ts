@@ -612,6 +612,10 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     actor.errand = errand;
     script()
       .catch((error: unknown) => {
+        // Cancelling a script rejects its waits with ScriptCancelled, which
+        // ends the script as planned. Any other error is a bug in the script:
+        // the colleague stops where it was, and the console is the only place
+        // the error shows.
         if (!(error instanceof ScriptCancelled)) console.error(error);
       })
       .finally(() => {

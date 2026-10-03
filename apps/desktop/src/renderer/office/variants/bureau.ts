@@ -284,7 +284,9 @@ function createFitter(root: Group, walls: ReadonlyArray<BuiltWall>, solids: Rect
         distance = across;
       }
       if (nearest === null) {
-        console.warn(`[bureau] nothing to hang on at (${x.toFixed(2)}, ${z.toFixed(2)})`);
+        console.warn(
+          `Could not hang an object at (${x.toFixed(2)}, ${z.toFixed(2)}): no wall runs within 0.2 m of that point, so the object is left out of the office. Hang it on a wall's line.`,
+        );
         return;
       }
       const { axis, line } = nearest.planned;
