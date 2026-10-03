@@ -38,7 +38,7 @@ const SITTING_ACTIONS: ReadonlySet<Action> = new Set<Action>([
 ]);
 
 /** Returns true when `action` is done sitting on a seat. */
-export function isSittingAction(action: Action): boolean {
+function isSittingAction(action: Action): boolean {
   return SITTING_ACTIONS.has(action);
 }
 
@@ -245,8 +245,7 @@ interface Gait {
   readonly lift: number;
 }
 
-const BEAN_GAIT: Gait = { cycleLength: 0.4, stance: 0.5, minimumCadence: 1.4, lift: 0.045 };
-const SUITED_GAIT: Gait = { cycleLength: 0.56, stance: 0.55, minimumCadence: 1.1, lift: 0.05 };
+const GAIT: Gait = { cycleLength: 0.4, stance: 0.5, minimumCadence: 1.4, lift: 0.045 };
 
 /** A settling step's length in seconds: a foot stepping back under the body. */
 const SETTLE_STEP_SECONDS = 0.22;
@@ -541,9 +540,7 @@ export class Motion {
   private readonly anatomy: Anatomy;
   private readonly bones: RigBones;
   private readonly root: Object3D;
-  private readonly bean: boolean;
   private readonly seed: number;
-  private readonly gait: Gait;
   private readonly planner: FootPlanner;
 
   private readonly standingHeight: number;
@@ -588,15 +585,13 @@ export class Motion {
     this.anatomy = anatomy;
     this.bones = bones;
     this.root = root;
-    this.bean = anatomy.style === "bean";
     let hash = 7;
     for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) % 100003;
     this.seed = hash / 100003;
-    this.gait = this.bean ? BEAN_GAIT : SUITED_GAIT;
     this.standingHeight = anatomy.standingPelvis;
     this.seatedHeight = SEAT_HEIGHT + anatomy.seatedPelvis;
     const { hip, shoulder } = anatomy;
-    const footX = hip.x + (this.bean ? 0.006 : 0.004);
+    const footX = hip.x + 0.006;
     this.neutralFeet = [
       new Vector3(footX, anatomy.ankle, hip.z),
       new Vector3(-footX, anatomy.ankle, hip.z),
@@ -607,11 +602,10 @@ export class Motion {
       new Vector3(-shoulder.x, shoulder.y, shoulder.z),
     ];
     this.reach = anatomy.upperArm + anatomy.forearm;
-    const out = this.bean ? 0.05 : 0.028;
     this.hangingHands = SIDES.map((side) =>
       this.shoulders[side]
         .clone()
-        .add(new Vector3(mirrorX(side) * out, -this.reach * 0.94, this.bean ? 0.025 : 0.02)),
+        .add(new Vector3(mirrorX(side) * 0.05, -this.reach * 0.94, 0.025)),
     ) as Pair<Vector3>;
     const { egg, neck } = anatomy;
     const mouth = mapFacePoint(egg, 24, 34.4, new Vector3());
@@ -619,7 +613,7 @@ export class Motion {
     this.mouth = mouth.add(new Vector3(neck.x, neck.y, neck.z));
     const eyeLine = neck.y + mapFacePoint(egg, 24, 26.6, new Vector3()).y;
     this.newspaper = this.placeNewspaper(eyeLine);
-    this.planner = new FootPlanner(this.gait, this.neutralFeet);
+    this.planner = new FootPlanner(GAIT, this.neutralFeet);
     for (const side of SIDES) bones.shoulders[side].position.copy(this.shoulders[side]);
   }
 
@@ -756,9 +750,6 @@ export class Motion {
       case "listen":
         this.writeListening(p, t, ambient);
         break;
-      case "pin":
-        this.writePinning(p, t, ambient);
-        break;
       case "hop":
         this.writeHop(p);
         break;
@@ -789,9 +780,9 @@ export class Motion {
     }
   }
 
-  /** Returns the depth of the front of the torso's egg (a bean's body, a suit's jacket) at height `y`. */
+  /** Returns the depth of the front of the body egg at height `y`. */
   private measureFront(y: number): number {
-    const egg = this.anatomy.jacket ?? this.anatomy.egg;
+    const { egg } = this.anatomy;
     return egg.depth * measureEggRadius(egg, y);
   }
 
@@ -805,7 +796,7 @@ export class Motion {
       const x = mirrorX(side);
       p.feet[side].copy(this.neutralFeet[side]);
       // Beans stand with their toes a little out.
-      p.footTurns[side].set(0, this.bean ? x * 0.14 : x * 0.06, 0);
+      p.footTurns[side].set(0, x * 0.14, 0);
       p.kneePoles[side].set(x * 0.15, 0, 1);
       p.hands[side].copy(this.hangingHands[side]);
       p.elbowPoles[side].set(x * 0.4, 0, -1);
@@ -816,7 +807,7 @@ export class Motion {
   /** Adds breathing to a still pose: the body swells and the hands rise a little. */
   private addBreath(p: Posture, t: number, ambient: number, depth: number): void {
     const breath = Math.sin(2 * Math.PI * 0.27 * t) * ambient * depth;
-    p.squash += (this.bean ? 0.014 : 0.008) * breath;
+    p.squash += 0.014 * breath;
     for (const side of SIDES) p.hands[side].y += 0.004 * breath;
     // A slow shift of weight from foot to foot.
     const sway = Math.sin(2 * Math.PI * 0.07 * t + 1.3) * ambient;
@@ -825,19 +816,17 @@ export class Motion {
 
   /** Adds the walk cycle's bob, lean, waddle and arm swing to a standing pose. */
   private addGait(p: Posture): void {
-    const { stance } = this.gait;
+    const { stance } = GAIT;
     const phase = this.planner.phase;
     const pace = Math.min(1, Math.max(this.measuredSpeed, 0.3) / WALK_SPEED);
-    const bob = this.bean ? 0.014 : 0.012;
     // Lowest just after each foot lands, highest as it passes under the body.
-    p.pelvis.y -= (this.bean ? 0.012 : 0.01) + bob * Math.cos(4 * Math.PI * (phase - 0.04));
-    p.pelvisTurn.x += (this.bean ? 0.08 : 0.05) * pace;
+    p.pelvis.y -= 0.012 + 0.014 * Math.cos(4 * Math.PI * (phase - 0.04));
+    p.pelvisTurn.x += 0.08 * pace;
     // The body rolls over whichever foot stands on the floor.
     const over = Math.cos(2 * Math.PI * (phase - stance / 2));
-    p.pelvisTurn.z -= (this.bean ? 0.065 : 0.02) * over;
-    p.pelvis.x += (this.bean ? 0.01 : 0.007) * over;
-    if (!this.bean) p.torsoTurn.y += 0.05 * Math.sin(2 * Math.PI * phase) * pace;
-    const swing = (this.bean ? 0.07 : 0.1) * pace * Math.cos(2 * Math.PI * phase);
+    p.pelvisTurn.z -= 0.065 * over;
+    p.pelvis.x += 0.01 * over;
+    const swing = 0.07 * pace * Math.cos(2 * Math.PI * phase);
     for (const side of SIDES) {
       // Each arm swings with the opposite leg.
       const forward = side === 0 ? -swing : swing;
@@ -852,14 +841,14 @@ export class Motion {
     const wave = Math.sin(2 * Math.PI * 1.3 * t) * ambient;
     const shoulder = this.shoulders[0];
     p.hands[0].set(
-      shoulder.x + (this.bean ? 0.07 : 0.05) + 0.03 * wave,
+      shoulder.x + 0.07 + 0.03 * wave,
       shoulder.y + this.reach * 0.88,
       shoulder.z + 0.05,
     );
     p.elbowPoles[0].set(1, -0.2, -0.5);
     p.handTurns[0].set(0.28 * wave, 0, 0);
     // The body leans away from the raised arm, and bounces a little with eagerness.
-    p.torsoTurn.z += this.bean ? 0.05 : 0.03;
+    p.torsoTurn.z += 0.05;
     p.pelvis.y += 0.004 * Math.max(0, Math.sin(2 * Math.PI * 1.3 * t)) * ambient;
   }
 
@@ -897,29 +886,8 @@ export class Motion {
     // Two nods every few seconds, and the head tipped a little to one side.
     const cycle = wrapUnit(t / 3.2);
     const nod = cycle < 0.3 ? Math.sin((cycle / 0.3) * Math.PI * 2) ** 2 : 0;
-    if (this.bean) {
-      p.torsoTurn.x += 0.08 * nod * ambient;
-      p.torsoTurn.z += 0.05;
-    } else {
-      p.headTurn.x += 0.18 * nod * ambient;
-      p.headTurn.z += 0.08;
-    }
-  }
-
-  private writePinning(p: Posture, t: number, ambient: number): void {
-    this.writeStanding(p);
-    this.addBreath(p, t, ambient, 0.6);
-    const press = Math.max(0, Math.sin(2 * Math.PI * (t / 2.4))) ** 4 * ambient;
-    const shoulder = this.shoulders[0];
-    p.hands[0].set(
-      shoulder.x - 0.03,
-      shoulder.y + this.reach * 0.7,
-      shoulder.z + this.reach * 0.5 + 0.025 * press,
-    );
-    p.elbowPoles[0].set(1, -0.6, -0.2);
-    p.handTurns[0].set(-0.6, 0, 0);
-    p.torsoTurn.x += this.bean ? -0.06 : 0.03;
-    if (!this.bean) p.headTurn.x -= 0.16;
+    p.torsoTurn.x += 0.08 * nod * ambient;
+    p.torsoTurn.z += 0.05;
   }
 
   /** Writes the hop: a crouch, a jump with arms up, a landing that squashes; then the rig stands. */
@@ -965,9 +933,8 @@ export class Motion {
   }
 
   private writeSitting(p: Posture): void {
-    const bean = this.bean;
     const { anatomy } = this;
-    const pelvisZ = bean ? 0.06 : 0.03;
+    const pelvisZ = 0.06;
     p.pelvis.set(0, this.seatedHeight, pelvisZ);
     p.pelvisTurn.set(0, 0, 0);
     p.torsoTurn.set(0, 0, 0);
@@ -976,47 +943,28 @@ export class Motion {
     const hipY = this.seatedHeight + anatomy.hip.y;
     for (const side of SIDES) {
       const x = mirrorX(side);
-      if (bean) {
-        // A bean's legs stick out over the seat's edge, toes up.
-        p.feet[side].set(x * (anatomy.hip.x + 0.012), hipY - 0.034, pelvisZ + 0.2);
-        p.footTurns[side].set(-1.0, x * 0.18, 0);
-        p.kneePoles[side].set(x * 0.2, 1, 0.3);
-      } else {
-        // A suited colleague's shins hang over the seat's edge; its feet do not reach the floor.
-        p.feet[side].set(
-          x * (anatomy.hip.x + 0.004),
-          hipY - anatomy.shin * 0.97,
-          pelvisZ + anatomy.thigh * 0.98 + 0.035,
-        );
-        p.footTurns[side].set(0.25, x * 0.05, 0);
-        p.kneePoles[side].set(0, 1, 1);
-      }
+      // A bean's legs stick out over the seat's edge, toes up.
+      p.feet[side].set(x * (anatomy.hip.x + 0.012), hipY - 0.034, pelvisZ + 0.2);
+      p.footTurns[side].set(-1.0, x * 0.18, 0);
+      p.kneePoles[side].set(x * 0.2, 1, 0.3);
       this.writeLapHand(p, side);
     }
   }
 
-  /** Rests a hand in the lap: on a bean's belly, on a suited colleague's thigh. */
+  /** Rests a hand in the lap, on the bean's belly. */
   private writeLapHand(p: Posture, side: Side): void {
     const x = mirrorX(side);
-    if (this.bean) {
-      const height = this.anatomy.egg.widestHeight * 0.5;
-      p.hands[side].set(x * 0.085, height, this.measureFront(height) + 0.03);
-      p.elbowPoles[side].set(x, -0.2, -0.6);
-      p.handTurns[side].set(0.3, 0, 0);
-    } else {
-      const { hip, legRadius } = this.anatomy;
-      p.hands[side].set(x * 0.08, hip.y + legRadius + 0.045, 0.15);
-      p.elbowPoles[side].set(x * 0.6, 0, -1);
-      p.handTurns[side].set(0.5, 0, 0);
-    }
+    const height = this.anatomy.egg.widestHeight * 0.5;
+    p.hands[side].set(x * 0.085, height, this.measureFront(height) + 0.03);
+    p.elbowPoles[side].set(x, -0.2, -0.6);
+    p.handTurns[side].set(0.3, 0, 0);
   }
 
-  /** Swings a sitting colleague's legs a little: a bean wiggles its feet, a suited one swings its shins. */
+  /** Swings a sitting colleague's legs a little: the bean wiggles its feet. */
   private addLegSwing(p: Posture, t: number, ambient: number): void {
     for (const side of SIDES) {
       const swing = Math.sin(2 * Math.PI * 0.45 * t + side * Math.PI) * ambient;
-      if (this.bean) p.footTurns[side].y += mirrorX(side) * 0.14 * swing;
-      else p.feet[side].z += 0.025 * swing;
+      p.footTurns[side].y += mirrorX(side) * 0.14 * swing;
     }
   }
 
@@ -1026,8 +974,8 @@ export class Motion {
    */
   private convertToTorso(p: Posture, point: Vector3, out: Vector3): Vector3 {
     const pelvis = writeTurn(p.pelvisTurn, scratchQuaternion);
-    const turn = scratchTorsoTurn.copy(p.torsoTurn);
-    if (this.bean) turn.add(p.headTurn);
+    // A bean's head is its body, so the head's turn turns the torso too.
+    const turn = scratchTorsoTurn.copy(p.torsoTurn).add(p.headTurn);
     const torso = writeTurn(turn, scratchTurn);
     pelvis.multiply(torso);
     scratchMatrix.compose(p.pelvis, pelvis, scratchWorld.set(1, 1, 1)).invert();
@@ -1036,9 +984,8 @@ export class Motion {
 
   private writeTyping(p: Posture, t: number, ambient: number): void {
     this.writeSitting(p);
-    p.pelvis.z += this.bean ? 0.06 : 0.03;
-    p.torsoTurn.x += this.bean ? 0.17 : 0.2;
-    if (!this.bean) p.headTurn.x += 0.14;
+    p.pelvis.z += 0.06;
+    p.torsoTurn.x += 0.17;
     this.addBreath(p, t, ambient, 0.5);
     // Typing comes in bursts, with a short pause to think between them.
     const burst = easeInOut(Math.min(1, 4 * Math.sin(2 * Math.PI * (t / 5.3)) + 3));
@@ -1060,8 +1007,7 @@ export class Motion {
     this.writeSitting(p);
     this.addBreath(p, t, ambient, 0.8);
     this.addLegSwing(p, t, ambient * 0.5);
-    p.torsoTurn.x += this.bean ? 0.02 : -0.05;
-    if (!this.bean) p.headTurn.x += 0.2;
+    p.torsoTurn.x += 0.02;
     const paper = this.newspaper;
     // Now and then the paper is shaken straight.
     const shake = Math.max(0, Math.sin(2 * Math.PI * (t / 6.5))) ** 8 * ambient;
@@ -1082,14 +1028,9 @@ export class Motion {
    * its size. A bean peeks over the top of it, just below `eyeLine`.
    */
   private placeNewspaper(eyeLine: number): Motion["newspaper"] {
-    if (this.bean) {
-      const height = 0.15;
-      const y = eyeLine - 0.045 - height / 2;
-      return { centre: new Vector3(0, y, this.measureFront(y) + 0.1), width: 0.24, height };
-    }
-    const height = 0.2;
-    const y = this.anatomy.shoulder.y - 0.06;
-    return { centre: new Vector3(0, y, this.measureFront(y) + 0.13), width: 0.3, height };
+    const height = 0.15;
+    const y = eyeLine - 0.045 - height / 2;
+    return { centre: new Vector3(0, y, this.measureFront(y) + 0.1), width: 0.24, height };
   }
 
   /** Returns how far a sip has lifted the cup, from 0 at the saucer to 1 at the mouth. */
@@ -1107,9 +1048,9 @@ export class Motion {
     this.addBreath(p, t, ambient, 0.8);
     this.addLegSwing(p, t, ambient * 0.5);
     const sip = this.measureSip() * ambient;
-    const lap = this.bean ? this.anatomy.egg.widestHeight * 0.42 : this.anatomy.hip.y + 0.11;
+    const lap = this.anatomy.egg.widestHeight * 0.42;
     // The right hand holds the saucer; the left lifts the cup from it to the mouth.
-    p.hands[1].set(-0.045, lap, this.measureFront(lap) + (this.bean ? 0.07 : 0.1));
+    p.hands[1].set(-0.045, lap, this.measureFront(lap) + 0.07);
     p.elbowPoles[1].set(-1, -0.4, -0.6);
     p.handTurns[1].set(0.9, 0, 0);
     const rest = scratchPoint.set(0.06, lap + 0.07, this.measureFront(lap) + 0.08);
@@ -1117,19 +1058,17 @@ export class Motion {
     p.hands[0].lerpVectors(rest, mouth, sip);
     p.elbowPoles[0].set(1, -0.5, -0.5);
     p.handTurns[0].set(0.6, 0, 0);
-    if (this.bean) p.torsoTurn.x -= 0.06 * sip;
-    else p.headTurn.x -= 0.12 * sip;
+    p.torsoTurn.x -= 0.06 * sip;
   }
 
   private writeSleeping(p: Posture, t: number, ambient: number): void {
     this.writeSitting(p);
     p.pelvis.z += 0.02;
     // Slumped back and to one side; deep, slow breaths.
-    p.torsoTurn.x -= this.bean ? 0.12 : 0.08;
-    p.torsoTurn.z += this.bean ? 0.16 : 0.08;
-    if (!this.bean) p.headTurn.set(0.32, 0.1, 0.26);
+    p.torsoTurn.x -= 0.12;
+    p.torsoTurn.z += 0.16;
     const breath = Math.sin(2 * Math.PI * 0.17 * t) * ambient;
-    p.squash += (this.bean ? 0.022 : 0.012) * breath;
+    p.squash += 0.022 * breath;
     for (const side of SIDES) {
       p.footTurns[side].y += mirrorX(side) * 0.3;
       p.hands[side].y += 0.006 * breath;
@@ -1143,7 +1082,7 @@ export class Motion {
   private turnToLook(input: MotionInput): boolean {
     let yaw = 0;
     let pitch = 0;
-    const yawLimit = this.bean ? 0.6 : 0.85;
+    const yawLimit = 0.6;
     if (input.asleep) {
       // A sleeper looks nowhere.
     } else if (input.look !== null) {
@@ -1173,14 +1112,8 @@ export class Motion {
       this.lookPitch = pitch;
     }
     const p = this.output;
-    if (this.bean) {
-      p.torsoTurn.y += this.lookYaw * 0.9;
-      p.torsoTurn.x += this.lookPitch * 0.45;
-    } else {
-      p.headTurn.y += this.lookYaw * 0.75;
-      p.torsoTurn.y += this.lookYaw * 0.25;
-      p.headTurn.x += this.lookPitch;
-    }
+    p.torsoTurn.y += this.lookYaw * 0.9;
+    p.torsoTurn.x += this.lookPitch * 0.45;
     return turning;
   }
 
@@ -1189,13 +1122,9 @@ export class Motion {
     const { bones, anatomy } = this;
     bones.pelvis.position.copy(p.pelvis);
     writeTurn(p.pelvisTurn, bones.pelvis.quaternion);
-    if (this.bean) {
-      writeTurn(scratchWorld.copy(p.torsoTurn).add(p.headTurn), bones.torso.quaternion);
-      bones.head.quaternion.identity();
-    } else {
-      writeTurn(p.torsoTurn, bones.torso.quaternion);
-      writeTurn(p.headTurn, bones.head.quaternion);
-    }
+    // A bean's head is its body, so the head's turn turns the torso.
+    writeTurn(scratchWorld.copy(p.torsoTurn).add(p.headTurn), bones.torso.quaternion);
+    bones.head.quaternion.identity();
     const squash = this.squash.value;
     const across = 1 / Math.sqrt(squash);
     bones.head.scale.set(across, squash, across);

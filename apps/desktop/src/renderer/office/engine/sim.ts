@@ -40,8 +40,6 @@ const VISIT_SECONDS = [2.2, 1.8, 1.1] as const;
 const TEA_SECONDS = 2.6;
 /** Sipping the fetched tea before a working colleague types again. */
 const TEA_BREAK_SECONDS = 16;
-/** Reaching up to pin one card. */
-const PIN_SECONDS = 1.6;
 /** The gap between two small happenings, per liveliness level. */
 const HAPPENING_GAP_SECONDS: Readonly<Record<1 | 2, readonly [number, number]>> = {
   1: [15, 40],
@@ -120,7 +118,7 @@ const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
 // Types.
 
 /** What an actor's script is doing, so the happenings leave busy colleagues alone. */
-type Errand = "queue" | "desk-wait" | "answer" | "visit" | "tea" | "lounge" | "pin" | "home";
+type Errand = "queue" | "desk-wait" | "answer" | "visit" | "tea" | "lounge" | "home";
 
 /** Where an actor rests between scripts. */
 type Place = "home" | "lounge" | "queue" | "desk-side" | "entrance" | "elsewhere";
@@ -378,7 +376,6 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
   const loungeIds = new Set(world.lounge);
   let nextDepartureAt = 0;
   let teaTaken = false;
-  let pinsWaiting = 0;
   const scratch = new Vector3();
 
   // -- Timers --------------------------------------------------------------
@@ -1051,32 +1048,6 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
   };
 
   /**
-   * Sends Triage to the case board to pin every card waiting for it, and
-   * back. Without Triage or a board, the waiting cards are dropped.
-   */
-  const pinProposals = (): void => {
-    const triage = [...actors.values()].find((actor) => actor.colleague.role === "triage");
-    const board = spots.caseBoard;
-    if (triage === undefined || board === null) {
-      pinsWaiting = 0;
-      return;
-    }
-    if (triage.errand === "pin") return;
-    run(triage, "pin", async () => {
-      await walkTo(triage, board);
-      while (pinsWaiting > 0) {
-        setAction(triage, "pin");
-        await wait(triage, PIN_SECONDS * 0.6);
-        pinsWaiting--;
-        await wait(triage, PIN_SECONDS * 0.4);
-      }
-      setAction(triage, "stand");
-      await wait(triage, 0.4);
-      await walkHome(triage);
-    });
-  };
-
-  /**
    * Sends a colleague to fetch tea from the trolley and sip it at its desk.
    * Returns false when no one can.
    */
@@ -1154,15 +1125,6 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
       [fetchTea, 3],
       [visitWithinRoom, 3],
       [fillFreeLoungeSeat, 2],
-      [
-        () => {
-          if (spots.caseBoard === null) return false;
-          pinsWaiting++;
-          pinProposals();
-          return true;
-        },
-        1,
-      ],
     ];
     // Tries the happenings in a weighted random order until one can happen.
     const order = happenings

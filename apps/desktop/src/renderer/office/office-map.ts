@@ -92,7 +92,7 @@ export const BUREAU_MAP: OfficeMap = {
       name: "The Triage Room",
       // Triage's desk stays empty: no Triage character is drawn yet.
       furniture: ["clerks-desk", "case-board", "plant", "lamp"],
-      spots: ["stand"],
+      spots: [],
     },
     {
       kind: "lounge",

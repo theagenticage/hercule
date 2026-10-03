@@ -11,9 +11,6 @@ import type { ProjectTint } from "../../screens/project-tile";
 /** A hat a colleague can wear. */
 export type Headwear = "cloche" | "headset" | "beret";
 
-/** Whether a colleague is a thread's agent, an assistant, or the Triage workflow. */
-export type Role = "session" | "assistant" | "triage";
-
 /** What a colleague looks like: its crew hue, body shape and what it wears. */
 export interface CrewLook {
   readonly hue: Hue;
@@ -47,9 +44,6 @@ export interface Colleague {
   readonly id: string;
   /** The short name the Office's tag shows. */
   readonly name: string;
-  /** The thread's full title. */
-  readonly title: string;
-  readonly role: Role;
   readonly look: CrewLook;
   readonly pose: Pose;
   /** What the tag shows after the name: "typing", "idle". */

@@ -1,19 +1,17 @@
 /**
- * The measurements of a colleague's body, in metres, for both
- * character styles and all four body shapes.
+ * The measurements of a colleague's body, in metres, for all four body
+ * shapes.
  *
  * The egg a colleague is drawn as comes straight from the Bureau's 2D face:
  * `SHAPE_METRICS` gives each shape's top, bottom, widest point and half
  * width, and the outline is the same pair of cubic curves `buildBodyPath`
- * draws. A `bean` is that egg as its whole body, on short legs. A `suited`
- * colleague wears the egg as its head, on a grown-up body in a suit.
+ * draws. A colleague is a bean: that egg as its whole body, on short legs.
  *
  * Face features are placed in the 2D face's own units (x 24 is the middle,
  * y 42.4 the bottom of every egg) and mapped onto the egg's surface, so the
  * 3D face keeps the book's proportions.
  */
 import { Vector3 } from "three";
-import type { CharacterStyle } from "../../engine/contracts";
 import type { Shape } from "../../../faces/look";
 import { SHAPE_METRICS } from "../../../faces/shapes";
 
@@ -137,12 +135,9 @@ export interface Place {
 
 /** Everything that sizes a colleague's body. All lengths are in metres. */
 export interface Anatomy {
-  readonly style: CharacterStyle;
   readonly shape: Shape;
-  /** The egg with the face on it: a bean's whole body, a suited colleague's head. */
+  /** The egg with the face on it, which is the bean's whole body. */
   readonly egg: Egg;
-  /** A suited colleague's jacket, lathed like the egg; null for a bean. */
-  readonly jacket: Egg | null;
   /** The height of the pelvis above the floor when standing. */
   readonly standingPelvis: number;
   /** The height of the pelvis above the seat's top when sitting. */
@@ -166,13 +161,8 @@ export interface Anatomy {
   readonly stroke: number;
 }
 
-/** The suited style's head height, per shape, so the shapes keep their 2D height ratios. */
-const SUITED_HEAD = 0.3 / (SHAPE_METRICS.egg.bottomY - SHAPE_METRICS.egg.topY);
-/** The bean style's body height per 2D unit: the egg shape's body is 0.8 tall. */
+/** A bean's body height per 2D unit: the egg shape's body is 0.8 tall. */
 const BEAN_BODY = 0.8 / (SHAPE_METRICS.egg.bottomY - SHAPE_METRICS.egg.topY);
-
-/** How wide each shape's suit is cut, against the egg shape's. */
-const SUIT_WIDTH: Readonly<Record<Shape, number>> = { egg: 1, tall: 0.9, round: 1.08, wide: 1.16 };
 
 /** Builds the anatomy of a bean: the Bureau's egg as a whole body on short legs. */
 function buildBeanAnatomy(shape: Shape): Anatomy {
@@ -181,10 +171,8 @@ function buildBeanAnatomy(shape: Shape): Anatomy {
   const shoulderHeight = egg.widestHeight + 0.035;
   const shoulderRadius = measureEggRadius(egg, shoulderHeight);
   return {
-    style: "bean",
     shape,
     egg,
-    jacket: null,
     standingPelvis: 0.2,
     seatedPelvis: 0.004,
     hip: { x: Math.min(0.095, egg.halfWidth * 0.34), y: 0.055, z: 0.01 },
@@ -202,47 +190,14 @@ function buildBeanAnatomy(shape: Shape): Anatomy {
   };
 }
 
-/** Builds the anatomy of a suited colleague: the egg as a head on a body in a suit. */
-function buildSuitedAnatomy(shape: Shape): Anatomy {
-  const metrics = SHAPE_METRICS[shape];
-  const egg = buildEgg(shape, (metrics.bottomY - metrics.topY) * SUITED_HEAD, 0.94, 0.9);
-  const jacket = buildEgg("egg", 0.4, 0.84 * SUIT_WIDTH[shape], 0.72);
-  const shoulderHeight = 0.315;
-  return {
-    style: "suited",
-    shape,
-    egg,
-    jacket,
-    standingPelvis: 0.33,
-    seatedPelvis: 0.012,
-    hip: { x: 0.078 * Math.min(1.1, SUIT_WIDTH[shape]), y: 0.05, z: 0 },
-    thigh: 0.18,
-    shin: 0.175,
-    legRadius: 0.05,
-    ankle: 0.05,
-    shoulder: {
-      x: measureEggRadius(jacket, shoulderHeight) - 0.01,
-      y: shoulderHeight,
-      z: 0.0,
-    },
-    upperArm: 0.165,
-    forearm: 0.155,
-    armRadius: 0.04,
-    handRadius: 0.043,
-    neck: { x: 0, y: 0.375, z: 0.005 },
-    stroke: 0.62 * egg.unit,
-  };
-}
+const anatomies = new Map<Shape, Anatomy>();
 
-const anatomies = new Map<string, Anatomy>();
-
-/** Returns the anatomy of `style` and `shape`, built once and then shared. */
-export function readAnatomy(style: CharacterStyle, shape: Shape): Anatomy {
-  const key = `${style}|${shape}`;
-  let anatomy = anatomies.get(key);
+/** Returns the anatomy of `shape`, built once and then shared. */
+export function readAnatomy(shape: Shape): Anatomy {
+  let anatomy = anatomies.get(shape);
   if (anatomy === undefined) {
-    anatomy = style === "bean" ? buildBeanAnatomy(shape) : buildSuitedAnatomy(shape);
-    anatomies.set(key, anatomy);
+    anatomy = buildBeanAnatomy(shape);
+    anatomies.set(shape, anatomy);
   }
   return anatomy;
 }

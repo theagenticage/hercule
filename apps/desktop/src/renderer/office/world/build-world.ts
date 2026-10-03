@@ -50,8 +50,6 @@ function buildColleague(session: Session, pose: Pose): Colleague {
   return {
     id: session.id,
     name: session.title,
-    title: session.title,
-    role: "session",
     look: { ...buildLook(session.id), headwear: null },
     pose,
     stateLabel: describePose(pose),

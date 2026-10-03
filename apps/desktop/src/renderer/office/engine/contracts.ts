@@ -77,13 +77,8 @@ export type Action =
   | "listen"
   /** Asleep: slumped in an armchair, eyes closed. */
   | "sleep"
-  /** Standing, reaching up to pin a card on a board. */
-  | "pin"
   /** One happy hop on the spot, then back to standing. */
   | "hop";
-
-/** The character styles the controls offer. */
-export type CharacterStyle = "bean" | "suited";
 
 /**
  * One colleague's 3D body. The root's origin sits between the feet on the
@@ -110,7 +105,7 @@ export interface ColleagueRig {
   dispose(): void;
 }
 
-export type BuildColleagueRig = (colleague: Colleague, style: CharacterStyle) => ColleagueRig;
+export type BuildColleagueRig = (colleague: Colleague) => ColleagueRig;
 
 // ---------------------------------------------------------------------------
 // Walls.
@@ -251,8 +246,6 @@ interface OfficeSpots {
   readonly queue: ReadonlyArray<Spot>;
   /** Places to sit when idle away from the desk: the lounge's chairs. */
   readonly lounge: ReadonlyArray<Seat>;
-  /** Where Triage stands to pin a Proposal. */
-  readonly caseBoard: Spot | null;
   /** Spots by the filing cabinets, where a colleague files a Task. */
   readonly records: Spot | null;
   /** Where a newly arrived colleague comes in: the front door, inside, facing in. */

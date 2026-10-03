@@ -50,7 +50,7 @@ export function listColleaguesInPose(
 ): ReadonlyArray<Colleague> {
   const found = world.colleagues
     .map((colleague) => applyColleagueState(colleague, states))
-    .filter((colleague) => colleague.role !== "triage" && colleague.pose === pose);
+    .filter((colleague) => colleague.pose === pose);
   if (pose !== "waiting") return found;
   const places = new Map(world.queue.map((id, place) => [id, place]));
   const findPlace = (colleague: Colleague): number => places.get(colleague.id) ?? places.size;

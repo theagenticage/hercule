@@ -147,7 +147,7 @@ export function mountOfficeScene(
     stage.scene.add(layout.root);
     const rigs = new Map<string, ColleagueRig>();
     for (const colleague of world.colleagues) {
-      const rig = buildColleagueRig(colleague, OFFICE_SETTINGS.style);
+      const rig = buildColleagueRig(colleague);
       addContactShadow(rig.object);
       rigs.set(colleague.id, rig);
       stage.scene.add(rig.object);

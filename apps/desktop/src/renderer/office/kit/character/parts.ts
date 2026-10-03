@@ -68,17 +68,17 @@ export const BONE_PARENTS: ReadonlyArray<number> = [
 
 /**
  * The colours a colleague's body is painted in:
- * - `body`, `shade` and `tint`: the tones of the colleague's hue;
+ * - `body` and `shade`: the tones of the colleague's hue;
  * - `trim`: shoes, buttons and the bowtie, in the hat colour;
  * - `hat`: the hat, also in the hat colour, but in a mesh of its own, so it
  *   can have a satin finish instead of the body's vinyl;
  * - `shadow`: the shade a hat casts on the head just below its edge, in the
  *   hue's dark ink tone at the edge, fading into the body colour below.
  */
-export type Surface = "body" | "shade" | "tint" | "trim" | "hat" | "shadow";
+export type Surface = "body" | "shade" | "trim" | "hat" | "shadow";
 
 /** The surfaces merged into a colleague's body mesh, in vertex order. */
-const BODY_SURFACES: ReadonlyArray<Surface> = ["body", "shade", "tint", "trim", "shadow"];
+const BODY_SURFACES: ReadonlyArray<Surface> = ["body", "shade", "trim", "shadow"];
 
 /**
  * A list of rigid parts, sorted into layers, merged into skinned geometry:
@@ -442,13 +442,11 @@ function buildMitten(radius: number): BufferGeometry {
 
 /** Builds a shoe whose ankle is at the origin: a rounded toe-cap, flat underneath. */
 function buildShoe(anatomy: Anatomy): BufferGeometry {
-  const suited = anatomy.style === "suited";
-  const radius = suited ? 0.04 : 0.042;
-  const length = suited ? 0.085 : 0.05;
-  const geometry = new CapsuleGeometry(radius, length, 3, 10);
+  const radius = 0.042;
+  const geometry = new CapsuleGeometry(radius, 0.05, 3, 10);
   geometry.rotateX(Math.PI / 2);
-  geometry.scale(1, suited ? 0.78 : 0.88, 1);
-  geometry.translate(0, -anatomy.ankle + radius * 0.6, suited ? 0.03 : 0.022);
+  geometry.scale(1, 0.88, 1);
+  geometry.translate(0, -anatomy.ankle + radius * 0.6, 0.022);
   const position = geometry.getAttribute("position");
   const normal = geometry.getAttribute("normal");
   for (let i = 0; i < position.count; i++) {
@@ -811,9 +809,9 @@ function addHeadset(list: PartList<Surface>, egg: Egg): void {
 }
 
 // ---------------------------------------------------------------------------
-// Accessories below the face: on a bean's body, on a suited colleague's chest.
+// Accessories below the face, on the lower part of a bean's body.
 
-/** Where the accessories below the face sit: on a bean's body, on a suited colleague's suit. */
+/** Where the accessories below the face sit on a bean's body. */
 interface Chest {
   /** The egg they sit on. */
   readonly egg: Egg;
@@ -829,30 +827,21 @@ interface Chest {
 
 /** Returns where the accessories below the face sit, for `anatomy`. */
 export function readChest(anatomy: Anatomy): Chest {
-  if (anatomy.jacket === null) {
-    return {
-      egg: anatomy.egg,
-      bone: BONE.head,
-      knot: mapFacePoint(anatomy.egg, 24, 37.8, new Vector3()),
-      fob: mapFacePoint(anatomy.egg, 24.4, 37.6, new Vector3()),
-      unit: anatomy.egg.unit,
-    };
-  }
   return {
-    egg: anatomy.jacket,
-    bone: BONE.torso,
-    knot: new Vector3(0, anatomy.jacket.height - 0.04, 0),
-    fob: new Vector3(0, anatomy.jacket.height * 0.5, 0),
-    unit: 0.0085,
+    egg: anatomy.egg,
+    bone: BONE.head,
+    knot: mapFacePoint(anatomy.egg, 24, 37.8, new Vector3()),
+    fob: mapFacePoint(anatomy.egg, 24.4, 37.6, new Vector3()),
+    unit: anatomy.egg.unit,
   };
 }
 
 /** Adds a bowtie at the chest's knot: two rounded wings and a knot. */
 function addBowtie(list: PartList<Surface>, anatomy: Anatomy): void {
   const chest = readChest(anatomy);
-  // On a bean the knot sits low, where the egg turns under, so a book-sized
-  // bowtie would wrap round half the body; it is drawn smaller there.
-  const u = chest.unit * (anatomy.jacket === null ? 0.62 : 1);
+  // The knot sits low, where the egg turns under, so a book-sized bowtie
+  // would wrap round half the body; it is drawn smaller.
+  const u = chest.unit * 0.62;
   const wing = new Shape();
   wing.moveTo(0, 0);
   wing.lineTo(-5 * u, 2.7 * u);
@@ -931,68 +920,6 @@ export function buildMonocleChain(egg: Egg): BufferGeometry {
 }
 
 // ---------------------------------------------------------------------------
-// The suit.
-
-/** Adds a suited colleague's jacket, waistcoat front and buttons. */
-function addSuit(list: PartList<Surface>, anatomy: Anatomy): void {
-  const jacket = anatomy.jacket!;
-  list.add("shade", buildEggGeometry(jacket, 16), BONE.torso);
-  // The waistcoat: a V from the collar down to the belly, in the hue's tint.
-  const columns = 8;
-  const rows = 10;
-  const low = jacket.height * 0.3;
-  const high = jacket.height * 0.985;
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const point = new Vector3();
-  const normal = new Vector3();
-  for (let r = 0; r <= rows; r++) {
-    const t = r / rows;
-    const height = low + (high - low) * t;
-    const radius = measureEggRadius(jacket, height);
-    const reach = radius * (0.1 + 0.55 * t * t);
-    for (let c = 0; c <= columns; c++) {
-      const across = (c / columns) * 2 - 1;
-      placeOnEgg(jacket, across * reach, height, 0.004, point, normal);
-      positions.push(point.x, point.y, point.z);
-      normals.push(normal.x, normal.y, normal.z);
-    }
-  }
-  const index: number[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < columns; c++) {
-      const a = r * (columns + 1) + c;
-      const b = a + columns + 1;
-      index.push(a, a + 1, b, a + 1, b + 1, b);
-    }
-  }
-  const front = new BufferGeometry();
-  front.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
-  front.setAttribute("normal", new BufferAttribute(new Float32Array(normals), 3));
-  front.setIndex(index);
-  list.add("tint", front, BONE.torso);
-  for (const t of [0.18, 0.38, 0.58]) {
-    const height = low + (high - low) * t;
-    const button = buildDome(0.009, 0.009, 0.006, 8);
-    button.translate(0, height, 0);
-    list.add("trim", wrapOntoEgg(button, jacket, 0.004), BONE.torso);
-  }
-  // The shirt cuffs at the wrists.
-  for (const bone of [BONE.elbowL, BONE.elbowR]) {
-    const cuff = new CylinderGeometry(
-      anatomy.armRadius * 1.04,
-      anatomy.armRadius * 1.06,
-      0.024,
-      12,
-      1,
-      true,
-    );
-    cuff.translate(0, -anatomy.forearm + 0.006, 0);
-    list.add("tint", cuff, bone);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // The whole look.
 
 /** What decides a colleague's shared geometry: everything in its look but its hue. */
@@ -1005,7 +932,7 @@ interface Build {
 /** Returns the key two rigs with the same shared geometry have in common. */
 function readBuildKey(build: Build): string {
   const { anatomy, accessories, headwear } = build;
-  return `${anatomy.style}|${anatomy.shape}|${[...accessories].sort().join(",")}|${headwear ?? ""}`;
+  return `${anatomy.shape}|${[...accessories].sort().join(",")}|${headwear ?? ""}`;
 }
 
 /** A colleague's body, without its face, as the geometry of its two meshes. */
@@ -1060,16 +987,13 @@ function readLayeredBody(build: Build): LayeredBody {
   if (known !== undefined) return known;
   const { anatomy, accessories, headwear } = build;
   const list = new PartList<Surface>();
-  const suited = anatomy.style === "suited";
-  list.add("body", buildEggGeometry(anatomy.egg, suited ? 16 : 22), BONE.head);
-  if (suited) addSuit(list, anatomy);
+  list.add("body", buildEggGeometry(anatomy.egg, 22), BONE.head);
   list.add("shade", buildLimb(anatomy.armRadius, anatomy.upperArm), BONE.shoulderL);
   list.add("shade", buildLimb(anatomy.armRadius, anatomy.upperArm), BONE.shoulderR);
   list.add("shade", buildLimb(anatomy.armRadius * 0.97, anatomy.forearm), BONE.elbowL);
   list.add("shade", buildLimb(anatomy.armRadius * 0.97, anatomy.forearm), BONE.elbowR);
-  const hand = suited ? "body" : "shade";
-  list.add(hand, buildMitten(anatomy.handRadius), BONE.handL);
-  list.add(hand, buildMitten(anatomy.handRadius), BONE.handR);
+  list.add("shade", buildMitten(anatomy.handRadius), BONE.handL);
+  list.add("shade", buildMitten(anatomy.handRadius), BONE.handR);
   list.add("shade", buildLimb(anatomy.legRadius, anatomy.thigh), BONE.hipL);
   list.add("shade", buildLimb(anatomy.legRadius, anatomy.thigh), BONE.hipR);
   list.add("shade", buildLimb(anatomy.legRadius * 0.96, anatomy.shin), BONE.kneeL);
@@ -1166,30 +1090,6 @@ export function buildNewspaper(width: number, height: number): BufferGeometry {
   if (merged === null) throw new Error("The newspaper could not be merged.");
   merged.computeVertexNormals();
   return merged;
-}
-
-/** Builds a magnifying glass's brass rim and handle, the lens centre at the origin, facing +z. */
-export function buildLoupe(): BufferGeometry {
-  const rim = new TorusGeometry(0.042, 0.0065, 5, 18);
-  const handle = new CapsuleGeometry(0.0085, 0.07, 2, 8);
-  handle.translate(0, -0.042 - 0.045, 0);
-  const collar = new CylinderGeometry(0.011, 0.011, 0.014, 10);
-  collar.translate(0, -0.05, 0);
-  const merged = mergeGeometries(
-    [rim.toNonIndexed(), handle.toNonIndexed(), collar.toNonIndexed()],
-    false,
-  );
-  if (merged === null) throw new Error("The loupe could not be merged.");
-  merged.deleteAttribute("uv");
-  return merged;
-}
-
-/** Builds the loupe's lens: a thin disc filling the rim. */
-export function buildLens(): BufferGeometry {
-  const lens = new CylinderGeometry(0.038, 0.038, 0.004, 18);
-  lens.rotateX(Math.PI / 2);
-  lens.deleteAttribute("uv");
-  return lens;
 }
 
 /** Builds the flat ring on the floor that marks a selected colleague, in the floor's plane. */

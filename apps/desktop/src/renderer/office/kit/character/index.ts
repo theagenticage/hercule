@@ -1,6 +1,5 @@
 /**
- * A colleague's 3D body: the Bureau crew's egg on short legs
- * (`bean`), or the same face on a grown-up figure in a suit (`suited`).
+ * A colleague's 3D body: the Bureau crew's egg on short legs, the bean.
  *
  * A rig is a skeleton of seventeen bones and two or three skinned meshes,
  * each painted in vertex colours so it costs one draw call: the body in
@@ -8,8 +7,8 @@
  * (features, badge and brass), and a hat in satin if it wears one. The
  * geometry is shared by every rig with the same look, so a rig owns only
  * its bones and a few small props, hidden until used: a cup and saucer, a
- * newspaper, the marigold palm, the sleeper's Zs, a magnifying glass for
- * Triage, and the selection ring on the floor.
+ * newspaper, the marigold palm, the sleeper's Zs, and the selection ring on
+ * the floor.
  *
  * `motion.ts` moves the bones; `face.ts` draws the face; `parts.ts` builds
  * the shapes; `anatomy.ts` sizes them.
@@ -35,15 +34,13 @@ import { paint, paintHue, paintVertexColors } from "../../engine/palette";
 import type { Pose } from "@hercule/client-core";
 import { readAnatomy, type Anatomy } from "./anatomy";
 import { hasOpenEyes, readEyeCentre, readFaceGeometry } from "./face";
-import { Motion, Spring, isSittingAction, measureDamping, type RigBones } from "./motion";
+import { Motion, Spring, measureDamping, type RigBones } from "./motion";
 import {
   BONE,
   BONE_PARENTS,
   buildCup,
   buildDome,
-  buildLens,
   buildLetterZ,
-  buildLoupe,
   buildNewspaper,
   buildSaucer,
   buildSelectionRing,
@@ -130,8 +127,6 @@ class Presence {
 // when the Office closes.
 let cupGeometry: BufferGeometry | null = null;
 let saucerGeometry: BufferGeometry | null = null;
-let loupeGeometry: BufferGeometry | null = null;
-let lensGeometry: BufferGeometry | null = null;
 let letterGeometry: BufferGeometry | null = null;
 const palmGeometries = new Map<number, BufferGeometry>();
 const ringGeometries = new Map<number, BufferGeometry>();
@@ -139,8 +134,6 @@ const newspaperGeometries = new Map<string, BufferGeometry>();
 registerCache(() => {
   cupGeometry = null;
   saucerGeometry = null;
-  loupeGeometry = null;
-  lensGeometry = null;
   letterGeometry = null;
   palmGeometries.clear();
   ringGeometries.clear();
@@ -229,9 +222,9 @@ function createSkinnedMesh(
 
 const scratchHold = new Vector3();
 
-export const buildColleagueRig: BuildColleagueRig = (colleague, style) => {
+export const buildColleagueRig: BuildColleagueRig = (colleague) => {
   const { look } = colleague;
-  const anatomy = readAnatomy(style, look.shape);
+  const anatomy = readAnatomy(look.shape);
   const build = { anatomy, accessories: look.accessories, headwear: look.headwear };
   const object = new Group();
   object.name = `colleague ${colleague.id}`;
@@ -291,23 +284,6 @@ export const buildColleagueRig: BuildColleagueRig = (colleague, style) => {
     bones.torso.add(prop.mesh);
   }
 
-  // Triage's mark: a brass magnifying glass in the right hand.
-  let loupe: Presence | null = null;
-  if (colleague.role === "triage") {
-    loupeGeometry ??= buildLoupe();
-    lensGeometry ??= buildLens();
-    const frame = new Mesh(loupeGeometry, paint("brass", "brass"));
-    frame.add(new Mesh(lensGeometry, paint("surface", "glass")));
-    // Held loosely by the handle, the lens hanging below the fist and facing forward.
-    const grip = new Group();
-    grip.position.set(0, -anatomy.handRadius * 0.75, 0);
-    frame.position.set(0, -0.09, 0);
-    frame.rotation.z = Math.PI;
-    grip.add(frame);
-    bones.hands[1].add(grip);
-    loupe = new Presence(grip);
-  }
-
   // The sleeper's Zs, which always face the camera.
   letterGeometry ??= buildLetterZ(1);
   const letters = [0, 1].map(() => {
@@ -319,9 +295,7 @@ export const buildColleagueRig: BuildColleagueRig = (colleague, style) => {
   });
 
   // The selection ring, flat on the floor.
-  const ringRadius =
-    Math.max(anatomy.egg.halfWidth, anatomy.jacket?.halfWidth ?? 0) +
-    (style === "bean" ? 0.12 : 0.14);
+  const ringRadius = anatomy.egg.halfWidth + 0.12;
   const ring = new Mesh(readRingGeometry(ringRadius), paint("accent", "matte"));
   ring.position.y = 0.006;
   ring.visible = false;
@@ -373,14 +347,8 @@ export const buildColleagueRig: BuildColleagueRig = (colleague, style) => {
     saucer.target = action === "sip" ? 1 : 0;
     newspaper.target = action === "read" ? 1 : 0;
     palm.target = action === "raise-hand" ? 1 : 0;
-    if (loupe !== null) {
-      // The magnifying glass is put away while the right hand is busy.
-      loupe.target = isSittingAction(action) && action !== "sit" ? 0 : 1;
-    }
     let fading = false;
-    for (const prop of [cup, saucer, newspaper, palm, loupe]) {
-      if (prop !== null) fading = prop.update(dt) || fading;
-    }
+    for (const prop of [cup, saucer, newspaper, palm]) fading = prop.update(dt) || fading;
     if (saucer.mesh.visible) {
       const hand = readMitten(1, scratchHold);
       saucer.mesh.position.set(hand.x + 0.012, hand.y + anatomy.handRadius * 0.62, hand.z + 0.01);

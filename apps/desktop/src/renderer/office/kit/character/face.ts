@@ -8,7 +8,7 @@
  * geometry with each layer's colour painted into its vertices, so the whole
  * face, with the brass of a watch or monocle, is one mesh and one draw call.
  * The eyes follow their own bones, so a blink squeezes them; everything else
- * follows the head, or the torso for a suited colleague's badge and watch.
+ * follows the head.
  */
 import {
   BufferGeometry,
@@ -474,24 +474,15 @@ interface BadgePlace {
 /**
  * Returns where a pose's badge is pinned. A bean wears it low on its left
  * (+x), where the book draws it, or on its right when a pocket watch hangs
- * there. A suited colleague wears it on the left of the chest.
+ * there.
  */
 function readBadgePlace(anatomy: Anatomy, wearsWatch: boolean): BadgePlace {
-  if (anatomy.jacket === null) {
-    const { egg } = anatomy;
-    return {
-      egg,
-      bone: BONE.head,
-      centre: mapFacePoint(egg, wearsWatch ? 13.6 : 34.4, 37.2, new Vector3()),
-      radius: 3 * egg.unit,
-    };
-  }
-  const jacket = anatomy.jacket;
+  const { egg } = anatomy;
   return {
-    egg: jacket,
-    bone: BONE.torso,
-    centre: new Vector3(0.066, jacket.height * 0.66, 0),
-    radius: 0.032,
+    egg,
+    bone: BONE.head,
+    centre: mapFacePoint(egg, wearsWatch ? 13.6 : 34.4, 37.2, new Vector3()),
+    radius: 3 * egg.unit,
   };
 }
 
@@ -613,7 +604,6 @@ export function readFaceGeometry(
 ): BufferGeometry {
   const wears = (accessory: Accessory) => accessories.includes(accessory);
   const key = [
-    anatomy.style,
     anatomy.shape,
     pose,
     ...(["tache", "glasses", "monocle", "watch"] as const).filter(wears),

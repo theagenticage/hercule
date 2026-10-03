@@ -10,23 +10,22 @@
  * route keeps `selectedId` and `drawer` in step with its `session` search
  * param, see `office-screen.tsx`.
  */
-import type { CharacterStyle, ColleagueState } from "./engine/contracts";
+import type { ColleagueState } from "./engine/contracts";
 import type { Colleague } from "./world/types";
 
 /** How many name tags the Office shows: all, the ones that matter now, or none. */
 export type TagMode = "all" | "smart" | "none";
 
 /**
- * The fixed values the Office runs with: how the colleagues look, which name
- * tags show, and how much the colleagues move about. The user cannot change
- * them; the scene passes each one to the part of the engine that uses it.
+ * The fixed values the Office runs with: which name tags show, and how much
+ * the colleagues move about. The user cannot change them; the scene passes
+ * each one to the part of the engine that uses it.
  */
 export const OFFICE_SETTINGS: {
-  readonly style: CharacterStyle;
   readonly tags: TagMode;
   /** How much the colleagues move about while nothing happens: 1 is calm. */
   readonly liveliness: 0 | 1 | 2;
-} = { style: "bean", tags: "smart", liveliness: 1 };
+} = { tags: "smart", liveliness: 1 };
 
 export interface OfficeState {
   readonly hoveredId: string | null;

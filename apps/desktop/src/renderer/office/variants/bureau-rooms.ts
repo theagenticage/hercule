@@ -99,7 +99,6 @@ export interface Fittings {
   /** Every desk with an owner, and the runner its owner runs on, for the fleet's desk tags. */
   readonly ownedDesks: Array<{ readonly desk: DeskHandle; readonly runnerId: string | null }>;
   yourDesk: Spot | null;
-  caseBoard: Spot | null;
   records: Spot | null;
   tea: Spot | null;
   entrance: Spot | null;
@@ -399,7 +398,7 @@ function designThreadRoom(
  * cards, because the Office does not read Proposals yet.
  */
 function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
-  const { has, offers } = readFixedRoom(fixed);
+  const { has } = readFixedRoom(fixed);
   const boardWidth = 2.2;
   const boardZone = 3.0;
   return {
@@ -425,7 +424,6 @@ function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
           inside.minZ + 0.3,
         );
         fittings.board = board;
-        if (offers("stand")) fittings.caseBoard = fitter.readSpot(board.pinMarker);
       }
       // Triage's own desk, west of the board.
       if (has("clerks-desk")) {

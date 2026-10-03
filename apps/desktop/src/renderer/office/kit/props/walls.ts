@@ -27,7 +27,6 @@ import {
   buildBlock,
   buildCylinder,
   buildExtrusion,
-  buildMarker,
   buildRing,
   buildSheet,
   buildSphere,
@@ -187,8 +186,6 @@ const readBoardGeometry = memoizeByKey((width: number) => {
 /** The cork board of Proposals: how many cards it shows, and how many of them burn. */
 export interface CaseBoardHandle {
   readonly object: Object3D;
-  /** Where Triage stands to pin a card, in the board's own space, facing the board. */
-  readonly pinMarker: Object3D;
   setCards(total: number, burning: number): void;
 }
 
@@ -230,11 +227,8 @@ export function buildCaseBoard(width: number): CaseBoardHandle {
     rotation.setFromAxisAngle(new Vector3(0, 0, 1), slot.turn);
     mesh.setMatrixAt(instance, matrix.compose(slot.pin, rotation, unit));
   };
-  const pinMarker = buildMarker(0, 0.7, Math.PI);
-  object.add(pinMarker);
   return {
     object,
-    pinMarker,
     setCards(total, burning) {
       const shown = Math.max(0, Math.min(BOARD_CAPACITY, Math.floor(total)));
       const burn = Math.max(0, Math.min(shown, Math.floor(burning)));
