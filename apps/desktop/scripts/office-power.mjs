@@ -106,7 +106,14 @@ app.whenReady().then(async () => {
   let cover = null;
   let other = null;
   if (mode === "hidden") window.hide();
-  if (mode === "minimized") window.minimize();
+  if (mode === "minimized") {
+    // A window minimized before it is on screen stays up, so this waits for it to show first.
+    app.focus({ steal: true });
+    await sleep(1000);
+    window.minimize();
+    await sleep(1000);
+    console.log(`minimized: ${window.isMinimized()}`);
+  }
   if (mode === "covered") {
     cover = new BrowserWindow({
       x: area.x,
@@ -140,6 +147,7 @@ app.whenReady().then(async () => {
 
   const readPage = () =>
     window.webContents.executeJavaScript(`(() => {
+      if (window.office === undefined) return { frames: 0, cpuMs: 0, listenersMs: 0, renderMs: 0, gpuMs: 0, gpuFrames: 0, staticRedraws: 0, skippedRafs: 0, visibility: document.visibilityState, hasFocus: document.hasFocus(), heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576) };
       const stage = window.office.stage;
       const s = stage.spike;
       return {

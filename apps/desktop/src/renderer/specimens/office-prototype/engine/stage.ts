@@ -163,7 +163,10 @@ const QUALITY: Readonly<
  *   the camera rests.
  * - `lowpower=1`: asks for the low-power GPU.
  * - `glass=0`: no backdrop blur on the office's panels and labels.
+ * - `glass=top`: backdrop blur on the top bar's pills only, to measure
+ *   whether one blurred element costs as much as all of them.
  * - `gputime=1`: reads the GPU time of each frame with a timer query.
+ * - `ao=off`: no ambient occlusion, whatever the quality.
  */
 const spikeParams = new URLSearchParams(location.search);
 export const SPIKE = {
@@ -174,10 +177,12 @@ export const SPIKE = {
   cache: spikeParams.get("cache") === "1",
   lowPower: spikeParams.get("lowpower") === "1",
   glass: spikeParams.get("glass") !== "0",
+  glassTopOnly: spikeParams.get("glass") === "top",
   gpuTime: spikeParams.get("gputime") === "1",
   merge: spikeParams.get("merge") === "1",
   animHz: Number(spikeParams.get("animhz") ?? 0),
   aoAlways: spikeParams.get("ao") === "always",
+  aoOff: spikeParams.get("ao") === "off",
 } as const;
 
 /** The layer the still building is drawn on in cache mode; colleagues stay on layer 0. */
@@ -287,7 +292,13 @@ export class Stage {
       powerPreference: SPIKE.lowPower ? "low-power" : "high-performance",
     });
     if (SPIKE.staticShadows) this.renderer.shadowMap.autoUpdate = false;
-    if (!SPIKE.glass) document.documentElement.style.setProperty("--glass-filter", "none");
+    if (!SPIKE.glass || SPIKE.glassTopOnly) document.documentElement.style.setProperty("--glass-filter", "none");
+    if (SPIKE.glassTopOnly) {
+      const style = document.createElement("style");
+      const blur = "blur(var(--glass-blur)) saturate(var(--glass-sat))";
+      style.textContent = `.office-top .pill { -webkit-backdrop-filter: ${blur}; backdrop-filter: ${blur}; }`;
+      document.head.append(style);
+    }
     this.sun.layers.enableAll();
     this.sky.layers.enableAll();
     this.gl = this.renderer.getContext() as WebGL2RenderingContext;
@@ -504,7 +515,7 @@ export class Stage {
     this.sun.shadow.mapSize.set(settings.shadowMap, settings.shadowMap);
     this.sun.shadow.map?.dispose();
     this.sun.shadow.map = null;
-    this.aoPass.enabled = settings.ao;
+    this.aoPass.enabled = settings.ao && !SPIKE.aoOff;
     this.invalidateStatic();
   }
 
