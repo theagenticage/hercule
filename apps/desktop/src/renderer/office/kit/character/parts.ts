@@ -70,12 +70,14 @@ export const BONE_PARENTS: ReadonlyArray<number> = [
  * - `body`, `shade` and `tint`: the tones of the colleague's hue;
  * - `trim`: shoes, buttons and the bowtie, in the hat colour;
  * - `hat`: the hat, also in the hat colour, but in a mesh of its own, so it
- *   can have a satin finish instead of the body's vinyl.
+ *   can have a satin finish instead of the body's vinyl;
+ * - `shadow`: the shade a hat casts on the head just below its edge, in the
+ *   hue's dark ink tone at the edge, fading into the body colour below.
  */
-export type Surface = "body" | "shade" | "tint" | "trim" | "hat";
+export type Surface = "body" | "shade" | "tint" | "trim" | "hat" | "shadow";
 
 /** The surfaces merged into a colleague's body mesh, in vertex order. */
-const BODY_SURFACES: ReadonlyArray<Surface> = ["body", "shade", "tint", "trim"];
+const BODY_SURFACES: ReadonlyArray<Surface> = ["body", "shade", "tint", "trim", "shadow"];
 
 /**
  * A list of rigid parts, sorted into layers, merged into skinned geometry:
@@ -87,6 +89,8 @@ export class PartList<Layer extends string> {
   /**
    * Adds `geometry` to `layer`, following `bone`, after applying `matrix`
    * if one is given. The geometry is copied, so the caller may dispose it.
+   * A geometry may carry a `coverage` attribute (see `paintLayers`); without
+   * one, every vertex is fully covered.
    */
   add(layer: Layer, geometry: BufferGeometry, bone: number, matrix?: Matrix4): void {
     const flat = geometry.index === null ? geometry.clone() : geometry.toNonIndexed();
@@ -95,6 +99,10 @@ export class PartList<Layer extends string> {
     part.setAttribute("position", flat.getAttribute("position"));
     part.setAttribute("normal", flat.getAttribute("normal"));
     const count = part.getAttribute("position").count;
+    part.setAttribute(
+      "coverage",
+      flat.getAttribute("coverage") ?? new BufferAttribute(new Float32Array(count).fill(1), 1),
+    );
     const skinIndex = new Uint16Array(count * 4);
     const skinWeight = new Float32Array(count * 4);
     for (let i = 0; i < count; i++) {
@@ -155,6 +163,11 @@ export interface LayeredGeometry<Layer extends string> {
  * weights, and paints each layer's vertices in the colour `readLayerColor`
  * returns for it. The colours are repainted after every theme change.
  *
+ * A vertex's `coverage` is how much of its layer's colour it gets: at 1 it
+ * is painted in that colour, below 1 it is painted that fraction of the way
+ * from the colour of `layerBeneath` to it. This is how a colour fades out
+ * over the surface it lies on.
+ *
  * A mesh drawn in vertex colours with one shared material costs one draw
  * call, where a material per colour would cost one per colour, and every
  * draw is repeated for the shadows and the ambient occlusion.
@@ -162,6 +175,7 @@ export interface LayeredGeometry<Layer extends string> {
 export function paintLayers<Layer extends string>(
   layered: LayeredGeometry<Layer>,
   readLayerColor: (layer: Layer) => Color,
+  layerBeneath?: Layer,
 ): BufferGeometry {
   const source = layered.geometry;
   const geometry = new BufferGeometry();
@@ -174,11 +188,19 @@ export function paintLayers<Layer extends string>(
     3,
   );
   geometry.setAttribute("color", colors);
+  const coverage = source.getAttribute("coverage");
+  const mixed = new Color();
   const repaint = (): void => {
+    const beneath = layerBeneath === undefined ? null : readLayerColor(layerBeneath);
     for (const { layer, start, count } of layered.ranges) {
       const color = readLayerColor(layer);
       for (let vertex = start; vertex < start + count; vertex++) {
-        colors.setXYZ(vertex, color.r, color.g, color.b);
+        const covered = coverage.getX(vertex);
+        if (beneath === null || covered >= 1) colors.setXYZ(vertex, color.r, color.g, color.b);
+        else {
+          mixed.copy(beneath).lerp(color, covered);
+          colors.setXYZ(vertex, mixed.r, mixed.g, mixed.b);
+        }
       }
     }
     colors.needsUpdate = true;
@@ -325,6 +347,9 @@ export function buildEggGeometry(egg: Egg, segments: number): BufferGeometry {
   return geometry;
 }
 
+/** How many segments a shell has around the egg. */
+const SHELL_SEGMENTS = 24;
+
 /**
  * Builds a shell that hugs the egg from a lower edge up to the top, `offset`
  * metres off its surface: a hat's crown or a band. `edge` returns the
@@ -338,7 +363,7 @@ function buildShell(
   offset: number,
   options: { readonly from?: number; readonly top?: number; readonly flare?: number },
 ): BufferGeometry {
-  const segments = 24;
+  const segments = SHELL_SEGMENTS;
   const from = options.from ?? 0;
   const top = options.top ?? 1;
   const flare = options.flare ?? 0;
@@ -521,9 +546,40 @@ export function buildRoundedRectangle(width: number, height: number, radius: num
 
 // ---------------------------------------------------------------------------
 // Hats. Each sits on the egg on the head bone, relative to the egg's top, as
-// the book draws its hats relative to the top of the body.
+// the book draws its hats relative to the top of the body. A hat must read as
+// an object worn on the head, not as paint on it: its brim has a thickness
+// the light can catch, and the head is shaded just below its edge.
 
-/** Adds a homburg: a creased crown, a band in the wearer's shade and a brim curled up at the sides. */
+/**
+ * Adds the shade a hat casts on the head: a band in the `shadow` surface,
+ * darkest just under the hat and fading into the body colour 2.8 units
+ * below it, so it reads as shade rather than as a painted stripe. `edge`
+ * returns the height of the hat's lowest point at an angle around the egg
+ * (0 is the front).
+ */
+function addHatShadow(list: PartList<Surface>, egg: Egg, edge: (angle: number) => number): void {
+  const width = 2.8 * egg.unit;
+  const below = (angle: number) => edge(angle) - width;
+  // The band reaches a little up under the hat, so no head shows between the two.
+  const top = (width * 1.3) / (egg.height - below(0));
+  const shell = buildShell(egg, below, 0.003, { top });
+  const position = shell.getAttribute("position");
+  const coverage = new Float32Array(position.count);
+  for (let vertex = 0; vertex < position.count; vertex++) {
+    const angle = Math.atan2(position.getX(vertex), position.getZ(vertex) / egg.depth);
+    const reach = Math.min(1, Math.max(0, (position.getY(vertex) - below(angle)) / width));
+    // Squared, so the shade gathers under the brim and thins out slowly below it.
+    coverage[vertex] = 0.85 * reach * reach;
+  }
+  shell.setAttribute("coverage", new BufferAttribute(coverage, 1));
+  list.add("shadow", shell, BONE.head);
+}
+
+/**
+ * Adds a homburg: a creased crown with a band in the wearer's shade, sitting
+ * on a brim that is a solid disc clearly wider than the head, curled up at
+ * the sides and rolled at its edge.
+ */
 function addHomburg(list: PartList<Surface>, egg: Egg): void {
   const { unit, unitAcross } = egg;
   const brimHeight = egg.height - 4.6 * unit;
@@ -562,42 +618,84 @@ function addHomburg(list: PartList<Surface>, egg: Egg): void {
     22,
     Math.PI,
   );
-  const brimRadius = 12.6 * unitAcross;
-  const thickness = Math.max(0.008, unit * 0.45);
+  // The brim reaches well past the crown: a narrower one reads, from above,
+  // as a thin ring drawn around the head.
+  const brimRadius = crownRadius * 1.38;
+  // A felt brim about a centimetre thick, rolled at its edge into a lip a
+  // little thicker than the brim, flush with its underside.
+  const thickness = Math.max(0.011, unit);
+  const lipRadius = thickness * 0.8;
   const brim = new LatheGeometry(
     [
       new Vector2(crownRadius * 0.92, -thickness / 2),
-      new Vector2(brimRadius - thickness, -thickness / 2),
-      new Vector2(brimRadius, 0),
-      new Vector2(brimRadius - thickness, thickness / 2),
+      new Vector2(brimRadius - lipRadius, -thickness / 2),
+      new Vector2(brimRadius - lipRadius, thickness / 2),
       new Vector2(crownRadius * 0.92, thickness / 2),
     ],
     30,
     Math.PI,
   );
-  const brimPosition = brim.getAttribute("position");
-  for (let i = 0; i < brimPosition.count; i++) {
-    const across = brimPosition.getX(i) / brimRadius;
-    brimPosition.setY(i, brimPosition.getY(i) + 2.6 * unit * across * across * across * across);
+  const lip = new TorusGeometry(brimRadius - lipRadius, lipRadius, 8, 48);
+  lip.rotateX(Math.PI / 2);
+  lip.translate(0, lipRadius - thickness / 2, 0);
+  // The brim curls up at the sides, more the further out it reaches.
+  for (const part of [brim, lip]) {
+    const position = part.getAttribute("position");
+    for (let i = 0; i < position.count; i++) {
+      const across = position.getX(i) / brimRadius;
+      position.setY(i, position.getY(i) + 2.4 * unit * across * across * across * across);
+    }
+    part.computeVertexNormals();
   }
-  brim.computeVertexNormals();
-  const place = composeMatrix(0, brimHeight, 0, -0.06, 0, 0.07, 1, 1, 1).multiply(
+  const tipForward = 0.06;
+  const tipSideways = 0.07;
+  const place = composeMatrix(0, brimHeight, 0, -tipForward, 0, tipSideways, 1, 1, 1).multiply(
     new Matrix4().makeScale(1, 1, egg.depth * 1.04),
   );
   list.add("hat", crown, BONE.head, place);
   list.add("shade", band, BONE.head, place);
   list.add("hat", brim, BONE.head, place);
+  list.add("hat", lip, BONE.head, place);
+  // The brim's underside where it meets the head, tipped as the hat is tipped.
+  const headRadius = measureEggRadius(egg, brimHeight);
+  addHatShadow(
+    list,
+    egg,
+    (angle) =>
+      brimHeight -
+      thickness / 2 +
+      headRadius * (tipSideways * Math.sin(angle) + tipForward * egg.depth * Math.cos(angle)),
+  );
 }
 
-/** Adds a cloche: a bell pulled down to the brows, a band in the wearer's shade and a rosette. */
+/** Adds a cloche: a bell pulled down to just above the brows, a band in the wearer's shade and a rosette. */
 function addCloche(list: PartList<Surface>, egg: Egg): void {
   const { unit, unitAcross } = egg;
-  // The edge sits just above the brows, which are at the same face height on every shape.
-  const front = (42.4 - 20.6) * unit;
+  // The brows are at the same face height on every shape, and the highest,
+  // the waiting pose's raised brows, reach up to 19.6 on the face's 48-unit
+  // grid. The edge sits high enough that the brim, including its lip and as
+  // seen from the office's raised camera, ends clear above them; any lower
+  // and a pose's brows show half hidden under the brim.
+  const front = (42.4 - 17.4) * unit;
   const drop = 4.5 * unit;
   const edge = (angle: number) => front - drop * (0.5 - 0.5 * Math.cos(angle));
   const offset = Math.max(0.01, 0.55 * unit);
-  list.add("hat", buildShell(egg, edge, offset, { flare: 1.6 * unit }), BONE.head);
+  const flare = 1.6 * unit;
+  const bell = buildShell(egg, edge, offset, { flare });
+  list.add("hat", bell, BONE.head);
+  // A rolled lip along the brim's outer edge gives the brim its thickness.
+  // It rides half its radius above that edge, so the brim drops no lower
+  // over the brows than it did without it. The bell's first ring of vertices
+  // is the edge; the ring's last vertex repeats its first.
+  const rim = bell.getAttribute("position");
+  const lipRadius = 0.6 * unit;
+  const lip: Vector3[] = [];
+  for (let s = 0; s < SHELL_SEGMENTS; s++) {
+    lip.push(new Vector3().fromBufferAttribute(rim, s).setY(rim.getY(s) + lipRadius / 2));
+  }
+  const roll = new TubeGeometry(new CatmullRomCurve3(lip, true), 48, lipRadius, 6, true);
+  list.add("hat", roll, BONE.head);
+  addHatShadow(list, egg, (angle) => edge(angle) - flare * 0.45 - lipRadius / 2);
   list.add("shade", buildShell(egg, edge, offset + 0.003, { from: 0.1, top: 0.26 }), BONE.head);
   // The rosette on the colleague's left, over the band.
   const point = new Vector3();
@@ -928,9 +1026,9 @@ export function readBodyGeometry(build: Build, hue: Hue): BodyGeometry {
   const readSurfaceColor = (surface: Surface): Color =>
     surface === "hat" || surface === "trim"
       ? readColor("hat")
-      : writeOklch(new Color(), readHue(hue, surface));
+      : writeOklch(new Color(), readHue(hue, surface === "shadow" ? "ink" : surface));
   const painted: BodyGeometry = {
-    body: paintLayers(layered.body, readSurfaceColor),
+    body: paintLayers(layered.body, readSurfaceColor, "body"),
     hat: layered.hat === null ? null : paintLayers(layered.hat, readSurfaceColor),
   };
   paintedBodies.set(key, painted);
