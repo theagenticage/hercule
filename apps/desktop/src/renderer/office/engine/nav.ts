@@ -24,6 +24,25 @@ const CELL_SIZE = 0.12;
  * jamb or a wall's corner never sinks into it.
  */
 const BODY_CLEARANCE = 0.3;
+/**
+ * How far a path keeps from walls and furniture where there is room to: a
+ * quarter metre more than a body needs, so colleagues walk down the middle
+ * of a corridor or a door instead of brushing past its walls.
+ */
+const COMFORT_CLEARANCE = 0.55;
+/**
+ * How much more a step costs in the search at `BODY_CLEARANCE` than at
+ * `COMFORT_CLEARANCE`, as a multiple of a step's length; between the two
+ * the extra cost falls off linearly.
+ */
+const NEAR_WALL_COST = 2;
+/**
+ * How much closer to walls and furniture a straight leg may run than the
+ * cells it replaces. Around a corner the search's cells follow a curve, and
+ * a straight chord across that curve always runs a little closer; without
+ * this slack the string keeps a corner every cell or two.
+ */
+const LEG_SLACK = 0.1;
 /** How far from a spot the nearest free cell may be, in metres. */
 const NEAREST_FREE_RADIUS = 1.6;
 /** Free areas smaller than this many cells are pockets (between a desk and a wall), never a start. */
@@ -437,17 +456,24 @@ function findNearestFreeCell(
 /**
  * Returns true when a body can walk the straight line between two world
  * points: every cell the line touches is passable, and every point along it,
- * sampled each half cell, keeps `BODY_CLEARANCE` from walls and furniture.
- * Where the line passes exactly through a cell corner it checks both cells
- * beside it, so it never cuts a corner the search would refuse to cut.
+ * sampled each half cell, keeps `clearance` metres from walls and furniture
+ * (at least `BODY_CLEARANCE`). Where the line passes exactly through a cell
+ * corner it checks both cells beside it, so it never cuts a corner the
+ * search would refuse to cut.
  */
-function hasLineOfSight(storey: Storey, from: Vector3, to: Vector3, avoidance: Avoidance): boolean {
+function hasLineOfSight(
+  storey: Storey,
+  from: Vector3,
+  to: Vector3,
+  avoidance: Avoidance,
+  clearance: number,
+): boolean {
   const samples = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / (CELL_SIZE / 2));
   for (let sample = 1; sample < samples; sample++) {
     const t = sample / samples;
     const x = from.x + (to.x - from.x) * t;
     const z = from.z + (to.z - from.z) * t;
-    if (sampleClearance(storey, x, z) < BODY_CLEARANCE) return false;
+    if (sampleClearance(storey, x, z) < clearance) return false;
   }
   const x0 = (from.x - storey.originX) / CELL_SIZE;
   const z0 = (from.z - storey.originZ) / CELL_SIZE;
@@ -494,7 +520,9 @@ function hasLineOfSight(storey: Storey, from: Vector3, to: Vector3, avoidance: A
 /**
  * Searches a storey's grid with A* from one free cell to another: 8-connected,
  * diagonal steps only where both cells beside the step are passable, with the
- * octile distance as the estimate. Returns the cells from start to goal, or
+ * octile distance as the estimate. A step into a cell closer to a wall or
+ * furniture than `COMFORT_CLEARANCE` costs more, so the path keeps to the
+ * middle of corridors and doors. Returns the cells from start to goal, or
  * null when the goal cannot be reached.
  */
 function searchCells(
@@ -504,7 +532,7 @@ function searchCells(
   avoidance: Avoidance,
   buffers: SearchBuffers,
 ): number[] | null {
-  const { cols } = storey;
+  const { cols, clearance } = storey;
   const { cost, parent, seen, closed, heap } = buffers;
   const search = ++buffers.search;
   const goalCol = goal % cols;
@@ -520,9 +548,16 @@ function searchCells(
     return (Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz)) * HEURISTIC_WEIGHT;
   };
   const passable = (cell: number): boolean => cell === goal || isPassable(storey, cell, avoidance);
-  /** Reaches `next` from `cell` at `reached`, unless an earlier route was as cheap. */
-  const visit = (cell: number, next: number, reached: number): void => {
+  /**
+   * Reaches `next` from `cell` by a step `length` cells long, unless an
+   * earlier route was as cheap.
+   */
+  const visit = (cell: number, next: number, length: number): void => {
     if (closed[next] === search) return;
+    const tightness = Math.max(0, COMFORT_CLEARANCE - clearance[next]!);
+    const reached =
+      cost[cell]! +
+      length * (1 + (NEAR_WALL_COST * tightness) / (COMFORT_CLEARANCE - BODY_CLEARANCE));
     if (seen[next] === search && cost[next]! <= reached) return;
     seen[next] = search;
     cost[next] = reached;
@@ -543,8 +578,8 @@ function searchCells(
       for (let at = goal; at !== -1; at = parent[at]!) cells.push(at);
       return cells.reverse();
     }
-    const straight = cost[cell]! + 1;
-    const diagonal = cost[cell]! + SQRT2;
+    const straight = 1;
+    const diagonal = SQRT2;
     const west = passable(cell - 1);
     const east = passable(cell + 1);
     const north = passable(cell - cols);
@@ -567,6 +602,10 @@ function searchCells(
  * so the legs start and end at exact points. Returns the kept points, ends
  * included.
  *
+ * A straight leg keeps as much clearance as the cells it replaces had, up to
+ * `COMFORT_CLEARANCE`, so pulling the string does not drag the path back
+ * against the walls the search kept it away from.
+ *
  * A first pass keeps a corner wherever the straight line from the last kept
  * point to the next cell is blocked. That corner can land late, after the
  * obstacle it turns around, so a second pass moves each corner to the cell
@@ -584,17 +623,25 @@ function pullString(
     index === 0 ? first : index === cells.length - 1 ? last : buildCellCentre(storey, cell),
   );
   if (points.length < 3) return points.length === 2 && last.equals(first) ? [first] : points;
+  /** Returns the clearance a straight leg from point `from` to point `to` must keep. */
+  const requireClearance = (from: number, to: number): number => {
+    let narrowest = COMFORT_CLEARANCE;
+    for (let index = from; index <= to; index++) {
+      narrowest = Math.min(narrowest, storey.clearance[cells[index]!]!);
+    }
+    return Math.max(BODY_CLEARANCE, narrowest - LEG_SLACK);
+  };
+  const canWalk = (from: number, to: number): boolean =>
+    hasLineOfSight(storey, points[from]!, points[to]!, avoidance, requireClearance(from, to));
   const kept = [0];
   for (let index = 1; index < points.length - 1; index++) {
-    if (!hasLineOfSight(storey, points[kept[kept.length - 1]!]!, points[index + 1]!, avoidance)) {
-      kept.push(index);
-    }
+    if (!canWalk(kept[kept.length - 1]!, index + 1)) kept.push(index);
   }
   kept.push(points.length - 1);
   for (let corner = 1; corner < kept.length - 1; corner++) {
     const before = points[kept[corner - 1]!]!;
     const after = points[kept[corner + 1]!]!;
-    if (hasLineOfSight(storey, before, after, avoidance)) {
+    if (canWalk(kept[corner - 1]!, kept[corner + 1]!)) {
       kept.splice(corner--, 1);
       continue;
     }
@@ -605,9 +652,7 @@ function pullString(
     }
     candidates.sort((a, b) => a.length - b.length);
     const best = candidates.find(
-      ({ index }) =>
-        hasLineOfSight(storey, before, points[index]!, avoidance) &&
-        hasLineOfSight(storey, points[index]!, after, avoidance),
+      ({ index }) => canWalk(kept[corner - 1]!, index) && canWalk(index, kept[corner + 1]!),
     );
     if (best !== undefined) kept[corner] = best.index;
   }
