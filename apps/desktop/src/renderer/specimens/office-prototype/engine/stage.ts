@@ -29,7 +29,7 @@ import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { isDarkTheme, readColor, refreshPalette, writeOklch } from "./palette";
+import { isDarkTheme, readColor, readToken, refreshPalette, writeOklch } from "./palette";
 
 /** How much the GPU is asked to do. */
 export type Quality = "low" | "medium" | "high";
@@ -100,10 +100,10 @@ const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
   evening: {
     azimuth: 285,
     elevation: 16,
-    sunIntensity: 1.7,
+    sunIntensity: 1.9,
     sun: [0.86, 0.11, 58],
-    skyIntensity: 0.62,
-    environment: 0.22,
+    skyIntensity: 0.85,
+    environment: 0.3,
   },
   night: {
     azimuth: 320,
@@ -266,8 +266,13 @@ export class Stage {
     const light = LIGHTS[this.resolveTimeOfDay()];
     const background = readColor("surface");
     this.scene.background = background;
-    this.sky.color.copy(readColor("room-sun", { dl: 0.02 }));
-    this.sky.groundColor.copy(readColor("room-floor", { dl: -0.25 }));
+    // The sky light takes its hue from the theme but not its lightness: a
+    // dark theme paints its rooms dark already, and a dark light on top would
+    // draw them nearly black. How bright the sky is comes from the time of day.
+    const sunToken = readToken("room-sun");
+    writeOklch(this.sky.color, { l: 0.96, c: Math.min(sunToken.c, 0.05), h: sunToken.h });
+    const floorToken = readToken("room-floor");
+    writeOklch(this.sky.groundColor, { l: 0.62, c: floorToken.c, h: floorToken.h });
     this.sky.intensity = light.skyIntensity;
     this.scene.environmentIntensity = light.environment;
     const [l, c, h] = light.sun;
