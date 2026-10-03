@@ -542,34 +542,45 @@ export const readSessionToken = (frame: SessionStart): string => {
   return frame.token;
 };
 
-/** A started session on a profile, with the token its runner received. */
-export interface Agent {
+/**
+ * A Thread a test spawned: the session, which has no Agent behind it, and the
+ * session token its runner received. A test calls the API with the token to
+ * act as that session.
+ */
+export interface SpawnedThread {
   readonly session: Session;
   readonly token: string;
 }
 
 /**
- * Spawns and starts a session on a new profile with exactly these grants. The
+ * Spawns and starts a Thread on a new profile with exactly these grants. The
  * profile is created for the test, because a session's grants are the only
  * way to limit what the agent inside it may do.
  */
-export const spawnAgentWithGrants = async (
+export const spawnThreadWithGrants = async (
   arranged: Arranged,
   name: string,
   grants: ReadonlyArray<Grant>,
-): Promise<Agent> => spawnAgentUnder(arranged, await createProfile(arranged, name, grants));
+): Promise<SpawnedThread> =>
+  spawnThreadUnder(arranged, await createProfile(arranged, name, grants));
 
 /**
- * Spawns and starts a session on `profile`, and waits until the runner has
- * answered its prompt. Returns the session, which is then `busy`, with its
- * token.
+ * Spawns and starts a Thread on `profile`: a session with no Agent, so its
+ * `agentId` is null. Waits until the runner has answered its prompt, and
+ * returns the session, which is then `busy`, with its session token.
+ *
+ * A test that needs a session spawned from an Agent must create the Agent and
+ * spawn from it; this helper never does.
  *
  * The fake runner answers the prompt with `opened` and reports no turn
  * events, so the session stays `busy` with its prompt's turn until the test
  * reports that turn's end. The runner has reported one event, at sequence
  * number 1, so the test's next event is 2.
  */
-export const spawnAgentUnder = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
+export const spawnThreadUnder = async (
+  arranged: Arranged,
+  profile: Profile,
+): Promise<SpawnedThread> => {
   const opened = await spawnSessionOrFail(arranged, {
     prompt: "hello",
     permissionProfileId: profile.id,

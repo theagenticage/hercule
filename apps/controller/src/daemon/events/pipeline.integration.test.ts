@@ -22,10 +22,10 @@ import {
 import {
   createProfile,
   at,
-  spawnAgentWithGrants,
+  spawnThreadWithGrants,
   waitUntil,
   WAIT_DEADLINE_MS,
-  type Agent,
+  type SpawnedThread,
   type Arranged,
 } from "../../sessions/testing";
 import { createWorkflowOrFail } from "../../workflows/testing";
@@ -42,7 +42,7 @@ import {
   waitForMatchedInputRows,
   runEffect,
   storeCondition,
-  subscribeAgent,
+  subscribeThread,
   spawnSubscriber,
   readCursorAndHead,
   withPipeline,
@@ -55,7 +55,7 @@ describe("the event pipeline's tick", () => {
   it("writes one matched input for a matched subscription, and moves its cursor past the event", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
 
       const eventId = await emitManualEvent(arranged, [REF], "The lid does not close");
 
@@ -85,7 +85,7 @@ describe("the event pipeline's tick", () => {
   it("reads a burst larger than one batch to the end of the log in one tick, not one batch per tick", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "burst-holder");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await waitUntilCaughtUp(arranged.harness);
 
       // Two and a half batches, inserted in one statement so the router finds
@@ -121,7 +121,7 @@ describe("the event pipeline's tick", () => {
   it("writes nothing twice, however often the cursor is moved back over the same events", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       const eventId = await emitManualEvent(arranged, [REF], "The lid does not close");
       await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) => found.length >= 1);
       const settled = await waitUntilCaughtUp(arranged.harness);
@@ -149,7 +149,7 @@ describe("the event pipeline's tick", () => {
   it("writes no matched input for an audit entry, whatever the condition, and moves the cursor past it", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       // A condition that matches everything, so a missing row is caused by the
       // kind of event, not by the condition.
       await storeCondition(arranged.harness, subscriptionId, "true");
@@ -211,8 +211,8 @@ const withHeldRunPipeline = (
 const subscribeIdleAgentToRun = async (
   arranged: Arranged,
   runId: string,
-): Promise<{ readonly agent: Agent; readonly subscriptionId: string }> => {
-  const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+): Promise<{ readonly agent: SpawnedThread; readonly subscriptionId: string }> => {
+  const agent = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
   const response = await post(
     arranged.harness.base,
     "/api/v1/subscriptions",
@@ -233,7 +233,7 @@ describe("the platform events in the pipeline", () => {
   it("writes a matched input for task.created and task.updated, in the order they happened", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       // No target kind waits on a task yet, so the condition is written into
       // the row the router reads.
       await storeCondition(arranged.harness, subscriptionId, 'event.kind.startsWith("task.")');

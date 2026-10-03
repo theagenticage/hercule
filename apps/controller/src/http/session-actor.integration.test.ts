@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import type { Assistant, Conversation, Session, Task } from "@hercule/contract";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   at,
   readProfileNamed,
   createProfile,
@@ -28,7 +28,7 @@ import {
   waitUntil,
   WAIT_DEADLINE_MS,
   withAgentFleet as withFleet,
-  type Agent,
+  type SpawnedThread,
   type Arranged,
 } from "../sessions/testing";
 import { del, get, post, send } from "./testing";
@@ -64,8 +64,8 @@ const parseRefusal = async (response: Response): Promise<Refusal> => {
 };
 
 /** Spawns a worker: the built-in profile with task read, create and update, and no delete. */
-const createWorkerAgent = async (arranged: Arranged): Promise<Agent> =>
-  spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
+const spawnWorkerThread = async (arranged: Arranged): Promise<SpawnedThread> =>
+  spawnThreadUnder(arranged, await readProfileNamed(arranged, "worker"));
 
 const exitSession = async (arranged: Arranged, session: Session): Promise<void> => {
   reportEvent(arranged.wire, 2, {
@@ -108,7 +108,7 @@ const listEventsOfKind = async (
 describe("the token the controller mints for a session", () => {
   it("is sent on the start frame, and the session row never holds it in plain text", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await createWorkerAgent(arranged);
+      const { token } = await spawnWorkerThread(arranged);
 
       // The token works, which is the only proof that the hash in the row was
       // computed from this string.
@@ -125,7 +125,7 @@ describe("the token the controller mints for a session", () => {
 
   it("is replaced by a new one when the session is resumed, which invalidates the old one", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await createWorkerAgent(arranged);
+      const { session, token } = await spawnWorkerThread(arranged);
       await exitSession(arranged, session);
 
       // Input to an exited session with a transcript resumes it in place: the
@@ -164,7 +164,7 @@ describe("the token the controller mints for a session", () => {
 describe("what a session token may reach", () => {
   it("creates and updates a task on the worker profile, and is forbidden the delete, with the grant named", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await createWorkerAgent(arranged);
+      const { token } = await spawnWorkerThread(arranged);
       const base = arranged.harness.base;
 
       const created = await createTask(base, token, { title: "the agent's own task" });
@@ -197,7 +197,7 @@ describe("what a session token may reach", () => {
       // A profile that can only read tasks, so the operation with the
       // malformed body is one this session may not call.
       const reader = await createProfile(arranged, "reader", ["task.read"]);
-      const { token } = await spawnAgentUnder(arranged, reader);
+      const { token } = await spawnThreadUnder(arranged, reader);
       const base = arranged.harness.base;
 
       const task = (await (
@@ -226,7 +226,7 @@ describe("what a session token may reach", () => {
 
   it("returns 401 for a token that belongs to no session", async () => {
     await withFleet(async (arranged) => {
-      await createWorkerAgent(arranged);
+      await spawnWorkerThread(arranged);
       const response = await get(
         arranged.harness.base,
         "/api/v1/tasks",
@@ -241,7 +241,7 @@ describe("what a session token may reach", () => {
 describe("when a session token stops working", () => {
   it("stops working when the runner reports that the session exited", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await createWorkerAgent(arranged);
+      const { session, token } = await spawnWorkerThread(arranged);
       expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
 
       await exitSession(arranged, session);
@@ -254,7 +254,7 @@ describe("when a session token stops working", () => {
 
   it("stops working when the session's runner is retired", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await createWorkerAgent(arranged);
+      const { session, token } = await spawnWorkerThread(arranged);
       expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
 
       const retired = await post(
@@ -275,7 +275,7 @@ describe("when a session token stops working", () => {
   it("stops working when the session's runner disconnects and never comes back", async () => {
     await withFleet(
       async (arranged) => {
-        const { session, token } = await createWorkerAgent(arranged);
+        const { session, token } = await spawnWorkerThread(arranged);
         expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
 
         arranged.wire.close();
@@ -314,7 +314,7 @@ describe("when a session token stops working", () => {
   it("loses a grant on the very next call after the profile is edited", async () => {
     await withFleet(async (arranged) => {
       const profile = await readProfileNamed(arranged, "worker");
-      const { token } = await spawnAgentUnder(arranged, profile);
+      const { token } = await spawnThreadUnder(arranged, profile);
       const base = arranged.harness.base;
 
       const before = await createTask(base, token, { title: "while the grant is held" });
@@ -340,7 +340,7 @@ describe("when a session token stops working", () => {
 describe("a session may not spawn a Thread", () => {
   it("forbids a session actor's spawn, naming session.spawn, and allows the user's", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await createWorkerAgent(arranged);
+      const { token } = await spawnWorkerThread(arranged);
 
       const refused = await post(
         arranged.harness.base,
@@ -367,7 +367,7 @@ describe("a session may not spawn a Thread", () => {
     await withFleet(async (arranged) => {
       // The assistant profile has `session.spawn`, so the static grant check
       // passes, and the error must come from the operation itself.
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );
@@ -395,15 +395,15 @@ describe("a session forking a session", () => {
       // The assistant profile is the built-in one with `session.spawn`, which
       // `session.continue` requires.
       const assistant = await readProfileNamed(arranged, "assistant");
-      const mine = await spawnAgentUnder(arranged, assistant);
+      const mine = await spawnThreadUnder(arranged, assistant);
       const base = arranged.harness.base;
 
       // Two possible parents, each exited with a transcript on a connected
       // runner, so both can be forked: one on this session's own profile, and
       // one on a narrower profile it may not use. Neither is the calling
       // session, whose token stops working when it exits.
-      const sibling = await spawnAgentUnder(arranged, assistant);
-      const stranger = await createWorkerAgent(arranged);
+      const sibling = await spawnThreadUnder(arranged, assistant);
+      const stranger = await spawnWorkerThread(arranged);
       await exitSession(arranged, sibling.session);
       await exitSession(arranged, stranger.session);
 
@@ -434,7 +434,7 @@ describe("a session forking a session", () => {
 describe("which actor a change records", () => {
   it("records session:<id> on a session's task and event log rows, and user on the user's", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await createWorkerAgent(arranged);
+      const { session, token } = await spawnWorkerThread(arranged);
       const base = arranged.harness.base;
       const stamp = `session:${session.id}`;
 
@@ -500,7 +500,7 @@ describe("a session on the assistant profile", () => {
 
   it("reads assistants and conversations", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );
@@ -519,7 +519,7 @@ describe("a session on the assistant profile", () => {
 
   it("reads a conversation's messages", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );
@@ -535,7 +535,7 @@ describe("a session on the assistant profile", () => {
 
   it("is forbidden to create or update an assistant, and the refusal names agent.write", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );

@@ -13,7 +13,7 @@ import { get, post, readErrorBody } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   readProfileNamed,
-  spawnAgentUnder,
+  spawnThreadUnder,
   withAgentFleet,
 } from "../sessions/testing";
 import { listMessages, readDefaultConversation, sendMessage } from "./testing";
@@ -115,7 +115,7 @@ describe("conversation.queryMessages", () => {
     await withAgentFleet(async (arranged) => {
       const { conversation } = await readDefaultConversation(arranged);
       await sendMessage(arranged, conversation.id, "hi");
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );

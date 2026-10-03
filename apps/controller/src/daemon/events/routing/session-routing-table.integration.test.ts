@@ -29,9 +29,9 @@ import {
   waitForMatchedInputRows,
   runEffect,
   storeCondition,
-  spawnStrandedAgent,
+  spawnStrandedThread,
   STRANDED_INPUT_ID,
-  subscribeAgent,
+  subscribeThread,
   spawnSubscriber,
   readSubscriptionRow,
   UNKNOWN_FUNCTION,
@@ -49,11 +49,11 @@ describe("the session routing table's sweep", () => {
     await withPipeline(async (arranged) => {
       const idle = await spawnSubscriber(arranged, "idle-holder");
       const resumable = await spawnSubscriber(arranged, "resumable-holder");
-      const gone = await spawnStrandedAgent(arranged, "gone-holder");
+      const gone = await spawnStrandedThread(arranged, "gone-holder");
 
-      const live = await subscribeAgent(arranged, idle, REF);
-      const sleeping = await subscribeAgent(arranged, resumable, REF);
-      const doomed = await subscribeAgent(arranged, gone, REF);
+      const live = await subscribeThread(arranged, idle, REF);
+      const sleeping = await subscribeThread(arranged, resumable, REF);
+      const doomed = await subscribeThread(arranged, gone, REF);
 
       await endPromptTurn(arranged, idle);
       await exitSession(arranged, resumable, 2);
@@ -91,7 +91,7 @@ describe("the session routing table's sweep", () => {
   it("cancels an input still waiting for a holder that has ended, with the same reason", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "resumable-holder");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await exitSession(arranged, agent, 2);
       expect((await readSession(arranged, agent.session.id)).resumable).toBe(true);
 
@@ -135,7 +135,7 @@ describe("a condition the router cannot evaluate", () => {
   it("is reported once per error, keeps the subscription live, and is cleared by a clean evaluation", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
 
       await emitManualEvent(arranged, [REF], "the first failure");
@@ -212,8 +212,8 @@ describe("a condition the router cannot evaluate", () => {
     await withPipeline(async (arranged) => {
       const broken = await spawnSubscriber(arranged, "broken-holder");
       const sound = await spawnSubscriber(arranged, "sound-holder");
-      const failing = await subscribeAgent(arranged, broken, REF);
-      const working = await subscribeAgent(arranged, sound, REF);
+      const failing = await subscribeThread(arranged, broken, REF);
+      const working = await subscribeThread(arranged, sound, REF);
       await endPromptTurn(arranged, sound);
       await storeCondition(arranged.harness, failing, UNKNOWN_FUNCTION);
 
@@ -236,7 +236,7 @@ describe("a condition the router cannot evaluate", () => {
   it("counts as no match when it reads the raw payload, which the context leaves out", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "raw-reader");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await storeCondition(arranged.harness, subscriptionId, READS_RAW);
 
       const eventId = await emitManualEvent(arranged, [REF], "not for a reader of raw");
@@ -260,7 +260,7 @@ describe("a condition the router cannot evaluate", () => {
     await withPipeline(
       async (arranged) => {
         const agent = await spawnSubscriber(arranged, "subscribers");
-        const subscriptionId = await subscribeAgent(arranged, agent, REF);
+        const subscriptionId = await subscribeThread(arranged, agent, REF);
 
         const eventId = await emitManualEvent(arranged, [REF], "over budget");
 

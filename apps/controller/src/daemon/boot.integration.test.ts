@@ -11,7 +11,13 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { del, type ServerHarness } from "../http/testing";
-import { at, waitUntil, WAIT_DEADLINE_MS, type Agent, type Arranged } from "../sessions/testing";
+import {
+  at,
+  waitUntil,
+  WAIT_DEADLINE_MS,
+  type SpawnedThread,
+  type Arranged,
+} from "../sessions/testing";
 import {
   emitManualEvent,
   OTHER_REF,
@@ -21,7 +27,7 @@ import {
   runEffect,
   spawnSubscriber,
   storeCondition,
-  subscribeAgent,
+  subscribeThread,
   readSubscriptionRow,
   waitForSubscription,
   UNRESOLVABLE,
@@ -69,12 +75,12 @@ const withALostWakeUp = async (
   arranged: Arranged,
   name: string,
 ): Promise<{
-  readonly agent: Agent;
+  readonly agent: SpawnedThread;
   readonly subscriptionId: string;
   readonly subscription: ReadSubscription;
 }> => {
   const agent = await spawnSubscriber(arranged, name);
-  const subscriptionId = await subscribeAgent(arranged, agent, REF);
+  const subscriptionId = await subscribeThread(arranged, agent, REF);
   expect((await readSubscription(arranged, agent, subscriptionId)).lostWakeUp).toBeNull();
 
   // A row that was sent and never answered: the runner may or may not have
@@ -211,7 +217,7 @@ describe("an input that was being delivered when the controller restarted", () =
   it("records no lost wake-up on an ended subscription, because it has no holder left", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "gone-holder");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       const cancelled = await del(
         arranged.harness.base,
         `/api/v1/subscriptions/${subscriptionId}`,

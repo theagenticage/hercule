@@ -39,7 +39,7 @@ import {
   waitWithin,
 } from "../http/testing";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   readProfileNamed,
   WAIT_DEADLINE_MS,
   waitUntil,
@@ -958,7 +958,7 @@ describe("trigger.pause and trigger.resume", () => {
         source: TASK_TRIGGER_SOURCE,
       });
       // The shipped assistant profile has workflow.read but not workflow.write.
-      const assistantSession = await spawnAgentUnder(
+      const assistantSession = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );
@@ -1043,7 +1043,7 @@ describe("the actor stamped on workflow writes", () => {
   it("stamps each write a session makes with that session", async () => {
     await withAgentFleet(async (arranged) => {
       const base = arranged.harness.base;
-      const unrestrictedSession = await spawnAgentUnder(
+      const unrestrictedSession = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "unrestricted"),
       );
@@ -1074,7 +1074,7 @@ describe("the actor stamped on workflow writes", () => {
       const storedBefore = await readWorkflow(base, arranged.token, userWorkflow.id);
       const workflowEntriesBefore = await readWorkflowEntries(base, arranged.token);
       // The shipped assistant profile has workflow.read but not workflow.write.
-      const assistantSession = await spawnAgentUnder(
+      const assistantSession = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );
@@ -1115,7 +1115,7 @@ describe("reading workflows and triggers", () => {
       ];
 
       // The shipped worker profile has no workflow grant.
-      const workerSession = await spawnAgentUnder(
+      const workerSession = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "worker"),
       );
@@ -1128,7 +1128,7 @@ describe("reading workflows and triggers", () => {
       }
 
       // The shipped assistant profile has workflow.read.
-      const assistantSession = await spawnAgentUnder(
+      const assistantSession = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );

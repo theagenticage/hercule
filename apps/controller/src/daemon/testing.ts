@@ -23,7 +23,7 @@ import { github } from "@hercule/plugin-github";
 import { get, post, type ServerHarness } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
-  spawnAgentWithGrants,
+  spawnThreadWithGrants,
   at,
   listFrames,
   createProfile,
@@ -34,7 +34,7 @@ import {
   readSessionToken,
   waitUntil,
   withFleet as sharedWithFleet,
-  type Agent,
+  type SpawnedThread,
   type Arranged,
 } from "../sessions/testing";
 
@@ -132,15 +132,18 @@ export const withPipeline = (
 export const runEffect = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.orDie(effect));
 
-/** Spawns a session on a profile that may create and read subscriptions. */
-export const spawnSubscriber = (arranged: Arranged, name: string): Promise<Agent> =>
-  spawnAgentWithGrants(arranged, name, ["subscription.write", "subscription.read"]);
+/** Spawns a Thread on a profile that may create and read subscriptions. */
+export const spawnSubscriber = (arranged: Arranged, name: string): Promise<SpawnedThread> =>
+  spawnThreadWithGrants(arranged, name, ["subscription.write", "subscription.read"]);
 
 /**
- * Spawns a session that cannot be resumed once it exits: the fake runner never
+ * Spawns a Thread that cannot be resumed once it exits: the fake runner never
  * reports a provider-native session for it, so it has no transcript.
  */
-export const spawnStrandedAgent = async (arranged: Arranged, name: string): Promise<Agent> => {
+export const spawnStrandedThread = async (
+  arranged: Arranged,
+  name: string,
+): Promise<SpawnedThread> => {
   const profile = await createProfile(arranged, name, ["subscription.write", "subscription.read"]);
   const opened = await spawnSessionOrFail(arranged, {
     prompt: "hello",
@@ -160,9 +163,13 @@ const reportExit = (arranged: Arranged, sessionId: string, seq: number): void =>
   });
 
 /** Reports the session's exit from the fake runner, and waits until the session is exited. */
-export const exitSession = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
-  reportExit(arranged, agent.session.id, seq);
-  await waitForSession(arranged, agent.session.id, (one) => one.status === "exited");
+export const exitSession = async (
+  arranged: Arranged,
+  thread: SpawnedThread,
+  seq: number,
+): Promise<void> => {
+  reportExit(arranged, thread.session.id, seq);
+  await waitForSession(arranged, thread.session.id, (one) => one.status === "exited");
 };
 
 export const reportTurnStarted = (arranged: Arranged, sessionId: string, seq: number): void =>
@@ -186,31 +193,35 @@ export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: 
 
 /**
  * Reports the end of the turn that the session's prompt opened, at sequence
- * number 2, and waits until the session is idle. A spawned agent is `busy`
+ * number 2, and waits until the session is idle. A spawned Thread is `busy`
  * until then, so an input sent to it waits for that turn to end. The test's
  * next event is 3.
  */
-export const endPromptTurn = async (arranged: Arranged, agent: Agent): Promise<void> => {
-  reportTurnCompleted(arranged, agent.session.id, 2);
-  await waitForSession(arranged, agent.session.id, (one) => one.status === "idle");
+export const endPromptTurn = async (arranged: Arranged, thread: SpawnedThread): Promise<void> => {
+  reportTurnCompleted(arranged, thread.session.id, 2);
+  await waitForSession(arranged, thread.session.id, (one) => one.status === "idle");
 };
 
 /** Starts a turn on the session, so a new input has to wait for the turn to end. */
-export const makeBusy = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
-  reportTurnStarted(arranged, agent.session.id, seq);
-  await waitForSession(arranged, agent.session.id, (one) => one.status === "busy");
+export const makeBusy = async (
+  arranged: Arranged,
+  thread: SpawnedThread,
+  seq: number,
+): Promise<void> => {
+  reportTurnStarted(arranged, thread.session.id, seq);
+  await waitForSession(arranged, thread.session.id, (one) => one.status === "busy");
 };
 
-export const subscribeAgent = async (
+export const subscribeThread = async (
   arranged: Arranged,
-  agent: Agent,
+  thread: SpawnedThread,
   ref: string,
 ): Promise<string> => {
   const response = await post(
     arranged.harness.base,
     "/api/v1/subscriptions",
     { target: { kind: "ref", ref } },
-    agent.token,
+    thread.token,
   );
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { subscriptionId: string }).subscriptionId;
@@ -237,10 +248,10 @@ export interface ReadSubscription {
 
 export const readSubscription = async (
   arranged: Arranged,
-  agent: Agent,
+  thread: SpawnedThread,
   id: string,
 ): Promise<ReadSubscription> => {
-  const response = await get(arranged.harness.base, "/api/v1/subscriptions", agent.token);
+  const response = await get(arranged.harness.base, "/api/v1/subscriptions", thread.token);
   expect(response.status, await response.clone().text()).toBe(200);
   const items = ((await response.json()) as { items: ReadonlyArray<ReadSubscription> }).items;
   const found = items.find((one) => one.id === id);
@@ -248,27 +259,30 @@ export const readSubscription = async (
   return found!;
 };
 
-export const readHealth = async (arranged: Arranged, agent: Agent, id: string): Promise<Health> =>
-  (await readSubscription(arranged, agent, id)).health;
+export const readHealth = async (
+  arranged: Arranged,
+  thread: SpawnedThread,
+  id: string,
+): Promise<Health> => (await readSubscription(arranged, thread, id)).health;
 
 export const waitForSubscription = (
   arranged: Arranged,
-  agent: Agent,
+  thread: SpawnedThread,
   id: string,
   ready: (subscription: ReadSubscription) => boolean,
 ): Promise<ReadSubscription> =>
   waitUntil("reached the subscription state the test waits for", async () => {
-    const found = await readSubscription(arranged, agent, id);
+    const found = await readSubscription(arranged, thread, id);
     return ready(found) ? found : undefined;
   });
 
 export const waitForHealth = async (
   arranged: Arranged,
-  agent: Agent,
+  thread: SpawnedThread,
   id: string,
   ready: (health: Health) => boolean,
 ): Promise<Health> =>
-  (await waitForSubscription(arranged, agent, id, (one) => ready(one.health))).health;
+  (await waitForSubscription(arranged, thread, id, (one) => ready(one.health))).health;
 
 export const buildPayload = (title: string): unknown => ({
   subject: { repo: "o/r", number: 87, title, url: PR_URL },
