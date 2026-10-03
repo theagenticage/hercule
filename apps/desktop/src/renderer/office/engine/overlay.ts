@@ -34,15 +34,6 @@
  *   so tags do not switch between pip and full tag during a flight. They are
  *   chosen again when the camera comes to rest.
  *
- * While a storey is focused (`setFocusedFloor`), the rules above hold for that
- * storey only:
- * - the tags of colleagues on other storeys hide in every mode, waiting ones
- *   too, unless hovered or selected, because they would float over the
- *   focused storey;
- * - the storey's rooms show their labels far away and in the middle
- *   distance, in place of its "floor" room's label, because the storey's
- *   view frames the whole storey from far away.
- *
  * A tag shows the colleague's state as the sim holds it now
  * (`readColleagueStates`), so an answered colleague's request leaves its tag.
  *
@@ -74,14 +65,6 @@ export interface Overlay {
   setMode(mode: TagMode): void;
   setHovered(id: string | null): void;
   setSelected(id: string | null): void;
-  /**
-   * Tells the overlay which storey the user looks at, or null for the whole
-   * office. Only the rooms on that storey show their labels, in place of its
-   * "floor" room's label: a building with storeys lifts the storeys above
-   * away (`OfficeLayout.focusFloor`), and a label of a storey below would
-   * float over the focused storey's floor.
-   */
-  setFocusedFloor(floor: number | null): void;
   dispose(): void;
 }
 
@@ -382,7 +365,6 @@ export function createOverlay(
 
   let mode: TagMode = "smart";
   let hoveredId: string | null = null;
-  let focusedFloor: number | null = null;
   let selectedId: string | null = null;
   let level: Level = "far";
   let width = container.clientWidth;
@@ -545,7 +527,7 @@ export function createOverlay(
    * a pip when it finds no free place for the full tag.
    *
    * Only colleagues the user can see count as the longest waiting: on screen,
-   * on the focused storey if any, and not behind a wall. Otherwise a room seen
+   * and not behind a wall. Otherwise a room seen
    * from far away could show only pips while the full tags go to colleagues
    * out of view. While the camera moves, the choice is kept from the last
    * frame, so tags do not switch between pip and full tag during a flight.
@@ -559,7 +541,6 @@ export function createOverlay(
       waitingTags.length = 0;
       for (const tag of tags) {
         if (!tag.visible || !isWaiting(tag.state)) continue;
-        if (focusedFloor !== null && tag.room !== null && tag.room.floor !== focusedFloor) continue;
         projected.copy(tag.anchor).project(camera);
         const isOnScreen =
           Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1 && Math.abs(projected.z) < 1;
@@ -636,27 +617,17 @@ export function createOverlay(
             : isWaiting(tag.state) && !tag.isPip
               ? RANK.waitingTag
               : RANK.otherTag;
-      // A tag over a colleague the user cannot see would float over a wall, or
-      // over the focused storey's floor for a colleague on another storey.
+      // A tag over a colleague the user cannot see would float over a wall.
       // The hovered and selected ones show anyway.
-      const isOnOtherStorey =
-        focusedFloor !== null && tag.room !== null && tag.room.floor !== focusedFloor;
-      if (tag.rank > RANK.hovered && (isOnOtherStorey || isColleagueHidden(camera, tag.rig))) {
-        continue;
-      }
+      if (tag.rank > RANK.hovered && isColleagueHidden(camera, tag.rig)) continue;
       candidates.push(tag);
     }
     if (mode === "smart" && level !== "close") {
       for (const label of labels) {
-        if (focusedFloor !== null && label.room.floor !== focusedFloor) continue;
-        // A focused storey's view frames the whole storey, which is far away,
-        // yet the user looks into the storey: its rooms show their labels.
         const wanted =
-          focusedFloor !== null
-            ? label.room.kind !== "floor"
-            : level === "far"
-              ? label.floorLabel === null
-              : label.floorLabel !== null && label.floorLabel === focusFloorLabel;
+          level === "far"
+            ? label.floorLabel === null
+            : label.floorLabel !== null && label.floorLabel === focusFloorLabel;
         if (!wanted) continue;
         if (!placeOnScreen(label, 0.5, 0.5)) continue;
         label.rank = level === "far" ? RANK.farRoomLabel : RANK.roomLabel;
@@ -799,10 +770,6 @@ export function createOverlay(
     setSelected(id) {
       markTag(selectedId, id, "is-selected");
       selectedId = id;
-      update();
-    },
-    setFocusedFloor(floor) {
-      focusedFloor = floor;
       update();
     },
     dispose() {

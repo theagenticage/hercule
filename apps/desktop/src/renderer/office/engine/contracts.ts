@@ -274,25 +274,6 @@ export interface OfficeLayout {
   readonly overview: CameraView;
   /** The box the whole office fits in, for the sun's shadow and the camera's limits. */
   readonly bounds: Box3;
-  /** Advances what moves in the building itself, a lift or a tube's capsule. Returns true while it moves. */
-  update?(frame: Frame): boolean;
-  /**
-   * Tells the office which storey the user looks at, or null for the whole
-   * office, so a building with storeys can lift away the ones above it.
-   */
-  focusFloor?(floor: number | null): void;
-  /**
-   * Sends an event's capsule through the pneumatic tubes to Triage. Returns
-   * the seconds until the capsule arrives, or 0 when the office has no tubes.
-   */
-  sendCapsule?(): number;
-  /**
-   * Shows or hides the pneumatic tubes, as the Event flow switch asks. A
-   * capsule sent while the tubes are hidden still takes its full ride.
-   */
-  setFlow?(on: boolean): void;
-  /** Pins one more Proposal card on the case board. */
-  pinProposal?(): void;
   /** Shows on the "now serving" sign how many colleagues wait on the user. */
   setWaitingCount?(count: number): void;
   dispose(): void;
@@ -383,12 +364,6 @@ export interface Sim {
    * changes, so a React panel can read it with `useSyncExternalStore`.
    */
   readStates(): ReadonlyMap<string, ColleagueState>;
-  /**
-   * Returns the storey colleague `colleagueId` stands on now, which differs
-   * from its desk's storey while it waits in the queue or visits a colleague.
-   * Returns null for an id the sim does not know.
-   */
-  readFloor(colleagueId: string): number | null;
   /** Calls `listener` after any colleague's state changes. Returns the function that unsubscribes. */
   subscribeStates(listener: () => void): () => void;
   dispose(): void;

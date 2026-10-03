@@ -256,7 +256,6 @@ export function mountOfficeScene(
 
   const stopFrames = stage.onFrame((frame) => {
     let moving = built.sim.update(frame);
-    moving = (built.layout.update?.(frame) ?? false) || moving;
     moving = camera.update(frame) || moving;
     built.overlay.update();
     return moving;

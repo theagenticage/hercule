@@ -51,8 +51,6 @@ const TEA_SECONDS = 2.6;
 const TEA_BREAK_SECONDS = 16;
 /** Reaching up to pin one card. */
 const PIN_SECONDS = 1.6;
-/** From the office opening to Ada's walk to Investigate backup timeouts. */
-const ADA_VISIT_DELAY_SECONDS = 4;
 /** The gap between two small happenings, per liveliness level. */
 const HAPPENING_GAP_SECONDS: Readonly<Record<1 | 2, readonly [number, number]>> = {
   1: [15, 40],
@@ -389,8 +387,6 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   let liveliness: 0 | 1 | 2 = 0;
   let happeningTimer = 0;
   let glanceTimer = 0;
-  let adaVisitScheduled = false;
-  let adaVisitTimer = 0;
   let nextTicket = 0;
   // The colleagues' states the UI reads. The map is replaced on every change,
   // never edited, so a reader sees a change as a new map.
@@ -1059,26 +1055,6 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     });
   };
 
-  /** Finds the scripted visit's pair: Ada, and the colleague investigating the backup timeouts. */
-  const findScriptedVisit = (): readonly [Actor, Actor] | null => {
-    const all = [...actors.values()];
-    const ada = all.find(
-      ({ colleague }) => colleague.role === "assistant" && colleague.name === "Ada",
-    );
-    const host = all.find(({ colleague }) => colleague.title === "Investigate backup timeouts");
-    return ada !== undefined && host !== undefined ? [ada, host] : null;
-  };
-
-  /** Plays a visit: the scripted one, or else two settled colleagues of one room. */
-  const triggerVisit = (): void => {
-    const scripted = findScriptedVisit();
-    if (scripted !== null) {
-      visit(...scripted);
-      return;
-    }
-    visitWithinRoom();
-  };
-
   /**
    * Sends a settled colleague to visit another one in the same room. Returns
    * false when no pair is free.
@@ -1101,14 +1077,14 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   };
 
   /**
-   * Sends Triage to the case board to pin every Proposal waiting for it, and
-   * back. Without a board, the cards are pinned at once.
+   * Sends Triage to the case board to pin every card waiting for it, and
+   * back. Without Triage or a board, the waiting cards are dropped.
    */
   const pinProposals = (): void => {
     const triage = [...actors.values()].find((actor) => actor.colleague.role === "triage");
     const board = spots.caseBoard;
     if (triage === undefined || board === null) {
-      for (; pinsWaiting > 0; pinsWaiting--) layout.pinProposal?.();
+      pinsWaiting = 0;
       return;
     }
     if (triage.errand === "pin") return;
@@ -1117,25 +1093,12 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       while (pinsWaiting > 0) {
         setAction(triage, "pin");
         await wait(triage, PIN_SECONDS * 0.6);
-        layout.pinProposal?.();
         pinsWaiting--;
         await wait(triage, PIN_SECONDS * 0.4);
       }
       setAction(triage, "stand");
       await wait(triage, 0.4);
       await walkHome(triage);
-    });
-  };
-
-  /**
-   * Plays an event arriving: its capsule runs through the tubes, and Triage
-   * pins a Proposal when it lands.
-   */
-  const receiveEvent = (): void => {
-    const seconds = layout.sendCapsule?.() ?? 0;
-    schedule(seconds, () => {
-      pinsWaiting++;
-      pinProposals();
     });
   };
 
@@ -1220,7 +1183,8 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       [
         () => {
           if (spots.caseBoard === null) return false;
-          receiveEvent();
+          pinsWaiting++;
+          pinProposals();
           return true;
         },
         1,
@@ -1406,28 +1370,10 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       stopTimer(glanceTimer);
       scheduleHappening();
       scheduleGlance();
-      // Ada's scripted visit is ambient life too: an office that stands still
-      // does not send her, and sends her later if it comes to life again.
-      if (level === 0 && adaVisitTimer !== 0) {
-        stopTimer(adaVisitTimer);
-        adaVisitTimer = 0;
-        adaVisitScheduled = false;
-      }
-      if (level > 0 && !adaVisitScheduled) {
-        adaVisitScheduled = true;
-        adaVisitTimer = schedule(ADA_VISIT_DELAY_SECONDS, () => {
-          adaVisitTimer = 0;
-          triggerVisit();
-        });
-      }
     },
 
     readStates() {
       return states;
-    },
-
-    readFloor(colleagueId) {
-      return actors.get(colleagueId)?.floor ?? null;
     },
 
     subscribeStates(listener) {
