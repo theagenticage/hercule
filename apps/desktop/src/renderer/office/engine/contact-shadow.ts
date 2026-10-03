@@ -54,6 +54,18 @@ function readShared(): NonNullable<typeof shared> {
 }
 
 /**
+ * Frees the disc's geometry, material and texture, which every colleague
+ * shares and so no colleague frees. The next contact shadow builds them again.
+ */
+export function disposeContactShadows(): void {
+  if (shared === null) return;
+  shared.material.map?.dispose();
+  shared.material.dispose();
+  shared.geometry.dispose();
+  shared = null;
+}
+
+/**
  * Lays a contact shadow under `object`, a colleague's root, whose origin sits
  * between the feet on the floor, and stops every mesh under it from casting
  * the sun's shadow.

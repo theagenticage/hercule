@@ -40,6 +40,7 @@ import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { disposeContactShadows } from "./contact-shadow";
 import { isDarkTheme, readColor, readToken, refreshPalette, writeOklch } from "./palette";
 import { StillBuilding } from "./still-building";
 
@@ -397,6 +398,8 @@ export class Stage {
     this.composer.dispose();
     this.sun.shadow.dispose();
     this.environmentTexture.dispose();
+    // The colleagues share one contact shadow, kept between builds, so the stage frees it last.
+    disposeContactShadows();
     this.renderer.dispose();
     // dispose() frees what three.js allocated, but the browser keeps the
     // context, and its GPU process keeps working for it, until it is lost.
