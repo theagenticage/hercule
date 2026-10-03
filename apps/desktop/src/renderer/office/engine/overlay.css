@@ -1,0 +1,153 @@
+/*
+ * PROTOTYPE - the name tags and room labels over the office, placed by
+ * overlay.ts. The script writes only `transform` and the `is-shown` class;
+ * everything else is here. Tags fade in and out over --dur-2, so the levels
+ * of the smart mode fade into each other.
+ */
+
+.office-tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  contain: strict;
+}
+
+.office-tag,
+.office-room-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+  will-change: transform, opacity;
+}
+
+.office-tag.is-shown,
+.office-room-label.is-shown {
+  opacity: 1;
+}
+
+/* A colleague's tag, as the Bureau book draws it: a pill off-centre to the right of the head. */
+.office-tag {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 8px 3px 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 90%, transparent);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-11);
+  line-height: 1.35;
+  translate: -38% -100%;
+}
+
+.office-tag__dot {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--who);
+}
+
+.office-tag__name {
+  font-weight: var(--w-bold);
+}
+
+.office-tag__state {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Waiting on the user: marigold, the one colour that means "you". */
+.office-tag--waiting {
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 60%, transparent);
+}
+
+.office-tag--waiting .office-tag__state {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/*
+ * Far away, a waiting colleague past the few who waited longest: a marigold
+ * pip centred over its head, with no text. Hovering it shows the full tag.
+ */
+.office-tag--pip {
+  gap: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  background: var(--you);
+  box-shadow:
+    var(--shadow-1),
+    0 0 0 1.5px var(--raised);
+  translate: -50% -100%;
+}
+
+.office-tag--pip > * {
+  display: none;
+}
+
+.office-tag.is-hovered {
+  z-index: 1;
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--who) 70%, transparent);
+}
+
+.office-tag.is-selected {
+  z-index: 2;
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1.5px var(--who);
+}
+
+/* A room's label in the overview: its name in the display face, with its counts. */
+.office-room-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  background: var(--glass-fill-raised);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 0 0 1px var(--glass-rim);
+  color: var(--ink);
+  translate: -50% -50%;
+}
+
+.office-room-label--counted {
+  padding-right: 5px;
+}
+
+.office-room-label__name {
+  padding-right: 2px;
+  font-family: var(--font-deco);
+  font-size: var(--t-12);
+  letter-spacing: 0.04em;
+  line-height: 18px;
+  text-transform: uppercase;
+}
+
+.office-room-label.is-hot {
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line);
+}
