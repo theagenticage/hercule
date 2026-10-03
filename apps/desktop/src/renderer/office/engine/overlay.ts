@@ -20,7 +20,9 @@
  * Mode `all` shows every tag and mode `none` only the hovered and selected
  * ones. Where tags overlap, the more important one shows: selected, hovered,
  * waiting, a room label, then the nearest to the camera. Far away, the room
- * labels come before the waiting tags.
+ * labels come before the waiting tags. A waiting tag that overlaps moves up
+ * to make way, but the hovered tag stays where it showed, so no tag moves
+ * under the pointer.
  *
  * Far away in the `smart` mode, a large fleet's requests must not bury the
  * room labels, which count them:
@@ -161,6 +163,8 @@ interface Placed {
   /** The anchor on screen this frame, in CSS pixels. */
   x: number;
   y: number;
+  /** How far the placement moved the element up or down from its anchor this frame, in CSS pixels. */
+  shiftY: number;
   /** The anchor's distance from the camera this frame. */
   depth: number;
   /** Whether the element shows: set when the frame's placement ends. */
@@ -244,6 +248,7 @@ function createPlaced(element: HTMLElement, anchor: Vector3): Placed {
     dirty: true,
     x: 0,
     y: 0,
+    shiftY: 0,
     depth: 0,
     shown: false,
     writtenX: NaN,
@@ -432,6 +437,7 @@ export function createOverlay(
     if (projected.z >= 1 || projected.z <= -1) return false;
     placed.x = ((projected.x + 1) / 2) * width;
     placed.y = ((1 - projected.y) / 2) * height;
+    placed.shiftY = 0;
     // A tag shown last frame counts a little smaller, so two tags at the edge of touching do not swap every frame.
     const inset = readInset(placed);
     const isPip = isPipTag(placed);
@@ -476,6 +482,7 @@ export function createOverlay(
   /** Moves an element's anchor and rectangle on screen by `dy` CSS pixels. */
   const shiftOnScreen = (placed: Placed, dy: number): void => {
     placed.y += dy;
+    placed.shiftY += dy;
     placed.rect.top += dy;
     placed.rect.bottom += dy;
   };
@@ -614,8 +621,13 @@ export function createOverlay(
     candidates.length = 0;
     for (const tag of tags) {
       if (!tag.visible || !wantsTag(tag, focusRoom)) continue;
+      const heldShiftY = tag.id === hoveredId && tag.shown ? tag.shiftY : 0;
       // A pip sits centred over the head, and gives way to every tag and label.
       if (!placeOnScreen(tag, tag.isPip ? 0.5 : TAG_ANCHOR_X, 1)) continue;
+      // The hovered tag stays where it showed, even when it had moved up to
+      // make way for another tag. Back at its anchor, it would push that tag
+      // in under the pointer, and a click would select the wrong colleague.
+      shiftOnScreen(tag, heldShiftY);
       tag.rank =
         tag.id === selectedId
           ? RANK.selected
