@@ -172,6 +172,11 @@ export class Stage {
   private building: StillBuilding | null = null;
   /** three.js's lookup table for lit materials, once a frame has drawn one (see `dispose`). */
   private lightingLookupTable: Texture | null = null;
+  /**
+   * True once `dispose` has run. A promise started while the office was open,
+   * such as the fonts loading, can still ask for a frame after it closed.
+   */
+  private disposed = false;
 
   private readonly container: HTMLElement;
 
@@ -299,6 +304,7 @@ export class Stage {
    * WebGL context itself, so the app is back to idle once the office closes.
    */
   dispose(): void {
+    this.disposed = true;
     cancelAnimationFrame(this.frameRequest);
     this.frameRequest = 0;
     this.listeners.clear();
@@ -375,9 +381,12 @@ export class Stage {
     }
   };
 
-  /** Asks for an animation frame, unless one is already on its way or the window is hidden. */
+  /**
+   * Asks for an animation frame, unless one is already on its way, the
+   * window is hidden, or the stage has been disposed.
+   */
   private scheduleFrame(): void {
-    if (this.frameRequest !== 0 || document.hidden) return;
+    if (this.frameRequest !== 0 || document.hidden || this.disposed) return;
     this.frameRequest = requestAnimationFrame(this.onAnimationFrame);
   }
 
