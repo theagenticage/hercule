@@ -181,6 +181,9 @@ Known and left as they are, because they do not change the answer:
   glasses' arms do not quite reach the head.
 - **The close-up** centres the colleague in the whole pane, so the dossier card covers the pane's
   left third and can hide a neighbour's name tag.
+- **The drawer** slides in and the office slides aside with it, but the top bar's right end jumps
+  to the drawer's edge at once. The app's motion rule lets only transforms, colours and opacity
+  move, and the top bar has to be laid out again to fit the narrower pane.
 - **Tower**: at Ten times the overview is so far away that every colleague is a pip.
 - **Campus**: the conservatory does not read as glass; the plaques at the pavilion doors are small;
   the trees differ between builds; with Event flow off, the tubes' kerbs still block paths.
