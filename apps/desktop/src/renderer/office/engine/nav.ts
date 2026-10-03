@@ -3,7 +3,7 @@
  * string pulling, so a path is a few straight legs around the furniture.
  *
  * A layout declares each storey's floor, marks walls and furniture as solid,
- * opens doors through the walls, and links storeys by lifts. `build()` then
+ * and opens doors through the walls. `build()` then
  * turns that into one grid per storey whose free cells are the places where a
  * colleague's body centre may be: every cell knows how far it is from the
  * nearest solid cell, and only cells a body's half width away are free, so a
@@ -47,8 +47,6 @@ const LEG_SLACK = 0.1;
 const NEAREST_FREE_RADIUS = 1.6;
 /** Free areas smaller than this many cells are pockets (between a desk and a wall), never a start. */
 const POCKET_CELLS = 40;
-/** What a lift ride costs when the router compares routes, in metres of walking. */
-const LIFT_COST = 6;
 /** How much the search's distance estimate is weighted, see `searchCells`. */
 const HEURISTIC_WEIGHT = 1.5;
 const SQRT2 = Math.SQRT2;
@@ -105,15 +103,13 @@ interface Storey {
   readonly occupied: Uint8Array;
 }
 
-/** A point the router may pass through: a path's two ends, and both ends of every lift. */
+/** One end of a path: its exact point, and the free cell the walk starts or ends on. */
 interface Portal {
   readonly storey: Storey;
   /** The exact point, with the storey's height. */
   readonly position: Vector3;
   /** The nearest free cell to the point. */
   readonly cell: number;
-  /** The other end of the lift, for a lift's end. */
-  readonly linked: number | null;
 }
 
 /** Whether a search keeps out of the discs `occupy` marks. */
@@ -659,11 +655,10 @@ function pullString(
   return kept.map((index) => points[index]!);
 }
 
-/** Creates the builder a layout fills with floors, obstacles, doors and lifts. */
+/** Creates the builder a layout fills with floors, obstacles and doors. */
 export function createNavBuilder(): NavBuilder {
   const floorRects = new Map<number, { y: number; rects: Rect[] }>();
   const marks = new Map<number, Mark[]>();
-  const links: Array<readonly [Spot, Spot]> = [];
 
   const addMark = (floor: number, mark: Mark): void => {
     const list = marks.get(floor);
@@ -700,11 +695,8 @@ export function createNavBuilder(): NavBuilder {
     open(floor, minX, minZ, maxX, maxZ) {
       addMark(floor, { solid: false, rect: { minX, minZ, maxX, maxZ } });
     },
-    link(from, to) {
-      links.push([from, to]);
-    },
     build() {
-      return buildGraph(floorRects, marks, links);
+      return buildGraph(floorRects, marks);
     },
   };
 }
@@ -713,7 +705,6 @@ export function createNavBuilder(): NavBuilder {
 function buildGraph(
   floorRects: ReadonlyMap<number, { readonly y: number; readonly rects: ReadonlyArray<Rect> }>,
   marks: ReadonlyMap<number, ReadonlyArray<Mark>>,
-  links: ReadonlyArray<readonly [Spot, Spot]>,
 ): OfficeNavGraph {
   const storeys = new Map<number, Storey>();
   for (const [floor, { y, rects }] of floorRects) {
@@ -734,75 +725,13 @@ function buildGraph(
     storey.componentSize[storey.component[cell]!]! >= POCKET_CELLS;
 
   /** Returns a portal at a spot: its exact point and its nearest free cell in an open area. */
-  const buildPortal = (spot: Spot, linked: number | null): Portal | null => {
+  const buildPortal = (spot: Spot): Portal | null => {
     const storey = storeys.get(spot.floor);
     if (storey === undefined) return null;
     const { x, z } = spot.position;
     const cell = findNearestFreeCell(storey, x, z, isOpenArea(storey));
     if (cell === -1) return null;
-    return { storey, position: new Vector3(x, storey.y, z), cell, linked };
-  };
-
-  // Both ends of every lift, side by side: portal 2k links to 2k + 1.
-  const liftPortals: Array<Portal | null> = [];
-  for (const [from, to] of links) {
-    const index = liftPortals.length;
-    liftPortals.push(buildPortal(from, index + 1), buildPortal(to, index));
-  }
-
-  /**
-   * Finds the cheapest chain of portals from start to goal with Dijkstra:
-   * a walk between two portals in the same free area costs its straight
-   * distance, a lift ride its height plus `LIFT_COST`. Returns the chain's
-   * portals, start and goal included, or null.
-   */
-  const routePortals = (start: Portal, goal: Portal): Portal[] | null => {
-    const portals: Portal[] = [start, goal];
-    for (const portal of liftPortals) if (portal !== null) portals.push(portal);
-    const indexOf = new Map<number, number>();
-    liftPortals.forEach((portal, index) => {
-      if (portal !== null) indexOf.set(index, portals.indexOf(portal));
-    });
-    const distance = new Array<number>(portals.length).fill(Infinity);
-    const previous = new Array<number>(portals.length).fill(-1);
-    const done = new Array<boolean>(portals.length).fill(false);
-    distance[0] = 0;
-    for (;;) {
-      let current = -1;
-      for (let index = 0; index < portals.length; index++) {
-        if (!done[index] && distance[index]! < (current === -1 ? Infinity : distance[current]!)) {
-          current = index;
-        }
-      }
-      if (current === -1 || current === 1) break;
-      done[current] = true;
-      const here = portals[current]!;
-      const relax = (next: number, step: number): void => {
-        if (distance[current]! + step < distance[next]!) {
-          distance[next] = distance[current]! + step;
-          previous[next] = current;
-        }
-      };
-      portals.forEach((there, next) => {
-        if (
-          next !== current &&
-          there.storey === here.storey &&
-          here.storey.component[here.cell] === there.storey.component[there.cell]
-        ) {
-          relax(next, here.position.distanceTo(there.position));
-        }
-      });
-      if (here.linked !== null) {
-        const next = indexOf.get(here.linked);
-        if (next !== undefined) {
-          relax(next, Math.abs(portals[next]!.position.y - here.position.y) + LIFT_COST);
-        }
-      }
-    }
-    if (previous[1] === -1) return null;
-    const chain: Portal[] = [];
-    for (let at = 1; at !== -1; at = previous[at]!) chain.push(portals[at]!);
-    return chain.reverse();
+    return { storey, position: new Vector3(x, storey.y, z), cell };
   };
 
   /** Returns the waypoints of one walk across a storey between two portals, or null. */
@@ -819,15 +748,11 @@ function buildGraph(
     const points = pullString(storey, cells, first, last, avoidance);
     if (!startsFree) points.unshift(from.position);
     if (!endsFree) points.push(to.position);
-    return points.map((position) => ({
-      position: position.clone(),
-      floor: storey.floor,
-      kind: "walk",
-    }));
+    return points.map((position) => ({ position: position.clone(), floor: storey.floor }));
   };
 
   const findPathAvoiding = (from: Spot, to: Spot, avoidance: Avoidance): Waypoint[] | null => {
-    const nearStart = buildPortal(from, null);
+    const nearStart = buildPortal(from);
     if (nearStart === null) return null;
     let start: Portal = nearStart;
     const goalStorey = storeys.get(to.floor);
@@ -867,31 +792,15 @@ function buildGraph(
       storey: goalStorey,
       position: new Vector3(to.position.x, goalStorey.y, to.position.z),
       cell: goalCell,
-      linked: null,
     };
-    const chain = routePortals(start, goal);
-    if (chain === null) return null;
-    const path: Waypoint[] = [];
-    for (let index = 0; index + 1 < chain.length; index++) {
-      const here = chain[index]!;
-      const there = chain[index + 1]!;
-      if (here.storey !== there.storey) {
-        // A lift ride: the last point before it rises or sinks to the next.
-        const last = path.pop();
-        path.push({
-          position: last?.position ?? here.position.clone(),
-          floor: here.storey.floor,
-          kind: "lift",
-        });
-        continue;
-      }
-      const leg = walkBetween(here, there, avoidance);
-      if (leg === null) return null;
-      // Two walks in a row meet at a portal; the point is kept once.
-      if (path[path.length - 1]?.kind === "walk") leg.shift();
-      path.push(...leg);
+    // A path keeps to one free area of one storey: nothing joins storeys.
+    if (
+      goal.storey !== start.storey ||
+      goal.storey.component[goal.cell] !== start.storey.component[start.cell]
+    ) {
+      return null;
     }
-    return path;
+    return walkBetween(start, goal, avoidance);
   };
 
   return {
@@ -900,8 +809,8 @@ function buildGraph(
       // colleagues move at all.
       if (storeys.size === 0) {
         return [
-          { position: from.position.clone(), floor: from.floor, kind: "walk" },
-          { position: to.position.clone(), floor: to.floor, kind: "walk" },
+          { position: from.position.clone(), floor: from.floor },
+          { position: to.position.clone(), floor: to.floor },
         ];
       }
       return (

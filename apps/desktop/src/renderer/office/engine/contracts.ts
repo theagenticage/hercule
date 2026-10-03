@@ -301,7 +301,7 @@ export interface OfficeLayout {
 /** What a variant gets to build its office. */
 export interface LayoutContext {
   readonly world: World;
-  /** The nav graph the variant fills with floors, obstacles and links. */
+  /** The nav graph the variant fills with floors, obstacles and doors. */
   readonly nav: NavBuilder;
 }
 
@@ -310,11 +310,10 @@ export type BuildOfficeLayout = (context: LayoutContext) => OfficeLayout;
 // ---------------------------------------------------------------------------
 // Walking.
 
-/** One point of a path. A `lift` point moves straight up or down to the next. */
+/** One point of a path. */
 export interface Waypoint {
   readonly position: Vector3;
   readonly floor: number;
-  readonly kind: "walk" | "lift";
 }
 
 /** What a layout tells the nav graph while it builds. */
@@ -327,8 +326,6 @@ export interface NavBuilder {
   blockObject(floor: number, object: Object3D, padding?: number): void;
   /** Marks a rectangle walkable again: a door through a wall. */
   open(floor: number, minX: number, minZ: number, maxX: number, maxZ: number): void;
-  /** Links two points on different storeys by a lift. */
-  link(from: Spot, to: Spot): void;
   /** Finishes the graph. Call it once, after every floor and obstacle. */
   build(): NavGraph;
 }
@@ -337,9 +334,9 @@ export interface NavBuilder {
 export interface NavGraph {
   /**
    * Returns a path from one spot to another: walkable, around every obstacle,
-   * through doors and lifts, smoothed into as few points as possible. The
-   * path ends exactly at `to`, even when `to` is inside an obstacle (a chair
-   * behind a desk). Returns null when no path exists.
+   * through doors, smoothed into as few points as possible. The path ends
+   * exactly at `to`, even when `to` is inside an obstacle (a chair behind a
+   * desk). Returns null when no path exists, as between two storeys.
    */
   findPath(from: Spot, to: Spot): ReadonlyArray<Waypoint> | null;
 }

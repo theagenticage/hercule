@@ -21,7 +21,6 @@ import type {
   Sim,
   SimContext,
   Spot,
-  Waypoint,
 } from "./contracts";
 import { WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
@@ -89,8 +88,6 @@ const TURN_RATE = 9;
 const MAX_TURN_SPEED = 6.5;
 /** A heading this close to its target counts as there, in radians. */
 const SETTLED_ANGLE = 0.004;
-/** m/s, a lift between storeys. */
-const LIFT_SPEED = 1.1;
 /** m/s, sliding onto a seat or off it. */
 const GLIDE_SPEED = 0.8;
 /** The longest slide onto or off a seat other than a desk's, in metres; a longer one is walked. */
@@ -148,15 +145,6 @@ interface WalkLeg {
   readonly length: number;
 }
 
-/** A lift ride from one storey to another. */
-interface LiftLeg {
-  readonly kind: "lift";
-  readonly floor: number;
-  readonly from: Vector3;
-  readonly to: Vector3;
-  readonly seconds: number;
-}
-
 /**
  * A short slide without steps: sitting down onto a seat, or getting up from
  * one, between the seat and a place to stand: beside a desk's chair, or the
@@ -175,7 +163,7 @@ interface GlideLeg {
   readonly action: Action;
 }
 
-type Leg = WalkLeg | LiftLeg | GlideLeg;
+type Leg = WalkLeg | GlideLeg;
 
 /** A walk in progress, which the frames advance. */
 interface Walk {
@@ -183,7 +171,7 @@ interface Walk {
   /** Every point the walk passes, from start to end, for drawing it. */
   readonly route: ReadonlyArray<Vector3>;
   leg: number;
-  /** Metres along a walk leg, or seconds into a lift ride or a glide. */
+  /** Metres along a walk leg, or seconds into a glide. */
   progress: number;
   speed: number;
   /** The heading to settle into at the end. */
@@ -364,29 +352,6 @@ function buildWalkLeg(points: ReadonlyArray<Vector3>): WalkLeg {
     distances.push(distances[index - 1]! + rounded[index]!.distanceTo(rounded[index - 1]!));
   }
   return { kind: "walk", points: rounded, distances, length: distances[distances.length - 1]! };
-}
-
-/** Splits a path into walks on one storey and the lift rides between them. */
-function buildLegs(path: ReadonlyArray<Waypoint>): Leg[] {
-  const legs: Leg[] = [];
-  let points: Vector3[] = [];
-  path.forEach((waypoint, index) => {
-    points.push(waypoint.position);
-    const next = path[index + 1];
-    if (waypoint.kind !== "lift" || next === undefined) return;
-    legs.push(buildWalkLeg(points));
-    const rise = Math.abs(next.position.y - waypoint.position.y);
-    legs.push({
-      kind: "lift",
-      floor: next.floor,
-      from: waypoint.position,
-      to: next.position,
-      seconds: Math.max(1.2, rise / LIFT_SPEED),
-    });
-    points = [];
-  });
-  legs.push(buildWalkLeg(points));
-  return legs;
 }
 
 /** Writes into `target` the point a distance along a walk leg, and returns it. */
@@ -691,8 +656,8 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
         );
       }
       path = [
-        { position: from.position, floor: from.floor, kind: "walk" },
-        { position: goal.position.clone(), floor: goal.floor, kind: "walk" },
+        { position: from.position, floor: from.floor },
+        { position: goal.position.clone(), floor: goal.floor },
       ];
     }
     // Any other seat inside an obstacle is the path's own first or last step,
@@ -747,11 +712,8 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     // A walk that starts where it ends, as from a desk's chair to the place
     // beside it, has no steps to take.
     if (last > first) {
-      legs.push(
-        ...buildLegs(path.slice(first, last)).filter(
-          (leg) => leg.kind !== "walk" || leg.length > 0.01,
-        ),
-      );
+      const walk = buildWalkLeg(path.slice(first, last).map((waypoint) => waypoint.position));
+      if (walk.length > 0.01) legs.push(walk);
     }
     if (sitDown !== null) legs.push(sitDown);
     actor.place = "elsewhere";
@@ -836,16 +798,6 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       walk.progress = 0;
       return;
     }
-    if (leg.kind === "lift") {
-      walk.progress = Math.min(leg.seconds, walk.progress + dt);
-      const t = walk.progress / leg.seconds;
-      position.lerpVectors(leg.from, leg.to, t * t * (3 - 2 * t));
-      if (walk.progress < leg.seconds) return;
-      actor.floor = leg.floor;
-      walk.leg++;
-      walk.progress = 0;
-      return;
-    }
     setAction(actor, "walk");
     const next = walk.legs[walk.leg + 1];
     const remaining = leg.length - walk.progress;
@@ -872,7 +824,7 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     walk.leg++;
     walk.progress = 0;
     walk.speed = 0;
-    if (next === undefined || next.kind === "lift") setAction(actor, "stand");
+    if (next === undefined) setAction(actor, "stand");
   };
 
   /** Advances a colleague's walk by one frame. Returns true while it walks. */
