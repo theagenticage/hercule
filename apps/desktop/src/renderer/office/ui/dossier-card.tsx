@@ -27,7 +27,8 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import type { Pose, World } from "../world/types";
+import type { Pose } from "@hercule/client-core";
+import type { World } from "../world/types";
 import { CloseIcon } from "../../icons/close";
 import { SleepIcon } from "./office-icons";
 import { listColleaguesInPose } from "./office-keys";

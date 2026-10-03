@@ -26,7 +26,8 @@ import type {
 import { WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
-import type { Colleague, OfficeRequest, Pose } from "../world/types";
+import type { Pose } from "@hercule/client-core";
+import type { Colleague, OfficeRequest } from "../world/types";
 
 // ---------------------------------------------------------------------------
 // Timings, in seconds.

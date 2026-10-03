@@ -3,13 +3,10 @@
  * in which room, and on which machine. `build-world.ts` builds it from the
  * user's threads.
  */
+import type { Pose } from "@hercule/client-core";
 import type { OpenRequest } from "@hercule/contract";
 import type { Accessory, Hue, Shape } from "../../faces/look";
 import type { ProjectTint } from "../../screens/project-tile";
-
-/** What a colleague is doing, drawn as a pose. The eight poses of the Bureau book. */
-export type Pose =
-  "working" | "waiting" | "idle" | "asleep" | "paused" | "failed" | "done" | "away";
 
 /** The headwear only assistants wear. */
 export type Headwear = "cloche" | "headset" | "beret";

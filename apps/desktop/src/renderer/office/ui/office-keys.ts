@@ -21,7 +21,8 @@ import {
   sendOfficeCommand,
   setOffice,
 } from "../office-store";
-import type { Colleague, Pose, World } from "../world/types";
+import type { Pose } from "@hercule/client-core";
+import type { Colleague, World } from "../world/types";
 
 /** Returns true when `target`, the keyboard's focus, is a field, where keys type text. */
 const isTyping = (target: EventTarget | null): boolean =>

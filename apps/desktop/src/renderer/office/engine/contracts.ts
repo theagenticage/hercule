@@ -15,7 +15,8 @@
  */
 import type { Box3, Object3D, Vector3 } from "three";
 import type { ProjectTint } from "../../screens/project-tile";
-import type { Colleague, OfficeRequest, Pose, World } from "../world/types";
+import type { Pose } from "@hercule/client-core";
+import type { Colleague, OfficeRequest, World } from "../world/types";
 import type { Frame, Stage } from "./stage";
 
 // ---------------------------------------------------------------------------

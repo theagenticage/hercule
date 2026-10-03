@@ -18,7 +18,8 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import type { Pose, World } from "../world/types";
+import type { Pose } from "@hercule/client-core";
+import type { World } from "../world/types";
 import { PoseMark } from "./dossier-card";
 import { OfficeIcon } from "../../icons/office";
 import { findNextColleagueId, listColleaguesInPose } from "./office-keys";

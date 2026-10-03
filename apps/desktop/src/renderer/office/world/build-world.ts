@@ -9,10 +9,11 @@ import {
   decideOfficeSeating,
   describePose,
   formatRequestQuestion,
+  type Pose,
 } from "@hercule/client-core";
 import { buildLook } from "../../faces/look";
 import { pickProjectTint } from "../../screens/project-tile";
-import type { Colleague, OfficeRequest, Pose, World } from "./types";
+import type { Colleague, OfficeRequest, World } from "./types";
 
 /** Every list the world is built from. */
 export interface WorldRecords {

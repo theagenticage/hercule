@@ -21,7 +21,7 @@ import {
 } from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import type { Accessory } from "../../../faces/look";
-import type { Pose } from "../../world/types";
+import type { Pose } from "@hercule/client-core";
 import { mapFacePoint, measureEggRadius, placeOnEgg, type Anatomy, type Egg } from "./anatomy";
 import {
   BONE,

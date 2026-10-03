@@ -31,7 +31,7 @@ import {
 } from "three";
 import type { BuildColleagueRig, ColleagueRig } from "../../engine/contracts";
 import { paint, paintHue, paintVertexColors } from "../../engine/palette";
-import type { Pose } from "../../world/types";
+import type { Pose } from "@hercule/client-core";
 import { readAnatomy, type Anatomy } from "./anatomy";
 import { hasOpenEyes, readEyeCentre, readFaceGeometry } from "./face";
 import { Motion, Spring, isSittingAction, measureDamping, type RigBones } from "./motion";
