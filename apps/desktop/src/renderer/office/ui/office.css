@@ -38,7 +38,8 @@
 }
 
 /* The drawer is the app's main pane, slid in from the right: the same
-   surface and hairline, with a shadow that lifts it over the office. Closed,
+   surface, with the card's rim and shadow on its left edge, turned to fall
+   leftward, because it floats over the office as the card does. Closed,
    it waits past the pane's right edge, clear of its own shadow, and its
    `inert` attribute keeps it out of focus and clicks. */
 .office-drawer {
@@ -50,8 +51,8 @@
   width: var(--drawer-width);
   background: var(--surface);
   box-shadow:
-    -1px 0 0 var(--line-soft),
-    var(--shadow-3);
+    -1px 0 0 var(--line),
+    -12px 0 32px -12px oklch(0 0 0 / calc(0.1 + 0.14 * var(--glass-level)));
   transform: translateX(calc(100% + 48px));
   transition: transform var(--dur-3) var(--ease-out);
 }
@@ -176,8 +177,7 @@
 }
 
 /* ---------- The dossier card ---------- */
-/* The book's `.next` card, moved to the top left under the header, where it
-   never meets the variant bar at the bottom. */
+/* The book's `.next` card, moved to the top left under the header. */
 .office-card {
   position: absolute;
   top: 56px;

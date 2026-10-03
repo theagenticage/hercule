@@ -99,6 +99,8 @@ const TAG_ANCHOR_X = 0.38;
 const TAG_GAP = 2;
 /** How much smaller a tag shown last frame counts in a collision, in CSS pixels. */
 const TAG_HOLD = 3;
+/** The least room between a room label and a tag, in CSS pixels, so a tag never sits on a label. */
+const LABEL_CLEARANCE = 6;
 /**
  * Where a room label or a waiting tag tries next when a more important one
  * takes its place, instead of hiding. Each step moves it by its own height,
@@ -218,8 +220,15 @@ const isSameTagText = (a: ColleagueState, b: ColleagueState): boolean =>
 /** Returns true when a placed element is a tag showing as a pip. */
 const isPipTag = (placed: Tag | RoomLabel): boolean => placed.kind === "tag" && placed.isPip;
 
-const overlaps = (a: Rect, b: Rect): boolean =>
-  a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+/** Returns true when two rectangles overlap, or come closer than `gap` CSS pixels. */
+const overlaps = (a: Rect, b: Rect, gap: number): boolean =>
+  a.left < b.right + gap &&
+  b.left < a.right + gap &&
+  a.top < b.bottom + gap &&
+  b.top < a.bottom + gap;
+
+/** Returns how much smaller than its element an element counts in a collision on each side, in CSS pixels. */
+const readInset = (placed: Placed): number => (placed.shown ? TAG_HOLD - TAG_GAP : -TAG_GAP);
 
 /** Creates the placement state an element starts with. */
 function createPlaced(element: HTMLElement, anchor: Vector3): Placed {
@@ -324,9 +333,15 @@ function writeCounts(label: RoomLabel, present: number, asking: number): void {
  * tag for every rig in `rigs` and a label for every room in `rooms`. `homes`
  * holds each colleague's seat, which the room labels count by. The `rigs`
  * map is the same one the picker gets, which is how the picker finds the tags.
+ *
+ * `viewport` is the element whose box is the part of the canvas the user
+ * sees: the canvas can reach past it, under the thread drawer or past the
+ * pane's edge. A tag or label shows only when all of it lies inside, so none
+ * is ever cut off.
  */
 export function createOverlay(
   container: HTMLElement,
+  viewport: HTMLElement,
   camera: PerspectiveCamera,
   rigs: ReadonlyMap<string, ColleagueRig>,
   rooms: ReadonlyArray<RoomInfo>,
@@ -369,6 +384,8 @@ export function createOverlay(
   /** The tags and labels showing, most important first, for hit tests. */
   let shownInOrder: Array<Tag | RoomLabel> = [];
 
+  /** The part of the overlay the user sees, in the overlay's CSS pixels, measured each frame. */
+  const view: Rect = { left: 0, top: 0, right: 0, bottom: 0 };
   const projected = new Vector3();
   const lookedAt = new Vector3();
   const candidates: Array<Tag | RoomLabel> = [];
@@ -412,7 +429,7 @@ export function createOverlay(
     placed.x = ((projected.x + 1) / 2) * width;
     placed.y = ((1 - projected.y) / 2) * height;
     // A tag shown last frame counts a little smaller, so two tags at the edge of touching do not swap every frame.
-    const inset = placed.shown ? TAG_HOLD - TAG_GAP : -TAG_GAP;
+    const inset = readInset(placed);
     const isPip = isPipTag(placed);
     const placedWidth = isPip ? PIP_SIZE : placed.width;
     const placedHeight = isPip ? PIP_SIZE : placed.height;
@@ -421,7 +438,35 @@ export function createOverlay(
     rect.right = rect.left + placedWidth - 2 * inset;
     rect.top = placed.y - placedHeight * shareAbove + inset;
     rect.bottom = rect.top + placedHeight - 2 * inset;
-    return rect.right > 0 && rect.left < width && rect.bottom > 0 && rect.top < height;
+    return isInsideView(placed);
+  };
+
+  /** Returns true when all of an element, not only its collision rectangle, lies inside the part of the overlay the user sees. */
+  const isInsideView = (placed: Placed): boolean => {
+    const inset = readInset(placed);
+    const { rect } = placed;
+    return (
+      rect.left - inset >= view.left &&
+      rect.right + inset <= view.right &&
+      rect.top - inset >= view.top &&
+      rect.bottom + inset <= view.bottom
+    );
+  };
+
+  /**
+   * Measures the part of the overlay the user sees, from the boxes of
+   * `viewport` and `container`. Both are read at the start of a frame, before
+   * the frame writes anything, so the read costs no extra layout. They are read
+   * every frame because the stage slides under the drawer with a CSS
+   * transition, which no observer reports.
+   */
+  const measureView = (): void => {
+    const box = container.getBoundingClientRect();
+    const seen = viewport.getBoundingClientRect();
+    view.left = Math.max(0, seen.left - box.left);
+    view.top = Math.max(0, seen.top - box.top);
+    view.right = Math.min(width, seen.right - box.left);
+    view.bottom = Math.min(height, seen.bottom - box.top);
   };
 
   /** Moves an element's anchor and rectangle on screen by `dy` CSS pixels. */
@@ -527,6 +572,7 @@ export function createOverlay(
 
   function update(): void {
     if (disposed) return;
+    measureView();
     camera.updateMatrixWorld();
     const view = readCameraView(camera);
     if (view !== null) lookedAt.copy(view.target);
@@ -605,12 +651,13 @@ export function createOverlay(
 
     const shown = new Set<Placed>();
     shownInOrder = [];
-    // Pips may overlap one another: two colleagues waiting side by side both keep theirs.
     const isFree = (candidate: Tag | RoomLabel): boolean =>
-      !shownInOrder.some(
-        (placed) =>
-          !(isPipTag(placed) && isPipTag(candidate)) && overlaps(placed.rect, candidate.rect),
-      );
+      !shownInOrder.some((placed) => {
+        // Pips may overlap one another: two colleagues waiting side by side both keep theirs.
+        if (isPipTag(placed) && isPipTag(candidate)) return false;
+        const gap = (placed.kind === "room") !== (candidate.kind === "room") ? LABEL_CLEARANCE : 0;
+        return overlaps(placed.rect, candidate.rect, gap);
+      });
     for (const candidate of candidates) {
       const shifts =
         candidate.kind === "room"
@@ -623,8 +670,9 @@ export function createOverlay(
       let fits =
         isFree(candidate) ||
         shifts.some((step) => {
-          shiftOnScreen(candidate, step * (candidate.height + 2 * TAG_GAP));
-          return isFree(candidate);
+          // The step keeps a label's clearance too, so a tag that makes way for a label clears it.
+          shiftOnScreen(candidate, step * (candidate.height + 2 * TAG_GAP + LABEL_CLEARANCE));
+          return isInsideView(candidate) && isFree(candidate);
         });
       // Far away, a full waiting tag with no free place shows its pip instead.
       if (!fits && isFar && candidate.kind === "tag" && candidate.rank === RANK.waitingTag) {

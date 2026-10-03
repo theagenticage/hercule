@@ -25,13 +25,14 @@ import "./office.css";
 /** Renders the Office of `world`: the scene, and the panels and the thread drawer over it. */
 export function OfficeView({ world }: { readonly world: World }): JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);
+  const deckRef = useRef<HTMLDivElement>(null);
   const [scene, setScene] = useState<OfficeScene | null>(null);
   const state = useSyncExternalStore(subscribeOffice, readOffice);
   useOfficeKeys(world);
   // The scene is built once, from the first world; later worlds go to `setWorld`.
   const firstWorld = useRef(world);
   useEffect(() => {
-    const mounted = mountOfficeScene(stageRef.current!, firstWorld.current);
+    const mounted = mountOfficeScene(stageRef.current!, deckRef.current!, firstWorld.current);
     setScene(mounted);
     return () => {
       setScene(null);
@@ -44,7 +45,7 @@ export function OfficeView({ world }: { readonly world: World }): JSX.Element {
   return (
     <div className="office" data-drawer={findDrawerThreadId(state) !== null}>
       <div className="office-stage" ref={stageRef} />
-      <div className="office-deck">
+      <div className="office-deck" ref={deckRef}>
         <TopBar world={world} scene={scene} />
         <DossierCard world={world} scene={scene} />
       </div>

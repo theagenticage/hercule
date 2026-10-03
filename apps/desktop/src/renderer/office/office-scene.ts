@@ -106,8 +106,16 @@ function countWaiting(world: World): number {
   return world.colleagues.filter((colleague) => colleague.pose === "waiting").length;
 }
 
-/** Builds the office for `world` into `container`, and returns its handle. */
-export function mountOfficeScene(container: HTMLElement, initialWorld: World): OfficeScene {
+/**
+ * Builds the office for `world` into `container`, and returns its handle.
+ * `viewport` is the element whose box is the part of the office the user
+ * sees; the name tags and room labels stay inside it.
+ */
+export function mountOfficeScene(
+  container: HTMLElement,
+  viewport: HTMLElement,
+  initialWorld: World,
+): OfficeScene {
   const stage = new Stage(container);
   const camera = createCameraRig(stage.camera, stage.renderer.domElement, () =>
     stage.requestRender(),
@@ -139,7 +147,14 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     // so they follow whichever office is built now.
     publishColleagueStates(sim.readStates());
     sim.subscribeStates(() => publishColleagueStates(sim.readStates()));
-    const overlay = createOverlay(container, stage.camera, rigs, layout.rooms, layout.homes);
+    const overlay = createOverlay(
+      container,
+      viewport,
+      stage.camera,
+      rigs,
+      layout.rooms,
+      layout.homes,
+    );
     overlay.setMode(OFFICE_SETTINGS.tags);
     stage.setShadowBounds(layout.bounds);
     stage.setBuilding(layout.root);
