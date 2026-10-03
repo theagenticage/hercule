@@ -95,4 +95,6 @@ export interface World {
   readonly runners: ReadonlyArray<RunnerInfo>;
   /** The thread rooms, in the order they fill the wings. */
   readonly rooms: ReadonlyArray<ThreadRoom>;
+  /** The ids of the colleagues who sit in the Lounge: the idle ones, in desk order. */
+  readonly lounge: ReadonlyArray<string>;
 }

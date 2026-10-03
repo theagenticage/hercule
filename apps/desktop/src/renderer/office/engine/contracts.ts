@@ -288,6 +288,8 @@ export interface OfficeLayout {
   setFlow?(on: boolean): void;
   /** Pins one more Proposal card on the case board. */
   pinProposal?(): void;
+  /** Shows on the "now serving" sign how many colleagues wait on the user. */
+  setWaitingCount?(count: number): void;
   dispose(): void;
 }
 
@@ -375,6 +377,17 @@ export interface Sim {
   /** The user answered a colleague's request: it hops, walks back, and goes back to work. */
   answer(colleagueId: string, answer: string): void;
   trigger(event: SimEvent): void;
+  /**
+   * Moves a colleague into the state its thread is in now, after the
+   * thread's pose or Request changed. The colleague's tag shows `state` at
+   * once, and when the pose changed the colleague walks where the new pose
+   * takes it:
+   * - `waiting`: to the back of the queue, or beside its desk when the queue is full;
+   * - `working`: back to its desk, with a hop first when it was waiting;
+   * - `idle`: to a free Lounge armchair when `inLounge` is true, else to its desk.
+   * Walks happen at every liveliness, because they show a real change.
+   */
+  setColleagueState(colleagueId: string, state: ColleagueState, inLounge: boolean): void;
   /** How lively the office is: 0 still (only state changes move anyone), 1 calm, 2 bustling. */
   setLiveliness(level: 0 | 1 | 2): void;
   /**

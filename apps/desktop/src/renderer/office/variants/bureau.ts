@@ -153,6 +153,9 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
     nav: graph,
     overview: frameView(building, 34, 54),
     bounds,
+    setWaitingCount(count) {
+      fittings.nowServing?.setNumber(count);
+    },
     dispose() {
       tags.dispose();
     },

@@ -148,7 +148,8 @@ type Errand =
   | "pin"
   | "arrive"
   | "fail"
-  | "finish";
+  | "finish"
+  | "home";
 
 /** Where an actor rests between scripts. */
 type Place = "home" | "lounge" | "queue" | "desk-side" | "entrance" | "elsewhere";
@@ -444,6 +445,9 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     ]),
   );
   const stateListeners = new Set<() => void>();
+  // The colleagues the world seats in the Lounge. Client-core decides who
+  // they are; the sim only walks them there and keeps them there.
+  const loungeIds = new Set(world.lounge);
   let nextDepartureAt = 0;
   let teaTaken = false;
   let pinsWaiting = 0;
@@ -528,6 +532,26 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
         : null;
     const next = new Map(states);
     next.set(id, { pose, request, stateLabel: describePose(pose) });
+    states = next;
+    for (const listener of stateListeners) listener();
+  };
+
+  /**
+   * Records a colleague's state in the states the UI reads, as the world
+   * gives it, and calls the state listeners. Does nothing when the state is
+   * the one recorded already.
+   */
+  const recordState = (id: string, state: ColleagueState): void => {
+    const current = states.get(id);
+    if (
+      current?.pose === state.pose &&
+      current.stateLabel === state.stateLabel &&
+      current.request === state.request
+    ) {
+      return;
+    }
+    const next = new Map(states);
+    next.set(id, state);
     states = next;
     for (const listener of stateListeners) listener();
   };
@@ -1287,40 +1311,31 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     return true;
   };
 
-  /**
-   * An idle colleague moves to a free lounge armchair, or one in the lounge
-   * goes back to its desk. Returns false when neither can happen.
-   */
-  const moveThroughLounge = (): boolean => {
-    const returning = pickSettled(
-      (actor) => actor.place === "lounge" && actor.pose === "idle" && actor.loungeSeat !== null,
-    );
-    const leaving = pickSettled(
-      (actor) => actor.place === "home" && actor.pose === "idle" && actor.home.kind === "desk",
-    );
-    const seat =
-      leaving === undefined
-        ? undefined
-        : listFreeLoungeSeats(leaving.floor, leaving.rig.object.position)[0];
-    if (
-      leaving !== undefined &&
-      seat !== undefined &&
-      (returning === undefined || Math.random() < 0.6)
-    ) {
-      run(leaving, "lounge", async () => {
-        takeLoungeSeat(leaving, seat);
-        await awaitDeparture(leaving);
-        setCup(leaving, false);
-        await walkTo(leaving, seat, Math.random() < 0.5 ? "sit" : "read");
-        leaving.place = "lounge";
-      });
-      return true;
-    }
-    if (returning === undefined) return false;
-    run(returning, "lounge", async () => {
-      await awaitDeparture(returning);
-      await walkHome(returning);
+  /** Walks an idle colleague to `seat`, a free Lounge armchair, and sits it down. */
+  const walkToLounge = (actor: Actor, seat: Seat): void => {
+    run(actor, "lounge", async () => {
+      takeLoungeSeat(actor, seat);
+      await awaitDeparture(actor);
+      setCup(actor, false);
+      await walkTo(actor, seat, Math.random() < 0.5 ? "sit" : "read");
+      actor.place = "lounge";
     });
+  };
+
+  /**
+   * Moves a colleague the world seats in the Lounge from its desk to an
+   * armchair that came free. It sat at its desk because the Lounge was full
+   * when it went idle. Returns false when no one can move.
+   */
+  const fillFreeLoungeSeat = (): boolean => {
+    const leaving = pickSettled(
+      (actor) =>
+        loungeIds.has(actor.colleague.id) && actor.place === "home" && actor.pose === "idle",
+    );
+    if (leaving === undefined) return false;
+    const seat = listFreeLoungeSeats(leaving.floor, leaving.rig.object.position)[0];
+    if (seat === undefined) return false;
+    walkToLounge(leaving, seat);
     return true;
   };
 
@@ -1339,7 +1354,7 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     const happenings: Array<readonly [() => boolean, number]> = [
       [fetchTea, 3],
       [visitWithinRoom, 3],
-      [moveThroughLounge, 2],
+      [fillFreeLoungeSeat, 2],
       [
         () => {
           if (spots.caseBoard === null) return false;
@@ -1403,12 +1418,6 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       );
     waiting.forEach((actor) => (actor.ticket = nextTicket++));
     const sleepers = all.filter((actor) => actor.pose === "asleep");
-    // Some idle colleagues sit in the lounge: every other one, up to half the
-    // armchairs the sleepers leave, so there is room to come and go.
-    const loungers = all
-      .filter((actor) => actor.pose === "idle" && actor.colleague.role !== "triage")
-      .filter((_, index) => index % 2 === 1)
-      .slice(0, Math.floor(Math.max(0, spots.lounge.length - sleepers.length) / 2));
     const entranceSpots = listEntranceSpots();
 
     for (const actor of all) {
@@ -1438,7 +1447,9 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
         setAction(actor, "stand");
         continue;
       }
-      if (sleepers.includes(actor) || loungers.includes(actor)) {
+      // The colleagues the world seats in the Lounge sit there while it has
+      // armchairs; the rest sit at their desks until one comes free.
+      if (sleepers.includes(actor) || loungeIds.has(actor.colleague.id)) {
         const seat = listFreeLoungeSeats(home.floor, home.position)[0];
         if (seat !== undefined) {
           takeLoungeSeat(actor, seat);
@@ -1459,6 +1470,62 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
 
   placeEveryone();
 
+  // -- Changes the world makes ----------------------------------------------
+
+  /** Takes a colleague out of the queue: it hops, and walks back to its desk. */
+  const walkBackFromQueue = (actor: Actor): void => {
+    leaveQueue(actor, QUEUE_CLOSE_SECONDS);
+    run(actor, "answer", async () => {
+      setAction(actor, "hop");
+      await wait(actor, HOP_SECONDS);
+      setAction(actor, "stand");
+      await walkHome(actor);
+    });
+  };
+
+  /**
+   * Sends a colleague to its own seat to do what its pose does there. A
+   * colleague already sitting there only changes what it does, without
+   * getting up.
+   */
+  const sendHome = (actor: Actor): void => {
+    if (actor.place === "home" && actor.errand === null) {
+      const action = decideHomeAction(actor.pose, actor.home.kind);
+      setAction(actor, action);
+      setCup(actor, action === "sip");
+      return;
+    }
+    run(actor, "home", () => walkHome(actor));
+  };
+
+  const setColleagueState = (colleagueId: string, state: ColleagueState, inLounge: boolean) => {
+    const actor = actors.get(colleagueId);
+    if (actor === undefined) return;
+    if (inLounge) loungeIds.add(colleagueId);
+    else loungeIds.delete(colleagueId);
+    const from = actor.pose;
+    // The state goes in first, so the pose set below keeps the world's
+    // request and label instead of making its own.
+    recordState(colleagueId, state);
+    if (state.pose === from) return;
+    setPose(actor, state.pose);
+    if (state.pose === "waiting") {
+      actor.ticket = nextTicket++;
+      setCup(actor, false);
+      joinQueue(actor);
+    } else if (from === "waiting" && state.pose === "working") {
+      walkBackFromQueue(actor);
+    } else {
+      const seat =
+        state.pose === "idle" && inLounge
+          ? listFreeLoungeSeats(actor.floor, actor.rig.object.position)[0]
+          : undefined;
+      if (seat === undefined) sendHome(actor);
+      else walkToLounge(actor, seat);
+    }
+    stage.requestRender();
+  };
+
   // -- The contract ----------------------------------------------------------
 
   return {
@@ -1472,15 +1539,11 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     answer(colleagueId) {
       const actor = actors.get(colleagueId);
       if (actor === undefined || actor.pose !== "waiting") return;
-      leaveQueue(actor, QUEUE_CLOSE_SECONDS);
       setPose(actor, "working");
-      run(actor, "answer", async () => {
-        setAction(actor, "hop");
-        await wait(actor, HOP_SECONDS);
-        setAction(actor, "stand");
-        await walkHome(actor);
-      });
+      walkBackFromQueue(actor);
     },
+
+    setColleagueState,
 
     trigger(event: SimEvent) {
       switch (event.kind) {

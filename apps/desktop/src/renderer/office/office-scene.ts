@@ -1,9 +1,13 @@
 /**
  * The director: builds the 3D Office into a container and keeps it in step
  * with the Office's state and the user's threads. It owns the stage, the
- * camera, and the one office built from the current world; a new world tears
- * the office down and builds the new one in place, with the camera where it
- * was.
+ * camera, and the one office built from the current world.
+ *
+ * A new world with the same desks is played on the built office: each
+ * colleague whose thread changed pose walks where the new pose takes it. A
+ * new world with other desks tears the office down and builds the new one in
+ * place, with the camera where it was. Rebuilding on every pose change would
+ * stop every walk and churn GPU memory on every Request.
  */
 import { Vector3, type Mesh, type Object3D } from "three";
 import { createCameraRig, placeCamera } from "./engine/camera-rig";
@@ -33,7 +37,8 @@ import {
   type OfficeState,
 } from "./office-store";
 import { buildBureau } from "./variants/bureau";
-import type { World } from "./world/types";
+import { computeDeskKey } from "./world/build-world";
+import type { Colleague, World } from "./world/types";
 
 /** One built office: what a new world replaces. */
 interface Built {
@@ -53,7 +58,10 @@ export interface OfficeScene {
   readLayout(): OfficeLayout;
   /** Returns the view that frames one colleague. */
   buildColleagueView(id: string): CameraView | null;
-  /** Rebuilds the office for a new world, unless it draws the same as the current one. */
+  /**
+   * Moves the office to a new world: the colleagues walk to their new
+   * states, or the office is rebuilt when the desks changed.
+   */
   setWorld(world: World): void;
   dispose(): void;
 }
@@ -78,24 +86,20 @@ function findLamps(root: Object3D): ReadonlyArray<Lamp> {
   return lamps;
 }
 
-/**
- * Returns a key that changes whenever `world` would draw differently: a
- * colleague, room, desk, pose, label or request changed. Two worlds with the
- * same key build the same office.
- */
-function computeWorldKey(world: World): string {
-  return JSON.stringify([
-    world.rooms.map((room) => [room.id, room.name, room.tint, room.colleagueIds]),
-    world.colleagues.map((colleague) => [
-      colleague.id,
-      colleague.name,
-      colleague.pose,
-      colleague.stateLabel,
-      colleague.request?.prompt ?? null,
-      colleague.request?.answers ?? null,
-    ]),
-    world.runners.map((runner) => [runner.id, runner.name, runner.slots]),
-  ]);
+/** Checks whether a colleague's tag would read the same in both states: same pose, label and request. */
+function isSameState(a: Colleague, b: Colleague): boolean {
+  return (
+    a.pose === b.pose &&
+    a.stateLabel === b.stateLabel &&
+    a.request?.short === b.request?.short &&
+    a.request?.prompt === b.request?.prompt &&
+    a.request?.answers.join("\n") === b.request?.answers.join("\n")
+  );
+}
+
+/** Counts the colleagues in `world` who wait on the user. */
+function countWaiting(world: World): number {
+  return world.colleagues.filter((colleague) => colleague.pose === "waiting").length;
 }
 
 /** Builds the office for `world` into `container`, and returns its handle. */
@@ -106,7 +110,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
   );
   let state = readOffice();
   let world = initialWorld;
-  let worldKey = computeWorldKey(world);
+  let deskKey = computeDeskKey(world);
   let built: Built;
   // True while the Mac runs on its battery or the user asks to reduce motion:
   // the office then stands still, whatever its liveliness. The battery's
@@ -334,10 +338,26 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     readLayout: () => built.layout,
     buildColleagueView,
     setWorld(next) {
-      const nextKey = computeWorldKey(next);
-      if (nextKey === worldKey) return;
+      const previous = world;
+      const nextKey = computeDeskKey(next);
       world = next;
-      worldKey = nextKey;
+      if (nextKey === deskKey) {
+        const before = new Map(previous.colleagues.map((colleague) => [colleague.id, colleague]));
+        const lounge = new Set(next.lounge);
+        for (const colleague of next.colleagues) {
+          const old = before.get(colleague.id);
+          if (old !== undefined && isSameState(old, colleague)) continue;
+          built.sim.setColleagueState(
+            colleague.id,
+            { pose: colleague.pose, request: colleague.request, stateLabel: colleague.stateLabel },
+            lounge.has(colleague.id),
+          );
+        }
+        built.layout.setWaitingCount?.(countWaiting(next));
+        stage.requestRender();
+        return;
+      }
+      deskKey = nextKey;
       teardown(built);
       built = build();
       switchLamps();
