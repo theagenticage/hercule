@@ -342,7 +342,7 @@ export function readColor(token: Token, shift: Shift = {}): Color {
   });
 }
 
-/** Whether the current theme is a dark one, which the office draws as evening. */
+/** Returns true when the current theme is a dark one, which the office draws as evening. */
 export function isDarkTheme(): boolean {
   return getComputedStyle(document.documentElement).colorScheme.includes("dark");
 }

@@ -1058,9 +1058,9 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     pickRandom([...actors.values()].filter((actor) => isSettled(actor) && accept(actor)));
 
   /**
-   * One colleague walks to another's desk, stands beside it, and they talk
-   * for a few seconds, looking at each other; then the visitor walks back.
-   * The host stays seated: it stops what it does and turns its head.
+   * Sends `visitor` to `host`'s desk: the visitor stands beside it, and the
+   * two talk for a few seconds, looking at each other; then the visitor walks
+   * back. The host stays seated: it stops what it does and turns its head.
    */
   const visit = (visitor: Actor, host: Actor): void => {
     if (visitor === host) return;
@@ -1123,7 +1123,10 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     visitWithinRoom();
   };
 
-  /** A settled colleague visits another one of the same room. Returns false when no pair is free. */
+  /**
+   * Sends a settled colleague to visit another one in the same room. Returns
+   * false when no pair is free.
+   */
   const visitWithinRoom = (): boolean => {
     const visitor = pickSettled(
       (actor) => actor.place === "home" && (actor.pose === "working" || actor.pose === "idle"),
@@ -1142,8 +1145,8 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   };
 
   /**
-   * Triage walks to the case board and pins every Proposal waiting for it,
-   * then walks back. Without a board, the cards are pinned at once.
+   * Sends Triage to the case board to pin every Proposal waiting for it, and
+   * back. Without a board, the cards are pinned at once.
    */
   const pinProposals = (): void => {
     const triage = [...actors.values()].find((actor) => actor.colleague.role === "triage");
@@ -1168,7 +1171,10 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     });
   };
 
-  /** An event arrives: its capsule runs through the tubes, and Triage pins a Proposal when it lands. */
+  /**
+   * Plays an event arriving: its capsule runs through the tubes, and Triage
+   * pins a Proposal when it lands.
+   */
   const receiveEvent = (): void => {
     const seconds = layout.sendCapsule?.() ?? 0;
     schedule(seconds, () => {
@@ -1177,7 +1183,10 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     });
   };
 
-  /** A colleague fetches tea from the trolley and sips it at its desk. Returns false when no one can. */
+  /**
+   * Sends a colleague to fetch tea from the trolley and sip it at its desk.
+   * Returns false when no one can.
+   */
   const fetchTea = (): boolean => {
     const tea = spots.tea;
     if (tea === null || teaTaken) return false;

@@ -922,7 +922,7 @@ export class Motion {
     if (!this.bean) p.headTurn.x -= 0.16;
   }
 
-  /** The hop: a crouch, a jump with arms up, a landing that squashes; then the rig stands. */
+  /** Writes the hop: a crouch, a jump with arms up, a landing that squashes; then the rig stands. */
   private writeHop(p: Posture): void {
     this.writeStanding(p);
     const t = this.hopClock;

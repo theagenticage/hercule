@@ -370,7 +370,10 @@ export interface Sim {
    * Walks happen at every liveliness, because they show a real change.
    */
   setColleagueState(colleagueId: string, state: ColleagueState, inLounge: boolean): void;
-  /** How lively the office is: 0 still (only state changes move anyone), 1 calm, 2 bustling. */
+  /**
+   * Sets how lively the office is: 0 still (only state changes move anyone),
+   * 1 calm, 2 bustling.
+   */
   setLiveliness(level: 0 | 1 | 2): void;
   /**
    * Returns every colleague's state now, by id, including colleagues who

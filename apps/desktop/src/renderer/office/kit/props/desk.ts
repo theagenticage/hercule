@@ -51,7 +51,10 @@ const EXTRA_SURFACES = {
   },
 } as const satisfies Record<string, Surface>;
 
-/** The lit green glass of a banker's lamp: the book's `--lamp-on`, a touch lighter and yellower than the dark glass. */
+/**
+ * Returns the material of a banker's lamp's lit green glass: the book's
+ * `--lamp-on`, a touch lighter and yellower than the dark glass.
+ */
 function paintLitShade() {
   return paint("room-lamp", "glow", { dl: 0.06, dc: -0.01, dh: -4 });
 }
