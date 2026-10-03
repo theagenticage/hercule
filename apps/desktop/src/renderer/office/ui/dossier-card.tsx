@@ -6,7 +6,7 @@
  *   state.
  * - The Request it waits on, when it waits on the user, answered with the
  *   same dock and the same operations as the thread screen's.
- * - The facts: the thread's title, the room, the runner and the model.
+ * - The facts: the room, the runner and the model.
  * - Open thread.
  *
  * The card hides while the thread drawer is open, because the drawer shows
@@ -153,7 +153,6 @@ export function DossierCard({
       )}
 
       <dl className="office-card-facts">
-        {colleague.title !== colleague.name ? <Fact name="Thread">{colleague.title}</Fact> : null}
         <Fact name="Room">
           {room === undefined ? null : room.kind === "project" ? (
             <ProjectTile tint={room.tint} name={room.label} />
