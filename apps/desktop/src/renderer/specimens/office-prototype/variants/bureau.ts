@@ -4,10 +4,10 @@
  * signature.
  */
 import { Box3, BoxGeometry, Group, Mesh, Vector3 } from "three";
-import type { BuildOfficeLayout, OfficeLayout, RoomInfo, Seat } from "../engine/contracts";
+import type { BuildOfficeLayout, OfficeLayout, RoomInfo, Seat, Spot } from "../engine/contracts";
 import { WALL_HEIGHT } from "../engine/contracts";
 import { paint } from "../engine/palette";
-import { buildDesk } from "../kit/props";
+import { buildArmchair, buildDesk, buildYourDesk } from "../kit/props";
 import type { Area, Colleague } from "../world/types";
 
 const DESK_PITCH_X = 1.9;
@@ -82,16 +82,45 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
       rowDepth = 0;
     }
   }
+  // The user's office and the lounge, in a row south of the rooms.
+  const front = z + rowDepth + ROOM_GAP + 1;
+  const yourDesk = buildYourDesk();
+  yourDesk.object.position.set(2, 0, front);
+  root.add(yourDesk.object);
+  const queue: Spot[] = Array.from({ length: 4 }, (_, index) => ({
+    position: new Vector3(2, 0, front + 0.95 + index * 0.7),
+    facing: Math.PI,
+    floor: 0,
+  }));
+  const lounge: Seat[] = [0, 1, 2].map((index) => {
+    const chair = buildArmchair();
+    chair.object.position.set(7 + index * 1.2, 0, front);
+    root.add(chair.object);
+    chair.object.updateMatrixWorld(true);
+    return {
+      position: chair.seatMarker.getWorldPosition(new Vector3()),
+      facing: 0,
+      floor: 0,
+      kind: "armchair",
+      roomId: "lounge",
+      desk: null,
+    };
+  });
   const bounds = new Box3().setFromObject(root);
   nav.addFloor(0, 0, bounds.min.x, bounds.min.z, bounds.max.x, bounds.max.z);
   const center = bounds.getCenter(new Vector3()).setY(0);
   const size = bounds.getSize(new Vector3());
-  const anyHome = homes.values().next().value!;
   const layout: OfficeLayout = {
     root,
     rooms,
     homes,
-    spots: { yourDesk: anyHome, queue: [], lounge: [], caseBoard: null, records: null },
+    spots: {
+      yourDesk: { position: new Vector3(2, 0, front - 0.85), facing: 0, floor: 0 },
+      queue,
+      lounge,
+      caseBoard: null,
+      records: null,
+    },
     nav: nav.build(),
     overview: {
       target: center,

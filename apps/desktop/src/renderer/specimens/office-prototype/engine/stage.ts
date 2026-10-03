@@ -124,6 +124,13 @@ const QUALITY: Readonly<
   high: { pixelRatio: 2, shadowMap: 4096, ao: true },
 };
 
+declare global {
+  interface Window {
+    /** The mounted office or lab page, for the screenshot tool and the console. */
+    office?: { readonly stage: Stage };
+  }
+}
+
 /** The stage: one WebGL canvas filling `container`. */
 export class Stage {
   readonly renderer: WebGLRenderer;

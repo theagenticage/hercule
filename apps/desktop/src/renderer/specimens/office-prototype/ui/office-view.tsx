@@ -4,16 +4,9 @@
  * moves between colleagues, so the camera can glide instead of cutting.
  */
 import { useEffect, useRef, type JSX } from "react";
-import { mountOfficeScene, type OfficeScene } from "../office-scene";
+import { mountOfficeScene } from "../office-scene";
 import type { World } from "../world/types";
 import "./office.css";
-
-declare global {
-  interface Window {
-    /** The mounted office, for the screenshot tool and the console. */
-    office?: OfficeScene;
-  }
-}
 
 export function OfficeView({ world }: { readonly world: World }): JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);

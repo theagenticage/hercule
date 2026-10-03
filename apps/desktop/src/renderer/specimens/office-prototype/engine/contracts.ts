@@ -114,7 +114,41 @@ export interface ColleagueRig {
 export type BuildColleagueRig = (colleague: Colleague, style: CharacterStyle) => ColleagueRig;
 
 // ---------------------------------------------------------------------------
+// Walls.
+
+/** The key under which a wall that can drop to the dado rail stores its `Cutaway`, in `userData`. */
+export const CUTAWAY = "cutaway";
+
+/**
+ * What a wall that can be cut away tells the camera. The camera decides which
+ * walls to lower, so the user always sees into the rooms; the wall decides
+ * how it looks lowered. A wall's outward side is its local +z: a layout
+ * places each wall with +z pointing out of the room it bounds.
+ */
+export interface Cutaway {
+  /** The room the wall bounds. */
+  readonly roomId: string;
+  /** True for the building's outer walls, which stay up longest. */
+  readonly exterior: boolean;
+  /** Lowers the wall: 0 is full height, 1 is down to the dado rail. */
+  setCut(amount: number): void;
+}
+
+// ---------------------------------------------------------------------------
 // Furniture.
+
+/** A piece of furniture to sit on: the object, and the seat's spot in the object's own space. */
+export interface SeatProp {
+  readonly object: Object3D;
+  /** Stand here, facing the way the marker faces, to sit down. */
+  readonly seatMarker: Object3D;
+}
+
+/** Furniture with several seats: a bench, a long table. */
+export interface SeatsProp {
+  readonly object: Object3D;
+  readonly seatMarkers: ReadonlyArray<Object3D>;
+}
 
 /** A desk with its chair, lamp and typewriter, which the sim changes as its owner's state changes. */
 export interface DeskHandle {
@@ -198,6 +232,11 @@ export interface OfficeLayout {
   readonly bounds: Box3;
   /** Advances what moves in the building itself, a lift or a tube's capsule. Returns true while it moves. */
   update?(frame: Frame): boolean;
+  /**
+   * Tells the office which storey the user looks at, or null for the whole
+   * office, so a building with storeys can lift away the ones above it.
+   */
+  focusFloor?(floor: number | null): void;
   dispose(): void;
 }
 
