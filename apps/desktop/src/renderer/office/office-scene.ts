@@ -344,6 +344,9 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
       if (nextKey === deskKey) {
         const before = new Map(previous.colleagues.map((colleague) => [colleague.id, colleague]));
         const lounge = new Set(next.lounge);
+        // Most new worlds change nothing the office shows, such as a thread's
+        // last activity, and draw no frame.
+        let changed = false;
         for (const colleague of next.colleagues) {
           const old = before.get(colleague.id);
           if (old !== undefined && isSameState(old, colleague)) continue;
@@ -352,9 +355,15 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
             { pose: colleague.pose, request: colleague.request, stateLabel: colleague.stateLabel },
             lounge.has(colleague.id),
           );
+          changed = true;
         }
-        built.layout.setWaitingCount?.(countWaiting(next));
-        stage.requestRender();
+        // The sign redraws its canvas on every call, so only a new count is sent.
+        const waiting = countWaiting(next);
+        if (waiting !== countWaiting(previous)) {
+          built.layout.setWaitingCount?.(waiting);
+          changed = true;
+        }
+        if (changed) stage.requestRender();
         return;
       }
       deskKey = nextKey;
