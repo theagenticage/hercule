@@ -1,6 +1,6 @@
 /**
  * The office's architecture: floors, walls, signs, the lift, the tubes, and
- * the outdoors. The layouts import every builder from this module; the
+ * the outdoors. The code in `maps/` imports every builder from this module; the
  * larger builders live in `architecture-<topic>.ts` files next to it and are
  * re-exported here.
  *
@@ -14,7 +14,7 @@
  *   its panelled dado stands 0.01 proud of the plaster on both faces and
  *   ends in a rail at `CUTAWAY_HEIGHT` (0.55); the cap on top is 0.026
  *   thick and 0.18 wide;
- * - a doorway is `DOOR_HEIGHT` (1.72) tall and as wide as the layout asks;
+ * - a doorway is `DOOR_HEIGHT` (1.72) tall and as wide as the map's builder asks;
  *   its stepped architrave adds 0.085 at each side and 0.16 on top;
  * - a window is `WINDOW_WIDTH` (0.8) wide, from a sill at 0.8 to a head at
  *   2.12, spaced `WINDOW_PITCH` (1.7) apart along the wall.

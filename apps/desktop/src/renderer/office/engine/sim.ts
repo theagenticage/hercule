@@ -339,9 +339,9 @@ function sampleLeg(leg: WalkLeg, distance: number, target: Vector3): Vector3 {
 // The sim.
 
 /** Builds the sim that runs the office's colleagues. */
-export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
-  const { spots } = layout;
-  const nav = layout.nav;
+export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
+  const { spots } = office;
+  const nav = office.nav;
   const officeNav = isOfficeNavGraph(nav) ? nav : null;
   const actors = new Map<string, Actor>();
   const queue: Array<Actor | null> = spots.queue.map(() => null);
@@ -588,7 +588,7 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
    * the spot's facing. A seated colleague gets up first. With `sitAction`,
    * the colleague sits down on the spot at the end and does that action.
    * When the graph finds no path, the console says so and the colleague walks
-   * straight, so a gap in a layout shows instead of freezing someone.
+   * straight, so a gap in a map shows instead of freezing someone.
    *
    * Getting up and sitting down are slides, not steps. A desk's chair has the
    * desk in front of it and its back behind it, so a colleague slides off it
@@ -1115,7 +1115,7 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
 
   for (const colleague of world.colleagues) {
     const rig = rigs.get(colleague.id);
-    const home = layout.homes.get(colleague.id);
+    const home = office.homes.get(colleague.id);
     if (rig === undefined || home === undefined) continue;
     actors.set(colleague.id, {
       colleague,

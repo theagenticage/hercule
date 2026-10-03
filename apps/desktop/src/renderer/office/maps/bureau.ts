@@ -9,16 +9,16 @@
  * The plan, the arithmetic of where each room goes, is `bureau-plan.ts`; what
  * stands in each room is `bureau-rooms.ts`; the runners' tags and the Lobby's
  * directory are `bureau-fleet.ts`. This file builds the shell (floors and
- * walls), runs the furnishing, and fills in the layout contract.
+ * walls), runs the furnishing, and fills in the `BuiltOffice` contract.
  */
 import { Box3, Group, Vector3, type Object3D } from "three";
 import {
   CUTAWAY,
   WALL_HEIGHT,
-  type BuildOfficeLayout,
+  type BuildOffice,
   type CameraView,
   type Cutaway,
-  type OfficeLayout,
+  type BuiltOffice,
   type RoomInfo,
   type Seat,
 } from "../engine/contracts";
@@ -32,7 +32,7 @@ import {
   WALL_THICKNESS,
 } from "../kit/architecture";
 import { buildFloorLamp, buildPlant, buildRug } from "../kit/props";
-import { BUREAU_MAP } from "../office-map";
+import { BUREAU_MAP } from "./office-map";
 import { buildDeskTags, buildDirectory } from "./bureau-fleet";
 import { HALL_IDS, planFloor, type FloorPlan, type PlannedWall, type Rect } from "./bureau-plan";
 import { designRooms, measureFootprint, type Fitter, type Fittings } from "./bureau-rooms";
@@ -53,7 +53,7 @@ interface BuiltWall {
   readonly hung: Object3D[];
 }
 
-export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
+export const buildBureau: BuildOffice = ({ world, nav }) => {
   const root = new Group();
   root.name = "bureau";
   const directory = buildDirectory(world);
@@ -144,7 +144,7 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
     lounge: fittings.lounge,
     tea: fittings.tea,
   };
-  const layout: OfficeLayout = {
+  const office: BuiltOffice = {
     root,
     rooms,
     homes: fittings.homes,
@@ -159,7 +159,7 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
       tags.dispose();
     },
   };
-  return layout;
+  return office;
 };
 
 /** Returns the rectangle a stretch of a wall covers, from `from` to `to` along it, `half` either side. */

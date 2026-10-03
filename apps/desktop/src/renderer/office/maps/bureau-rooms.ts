@@ -32,7 +32,7 @@ import {
   type CaseBoardHandle,
   type NowServingHandle,
 } from "../kit/props";
-import type { FixedRoom, Furniture, OfficeMap, SpotKind } from "../office-map";
+import type { FixedRoom, Furniture, OfficeMap, SpotKind } from "./office-map";
 import type { Colleague, ThreadRoom, World } from "../world/types";
 import type { PlannedRoom, PlanRequest, Rect, RoomRequest } from "./bureau-plan";
 
@@ -91,7 +91,7 @@ export interface Fitter {
   readSpot(marker: Object3D): Spot;
 }
 
-/** What the rooms leave behind for the layout: seats, spots, and the pieces the office animates. */
+/** What the rooms give the built office: seats, spots, and the pieces the office animates. */
 export interface Fittings {
   readonly homes: Map<string, Seat>;
   readonly lounge: Seat[];

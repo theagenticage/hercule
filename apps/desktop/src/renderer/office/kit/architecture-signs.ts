@@ -76,7 +76,7 @@ function measurePlaqueFace(text: string, hasChip: boolean): number {
  * colour sits at the left end. The frame and the chip are one mesh and the
  * face another.
  *
- * The plaque's back is at z = 0 and its centre at y = 0, so a layout hangs it
+ * The plaque's back is at z = 0 and its centre at y = 0, so a map's builder hangs it
  * flat on a wall. Its face is 0.12 tall and about 0.04 wide per letter, plus
  * 0.124 for the padding and the frame.
  */

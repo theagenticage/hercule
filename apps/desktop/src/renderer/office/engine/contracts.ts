@@ -4,7 +4,7 @@
  *
  * - kit/character: a colleague's 3D body, `ColleagueRig`;
  * - kit/props and kit/architecture: furniture and rooms, `DeskHandle`;
- * - variants/*: a whole office, `OfficeLayout`;
+ * - maps/*: a whole office, `BuiltOffice`;
  * - engine/nav and engine/sim: walking and behaviour, `NavGraph` and `Sim`;
  * - engine/camera-rig, engine/overlay, engine/picking: how the user looks
  *   around and points at things.
@@ -114,7 +114,7 @@ export const CUTAWAY = "cutaway";
 /**
  * What a wall that can be cut away tells the camera. The camera decides which
  * walls to lower, so the user always sees into the rooms; the wall decides
- * how it looks lowered. A wall's outward side is its local +z: a layout
+ * how it looks lowered. A wall's outward side is its local +z: a map's builder
  * places each wall with +z pointing out of the room it bounds.
  */
 export interface Cutaway {
@@ -135,7 +135,7 @@ export const LAMP = "lamp";
 /**
  * A light the office switches on in the evening, such as a standard lamp, a
  * lantern outdoors, or a window's outer panes. The director finds every
- * `Lamp` under a layout's root and switches them all with the time of day. A
+ * `Lamp` under the built office's root and switches them all with the time of day. A
  * desk's banker's lamp is not one: the sim lights it while the desk's owner
  * works.
  */
@@ -221,8 +221,8 @@ interface OfficeSpots {
   readonly tea: Spot | null;
 }
 
-/** One whole office: what a variant builds from the world. */
-export interface OfficeLayout {
+/** One whole office, built from an Office Map and the world. */
+export interface BuiltOffice {
   readonly root: Object3D;
   readonly rooms: ReadonlyArray<RoomInfo>;
   /** Every colleague's home seat, by colleague id. Every colleague of the world has one. */
@@ -238,14 +238,14 @@ export interface OfficeLayout {
   dispose(): void;
 }
 
-/** What a variant gets to build its office. */
-interface LayoutContext {
+/** What a map's builder gets to build its office. */
+interface OfficeBuildContext {
   readonly world: World;
-  /** The nav graph the variant fills with floors, obstacles and doors. */
+  /** The nav graph the map's builder fills with floors, obstacles and doors. */
   readonly nav: NavBuilder;
 }
 
-export type BuildOfficeLayout = (context: LayoutContext) => OfficeLayout;
+export type BuildOffice = (context: OfficeBuildContext) => BuiltOffice;
 
 // ---------------------------------------------------------------------------
 // Walking.
@@ -256,7 +256,7 @@ export interface Waypoint {
   readonly floor: number;
 }
 
-/** What a layout tells the nav graph while it builds. */
+/** What a map's builder tells the nav graph while it builds. */
 export interface NavBuilder {
   /** Declares a walkable storey: its floor's height, and the rectangle (x, z) it covers. */
   addFloor(floor: number, y: number, minX: number, minZ: number, maxX: number, maxZ: number): void;
@@ -331,7 +331,7 @@ export interface Sim {
 /** What the sim gets to run the office. */
 export interface SimContext {
   readonly world: World;
-  readonly layout: OfficeLayout;
+  readonly office: BuiltOffice;
   readonly rigs: ReadonlyMap<string, ColleagueRig>;
   readonly stage: Stage;
 }

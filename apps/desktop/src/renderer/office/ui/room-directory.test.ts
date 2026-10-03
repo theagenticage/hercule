@@ -2,7 +2,7 @@
  * Tests the groups of the room directory. The tests check that:
  *
  * - the project rooms come under "Projects", then every other room under
- *   "The Office", each in the layout's order;
+ *   "The Office", each in the built office's order;
  * - a group with no rooms is left out.
  */
 import { describe, expect, it } from "vitest";

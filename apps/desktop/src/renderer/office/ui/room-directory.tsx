@@ -3,14 +3,14 @@
  * Office, so the user can fly the camera straight to one.
  *
  * The rooms come from the office as built now, so the list follows the
- * rooms as threads come and go. The project
- * rooms come first, each drawn as its project's tile, then the Office's
- * fixed rooms. Each room shows how many colleagues belong in it now, the
- * same count its label in the 3D view shows: see `countColleaguesByRoom`.
+ * rooms as threads come and go. The project rooms come first, each drawn as
+ * its project's tile, then the Office's fixed rooms. Each room shows how
+ * many colleagues belong in it now, the same count its label in the 3D view
+ * shows: see `countColleaguesByRoom`.
  */
 import { useSyncExternalStore, type JSX } from "react";
 import { ProjectTile } from "../../screens/project-tile";
-import type { OfficeLayout, RoomInfo } from "../engine/contracts";
+import type { BuiltOffice, RoomInfo } from "../engine/contracts";
 import { countColleaguesByRoom } from "../engine/room-counts";
 import {
   readColleagueStates,
@@ -32,7 +32,7 @@ interface RoomGroup {
 /**
  * Returns the rooms of `rooms` in the directory's groups: the project rooms
  * under "Projects", then every other room under "The Office", each in the
- * layout's order. Groups with no rooms are left out.
+ * built office's order. Groups with no rooms are left out.
  */
 export function groupRooms(rooms: ReadonlyArray<RoomInfo>): ReadonlyArray<RoomGroup> {
   const groups: ReadonlyArray<RoomGroup> = [
@@ -44,23 +44,23 @@ export function groupRooms(rooms: ReadonlyArray<RoomInfo>): ReadonlyArray<RoomGr
 
 /** Renders the directory's list of rooms, the room the camera is in marked. */
 function RoomList({
-  layout,
+  office,
   roomId,
   onPick,
 }: {
-  readonly layout: OfficeLayout;
+  readonly office: BuiltOffice;
   readonly roomId: string | null;
   readonly onPick: (roomId: string) => void;
 }): JSX.Element {
   const states = useSyncExternalStore(subscribeColleagueStates, readColleagueStates);
-  const counts = countColleaguesByRoom(layout.rooms, layout.homes, states);
+  const counts = countColleaguesByRoom(office.rooms, office.homes, states);
   return (
     <>
       <div className="pop-h">
         <b>Rooms</b>
-        <span>{layout.rooms.length} rooms</span>
+        <span>{office.rooms.length} rooms</span>
       </div>
-      {groupRooms(layout.rooms).map((group) => (
+      {groupRooms(office.rooms).map((group) => (
         <div className="pop-sec" key={group.heading}>
           <div className="q-h">{group.heading}</div>
           {group.rooms.map((room) => (
@@ -97,13 +97,13 @@ function RoomList({
  * the directory it opens. A click on a room flies the camera there.
  */
 export function RoomDirectory({
-  layout,
+  office,
 }: {
   /** The office as built now, or null before the scene mounts. */
-  readonly layout: OfficeLayout | null;
+  readonly office: BuiltOffice | null;
 }): JSX.Element {
   const state = useSyncExternalStore(subscribeOffice, readOffice);
-  const room = layout?.rooms.find((each) => each.id === state.roomId);
+  const room = office?.rooms.find((each) => each.id === state.roomId);
   return (
     <OfficeMenu
       label="Room directory"
@@ -119,9 +119,9 @@ export function RoomDirectory({
       }
     >
       {(close) =>
-        layout === null ? null : (
+        office === null ? null : (
           <RoomList
-            layout={layout}
+            office={office}
             roomId={state.roomId}
             onPick={(roomId) => {
               setOffice({ selectedId: null, roomId, drawer: false });

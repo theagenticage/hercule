@@ -19,7 +19,7 @@ import { Mark } from "../../marks";
 import { ProjectTile } from "../../screens/project-tile";
 import { RequestDock } from "../../screens/thread/dock";
 import { useAgeLabel } from "../../app/age-clock";
-import type { OfficeLayout } from "../engine/contracts";
+import type { BuiltOffice } from "../engine/contracts";
 import {
   applyColleagueState,
   readColleagueStates,
@@ -78,11 +78,11 @@ function Fact({
 /** Renders the dossier card of the selected colleague. It shows while a colleague is selected and the drawer is closed. */
 export function DossierCard({
   world,
-  layout,
+  office,
 }: {
   readonly world: World;
   /** The office as built now, or null before the scene mounts. */
-  readonly layout: OfficeLayout | null;
+  readonly office: BuiltOffice | null;
 }): JSX.Element {
   const state = useSyncExternalStore(subscribeOffice, readOffice);
   const states = useSyncExternalStore(subscribeColleagueStates, readColleagueStates);
@@ -97,8 +97,8 @@ export function DossierCard({
   const { pose, request, openRequest } = colleague;
   const waiting = listColleaguesInPose(world, states, "waiting");
   const runner = world.runners.find((each) => each.id === colleague.runnerId);
-  const roomId = layout?.homes.get(colleague.id)?.roomId;
-  const room = layout?.rooms.find((each) => each.id === roomId);
+  const roomId = office?.homes.get(colleague.id)?.roomId;
+  const room = office?.rooms.find((each) => each.id === roomId);
 
   return (
     <section

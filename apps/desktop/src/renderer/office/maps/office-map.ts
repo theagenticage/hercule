@@ -1,14 +1,14 @@
 /**
  * The Office Map type, and the Bureau: for now the only Office Map.
  *
- * An Office Map is a plain typed value. `variants/bureau-rooms.ts` reads only
+ * An Office Map is a plain typed value. `maps/bureau-rooms.ts` reads only
  * its fixed rooms: which exist, in what order, under what name, which
  * furniture stands in them, and which spots they offer to colleagues. The
  * other fields describe what the code does anyway:
  *
- * - `growth`, `wing` and `room` each allow one value, the one the code
- *   implements;
- * - `desk`, `id` and `name` are not read: every thread sits at a clerk's desk.
+ * - `growth`, `wing`, `room` and `desk` each allow one value, the one the
+ *   code implements;
+ * - `id` and `name` are not read.
  *
  * The code owns each room's geometry, the growth rule itself and the
  * animations. Left for later (#336): a real map format with its own schema,
@@ -65,7 +65,7 @@ export interface OfficeMap {
   /**
    * The rule by which the place grows. `gallery-wings` lays the thread rooms
    * in wings along a corridor north of the Gallery, and the fixed rooms along
-   * the street south of it; the rule's geometry is `variants/bureau-plan.ts`.
+   * the street south of it; the rule's geometry is `maps/bureau-plan.ts`.
    */
   readonly growth: "gallery-wings";
   /** What a wing stands for. `none`: wings carry no meaning, and rooms fill them in order. */
@@ -73,7 +73,7 @@ export interface OfficeMap {
   /** What a room stands for. `project`: one room per project, and one for the threads with none. */
   readonly room: "project";
   /** What stands at each thread's desk. */
-  readonly desk: ReadonlyArray<Furniture>;
+  readonly desk: "clerks-desk";
   /** The fixed rooms, west to east along the street. The last one holds the front door. */
   readonly fixedRooms: ReadonlyArray<FixedRoom>;
 }
@@ -85,7 +85,7 @@ export const BUREAU_MAP: OfficeMap = {
   growth: "gallery-wings",
   wing: "none",
   room: "project",
-  desk: ["clerks-desk"],
+  desk: "clerks-desk",
   fixedRooms: [
     {
       kind: "triage-room",

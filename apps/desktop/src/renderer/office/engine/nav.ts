@@ -2,7 +2,7 @@
  * Walking through the office: a grid per storey, A* over it, and
  * string pulling, so a path is a few straight legs around the furniture.
  *
- * A layout declares each storey's floor, marks walls and furniture as solid,
+ * A map's builder declares each storey's floor, marks walls and furniture as solid,
  * and opens doors through the walls. `build()` then
  * turns that into one grid per storey whose free cells are the places where a
  * colleague's body centre may be: every cell knows how far it is from the
@@ -311,7 +311,7 @@ function rasterizeStorey(
   }
 
   // Only solid cells push a body away. The floor's own edge does not: an
-  // entrance often sits right on it, and the layout walls the edge anyway.
+  // entrance often sits right on it, and the map's builder walls the edge anyway.
   const clearance = measureClearance(solid, cols, rows);
   const free = new Uint8Array(count);
   for (let row = 1; row < rows - 1; row++) {
@@ -655,7 +655,7 @@ function pullString(
   return kept.map((index) => points[index]!);
 }
 
-/** Creates the builder a layout fills with floors, obstacles and doors. */
+/** Creates the `NavBuilder` a map's builder fills with floors, obstacles and doors. */
 export function createNavBuilder(): NavBuilder {
   const floorRects = new Map<number, { y: number; rects: Rect[] }>();
   const marks = new Map<number, Mark[]>();
@@ -677,7 +677,7 @@ export function createNavBuilder(): NavBuilder {
       addMark(floor, { solid: true, rect: { minX, minZ, maxX, maxZ } });
     },
     blockObject(floor, object: Object3D, padding = 0) {
-      // A layout often calls this before its root is in the scene, so the
+      // A map's builder often calls this before its root is in the scene, so the
       // world matrices are brought up to date here.
       object.updateWorldMatrix(true, true);
       const box = new Box3().setFromObject(object);
@@ -805,7 +805,7 @@ function buildGraph(
 
   return {
     findPath(from, to) {
-      // A layout that declares no floors still gets straight paths, so its
+      // An office that declares no floors still gets straight paths, so its
       // colleagues move at all.
       if (storeys.size === 0) {
         return [

@@ -106,7 +106,7 @@ interface ThreadSlot {
 
 /**
  * Lays out where a board `width` wide pins its cards, in the order they are
- * pinned, and which cards a thread joins. The layout is the same every time
+ * pinned, and which cards a thread joins. The cards land in the same places every time
  * for the same width.
  */
 const planBoard = memoizeByKey((width: number) => {

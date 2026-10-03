@@ -250,7 +250,7 @@ interface TrackedWall {
   readonly centre: Vector3;
   /** The wall's outward normal in world space, flattened onto the floor. */
   readonly normal: Vector3;
-  /** The two ends of the wall's middle line on the floor plan, as world x and z. */
+  /** The two ends of the wall's middle line seen from above, as world x and z. */
   readonly ends: readonly [number, number, number, number];
   /** The cut the wall moves toward: 0 standing, 1 down to the dado rail. */
   goal: number;
@@ -318,7 +318,7 @@ function isOnSightRay(object: Object3D): boolean {
  * Returns true when a wall the camera's rig tracks hides `point` from
  * `camera`: the straight line between them passes through the wall. The line
  * passes through a doorway, over a wall lowered to the dado rail, and through
- * a wall that is not shown, such as one on a storey the layout hides.
+ * a wall that is not shown, such as one on a storey the built office hides.
  * Returns false for a camera without a rig.
  *
  * The test uses each wall's world matrices as of the last drawn frame, so
@@ -334,7 +334,7 @@ export function isHiddenByWall(camera: PerspectiveCamera, point: Vector3): boole
   for (const wall of walls) {
     // A wall lowered all the way stands below every head.
     if (wall.shown > 0.99) continue;
-    // A cheap test on the floor plan first: does the line cross the wall's middle line?
+    // A cheap test first, seen from above: does the line cross the wall's middle line?
     const [ax, az, bx, bz] = wall.ends;
     const sx = bx - ax;
     const sz = bz - az;
@@ -605,7 +605,7 @@ export function createCameraRig(
 
   /**
    * Turns the goal azimuth by `degrees`, and tilts the goal elevation within
-   * its limits. A layout's view may sit outside the limits (the tower's
+   * its limits. A built office's view may sit outside the limits (the tower's
    * overview looks up from a low angle); a tilt from there never moves
    * further out, and never jumps.
    */

@@ -18,7 +18,7 @@ import {
   type CameraView,
   type ColleagueRig,
   type Lamp,
-  type OfficeLayout,
+  type BuiltOffice,
   type Sim,
 } from "./engine/contracts";
 import { createNavBuilder } from "./engine/nav";
@@ -37,7 +37,7 @@ import {
   subscribeOffice,
   type OfficeState,
 } from "./office-store";
-import { buildBureau } from "./variants/bureau";
+import { buildBureau } from "./maps/bureau";
 import { computeDeskKey } from "./world/build-world";
 import type { Colleague, World } from "./world/types";
 
@@ -48,12 +48,12 @@ import type { Colleague, World } from "./world/types";
  * with other desks needs another build.
  */
 interface BuiltScene {
-  readonly layout: OfficeLayout;
+  readonly office: BuiltOffice;
   readonly rigs: ReadonlyMap<string, ColleagueRig>;
   readonly sim: Sim;
   readonly overlay: Overlay;
   readonly picker: Picker;
-  /** The room lights under the layout's root, which the time of day switches. */
+  /** The room lights under the built office's root, which the time of day switches. */
   readonly lamps: ReadonlyArray<Lamp>;
 }
 
@@ -118,14 +118,14 @@ function countWaiting(world: World): number {
  * Builds the office for `initialWorld` into `container`, and returns its
  * handle. `viewport` is the element whose box is the part of the office the
  * user sees; the name tags and room labels stay inside it. `onBuild` is
- * called with the office's layout after every build: once here, and again
+ * called with the built office after every build: once here, and again
  * whenever a new world rebuilds the office.
  */
 export function mountOfficeScene(
   container: HTMLElement,
   viewport: HTMLElement,
   initialWorld: World,
-  onBuild: (layout: OfficeLayout) => void,
+  onBuild: (office: BuiltOffice) => void,
 ): OfficeScene {
   const stage = new Stage(container);
   const camera = createCameraRig(stage.camera, stage.renderer.domElement, () =>
@@ -143,8 +143,8 @@ export function mountOfficeScene(
   const decideLiveliness = (): 0 | 1 | 2 => (still ? 0 : OFFICE_SETTINGS.liveliness);
 
   const build = (): BuiltScene => {
-    const layout = buildBureau({ world, nav: createNavBuilder() });
-    stage.scene.add(layout.root);
+    const office = buildBureau({ world, nav: createNavBuilder() });
+    stage.scene.add(office.root);
     const rigs = new Map<string, ColleagueRig>();
     for (const colleague of world.colleagues) {
       const rig = buildColleagueRig(colleague);
@@ -152,7 +152,7 @@ export function mountOfficeScene(
       rigs.set(colleague.id, rig);
       stage.scene.add(rig.object);
     }
-    const sim = buildSim({ world, layout, rigs, stage });
+    const sim = buildSim({ world, office, rigs, stage });
     sim.setLiveliness(decideLiveliness());
     // The panels and the sidebar read the colleagues' states from the store,
     // so they follow whichever office is built now.
@@ -163,18 +163,18 @@ export function mountOfficeScene(
       viewport,
       stage.camera,
       rigs,
-      layout.rooms,
-      layout.homes,
+      office.rooms,
+      office.homes,
     );
     overlay.setMode(OFFICE_SETTINGS.tags);
-    stage.setShadowBounds(layout.bounds);
-    stage.setBuilding(layout.root);
-    camera.setBounds(layout.bounds);
-    camera.trackWalls(layout.root);
-    const lamps = findLamps(layout.root);
-    onBuild(layout);
+    stage.setShadowBounds(office.bounds);
+    stage.setBuilding(office.root);
+    camera.setBounds(office.bounds);
+    camera.trackWalls(office.root);
+    const lamps = findLamps(office.root);
+    onBuild(office);
     return {
-      layout,
+      office,
       rigs,
       sim,
       overlay,
@@ -189,16 +189,16 @@ export function mountOfficeScene(
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 
-  const tearDownBuiltScene = ({ layout, rigs, sim, overlay }: BuiltScene): void => {
+  const tearDownBuiltScene = ({ office, rigs, sim, overlay }: BuiltScene): void => {
     sim.dispose();
     overlay.dispose();
     for (const rig of rigs.values()) {
       stage.scene.remove(rig.object);
       rig.dispose();
     }
-    stage.scene.remove(layout.root);
-    disposeGeometry(layout.root);
-    layout.dispose();
+    stage.scene.remove(office.root);
+    disposeGeometry(office.root);
+    office.dispose();
   };
 
   const buildColleagueView = (id: string): CameraView | null => {
@@ -217,8 +217,8 @@ export function mountOfficeScene(
       const view = buildColleagueView(state.selectedId);
       if (view !== null) return view;
     }
-    const room = built.layout.rooms.find((candidate) => candidate.id === state.roomId);
-    return room?.view ?? built.layout.overview;
+    const room = built.office.rooms.find((candidate) => candidate.id === state.roomId);
+    return room?.view ?? built.office.overview;
   };
 
   const applySelection = (previous: OfficeState | null): void => {
@@ -300,7 +300,7 @@ export function mountOfficeScene(
     switch (command.kind) {
       case "overview":
         setOffice({ selectedId: null, roomId: null, drawer: false });
-        camera.flyTo(built.layout.overview);
+        camera.flyTo(built.office.overview);
         break;
       case "turn-camera":
         camera.turn(command.degrees);
@@ -366,7 +366,7 @@ export function mountOfficeScene(
         // The sign redraws its canvas on every call, so only a new count is sent.
         const waiting = countWaiting(next);
         if (waiting !== countWaiting(previous)) {
-          built.layout.setWaitingCount?.(waiting);
+          built.office.setWaitingCount?.(waiting);
           changed = true;
         }
         if (changed) stage.requestRender();

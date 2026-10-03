@@ -1,6 +1,6 @@
 /**
  * The office's furniture and props, in the Crew Bureau's Art
- * Deco. The layouts import every builder from here; the pieces live in the
+ * Deco. The code in `maps/` imports every builder from here; the pieces live in the
  * files beside this one, by kind.
  *
  * Every builder returns an object whose origin sits on the floor, in the

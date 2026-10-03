@@ -158,7 +158,7 @@ function assignPaintSlot(material: MeshStandardMaterial): number {
  * attribute, the column of `paintTable` it is painted from, so a mesh can
  * hold parts in many palette colours and finishes and still be drawn in one
  * draw call. The shader changes are methods rather than properties so that
- * `clone()` keeps them, for the copies a layout fades.
+ * `clone()` keeps them, for the copies the office fades.
  */
 class PaintedPartsMaterial extends MeshStandardMaterial {
   override onBeforeCompile(shader: WebGLProgramParametersWithUniforms): void {

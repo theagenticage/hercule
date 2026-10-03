@@ -10,7 +10,7 @@
  * their words.
  */
 import { useSyncExternalStore, type JSX } from "react";
-import type { OfficeLayout } from "../engine/contracts";
+import type { BuiltOffice } from "../engine/contracts";
 import {
   readColleagueStates,
   readOffice,
@@ -67,11 +67,11 @@ function PoseCounts({ world }: { readonly world: World }): JSX.Element {
 /** Renders the top bar over the office of `world`. */
 export function TopBar({
   world,
-  layout,
+  office,
 }: {
   readonly world: World;
   /** The office as built now, or null before the scene mounts. */
-  readonly layout: OfficeLayout | null;
+  readonly office: BuiltOffice | null;
 }): JSX.Element {
   const state = useSyncExternalStore(subscribeOffice, readOffice);
   const inOverview = state.selectedId === null && state.roomId === null;
@@ -88,7 +88,7 @@ export function TopBar({
           <OfficeIcon size={14} />
           Overview
         </button>
-        <RoomDirectory layout={layout} />
+        <RoomDirectory office={office} />
       </nav>
       <span className="spacer" />
       <PoseCounts world={world} />
