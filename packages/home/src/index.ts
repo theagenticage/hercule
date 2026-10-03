@@ -24,6 +24,8 @@ export {
   DEFAULT_HOME_NAME,
   buildHomePaths,
   resolveHomePath,
+  resolveHomePathToActOn,
+  isInSession,
   locateLogsDir,
   locateProcessLogFile,
   locateRunnerDir,

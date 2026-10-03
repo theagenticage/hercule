@@ -18,16 +18,36 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { resolveHomePath } from "@hercule/home";
 import { ServiceError, Supervisor } from "@hercule/service";
 import { run as runArgv } from "./index";
 import { join, runJoinCommand, type JoinCommandOptions } from "./join";
 
+/**
+ * The directory `os.homedir()` returns to every module this file loads: a
+ * temporary directory per test. A command that names no Home falls back to
+ * `<homedir>/.hercule`, which on a developer's machine is their live Home.
+ * Bun reads `HOME` once, at startup, so setting `process.env.HOME` here would
+ * not move it.
+ */
+const fakeOs = vi.hoisted(() => ({ homedir: "" }));
+
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  homedir: () => fakeOs.homedir,
+}));
+
 const homes: Array<string> = [];
 
+beforeEach(() => {
+  fakeOs.homedir = createTemporaryHome();
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
@@ -236,6 +256,37 @@ describe("hercule runner join --reserved", () => {
       expect(error).toHaveBeenCalledWith(
         "hercule: A service runs the compiled hercule binary, and this Hercule runs from a source checkout. Build the binary with `pnpm build:binary` and run `./hercule service install`. To join without installing the service, add --no-service.",
       );
+    } finally {
+      error.mockRestore();
+      fetched.mockRestore();
+      process.exitCode = 0;
+    }
+  });
+});
+
+describe("hercule runner join inside a session", () => {
+  it("refuses when no Home is named, and neither joins nor writes anything", async () => {
+    // Checked first: if the fake home directory had not reached the home
+    // functions, a broken refusal would write into the developer's live Home.
+    const defaultHome = pathJoin(fakeOs.homedir, ".hercule");
+    expect(resolveHomePath(undefined, {})).toBe(defaultHome);
+    vi.stubEnv("HERCULE_SESSION", "1");
+    vi.stubEnv("HERCULE_HOME", undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetched = vi.spyOn(globalThis, "fetch");
+    try {
+      process.exitCode = 0;
+      // `--no-service`, so that even a join let through by mistake could not
+      // reach this machine's service manager.
+      await runArgv(["join", "http://127.0.0.1:4937", "--token", "a-join-token", "--no-service"]);
+      expect(process.exitCode).toBe(2);
+      expect(error.mock.calls).toEqual([
+        [
+          `hercule: --home: this command runs inside a Hercule session, where the default Home (${defaultHome}) may be the user's live one. Name a scratch Home with --home <dir> or HERCULE_HOME.`,
+        ],
+      ]);
+      expect(fetched).not.toHaveBeenCalled();
+      expect(existsSync(defaultHome)).toBe(false);
     } finally {
       error.mockRestore();
       fetched.mockRestore();

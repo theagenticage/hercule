@@ -16,7 +16,7 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
-import { RUNNER_WORKSPACE_VARIABLE } from "../credentials";
+import { RUNNER_SOCKET_VARIABLE, RUNNER_WORKSPACE_VARIABLE } from "../credentials";
 import { tearDown } from "./dispose";
 import {
   readCurrentBranch,
@@ -174,10 +174,16 @@ const runSetup = async (
 ): Promise<string | undefined> => {
   const child = Bun.spawn(["/bin/sh", "-c", command], {
     cwd: dir,
-    // The scrubbed environment, without the workspace id that provisioning adds
-    // for git: a setup command is repository code, so it gets no credential of
-    // its own.
-    env: { ...substrate.gitEnv },
+    // The scrubbed environment, without the credential socket and without the
+    // workspace id that provisioning adds for git. A setup command is
+    // repository code, and it must not get a credential through git. With no
+    // socket in its environment, the credential helper git is configured with
+    // answers nothing. That helper is git's only one, because the environment
+    // clears the machine's helpers, and git may not prompt, so a fetch from a
+    // private remote fails instead of getting a credential.
+    env: Object.fromEntries(
+      Object.entries(substrate.gitEnv).filter(([name]) => name !== RUNNER_SOCKET_VARIABLE),
+    ),
     // Its own process group, so the deadline can kill everything it started.
     detached: true,
     stdout: "pipe",

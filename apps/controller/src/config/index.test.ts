@@ -1,14 +1,30 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Effect, Result } from "effect";
+import { resolveHomePath } from "@hercule/home";
 import { BootstrapConfig, layer, HerculeHome } from "./index";
+
+/**
+ * The directory `os.homedir()` returns to every module this file loads: each
+ * test's temporary directory. A case that names no Home makes the layer fall
+ * back to `<homedir>/.hercule`, which on a developer's machine is their live
+ * Home. Bun reads `HOME` once, at startup, so setting `process.env.HOME` here
+ * would not move it.
+ */
+const fakeOs = vi.hoisted(() => ({ homedir: "" }));
+
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  homedir: () => fakeOs.homedir,
+}));
 
 let home: string;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "hercule-home-"));
+  fakeOs.homedir = home;
 });
 
 afterEach(() => {
@@ -205,6 +221,20 @@ describe("the config layer", () => {
     expect(Result.isFailure(result) && result.failure._tag).toBe("InvalidOptionError");
     expect(Result.isFailure(result) && result.failure.message).toContain("usage: hercule serve");
     expect(existsSync(join(home, "config.toml"))).toBe(false);
+  });
+
+  it("refuses inside a session when no Home is named, and creates nothing", async () => {
+    // Checked first: if the fake home directory had not reached the home
+    // functions, a broken refusal would write into the developer's live Home.
+    expect(resolveHomePath(undefined, {})).toBe(join(home, ".hercule"));
+
+    const result = await Effect.runPromise(
+      HerculeHome.pipe(Effect.provide(layer([], { HERCULE_SESSION: "1" })), Effect.result),
+    );
+
+    expect(Result.isFailure(result) && result.failure._tag).toBe("InvalidOptionError");
+    expect(Result.isFailure(result) && result.failure.message).toContain(join(home, ".hercule"));
+    expect(existsSync(join(home, ".hercule"))).toBe(false);
   });
 
   it("reports a malformed global option", async () => {

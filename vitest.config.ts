@@ -84,6 +84,7 @@ const binaryTests = [
   "e2e/workflows.test.ts",
   "e2e/binary-size.test.ts",
   "e2e/logs.test.ts",
+  "e2e/home-in-session.test.ts",
 ];
 
 export default defineConfig({

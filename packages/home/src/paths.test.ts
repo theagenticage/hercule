@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildHomePaths, resolveHomePath } from "./paths";
+import { Result } from "effect";
+import { buildHomePaths, isInSession, resolveHomePath, resolveHomePathToActOn } from "./paths";
 
 describe("resolveHomePath", () => {
   it("prefers --home, then HERCULE_HOME, then ~/.hercule", () => {
@@ -16,6 +17,54 @@ describe("resolveHomePath", () => {
 
   it("ignores an empty HERCULE_HOME", () => {
     expect(resolveHomePath(undefined, { HERCULE_HOME: "" })).toBe(join(homedir(), ".hercule"));
+  });
+
+  it("takes an empty --home as the default Home, without falling back to HERCULE_HOME", () => {
+    expect(resolveHomePath("", { HERCULE_HOME: "/tmp/env" })).toBe(join(homedir(), ".hercule"));
+  });
+});
+
+describe("resolveHomePathToActOn", () => {
+  const SESSION = { HERCULE_SESSION: "1" };
+
+  it("refuses the default Home inside a session, and names it in the message", () => {
+    const resolved = resolveHomePathToActOn(undefined, SESSION);
+
+    expect(Result.isFailure(resolved) && resolved.failure.option).toBe("--home");
+    // The message names the path the command would have used, so the agent
+    // sees that it is the user's live Home.
+    expect(Result.isFailure(resolved) && resolved.failure.message).toContain(
+      join(homedir(), ".hercule"),
+    );
+  });
+
+  it("refuses an empty HERCULE_HOME inside a session, because it names no Home", () => {
+    const resolved = resolveHomePathToActOn(undefined, { ...SESSION, HERCULE_HOME: "" });
+
+    expect(Result.isFailure(resolved) && resolved.failure.option).toBe("--home");
+  });
+
+  it("accepts a Home named by --home or by HERCULE_HOME inside a session", () => {
+    expect(resolveHomePathToActOn("/tmp/flag", SESSION)).toEqual(Result.succeed("/tmp/flag"));
+    expect(resolveHomePathToActOn(undefined, { ...SESSION, HERCULE_HOME: "/tmp/env" })).toEqual(
+      Result.succeed("/tmp/env"),
+    );
+  });
+
+  it("returns the default Home outside a session", () => {
+    expect(resolveHomePathToActOn(undefined, {})).toEqual(
+      Result.succeed(join(homedir(), ".hercule")),
+    );
+  });
+});
+
+describe("isInSession", () => {
+  it("is true only when HERCULE_SESSION is exactly 1", () => {
+    expect(isInSession({ HERCULE_SESSION: "1" })).toBe(true);
+    expect(isInSession({ HERCULE_SESSION: "0" })).toBe(false);
+    expect(isInSession({ HERCULE_SESSION: "" })).toBe(false);
+    expect(isInSession({ HERCULE_SESSION: "true" })).toBe(false);
+    expect(isInSession({})).toBe(false);
   });
 });
 

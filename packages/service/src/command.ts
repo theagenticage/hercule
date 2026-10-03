@@ -2,21 +2,23 @@
  * The `hercule service` command line: its help, its verbs and its exit codes.
  * The dispatcher hands it every invocation that starts with `service`.
  */
+import { resolve } from "node:path";
 import { Effect, Layer, Result } from "effect";
 import {
   buildControllerOrigin,
+  isInSession,
   loadBootstrapConfig,
   locateCompiledBinary,
   locateLogsDir,
   parseGlobalOptions,
-  resolveHomePath,
+  resolveHomePathToActOn,
   type ConfigOverrides,
   type Env,
 } from "@hercule/home";
 import { installService, refuseConfigFlags } from "./install";
 import { makeSupervisorLayer } from "./platform";
 import { chooseServiceRole } from "./role";
-import { Supervisor, type ServiceError, type ServiceStatus } from "./supervisor";
+import { ServiceError, Supervisor, type ServiceStatus } from "./supervisor";
 
 /**
  * The exit codes of `hercule service`. A failure here happened on this
@@ -122,12 +124,52 @@ export const describeStatus = (status: ServiceStatus): string => {
     : `The Hercule service runs ${runs}, as pid ${status.pid}.`;
 };
 
+/**
+ * Succeeds only when an installed unit file names `home` as the Hercule Home
+ * its service runs. Fails in every other case: the unit runs another Home,
+ * its unit file names no Home, or no unit file is installed at all.
+ *
+ * There is one unit per machine user, so `start`, `stop`, `restart` and
+ * `uninstall` act on it whatever `--home` says. Inside a session that unit is
+ * usually the user's live Hercule, which a session must not stop. A missing
+ * unit file does not mean nothing runs: launchd keeps a job it loaded after
+ * the file is deleted, and restarts it when it exits, so `uninstall` would
+ * still unload it. Both paths are resolved before they are compared, because
+ * a plist written by hand may spell the same folder with a trailing slash.
+ */
+const requireUnitOfNamedHome = (
+  status: ServiceStatus,
+  home: string,
+  verb: ServiceVerb,
+): Effect.Effect<void, ServiceError> => {
+  if (status.installed && status.home !== null && resolve(status.home) === resolve(home)) {
+    return Effect.void;
+  }
+  const found = !status.installed
+    ? status.running
+      ? `No Hercule unit file is installed on this machine, but a Hercule service runs as pid ${String(status.pid)}, for a Home that cannot be read.`
+      : "No Hercule unit file is installed on this machine."
+    : status.home === null
+      ? `The Hercule service on this machine runs a Hercule Home its unit file does not name, not ${home}.`
+      : `The Hercule service on this machine runs the Hercule Home ${status.home}, not ${home}.`;
+  return Effect.fail(
+    new ServiceError({
+      message: `${found} Inside a session, \`hercule service ${verb}\` may only act on a service whose unit file names the Home it was given, because any other may be the user's live Hercule. Run it outside the session.`,
+    }),
+  );
+};
+
 /** One `hercule service` command line, and where its output goes. */
 export interface ServiceCommandRequest {
   /** The arguments after `service`, with the global options removed. */
   readonly args: ReadonlyArray<string>;
-  /** The absolute Hercule Home, from `--home`, else `HERCULE_HOME`, else `~/.hercule`. */
-  readonly home: string;
+  /**
+   * The `--home` option, when given. The command resolves the Home from it,
+   * `HERCULE_HOME` and `~/.hercule` only after it has checked its arguments,
+   * so help and usage errors still work inside a session, where an unnamed
+   * Home is refused.
+   */
+  readonly homeOption: string | undefined;
   readonly overrides: ConfigOverrides;
   readonly env: Env;
   /** Writes one line to stdout. */
@@ -152,6 +194,10 @@ export interface ServiceCommandDependencies {
  *
  * Every verb refuses a `-c` flag, because no verb starts Hercule in this
  * process: the unit runs it, and reads only `config.toml`.
+ *
+ * Inside a session, every verb needs a Home named by `--home` or
+ * `HERCULE_HOME` (exit 2 without one), and `start`, `stop`, `restart` and
+ * `uninstall` refuse a unit that runs another Home (exit 1).
  */
 export const runServiceCommand = async (
   request: ServiceCommandRequest,
@@ -179,20 +225,32 @@ export const runServiceCommand = async (
   }
   const unknown = flags.find((flag) => flag !== "--json");
   if (unknown !== undefined) return reportMisuse(`service ${verb} takes no \`${unknown}\``);
+  const resolved = resolveHomePathToActOn(request.homeOption, request.env);
+  if (Result.isFailure(resolved)) {
+    // No help line: the help cannot name the missing Home.
+    request.err(`hercule: ${resolved.failure.option}: ${resolved.failure.message}`);
+    return EXIT.usage;
+  }
+  const home = resolved.success;
   const json = flags.includes("--json");
   // With --json, stdout carries only the status, so the lines for a person go to stderr.
   const printForPerson = json ? request.err : request.out;
 
   const runVerb = Effect.gen(function* () {
-    yield* refuseConfigFlags(request.home, request.overrides);
+    yield* refuseConfigFlags(home, request.overrides);
     const supervisor = yield* Supervisor;
+    if (verb !== "install" && verb !== "status" && isInSession(request.env)) {
+      // `install` needs no check here: the Supervisor's `prepare` refuses a
+      // unit that runs another Home.
+      yield* requireUnitOfNamedHome(yield* supervisor.readStatus, home, verb);
+    }
     switch (verb) {
       case "install": {
-        const chosen = yield* chooseServiceRole(request.home);
+        const chosen = yield* chooseServiceRole(home);
         printForPerson(`Installing the unit for \`hercule ${chosen.role}\`: ${chosen.reason}.`);
         return yield* installService({
           role: chosen.role,
-          home: request.home,
+          home,
           overrides: request.overrides,
           env: request.env,
           program: dependencies.program,
@@ -202,8 +260,14 @@ export const runServiceCommand = async (
         const before = yield* supervisor.readStatus;
         const after = yield* supervisor.uninstall;
         if (!before.installed) {
+          // A service can outlive its deleted unit file: launchd unloads such
+          // a job on `uninstall`, systemd leaves it running. Say which happened.
           printForPerson(
-            "No Hercule service is installed on this machine, so there is nothing to uninstall.",
+            after.running
+              ? `No Hercule unit file is installed, but a Hercule service still runs as pid ${String(after.pid)}.`
+              : before.running
+                ? `No Hercule unit file was installed, but a Hercule service was running as pid ${String(before.pid)}. It is stopped now.`
+                : "No Hercule service is installed on this machine.",
           );
         } else {
           printForPerson(`Uninstalled the Hercule service and deleted ${before.unitFile}.`);
@@ -233,7 +297,7 @@ export const runServiceCommand = async (
   }
   const status = outcome.success;
   if (json) {
-    const reportedHome = status.installed && status.home !== null ? status.home : request.home;
+    const reportedHome = status.installed && status.home !== null ? status.home : home;
     const report: ServiceReport = {
       ...status,
       controllerUrl: await Effect.runPromise(buildControllerUrl(reportedHome)),
@@ -259,7 +323,7 @@ export async function run(argv: readonly string[]): Promise<void> {
   }
   process.exitCode = await runServiceCommand({
     args: options.success.rest,
-    home: resolveHomePath(options.success.home, process.env),
+    homeOption: options.success.home,
     overrides: options.success.overrides,
     env: process.env,
     out: (line) => console.log(line),

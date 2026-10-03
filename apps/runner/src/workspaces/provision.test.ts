@@ -8,7 +8,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { makeWorkspaces } from "./index";
 import {
   addBranch,
@@ -308,33 +308,46 @@ describe("provisioning from a shared cache", () => {
 });
 
 describe("the setup command", () => {
-  it("runs in the checkout, with the environment the runner's git uses", async () => {
+  it("runs in the checkout, with the runner's git environment minus the credential socket and the runner's own settings", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
+    // The runner's own Home. A `hercule` command in the setup command would act on it.
+    vi.stubEnv("HERCULE_HOME", "/tmp/not-the-live-home");
+    try {
+      expect(process.env["HERCULE_HOME"]).toBe("/tmp/not-the-live-home");
+      const report = await makeWorkspaces({
+        storageDir,
+        gitEnv: { HERCULE_RUNNER_SOCKET: "/tmp/hercule-test.sock" },
+      }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: remote.url,
+              branch: "hercule/run-5e5e5e5e",
+              setupCommand: "env > setup-env.txt",
+            }),
+          ],
+        }),
+      );
 
-    const report = await makeWorkspaces({
-      storageDir,
-      gitEnv: { HERCULE_RUNNER_SOCKET: "/tmp/hercule-test.sock" },
-    }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: remote.url,
-            branch: "hercule/run-5e5e5e5e",
-            setupCommand: 'printf "%s\\n" "$HERCULE_RUNNER_SOCKET" > setup-ran.txt',
-          }),
-        ],
-      }),
-    );
-
-    expect(report.status).toBe("ready");
-    const ran = join(storageDir, "workspaces", workspaceId, "setup-ran.txt");
-    // In the checkout, because a setup command installs dependencies there.
-    expect(readFileSync(ran, "utf8")).toBe("/tmp/hercule-test.sock\n");
+      expect(report.status).toBe("ready");
+      // In the checkout, because a setup command installs dependencies there.
+      const env = readFileSync(
+        join(storageDir, "workspaces", workspaceId, "setup-env.txt"),
+        "utf8",
+      );
+      // The substrate environment reached the setup command, not an empty one.
+      expect(env).toMatch(/^GIT_TERMINAL_PROMPT=0$/m);
+      // Without the socket, the credential helper git is configured with answers nothing.
+      expect(env).not.toMatch(/^HERCULE_RUNNER_SOCKET=/m);
+      expect(env).not.toMatch(/^HERCULE_HOME=/m);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("fails the workspace with the last 20 lines of output, and leaves the directory in place", async () => {
