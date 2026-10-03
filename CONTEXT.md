@@ -40,8 +40,12 @@ _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in 
 A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
+**Subagent**:
+An agent a session's harness delegated work to while the session runs. It works inside that session's process and settings, has turns and a transcript of its own within the session's, and may start subagents of its own. It is not a Session: it is never resumed or forked on its own, and it does not outlive its session's process.
+_Avoid_: task (Task is a unit of human intent, not Claude Code's word for a subagent), child session, sub-session, collab agent, child agent
+
 **User Material**:
-The user's own knowledge and configuration from a local harness installation - skills, subagents, instructions, commands, settings. Linked live into Threads on runners that have it; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
+The user's own knowledge and configuration from a local harness installation - skills, subagent definitions, instructions, commands, settings. Linked live into Threads on runners that have it; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
 _Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles
 
 **Run**:
@@ -73,7 +77,7 @@ The port through which the runs domain hands a run's execution to be carried out
 _Avoid_: the run's scheduler (the Scheduler is the core component that fires `cron.tick` and scheduled wakes)
 
 **Turn**:
-One user-visible episode of a session: from a user input until the agent goes idle. Contains any number of model calls and tool executions; ends by stopping (completed, failed, interrupted), never by replying once.
+One user-visible episode of a session's own agent or of one of its subagents: from an input (the user's, or for a subagent its parent agent's) until that agent goes idle. Contains any number of model calls and tool executions; ends by stopping (completed, failed, interrupted), never by replying once. A session's status follows its own agent's turns only.
 _Avoid_: exchange, round, iteration
 
 **Request**:
