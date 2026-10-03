@@ -9,7 +9,7 @@ This document covers:
 - the Electron security baseline and the IPC contract
 - the native behaviour the app must have
 - the design system
-- the first milestone's screens
+- the first milestone's screens, the Office among them
 - the performance budgets and rules
 - the slices and the tests
 
@@ -679,7 +679,7 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
 
 **The pointer,** a Mac trackpad first and a mouse second: two-finger scroll pans; a pinch zooms toward the pointer, as a mouse wheel does; a left drag grabs the floor; a right or ⌥ drag orbits; a double click on the floor glides there. Walls between the camera and the room in view drop to the dado rail, so the room can always be seen.
 
-**Fixed settings.** v1 has no controls. The theme follows the app's theme, and the light follows the theme: day in a light theme, evening in a dark one. Name tags are the prototype's Smart setting, its characters are Bean, and its quality is Medium, with no ambient occlusion. Its liveliness is Calm, and Still when the Office stands still ([Performance](#performance)).
+**Fixed settings.** v1 has no controls. The theme follows the app's theme, and the light follows the theme: day in a light theme, evening in a dark one. Name tags are the prototype's Smart setting, and its characters are Bean. Its quality is sharp on a Retina display, with the sun's shadows drawn once and redrawn only when the building changes, and no ambient occlusion, which would double the cost of every frame. Its liveliness is Calm, and Still when the Office stands still ([Performance](#performance)).
 
 **Printer rage** is the Office's one activity. At random, and at most once every 5 minutes for the whole Office, a working colleague walks to the printer, kicks it and walks back. A colleague that waits on the user never goes. The printer is furniture in the Office Map that offers a spot and an animation, the pattern later activities follow. It never happens while the Office stands still. A trigger on a thread's failed tool calls is left to the Office Map system, because it could fire too often.
 
@@ -770,7 +770,7 @@ These are starting budgets. The first performance pass measures the real thread 
 
 | Budget | Limit |
 |---|---|
-| Frames | The colleagues' ambient life draws at most 30 frames a second, never 60 or 120. While the camera moves, and while the user drags or zooms, the Office draws at the display's rate |
+| Frames | The colleagues' ambient life draws at most 30 frames a second, never 60 or 120. While the camera moves, and while the user drags or zooms, the Office draws at most 60, so a glide stays smooth |
 | Window hidden, minimized or covered | No frames, and no wakeups from the Office |
 | Standing still: on battery, or with Reduce motion | No frames while nothing happens, so the idle row above applies. A thread whose pose changes walks where its new pose takes it, and frames stop once it arrives |
 | CPU, window visible, on mains power | Averaged over 30 seconds, with the camera at rest: the renderer at most 20% of one core, the GPU process at most 35% of one core |
@@ -1195,7 +1195,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
    - the route, the sidebar's top row and Go › Office
    - `decideOfficeSeating` in `@hercule/client-core`, with its tests, and the Bureau's `OfficeMap` value
    - the card, answering from it, and the drawer
-   - the performance work: the 30-frame cap, standing still on battery and with Reduce motion, Medium quality, and the static furniture merged by material
+   - the performance work: the 30-frame cap, standing still on battery and with Reduce motion, no ambient occlusion, shadows drawn once, and the static furniture merged by material
    - the bug fixes: colleagues walking through walls, legs inside chairs and sofas, poor paths, and hats painted on
    - room names and plaques in the UI face
    - the first measurement, recorded in [Measured](#measured)
