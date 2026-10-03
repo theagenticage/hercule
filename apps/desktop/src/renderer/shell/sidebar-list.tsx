@@ -69,8 +69,9 @@ const findItemKey = (element: Element): string | null =>
   element.closest("[data-key]")?.getAttribute("data-key") ?? null;
 
 /**
- * Returns the element that draws `item`. While `officeOpen` is true, a
- * thread's row opens the thread in the Office's drawer.
+ * Returns the element that draws `item`. While `officeOpen` is true, the row
+ * of a thread with a colleague in the Office opens the thread in the
+ * Office's drawer.
  */
 const renderItem = (
   item: SidebarItem,
@@ -158,9 +159,10 @@ const renderItem = (
 /**
  * Renders the thread list, or "No threads yet" when `items` is empty.
  *
- * - While `officeOpen` is true, a thread's row opens the thread in the
- *   Office's drawer instead of on its own screen. Opening or leaving the
- *   Office draws every mounted row again, once.
+ * - While `officeOpen` is true, the row of a thread with a colleague in the
+ *   Office opens the thread in the Office's drawer instead of on its own
+ *   screen. Opening or leaving the Office draws every mounted row again,
+ *   once.
  * - `onExpand` is called with a section's key when its "more" row is
  *   pressed. It must keep its identity across renders, or every "more" row
  *   draws again on each render.

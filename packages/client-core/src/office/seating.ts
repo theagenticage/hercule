@@ -33,6 +33,16 @@ export interface OfficeSeating {
 /** The poses of the threads that are seated in the Office. */
 const SEATED_POSES: ReadonlySet<Pose> = new Set(["working", "waiting", "idle"]);
 
+/**
+ * Checks whether a thread in `pose` has a colleague in the Office: true for
+ * `working`, `waiting` and `idle`, false for every other pose.
+ *
+ * The sidebar and the Go menu ask this while the Office is open, to open a
+ * thread in the Office's drawer or on its own screen, so they always agree
+ * with `decideOfficeSeating` about who is in the Office.
+ */
+export const isSeatedPose = (pose: Pose): boolean => SEATED_POSES.has(pose);
+
 /** Compares two strings by their UTF-16 code units, the same way in every locale. */
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -82,7 +92,7 @@ export const decideOfficeSeating = ({
       session,
       pose: decideThreadPose(session, runnersById.get(session.runnerId)),
     }))
-    .filter((desk) => SEATED_POSES.has(desk.pose))
+    .filter((desk) => isSeatedPose(desk.pose))
     // Workspaces of equal rank, such as two main workspaces, are told apart
     // by id so that each keeps its desks together. Threads created in the
     // same instant are told apart by id so that the order never depends on

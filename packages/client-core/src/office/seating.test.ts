@@ -17,7 +17,8 @@
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest, Session } from "@hercule/contract";
-import { decideOfficeSeating } from "./seating";
+import { POSES } from "../threads/pose";
+import { decideOfficeSeating, isSeatedPose } from "./seating";
 import {
   MOSS,
   OPS_PROJECT,
@@ -159,5 +160,11 @@ describe("decideOfficeSeating", () => {
     ]);
 
     expect(rooms).toEqual([{ projectId: WEBSHOP_PROJECT.id, name: "webshop", desks: ["s-bun"] }]);
+  });
+});
+
+describe("isSeatedPose", () => {
+  it("seats the working, waiting and idle poses, and no other", () => {
+    expect(POSES.filter(isSeatedPose)).toEqual(["working", "waiting", "idle"]);
   });
 });

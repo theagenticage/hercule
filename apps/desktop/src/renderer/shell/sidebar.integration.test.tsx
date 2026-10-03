@@ -293,6 +293,26 @@ describe("the sidebar", () => {
     );
   });
 
+  it("opens a thread with no colleague in the Office on its own screen, even while the Office is open", async () => {
+    const { nav } = await startSidebar({ path: "/office" });
+
+    expect(
+      within(nav)
+        .getByRole("link", { name: "Rotate the backups key, can't be reached" })
+        .getAttribute("href"),
+    ).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
+    // A waiting thread always has a colleague, in its row of Waiting on you
+    // and in its project's.
+    expect(
+      within(nav)
+        .getAllByRole("link", { name: "Write the retry runbook, waiting on you" })
+        .map((link) => link.getAttribute("href")),
+    ).toEqual([
+      `/office?session=${FIXTURE_THREAD_IDS.runbook}`,
+      `/office?session=${FIXTURE_THREAD_IDS.runbook}`,
+    ]);
+  });
+
   it("opens a thread on its own screen again once the Office is closed", async () => {
     const { nav, router } = await startSidebar({ path: "/office" });
 

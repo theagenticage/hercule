@@ -15,12 +15,14 @@ import { projectsQuery, threadsQuery } from "../../app/queries";
 import {
   buildErrorBody,
   buildSidebarHandlers,
+  buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  THREAD_FIXTURES,
   type Call,
   type Handler,
   type LiveStub,
@@ -382,6 +384,32 @@ describe("Go > Office", () => {
     expect(await screen.findByText("The Office")).toBeTruthy();
     expect(router.state.location.href).toBe("/office");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens a thread chosen in the Go menu in the Office's drawer while the Office is open", async () => {
+    const { fake, router } = await startShell({
+      path: "/office",
+      handlers: buildThreadHandlers(THREAD_FIXTURES.finished),
+    });
+
+    fake.openThread(FIXTURE_THREAD_IDS.bunPin);
+
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ session: FIXTURE_THREAD_IDS.bunPin });
+    });
+    expect(router.state.location.pathname).toBe("/office");
+  });
+
+  it("opens a thread with no colleague in the Office on its own screen, even while the Office is open", async () => {
+    const { fake, router } = await startShell({ path: "/office" });
+
+    // "Rotate the backups key" has exited and cannot be resumed, so it is
+    // away and has no colleague.
+    fake.openThread(FIXTURE_THREAD_IDS.backupsKey);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
+    });
   });
 });
 

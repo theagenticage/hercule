@@ -18,7 +18,7 @@
  */
 import { memo, useId, type ComponentProps, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, joinLabelText, type Pose } from "@hercule/client-core";
+import { describePose, isSeatedPose, joinLabelText, type Pose } from "@hercule/client-core";
 import { buildLook, Face } from "../faces";
 import { PlusIcon } from "../icons/plus";
 import { Mark } from "../marks";
@@ -62,13 +62,16 @@ export const WaitingHeader = memo(function WaitingHeader({
 });
 
 /**
- * Renders a link to the thread of `sessionId`, which opens the thread on its
- * own screen, or in the Office's drawer while `officeOpen` is true. The other
- * props are the link's own. Either way the router marks the link as the
- * current page while its thread is open.
+ * Renders a link to the thread of `sessionId`, whose pose is `pose`. While
+ * `officeOpen` is true and the thread has a colleague in the Office, the link
+ * opens the thread in the Office's drawer; otherwise it opens the thread on
+ * its own screen, because an asleep or away thread has no colleague to
+ * select. The other props are the link's own. Either way the router marks the
+ * link as the current page while its thread is open.
  */
 function ThreadLink({
   sessionId,
+  pose,
   officeOpen,
   ...props
 }: Pick<
@@ -76,10 +79,11 @@ function ThreadLink({
   "className" | "style" | "aria-label" | "aria-describedby" | "children"
 > & {
   readonly sessionId: string;
+  readonly pose: Pose;
   readonly officeOpen: boolean;
   readonly "data-key": string;
 }): JSX.Element {
-  return officeOpen ? (
+  return officeOpen && isSeatedPose(pose) ? (
     <Link to="/office" search={{ session: sessionId }} activeProps={SELECTED} {...props} />
   ) : (
     <Link to="/threads/$sessionId" params={{ sessionId }} activeProps={SELECTED} {...props} />
@@ -91,7 +95,7 @@ function ThreadLink({
  * question it asks. The link is named "<title>, waiting on you" and described
  * by the question; the face is hidden, because the name already says the
  * state. It opens the thread in the Office's drawer while `officeOpen` is
- * true.
+ * true, because a waiting thread always has a colleague there.
  */
 export const WaitingRow = memo(function WaitingRow({
   itemKey,
@@ -110,6 +114,7 @@ export const WaitingRow = memo(function WaitingRow({
   return (
     <ThreadLink
       sessionId={sessionId}
+      pose="waiting"
       officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={itemKey}
@@ -226,8 +231,9 @@ export const WorkspaceLabel = memo(function WorkspaceLabel({
  * The link is named "<title>, <pose words>", such as "Fix checkout, working",
  * and described by the second line and, when the end is not a mark, the end
  * in words, such as "offline" or "20 minutes ago". A mark says the pose,
- * which the name already holds, so it is hidden. It opens the thread in the
- * Office's drawer while `officeOpen` is true.
+ * which the name already holds, so it is hidden. While `officeOpen` is true,
+ * it opens the thread in the Office's drawer if the thread has a colleague
+ * there, and on its own screen if it does not.
  */
 export const ThreadRow = memo(function ThreadRow({
   itemKey,
@@ -260,6 +266,7 @@ export const ThreadRow = memo(function ThreadRow({
   return (
     <ThreadLink
       sessionId={sessionId}
+      pose={pose}
       officeOpen={officeOpen}
       className="side-row side-item"
       data-key={itemKey}

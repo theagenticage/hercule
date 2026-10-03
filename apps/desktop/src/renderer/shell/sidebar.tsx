@@ -46,8 +46,10 @@ const SELECTED = { className: "is-on" } as const;
  * its links, which the router marks as the current page. The Office button
  * is marked the same way while the Office is open.
  *
- * While the Office is open, a thread's row opens the thread in the Office's
- * drawer instead of on its own screen, so the user stays in the Office.
+ * While the Office is open, the row of a thread with a colleague in the
+ * Office opens the thread in the Office's drawer instead of on its own
+ * screen, so the user stays in the Office. An asleep or away thread has no
+ * colleague, so its row still opens its own screen.
  *
  * The lists it reads are in the cache before the shell renders, because the
  * shell's loader reads them, so nothing here waits in practice. A live push
