@@ -220,19 +220,6 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     }
   };
 
-  /**
-   * Moves the camera to `view`: a glide, or a jump while the user asks to
-   * reduce motion. The camera's own moves, such as a turn by a key, still glide.
-   */
-  const moveCamera = (view: CameraView): void => {
-    if (prefersReducedMotion()) {
-      placeCamera(stage.camera, view);
-      stage.requestRender();
-    } else {
-      camera.flyTo(view);
-    }
-  };
-
   setAmbientMotion(decideLiveliness() > 0);
   built = build();
   switchLamps();
@@ -246,7 +233,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     azimuth: opening.azimuth - 24,
     elevation: Math.min(opening.elevation + 12, 70),
   });
-  moveCamera(opening);
+  camera.flyTo(opening);
   applySelection(null);
   // Signs drawn on canvases redraw once their typeface loads, after the first frames.
   void document.fonts.ready.then(() => stage.requestRender());
@@ -272,7 +259,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     applySelection(previous);
     if (previous.selectedId !== state.selectedId || previous.roomId !== state.roomId) {
       focusFloor();
-      moveCamera(decideView());
+      camera.flyTo(decideView());
     }
     stage.requestRender();
   });
@@ -303,7 +290,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     switch (command.kind) {
       case "overview":
         setOffice({ selectedId: null, roomId: null, drawer: false });
-        moveCamera(built.layout.overview);
+        camera.flyTo(built.layout.overview);
         break;
       case "focus-room":
         setOffice({ selectedId: null, roomId: command.roomId, drawer: false });

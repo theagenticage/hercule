@@ -19,9 +19,12 @@ interface BatteryManager extends EventTarget {
 /** The query that matches while the user asks the system to reduce motion. */
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
-/** Returns true while the user asks the system to reduce motion. */
+let reducedMotion: MediaQueryList | null = null;
+
+/** Returns true while the user asks the system to reduce motion. Cheap enough to ask every frame. */
 export function prefersReducedMotion(): boolean {
-  return matchMedia(REDUCED_MOTION).matches;
+  reducedMotion ??= matchMedia(REDUCED_MOTION);
+  return reducedMotion.matches;
 }
 
 /**

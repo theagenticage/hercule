@@ -14,6 +14,9 @@
  * - left-drag grabs the floor, right-drag or Option-drag orbits;
  * - double-click on the floor glides there;
  * - Q and E turn 45 degrees, + and - zoom, F finds the followed colleague again.
+ *
+ * While the user asks the system to reduce motion, the camera jumps wherever
+ * it would glide or fly.
  */
 import {
   Box3,
@@ -28,6 +31,7 @@ import {
 } from "three";
 import { CUTAWAY, type CameraView, type Cutaway } from "./contracts";
 import type { Frame } from "./stage";
+import { prefersReducedMotion } from "./stillness";
 import { readOffice } from "../office-store";
 
 export interface CameraRig {
@@ -776,6 +780,14 @@ export function createCameraRig(
   element.addEventListener("contextmenu", onContextMenu);
   window.addEventListener("keydown", onKeyDown);
 
+  /** Moves every spring to its goal at once. */
+  function settleSprings(): void {
+    for (const spring of springs) {
+      spring.value = spring.goal;
+      spring.velocity = 0;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Flights.
 
@@ -801,8 +813,9 @@ export function createCameraRig(
       Math.abs(turn) / 120 +
       Math.abs(view.elevation - from.elevation) / 60 +
       Math.abs(view.target.y - from.target.y) / longest;
-    if (effort < 0.002) {
-      // Already there: nothing to animate, and no frame to ask for.
+    const jump = prefersReducedMotion();
+    if (effort < 0.002 || jump) {
+      // Already there, or asked to jump: nothing to animate.
       flight = null;
       targetX.goal = view.target.x;
       targetY.goal = view.target.y;
@@ -810,6 +823,7 @@ export function createCameraRig(
       distance.goal = view.distance;
       azimuth.goal = azimuth.value + turn;
       elevation.goal = view.elevation;
+      if (jump) settleSprings();
       if (effort > 0) requestRender();
       return;
     }
@@ -935,6 +949,7 @@ export function createCameraRig(
         stepFlight(flight, frame.dt);
         moving = true;
       } else {
+        if (prefersReducedMotion()) settleSprings();
         if (followed !== null) {
           const point = followed();
           targetX.goal = point.x;
