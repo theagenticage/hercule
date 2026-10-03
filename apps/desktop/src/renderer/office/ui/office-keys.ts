@@ -5,15 +5,18 @@
  * - Escape steps back one level: the thread drawer, then the selected
  *   colleague and its card, then the room.
  * - Tab and Shift+Tab select the next and the previous colleague waiting on
- *   the user, the longest waiting first.
+ *   the user, the longest waiting first. They do so only while the focus is
+ *   on the 3D view or on nothing at all. In the top bar, the card, the drawer
+ *   and a menu, Tab moves the focus as usual, so every control stays in reach
+ *   of the keyboard.
  * - Enter opens the selected colleague's thread in the drawer.
  * - Q and E turn the camera 45 degrees, = and - zoom it, and F finds the
  *   followed colleague again. These keys are left alone in the thread
  *   drawer, which is the thread screen and has keys of its own.
  *
  * The Office reads only keys pressed while the focus is in the Office or on
- * nothing at all, so Tab still moves through the sidebar. Keys typed in a
- * field, such as the drawer's composer, are left alone, and so is a key
+ * nothing at all, so keys in the sidebar keep their own meaning. Keys typed
+ * in a field, such as the drawer's composer, are left alone, and so is a key
  * another handler already used.
  */
 import { useEffect } from "react";
@@ -131,8 +134,9 @@ export function useOfficeKeys(world: World): void {
           break;
         }
         case "Tab": {
-          // Tab keeps moving the focus inside the drawer and a menu.
-          if (isInside(event.target, ".office-drawer, .pop")) return;
+          // Tab selects a colleague only while the Office itself has the
+          // focus. On a panel's control, Tab moves the focus as usual.
+          if (event.target !== document.body && !isInside(event.target, ".office-stage")) return;
           const waiting = listColleaguesInPose(world, readColleagueStates(), "waiting");
           const nextId = findNextColleagueId(waiting, state.selectedId, event.shiftKey ? -1 : 1);
           if (nextId === null) return;
