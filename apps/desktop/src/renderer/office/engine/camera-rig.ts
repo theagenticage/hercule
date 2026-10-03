@@ -12,8 +12,10 @@
  * Input, a Mac trackpad first and a mouse second:
  * - two-finger scroll pans, pinch zooms toward the pointer, a mouse wheel zooms;
  * - left-drag grabs the floor, right-drag or Option-drag orbits;
- * - double-click on the floor glides there;
- * - Q and E turn 45 degrees, + and - zoom, F finds the followed colleague again.
+ * - double-click on the floor glides there.
+ *
+ * The Office's keys turn the camera, zoom it and find the followed colleague
+ * again through `turn`, `zoomStep` and `resumeFollow`: see `office-keys.ts`.
  *
  * While the user asks the system to reduce motion, the camera jumps wherever
  * it would glide or fly, and a wall drops or rises at once.
@@ -43,6 +45,15 @@ export interface CameraRig {
   follow(target: (() => Vector3) | null): void;
   /** Limits panning to the office's box. */
   setBounds(bounds: Box3): void;
+  /** Turns the camera around the point it looks at by `degrees`: a positive turn is clockwise from above. */
+  turn(degrees: number): void;
+  /** Zooms one step toward the middle of the view, or one step away from it. */
+  zoomStep(direction: "in" | "out"): void;
+  /**
+   * Follows the colleague the camera followed before the user moved it away,
+   * again. Does nothing when the camera follows no one.
+   */
+  resumeFollow(): void;
   /**
    * Finds every wall under `root` that can be cut away (a `Cutaway` in its
    * `userData`), so the camera can lower the walls between it and what the
@@ -59,6 +70,8 @@ export interface CameraRig {
 const MIN_DISTANCE = 3;
 /** How far past the overview the user can zoom out, as a factor of its distance. */
 const MAX_DISTANCE_FACTOR = 1.3;
+/** The distance one zoom step in multiplies the camera's distance by. A step out divides by it. */
+const KEY_ZOOM_STEP = 0.78;
 /** The lowest and highest elevation an orbit reaches, in degrees. */
 const MIN_ELEVATION = 18;
 const MAX_ELEVATION = 72;
@@ -373,11 +386,6 @@ interface Drag {
   /** The last few pointer positions with their times, to throw the floor on release. */
   readonly trail: Array<{ readonly x: number; readonly y: number; readonly time: number }>;
 }
-
-/** True when the keyboard's focus is in a field, where keys type text. */
-const isTyping = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
 /**
  * Returns true when a wheel event comes from a mouse wheel rather than a
@@ -731,46 +739,6 @@ export function createCameraRig(
 
   const onContextMenu = (event: Event): void => event.preventDefault();
 
-  const onKeyDown = (event: KeyboardEvent): void => {
-    if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
-    const rect = element.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    switch (event.key) {
-      case "q":
-      case "Q":
-        interrupt();
-        orbitBy(-45, 0);
-        break;
-      case "e":
-      case "E":
-        interrupt();
-        orbitBy(45, 0);
-        break;
-      case "=":
-      case "+":
-        interrupt();
-        zoomAt(rect, cx, cy, 0.78);
-        break;
-      case "-":
-      case "_":
-        interrupt();
-        zoomAt(rect, cx, cy, 1 / 0.78);
-        break;
-      case "f":
-      case "F":
-        if (pausedFollow === null) return;
-        interrupt();
-        followed = pausedFollow;
-        pausedFollow = null;
-        break;
-      default:
-        return;
-    }
-    event.preventDefault();
-    requestRender();
-  };
-
   element.addEventListener("wheel", onWheel, { passive: false });
   element.addEventListener("pointerdown", onPointerDown);
   element.addEventListener("pointermove", onPointerMove);
@@ -778,7 +746,6 @@ export function createCameraRig(
   element.addEventListener("pointercancel", onPointerUp);
   element.addEventListener("dblclick", onDoubleClick);
   element.addEventListener("contextmenu", onContextMenu);
-  window.addEventListener("keydown", onKeyDown);
 
   /** Moves every spring to its goal at once. */
   function settleSprings(): void {
@@ -998,6 +965,29 @@ export function createCameraRig(
       farthestView = 0;
       updateMaxDistance();
     },
+    turn(degrees) {
+      interrupt();
+      orbitBy(degrees, 0);
+      requestRender();
+    },
+    zoomStep(direction) {
+      const rect = element.getBoundingClientRect();
+      interrupt();
+      zoomAt(
+        rect,
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+        direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP,
+      );
+      requestRender();
+    },
+    resumeFollow() {
+      if (pausedFollow === null) return;
+      interrupt();
+      followed = pausedFollow;
+      pausedFollow = null;
+      requestRender();
+    },
     trackWalls(root) {
       root.updateWorldMatrix(true, true);
       walls = [];
@@ -1020,7 +1010,6 @@ export function createCameraRig(
       element.removeEventListener("pointercancel", onPointerUp);
       element.removeEventListener("dblclick", onDoubleClick);
       element.removeEventListener("contextmenu", onContextMenu);
-      window.removeEventListener("keydown", onKeyDown);
     },
   };
 }

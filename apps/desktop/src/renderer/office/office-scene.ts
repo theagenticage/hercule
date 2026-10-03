@@ -303,6 +303,15 @@ export function mountOfficeScene(
       case "focus-colleague":
         setOffice({ selectedId: command.colleagueId });
         break;
+      case "turn-camera":
+        camera.turn(command.degrees);
+        break;
+      case "zoom-camera":
+        camera.zoomStep(command.direction);
+        break;
+      case "resume-follow":
+        camera.resumeFollow();
+        break;
     }
     stage.requestRender();
   });

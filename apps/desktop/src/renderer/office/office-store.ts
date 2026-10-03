@@ -62,11 +62,16 @@ export function subscribeOffice(listener: () => void): () => void {
 // ---------------------------------------------------------------------------
 // Commands: what the panels ask the scene to do, beyond changing state.
 
-/** A command from the panels to the scene. */
+/** A command from the panels and the keys to the scene. */
 export type OfficeCommand =
   | { readonly kind: "overview" }
   | { readonly kind: "focus-room"; readonly roomId: string }
-  | { readonly kind: "focus-colleague"; readonly colleagueId: string };
+  | { readonly kind: "focus-colleague"; readonly colleagueId: string }
+  /** Turns the camera around the point it looks at: a positive turn is clockwise from above. */
+  | { readonly kind: "turn-camera"; readonly degrees: number }
+  | { readonly kind: "zoom-camera"; readonly direction: "in" | "out" }
+  /** Follows the selected colleague again after the user moved the camera away. */
+  | { readonly kind: "resume-follow" };
 
 const commandListeners = new Set<(command: OfficeCommand) => void>();
 

@@ -7,10 +7,14 @@
  * - Tab and Shift+Tab select the next and the previous colleague waiting on
  *   the user, the longest waiting first.
  * - Enter opens the selected colleague's thread in the drawer.
+ * - Q and E turn the camera 45 degrees, = and - zoom it, and F finds the
+ *   followed colleague again. These keys are left alone in the thread
+ *   drawer, which is the thread screen and has keys of its own.
  *
  * The Office reads only keys pressed while the focus is in the Office or on
  * nothing at all, so Tab still moves through the sidebar. Keys typed in a
- * field, such as the drawer's composer, are left alone.
+ * field, such as the drawer's composer, are left alone, and so is a key
+ * another handler already used.
  */
 import { useEffect } from "react";
 import type { ColleagueState } from "../engine/contracts";
@@ -20,6 +24,7 @@ import {
   readOffice,
   sendOfficeCommand,
   setOffice,
+  type OfficeCommand,
 } from "../office-store";
 import type { Pose } from "@hercule/client-core";
 import type { Colleague, World } from "../world/types";
@@ -75,6 +80,29 @@ export function findNextColleagueId(
 const isInside = (target: EventTarget | null, selector: string): boolean =>
   target instanceof Element && target.closest(selector) !== null;
 
+/** Returns the camera command a key asks for, or null for a key that moves no camera. */
+function decideCameraCommand(key: string): OfficeCommand | null {
+  switch (key) {
+    case "q":
+    case "Q":
+      return { kind: "turn-camera", degrees: -45 };
+    case "e":
+    case "E":
+      return { kind: "turn-camera", degrees: 45 };
+    case "=":
+    case "+":
+      return { kind: "zoom-camera", direction: "in" };
+    case "-":
+    case "_":
+      return { kind: "zoom-camera", direction: "out" };
+    case "f":
+    case "F":
+      return { kind: "resume-follow" };
+    default:
+      return null;
+  }
+}
+
 /** Listens to the window's keys for as long as the office is mounted. */
 export function useOfficeKeys(world: World): void {
   useEffect(() => {
@@ -111,8 +139,12 @@ export function useOfficeKeys(world: World): void {
           sendOfficeCommand({ kind: "focus-colleague", colleagueId: nextId });
           break;
         }
-        default:
-          return;
+        default: {
+          const command = decideCameraCommand(event.key);
+          if (command === null || isInside(event.target, ".office-drawer")) return;
+          sendOfficeCommand(command);
+          break;
+        }
       }
       event.preventDefault();
     };
