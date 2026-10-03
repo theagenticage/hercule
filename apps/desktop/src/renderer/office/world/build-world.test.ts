@@ -2,6 +2,8 @@
  * Tests the world the Office draws. The tests check that:
  *
  * - the Lounge holds the idle threads, and no working or waiting one;
+ * - the queue holds the threads with an open Request, the longest waiting
+ *   first, even when they waited less than a minute apart;
  * - a thread that changes pose keeps the desk key, so the Office plays the
  *   change on the built office instead of rebuilding it;
  * - a new thread changes the desk key, so the Office is rebuilt.
@@ -52,6 +54,20 @@ describe("buildWorld", () => {
     });
 
     expect(build([working, idle, waiting]).lounge).toEqual(["s-idle"]);
+  });
+
+  it("queues the threads with an open Request, the longest waiting first", () => {
+    /** Returns a thread that has waited on `REQUEST` since `lastActivityAt`. */
+    const buildAsking = (id: string, lastActivityAt: string): Session =>
+      buildSession({ id, status: "busy", runnerId: MOSS.id, openRequest: REQUEST, lastActivityAt });
+
+    const world = build([
+      buildAsking("s-later", "2026-09-10T09:59:40.000Z"),
+      working,
+      buildAsking("s-earlier", "2026-09-10T09:59:10.000Z"),
+    ]);
+
+    expect(world.queue).toEqual(["s-earlier", "s-later"]);
   });
 });
 

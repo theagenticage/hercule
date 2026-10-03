@@ -75,7 +75,8 @@ function buildColleague(session: Session, pose: Pose, now: number): Colleague {
  * Returns the world the Office draws for `records` at time `now`, in
  * milliseconds since the epoch: one colleague per seated thread, one room
  * per project with a seated thread, in the seating's order, every runner,
- * and the idle colleagues the Lounge seats.
+ * the queue of colleagues waiting on the user, and the idle colleagues the
+ * Lounge seats.
  */
 export function buildWorld(records: WorldRecords, now: number): World {
   const seating = decideOfficeSeating(records);
@@ -96,6 +97,7 @@ export function buildWorld(records: WorldRecords, now: number): World {
       tint: room.projectId === null ? null : pickProjectTint(room.projectId, records.projects),
       colleagueIds: room.desks.map((desk) => desk.session.id),
     })),
+    queue: seating.queue,
     lounge: seating.lounge,
   };
 }

@@ -30,9 +30,10 @@ const isTyping = (target: EventTarget | null): boolean =>
   (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
 /**
- * Returns the colleagues of `world` in `pose` now, as `states` holds them:
- * in the world's order, except that waiting colleagues come longest waiting
- * first, as the queue in front of the user's desk.
+ * Returns the colleagues of `world` in `pose` now, as `states` holds them,
+ * in the world's order. Waiting colleagues come in the order of the world's
+ * queue at the user's desk, the longest waiting first. A colleague the sim
+ * shows waiting before the world queues it comes last.
  */
 export function listColleaguesInPose(
   world: World,
@@ -43,9 +44,9 @@ export function listColleaguesInPose(
     .map((colleague) => applyColleagueState(colleague, states))
     .filter((colleague) => colleague.role !== "triage" && colleague.pose === pose);
   if (pose !== "waiting") return found;
-  return found.toSorted(
-    (a, b) => (b.request?.waitingMinutes ?? 0) - (a.request?.waitingMinutes ?? 0),
-  );
+  const places = new Map(world.queue.map((id, place) => [id, place]));
+  const findPlace = (colleague: Colleague): number => places.get(colleague.id) ?? places.size;
+  return found.toSorted((a, b) => findPlace(a) - findPlace(b));
 }
 
 /**

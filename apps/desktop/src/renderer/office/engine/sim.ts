@@ -1306,12 +1306,12 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   /** Seats every colleague where its pose puts it when the office opens. */
   const placeEveryone = (): void => {
     const all = [...actors.values()];
+    // The world's queue holds the waiting colleagues, the longest waiting first.
+    const places = new Map(world.queue.map((id, place) => [id, place]));
+    const findPlace = (actor: Actor): number => places.get(actor.colleague.id) ?? places.size;
     const waiting = all
       .filter((actor) => actor.pose === "waiting")
-      .sort(
-        (a, b) =>
-          (b.colleague.request?.waitingMinutes ?? 0) - (a.colleague.request?.waitingMinutes ?? 0),
-      );
+      .sort((a, b) => findPlace(a) - findPlace(b));
     waiting.forEach((actor) => (actor.ticket = nextTicket++));
     const sleepers = all.filter((actor) => actor.pose === "asleep");
     const entranceSpots = listEntranceSpots();
