@@ -31,6 +31,7 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
   type Matrix4,
+  type Mesh,
   type Object3D,
   type Texture,
 } from "three";
@@ -50,6 +51,32 @@ const MAX_PIXEL_RATIO = 2;
  * costs GPU memory, not frame time.
  */
 const SHADOW_MAP_SIZE = 4096;
+
+/**
+ * Returns the lookup table three.js gives every lit material it draws with
+ * `renderer`, found in the uniforms of the first such material in `scene`.
+ * Returns null when no material in `scene` has been drawn with one.
+ *
+ * three.js 0.186 builds this table (its "DFG LUT", for physically based
+ * light) once, keeps it in a module-level variable that it does not export,
+ * and never disposes it. Reading it back from a drawn material is the only
+ * way to reach it.
+ */
+function findLightingLookupTable(renderer: WebGLRenderer, scene: Scene): Texture | null {
+  let found: Texture | null = null;
+  scene.traverse((object) => {
+    if (found !== null || !(object as Mesh).isMesh) return;
+    const material = (object as Mesh).material;
+    for (const each of Array.isArray(material) ? material : [material]) {
+      if (!renderer.properties.has(each)) continue;
+      const drawn = renderer.properties.get(each) as {
+        uniforms?: { dfgLUT?: { value: Texture | null } };
+      };
+      found ??= drawn.uniforms?.dfgLUT?.value ?? null;
+    }
+  });
+  return found;
+}
 
 /** The light the office is drawn in, which follows the theme: morning in a light theme, evening in a dark one. */
 type TimeOfDay = "morning" | "evening";
@@ -143,6 +170,8 @@ export class Stage {
   private readonly drawnCamera = { world: new Float64Array(16), projection: new Float64Array(16) };
   /** The still building, once `setBuilding` declares it; null draws the shadows every frame. */
   private building: StillBuilding | null = null;
+  /** three.js's lookup table for lit materials, once a frame has drawn one (see `dispose`). */
+  private lightingLookupTable: Texture | null = null;
 
   private readonly container: HTMLElement;
 
@@ -275,6 +304,13 @@ export class Stage {
     this.composer.dispose();
     this.sun.shadow.dispose();
     this.environmentTexture.dispose();
+    // three.js keeps its lookup table for lit materials for good and shares
+    // it between renderers. Each renderer that drew with it added a dispose
+    // listener to it, and the listener holds the renderer, so without this
+    // the closed office's renderer, canvas and WebGL context would stay in
+    // memory. Disposing the table removes those listeners; the next office's
+    // renderer uploads it again.
+    this.lightingLookupTable?.dispose();
     this.renderer.dispose();
     // dispose() frees what three.js allocated, but the browser keeps the
     // context, and its GPU process keeps working for it, until it is lost.
@@ -391,6 +427,7 @@ export class Stage {
     // A camera that moved in this frame will likely move in the next one too.
     if (this.recordCamera()) this.urgent = true;
     this.composer.render(dt);
+    this.lightingLookupTable ??= findLightingLookupTable(this.renderer, this.scene);
     if (again || this.urgent) {
       this.scheduleFrame();
     } else {
