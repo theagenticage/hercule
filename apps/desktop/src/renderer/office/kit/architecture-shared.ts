@@ -241,12 +241,12 @@ export function buildPaintedMesh(
 
 /** Returns the colour `share` of the way from `from` to `to`, mixed in OKLab as CSS color-mix() does. */
 function mixOklch(from: Oklch, to: Oklch, share: number): Pick<Oklch, "l" | "c" | "h"> {
-  const toLab = ({ c, h }: Oklch) => [
+  const convertToLab = ({ c, h }: Oklch) => [
     c * Math.cos((h * Math.PI) / 180),
     c * Math.sin((h * Math.PI) / 180),
   ];
-  const [fa, fb] = toLab(from) as [number, number];
-  const [ta, tb] = toLab(to) as [number, number];
+  const [fa, fb] = convertToLab(from) as [number, number];
+  const [ta, tb] = convertToLab(to) as [number, number];
   const a = fa + (ta - fa) * share;
   const b = fb + (tb - fb) * share;
   return {
@@ -316,7 +316,7 @@ export function readCssColor(token: Token, lightness = 0): string {
  * in the app; the display face is kept for numerals. The
  * generic family keeps a canvas drawn before the face loads in a sans-serif.
  */
-export function uiFont(pixels: number): string {
+export function buildUiFont(pixels: number): string {
   return `640 ${String(pixels)}px "Bricolage Grotesque", sans-serif`;
 }
 

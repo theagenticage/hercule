@@ -211,7 +211,7 @@ function seatAtDesks(
 }
 
 /** Returns the room's floor inside its walls. */
-function insideWalls(rect: Rect): Rect {
+function computeFloorInsideWalls(rect: Rect): Rect {
   return {
     minX: rect.minX + HALF_WALL,
     minZ: rect.minZ + HALF_WALL,
@@ -377,7 +377,7 @@ function designThreadRoom(
       grid.depth + 2.4,
     ),
     furnish(planned, fitter, fittings) {
-      const inside = insideWalls(planned.rect);
+      const inside = computeFloorInsideWalls(planned.rect);
       const centreX = (inside.minX + inside.maxX - dressing) / 2;
       const centreZ = (inside.minZ + inside.maxZ) / 2;
       seatAtDesks(colleagues, grid, centreX, centreZ, room.id, sizes, fitter, fittings);
@@ -413,7 +413,7 @@ function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
       0.86,
     ),
     furnish(room, fitter, fittings) {
-      const inside = insideWalls(room.rect);
+      const inside = computeFloorInsideWalls(room.rect);
       if (has("case-board")) {
         const boardX = (inside.minX + inside.maxX) / 2 + 0.3;
         const board = buildCaseBoard(boardWidth);
@@ -460,7 +460,7 @@ function designLounge(fixed: FixedRoom, groups: number): RoomDesign {
       0.3,
     ),
     furnish(room, fitter, fittings) {
-      const inside = insideWalls(room.rect);
+      const inside = computeFloorInsideWalls(room.rect);
       if (has("tea-trolley")) {
         const trolley = fitter.place(buildTeaTrolley(), inside.maxX - 1.0, inside.minZ + 0.32);
         if (offers("stand")) {
@@ -509,7 +509,7 @@ function designYourOffice(fixed: FixedRoom): RoomDesign {
   return {
     request: requestRoom("your-office", fixed.name, "your-office", null, 6.6, 6.2, 0.84),
     furnish(room, fitter, fittings) {
-      const inside = insideWalls(room.rect);
+      const inside = computeFloorInsideWalls(room.rect);
       const deskX = inside.minX + 2.2;
       const deskZ = inside.maxZ - 1.75;
       if (has("partner-desk")) {
@@ -590,7 +590,7 @@ function designLobby(fixed: FixedRoom, directory: Object3D): RoomDesign {
   return {
     request: requestRoom("lobby", fixed.name, "lobby", null, 5.6, 5.0),
     furnish(room, fitter, fittings) {
-      const inside = insideWalls(room.rect);
+      const inside = computeFloorInsideWalls(room.rect);
       const doorX = (room.rect.minX + room.rect.maxX) / 2;
       if (offers("stand")) {
         fittings.entrance = {

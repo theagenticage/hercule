@@ -122,7 +122,7 @@ const liveViews = new WeakMap<PerspectiveCamera, LiveView>();
 /** The cameras whose rig moved them in its last update. */
 const movingCameras = new WeakSet<PerspectiveCamera>();
 
-const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
+const convertToRadians = (degrees: number): number => (degrees * Math.PI) / 180;
 
 /** Moves `camera` to look at `target` from a distance and two angles in degrees. */
 function aimCamera(
@@ -132,8 +132,8 @@ function aimCamera(
   azimuth: number,
   elevation: number,
 ): void {
-  const a = toRadians(azimuth);
-  const e = toRadians(elevation);
+  const a = convertToRadians(azimuth);
+  const e = convertToRadians(elevation);
   camera.position.set(
     target.x + distance * Math.cos(e) * Math.sin(a),
     target.y + distance * Math.sin(e),
@@ -234,7 +234,7 @@ const easeInOut = (t: number): number =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 /** Returns the turn from one azimuth to another the short way round, in degrees. */
-const shortestTurn = (from: number, to: number): number => {
+const measureShortestTurn = (from: number, to: number): number => {
   const turn = ((((to - from) % 360) + 540) % 360) - 180;
   return turn === -180 ? 180 : turn;
 };
@@ -553,7 +553,7 @@ export function createCameraRig(
     if (bounds === null) return;
     const size = bounds.getSize(scratch);
     const radius = Math.hypot(size.x, size.y, size.z) / 2;
-    const fit = (0.8 * radius) / Math.tan(toRadians(camera.fov / 2));
+    const fit = (0.8 * radius) / Math.tan(convertToRadians(camera.fov / 2));
     maxDistance = MAX_DISTANCE_FACTOR * Math.max(fit, farthestView, MIN_DISTANCE);
   };
 
@@ -763,7 +763,7 @@ export function createCameraRig(
     farthestView = Math.max(farthestView, view.distance);
     updateMaxDistance();
     if (flight !== null && flight.to === view) return;
-    const turn = shortestTurn(azimuth.value, view.azimuth);
+    const turn = measureShortestTurn(azimuth.value, view.azimuth);
     const from = {
       target: new Vector3(targetX.value, targetY.value, targetZ.value),
       distance: distance.value,

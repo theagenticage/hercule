@@ -184,7 +184,7 @@ export function mountOfficeScene(
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 
-  const teardown = ({ layout, rigs, sim, overlay }: BuiltScene): void => {
+  const tearDownBuiltScene = ({ layout, rigs, sim, overlay }: BuiltScene): void => {
     sim.dispose();
     overlay.dispose();
     for (const rig of rigs.values()) {
@@ -375,7 +375,7 @@ export function mountOfficeScene(
         return;
       }
       deskKey = nextKey;
-      teardown(built);
+      tearDownBuiltScene(built);
       built = build();
       switchLamps();
       applySelection(null);
@@ -391,7 +391,7 @@ export function mountOfficeScene(
       stopStillness();
       stopCommands();
       themeObserver.disconnect();
-      teardown(built);
+      tearDownBuiltScene(built);
       camera.dispose();
       stage.dispose();
       // The store outlives the scene, so the states of these colleagues

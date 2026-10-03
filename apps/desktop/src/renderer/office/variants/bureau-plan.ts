@@ -219,14 +219,14 @@ export function planFloor(request: PlanRequest): FloorPlan {
   const innerWidth = Math.max(codeWidth, backWidth, frontWidth);
   const width = innerWidth + EAST_HALL_WIDTH;
 
-  const maxDepth = (rooms: ReadonlyArray<RoomRequest>): number =>
+  const measureMaxDepth = (rooms: ReadonlyArray<RoomRequest>): number =>
     rooms.reduce((depth, room) => Math.max(depth, room.depth), 0);
   const northRooms = double ? rows.north : request.code;
   const southRooms = double ? rows.south : [];
-  const northDepth = maxDepth(northRooms);
-  const southDepth = maxDepth(southRooms);
-  const backDepth = maxDepth(request.back);
-  const frontDepth = maxDepth(request.front);
+  const northDepth = measureMaxDepth(northRooms);
+  const southDepth = measureMaxDepth(southRooms);
+  const backDepth = measureMaxDepth(request.back);
+  const frontDepth = measureMaxDepth(request.front);
 
   const arcadeZ = northDepth;
   const southZ = arcadeZ + (double ? ARCADE_WIDTH : 0);
@@ -334,9 +334,14 @@ function cutLine(rooms: ReadonlyArray<PlannedRoom>, axis: "x" | "z", line: numbe
     const to = breaks[index + 1]!;
     if (to - from < EPSILON) continue;
     const middle = (from + to) / 2;
-    const covering = (edges: typeof before) =>
+    const findCoveringRoom = (edges: typeof before) =>
       edges.find((edge) => edge.from <= middle && middle <= edge.to)?.room ?? null;
-    const piece: WallPiece = { from, to, before: covering(before), after: covering(after) };
+    const piece: WallPiece = {
+      from,
+      to,
+      before: findCoveringRoom(before),
+      after: findCoveringRoom(after),
+    };
     if (piece.before === null && piece.after === null) continue;
     const last = pieces[pieces.length - 1];
     if (
@@ -351,8 +356,12 @@ function cutLine(rooms: ReadonlyArray<PlannedRoom>, axis: "x" | "z", line: numbe
   return pieces;
 }
 
-/** Returns the side of `room` that faces its neighbour across a wall piece. */
-function sideOf(axis: "x" | "z", isBefore: boolean): Side {
+/**
+ * Returns the side of a room that faces a wall piece running along `axis`:
+ * south or east for the room before the piece (`isBefore`), north or west for
+ * the room after it.
+ */
+function decideNeighbourSide(axis: "x" | "z", isBefore: boolean): Side {
   if (axis === "x") return isBefore ? "south" : "north";
   return isBefore ? "east" : "west";
 }
@@ -396,8 +405,8 @@ function planWalls(
           );
           doors.push({ at: clamped, width: DOOR_WIDTH });
         };
-        if (before !== null) addDoor(before, sideOf(axis, true));
-        if (after !== null) addDoor(after, sideOf(axis, false));
+        if (before !== null) addDoor(before, decideNeighbourSide(axis, true));
+        if (after !== null) addDoor(after, decideNeighbourSide(axis, false));
         const lobbyAndHall =
           (before?.id === lobbyId && after?.kind === "hall") ||
           (after?.id === lobbyId && before?.kind === "hall");

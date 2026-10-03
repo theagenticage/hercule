@@ -93,12 +93,17 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
   // Walking: the whole storey, minus the walls, plus their doorways, minus the furniture.
   nav.addFloor(0, 0, 0, 0, plan.width, plan.depth);
   for (const wall of plan.walls) {
-    const rect = spanRect(wall, wall.from - HALF_WALL, wall.to + HALF_WALL, HALF_WALL);
+    const rect = buildWallStretchRect(wall, wall.from - HALF_WALL, wall.to + HALF_WALL, HALF_WALL);
     nav.block(0, rect.minX, rect.minZ, rect.maxX, rect.maxZ);
   }
   for (const wall of plan.walls) {
     for (const door of wall.doors) {
-      const rect = spanRect(wall, door.at - door.width / 2, door.at + door.width / 2, 0.3);
+      const rect = buildWallStretchRect(
+        wall,
+        door.at - door.width / 2,
+        door.at + door.width / 2,
+        0.3,
+      );
       nav.open(0, rect.minX, rect.minZ, rect.maxX, rect.maxZ);
     }
   }
@@ -164,7 +169,7 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
 };
 
 /** Returns the rectangle a stretch of a wall covers, from `from` to `to` along it, `half` either side. */
-function spanRect(wall: PlannedWall, from: number, to: number, half: number): Rect {
+function buildWallStretchRect(wall: PlannedWall, from: number, to: number, half: number): Rect {
   return wall.axis === "x"
     ? { minX: from, minZ: wall.line - half, maxX: to, maxZ: wall.line + half }
     : { minX: wall.line - half, minZ: from, maxX: wall.line + half, maxZ: to };
@@ -221,12 +226,12 @@ function buildWalls(plan: FloorPlan, root: Group): BuiltWall[] {
     const rotation = { south: 0, north: Math.PI, east: Math.PI / 2, west: -Math.PI / 2 }[
       planned.outward
     ];
-    const toLocal = (at: number): number =>
+    const convertToLocal = (at: number): number =>
       planned.outward === "south" || planned.outward === "west" ? at - centre : centre - at;
     const object = buildWall(end - start, {
       // Walls along z stand a hair lower, so two caps never lie in the same plane at a corner.
       height: planned.axis === "x" ? WALL_HEIGHT : WALL_HEIGHT - 0.004,
-      doors: planned.doors.map((door) => ({ at: toLocal(door.at), width: door.width })),
+      doors: planned.doors.map((door) => ({ at: convertToLocal(door.at), width: door.width })),
       windows: planned.windows,
       cutaway: { roomId: planned.ownerId, exterior: planned.exterior },
     });

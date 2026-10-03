@@ -175,29 +175,29 @@ function readNewspaperGeometry(width: number, height: number): BufferGeometry {
 /** Creates the rig's bones, parented as `BONE_PARENTS` says, with their fixed offsets. */
 function createBones(anatomy: Anatomy, root: Object3D): { list: Bone[]; named: RigBones } {
   const list = BONE_PARENTS.map(() => new Bone());
-  const bone = (index: number): Bone => list[index]!;
+  const readBone = (index: number): Bone => list[index]!;
   BONE_PARENTS.forEach((parent, index) => {
-    if (parent < 0) root.add(bone(index));
-    else bone(parent).add(bone(index));
+    if (parent < 0) root.add(readBone(index));
+    else readBone(parent).add(readBone(index));
   });
   const { neck, upperArm, forearm, thigh, shin, egg } = anatomy;
-  bone(BONE.head).position.set(neck.x, neck.y, neck.z);
-  for (const index of [BONE.elbowL, BONE.elbowR]) bone(index).position.set(0, -upperArm, 0);
-  for (const index of [BONE.handL, BONE.handR]) bone(index).position.set(0, -forearm, 0);
-  for (const index of [BONE.kneeL, BONE.kneeR]) bone(index).position.set(0, -thigh, 0);
-  for (const index of [BONE.footL, BONE.footR]) bone(index).position.set(0, -shin, 0);
-  bone(BONE.eyeL).position.copy(readEyeCentre(egg, "left"));
-  bone(BONE.eyeR).position.copy(readEyeCentre(egg, "right"));
+  readBone(BONE.head).position.set(neck.x, neck.y, neck.z);
+  for (const index of [BONE.elbowL, BONE.elbowR]) readBone(index).position.set(0, -upperArm, 0);
+  for (const index of [BONE.handL, BONE.handR]) readBone(index).position.set(0, -forearm, 0);
+  for (const index of [BONE.kneeL, BONE.kneeR]) readBone(index).position.set(0, -thigh, 0);
+  for (const index of [BONE.footL, BONE.footR]) readBone(index).position.set(0, -shin, 0);
+  readBone(BONE.eyeL).position.copy(readEyeCentre(egg, "left"));
+  readBone(BONE.eyeR).position.copy(readEyeCentre(egg, "right"));
   const named: RigBones = {
-    pelvis: bone(BONE.pelvis),
-    torso: bone(BONE.torso),
-    head: bone(BONE.head),
-    shoulders: [bone(BONE.shoulderL), bone(BONE.shoulderR)],
-    elbows: [bone(BONE.elbowL), bone(BONE.elbowR)],
-    hands: [bone(BONE.handL), bone(BONE.handR)],
-    hips: [bone(BONE.hipL), bone(BONE.hipR)],
-    knees: [bone(BONE.kneeL), bone(BONE.kneeR)],
-    feet: [bone(BONE.footL), bone(BONE.footR)],
+    pelvis: readBone(BONE.pelvis),
+    torso: readBone(BONE.torso),
+    head: readBone(BONE.head),
+    shoulders: [readBone(BONE.shoulderL), readBone(BONE.shoulderR)],
+    elbows: [readBone(BONE.elbowL), readBone(BONE.elbowR)],
+    hands: [readBone(BONE.handL), readBone(BONE.handR)],
+    hips: [readBone(BONE.hipL), readBone(BONE.hipR)],
+    knees: [readBone(BONE.kneeL), readBone(BONE.kneeR)],
+    feet: [readBone(BONE.footL), readBone(BONE.footR)],
   };
   return { list, named };
 }
@@ -209,7 +209,7 @@ function createSkinnedMesh(
   skeleton: Skeleton,
 ): SkinnedMesh {
   const mesh = new SkinnedMesh(geometry, material);
-  // Each part is built in its bone's own space, so nothing needs unbinding.
+  // Each part is built in its readBone's own space, so nothing needs unbinding.
   mesh.bind(skeleton, new Matrix4());
   mesh.boundingSphere = RIG_BOUNDS;
   return mesh;

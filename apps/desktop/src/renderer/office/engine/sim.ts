@@ -261,7 +261,8 @@ function computeYawToward(from: Vector3, to: Vector3): number {
   return Math.atan2(to.x - from.x, to.z - from.z);
 }
 
-function randomBetween(min: number, max: number): number {
+/** Returns a random number from `min` up to, but not including, `max`. */
+function pickRandomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
@@ -1029,7 +1030,7 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   /** Glances now and then from someone in the queue at its head, while the office is lively. */
   const scheduleGlance = (): void => {
     if (liveliness === 0) return;
-    glanceTimer = schedule(randomBetween(...GLANCE_GAP_SECONDS), () => {
+    glanceTimer = schedule(pickRandomBetween(...GLANCE_GAP_SECONDS), () => {
       const head = queue[0];
       const glancer = pickRandom(
         queue.filter(
@@ -1269,7 +1270,7 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
 
   const scheduleHappening = (): void => {
     if (liveliness === 0) return;
-    happeningTimer = schedule(randomBetween(...HAPPENING_GAP_SECONDS[liveliness]), () => {
+    happeningTimer = schedule(pickRandomBetween(...HAPPENING_GAP_SECONDS[liveliness]), () => {
       startHappening();
       scheduleHappening();
     });

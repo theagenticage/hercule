@@ -174,7 +174,7 @@ function addDot(
 function addEye(face: FaceBuild, pose: Pose, side: "left" | "right"): void {
   const x = EYE_X[side];
   const eye = { eye: side } as const;
-  const open = (dy: number, ry: number) => {
+  const addOpenEye = (dy: number, ry: number) => {
     addDot(face, "ink", [x, EYE_Y + dy], 2, ry, { ...eye, height: 1.1 });
     // The glint sits on the eye's dome, up and to the image's right.
     addDot(face, "paper", [x + 0.7, EYE_Y + dy - 0.9], 0.62, 0.62, {
@@ -185,12 +185,12 @@ function addEye(face: FaceBuild, pose: Pose, side: "left" | "right"): void {
   };
   switch (pose) {
     case "working":
-      return open(1, 2.2);
+      return addOpenEye(1, 2.2);
     case "waiting":
-      return open(-0.5, 2.75);
+      return addOpenEye(-0.5, 2.75);
     case "idle":
     case "failed":
-      return open(0, 2.55);
+      return addOpenEye(0, 2.55);
     case "paused":
       return addLine(
         face,
@@ -519,7 +519,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
   face.list.add("badge", wrapOntoEgg(pin, egg, 0), bone);
   // The symbol, in the book's badge units: the badge there has a radius of 5.6.
   const scale = radius / 5.6;
-  const symbol = (layer: FaceLayer, points: ReadonlyArray<FacePoint>, width: number) => {
+  const addSymbol = (layer: FaceLayer, points: ReadonlyArray<FacePoint>, width: number) => {
     const line = buildStroke(
       points.map(([x, y]) => new Vector3(centre.x + x * scale, centre.y - y * scale, 0)),
       (width / 2) * scale,
@@ -528,7 +528,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
   };
   switch (pose) {
     case "done":
-      symbol(
+      addSymbol(
         "paper",
         [
           [-2.4, 0.2],
@@ -539,7 +539,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
       );
       return;
     case "failed":
-      symbol(
+      addSymbol(
         "paper",
         [
           [-1.7, -1.7],
@@ -547,7 +547,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
         ],
         1.7,
       );
-      symbol(
+      addSymbol(
         "paper",
         [
           [1.7, -1.7],
@@ -557,7 +557,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
       );
       return;
     case "paused":
-      symbol(
+      addSymbol(
         "ink",
         [
           [-1.2, -1.8],
@@ -565,7 +565,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
         ],
         1.5,
       );
-      symbol(
+      addSymbol(
         "ink",
         [
           [1.2, -1.8],
@@ -575,7 +575,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
       );
       return;
     case "away":
-      symbol(
+      addSymbol(
         "ink",
         [
           [-2.4, 1.8],
@@ -583,7 +583,7 @@ function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boo
         ],
         1.3,
       );
-      symbol("ink", traceFaceQuadratic([-2.2, -1.8], [0.2, -4.2], [2.6, -1.8]), 1.3);
+      addSymbol("ink", traceFaceQuadratic([-2.2, -1.8], [0.2, -4.2], [2.6, -1.8]), 1.3);
       return;
     default:
       return;

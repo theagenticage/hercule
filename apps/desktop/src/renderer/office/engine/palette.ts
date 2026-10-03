@@ -148,11 +148,11 @@ export function readToken(name: string): Oklch {
   const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data;
   const color = new Color().setRGB(r! / 255, g! / 255, b! / 255);
   // Approximate the sRGB colour back to OKLCH through three's linear sRGB.
-  return { ...linearToOklch(color), alpha: a! / 255 };
+  return { ...convertLinearToOklch(color), alpha: a! / 255 };
 }
 
 /** Converts a linear sRGB colour to OKLCH. */
-function linearToOklch(color: Color): Omit<Oklch, "alpha"> {
+function convertLinearToOklch(color: Color): Omit<Oklch, "alpha"> {
   const l = Math.cbrt(0.4122214708 * color.r + 0.5363325363 * color.g + 0.0514459929 * color.b);
   const m = Math.cbrt(0.2119034982 * color.r + 0.6806995451 * color.g + 0.1073969566 * color.b);
   const s = Math.cbrt(0.0883024619 * color.r + 0.2817188376 * color.g + 0.6299787005 * color.b);
@@ -259,7 +259,12 @@ function applyPaint({ material, read, shift }: Paintable): void {
 const WHITE: Oklch = { l: 1, c: 0, h: 0, alpha: 1 };
 
 /** Returns the shared material for a key, building and painting it the first time. */
-function share(key: string, finish: Finish, read: () => Oklch, shift: Shift): MeshStandardMaterial {
+function shareMaterial(
+  key: string,
+  finish: Finish,
+  read: () => Oklch,
+  shift: Shift,
+): MeshStandardMaterial {
   const known = paintables.get(key);
   if (known !== undefined) return known.material;
   const material = buildMaterial(finish);
@@ -281,7 +286,7 @@ export function paint(
   shift: Shift = {},
 ): MeshStandardMaterial {
   const key = `${token}|${finish}|${String(shift.dl ?? 0)}|${String(shift.dc ?? 0)}|${String(shift.dh ?? 0)}`;
-  return share(key, finish, () => readToken(token), shift);
+  return shareMaterial(key, finish, () => readToken(token), shift);
 }
 
 /**
@@ -295,7 +300,7 @@ export function paintHue(
   shift: Shift = {},
 ): MeshStandardMaterial {
   const key = `hue:${hue}|${part}|${finish}|${String(shift.dl ?? 0)}|${String(shift.dc ?? 0)}|${String(shift.dh ?? 0)}`;
-  return share(key, finish, () => readHue(hue, part), shift);
+  return shareMaterial(key, finish, () => readHue(hue, part), shift);
 }
 
 /**
@@ -304,7 +309,7 @@ export function paintHue(
  * own colour stays white so the vertex colours show unchanged.
  */
 export function paintVertexColors(finish: Finish): MeshStandardMaterial {
-  const material = share(`vertex-colours|${finish}`, finish, () => WHITE, {});
+  const material = shareMaterial(`vertex-colours|${finish}`, finish, () => WHITE, {});
   material.vertexColors = true;
   return material;
 }

@@ -352,14 +352,14 @@ const SHELL_SEGMENTS = 24;
 
 /**
  * Builds a shell that hugs the egg from a lower edge up to the top, `offset`
- * metres off its surface: a hat's crown or a band. `edge` returns the
+ * metres off its surface: a hat's crown or a band. `readEdgeHeight` returns the
  * height of the lower edge at an angle around the egg (0 is the front), and
  * `top` is the fraction of the way from the edge to the egg's top where the
  * shell ends. With `flare`, the lower edge turns out into a small brim.
  */
 function buildShell(
   egg: Egg,
-  edge: (angle: number) => number,
+  readEdgeHeight: (angle: number) => number,
   offset: number,
   options: { readonly from?: number; readonly top?: number; readonly flare?: number },
 ): BufferGeometry {
@@ -377,7 +377,7 @@ function buildShell(
   for (const row of rings) {
     for (let s = 0; s <= segments; s++) {
       const angle = Math.PI + (s / segments) * Math.PI * 2;
-      const low = edge(angle);
+      const low = readEdgeHeight(angle);
       const fraction = row < 0 ? 0 : row;
       const height = Math.min(low + (egg.height - low) * fraction, egg.height - 1e-4);
       let radius = measureEggRadius(egg, height);
@@ -553,22 +553,29 @@ export function buildRoundedRectangle(width: number, height: number, radius: num
 /**
  * Adds the shade a hat casts on the head: a band in the `shadow` surface,
  * darkest just under the hat and fading into the body colour 2.8 units
- * below it, so it reads as shade rather than as a painted stripe. `edge`
- * returns the height of the hat's lowest point at an angle around the egg
- * (0 is the front).
+ * below it, so it reads as shade rather than as a painted stripe.
+ * `readEdgeHeight` returns the height of the hat's lowest point at an angle
+ * around the egg (0 is the front).
  */
-function addHatShadow(list: PartList<Surface>, egg: Egg, edge: (angle: number) => number): void {
+function addHatShadow(
+  list: PartList<Surface>,
+  egg: Egg,
+  readEdgeHeight: (angle: number) => number,
+): void {
   const width = 2.8 * egg.unit;
-  const below = (angle: number) => edge(angle) - width;
+  const readShadeBottom = (angle: number) => readEdgeHeight(angle) - width;
   // The band reaches a little up under the hat, so no head shows between the two.
-  const top = (width * 1.3) / (egg.height - below(0));
-  const shell = buildShell(egg, below, 0.003, { top });
+  const top = (width * 1.3) / (egg.height - readShadeBottom(0));
+  const shell = buildShell(egg, readShadeBottom, 0.003, { top });
   const position = shell.getAttribute("position");
   const coverage = new Float32Array(position.count);
   for (let vertex = 0; vertex < position.count; vertex++) {
     const angle = Math.atan2(position.getX(vertex), position.getZ(vertex) / egg.depth);
-    const reach = Math.min(1, Math.max(0, (position.getY(vertex) - below(angle)) / width));
-    // Squared, so the shade gathers under the brim and thins out slowly below it.
+    const reach = Math.min(
+      1,
+      Math.max(0, (position.getY(vertex) - readShadeBottom(angle)) / width),
+    );
+    // Squared, so the shade gathers under the brim and thins out slowly readShadeBottom it.
     coverage[vertex] = 0.85 * reach * reach;
   }
   shell.setAttribute("coverage", new BufferAttribute(coverage, 1));
@@ -678,10 +685,10 @@ function addCloche(list: PartList<Surface>, egg: Egg): void {
   // and a pose's brows show half hidden under the brim.
   const front = (42.4 - 17.4) * unit;
   const drop = 4.5 * unit;
-  const edge = (angle: number) => front - drop * (0.5 - 0.5 * Math.cos(angle));
+  const readEdgeHeight = (angle: number) => front - drop * (0.5 - 0.5 * Math.cos(angle));
   const offset = Math.max(0.01, 0.55 * unit);
   const flare = 1.6 * unit;
-  const bell = buildShell(egg, edge, offset, { flare });
+  const bell = buildShell(egg, readEdgeHeight, offset, { flare });
   list.add("hat", bell, BONE.head);
   // A rolled lip along the brim's outer edge gives the brim its thickness.
   // It rides half its radius above that edge, so the brim drops no lower
@@ -695,8 +702,12 @@ function addCloche(list: PartList<Surface>, egg: Egg): void {
   }
   const roll = new TubeGeometry(new CatmullRomCurve3(lip, true), 48, lipRadius, 6, true);
   list.add("hat", roll, BONE.head);
-  addHatShadow(list, egg, (angle) => edge(angle) - flare * 0.45 - lipRadius / 2);
-  list.add("shade", buildShell(egg, edge, offset + 0.003, { from: 0.1, top: 0.26 }), BONE.head);
+  addHatShadow(list, egg, (angle) => readEdgeHeight(angle) - flare * 0.45 - lipRadius / 2);
+  list.add(
+    "shade",
+    buildShell(egg, readEdgeHeight, offset + 0.003, { from: 0.1, top: 0.26 }),
+    BONE.head,
+  );
   // The rosette on the colleague's left, over the band.
   const point = new Vector3();
   const normal = new Vector3();

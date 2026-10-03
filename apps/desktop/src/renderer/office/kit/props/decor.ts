@@ -55,19 +55,20 @@ function buildLeaf(
   outline.moveTo(0, 0);
   if (feathered) {
     const leaflets = 11;
-    const reach = (t: number) => width * Math.sin(Math.PI * Math.min(1, 0.15 + t)) * (1 - t * 0.3);
+    const measureLeafletReach = (t: number) =>
+      width * Math.sin(Math.PI * Math.min(1, 0.15 + t)) * (1 - t * 0.3);
     for (let leaflet = 0; leaflet < leaflets; leaflet++) {
       const t = (leaflet + 0.5) / (leaflets + 0.5);
-      outline.lineTo(length * t, reach(t) * 0.06);
-      outline.lineTo(length * (t + 0.09), reach(t));
-      outline.lineTo(length * (t + 0.035), reach(t) * 0.06);
+      outline.lineTo(length * t, measureLeafletReach(t) * 0.06);
+      outline.lineTo(length * (t + 0.09), measureLeafletReach(t));
+      outline.lineTo(length * (t + 0.035), measureLeafletReach(t) * 0.06);
     }
     outline.lineTo(length, 0);
     for (let leaflet = leaflets - 1; leaflet >= 0; leaflet--) {
       const t = (leaflet + 0.5) / (leaflets + 0.5);
-      outline.lineTo(length * (t + 0.035), -reach(t) * 0.06);
-      outline.lineTo(length * (t + 0.09), -reach(t));
-      outline.lineTo(length * t, -reach(t) * 0.06);
+      outline.lineTo(length * (t + 0.035), -measureLeafletReach(t) * 0.06);
+      outline.lineTo(length * (t + 0.09), -measureLeafletReach(t));
+      outline.lineTo(length * t, -measureLeafletReach(t) * 0.06);
     }
   } else {
     outline.bezierCurveTo(length * 0.25, width * 0.75, length * 0.75, width * 0.75, length, 0);

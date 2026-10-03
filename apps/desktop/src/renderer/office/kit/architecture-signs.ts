@@ -23,9 +23,9 @@ import { paint, paintHue } from "../engine/palette";
 import {
   buildCanvasLabel,
   buildPaintedMesh,
+  buildUiFont,
   placeBox,
   readCssColor,
-  uiFont,
   type PaintedParts,
 } from "./architecture-shared";
 
@@ -63,7 +63,7 @@ function estimatePlaqueAdvance(text: string): number {
 }
 
 /** Returns the width of a plaque's enamel face for `text`, which is already upper case. */
-function plaqueFaceWidth(text: string, hasChip: boolean): number {
+function measurePlaqueFace(text: string, hasChip: boolean): number {
   const characters = [...text].length;
   const textWidth =
     (estimatePlaqueAdvance(text) + PLAQUE_TRACKING * Math.max(0, characters - 1)) * PLAQUE_EM;
@@ -83,7 +83,7 @@ function plaqueFaceWidth(text: string, hasChip: boolean): number {
 export function buildPlaque(text: string, options: { readonly hue?: Hue } = {}): Object3D {
   const label = text.toUpperCase();
   const hasChip = options.hue !== undefined;
-  const faceWidth = plaqueFaceWidth(label, hasChip);
+  const faceWidth = measurePlaqueFace(label, hasChip);
   const faceHeight = PLAQUE_FACE_HEIGHT;
   const object = new Group();
 
@@ -118,7 +118,7 @@ export function buildPlaque(text: string, options: { readonly hue?: Hue } = {}):
   const scale = pixelWidth / faceWidth;
   const textLeft = (PLAQUE_PADDING + (hasChip ? PLAQUE_CHIP : 0)) * scale;
   const textRight = pixelWidth - PLAQUE_PADDING * scale;
-  const font = uiFont(Math.round(PLAQUE_EM * scale));
+  const font = buildUiFont(Math.round(PLAQUE_EM * scale));
   const { texture } = buildCanvasLabel(pixelWidth, pixelHeight, font, (context) => {
     context.fillStyle = readCssColor("room-inlay-2", -0.06);
     context.fillRect(0, 0, pixelWidth, pixelHeight);

@@ -77,7 +77,7 @@ function easeInOut(t: number): number {
 }
 
 /** Returns a deterministic number in [0, 1) for an integer and a seed, for the rig's own randomness. */
-function hashUnit(seed: number, index: number): number {
+function hashToUnit(seed: number, index: number): number {
   const x = Math.sin(seed * 127.1 + index * 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
@@ -276,7 +276,7 @@ class FootPlanner {
   constructor(gait: Gait, neutral: Pair<Vector3>) {
     this.gait = gait;
     this.neutral = neutral;
-    const foot = (): PlannedFoot => ({
+    const createPlannedFoot = (): PlannedFoot => ({
       planted: true,
       lock: new Vector3(),
       lockYaw: 0,
@@ -285,7 +285,7 @@ class FootPlanner {
       progress: 0,
       swingStart: 0,
     });
-    this.feet = [foot(), foot()];
+    this.feet = [createPlannedFoot(), createPlannedFoot()];
   }
 
   /** Plants both feet under the body on the next update, wherever they were. */
@@ -866,12 +866,12 @@ export class Motion {
   private writeTalking(p: Posture, t: number, ambient: number): void {
     this.writeStanding(p);
     this.addBreath(p, t, ambient, 0.6);
-    const gesture = (offset: number): number =>
+    const computeGesture = (offset: number): number =>
       (0.6 * Math.sin(1.9 * t + offset) + 0.4 * Math.sin(3.1 * t + offset * 2.3)) * ambient;
     for (const side of SIDES) {
       const x = mirrorX(side);
       const shoulder = this.shoulders[side];
-      const g = gesture(side * 2.1);
+      const g = computeGesture(side * 2.1);
       const height = shoulder.y - this.reach * 0.55 + 0.05 * Math.max(0, g);
       p.hands[side].set(
         shoulder.x + x * (0.03 + 0.03 * g),
@@ -1159,8 +1159,9 @@ export class Motion {
     } else if (input.ambient > 0 && this.action !== "walk" && this.action !== "hop") {
       // A glance to one side now and then.
       const slot = Math.floor((this.clock + this.seed * 50) / 4.6);
-      const pick = hashUnit(this.seed, slot);
-      if (pick > 0.55) yaw = (pick > 0.78 ? 1 : -1) * (0.25 + 0.25 * hashUnit(this.seed, slot + 7));
+      const pick = hashToUnit(this.seed, slot);
+      if (pick > 0.55)
+        yaw = (pick > 0.78 ? 1 : -1) * (0.25 + 0.25 * hashToUnit(this.seed, slot + 7));
       yaw *= input.ambient;
     }
     const follow = 1 - Math.exp(-input.dt * 7);

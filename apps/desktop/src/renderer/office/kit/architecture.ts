@@ -107,7 +107,7 @@ export function buildFloor(
   const ringWidth = ring.slice(1).reduce((sum, part) => sum + part, 0);
   const reach = CORNER_REACH * scale;
 
-  const breaksAlong = (size: number): number[] => {
+  const listBreaksAlong = (size: number): number[] => {
     const breaks = new Set<number>([0, size]);
     for (let at = PARQUET_SQUARE; at < size; at += PARQUET_SQUARE) breaks.add(at);
     let at = 0;
@@ -127,9 +127,9 @@ export function buildFloor(
   const classify = (x: number, z: number): FloorPart => {
     const fromX = Math.min(x, width - x);
     const fromZ = Math.min(z, depth - z);
-    const inCorner = (distance: number) =>
+    const isInCorner = (distance: number) =>
       distance > margin - reach && distance < margin + ringWidth + reach;
-    if (inCorner(fromX) && inCorner(fromZ)) return "corner";
+    if (isInCorner(fromX) && isInCorner(fromZ)) return "corner";
     const distance = Math.min(fromX, fromZ);
     if (distance > margin && distance < margin + ringWidth) {
       const into = distance - margin;
@@ -139,8 +139,8 @@ export function buildFloor(
     return parity % 2 === 0 ? "light" : "dark";
   };
 
-  const xs = breaksAlong(width);
-  const zs = breaksAlong(depth);
+  const xs = listBreaksAlong(width);
+  const zs = listBreaksAlong(depth);
   const quads: Record<FloorPart, number[]> = {
     light: [],
     dark: [],
@@ -571,16 +571,16 @@ function addWindow(parts: WallParts, window: Opening): void {
       .translate(middle, transom, 0);
     parts.frames.push(rayGeometry);
   }
-  parts.frames.push(fanArc(radius, 0.008).translate(middle, transom, 0));
-  parts.frames.push(fanArc(0.05, 0.022).translate(middle, transom, 0));
+  parts.frames.push(buildFanArc(radius, 0.008).translate(middle, transom, 0));
+  parts.frames.push(buildFanArc(0.05, 0.022).translate(middle, transom, 0));
   // Two panes back to back: each is seen from its own side only.
-  const pane = (facing: 1 | -1) => {
+  const buildPane = (facing: 1 | -1) => {
     const geometry = new PlaneGeometry(width - 0.01, top - bottom - 0.01);
     if (facing === -1) geometry.rotateY(Math.PI);
     return geometry.translate(middle, (bottom + top) / 2, facing * 0.004);
   };
-  parts.innerGlass.push(pane(-1));
-  parts.outerGlass.push(pane(1));
+  parts.innerGlass.push(buildPane(-1));
+  parts.outerGlass.push(buildPane(1));
   // The sills: a deeper one inside, a narrower one outside.
   const inside = WALL_THICKNESS / 2 + 0.05;
   parts.trim.push(placeBox(width + 0.12, 0.03, inside, middle, bottom - 0.024, -inside / 2));
@@ -589,7 +589,7 @@ function addWindow(parts: WallParts, window: Opening): void {
 }
 
 /** Returns a half ring of `radius` above the origin, in the x-y plane, made of a round bar `bar` thick. */
-function fanArc(radius: number, bar: number): BufferGeometry {
+function buildFanArc(radius: number, bar: number): BufferGeometry {
   const segments = 22;
   const parts: BufferGeometry[] = [];
   for (let index = 0; index < segments; index++) {

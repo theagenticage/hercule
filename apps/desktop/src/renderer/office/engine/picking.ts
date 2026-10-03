@@ -70,7 +70,7 @@ export function isColleagueHidden(camera: PerspectiveCamera, rig: ColleagueRig):
 }
 
 /** Returns the distance from a point to the segment between two points, all on screen. */
-function measureToSegment(
+function measureDistanceToSegment(
   px: number,
   py: number,
   ax: number,
@@ -123,7 +123,7 @@ export function createPicker(
         feet.project(camera);
         head.project(camera);
         if (feet.z >= 1 || head.z >= 1) continue;
-        const gap = measureToSegment(
+        const gap = measureDistanceToSegment(
           clientX - box.left,
           clientY - box.top,
           ((feet.x + 1) / 2) * box.width,

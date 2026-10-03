@@ -250,7 +250,7 @@ function measureClearance(solid: Uint8Array, cols: number, rows: number): Float3
 }
 
 /** Returns the rectangle a set of rectangles covers together. */
-function unionRects(rects: ReadonlyArray<Rect>): Rect {
+function computeBoundingRect(rects: ReadonlyArray<Rect>): Rect {
   let minX = Infinity;
   let minZ = Infinity;
   let maxX = -Infinity;
@@ -276,7 +276,7 @@ function rasterizeStorey(
   floors: ReadonlyArray<Rect>,
   marks: ReadonlyArray<Mark>,
 ): Storey {
-  const extent = unionRects(floors);
+  const extent = computeBoundingRect(floors);
   const originX = extent.minX - CELL_SIZE;
   const originZ = extent.minZ - CELL_SIZE;
   const cols = Math.ceil((extent.maxX - extent.minX) / CELL_SIZE) + 2;
@@ -547,7 +547,7 @@ function searchCells(
     // the string-pulled paths measured under 2% longer in total.
     return (Math.max(dx, dz) + (SQRT2 - 1) * Math.min(dx, dz)) * HEURISTIC_WEIGHT;
   };
-  const passable = (cell: number): boolean => cell === goal || isPassable(storey, cell, avoidance);
+  const canEnter = (cell: number): boolean => cell === goal || isPassable(storey, cell, avoidance);
   /**
    * Reaches `next` from `cell` by a step `length` cells long, unless an
    * earlier route was as cheap.
@@ -580,18 +580,18 @@ function searchCells(
     }
     const straight = 1;
     const diagonal = SQRT2;
-    const west = passable(cell - 1);
-    const east = passable(cell + 1);
-    const north = passable(cell - cols);
-    const south = passable(cell + cols);
+    const west = canEnter(cell - 1);
+    const east = canEnter(cell + 1);
+    const north = canEnter(cell - cols);
+    const south = canEnter(cell + cols);
     if (west) visit(cell, cell - 1, straight);
     if (east) visit(cell, cell + 1, straight);
     if (north) visit(cell, cell - cols, straight);
     if (south) visit(cell, cell + cols, straight);
-    if (north && west && passable(cell - cols - 1)) visit(cell, cell - cols - 1, diagonal);
-    if (north && east && passable(cell - cols + 1)) visit(cell, cell - cols + 1, diagonal);
-    if (south && west && passable(cell + cols - 1)) visit(cell, cell + cols - 1, diagonal);
-    if (south && east && passable(cell + cols + 1)) visit(cell, cell + cols + 1, diagonal);
+    if (north && west && canEnter(cell - cols - 1)) visit(cell, cell - cols - 1, diagonal);
+    if (north && east && canEnter(cell - cols + 1)) visit(cell, cell - cols + 1, diagonal);
+    if (south && west && canEnter(cell + cols - 1)) visit(cell, cell + cols - 1, diagonal);
+    if (south && east && canEnter(cell + cols + 1)) visit(cell, cell + cols + 1, diagonal);
   }
   return null;
 }
@@ -834,10 +834,10 @@ function buildGraph(
     if (goalStorey === undefined) return null;
     // The goal's free cell is the nearest one in the start's own area when
     // there is one, so a chair is reached from the room it stands in.
-    const sameArea = (cell: number): boolean =>
+    const isInStartArea = (cell: number): boolean =>
       goalStorey === start.storey &&
       goalStorey.component[cell] === start.storey.component[start.cell];
-    let goalCell = findNearestFreeCell(goalStorey, to.position.x, to.position.z, sameArea);
+    let goalCell = findNearestFreeCell(goalStorey, to.position.x, to.position.z, isInStartArea);
     if (goalCell === -1) {
       goalCell = findNearestFreeCell(
         goalStorey,

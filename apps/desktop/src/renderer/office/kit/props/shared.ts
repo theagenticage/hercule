@@ -164,7 +164,7 @@ export class PartList<S extends string> implements PartSink<S> {
 
   /** Adds a part on `surface`, moved by `placement` and by every `nest` around this call. */
   add(surface: S, geometry: BufferGeometry, placement: Placement = {}): void {
-    const matrix = this.currentMatrix().clone().multiply(buildPlacementMatrix(placement));
+    const matrix = this.readCurrentMatrix().clone().multiply(buildPlacementMatrix(placement));
     const part = normalizeGeometry(geometry).applyMatrix4(matrix);
     geometry.dispose();
     const list = this.parts.get(surface);
@@ -174,7 +174,7 @@ export class PartList<S extends string> implements PartSink<S> {
 
   /** Runs `build`, placing every part it adds by `placement` as well. */
   nest(placement: Placement, build: () => void): void {
-    this.stack.push(this.currentMatrix().clone().multiply(buildPlacementMatrix(placement)));
+    this.stack.push(this.readCurrentMatrix().clone().multiply(buildPlacementMatrix(placement)));
     build();
     this.stack.pop();
   }
@@ -217,7 +217,7 @@ export class PartList<S extends string> implements PartSink<S> {
     };
   }
 
-  private currentMatrix(): Matrix4 {
+  private readCurrentMatrix(): Matrix4 {
     return this.stack[this.stack.length - 1]!;
   }
 }
