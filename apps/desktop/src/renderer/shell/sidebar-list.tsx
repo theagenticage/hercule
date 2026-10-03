@@ -68,10 +68,14 @@ const NO_FOCUS: Focus = { key: null, restore: false };
 const findItemKey = (element: Element): string | null =>
   element.closest("[data-key]")?.getAttribute("data-key") ?? null;
 
-/** Returns the element that draws `item`. */
+/**
+ * Returns the element that draws `item`. While `officeOpen` is true, a
+ * thread's row opens the thread in the Office's drawer.
+ */
 const renderItem = (
   item: SidebarItem,
   onScreen: boolean,
+  officeOpen: boolean,
   onExpand: (section: SectionKey) => void,
 ): JSX.Element => {
   switch (item.kind) {
@@ -93,6 +97,7 @@ const renderItem = (
           sessionId={item.sessionId}
           title={item.title}
           question={item.question}
+          officeOpen={officeOpen}
         />
       );
     case "project-header":
@@ -131,6 +136,7 @@ const renderItem = (
           end={item.end}
           activityAt={item.activityAt}
           onScreen={onScreen}
+          officeOpen={officeOpen}
         />
       );
     case "draft-row":
@@ -151,15 +157,21 @@ const renderItem = (
 
 /**
  * Renders the thread list, or "No threads yet" when `items` is empty.
- * `onExpand` is called with a section's key when its "more" row is pressed;
- * it must keep its identity across renders, or every "more" row draws again
- * on each render.
+ *
+ * - While `officeOpen` is true, a thread's row opens the thread in the
+ *   Office's drawer instead of on its own screen. Opening or leaving the
+ *   Office draws every mounted row again, once.
+ * - `onExpand` is called with a section's key when its "more" row is
+ *   pressed. It must keep its identity across renders, or every "more" row
+ *   draws again on each render.
  */
 export function SidebarList({
   items,
+  officeOpen,
   onExpand,
 }: {
   readonly items: readonly SidebarItem[];
+  readonly officeOpen: boolean;
   readonly onExpand: (section: SectionKey) => void;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
@@ -262,7 +274,7 @@ export function SidebarList({
   for (const { index, key, start, size } of virtualItems) {
     if (start > end) drawn.push(<div key={`gap:${key}`} style={{ height: start - end }} />);
     const onScreen = visible !== null && index >= visible.startIndex && index <= visible.endIndex;
-    drawn.push(renderItem(items[index]!, onScreen, onExpand));
+    drawn.push(renderItem(items[index]!, onScreen, officeOpen, onExpand));
     end = start + size;
   }
 

@@ -32,6 +32,7 @@ const NewProjectDialog = lazy(() =>
  * The shell also owns the project picker, which File > New Thread (⌘N) and
  * the sidebar's New thread open, and the New project dialog that the
  * picker's last row opens. A project added there opens a Draft Thread in it.
+ * Go > Office (⌘⇧O) opens the Office.
  *
  * While the user is signed in, the shell sends main the threads waiting on
  * the user whenever the thread list changes, for the dock badge and the
@@ -97,14 +98,20 @@ function ShellLayout(): JSX.Element {
     "Could not update the dock badge and the threads' notifications:",
   );
 
-  // Only a signed-in user can start a thread, so only the shell listens for
-  // File > New Thread.
+  // Only a signed-in user can start a thread or open the Office, so only the
+  // shell listens for File > New Thread and Go > Office. The Office, like a
+  // thread opened from the menu, replaces whatever the user was doing, the
+  // project picker included.
   useEffect(
     () =>
       bridge.menu.onCommand((command) => {
         if (command === "newThread") openNewThread();
+        if (command === "openOffice") {
+          setDialog(null);
+          void navigate({ to: "/office" });
+        }
       }),
-    [bridge, openNewThread],
+    [bridge, navigate, openNewThread],
   );
 
   // A thread opened from the menu or a notification replaces whatever the

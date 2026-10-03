@@ -6,9 +6,10 @@
  *
  * First it stops every animation, so the waiting faces show the frame the
  * app draws, and it hides the traffic-light placeholders, where macOS draws
- * the real ones over the app's window. Then it makes exactly five edits,
- * each where the app shows what its data holds and the book shows its own
- * sample data:
+ * the real ones over the app's window. Then it makes exactly six edits. The
+ * first five are where the app shows what its data holds and the book shows
+ * its own sample data; the sixth is where the app's layout departs from the
+ * book's:
  *
  * 1. removes the Threads and Hercule tabs and the Assistants section, which
  *    v1 does not have (spec 17 §Scope);
@@ -20,13 +21,18 @@
  *    one title, and the book's shorter names exist only in its sample data;
  * 5. sets each project row's second line to the name of the model the
  *    fixture gives the thread: v1's second line is the model, where the
- *    book's is a branch and a machine.
+ *    book's is a branch and a machine;
+ * 6. draws New thread, Search and the Office in one row, as the app's
+ *    sidebar.css lays them out: the book draws New thread and Search as two
+ *    rows and has no Office button. Search becomes a 30px icon button with
+ *    the book's search icon, and the Office button follows it with the icon
+ *    of the Office row in the book's Hercule tab.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
 import { SPECIMEN_COUNTS, SPECIMEN_THREADS } from "./sidebar-fixture";
-import { findElement } from "./book-page";
+import { findElement, findElementByText } from "./book-page";
 import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
 
 /** Returns the text of the `.side-name` inside a sidebar row. Fails when the row has none. */
@@ -88,5 +94,26 @@ for (const row of side.querySelectorAll('[data-pane="threads"] .side-row')) {
   if (thread === undefined) throw new Error(`The sidebar fixture has no thread "${title}".`);
   findElement(row, ".side-meta").textContent = thread.model.name;
 }
+
+// 6. The actions row.
+const actions = findElement(side, ".side-actions") as HTMLElement;
+const searchRow = findElementByText(actions, ".nav-row", "Search⌘K");
+const search = document.createElement("button");
+search.className = "icon-btn";
+search.title = "Search ⌘K";
+search.append(findElement(searchRow, "svg"));
+const office = document.createElement("a");
+office.className = "icon-btn";
+office.title = "Office ⌘⇧O";
+// The Office row of the book's Hercule tab, which the sidebar keeps but hides, holds the icon.
+office.append(findElement(side, '[data-pane="hercule"] a[href="office.html"] > svg'));
+searchRow.replaceWith(search, office);
+Object.assign(actions.style, { flexDirection: "row", alignItems: "center", gap: "2px" });
+Object.assign((findElement(actions, ".nav-row") as HTMLElement).style, {
+  flex: "1",
+  minWidth: "0",
+});
+for (const button of [search, office])
+  Object.assign(button.style, { width: "30px", height: "30px" });
 
 await markSheetReady();
