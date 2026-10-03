@@ -198,10 +198,10 @@ export type DeviceFlowStep =
 /**
  * The reason given when a device flow ends `expired` because its code's
  * expiry passed on this machine's clock while the flow was still open. A
- * flow the controller ended carries the controller's own reason instead.
+ * flow the controller ended carries the controller's own reason instead,
+ * which reads the same.
  */
-export const DEVICE_CODE_EXPIRED =
-  "The code stopped working before it was approved. Start again for a new one.";
+export const DEVICE_CODE_EXPIRED = "the code expired before it was approved";
 
 /**
  * Decides what a screen does next in a device flow, from the flow's start,
