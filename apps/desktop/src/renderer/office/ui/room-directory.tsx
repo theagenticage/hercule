@@ -113,7 +113,7 @@ export function RoomDirectory({
       trigger={
         <>
           <ListIcon size={14} />
-          <span className="office-top-label">{room?.label ?? "Rooms"}</span>
+          {room?.label ?? "Rooms"}
           <ChevronDownIcon size={12} />
         </>
       }
