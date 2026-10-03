@@ -1,10 +1,10 @@
 /**
- * PROTOTYPE - variant A, the Bureau floor: the whole office on one storey,
- * organised by area of the code base. Each area has a room of its own,
- * grouped into wings by project, the floor inlaid in the project's colour and
- * a plaque at the door. The meta rooms (Your Office, the Case Room, the Post
- * Room, the Library...) sit along the Gallery, the main corridor, and the
- * front door opens from the street into the Lobby on the south-east corner.
+ * The Bureau floor: the whole Office on one storey. Each project has a room
+ * of its own, the floor inlaid in the project's tint and a plaque at the
+ * door, and the threads with no project share one more. The fixed rooms of
+ * the Office Map (the Triage Room, the Lounge, Your Office) sit along the
+ * Gallery, the main corridor, and the front door opens from the street into
+ * the Lobby on the south-east corner.
  *
  * The plan, the arithmetic of where each room goes, is `bureau-plan.ts`; what
  * stands in each room is `bureau-rooms.ts`; the runners' tags and the Lobby's
@@ -19,37 +19,24 @@ import {
   type BuildOfficeLayout,
   type CameraView,
   type Cutaway,
-  type NavGraph,
   type OfficeLayout,
   type RoomInfo,
   type Seat,
-  type Spot,
-  type Waypoint,
 } from "../engine/contracts";
-import { isOfficeNavGraph, type OfficeNavGraph } from "../engine/nav";
 import type { Token } from "../engine/palette";
 import {
   buildFloor,
   buildLamppost,
   buildPath,
   buildPlaque,
-  buildTubes,
   buildWall,
   WALL_THICKNESS,
-  type TubeHandle,
 } from "../kit/architecture";
 import { buildFloorLamp, buildPlant, buildRug } from "../kit/props";
-import type { ProjectKey, World } from "../world/types";
+import { BUREAU_MAP } from "../office-map";
 import { buildDeskTags, buildDirectory } from "./bureau-fleet";
 import { HALL_IDS, planFloor, type FloorPlan, type PlannedWall, type Rect } from "./bureau-plan";
 import { designRooms, measureFootprint, type Fitter, type Fittings } from "./bureau-rooms";
-
-/** The inlay each project's rooms are floored with. */
-const PROJECT_INLAY: Readonly<Record<ProjectKey, Token>> = {
-  webshop: "proj-webshop",
-  "payments-api": "proj-payments",
-  ops: "proj-ops",
-};
 
 const HALF_WALL = WALL_THICKNESS / 2;
 /** How far a lowered wall must drop before what hangs on it hides: by then the cap passes it. */
@@ -59,43 +46,8 @@ const FIELD_OF_VIEW = 28;
 const ASPECT = 1.3;
 /** How much room a framed view leaves around its box, for the bars that float over the canvas. */
 const FRAME_MARGIN = 1.12;
-/** The height the pneumatic tube runs at, over the doorways. */
-const TUBE_RUN_HEIGHT = 2.08;
 /** The pavement in front of the building. */
 const PAVEMENT_DEPTH = 2.4;
-/**
- * How far the sim slides a colleague onto a seat at the end of a walk, in
- * metres: `MAX_GLIDE` in `engine/sim.ts`. The walking check leaves this last
- * stretch out.
- */
-const SEAT_SLIDE = 1.0;
-/**
- * Where the sim stands a colleague beside a seat, as (sideways, forward)
- * metres in the seat's own frame, best tier first. This is a copy of
- * `BESIDE_SEAT` in `engine/sim.ts`, which keeps its table private; the walking
- * check reads it, so the two must change together.
- */
-const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
-  [
-    [0.85, 0.15],
-    [-0.85, 0.15],
-  ],
-  [
-    [1.0, -0.15],
-    [-1.0, -0.15],
-  ],
-  [
-    [0.75, -0.5],
-    [-0.75, -0.5],
-  ],
-  [[0, -0.75]],
-  [
-    [1.25, 0],
-    [-1.25, 0],
-  ],
-  [[0, -1.1]],
-];
-
 /** A built wall, with the ornaments hung on it, which hide while it is lowered. */
 interface BuiltWall {
   readonly planned: PlannedWall;
@@ -106,7 +58,7 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
   const root = new Group();
   root.name = "bureau";
   const directory = buildDirectory(world);
-  const { request, designs } = designRooms(world, directory);
+  const { request, designs } = designRooms(world, BUREAU_MAP, directory);
   const plan = planFloor(request);
 
   buildFloors(plan, root);
@@ -125,14 +77,11 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
     entrance: null,
     board: null,
     nowServing: null,
-    tubeStart: null,
-    tubeEnd: null,
   };
   for (const room of plan.rooms) designs.get(room.id)?.furnish(room, fitter, fittings);
   dressHalls(plan, walls, fitter);
   hangPlaques(plan, walls, fitter);
   buildStreet(plan, root);
-  const tubes = buildTubeLine(fittings, root);
 
   root.updateMatrixWorld(true);
   const tags = buildDeskTags(fittings.ownedDesks, world);
@@ -176,7 +125,7 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
         floor: 0,
         bounds,
         view: frameView(bounds, 38, 52),
-        project: room.project,
+        tint: room.tint,
       };
     });
   const building = new Box3(
@@ -196,9 +145,6 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
     entrance,
     tea: fittings.tea,
   };
-  checkWalking(world, graph, fittings.homes, spots);
-
-  let proposals = world.proposals.total;
   const layout: OfficeLayout = {
     root,
     rooms,
@@ -207,21 +153,6 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
     nav: graph,
     overview: frameView(building, 34, 54),
     bounds,
-    update: (frame) => tubes?.update(frame) ?? false,
-    sendCapsule() {
-      if (tubes === null) return 0;
-      tubes.send();
-      return tubes.rideSeconds;
-    },
-    setFlow(on) {
-      // Hiding the tube leaves its capsules riding, so a capsule sent while it
-      // is hidden still arrives on time.
-      if (tubes !== null) tubes.object.visible = on;
-    },
-    pinProposal() {
-      proposals += 1;
-      fittings.board?.setCards(proposals, world.proposals.burning);
-    },
     dispose() {
       tags.dispose();
     },
@@ -236,14 +167,14 @@ function spanRect(wall: PlannedWall, from: number, to: number, half: number): Re
     : { minX: wall.line - half, minZ: from, maxX: wall.line + half, maxZ: to };
 }
 
-/** Lays a floor under every room and corridor, inlaid in its project's colour. */
+/** Lays a floor under every room and corridor, inlaid in its project's tint. */
 function buildFloors(plan: FloorPlan, root: Group): void {
   for (const room of plan.rooms) {
     const width = room.rect.maxX - room.rect.minX;
     const depth = room.rect.maxZ - room.rect.minZ;
     const inlay: Token | undefined =
-      room.project !== null
-        ? PROJECT_INLAY[room.project]
+      room.tint !== null
+        ? (`proj-${room.tint}` as const)
         : room.kind === "hall"
           ? "room-inlay-2"
           : undefined;
@@ -386,8 +317,8 @@ function findDoors(walls: ReadonlyArray<BuiltWall>, axis: "x" | "z", line: numbe
  */
 function dressHalls(plan: FloorPlan, walls: ReadonlyArray<BuiltWall>, fitter: Fitter): void {
   const gallery = plan.rooms.find((room) => room.id === HALL_IDS.gallery)!.rect;
-  const arcade = plan.rooms.find((room) => room.id === HALL_IDS.arcade)!.rect;
-  const eastHall = plan.rooms.find((room) => room.id === HALL_IDS.eastHall)!.rect;
+  const arcade = plan.rooms.find((room) => room.id === HALL_IDS.arcade)?.rect;
+  const eastHall = plan.rooms.find((room) => room.id === HALL_IDS.eastHall)?.rect;
   const galleryZ = (gallery.minZ + gallery.maxZ) / 2;
   fitter.place(buildRug(plan.width - 3.2, 1.0), plan.width / 2 - 0.4, galleryZ, 0, true);
   const doors = findDoors(walls, "x", gallery.minZ);
@@ -397,9 +328,12 @@ function dressHalls(plan: FloorPlan, walls: ReadonlyArray<BuiltWall>, fitter: Fi
     fitter.place(buildPlant("small"), x, gallery.minZ + HALF_WALL + 0.3);
   }
   fitter.place(buildPlant("tall"), gallery.minX + 0.45, gallery.maxZ - 0.5);
-  fitter.place(buildPlant("tall"), arcade.minX + 0.45, arcade.minZ + 0.45);
-  fitter.place(buildPlant("tall"), eastHall.maxX - 0.45, eastHall.minZ + 0.45);
-  fitter.placeLamp(eastHall.minX + 0.4, eastHall.minZ + 0.45);
+  if (arcade !== undefined)
+    fitter.place(buildPlant("tall"), arcade.minX + 0.45, arcade.minZ + 0.45);
+  if (eastHall !== undefined) {
+    fitter.place(buildPlant("tall"), eastHall.maxX - 0.45, eastHall.minZ + 0.45);
+    fitter.placeLamp(eastHall.minX + 0.4, eastHall.minZ + 0.45);
+  }
 }
 
 /** Hangs a plaque with the room's name beside every door from a corridor into a room. */
@@ -441,28 +375,6 @@ function buildStreet(plan: FloorPlan, root: Group): void {
 }
 
 /**
- * Builds the pneumatic tube from its mouth in the Post Room to its end at
- * Triage's desk: up from the mouth, east along the north wall over the
- * doorways, through the wall between the two rooms, and down to the end. It
- * stands on slim posts, so it stays up when the walls are lowered.
- */
-function buildTubeLine(fittings: Fittings, root: Group): TubeHandle | null {
-  const { tubeStart, tubeEnd } = fittings;
-  if (tubeStart === null || tubeEnd === null) return null;
-  const tubes = buildTubes(
-    [
-      tubeStart,
-      new Vector3(tubeStart.x, TUBE_RUN_HEIGHT, tubeStart.z),
-      new Vector3(tubeEnd.x, TUBE_RUN_HEIGHT, tubeStart.z),
-      tubeEnd,
-    ],
-    { posts: true },
-  );
-  root.add(tubes.object);
-  return tubes;
-}
-
-/**
  * Returns the view that frames a box from the given angles: the camera backs
  * off until every corner of the box is inside the field of view.
  */
@@ -492,116 +404,4 @@ function frameView(box: Box3, azimuth: number, elevation: number): CameraView {
     );
   }
   return { target, distance: distance * FRAME_MARGIN, azimuth, elevation };
-}
-
-/**
- * Returns the places where the sim stands a colleague beside a seat: the
- * walkable places of the first tier of `BESIDE_SEAT` that has any, which is
- * where the sim's `findBesideSeat` picks from. Returns an empty list when
- * furniture or walls crowd every place.
- */
-function listBesideSeat(seat: Seat, graph: OfficeNavGraph): Vector3[] {
-  const forwardX = Math.sin(seat.facing);
-  const forwardZ = Math.cos(seat.facing);
-  for (const tier of BESIDE_SEAT) {
-    const places = tier
-      .map(
-        ([sideways, forward]) =>
-          new Vector3(
-            seat.position.x + forwardZ * sideways + forwardX * forward,
-            seat.position.y,
-            seat.position.z - forwardX * sideways + forwardZ * forward,
-          ),
-      )
-      .filter((position) => graph.isWalkable({ position, facing: 0, floor: seat.floor }));
-    if (places.length > 0) return places;
-  }
-  return [];
-}
-
-/**
- * Returns true when a path is walkable all along: every point on it, a few
- * centimetres apart, is free floor, except within `slack` metres of its end.
- * A path to a place that furniture or walls box in still ends there, through
- * them, so a path being found is not enough.
- */
-function isPathWalkable(
-  path: ReadonlyArray<Waypoint>,
-  graph: OfficeNavGraph,
-  slack: number,
-): boolean {
-  const step = 0.05;
-  const end = path[path.length - 1]?.position;
-  for (let index = 0; index + 1 < path.length; index++) {
-    const from = path[index]!;
-    const to = path[index + 1]!;
-    if (from.kind === "lift") continue;
-    const length = from.position.distanceTo(to.position);
-    for (let travelled = 0; travelled <= length; travelled += step) {
-      const position = from.position
-        .clone()
-        .lerp(to.position, length === 0 ? 0 : travelled / length);
-      if (end !== undefined && position.distanceTo(end) < slack) continue;
-      if (!graph.isWalkable({ position, facing: 0, floor: from.floor })) return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Checks that a colleague coming in at the front door can walk, without
- * crossing furniture or walls, to every home, every spot, and the places
- * beside every home where the sim stands a colleague who visits or gets up.
- * The last metre to a seat is left out, because the sim slides a colleague
- * onto a seat from that far. Logs each failure, and one line with the counts.
- */
-function checkWalking(
-  world: World,
-  graph: NavGraph,
-  homes: ReadonlyMap<string, Seat>,
-  spots: OfficeLayout["spots"],
-): void {
-  const missing = world.colleagues.filter((colleague) => !homes.has(colleague.id));
-  for (const colleague of missing) console.warn(`[bureau] no home for ${colleague.id}`);
-  if (!isOfficeNavGraph(graph)) return;
-  const canWalkTo = (spot: Spot, slack: number): boolean => {
-    const path = graph.findPath(spots.entrance, spot);
-    return path !== null && isPathWalkable(path, graph, slack);
-  };
-  const describe = (spot: Spot): string =>
-    `(${spot.position.x.toFixed(2)}, ${spot.position.z.toFixed(2)})`;
-
-  const seats: Array<readonly [string, Spot]> = [
-    ...[...homes].map(([id, seat]) => [`the home of ${id} in ${seat.roomId}`, seat] as const),
-    ["your desk", spots.yourDesk],
-    ...spots.lounge.map((seat, index) => [`lounge seat ${String(index)}`, seat] as const),
-  ];
-  const standing: Array<readonly [string, Spot]> = [
-    ["the front door", spots.entrance],
-    ...spots.queue.map((spot, index) => [`queue place ${String(index)}`, spot] as const),
-    ...(spots.caseBoard === null ? [] : [["the case board", spots.caseBoard] as const]),
-    ...(spots.records === null ? [] : [["records", spots.records] as const]),
-    ...(spots.tea === null ? [] : [["the tea trolley", spots.tea] as const]),
-  ];
-  let reached = 0;
-  for (const [name, seat] of seats) {
-    if (canWalkTo(seat, SEAT_SLIDE)) reached += 1;
-    else console.warn(`[bureau] no clear walk to ${name} at ${describe(seat)}`);
-  }
-  for (const [name, spot] of standing) {
-    if (graph.isWalkable(spot) && canWalkTo(spot, 0)) reached += 1;
-    else console.warn(`[bureau] no clear walk to ${name} at ${describe(spot)}`);
-  }
-  let besideReached = 0;
-  for (const [id, seat] of homes) {
-    const places = listBesideSeat(seat, graph).map((position) => ({ ...seat, position }));
-    if (places.length > 0 && places.every((place) => canWalkTo(place, 0))) besideReached += 1;
-    else console.warn(`[bureau] no clear walk to beside the home of ${id} at ${describe(seat)}`);
-  }
-  const total = seats.length + standing.length;
-  console.info(
-    `[bureau] ${String(world.colleagues.length)} colleagues, ${String(homes.size)} homes; ` +
-      `clear walks from the front door: ${String(reached)} of ${String(total)} seats and spots, ` +
-      `${String(besideReached)} of ${String(homes.size)} places beside the homes`,
-  );
 }

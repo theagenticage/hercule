@@ -14,6 +14,7 @@
  * looks from the south-east, down at the office.
  */
 import type { Box3, Object3D, Vector3 } from "three";
+import type { ProjectTint } from "../../screens/project-tile";
 import type { Colleague, OfficeRequest, Pose, World } from "../world/types";
 import type { Frame, Stage } from "./stage";
 
@@ -192,20 +193,13 @@ export interface CameraView {
   readonly elevation: number;
 }
 
-/** The kinds of rooms. Code rooms hold an area's colleagues; the others are the meta rooms. */
+/**
+ * The kinds of rooms. A project room seats the threads of one project, or the
+ * threads with no project; the others are the fixed rooms, the corridors, and
+ * the storeys.
+ */
 export type RoomKind =
-  | "code"
-  | "case-room"
-  | "reading-room"
-  | "library"
-  | "post-room"
-  | "dispatch"
-  | "your-office"
-  | "lounge"
-  | "records"
-  | "lobby"
-  | "hall"
-  | "floor";
+  "project" | "triage-room" | "your-office" | "lounge" | "lobby" | "hall" | "floor";
 
 /** A room the user can jump to. */
 export interface RoomInfo {
@@ -216,8 +210,8 @@ export interface RoomInfo {
   /** The room's box in world space, floor to ceiling. */
   readonly bounds: Box3;
   readonly view: CameraView;
-  /** The project whose low-chroma inlay tints the floor, when the room belongs to one. */
-  readonly project: string | null;
+  /** The project tint whose low-chroma inlay tints the floor, when the room seats a project. */
+  readonly tint: ProjectTint | null;
 }
 
 /**

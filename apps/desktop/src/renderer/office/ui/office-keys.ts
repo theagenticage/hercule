@@ -1,23 +1,32 @@
 /**
- * PROTOTYPE - the office's keyboard, and the order in which the office walks
- * through its colleagues:
+ * The Office's keyboard, and the order in which the Office walks through its
+ * colleagues:
  *
- * - Escape steps back one level: the controls panel, then the thread drawer,
- *   then the selected colleague and its card, then the room.
+ * - Escape steps back one level: the thread drawer, then the selected
+ *   colleague and its card, then the room.
  * - Tab and Shift+Tab select the next and the previous colleague waiting on
  *   the user, the longest waiting first.
  * - Enter opens the selected colleague's thread in the drawer.
- * - The full stop shows and hides the controls panel.
  *
- * The office never reads ← and →, which switch the variant (variant-bar.tsx).
- * Keys typed in a field, such as the drawer's composer, are left alone.
+ * The Office reads only keys pressed while the focus is in the Office or on
+ * nothing at all, so Tab still moves through the sidebar. Keys typed in a
+ * field, such as the drawer's composer, are left alone.
  */
 import { useEffect } from "react";
 import type { ColleagueState } from "../engine/contracts";
-import { readColleagueStates, readOffice, sendOfficeCommand, setOffice } from "../office-store";
+import {
+  applyColleagueState,
+  readColleagueStates,
+  readOffice,
+  sendOfficeCommand,
+  setOffice,
+} from "../office-store";
 import type { Colleague, Pose, World } from "../world/types";
-import { applyColleagueState } from "./answers";
-import { isTyping } from "./variant-bar";
+
+/** Returns true when `target`, the keyboard's focus, is a field, where keys type text. */
+const isTyping = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
 /**
  * Returns the colleagues of `world` in `pose` now, as `states` holds them:
@@ -70,6 +79,7 @@ export function useOfficeKeys(world: World): void {
     const onKey = (event: KeyboardEvent): void => {
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       if (isTyping(event.target)) return;
+      if (event.target !== document.body && !isInside(event.target, ".office")) return;
       const state = readOffice();
       switch (event.key) {
         case "Escape": {
@@ -77,8 +87,7 @@ export function useOfficeKeys(world: World): void {
           // dock reads Escape as Deny: neither is the office's to step back.
           if (document.querySelector(":popover-open") !== null) return;
           if (isInside(event.target, ".dock")) return;
-          if (state.controls) setOffice({ controls: false });
-          else if (state.drawer) setOffice({ drawer: false });
+          if (state.drawer) setOffice({ drawer: false });
           else if (state.selectedId !== null) setOffice({ selectedId: null });
           else if (state.roomId !== null) sendOfficeCommand({ kind: "overview" });
           else return;
@@ -87,22 +96,17 @@ export function useOfficeKeys(world: World): void {
         case "Enter": {
           // Enter on a button presses that button.
           if (isInside(event.target, "button, a, [role='switch'], .office-drawer")) return;
-          const selected = world.colleagues.find((each) => each.id === state.selectedId);
-          if (state.drawer || selected?.role !== "session") return;
+          if (state.drawer || state.selectedId === null) return;
           setOffice({ drawer: true });
           break;
         }
         case "Tab": {
-          // Tab keeps moving the focus inside the drawer, a menu and the controls.
-          if (isInside(event.target, ".office-drawer, .pop, .office-controls")) return;
+          // Tab keeps moving the focus inside the drawer and a menu.
+          if (isInside(event.target, ".office-drawer, .pop")) return;
           const waiting = listColleaguesInPose(world, readColleagueStates(), "waiting");
           const nextId = findNextColleagueId(waiting, state.selectedId, event.shiftKey ? -1 : 1);
           if (nextId === null) return;
           sendOfficeCommand({ kind: "focus-colleague", colleagueId: nextId });
-          break;
-        }
-        case ".": {
-          setOffice({ controls: !state.controls });
           break;
         }
         default:

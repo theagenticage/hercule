@@ -426,11 +426,10 @@ function drawSign(canvas: HTMLCanvasElement, count: number): void {
     ? readColor("you").getStyle()
     : readColor("room-paper", { dl: -0.25 }).getStyle();
   context.clearRect(0, 0, canvas.width, canvas.height);
-  const deco = (size: number) => `${size}px Limelight, "Bricolage Grotesque", serif`;
   context.textAlign = "center";
   context.textBaseline = "alphabetic";
   context.fillStyle = brass;
-  context.font = deco(64);
+  context.font = '640 64px "Bricolage Grotesque", sans-serif';
   context.letterSpacing = "10px";
   context.fillText("NOW SERVING", canvas.width / 2, 96);
   // Two thin rules either side of the numeral, level with its middle.
@@ -438,7 +437,7 @@ function drawSign(canvas: HTMLCanvasElement, count: number): void {
   context.fillRect(canvas.width - 380, 299, 230, 5);
   context.letterSpacing = "0px";
   context.fillStyle = numeral;
-  context.font = deco(210);
+  context.font = '210px Limelight, "Bricolage Grotesque", serif';
   context.fillText(String(Math.min(99, Math.max(0, count))), canvas.width / 2, 372);
 }
 
@@ -455,9 +454,10 @@ export interface NowServingHandle {
  * deep. The count shows in marigold while anyone waits, and in quiet paper
  * when no one does.
  *
- * The lettering is in Limelight. The sign draws at once with whatever font is
- * ready and draws again when Limelight has loaded; frames are drawn on demand,
- * so the caller should request a frame after `document.fonts.ready`.
+ * The words are in the UI face and the numeral in Limelight. The sign draws
+ * at once with whatever font is ready and draws again when Limelight has
+ * loaded; frames are drawn on demand, so the caller should request a frame
+ * after `document.fonts.ready`.
  */
 export function buildNowServing(): NowServingHandle {
   const object = new Group();

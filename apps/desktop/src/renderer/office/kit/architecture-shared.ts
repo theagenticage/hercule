@@ -315,6 +315,16 @@ export function decoFont(pixels: number): string {
   return `${String(pixels)}px Limelight`;
 }
 
+/**
+ * Returns the UI face's CSS shorthand at a pixel size, in the app's bold
+ * weight (`--w-bold`). Room names
+ * are drawn in the UI face, like every name in the app; the display face is
+ * kept for the wordmark and numerals.
+ */
+export function uiFont(pixels: number): string {
+  return `640 ${String(pixels)}px "Bricolage Grotesque"`;
+}
+
 /** A canvas texture that redraws itself when the theme changes and when the display face arrives. */
 export interface CanvasLabel {
   readonly texture: CanvasTexture;
@@ -335,13 +345,14 @@ function redrawLabels(): void {
 
 /**
  * Builds a canvas texture `width` by `height` pixels and paints it with
- * `draw`. `draw` runs again after every palette repaint and once more when
- * the display face has loaded, so text drawn in Limelight never stays in a
- * fallback face. Returns the texture and its canvas.
+ * `draw`, which writes in `font`, a CSS font shorthand. `draw` runs again
+ * after every palette repaint and once more when `font` has loaded, so the
+ * text never stays in a fallback face. Returns the texture and its canvas.
  */
 export function buildCanvasLabel(
   width: number,
   height: number,
+  font: string,
   draw: (context: CanvasRenderingContext2D) => void,
 ): CanvasLabel {
   const canvas = document.createElement("canvas");
@@ -363,8 +374,8 @@ export function buildCanvasLabel(
   // The texture holds the owner, so the label lives exactly as long as its texture.
   texture.userData.owner = owner;
   subscribeKitRepaint();
-  if (!isDecoFontReady()) {
-    void waitForDecoFont().then(() => {
+  if (!document.fonts.check(font)) {
+    void document.fonts.load(font).then(() => {
       redraw();
       // Nothing may be moving, so ask for a frame to show the redrawn text.
       window.office?.stage.requestRender();

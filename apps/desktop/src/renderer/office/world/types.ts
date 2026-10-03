@@ -1,62 +1,21 @@
 /**
- * PROTOTYPE - the world the 3D office draws: who works here, what each one is
- * doing, and on which machine. Every variant reads the same world, so the
- * variants differ in layout and navigation, never in data.
+ * The world the 3D Office draws: who works here, what each one is doing,
+ * in which room, and on which machine. `build-world.ts` builds it from the
+ * user's threads.
  */
+import type { OpenRequest } from "@hercule/contract";
 import type { Accessory, Hue, Shape } from "../../faces/look";
+import type { ProjectTint } from "../../screens/project-tile";
 
 /** What a colleague is doing, drawn as a pose. The eight poses of the Bureau book. */
 export type Pose =
   "working" | "waiting" | "idle" | "asleep" | "paused" | "failed" | "done" | "away";
 
-/** The headwear only the three assistants wear. */
+/** The headwear only assistants wear. */
 export type Headwear = "cloche" | "headset" | "beret";
-
-/** The three projects of the fixture world, plus the extra ones the larger fleets add. */
-export type ProjectKey = "webshop" | "payments-api" | "ops";
 
 /** Whether a colleague is a thread's agent, an assistant, or the Triage workflow. */
 export type Role = "session" | "assistant" | "triage";
-
-/**
- * Where a colleague's work belongs: an area of a project's code, or a kind of
- * work that is not about one area (the meta rooms).
- */
-export type Area =
-  // webshop
-  | "checkout"
-  | "cart"
-  // payments-api
-  | "webhooks"
-  | "payouts"
-  // ops
-  | "infra"
-  | "dashboards"
-  | "secrets"
-  // meta rooms
-  | "research"
-  | "review"
-  | "release"
-  | "correspondence"
-  | "triage"
-  | "assistants";
-
-/** The project each code area belongs to. Meta areas belong to none. */
-export const AREA_PROJECT: Readonly<Record<Area, ProjectKey | null>> = {
-  checkout: "webshop",
-  cart: "webshop",
-  webhooks: "payments-api",
-  payouts: "payments-api",
-  infra: "ops",
-  dashboards: "ops",
-  secrets: "ops",
-  research: null,
-  review: null,
-  release: null,
-  correspondence: null,
-  triage: null,
-  assistants: null,
-};
 
 /** What a colleague looks like: its crew hue, body shape and what it wears. */
 export interface CrewLook {
@@ -70,7 +29,7 @@ export interface CrewLook {
 export interface OfficeRequest {
   /** A command approval shows the command; a question shows its text. */
   readonly kind: "command" | "question";
-  /** The short form, as the waiting row and the speech bubble show it: "Run git push?". */
+  /** The short form, as the name tag's speech bubble shows it: "Run git push?". */
   readonly short: string;
   /** The full prompt: the command, or the question. */
   readonly prompt: string;
@@ -80,29 +39,45 @@ export interface OfficeRequest {
   readonly waitingMinutes: number;
 }
 
-/** One colleague: a live session's agent, an assistant, or Triage. */
+/** One colleague: a thread's agent. */
 export interface Colleague {
+  /** The session's id. */
   readonly id: string;
-  /** The short name the office's tag shows: "Refactor cart totals", "Ada". */
+  /** The short name the Office's tag shows. */
   readonly name: string;
   /** The thread's full title. */
   readonly title: string;
   readonly role: Role;
   readonly look: CrewLook;
   readonly pose: Pose;
-  /** What the tag shows after the name: "22m", "idle 20m", "heartbeat", "paused". */
+  /** What the tag shows after the name: "typing", "idle". */
   readonly stateLabel: string;
-  readonly project: ProjectKey | null;
-  readonly area: Area;
-  /** The runner the session runs on; null for Triage and Juno, which hold no session. */
+  /** The id of the project the thread belongs to, or null. */
+  readonly project: string | null;
+  /** The runner the session runs on, or null before it is placed. */
   readonly runnerId: string | null;
-  /** The model's display name, or null for one that runs none. */
+  /** The model's display name, or null when it is not known. */
   readonly model: string | null;
-  /** What the colleague did last, oldest first: one line each, as a status ticker shows them. */
+  /** What the colleague did last, oldest first: one line each. */
   readonly activity: ReadonlyArray<string>;
+  /** The request as the Office's tag and queue show it, or null. */
   readonly request: OfficeRequest | null;
-  /** The id of the thread fixture whose transcript the thread drawer shows, when one exists. */
-  readonly threadId: string | null;
+  /** The thread's open Request, which the dossier card answers, or null. */
+  readonly openRequest: OpenRequest | null;
+}
+
+/** One room of threads: a project's, or the one the threads with no project share. */
+export interface ThreadRoom {
+  /** The room's id in the Office, unique among its rooms. */
+  readonly id: string;
+  /** The project's id, or null for the threads with no project. */
+  readonly projectId: string | null;
+  /** The name on the plaque: the project's name, or "No project". */
+  readonly name: string;
+  /** The project's tint, which inlays the room's floor, or null for no project. */
+  readonly tint: ProjectTint | null;
+  /** The ids of the colleagues with a desk in the room, in desk order. */
+  readonly colleagueIds: ReadonlyArray<string>;
 }
 
 /** One machine of the fleet. */
@@ -114,18 +89,10 @@ export interface RunnerInfo {
   readonly local: boolean;
 }
 
-/** Everything the office draws. */
+/** Everything the Office draws. */
 export interface World {
   readonly colleagues: ReadonlyArray<Colleague>;
   readonly runners: ReadonlyArray<RunnerInfo>;
-  readonly projects: ReadonlyArray<ProjectKey>;
-  /** Proposals pinned on the case board, and how many of them burn. */
-  readonly proposals: { readonly total: number; readonly burning: number };
-  /** Open Tasks in the filing cabinets. */
-  readonly openTasks: number;
-  /** When Triage last ran and next runs, as the tag shows them. */
-  readonly triage: { readonly lastRun: string; readonly nextRun: string };
+  /** The thread rooms, in the order they fill the wings. */
+  readonly rooms: ReadonlyArray<ThreadRoom>;
 }
-
-/** The fleet sizes the controls offer. */
-export type FleetSize = "today" | "growing" | "ten-x";

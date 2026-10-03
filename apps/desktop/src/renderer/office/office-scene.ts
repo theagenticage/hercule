@@ -1,8 +1,9 @@
 /**
- * PROTOTYPE - the director: builds the 3D office into a container and keeps
- * it in step with the office's state. It owns the stage, the camera, and the
- * one office the current variant builds; a change of variant or character
- * style tears the office down and builds the new one in place.
+ * The director: builds the 3D Office into a container and keeps it in step
+ * with the Office's state and the user's threads. It owns the stage, the
+ * camera, and the one office built from the current world; a new world tears
+ * the office down and builds the new one in place, with the camera where it
+ * was.
  */
 import { Vector3, type Mesh, type Object3D } from "three";
 import { createCameraRig, placeCamera } from "./engine/camera-rig";
@@ -21,6 +22,7 @@ import { buildSim } from "./engine/sim";
 import { Stage } from "./engine/stage";
 import { buildColleagueRig, setAmbientMotion } from "./kit/character";
 import {
+  OFFICE_SETTINGS,
   onOfficeCommand,
   publishColleagueStates,
   readOffice,
@@ -28,10 +30,10 @@ import {
   subscribeOffice,
   type OfficeState,
 } from "./office-store";
-import { LAYOUTS } from "./variants";
+import { buildBureau } from "./variants/bureau";
 import type { World } from "./world/types";
 
-/** One built office: what a change of variant or style replaces. */
+/** One built office: what a new world replaces. */
 interface Built {
   readonly layout: OfficeLayout;
   readonly rigs: ReadonlyMap<string, ColleagueRig>;
@@ -49,6 +51,8 @@ export interface OfficeScene {
   readLayout(): OfficeLayout;
   /** Returns the view that frames one colleague. */
   buildColleagueView(id: string): CameraView | null;
+  /** Rebuilds the office for a new world, unless it draws the same as the current one. */
+  setWorld(world: World): void;
   dispose(): void;
 }
 
@@ -72,36 +76,54 @@ function findLamps(root: Object3D): ReadonlyArray<Lamp> {
   return lamps;
 }
 
+/**
+ * Returns a key that changes whenever `world` would draw differently: a
+ * colleague, room, desk, pose, label or request changed. Two worlds with the
+ * same key build the same office.
+ */
+function computeWorldKey(world: World): string {
+  return JSON.stringify([
+    world.rooms.map((room) => [room.id, room.name, room.tint, room.colleagueIds]),
+    world.colleagues.map((colleague) => [
+      colleague.id,
+      colleague.name,
+      colleague.pose,
+      colleague.stateLabel,
+      colleague.request?.prompt ?? null,
+      colleague.request?.answers ?? null,
+    ]),
+    world.runners.map((runner) => [runner.id, runner.name, runner.slots]),
+  ]);
+}
+
 /** Builds the office for `world` into `container`, and returns its handle. */
-export function mountOfficeScene(container: HTMLElement, world: World): OfficeScene {
+export function mountOfficeScene(container: HTMLElement, initialWorld: World): OfficeScene {
   const stage = new Stage(container);
   const camera = createCameraRig(stage.camera, stage.renderer.domElement, () =>
     stage.requestRender(),
   );
   let state = readOffice();
+  let world = initialWorld;
+  let worldKey = computeWorldKey(world);
   let built: Built;
-  // The URL may open the office at night or at low quality; later changes arrive through the store.
-  stage.setTimeOfDay(state.timeOfDay);
-  stage.setQuality(state.quality);
 
   const build = (): Built => {
-    const layout = LAYOUTS[state.variant]({ world, nav: createNavBuilder() });
+    const layout = buildBureau({ world, nav: createNavBuilder() });
     stage.scene.add(layout.root);
     const rigs = new Map<string, ColleagueRig>();
     for (const colleague of world.colleagues) {
-      const rig = buildColleagueRig(colleague, state.style);
+      const rig = buildColleagueRig(colleague, OFFICE_SETTINGS.style);
       rigs.set(colleague.id, rig);
       stage.scene.add(rig.object);
     }
-    layout.setFlow?.(state.flow);
     const sim = buildSim({ world, layout, rigs, stage });
-    sim.setLiveliness(state.liveliness);
+    sim.setLiveliness(OFFICE_SETTINGS.liveliness);
     // The panels and the sidebar read the colleagues' states from the store,
     // so they follow whichever office is built now.
     publishColleagueStates(sim.readStates());
     sim.subscribeStates(() => publishColleagueStates(sim.readStates()));
     const overlay = createOverlay(container, stage.camera, rigs, layout.rooms);
-    overlay.setMode(state.tags);
+    overlay.setMode(OFFICE_SETTINGS.tags);
     stage.setShadowBounds(layout.bounds);
     camera.setBounds(layout.bounds);
     camera.trackWalls(layout.root);
@@ -116,7 +138,7 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     };
   };
 
-  /** Lights the room lamps in the evening and at night, and puts them out by day. */
+  /** Lights the room lamps in the evening and at night, and puts them out by day. The theme decides which. */
   const switchLamps = (): void => {
     const time = stage.resolveTimeOfDay();
     const on = time === "evening" || time === "night";
@@ -188,7 +210,7 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     }
   };
 
-  setAmbientMotion(state.liveliness > 0);
+  setAmbientMotion(OFFICE_SETTINGS.liveliness > 0);
   built = build();
   switchLamps();
   focusFloor();
@@ -224,29 +246,6 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
   const stopState = subscribeOffice(() => {
     const previous = state;
     state = readOffice();
-    if (previous.variant !== state.variant || previous.style !== state.style) {
-      teardown(built);
-      built = build();
-      switchLamps();
-      focusFloor();
-      applySelection(null);
-      camera.flyTo(decideView());
-    }
-    if (previous.theme !== state.theme) {
-      stage.applyTheme();
-      switchLamps();
-    }
-    if (previous.timeOfDay !== state.timeOfDay) {
-      stage.setTimeOfDay(state.timeOfDay);
-      switchLamps();
-    }
-    if (previous.quality !== state.quality) stage.setQuality(state.quality);
-    if (previous.liveliness !== state.liveliness) {
-      setAmbientMotion(state.liveliness > 0);
-      built.sim.setLiveliness(state.liveliness);
-    }
-    if (previous.tags !== state.tags) built.overlay.setMode(state.tags);
-    if (previous.flow !== state.flow) built.layout.setFlow?.(state.flow);
     applySelection(previous);
     if (previous.selectedId !== state.selectedId || previous.roomId !== state.roomId) {
       focusFloor();
@@ -255,14 +254,16 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     stage.requestRender();
   });
 
+  // The Office's light follows the app's theme: the lamps go on with the dark theme.
+  const themeObserver = new MutationObserver(() => {
+    stage.applyTheme();
+    switchLamps();
+    stage.requestRender();
+  });
+  themeObserver.observe(document.documentElement, { attributeFilter: ["data-theme"] });
+
   const stopCommands = onOfficeCommand((command) => {
     switch (command.kind) {
-      case "answer":
-        built.sim.answer(command.colleagueId, command.answer);
-        break;
-      case "simulate":
-        built.sim.trigger(command.event);
-        break;
       case "overview":
         setOffice({ selectedId: null, roomId: null, drawer: false });
         camera.flyTo(built.layout.overview);
@@ -308,6 +309,18 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     stage,
     readLayout: () => built.layout,
     buildColleagueView,
+    setWorld(next) {
+      const nextKey = computeWorldKey(next);
+      if (nextKey === worldKey) return;
+      world = next;
+      worldKey = nextKey;
+      teardown(built);
+      built = build();
+      switchLamps();
+      focusFloor();
+      applySelection(null);
+      stage.requestRender();
+    },
     dispose() {
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerdown", onPointerDown);
@@ -316,6 +329,7 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
       stopFrames();
       stopState();
       stopCommands();
+      themeObserver.disconnect();
       teardown(built);
       camera.dispose();
       stage.dispose();

@@ -15,6 +15,7 @@ import { Route as FirstRunRouteRouteImport } from './routes/first-run/route'
 import { Route as ConnectedShellRouteImport } from './routes/_connected/_shell'
 import { Route as ConnectedLoginRouteImport } from './routes/_connected/login'
 import { Route as ConnectedShellIndexRouteImport } from './routes/_connected/_shell/index'
+import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_shell/office'
 import { Route as ConnectedShellThreadsSessionIdRouteImport } from './routes/_connected/_shell/threads/$sessionId'
 
 const ConnectedRoute = ConnectedRouteImport.update({
@@ -45,6 +46,11 @@ const ConnectedShellIndexRoute = ConnectedShellIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ConnectedShellRoute,
 } as any)
+const ConnectedShellOfficeRoute = ConnectedShellOfficeRouteImport.update({
+  id: '/office',
+  path: '/office',
+  getParentRoute: () => ConnectedShellRoute,
+} as any)
 const ConnectedShellThreadsSessionIdRoute =
   ConnectedShellThreadsSessionIdRouteImport.update({
     id: '/threads/$sessionId',
@@ -57,6 +63,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/office': typeof ConnectedShellOfficeRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
 }
 export interface FileRoutesByTo {
@@ -64,6 +71,7 @@ export interface FileRoutesByTo {
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/office': typeof ConnectedShellOfficeRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
 }
 export interface FileRoutesById {
@@ -73,14 +81,27 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/_connected/_shell': typeof ConnectedShellRouteWithChildren
   '/_connected/login': typeof ConnectedLoginRoute
+  '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
   '/_connected/_shell/': typeof ConnectedShellIndexRoute
   '/_connected/_shell/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/first-run' | '/' | '/connect' | '/login' | '/threads/$sessionId'
+  fullPaths:
+    | '/first-run'
+    | '/'
+    | '/connect'
+    | '/login'
+    | '/office'
+    | '/threads/$sessionId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/first-run' | '/' | '/connect' | '/login' | '/threads/$sessionId'
+  to:
+    | '/first-run'
+    | '/'
+    | '/connect'
+    | '/login'
+    | '/office'
+    | '/threads/$sessionId'
   id:
     | '__root__'
     | '/first-run'
@@ -88,6 +109,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/_connected/_shell'
     | '/_connected/login'
+    | '/_connected/_shell/office'
     | '/_connected/_shell/'
     | '/_connected/_shell/threads/$sessionId'
   fileRoutesById: FileRoutesById
@@ -142,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellIndexRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/office': {
+      id: '/_connected/_shell/office'
+      path: '/office'
+      fullPath: '/office'
+      preLoaderRoute: typeof ConnectedShellOfficeRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
     '/_connected/_shell/threads/$sessionId': {
       id: '/_connected/_shell/threads/$sessionId'
       path: '/threads/$sessionId'
@@ -153,11 +182,13 @@ declare module '@tanstack/react-router' {
 }
 
 interface ConnectedShellRouteChildren {
+  ConnectedShellOfficeRoute: typeof ConnectedShellOfficeRoute
   ConnectedShellIndexRoute: typeof ConnectedShellIndexRoute
   ConnectedShellThreadsSessionIdRoute: typeof ConnectedShellThreadsSessionIdRoute
 }
 
 const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
+  ConnectedShellOfficeRoute: ConnectedShellOfficeRoute,
   ConnectedShellIndexRoute: ConnectedShellIndexRoute,
   ConnectedShellThreadsSessionIdRoute: ConnectedShellThreadsSessionIdRoute,
 }

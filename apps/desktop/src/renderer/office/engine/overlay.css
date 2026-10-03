@@ -138,7 +138,8 @@
 
 .office-room-label__name {
   padding-right: 2px;
-  font-family: var(--font-deco);
+  font-family: var(--font-ui);
+  font-weight: var(--w-bold);
   font-size: var(--t-12);
   letter-spacing: 0.04em;
   line-height: 18px;

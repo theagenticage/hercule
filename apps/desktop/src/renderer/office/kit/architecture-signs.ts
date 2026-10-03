@@ -1,6 +1,6 @@
 /**
- * PROTOTYPE - the office's lettering: brass-framed plaques with a name in the
- * Deco display face, and the large wordmark over an entrance.
+ * The Office's lettering: brass-framed plaques with a room's name in the UI
+ * face, and the large wordmark over an entrance in the Deco display face.
  *
  * A plaque's text is drawn on a canvas texture that redraws when the theme
  * changes and when the face has loaded. A plaque is sized from an estimate of
@@ -29,6 +29,7 @@ import {
   isDecoFontReady,
   placeBox,
   readCssColor,
+  uiFont,
   waitForDecoFont,
   type PaintedParts,
 } from "./architecture-shared";
@@ -49,12 +50,11 @@ const PLAQUE_RIM = 0.012;
 const PLAQUE_PIXELS_PER_METRE = 1600;
 
 /**
- * Returns the estimated advance of `text` in the display face, in ems,
- * without the tracking. The widths are Limelight's, averaged per kind of
- * character and measured once, so a sign is the same size before and after
- * the face loads.
+ * Returns the estimated advance of `text` in the plaque's face, in ems,
+ * without the tracking. The widths are averaged per kind of character, so a
+ * plaque is the same size before and after the face loads.
  */
-function estimateDecoAdvance(text: string): number {
+function estimatePlaqueAdvance(text: string): number {
   let advance = 0;
   for (const character of text) {
     if (character === " ") advance += 0.26;
@@ -79,12 +79,12 @@ export function measurePlaque(text: string, options: { readonly hue?: Hue } = {}
 function plaqueFaceWidth(text: string, hasChip: boolean): number {
   const characters = [...text].length;
   const textWidth =
-    (estimateDecoAdvance(text) + PLAQUE_TRACKING * Math.max(0, characters - 1)) * PLAQUE_EM;
+    (estimatePlaqueAdvance(text) + PLAQUE_TRACKING * Math.max(0, characters - 1)) * PLAQUE_EM;
   return textWidth + 2 * PLAQUE_PADDING + (hasChip ? PLAQUE_CHIP : 0);
 }
 
 /**
- * Builds a brass-framed plaque with `text` in the display face, in capitals,
+ * Builds a brass-framed plaque with `text` in the UI face, in capitals,
  * cream on a dark enamel face. With `hue`, a small enamel chip in the crew's
  * colour sits at the left end. The frame and the chip are one mesh and the
  * face another.
@@ -131,7 +131,8 @@ export function buildPlaque(text: string, options: { readonly hue?: Hue } = {}):
   const scale = pixelWidth / faceWidth;
   const textLeft = (PLAQUE_PADDING + (hasChip ? PLAQUE_CHIP : 0)) * scale;
   const textRight = pixelWidth - PLAQUE_PADDING * scale;
-  const { texture } = buildCanvasLabel(pixelWidth, pixelHeight, (context) => {
+  const font = uiFont(Math.round(PLAQUE_EM * scale));
+  const { texture } = buildCanvasLabel(pixelWidth, pixelHeight, font, (context) => {
     context.fillStyle = readCssColor("room-inlay-2", -0.06);
     context.fillRect(0, 0, pixelWidth, pixelHeight);
     // A thin brass line inset from the rim, the plaque's Deco double frame.
@@ -139,7 +140,7 @@ export function buildPlaque(text: string, options: { readonly hue?: Hue } = {}):
     context.strokeStyle = readCssColor("brass");
     context.lineWidth = Math.max(2, pixelHeight * 0.018);
     context.strokeRect(inset, inset, pixelWidth - 2 * inset, pixelHeight - 2 * inset);
-    context.font = decoFont(Math.round(PLAQUE_EM * scale));
+    context.font = font;
     context.letterSpacing = `${String(Math.round(PLAQUE_TRACKING * PLAQUE_EM * scale))}px`;
     context.fillStyle = readCssColor("room-paper", 0.02);
     context.textAlign = "center";

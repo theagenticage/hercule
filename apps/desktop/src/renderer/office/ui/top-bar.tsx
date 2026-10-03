@@ -1,35 +1,27 @@
 /**
- * PROTOTYPE - the office's top bar: slim glass pills floating over the top of
- * the office, as the Bureau book's office header draws them.
+ * The Office's top bar: slim glass pills floating over the top of the
+ * Office, as the Bureau book's office header draws them.
  *
- * - The office's pill: its title, Overview, and the room directory.
- * - Event flow: a switch for the pneumatic tubes that carry events to Triage.
+ * - The Office's pill: its title, Overview, and the room directory.
  * - The counts of who is doing what. A click on a count selects the next
  *   colleague in that state, so repeated clicks walk through all of them.
- * - Simulate: a menu that makes something happen in the office.
- * - The button that shows and hides the controls panel.
  *
  * While the thread drawer is open the bar has less room, so the counts drop
- * their words, Simulate drops its name, and Event flow hides; the controls
- * panel still has it.
+ * their words.
  */
 import { useSyncExternalStore, type JSX } from "react";
-import { SlidersIcon } from "../../icons";
-import type { SimEvent } from "../engine/contracts";
 import type { OfficeScene } from "../office-scene";
 import {
   readColleagueStates,
   readOffice,
   sendOfficeCommand,
-  setOffice,
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
 import type { Pose, World } from "../world/types";
 import { PoseMark } from "./dossier-card";
-import { BoltIcon, ChevronDownIcon, OfficeIcon } from "./office-icons";
+import { OfficeIcon } from "../../icons/office";
 import { findNextColleagueId, listColleaguesInPose } from "./office-keys";
-import { OfficeMenu } from "./office-menu";
 import { RoomDirectory } from "./room-directory";
 
 /**
@@ -46,24 +38,6 @@ const COUNTS: ReadonlyArray<{ readonly poses: ReadonlyArray<Pose>; readonly word
   { poses: ["failed"], words: "failed" },
   { poses: ["idle", "done"], words: "idle" },
   { poses: ["asleep", "away"], words: "asleep" },
-];
-
-/** The Simulate menu's items: one per kind of event the sim can play. */
-const SIMULATIONS: ReadonlyArray<{
-  readonly event: SimEvent;
-  readonly name: string;
-  readonly description: string;
-}> = [
-  { event: { kind: "ask" }, name: "Ask", description: "A working colleague asks you something" },
-  { event: { kind: "visit" }, name: "Visit", description: "A colleague walks over to ask another" },
-  { event: { kind: "arrive" }, name: "Arrive", description: "A new thread starts at a free desk" },
-  { event: { kind: "fail" }, name: "Fail", description: "A colleague's turn fails" },
-  { event: { kind: "finish" }, name: "Finish", description: "A colleague's turn finishes" },
-  {
-    event: { kind: "event" },
-    name: "Event",
-    description: "An event runs through the tubes to Triage",
-  },
 ];
 
 /** Renders the counts of who is doing what. Poses nobody is in are left out. */
@@ -98,49 +72,6 @@ function PoseCounts({ world }: { readonly world: World }): JSX.Element {
   );
 }
 
-/** Renders the Simulate menu's trigger and its menu. */
-function SimulateMenu(): JSX.Element {
-  return (
-    <OfficeMenu
-      label="Simulate"
-      align="end"
-      triggerClassName="pill-btn"
-      triggerLabel="Simulate"
-      trigger={
-        <>
-          <BoltIcon size={14} />
-          <span className="office-top-label">Simulate</span>
-          <ChevronDownIcon size={12} />
-        </>
-      }
-    >
-      {() => (
-        <>
-          <div className="pop-h">
-            <b>Simulate</b>
-            <span>What happens next</span>
-          </div>
-          <div className="pop-sec">
-            {SIMULATIONS.map(({ event, name, description }) => (
-              <button
-                key={event.kind}
-                type="button"
-                className="line"
-                onClick={() => sendOfficeCommand({ kind: "simulate", event })}
-              >
-                <span className="grow">
-                  <b>{name}</b>
-                  <small>{description}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </OfficeMenu>
-  );
-}
-
 /** Renders the top bar over the office of `world`. */
 export function TopBar({
   world,
@@ -166,35 +97,8 @@ export function TopBar({
         </button>
         <RoomDirectory scene={scene} />
       </nav>
-      <span className="pill office-flow-pill">
-        <button
-          type="button"
-          className="pill-btn flow-btn"
-          role="switch"
-          aria-checked={state.flow}
-          onClick={() => setOffice({ flow: !state.flow })}
-        >
-          Event flow
-          <span className="toggle" aria-hidden="true" />
-        </button>
-      </span>
       <span className="spacer" />
       <PoseCounts world={world} />
-      <span className="pill">
-        <SimulateMenu />
-        <span className="pill-sep" />
-        <button
-          type="button"
-          className="pill-btn pill-btn--icon"
-          aria-label="Controls"
-          aria-pressed={state.controls}
-          aria-keyshortcuts="."
-          title="Controls (.)"
-          onClick={() => setOffice({ controls: !state.controls })}
-        >
-          <SlidersIcon size={16} />
-        </button>
-      </span>
     </header>
   );
 }

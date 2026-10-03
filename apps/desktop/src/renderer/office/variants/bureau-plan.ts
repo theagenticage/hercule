@@ -1,24 +1,24 @@
 /**
- * PROTOTYPE - the Bureau floor's plan: where every room and corridor sits,
- * and where the walls, doors and windows between them go. Pure arithmetic on
- * rectangles; nothing here builds a mesh.
+ * The Bureau floor's plan: where every room and corridor sits, and where the
+ * walls, doors and windows between them go. Pure arithmetic on rectangles;
+ * nothing here builds a mesh. This is the geometry of the Office Map's
+ * `gallery-wings` growth rule.
  *
  * The storey reads, from north to south:
  *
- * - the code rooms, one row along the Arcade's north side, and a second row
- *   along its south side once the fleet is large enough to need it;
- * - the Arcade, the corridor of the code wings;
- * - the back row of meta rooms (Dispatch, the Library, the Reading Room...);
+ * - the project rooms, in one row north of the Gallery, or in two rows either
+ *   side of the Arcade once there are enough of them to need it;
+ * - the back row, which the Bureau leaves empty;
  * - the Gallery, the main corridor, from the west wall to the east wall;
- * - the front row along the street (the Post Room, the Case Room, the
- *   Lounge, Your Office), ending in the Lobby on the south-east corner.
+ * - the front row of fixed rooms along the street, ending in the Lobby on the
+ *   south-east corner.
  *
  * The East Hall runs along the east facade from the Gallery up to the
- * Arcade, so a colleague walks in through the Lobby, up the East Hall, and
- * along a corridor to its room.
+ * project rooms, so a colleague walks in through the Lobby, up the East
+ * Hall, and along a corridor to its room.
  */
 import type { RoomKind } from "../engine/contracts";
-import type { ProjectKey } from "../world/types";
+import type { ProjectTint } from "../../screens/project-tile";
 
 /** A rectangle on the floor, in world metres. North is -z. */
 export interface Rect {
@@ -38,7 +38,8 @@ export interface RoomRequest {
   readonly id: string;
   readonly label: string;
   readonly kind: RoomKind;
-  readonly project: ProjectKey | null;
+  /** The project tint the floor is inlaid with, or null. */
+  readonly tint: ProjectTint | null;
   /** The width (x) and depth (z) the furniture needs, before the plan stretches the room. */
   readonly width: number;
   readonly depth: number;
@@ -81,18 +82,10 @@ export interface PlannedWall {
   readonly windows: boolean;
 }
 
-/** A project's stretch of the code rows, west to east: its wing. */
-export interface Wing {
-  readonly project: ProjectKey;
-  readonly minX: number;
-  readonly maxX: number;
-}
-
 export interface FloorPlan {
   /** Every room and corridor. */
   readonly rooms: ReadonlyArray<PlannedRoom>;
   readonly walls: ReadonlyArray<PlannedWall>;
-  readonly wings: ReadonlyArray<Wing>;
   readonly width: number;
   readonly depth: number;
   /** The front door in the Lobby's south wall: its centre's x, and its width. */
@@ -101,11 +94,8 @@ export interface FloorPlan {
 
 /** What the plan is asked to fit. */
 export interface PlanRequest {
-  /** The code rooms, one group per project, west to east. */
-  readonly code: ReadonlyArray<{
-    readonly project: ProjectKey;
-    readonly rooms: ReadonlyArray<RoomRequest>;
-  }>;
+  /** The project rooms, west to east. */
+  readonly code: ReadonlyArray<RoomRequest>;
   /** The back row, west to east. */
   readonly back: ReadonlyArray<RoomRequest>;
   /** The front row, west to east; the last one is the Lobby, which takes the south-east corner. */
@@ -137,7 +127,7 @@ function sumWidths(rooms: ReadonlyArray<RoomRequest>): number {
 }
 
 /**
- * Splits one project's rooms into a north and a south row of about the same
+ * Splits the project rooms into a north and a south row of about the same
  * width: the widest room goes first, each into the row that is narrower so
  * far. Each row keeps the rooms' original order.
  */
@@ -194,7 +184,7 @@ function buildHall(id: string, label: string, rect: Rect): PlannedRoom {
     id,
     label,
     kind: "hall",
-    project: null,
+    tint: null,
     width: rect.maxX - rect.minX,
     depth: rect.maxZ - rect.minZ,
     rect,
@@ -204,91 +194,83 @@ function buildHall(id: string, label: string, rect: Rect): PlannedRoom {
 }
 
 /**
- * Plans the storey: decides whether the code rooms need one row or two,
+ * Plans the storey: decides whether the project rooms need one row or two,
  * stretches every row to the building's width, and places the corridors.
  * One row is kept while it stretches no row much more than two rows would.
+ *
+ * The Arcade runs between two rows of project rooms; with one row, its rooms
+ * open straight onto the Gallery. An empty row takes no floor, and the plan
+ * still holds the Gallery and the front row when there are no project rooms.
  */
 export function planFloor(request: PlanRequest): FloorPlan {
   const backWidth = sumWidths(request.back);
   const frontWidth = sumWidths(request.front) - EAST_HALL_WIDTH;
-  const groups = request.code.map((group) => ({
-    project: group.project,
-    rooms: group.rooms,
-    ...splitIntoRows(group.rooms),
-  }));
-  const singleWidth = groups.reduce((sum, group) => sum + sumWidths(group.rooms), 0);
-  const doubleWidth = groups.reduce(
-    (sum, group) => sum + Math.max(sumWidths(group.north), sumWidths(group.south)),
-    0,
-  );
+  const rows = splitIntoRows(request.code);
+  const singleWidth = sumWidths(request.code);
+  const doubleWidth = Math.max(sumWidths(rows.north), sumWidths(rows.south));
+  // How much the widest row stretches the narrowest one that holds any room.
   const decideStretch = (codeWidth: number): number => {
-    const inner = Math.max(codeWidth, backWidth, frontWidth);
-    return inner / Math.min(codeWidth, backWidth, frontWidth);
+    const widths = [codeWidth, backWidth, frontWidth].filter((width) => width > 0);
+    return Math.max(...widths) / Math.min(...widths);
   };
-  const double = decideStretch(doubleWidth) < decideStretch(singleWidth) * 0.85;
+  const double =
+    request.code.length > 1 && decideStretch(doubleWidth) < decideStretch(singleWidth) * 0.85;
   const codeWidth = double ? doubleWidth : singleWidth;
   const innerWidth = Math.max(codeWidth, backWidth, frontWidth);
   const width = innerWidth + EAST_HALL_WIDTH;
 
   const maxDepth = (rooms: ReadonlyArray<RoomRequest>): number =>
     rooms.reduce((depth, room) => Math.max(depth, room.depth), 0);
-  const northRooms = groups.flatMap((group) => (double ? group.north : group.rooms));
-  const southRooms = double ? groups.flatMap((group) => group.south) : [];
+  const northRooms = double ? rows.north : request.code;
+  const southRooms = double ? rows.south : [];
   const northDepth = maxDepth(northRooms);
   const southDepth = maxDepth(southRooms);
   const backDepth = maxDepth(request.back);
   const frontDepth = maxDepth(request.front);
 
   const arcadeZ = northDepth;
-  const southZ = arcadeZ + ARCADE_WIDTH;
+  const southZ = arcadeZ + (double ? ARCADE_WIDTH : 0);
   const backZ = southZ + southDepth;
   const galleryZ = backZ + backDepth;
   const frontZ = galleryZ + GALLERY_WIDTH;
   const depth = frontZ + frontDepth;
 
   const rooms: PlannedRoom[] = [];
-  const wings: Wing[] = [];
-  const codeScale = innerWidth / codeWidth;
-  let x = 0;
-  groups.forEach((group, index) => {
-    const span = double
-      ? Math.max(sumWidths(group.north), sumWidths(group.south))
-      : sumWidths(group.rooms);
-    const to = index === groups.length - 1 ? innerWidth : x + span * codeScale;
+  rooms.push(...layRow(northRooms, 0, innerWidth, 0, arcadeZ, "north-code", "south"));
+  if (double) {
+    rooms.push(...layRow(southRooms, 0, innerWidth, southZ, backZ, "south-code", "north"));
     rooms.push(
-      ...layRow(double ? group.north : group.rooms, x, to, 0, arcadeZ, "north-code", "south"),
+      buildHall(HALL_IDS.arcade, "The Arcade", {
+        minX: 0,
+        minZ: arcadeZ,
+        maxX: innerWidth,
+        maxZ: southZ,
+      }),
     );
-    if (double && group.south.length > 0) {
-      rooms.push(...layRow(group.south, x, to, southZ, backZ, "south-code", "north"));
-    }
-    wings.push({ project: group.project, minX: x, maxX: to });
-    x = to;
-  });
+  }
   rooms.push(...layRow(request.back, 0, innerWidth, backZ, galleryZ, "back", "south"));
   const front = layRow(request.front, 0, width, frontZ, depth, "front", "north");
   // The Lobby's door is the front door and its opening into the Gallery, not a room door.
   front[front.length - 1] = { ...front[front.length - 1]!, doorSide: null };
   rooms.push(...front);
   rooms.push(
-    buildHall(HALL_IDS.arcade, "The Arcade", {
-      minX: 0,
-      minZ: arcadeZ,
-      maxX: innerWidth,
-      maxZ: southZ,
-    }),
     buildHall(HALL_IDS.gallery, "The Gallery", {
       minX: 0,
       minZ: galleryZ,
       maxX: width,
       maxZ: frontZ,
     }),
-    buildHall(HALL_IDS.eastHall, "The East Hall", {
-      minX: innerWidth,
-      minZ: 0,
-      maxX: width,
-      maxZ: galleryZ,
-    }),
   );
+  if (galleryZ > 0) {
+    rooms.push(
+      buildHall(HALL_IDS.eastHall, "The East Hall", {
+        minX: innerWidth,
+        minZ: 0,
+        maxX: width,
+        maxZ: galleryZ,
+      }),
+    );
+  }
 
   const lobby = front[front.length - 1]!;
   const frontDoor: Doorway = {
@@ -296,7 +278,7 @@ export function planFloor(request: PlanRequest): FloorPlan {
     width: FRONT_DOOR_WIDTH,
   };
   const walls = planWalls(rooms, request.connections, frontDoor, lobby.id);
-  return { rooms, walls, wings, width, depth, frontDoor };
+  return { rooms, walls, width, depth, frontDoor };
 }
 
 /** One piece of a wall line between two breakpoints, with the rooms on either side. */

@@ -47,8 +47,6 @@ import {
 } from "./architecture-shared";
 
 export { buildPlaque, buildWordmark, measurePlaque } from "./architecture-signs";
-export { buildLift, LIFT_CAR_INTERIOR, LIFT_FOOTPRINT, type LiftHandle } from "./architecture-lift";
-export { buildTubes, type TubeHandle, type TubeOptions } from "./architecture-tubes";
 export { buildLamppost, buildLawn, buildPath, buildTree } from "./architecture-outdoors";
 
 /** The thickness of every wall. */
