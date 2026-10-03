@@ -56,8 +56,6 @@ export interface OfficeScene {
   readonly stage: Stage;
   /** The office as built now. */
   readLayout(): OfficeLayout;
-  /** Returns the view that frames one colleague. */
-  buildColleagueView(id: string): CameraView | null;
   /**
    * Moves the office to a new world: the colleagues walk to their new
    * states, or the office is rebuilt when the desks changed.
@@ -68,6 +66,12 @@ export interface OfficeScene {
 
 /** The distance a click may travel and still count as a click, not a drag. */
 const CLICK_SLOP = 5;
+
+/** How far the camera stands from the selected colleague, in metres. */
+const COLLEAGUE_VIEW_DISTANCE = 7.5;
+
+/** How far the camera stands from the selected colleague while the thread drawer is open, in metres. */
+const DRAWER_VIEW_DISTANCE = 12;
 
 /** Frees the geometry of every mesh under `root`. Materials are shared by the palette and stay. */
 function disposeGeometry(root: Object3D): void {
@@ -196,7 +200,10 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     const rig = built.rigs.get(id);
     if (rig === undefined) return null;
     const target = rig.object.getWorldPosition(new Vector3()).setY(rig.object.position.y + 0.55);
-    return { target, distance: 7.5, azimuth: 28, elevation: 30 };
+    // The open drawer covers almost half of the office, so the camera steps
+    // back to keep the colleague's desk and neighbours in what is left.
+    const distance = state.drawer ? DRAWER_VIEW_DISTANCE : COLLEAGUE_VIEW_DISTANCE;
+    return { target, distance, azimuth: 28, elevation: 30 };
   };
 
   /** Returns the view the state asks for: the selected colleague, the chosen room, or the whole office. */
@@ -261,7 +268,11 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     const previous = state;
     state = readOffice();
     applySelection(previous);
-    if (previous.selectedId !== state.selectedId || previous.roomId !== state.roomId) {
+    if (
+      previous.selectedId !== state.selectedId ||
+      previous.roomId !== state.roomId ||
+      previous.drawer !== state.drawer
+    ) {
       focusFloor();
       camera.flyTo(decideView());
     }
@@ -336,7 +347,6 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
   return {
     stage,
     readLayout: () => built.layout,
-    buildColleagueView,
     setWorld(next) {
       const previous = world;
       const nextKey = computeDeskKey(next);
