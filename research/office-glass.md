@@ -41,7 +41,7 @@ At 30 frames a second, step 3 is the 19 points of one core that the GPU process 
 
 - A `backdrop-filter` is drawn by Skia's `saveLayer` with a backdrop filter. That call reads the pixels already drawn into the same image. So the pixels under the blur must be drawn by Chromium, in the same image.
 - Pixels that macOS composited from `CALayer`s are not available to Chromium. Core Animation has a layer that blurs what is under it (`CABackdropLayer`), but it is private API. Safari (WebKit) uses it. Chromium does not.
-- Chromium could, in principle, draw only the part of the window under the blur and still hand the rest to macOS. Its code does not do that. It tries to turn every quad into a `CALayer`, and at the first one it cannot, it gives up on all of them. Only protected video keeps a layer of its own.
+- Chromium could, in principle, draw only the part of the window under the blur and still hand the rest to macOS. Its code does not do that. It tries to turn every quad into a `CALayer`, and at the first one it cannot, it gives up on all of them. Only content that must be an overlay, such as protected video, keeps a layer of its own.
 
 ### What Chromium's source says
 
@@ -171,7 +171,9 @@ No. #301 chooses, for the thread screens, between keeping the blur (and its cost
 
 ## 6. What changes in spec 17 rule 5 if glass comes back
 
-Rule 5 lives in [spec 17 §Rules](https://github.com/theagenticage/hercule/blob/spec/office-v1/docs/spec/17-desktop-app.md#rules) on `spec/office-v1`. Two parts change.
+Rule 5 lives in [spec 17 §Rules](https://github.com/theagenticage/hercule/blob/spec/office-v1/docs/spec/17-desktop-app.md#rules) on `spec/office-v1`. Three parts change.
+
+The key point: the Office must turn off only the blur, not the glass level. At level 0 every glass fill is fully opaque, so nothing the Office paints under a panel could show. The spike keeps the level at 0.4 (fills about 90% opaque) and sets only `--glass-filter` to `none`, which is what `base.css` already does for Reduce transparency.
 
 **The first sentence** lists name tags as a glass surface, and so does #341. They are not: in the book (`.tag` in `docs/design/crew-bureau-2/office.css`), the prototype and v1, a name tag is a solid 90% `--raised` fill with no blur. The room labels are the Office's glass. Today it reads:
 
@@ -181,15 +183,17 @@ It becomes:
 
 > It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and the Office's room labels.
 
+**The parenthetical in the main text,** "Reduce transparency is the one setting that sets the level to 0 (the Office, below, also sets it while it is open)", drops "(the Office, below, also sets it while it is open)": the Office no longer touches the level.
+
 **The third bullet** ("So the window draws no blur while the Office is open") becomes:
 
-> - So no element of the window has a `backdrop-filter` while the Office is open *(decided 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332); amended YYYY-MM-DD, [#341](https://github.com/theagenticage/hercule/issues/341))*. The Office sets the glass level to 0 for the whole window, through the same tokens as Reduce transparency, and draws its own glass instead: each frame, it shrinks its rendered frame to a quarter, blurs it with the glass's blur and saturation, and paints it under its top bar's pills, its card and its room labels, beneath their HTML fill. The page then has no backdrop filter, so macOS keeps compositing the window's layers. The thread drawer's composer and Requests dock sit over HTML, not over the Office's frame, so they draw as solid Bureau surfaces, with the glass's rim and shadow. Reduce transparency turns the Office's own glass off too. Leaving the Office brings the CSS glass back.
+> - So no element of the window has a `backdrop-filter` while the Office is open *(decided 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332); amended YYYY-MM-DD, [#341](https://github.com/theagenticage/hercule/issues/341))*. The Office sets the glass filter to `none` for the whole window, as `base.css` does for Reduce transparency, and keeps the glass level, so the glass fills stay about 90% opaque. It then draws the blur itself: each frame, it shrinks its rendered frame to a quarter, blurs it with the glass's blur and saturation, and paints it under its top bar's pills, its card and its room labels, beneath their HTML fill. With no backdrop filter in the page, macOS keeps compositing the window's layers. The thread drawer's composer and Requests dock sit over HTML, not over the Office's frame: without a blur, text under them would show through their fill, so they draw as solid Bureau surfaces (a full fill), with the glass's rim and shadow. With Reduce transparency the level is 0 and every fill is opaque, so the Office skips its blur too. Leaving the Office brings the CSS glass back.
 
 The second bullet's last sentence ("This cause was read from the source, not measured...") becomes the measured result.
 
 ## The spike
 
-Branch `spike/office-glass`, on top of #333's `spike/office-rendering`. Commit `89a69ad9` adds two switches to the prototype (`apps/desktop/src/renderer/specimens/office-prototype`):
+Branch `spike/office-glass`, on top of #333's `spike/office-rendering`. Commits `89a69ad9` and `1abde54b` add two switches to the prototype (`apps/desktop/src/renderer/specimens/office-prototype`):
 
 - `glass=dot`: every backdrop blur off, plus one blurred 8 x 8 pixel dot in the middle of the window. Against `glass=0`, it measures what losing the hand-off costs, apart from blurring large areas.
 - `glass=webgl`: every backdrop blur off, and the Office draws its own glass (`engine/glass.ts`).
