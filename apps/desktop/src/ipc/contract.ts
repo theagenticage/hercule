@@ -103,10 +103,10 @@ export type ControllerUrlSaveOutcome = typeof ControllerUrlSaveOutcome.Type;
  * Main saves nothing and checks nothing.
  *
  * - `Found`: the binary reported `origin`, the address Hercule's controller
- *   on this Mac opens at. Nothing may answer there yet. The renderer saves it
- *   through `controllerUrl.save`, which runs the connect check first: a
- *   controller that answers is saved and the window reloads, and any other
- *   outcome means Hercule was not found.
+ *   on this Mac opens at. Whether anything answers there is not checked.
+ *   The renderer saves it through `controllerUrl.save`, which runs the
+ *   connect check first: a controller that answers is saved and the window
+ *   reloads, and any other outcome means Hercule was not found.
  * - `Runner`: this Mac's Service Unit runs a runner, not Hercule's
  *   controller. `running` is true when its process runs. Main never
  *   installs over it: that would restart the runner and end its sessions.

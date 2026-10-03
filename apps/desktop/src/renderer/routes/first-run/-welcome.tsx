@@ -47,6 +47,11 @@ export function NoControllerFirstRun(): JSX.Element {
   const found = useQuery(localControllerQuery(bridge));
   const save = useMutation({
     mutationFn: (origin: string) => bridge.controllerUrl.save(origin),
+    // A rejection means main refused the message or failed: a bug, which the
+    // user cannot act on, so it is logged, and the welcome shows as fresh.
+    onError: (error) => {
+      console.error("Could not save the controller found on this Mac:", error);
+    },
   });
   // React's StrictMode runs an effect twice on mount, so the ref keeps the
   // address from being saved twice, which would reload the window twice.
