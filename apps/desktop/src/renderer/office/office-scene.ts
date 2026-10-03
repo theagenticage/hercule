@@ -53,7 +53,6 @@ interface Built {
 
 /** What the page and the tools read of a mounted office. */
 export interface OfficeScene {
-  readonly stage: Stage;
   /**
    * Moves the office to a new world: the colleagues walk to their new
    * states, or the office is rebuilt when the desks changed.
@@ -180,27 +179,6 @@ export function mountOfficeScene(
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 
-  // The storey the building shows now, so the frame loop can tell when the
-  // followed colleague takes the lift to another one.
-  let focusedFloor: number | null = null;
-
-  /**
-   * Tells a building with storeys which one the user looks at, so it lifts
-   * away the ones above and the overlay hides their labels. With a colleague
-   * selected, that is the storey the colleague stands on now, not its desk's:
-   * a colleague waiting in the lobby's queue would be hidden under its own
-   * storey otherwise.
-   */
-  const focusFloor = (): void => {
-    const { layout, overlay, sim } = built;
-    if (layout.focusFloor === undefined) return;
-    const room = layout.rooms.find((candidate) => candidate.id === state.roomId);
-    focusedFloor =
-      state.selectedId !== null ? sim.readFloor(state.selectedId) : (room?.floor ?? null);
-    layout.focusFloor(focusedFloor);
-    overlay.setFocusedFloor(focusedFloor);
-  };
-
   const teardown = ({ layout, rigs, sim, overlay }: Built): void => {
     sim.dispose();
     overlay.dispose();
@@ -251,7 +229,6 @@ export function mountOfficeScene(
   setAmbientMotion(decideLiveliness() > 0);
   built = build();
   switchLamps();
-  focusFloor();
   // The office opens with a short glide down onto the first view, so it reads
   // as a place the camera arrives in rather than a picture.
   const opening = decideView();
@@ -268,13 +245,6 @@ export function mountOfficeScene(
 
   const stopFrames = stage.onFrame((frame) => {
     let moving = built.sim.update(frame);
-    if (
-      built.layout.focusFloor !== undefined &&
-      state.selectedId !== null &&
-      built.sim.readFloor(state.selectedId) !== focusedFloor
-    ) {
-      focusFloor();
-    }
     moving = (built.layout.update?.(frame) ?? false) || moving;
     moving = camera.update(frame) || moving;
     built.overlay.update();
@@ -290,7 +260,6 @@ export function mountOfficeScene(
       previous.roomId !== state.roomId ||
       previous.drawer !== state.drawer
     ) {
-      focusFloor();
       camera.flyTo(decideView());
     }
     stage.requestRender();
@@ -362,7 +331,6 @@ export function mountOfficeScene(
   canvas.addEventListener("pointerleave", onPointerLeave);
 
   return {
-    stage,
     setWorld(next) {
       const previous = world;
       const nextKey = computeDeskKey(next);
@@ -396,7 +364,6 @@ export function mountOfficeScene(
       teardown(built);
       built = build();
       switchLamps();
-      focusFloor();
       applySelection(null);
       stage.requestRender();
     },
