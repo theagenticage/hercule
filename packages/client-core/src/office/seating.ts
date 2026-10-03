@@ -7,10 +7,13 @@ import type { Project, Runner, Session, Workspace } from "@hercule/contract";
 import { decideGroupProjectId, rankLane } from "../threads/groups";
 import { decideThreadPose, type Pose } from "../threads/pose";
 
+/** The poses of the threads that are seated in the Office. */
+export type SeatedPose = "working" | "waiting" | "idle";
+
 /** A thread at its desk, and the pose its character shows. */
 export interface OfficeDesk {
   readonly session: Session;
-  readonly pose: Pose;
+  readonly pose: SeatedPose;
 }
 
 export interface OfficeRoom {
@@ -30,8 +33,7 @@ export interface OfficeSeating {
   readonly lounge: readonly string[];
 }
 
-/** The poses of the threads that are seated in the Office. */
-const SEATED_POSES: ReadonlySet<Pose> = new Set(["working", "waiting", "idle"]);
+const SEATED_POSES: ReadonlySet<Pose> = new Set<SeatedPose>(["working", "waiting", "idle"]);
 
 /**
  * Checks whether a thread in `pose` has a colleague in the Office: true for
@@ -41,7 +43,7 @@ const SEATED_POSES: ReadonlySet<Pose> = new Set(["working", "waiting", "idle"]);
  * thread in the Office's drawer or on its own screen, so they always agree
  * with `decideOfficeSeating` about who is in the Office.
  */
-export const isSeatedPose = (pose: Pose): boolean => SEATED_POSES.has(pose);
+export const isSeatedPose = (pose: Pose): pose is SeatedPose => SEATED_POSES.has(pose);
 
 /** Compares two strings by their UTF-16 code units, the same way in every locale. */
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -88,11 +90,10 @@ export const decideOfficeSeating = ({
 
   const desks = sessions
     .filter((session) => session.agentId === null)
-    .map((session) => ({
-      session,
-      pose: decideThreadPose(session, runnersById.get(session.runnerId)),
-    }))
-    .filter((desk) => isSeatedPose(desk.pose))
+    .flatMap((session): OfficeDesk[] => {
+      const pose = decideThreadPose(session, runnersById.get(session.runnerId));
+      return isSeatedPose(pose) ? [{ session, pose }] : [];
+    })
     // Workspaces of equal rank, such as two main workspaces, are told apart
     // by id so that each keeps its desks together. Threads created in the
     // same instant are told apart by id so that the order never depends on

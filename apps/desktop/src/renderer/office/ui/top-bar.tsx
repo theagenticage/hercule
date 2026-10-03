@@ -19,9 +19,9 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import { describePose, isSeatedPose, POSES, type Pose } from "@hercule/client-core";
+import { describePose, isSeatedPose, POSES, type SeatedPose } from "@hercule/client-core";
 import type { World } from "../world/types";
-import { PoseMark } from "./dossier-card";
+import { Mark } from "../../marks";
 import { OfficeIcon } from "../../icons/office";
 import { findNextColleagueId, listColleaguesInPose } from "./office-keys";
 import { RoomDirectory } from "./room-directory";
@@ -30,7 +30,7 @@ import { RoomDirectory } from "./room-directory";
  * The poses the bar counts, in its order: every pose a thread can have while
  * it has a colleague in the Office.
  */
-const COUNTED_POSES: ReadonlyArray<Pose> = POSES.filter(isSeatedPose);
+const COUNTED_POSES: ReadonlyArray<SeatedPose> = POSES.filter(isSeatedPose);
 
 /** Renders the counts of who is doing what. Poses nobody is in are left out. */
 function PoseCounts({ world }: { readonly world: World }): JSX.Element {
@@ -54,7 +54,7 @@ function PoseCounts({ world }: { readonly world: World }): JSX.Element {
               if (colleagueId !== null) setOffice({ selectedId: colleagueId });
             }}
           >
-            <PoseMark pose={pose} />
+            <Mark state={pose} />
             <b>{colleagues.length}</b>
             <span className="sum-words">{words}</span>
           </button>

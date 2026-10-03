@@ -14,15 +14,3 @@ export function ChevronDownIcon({ size = 16 }: IconProps): JSX.Element {
     </IconFrame>
   );
 }
-
-/**
- * Renders a small Z, for a colleague that is asleep or away. Those two poses
- * have no state mark, and the moon is already idle's mark.
- */
-export function SleepIcon({ size = 16 }: IconProps): JSX.Element {
-  return (
-    <IconFrame size={size}>
-      <path d="M5.2 5.2h5.6l-5.6 5.6h5.6" />
-    </IconFrame>
-  );
-}

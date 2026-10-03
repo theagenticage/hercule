@@ -3,7 +3,7 @@
  * in which room, and on which machine. `build-world.ts` builds it from the
  * user's threads.
  */
-import type { Pose } from "@hercule/client-core";
+import type { SeatedPose } from "@hercule/client-core";
 import type { OpenRequest } from "@hercule/contract";
 import type { Accessory, Hue, Shape } from "../../faces/look";
 import type { ProjectTint } from "../../screens/project-tile";
@@ -12,7 +12,7 @@ import type { ProjectTint } from "../../screens/project-tile";
 export type Headwear = "cloche" | "headset" | "beret";
 
 /** What a colleague looks like: its crew hue, body shape and what it wears. */
-export interface CrewLook {
+interface CrewLook {
   readonly hue: Hue;
   readonly shape: Shape;
   readonly accessories: ReadonlyArray<Accessory>;
@@ -45,7 +45,7 @@ export interface Colleague {
   /** The short name the Office's tag shows. */
   readonly name: string;
   readonly look: CrewLook;
-  readonly pose: Pose;
+  readonly pose: SeatedPose;
   /** What the tag shows after the name: "typing", "idle". */
   readonly stateLabel: string;
   /** The id of the project the thread belongs to, or null. */
@@ -75,7 +75,7 @@ export interface ThreadRoom {
 }
 
 /** One machine of the fleet. */
-export interface RunnerInfo {
+interface RunnerInfo {
   readonly id: string;
   readonly name: string;
   readonly slots: number;

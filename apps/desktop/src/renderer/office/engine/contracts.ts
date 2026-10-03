@@ -14,7 +14,7 @@
  */
 import type { Box3, Object3D, Vector3 } from "three";
 import type { ProjectTint } from "../../screens/project-tile";
-import type { Pose } from "@hercule/client-core";
+import type { Pose, SeatedPose } from "@hercule/client-core";
 import type { Colleague, OfficeRequest, World } from "../world/types";
 import type { Frame, Stage } from "./stage";
 
@@ -194,11 +194,9 @@ export interface CameraView {
 
 /**
  * The kinds of rooms. A project room seats the threads of one project, or the
- * threads with no project; the others are the fixed rooms, the corridors, and
- * the storeys.
+ * threads with no project; the others are the fixed rooms and the corridors.
  */
-export type RoomKind =
-  "project" | "triage-room" | "your-office" | "lounge" | "lobby" | "hall" | "floor";
+export type RoomKind = "project" | "triage-room" | "your-office" | "lounge" | "lobby" | "hall";
 
 /** A room the user can jump to. */
 export interface RoomInfo {
@@ -211,31 +209,6 @@ export interface RoomInfo {
   readonly view: CameraView;
   /** The project tint whose low-chroma inlay tints the floor, when the room seats a project. */
   readonly tint: ProjectTint | null;
-}
-
-/**
- * Returns the room of kind "floor" that stands for `room`, such as a storey of
- * the Tower or a pavilion of the Campus: the smallest one on the same storey
- * whose plan holds the middle of `room`. Returns null for a "floor" room
- * itself, and for a room outside every "floor" room.
- */
-export function findFloorRoom(room: RoomInfo, rooms: ReadonlyArray<RoomInfo>): RoomInfo | null {
-  if (room.kind === "floor") return null;
-  const x = (room.bounds.min.x + room.bounds.max.x) / 2;
-  const z = (room.bounds.min.z + room.bounds.max.z) / 2;
-  let smallest: RoomInfo | null = null;
-  let smallestArea = Infinity;
-  for (const candidate of rooms) {
-    const { min, max } = candidate.bounds;
-    if (candidate.kind !== "floor" || candidate.floor !== room.floor) continue;
-    if (x < min.x || x > max.x || z < min.z || z > max.z) continue;
-    const area = (max.x - min.x) * (max.z - min.z);
-    if (area < smallestArea) {
-      smallest = candidate;
-      smallestArea = area;
-    }
-  }
-  return smallest;
 }
 
 /** The fixed places the sim sends colleagues to. */
@@ -319,11 +292,11 @@ export interface NavGraph {
 
 /**
  * A colleague's state as the sim holds it now. It starts as the world's
- * `Colleague` and changes as things happen: an answered colleague works
- * again, a failed one shows its plaster.
+ * `Colleague` and changes as things happen, such as an answered colleague
+ * going back to work.
  */
 export interface ColleagueState {
-  readonly pose: Pose;
+  readonly pose: SeatedPose;
   /** The request the colleague waits on the user with, or null. */
   readonly request: OfficeRequest | null;
   /** The short state the name tag shows when there is no request, such as "typing" or "idle 2h". */

@@ -16,7 +16,7 @@ import type { Action, BuildSim, ColleagueRig, ColleagueState, Seat, Spot } from 
 import { WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
-import type { Pose } from "@hercule/client-core";
+import type { SeatedPose } from "@hercule/client-core";
 import type { Colleague, OfficeRequest } from "../world/types";
 
 // ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
 type Errand = "queue" | "desk-wait" | "answer" | "visit" | "tea" | "lounge" | "home";
 
 /** Where an actor rests between scripts. */
-type Place = "home" | "lounge" | "queue" | "desk-side" | "entrance" | "elsewhere";
+type Place = "home" | "lounge" | "queue" | "desk-side" | "elsewhere";
 
 /** A stretch of a path on one storey, with its corners rounded. */
 interface WalkLeg {
@@ -169,7 +169,7 @@ interface Actor {
   readonly colleague: Colleague;
   readonly rig: ColleagueRig;
   readonly home: Seat;
-  pose: Pose;
+  pose: SeatedPose;
   action: Action;
   place: Place;
   floor: number;
@@ -238,7 +238,7 @@ function isDeskSeat(spot: Spot): spot is Seat {
 }
 
 /** Returns the short state a name tag shows for a pose the sim has just set, such as "typing". */
-function describePose(pose: Pose): string {
+function describePose(pose: SeatedPose): string {
   return pose === "working" ? "typing" : pose;
 }
 
@@ -254,23 +254,15 @@ function buildRequest(colleague: Colleague): OfficeRequest {
 }
 
 /** Returns the action a colleague does at its own seat in a pose. */
-function decideHomeAction(pose: Pose, seat: Seat["kind"]): Action {
+function decideHomeAction(pose: SeatedPose, seat: Seat["kind"]): Action {
   if (seat === "standing") return pose === "waiting" ? "raise-hand" : "stand";
   switch (pose) {
     case "working":
       return seat === "armchair" ? "read" : "type";
     case "idle":
       return "sip";
-    case "asleep":
-      return "sleep";
     case "waiting":
       return "raise-hand";
-    case "away":
-      return "stand";
-    case "paused":
-    case "failed":
-    case "done":
-      return "sit";
   }
 }
 
@@ -447,7 +439,7 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
    * waiting colleague keeps its request, takes the world's, or gets one made
    * up; any other pose has none. Does nothing when the pose is unchanged.
    */
-  const recordPose = (actor: Actor, pose: Pose): void => {
+  const recordPose = (actor: Actor, pose: SeatedPose): void => {
     const id = actor.colleague.id;
     const current = states.get(id);
     if (current?.pose === pose) return;
@@ -482,7 +474,7 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
   };
 
   /** Sets a colleague's pose: its face, the lamp and note on its desk, and its state for the UI. */
-  const setPose = (actor: Actor, pose: Pose): void => {
+  const setPose = (actor: Actor, pose: SeatedPose): void => {
     actor.pose = pose;
     actor.rig.setFace(pose);
     actor.home.desk?.setLamp(pose === "working");
@@ -829,25 +821,6 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
     return null;
   };
 
-  /** Returns the spots near the entrance where colleagues who are away stand, nearest first. */
-  const listEntranceSpots = (): Vector3[] => {
-    const { position, facing, floor } = spots.entrance;
-    const forwardX = Math.sin(facing);
-    const forwardZ = Math.cos(facing);
-    const found: Vector3[] = [];
-    for (const forward of [0.9, 1.6]) {
-      for (const sideways of [0.65, -0.65, 1.3, -1.3, 1.95, -1.95]) {
-        const candidate = new Vector3(
-          position.x + forwardZ * sideways + forwardX * forward,
-          position.y,
-          position.z - forwardX * sideways + forwardZ * forward,
-        );
-        if (isWalkable(candidate, floor)) found.push(candidate);
-      }
-    }
-    return found;
-  };
-
   /** Returns the free lounge armchairs, the ones on `floor` first, nearest to `near` first. */
   const listFreeLoungeSeats = (floor: number, near: Vector3): Seat[] =>
     spots.lounge
@@ -1037,10 +1010,7 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
     if (visitor === undefined) return false;
     const host = pickSettled(
       (actor) =>
-        actor !== visitor &&
-        actor.place === "home" &&
-        actor.home.roomId === visitor.home.roomId &&
-        actor.pose !== "asleep",
+        actor !== visitor && actor.place === "home" && actor.home.roomId === visitor.home.roomId,
     );
     if (host === undefined) return false;
     visit(visitor, host);
@@ -1179,8 +1149,6 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
       .filter((actor) => actor.pose === "waiting")
       .sort((a, b) => findPlace(a) - findPlace(b));
     waiting.forEach((actor) => (actor.ticket = nextTicket++));
-    const sleepers = all.filter((actor) => actor.pose === "asleep");
-    const entranceSpots = listEntranceSpots();
 
     for (const actor of all) {
       const { rig, home } = actor;
@@ -1202,22 +1170,15 @@ export const buildSim: BuildSim = ({ world, layout, rigs, stage }) => {
         }
         continue;
       }
-      if (actor.pose === "away") {
-        const position = entranceSpots.shift() ?? spots.entrance.position;
-        placeAt(actor, position, spots.entrance.floor, spots.entrance.facing);
-        actor.place = "entrance";
-        setAction(actor, "stand");
-        continue;
-      }
       // The colleagues the world seats in the Lounge sit there while it has
       // armchairs; the rest sit at their desks until one comes free.
-      if (sleepers.includes(actor) || loungeIds.has(actor.colleague.id)) {
+      if (loungeIds.has(actor.colleague.id)) {
         const seat = listFreeLoungeSeats(home.floor, home.position)[0];
         if (seat !== undefined) {
           takeLoungeSeat(actor, seat);
           placeAt(actor, seat.position, seat.floor, seat.facing);
           actor.place = "lounge";
-          setAction(actor, actor.pose === "asleep" ? "sleep" : "sit");
+          setAction(actor, "sit");
           continue;
         }
       }

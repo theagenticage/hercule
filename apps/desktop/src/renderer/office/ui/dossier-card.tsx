@@ -28,22 +28,9 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import type { Pose } from "@hercule/client-core";
 import type { World } from "../world/types";
 import { CloseIcon } from "../../icons/close";
-import { SleepIcon } from "./office-icons";
 import { listColleaguesInPose } from "./office-keys";
-
-/** Renders the state mark for `pose`, or a Z for the two poses that have no mark. */
-export function PoseMark({ pose }: { readonly pose: Pose }): JSX.Element {
-  return pose === "asleep" || pose === "away" ? (
-    <span className="office-sleep" aria-hidden="true">
-      <SleepIcon size={14} />
-    </span>
-  ) : (
-    <Mark state={pose} />
-  );
-}
 
 /**
  * Renders the head of the card's Request: how long the colleague has waited
@@ -126,7 +113,7 @@ export function DossierCard({
         <span className="who-text">
           <span className="who-name">{colleague.name}</span>
           <span className="who-state">
-            <PoseMark pose={pose} />
+            <Mark state={pose} />
             <span>{colleague.stateLabel}</span>
           </span>
         </span>

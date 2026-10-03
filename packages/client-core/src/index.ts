@@ -200,6 +200,7 @@ export {
   type OfficeDesk,
   type OfficeRoom,
   type OfficeSeating,
+  type SeatedPose,
 } from "./office/seating";
 export {
   addCompletedStep,

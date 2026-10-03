@@ -9,14 +9,14 @@ import {
   decideOfficeSeating,
   describePose,
   formatRequestQuestion,
-  type Pose,
+  type SeatedPose,
 } from "@hercule/client-core";
 import { buildLook } from "../../faces/look";
 import { pickProjectTint } from "../../screens/project-tile";
 import type { Colleague, OfficeRequest, World } from "./types";
 
 /** Every list the world is built from. */
-export interface WorldRecords {
+interface WorldRecords {
   readonly sessions: readonly Session[];
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
@@ -46,7 +46,7 @@ function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): Offic
 }
 
 /** Returns the colleague the Office draws for a seated thread in `pose`. */
-function buildColleague(session: Session, pose: Pose): Colleague {
+function buildColleague(session: Session, pose: SeatedPose): Colleague {
   return {
     id: session.id,
     name: session.title,

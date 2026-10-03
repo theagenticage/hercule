@@ -10,19 +10,12 @@
  *   show their names;
  * - close up, every colleague in view does.
  *
- * A room of kind "floor", such as a storey of the Tower, stands for the rooms
- * of its storey that lie inside it. Far away, only its label shows. The
- * rooms inside it show their labels in the middle distance, for the "floor"
- * room the camera looks at. Rooms outside any "floor" room keep their label
- * far away.
- *
  * At every distance the waiting, hovered and selected colleagues show theirs.
  * Mode `all` shows every tag and mode `none` only the hovered and selected
  * ones. Where tags overlap, the more important one shows: selected, hovered,
- * waiting, a room label, then the nearest to the camera. Far away, the room
- * labels come before the waiting tags. A waiting tag that overlaps moves up
- * to make way, but the hovered tag stays where it showed, so no tag moves
- * under the pointer.
+ * a room label, waiting, then the nearest to the camera. A waiting tag that
+ * overlaps moves up to make way, but the hovered tag stays where it showed,
+ * so no tag moves under the pointer.
  *
  * Far away in the `smart` mode, a large fleet's requests must not bury the
  * room labels, which count them:
@@ -47,7 +40,6 @@
 import { Vector3, type PerspectiveCamera } from "three";
 import {
   WALL_HEIGHT,
-  findFloorRoom,
   type ColleagueRig,
   type ColleagueState,
   type RoomInfo,
@@ -105,16 +97,15 @@ const FULL_WAITING_TAGS = 5;
 const PIP_SIZE = 8;
 /**
  * The order in which tags and room labels claim their place on screen, the
- * lowest first. Far away, the room labels come before the waiting tags, so
- * the user can always find the rooms; in the middle distance they come after.
+ * lowest first. The room labels come before the waiting tags, so the user can
+ * always find the rooms.
  */
 const RANK = {
   selected: 0,
   hovered: 1,
-  farRoomLabel: 2,
+  roomLabel: 2,
   waitingTag: 3,
-  roomLabel: 4,
-  otherTag: 5,
+  otherTag: 4,
 } as const;
 const FAR_WAITING_TAG_SHIFTS: ReadonlyArray<number> = Array.from(
   { length: FULL_WAITING_TAGS - 1 },
@@ -187,11 +178,6 @@ interface RoomLabel extends Placed {
   readonly room: RoomInfo;
   readonly count: HTMLElement;
   readonly waiting: HTMLElement;
-  /**
-   * The label of the "floor" room this room lies inside, or null. While the
-   * "floor" room's label shows far away, this one waits for the middle distance.
-   */
-  floorLabel: RoomLabel | null;
   /** The counts the text shows. */
   writtenPresent: number;
   writtenAsking: number;
@@ -296,7 +282,6 @@ function createRoomLabel(room: RoomInfo): RoomLabel {
     room,
     count,
     waiting,
-    floorLabel: null,
     writtenPresent: -1,
     writtenAsking: -1,
   };
@@ -356,11 +341,6 @@ export function createOverlay(
   });
   const labels = sizedRooms.map(createRoomLabel);
   for (const label of labels) layer.append(label.element);
-  const labelsByRoom = new Map(labels.map((label) => [label.room, label]));
-  for (const label of labels) {
-    const floorRoom = findFloorRoom(label.room, rooms);
-    label.floorLabel = floorRoom === null ? null : (labelsByRoom.get(floorRoom) ?? null);
-  }
   const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
 
   let mode: TagMode = "smart";
@@ -571,9 +551,6 @@ export function createOverlay(
     else camera.getWorldDirection(lookedAt).multiplyScalar(20).add(camera.position);
     level = decideLevel(view?.distance ?? camera.position.distanceTo(lookedAt));
     const focusRoom = findRoom(lookedAt);
-    const focusLabel = focusRoom === null ? undefined : labelsByRoom.get(focusRoom);
-    const focusFloorLabel =
-      focusLabel?.room.kind === "floor" ? focusLabel : (focusLabel?.floorLabel ?? null);
 
     // First the text and the counts, then one measuring pass, then placement.
     const states = readColleagueStates();
@@ -622,15 +599,10 @@ export function createOverlay(
       if (tag.rank > RANK.hovered && isColleagueHidden(camera, tag.rig)) continue;
       candidates.push(tag);
     }
-    if (mode === "smart" && level !== "close") {
+    if (isFar) {
       for (const label of labels) {
-        const wanted =
-          level === "far"
-            ? label.floorLabel === null
-            : label.floorLabel !== null && label.floorLabel === focusFloorLabel;
-        if (!wanted) continue;
         if (!placeOnScreen(label, 0.5, 0.5)) continue;
-        label.rank = level === "far" ? RANK.farRoomLabel : RANK.roomLabel;
+        label.rank = RANK.roomLabel;
         candidates.push(label);
       }
     }

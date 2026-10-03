@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Box3, Vector3 } from "three";
 import type { ColleagueState, RoomInfo, RoomKind, Seat } from "./contracts";
 import { countColleaguesByRoom } from "./room-counts";
-import type { Pose } from "@hercule/client-core";
+import type { SeatedPose } from "@hercule/client-core";
 
 /** Returns a room of `kind` with id `id`; its place does not matter to the counts. */
 const buildRoom = (id: string, kind: RoomKind): RoomInfo => ({
@@ -35,7 +35,7 @@ const buildSeat = (roomId: string): Seat => ({
 });
 
 /** Returns a state in `pose`, with no request unless `asks` is true. */
-const buildState = (pose: Pose, asks = false): ColleagueState => ({
+const buildState = (pose: SeatedPose, asks = false): ColleagueState => ({
   pose,
   stateLabel: pose,
   request: asks
