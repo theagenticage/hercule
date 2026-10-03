@@ -187,6 +187,30 @@ describe("the environment a session runs with", () => {
     expect(env["HERCULE_TOKEN"]).toBe("a-session-token");
   });
 
+  it("drops the runner's own Hercule variables, and keeps only the four it sets for the session", () => {
+    // The local runner is started with the controller's Home in HERCULE_HOME,
+    // which is the user's live Home. A `hercule serve` run inside the session
+    // would open its database.
+    const machine = buildMachine({
+      baseEnv: {
+        PATH: "/usr/bin",
+        HOME: "/home/somebody",
+        HERCULE_HOME: "/home/somebody/.hercule",
+        HERCULE_BIND_PORT: "4937",
+      },
+    });
+
+    const env = resolveEnv(buildSessionStart(), machine);
+
+    expect(env["HERCULE_HOME"]).toBeUndefined();
+    expect(env["HERCULE_BIND_PORT"]).toBeUndefined();
+    expect(
+      Object.keys(env)
+        .filter((name) => name.startsWith("HERCULE_"))
+        .sort(),
+    ).toEqual(["HERCULE_API_URL", "HERCULE_RUNNER_SOCKET", "HERCULE_SESSION", "HERCULE_TOKEN"]);
+  });
+
   it("puts the runner's own bin directory at the front of PATH", () => {
     const machine = buildMachine();
 

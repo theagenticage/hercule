@@ -107,8 +107,13 @@ const makeRunner = (
     workspaces,
     socketPath,
     // A home with no git configuration, so the machine's own hooks and
-    // identity stay out of the test.
-    baseEnv: { PATH: process.env["PATH"], HOME: createTemporaryDir("hercule-home-") },
+    // identity stay out of the test. HERCULE_HOME stands for the runner's own
+    // Home, which a step's git and hooks must never see.
+    baseEnv: {
+      PATH: process.env["PATH"],
+      HOME: createTemporaryDir("hercule-home-"),
+      HERCULE_HOME: "/home/somebody/.hercule",
+    },
     ...options,
   });
   const sent: Array<WorkspaceStepResult> = [];
@@ -222,12 +227,14 @@ describe("git.commit", { timeout: TEST_TIMEOUT_MS }, () => {
     writeFileSync(join(workspace.dir, "a.txt"), "a\n");
     writeFileSync(join(workspace.dir, "README.md"), "changed\n");
     // A hook runs with the environment of the git that runs it, so it can
-    // write down what a push's credential helper would be given.
+    // write down what a push's credential helper would be given, and whether
+    // the runner's own HERCULE_HOME reached the step.
     const seen = join(createTemporaryDir("hercule-hook-"), "environment");
     workspace.writePreCommitHook(
       [
         `echo "$HERCULE_RUNNER_SOCKET" > '${seen}'`,
         `echo "$HERCULE_RUNNER_WORKSPACE" >> '${seen}'`,
+        `echo "$HERCULE_HOME" >> '${seen}'`,
         `git config --get-all credential.helper >> '${seen}'`,
       ].join("\n"),
     );
@@ -243,9 +250,12 @@ describe("git.commit", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(runGitOrThrow(workspace.dir, "log", "-1", "--format=%an <%ae>|%s")).toBe(
       "Hercule Bot <bot@example.invalid>|Add a",
     );
-    const [socket, workspaceId, ...helpers] = readFileSync(seen, "utf8").trimEnd().split("\n");
+    const [socket, workspaceId, home, ...helpers] = readFileSync(seen, "utf8")
+      .trimEnd()
+      .split("\n");
     expect(socket).toBe(runner.socketPath);
     expect(workspaceId).toBe(workspace.workspaceId);
+    expect(home).toBe("");
     // The machine's own config may name helpers first. The empty helper
     // after them clears them, so git asks only this runner's helper.
     expect(helpers.slice(-2)).toEqual(["", expect.stringMatching(/ git-credential$/)]);
