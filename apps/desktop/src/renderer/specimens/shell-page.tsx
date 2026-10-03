@@ -116,20 +116,20 @@ export interface DraftScreenRecords {
 }
 
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
-interface OpenScreens {
+export interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
   readonly draft?: DraftScreenRecords;
 }
 
 /** An address that never answers. The client sends nothing to it. */
-const CONTROLLER_URL = "http://controller.invalid";
+export const CONTROLLER_URL = "http://controller.invalid";
 
 /**
  * Fails every request. The query cache already holds every record the page
  * reads, so a request means the page read something the fixture does not
  * hold.
  */
-const refuseRequest: FetchLike = (url) =>
+export const refuseRequest: FetchLike = (url) =>
   Promise.reject(
     new Error(
       `The shell specimen sends no request, but the page asked for ${url}. ` +
@@ -150,7 +150,7 @@ const buildBridgeCallError = (call: string): Error =>
  * for the Go menu, the dock badge and the notifications: it accepts that,
  * and ignores it. It sends no menu command and opens no thread.
  */
-const REFUSING_BRIDGE: Bridge = {
+export const REFUSING_BRIDGE: Bridge = {
   controllerUrl: {
     read: () => Promise.reject(buildBridgeCallError("controllerUrl.read")),
     save: () => Promise.reject(buildBridgeCallError("controllerUrl.save")),
@@ -187,7 +187,7 @@ const REFUSING_BRIDGE: Bridge = {
  * the cache also holds what the draft is built from: no setting set, no
  * profile, and no runner on this Mac.
  */
-const seedQueryCache = (
+export const seedQueryCache = (
   queryClient: QueryClient,
   client: HerculeClient,
   records: SidebarRecords,

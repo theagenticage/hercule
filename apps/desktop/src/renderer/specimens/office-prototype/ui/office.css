@@ -1,0 +1,116 @@
+/* PROTOTYPE - the office's styles. */
+
+.office {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.office-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.office-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* The name tags, placed over the canvas by engine/overlay.ts. */
+.office-tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.office-tag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: var(--glass-fill-thin);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    var(--shadow-1);
+  color: var(--ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* The prototype's variant switcher: a pill floating at the bottom centre. */
+.variant-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--r-pill);
+  background: var(--glass-fill-raised);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+  transform: translateX(-50%);
+  font-size: var(--t-12);
+}
+
+.variant-bar-step {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+.variant-bar-step:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.variant-bar-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 168px;
+  padding: 0 6px;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+.variant-bar-key {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-xs);
+  background: var(--selected);
+  font-family: var(--font-deco);
+  font-weight: 400;
+}
+
+.variant-bar-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
