@@ -12,7 +12,6 @@
 import { useEffect, useMemo, useRef, type JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { ageClock } from "../app/age-clock";
 import {
   localRunnerQuery,
   projectsQuery,
@@ -43,14 +42,8 @@ export function OfficeScreen({
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const localRunnerId = useQuery(localRunnerQuery(bridge, runners)).data ?? null;
-  // The age clock's time, so a request's minutes agree with the sidebar's
-  // age label for the same thread.
   const world = useMemo(
-    () =>
-      buildWorld(
-        { sessions, projects, workspaces, runners, localRunnerId },
-        ageClock.readNow().getTime(),
-      ),
+    () => buildWorld({ sessions, projects, workspaces, runners, localRunnerId }),
     [sessions, projects, workspaces, runners, localRunnerId],
   );
 

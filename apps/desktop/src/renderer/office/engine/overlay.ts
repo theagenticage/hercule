@@ -210,8 +210,12 @@ interface RoomLabel extends Placed {
   writtenAsking: number;
 }
 
-/** Returns how many minutes a colleague has waited on the user: nought without a request. */
-const readWaitingMinutes = (tag: Tag): number => tag.state.request?.waitingMinutes ?? 0;
+/**
+ * Returns when a colleague started waiting on the user, in milliseconds since
+ * the epoch. A colleague with no request sorts after every one with a request.
+ */
+const readWaitingSince = (tag: Tag): number =>
+  tag.state.request === null ? Infinity : Date.parse(tag.state.request.waitingSince);
 
 /** Returns true when two states of a colleague give its tag the same text. */
 const isSameTagText = (a: ColleagueState, b: ColleagueState): boolean =>
@@ -555,7 +559,7 @@ export function createOverlay(
         if (!isOnScreen || isColleagueHidden(camera, tag.rig)) continue;
         waitingTags.push(tag);
       }
-      waitingTags.sort((a, b) => readWaitingMinutes(b) - readWaitingMinutes(a));
+      waitingTags.sort((a, b) => readWaitingSince(a) - readWaitingSince(b));
       longestWaitingIds.clear();
       for (const tag of waitingTags.slice(0, FULL_WAITING_TAGS)) longestWaitingIds.add(tag.id);
       isLongestWaitingKept = true;

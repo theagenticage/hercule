@@ -44,7 +44,7 @@ const buildState = (pose: Pose, asks = false): ColleagueState => ({
         short: "Run git push?",
         prompt: "git push",
         answers: ["Allow", "Deny"],
-        waitingMinutes: 1,
+        waitingSince: "2026-09-10T10:00:00.000Z",
       }
     : null,
 });

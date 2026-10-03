@@ -18,6 +18,7 @@ import { Face } from "../../faces";
 import { Mark } from "../../marks";
 import { ProjectTile } from "../../screens/project-tile";
 import { RequestDock } from "../../screens/thread/dock";
+import { useAgeLabel } from "../../app/age-clock";
 import type { OfficeLayout } from "../engine/contracts";
 import {
   applyColleagueState,
@@ -41,6 +42,33 @@ export function PoseMark({ pose }: { readonly pose: Pose }): JSX.Element {
     </span>
   ) : (
     <Mark state={pose} />
+  );
+}
+
+/**
+ * Renders the head of the card's Request: how long the colleague has waited
+ * since `waitingSince`, counted as the sidebar counts a thread's age, and its
+ * place in the queue. The age stays current only while `counting` is true.
+ */
+function RequestHead({
+  waitingSince,
+  place,
+  queueLength,
+  counting,
+}: {
+  readonly waitingSince: string;
+  readonly place: number;
+  readonly queueLength: number;
+  readonly counting: boolean;
+}): JSX.Element {
+  const age = useAgeLabel(waitingSince, counting);
+  return (
+    <div className="office-card-ask">
+      <span className="office-card-ask-h">Waiting on you · {age}</span>
+      <span className="next-of">
+        {place} of {queueLength}
+      </span>
+    </div>
   );
 }
 
@@ -114,12 +142,12 @@ export function DossierCard({
 
       {request === null || openRequest === null ? null : (
         <div className="office-card-request">
-          <div className="office-card-ask">
-            <span className="office-card-ask-h">Waiting on you · {request.waitingMinutes}m</span>
-            <span className="next-of">
-              {waiting.findIndex((each) => each.id === colleague.id) + 1} of {waiting.length}
-            </span>
-          </div>
+          <RequestHead
+            waitingSince={request.waitingSince}
+            place={waiting.findIndex((each) => each.id === colleague.id) + 1}
+            queueLength={waiting.length}
+            counting={open}
+          />
           <RequestDock key={openRequest.requestId} sessionId={colleague.id} request={openRequest} />
         </div>
       )}

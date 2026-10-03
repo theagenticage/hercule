@@ -30,16 +30,13 @@ const REQUEST: OpenRequest = {
 
 /** Returns the world for `sessions` in the fixture fleet. */
 const build = (sessions: readonly Session[]) =>
-  buildWorld(
-    {
-      sessions,
-      projects: [WEBSHOP_PROJECT, OPS_PROJECT],
-      workspaces: [PRIMARY, THREAD_3F1],
-      runners: [MOSS],
-      localRunnerId: MOSS.id,
-    },
-    Date.parse("2026-09-10T10:00:00.000Z"),
-  );
+  buildWorld({
+    sessions,
+    projects: [WEBSHOP_PROJECT, OPS_PROJECT],
+    workspaces: [PRIMARY, THREAD_3F1],
+    runners: [MOSS],
+    localRunnerId: MOSS.id,
+  });
 
 const working = buildSession({ id: "s-working", status: "busy", runnerId: MOSS.id });
 const idle = buildSession({ id: "s-idle", status: "idle", runnerId: MOSS.id });

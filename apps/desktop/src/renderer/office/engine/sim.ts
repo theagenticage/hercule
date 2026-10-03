@@ -286,7 +286,7 @@ function buildRequest(colleague: Colleague): OfficeRequest {
     short: "Go ahead with the plan?",
     prompt: `${colleague.name} has a plan ready and asks whether to go ahead with it.`,
     answers: ["Go ahead", "Not yet"],
-    waitingMinutes: 0,
+    waitingSince: new Date().toISOString(),
   };
 }
 

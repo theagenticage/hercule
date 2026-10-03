@@ -30,27 +30,23 @@ const NO_PROJECT_ROOM_ID = "no-project";
 
 /**
  * Returns the request a waiting colleague's tag and the queue read: the
- * one-line question the sidebar's Waiting on you row shows, and how many
- * minutes the thread has waited. The thread's last activity stands in for
- * when the request opened, which the session record does not hold.
+ * one-line question the sidebar's Waiting on you row shows, and since when
+ * the thread has waited. The thread's last activity stands in for when the
+ * request opened, which the session record does not hold.
  */
-function buildOfficeRequest(
-  request: OpenRequest,
-  lastActivityAt: string,
-  now: number,
-): OfficeRequest {
+function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): OfficeRequest {
   const card = buildApprovalCard(request);
   return {
     kind: request.kind === "question" ? "question" : "command",
     short: formatRequestQuestion(request),
     prompt: card.subject.join("\n"),
     answers: card.rows.map((row) => row.label),
-    waitingMinutes: Math.max(0, Math.floor((now - Date.parse(lastActivityAt)) / 60_000)),
+    waitingSince: lastActivityAt,
   };
 }
 
 /** Returns the colleague the Office draws for a seated thread in `pose`. */
-function buildColleague(session: Session, pose: Pose, now: number): Colleague {
+function buildColleague(session: Session, pose: Pose): Colleague {
   return {
     id: session.id,
     name: session.title,
@@ -66,23 +62,22 @@ function buildColleague(session: Session, pose: Pose, now: number): Colleague {
     request:
       session.openRequest === null
         ? null
-        : buildOfficeRequest(session.openRequest, session.lastActivityAt, now),
+        : buildOfficeRequest(session.openRequest, session.lastActivityAt),
     openRequest: session.openRequest,
   };
 }
 
 /**
- * Returns the world the Office draws for `records` at time `now`, in
- * milliseconds since the epoch: one colleague per seated thread, one room
- * per project with a seated thread, in the seating's order, every runner,
- * the queue of colleagues waiting on the user, and the idle colleagues the
- * Lounge seats.
+ * Returns the world the Office draws for `records`: one colleague per
+ * seated thread, one room per project with a seated thread, in the seating's
+ * order, every runner, the queue of colleagues waiting on the user, and the
+ * idle colleagues the Lounge seats.
  */
-export function buildWorld(records: WorldRecords, now: number): World {
+export function buildWorld(records: WorldRecords): World {
   const seating = decideOfficeSeating(records);
   return {
     colleagues: seating.rooms.flatMap((room) =>
-      room.desks.map((desk) => buildColleague(desk.session, desk.pose, now)),
+      room.desks.map((desk) => buildColleague(desk.session, desk.pose)),
     ),
     runners: records.runners.map((runner) => ({
       id: runner.id,

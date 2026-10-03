@@ -32,8 +32,12 @@ export interface OfficeRequest {
   readonly prompt: string;
   /** The answers, the suggested one first. */
   readonly answers: ReadonlyArray<string>;
-  /** Minutes the request has waited. */
-  readonly waitingMinutes: number;
+  /**
+   * When the colleague started waiting on the user, as an ISO 8601 time. The
+   * session records no time for when its Request opened, so the thread's last
+   * activity stands in for it.
+   */
+  readonly waitingSince: string;
 }
 
 /** One colleague: a thread's agent. */
