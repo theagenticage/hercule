@@ -671,7 +671,7 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
 | Key | What it does |
 |---|---|
 | Esc | Steps back one level: the drawer, then the card and the selection, then the room |
-| Tab / ⇧Tab | Selects the next or previous colleague waiting on the user, longest waiting first |
+| Tab / ⇧Tab | Selects the next or previous colleague waiting on the user, longest waiting first. Only while the focus is on the Office itself: in the top bar, the card, the drawer and the menus, Tab moves the focus as everywhere else |
 | ⏎ | Opens the selected colleague's thread in the drawer |
 | Q / E | Turns the building 45 degrees |
 | `=` / `-` | Zooms in and out |
