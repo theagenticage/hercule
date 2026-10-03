@@ -87,7 +87,7 @@ const run = (
   runServiceCommand(
     {
       args,
-      home,
+      homeOption: home,
       overrides: [],
       env: { PATH: "/usr/bin" },
       out: (line) => out.push(line),
@@ -157,6 +157,19 @@ describe("the command line", () => {
       "hercule: service install takes no `--force`",
       "run `hercule service --help`",
     ]);
+    expect(actions).toEqual([]);
+  });
+
+  it("inside a session, prints the help but refuses a verb when no Home is named", async () => {
+    // The status verb is used because it is harmless if the refusal ever breaks:
+    // the Supervisor here is a fake, and status writes nothing.
+    const inSession = { homeOption: undefined, env: { PATH: "/usr/bin", HERCULE_SESSION: "1" } };
+
+    expect(await run(["--help"], inSession)).toBe(0);
+    expect(await run(["status"], inSession)).toBe(2);
+    // One line, with no pointer to the help, which cannot name the missing Home.
+    expect(err).toHaveLength(1);
+    expect(err[0]).toMatch(/^hercule: --home: this command runs inside a Hercule session/);
     expect(actions).toEqual([]);
   });
 
@@ -235,7 +248,7 @@ describe("install", () => {
   it("refuses a Hercule Home with a line break in its path", async () => {
     const odd = join(home, "odd\nExecStartPre=/bin/sh");
     mkdirSync(odd, { recursive: true });
-    expect(await run(["install"], { home: odd })).toBe(1);
+    expect(await run(["install"], { homeOption: odd })).toBe(1);
     expect(err).toEqual([
       `hercule: The Hercule Home ${JSON.stringify(odd)} has a control character, which a unit file cannot hold. Use a path without one.`,
     ]);
@@ -340,6 +353,73 @@ describe("the other verbs", () => {
   it("status prints the status", async () => {
     expect(await run(["status"])).toBe(0);
     expect(out).toEqual(["No Hercule service is installed on this machine."]);
+  });
+});
+
+describe("a verb that acts on the unit, inside a session", () => {
+  const SESSION_ENV = { PATH: "/usr/bin", HERCULE_SESSION: "1" };
+  const ACTING_VERBS = ["start", "stop", "restart", "uninstall"] as const;
+
+  /** Installs the fake unit for the Hercule Home `unitHome`. */
+  const installUnitFor = (unitHome: string | null): void => {
+    installed = {
+      installed: true,
+      running: true,
+      pid: 42,
+      role: "serve",
+      home: unitHome,
+      unitFile: UNIT_FILE,
+    };
+  };
+
+  it.each(ACTING_VERBS)(
+    "refuses %s when the unit runs another Home, and leaves the unit alone",
+    async (verb) => {
+      installUnitFor("/live");
+
+      expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+      expect(actions).toEqual([]);
+      expect(err).toEqual([
+        `hercule: The Hercule service on this machine runs the Hercule Home /live, not ${home}. Inside a session, \`hercule service ${verb}\` may only act on the service of the Home it names, because the other one may be the user's live Hercule. Run it outside the session.`,
+      ]);
+    },
+  );
+
+  it.each(ACTING_VERBS)("refuses %s when the unit names no Home", async (verb) => {
+    installUnitFor(null);
+
+    expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+    expect(actions).toEqual([]);
+    expect(err[0]).toContain("runs a Hercule Home its unit file does not name");
+  });
+
+  it.each(ACTING_VERBS)("runs %s when the unit runs the Home it names", async (verb) => {
+    installUnitFor(home);
+
+    expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(0);
+    expect(actions).toEqual([verb]);
+    expect(err).toEqual([]);
+  });
+
+  it.each(ACTING_VERBS)("runs %s when no unit is installed", async (verb) => {
+    expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(0);
+    expect(actions).toEqual([verb]);
+  });
+
+  it.each(ACTING_VERBS)("runs %s on another Home's unit outside a session", async (verb) => {
+    installUnitFor("/live");
+
+    expect(await run([verb], { homeOption: home })).toBe(0);
+    expect(actions).toEqual([verb]);
+  });
+
+  it("still reports the status of another Home's unit", async () => {
+    installUnitFor("/live");
+
+    expect(await run(["status"], { homeOption: home, env: SESSION_ENV })).toBe(0);
+    expect(out).toEqual([
+      "The Hercule service runs `hercule serve` for the Hercule Home /live, as pid 42.",
+    ]);
   });
 });
 

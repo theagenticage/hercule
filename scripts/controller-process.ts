@@ -40,7 +40,7 @@ const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
  * `HERCULE_TOKEN` set in their shell must not change what a test or a
  * measurement exercises.
  */
-function buildCleanEnv(): Record<string, string> {
+export function buildCleanEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>

@@ -23,7 +23,7 @@ import {
   loadBootstrapConfig,
   locateCompiledBinary,
   parseGlobalOptions,
-  resolveHomePath,
+  resolveHomePathToActOn,
   type ConfigOverrides,
 } from "@hercule/home";
 import { makeProcessLogLayer } from "@hercule/process-log";
@@ -129,6 +129,20 @@ const reportMisuse = (reason: string): void => {
   process.exitCode = EXIT.usage;
 };
 
+/**
+ * Returns the Home a runner command acts on. Inside a session with no Home
+ * named, prints the refusal, sets the usage exit code and returns undefined.
+ * It runs after the command line is checked, so a typo is still reported as
+ * a typo inside a session.
+ */
+const resolveHomeOrReportRefusal = (homeOption: string | undefined): string | undefined => {
+  const resolved = resolveHomePathToActOn(homeOption, process.env);
+  if (Result.isSuccess(resolved)) return resolved.success;
+  console.error(`hercule: ${resolved.failure.option}: ${resolved.failure.message}`);
+  process.exitCode = EXIT.usage;
+  return undefined;
+};
+
 export async function run(argv: readonly string[]): Promise<void> {
   const options = parseGlobalOptions(argv);
   if (Result.isFailure(options)) {
@@ -140,13 +154,14 @@ export async function run(argv: readonly string[]): Promise<void> {
   const verb = rest[0];
 
   if (verb === undefined || verb.startsWith("-")) {
-    const home = resolveHomePath(options.success.home, process.env);
     // Any other option is a typo, and starting a daemon would be the wrong response.
     const unknown = rest.find((token) => token !== "--local");
     if (unknown !== undefined) {
       reportMisuse(`unknown runner option \`${unknown}\``);
       return;
     }
+    const home = resolveHomeOrReportRefusal(options.success.home);
+    if (home === undefined) return;
     return await runUntilStopped(
       { home, overrides: options.success.overrides },
       verb === "--local" ? runLocalRunner(home) : runDaemon(home),
@@ -156,18 +171,19 @@ export async function run(argv: readonly string[]): Promise<void> {
     // Any other subcommand that reaches this role came from
     // `hercule git-credential`, because the dispatcher sends every other
     // runner subcommand to the CLI. git passes the action name, and only `get`
-    // returns anything.
+    // returns anything. It reads no Home, so it runs inside a session too.
     return await runCredentialAction(verb);
   }
 
   const args = rest.slice(1);
-  const home = resolveHomePath(options.success.home, process.env);
 
   if (verb === "set-controller") {
     if (args.length !== 1) {
       reportMisuse("set-controller takes one controller URL");
       return;
     }
+    const home = resolveHomeOrReportRefusal(options.success.home);
+    if (home === undefined) return;
     const outcome = await Effect.runPromise(
       Effect.result(setController({ home, controllerUrl: args[0]! })),
     );
@@ -201,6 +217,8 @@ export async function run(argv: readonly string[]): Promise<void> {
     reportMisuse("join needs --token <token>");
     return;
   }
+  const home = resolveHomeOrReportRefusal(options.success.home);
+  if (home === undefined) return;
 
   const outcome = await Effect.runPromise(
     Effect.result(

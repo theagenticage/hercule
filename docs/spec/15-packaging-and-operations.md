@@ -148,6 +148,24 @@ Crash-restart and join handoff (resolved 2026-08-31, [#43](https://github.com/th
 
 Everything Hercule keeps on a machine lives in one directory, `~/.hercule` by default, overridable with `HERCULE_HOME` or `--home`. XDG splitting is rejected ([ADR 0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md)).
 
+*(Amended 2026-10-03, [#310](https://github.com/theagenticage/hercule/issues/310).)* Inside a session (`HERCULE_SESSION=1`), the commands below never use the default Home on their own. When neither `--home` nor `HERCULE_HOME` names a Home (an empty value names none), the command fails before it touches anything, with a message that names the default Home and asks for a scratch one:
+
+- `hercule serve`;
+- `hercule runner` and `hercule runner --local`;
+- `hercule runner join` and `hercule runner set-controller`;
+- every `hercule service` verb, `status` included.
+
+A session never inherits `HERCULE_HOME` from its runner ([06 §9.3](./06-providers.md)), so inside a session the default Home is a guess. When the session's own controller runs on a scratch Home, that guess is the user's live Home. The command line is checked first, so `--help` and a mistyped option are answered as usual.
+
+Naming a Home is not enough for the Service Unit, because a machine user has one unit whatever Home it runs. `install` already refuses a unit that runs another Home (section 4). Inside a session, `start`, `stop`, `restart` and `uninstall` refuse the same way: when the installed unit runs a Home other than the one named, or its Home cannot be read, the verb fails and leaves the unit alone. Outside a session they act on the installed unit as before.
+
+These are guards against an agent's mistake, not a sandbox: an agent that names `~/.hercule` itself, or unsets `HERCULE_SESSION`, gets through, as [13 §5](./13-security.md) accepts for credentials. Not covered:
+
+- `hercule git-credential`, which reads no Home and must run inside sessions for git to work;
+- `hercule login` and `hercule logout`. They write only `credentials.json`, and the CLI never reads that file inside a session ([13 §5](./13-security.md)), so a session's login cannot make another session act as the user. At worst it replaces the user's stored login, which the user fixes by logging in again.
+
+Every other command resolves the Home as above.
+
 ```
 ~/.hercule/
   config.toml       bootstrap config (section 6)
