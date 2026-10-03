@@ -17,8 +17,9 @@ import type { Colleague } from "./world/types";
 export type TagMode = "all" | "smart" | "none";
 
 /**
- * The Office's fixed settings. The prototype offered controls for each of
- * them; the app ships the chosen values.
+ * The fixed values the Office runs with: how the colleagues look, which name
+ * tags show, and how much the colleagues move about. The user cannot change
+ * them; the scene passes each one to the part of the engine that uses it.
  */
 export const OFFICE_SETTINGS: {
   readonly style: CharacterStyle;
