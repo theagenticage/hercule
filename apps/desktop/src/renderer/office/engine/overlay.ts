@@ -3,17 +3,18 @@
  * over each colleague's head, and the room labels of the overview.
  *
  * In the `smart` mode, the tags follow the camera's distance:
- * - far away, one label per room shows its name, how many colleagues are in
- *   it and how many wait on the user;
+ * - far away, one label per room shows its name, how many colleagues belong
+ *   in it and how many of those wait on the user (`countColleaguesByRoom`,
+ *   the same counts the Rooms directory shows);
  * - in the middle distance, the colleagues in the room the camera looks at
  *   show their names;
  * - close up, every colleague in view does.
  *
  * A room of kind "floor", such as a storey of the Tower, stands for the rooms
- * of its storey that lie inside it. Far away, only its label shows, and it
- * counts the colleagues in all of those rooms. The rooms inside it show
- * their labels in the middle distance, for the "floor" room the camera looks
- * at. Rooms outside any "floor" room keep their label far away.
+ * of its storey that lie inside it. Far away, only its label shows. The
+ * rooms inside it show their labels in the middle distance, for the "floor"
+ * room the camera looks at. Rooms outside any "floor" room keep their label
+ * far away.
  *
  * At every distance the waiting, hovered and selected colleagues show theirs.
  * Mode `all` shows every tag and mode `none` only the hovered and selected
@@ -57,7 +58,9 @@ import {
   type ColleagueRig,
   type ColleagueState,
   type RoomInfo,
+  type Seat,
 } from "./contracts";
+import { countColleaguesByRoom, isWaiting } from "./room-counts";
 import { isCameraMoving, isShown, readCameraView } from "./camera-rig";
 import { isColleagueHidden, registerTagHitTest } from "./picking";
 import { readColleagueStates, sendOfficeCommand, type TagMode } from "../office-store";
@@ -200,16 +203,10 @@ interface RoomLabel extends Placed {
    * "floor" room's label shows far away, this one waits for the middle distance.
    */
   floorLabel: RoomLabel | null;
-  /** The counts this frame, and the counts the text shows. */
-  present: number;
-  asking: number;
+  /** The counts the text shows. */
   writtenPresent: number;
   writtenAsking: number;
 }
-
-/** Returns true when a colleague waits on the user. */
-const isWaiting = (state: ColleagueState): boolean =>
-  state.pose === "waiting" || state.request !== null;
 
 /** Returns how many minutes a colleague has waited on the user: nought without a request. */
 const readWaitingMinutes = (tag: Tag): number => tag.state.request?.waitingMinutes ?? 0;
@@ -299,44 +296,41 @@ function createRoomLabel(room: RoomInfo): RoomLabel {
     count,
     waiting,
     floorLabel: null,
-    present: 0,
-    asking: 0,
     writtenPresent: -1,
     writtenAsking: -1,
   };
 }
 
-/** Counts one colleague in a room's label, and counts it as waiting when it waits on the user. */
-function countColleague(label: RoomLabel, waiting: boolean): void {
-  label.present += 1;
-  if (waiting) label.asking += 1;
-}
-
-/** Writes a room label's counts when they changed. A count of nought hides. */
-function writeCounts(label: RoomLabel): void {
-  if (label.present === label.writtenPresent && label.asking === label.writtenAsking) return;
-  label.writtenPresent = label.present;
-  label.writtenAsking = label.asking;
-  label.count.textContent = String(label.present);
-  label.count.title = `${label.present} ${label.present === 1 ? "colleague" : "colleagues"} here`;
-  label.count.style.display = label.present === 0 ? "none" : "";
-  label.waiting.textContent = String(label.asking);
-  label.waiting.title = `${label.asking} waiting on you`;
-  label.waiting.style.display = label.asking === 0 ? "none" : "";
-  label.element.classList.toggle("office-room-label--counted", label.present > 0);
+/**
+ * Writes a room label's counts, `present` colleagues of whom `asking` wait on
+ * the user, when they changed. A count of nought hides.
+ */
+function writeCounts(label: RoomLabel, present: number, asking: number): void {
+  if (present === label.writtenPresent && asking === label.writtenAsking) return;
+  label.writtenPresent = present;
+  label.writtenAsking = asking;
+  label.count.textContent = String(present);
+  label.count.title = `${present} ${present === 1 ? "colleague" : "colleagues"} here`;
+  label.count.style.display = present === 0 ? "none" : "";
+  label.waiting.textContent = String(asking);
+  label.waiting.title = `${asking} waiting on you`;
+  label.waiting.style.display = asking === 0 ? "none" : "";
+  label.element.classList.toggle("office-room-label--counted", present > 0);
   label.dirty = true;
 }
 
 /**
  * Creates the overlay in `container`, which also holds the canvas, with a
- * tag for every rig in `rigs` and a label for every room. The `rigs` map is
- * the same one the picker gets, which is how the picker finds the tags.
+ * tag for every rig in `rigs` and a label for every room in `rooms`. `homes`
+ * holds each colleague's seat, which the room labels count by. The `rigs`
+ * map is the same one the picker gets, which is how the picker finds the tags.
  */
 export function createOverlay(
   container: HTMLElement,
   camera: PerspectiveCamera,
   rigs: ReadonlyMap<string, ColleagueRig>,
   rooms: ReadonlyArray<RoomInfo>,
+  homes: ReadonlyMap<string, Seat>,
 ): Overlay {
   const layer = document.createElement("div");
   layer.className = "office-tags";
@@ -370,6 +364,8 @@ export function createOverlay(
   let width = container.clientWidth;
   let height = container.clientHeight;
   let disposed = false;
+  /** The states the room labels were last counted from. The sim replaces its map on every change. */
+  let countedStates: ReadonlyMap<string, ColleagueState> | null = null;
   /** The tags and labels showing, most important first, for hit tests. */
   let shownInOrder: Array<Tag | RoomLabel> = [];
 
@@ -543,7 +539,14 @@ export function createOverlay(
 
     // First the text and the counts, then one measuring pass, then placement.
     const states = readColleagueStates();
-    for (const label of labels) label.present = label.asking = 0;
+    if (states !== countedStates) {
+      countedStates = states;
+      const counts = countColleaguesByRoom(rooms, homes, states);
+      for (const label of labels) {
+        const count = counts.get(label.room.id);
+        writeCounts(label, count?.colleagues ?? 0, count?.waiting ?? 0);
+      }
+    }
     for (const tag of tags) {
       const { rig } = tag;
       tag.state = states.get(tag.id) ?? rig.colleague;
@@ -553,15 +556,7 @@ export function createOverlay(
       rig.object.getWorldPosition(tag.anchor);
       tag.room = findRoom(tag.anchor);
       tag.anchor.y += rig.headHeight + TAG_LIFT;
-      const label = tag.room === null ? undefined : labelsByRoom.get(tag.room);
-      if (label !== undefined) {
-        const waiting = isWaiting(tag.state);
-        countColleague(label, waiting);
-        // A "floor" room's label counts the colleagues in the rooms it stands for too.
-        if (label.floorLabel !== null) countColleague(label.floorLabel, waiting);
-      }
     }
-    for (const label of labels) writeCounts(label);
     decidePips();
     measureChanged();
 

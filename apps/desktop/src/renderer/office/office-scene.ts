@@ -139,7 +139,7 @@ export function mountOfficeScene(container: HTMLElement, initialWorld: World): O
     // so they follow whichever office is built now.
     publishColleagueStates(sim.readStates());
     sim.subscribeStates(() => publishColleagueStates(sim.readStates()));
-    const overlay = createOverlay(container, stage.camera, rigs, layout.rooms);
+    const overlay = createOverlay(container, stage.camera, rigs, layout.rooms, layout.homes);
     overlay.setMode(OFFICE_SETTINGS.tags);
     stage.setShadowBounds(layout.bounds);
     stage.setBuilding(layout.root);

@@ -5,12 +5,13 @@
  * The rooms come from the scene's current layout, read each time the menu
  * opens, so the list follows the rooms as threads come and go. The project
  * rooms come first, each drawn as its project's tile, then the Office's
- * fixed rooms. Each room shows how many colleagues belong in it now: see
- * `countColleaguesByRoom`.
+ * fixed rooms. Each room shows how many colleagues belong in it now, the
+ * same count its label in the 3D view shows: see `countColleaguesByRoom`.
  */
 import { useSyncExternalStore, type JSX } from "react";
 import { ProjectTile } from "../../screens/project-tile";
-import type { ColleagueState, OfficeLayout, RoomInfo } from "../engine/contracts";
+import type { OfficeLayout, RoomInfo } from "../engine/contracts";
+import { countColleaguesByRoom } from "../engine/room-counts";
 import type { OfficeScene } from "../office-scene";
 import {
   readColleagueStates,
@@ -19,7 +20,6 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import type { Pose } from "../world/types";
 import { ListIcon } from "../../icons/list";
 import { ChevronDownIcon } from "./office-icons";
 import { OfficeMenu } from "./office-menu";
@@ -43,32 +43,6 @@ export function groupRooms(rooms: ReadonlyArray<RoomInfo>): ReadonlyArray<RoomGr
   return groups.filter((group) => group.rooms.length > 0);
 }
 
-/** Counts the colleagues in `states` whose pose is `pose`. */
-const countPose = (states: ReadonlyMap<string, ColleagueState>, pose: Pose): number =>
-  [...states.values()].filter((state) => state.pose === pose).length;
-
-/**
- * Returns how many colleagues belong in each room of `layout` now, by room id:
- * - a project room: the colleagues with their desk in it;
- * - the Lounge: the colleagues whose pose in `states` is idle, because idle colleagues sit there;
- * - Your Office: the colleagues whose pose is waiting, because they queue there.
- * Any other room has no count, and the directory shows 0.
- */
-const countColleaguesByRoom = (
-  layout: OfficeLayout,
-  states: ReadonlyMap<string, ColleagueState>,
-): ReadonlyMap<string, number> => {
-  const counts = new Map<string, number>();
-  for (const seat of layout.homes.values()) {
-    counts.set(seat.roomId, (counts.get(seat.roomId) ?? 0) + 1);
-  }
-  for (const room of layout.rooms) {
-    if (room.kind === "lounge") counts.set(room.id, countPose(states, "idle"));
-    if (room.kind === "your-office") counts.set(room.id, countPose(states, "waiting"));
-  }
-  return counts;
-};
-
 /** Renders the directory's list of rooms, the room the camera is in marked. */
 function RoomList({
   layout,
@@ -80,7 +54,7 @@ function RoomList({
   readonly onPick: (roomId: string) => void;
 }): JSX.Element {
   const states = useSyncExternalStore(subscribeColleagueStates, readColleagueStates);
-  const counts = countColleaguesByRoom(layout, states);
+  const counts = countColleaguesByRoom(layout.rooms, layout.homes, states);
   return (
     <>
       <div className="pop-h">
@@ -105,8 +79,11 @@ function RoomList({
                   <b>{room.label}</b>
                 )}
               </span>
-              <span className="count" aria-label={`${String(counts.get(room.id) ?? 0)} colleagues`}>
-                {counts.get(room.id) ?? 0}
+              <span
+                className="count"
+                aria-label={`${String(counts.get(room.id)?.colleagues ?? 0)} colleagues`}
+              >
+                {counts.get(room.id)?.colleagues ?? 0}
               </span>
             </button>
           ))}
