@@ -70,7 +70,6 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
     queue: [],
     ownedDesks: [],
     yourDesk: null,
-    records: null,
     tea: null,
     entrance: null,
     board: null,
@@ -143,8 +142,6 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
     yourDesk: fittings.yourDesk ?? entrance,
     queue: fittings.queue,
     lounge: fittings.lounge,
-    records: fittings.records,
-    entrance,
     tea: fittings.tea,
   };
   const layout: OfficeLayout = {

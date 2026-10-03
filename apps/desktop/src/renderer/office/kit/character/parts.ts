@@ -526,7 +526,7 @@ export function buildPlate(shape: Shape, depth: number, curveSegments = 6): Buff
 }
 
 /** Builds a rounded rectangle shape centred on the origin. */
-export function buildRoundedRectangle(width: number, height: number, radius: number): Shape {
+function buildRoundedRectangle(width: number, height: number, radius: number): Shape {
   const shape = new Shape();
   const w = width / 2;
   const h = height / 2;
@@ -815,8 +815,6 @@ function addHeadset(list: PartList<Surface>, egg: Egg): void {
 interface Chest {
   /** The egg they sit on. */
   readonly egg: Egg;
-  /** The bone they follow. */
-  readonly bone: number;
   /** The bowtie's knot, in the egg's face plane. */
   readonly knot: Vector3;
   /** Where the watch chain starts, in the egg's face plane; the watch hangs to its left (+x). */
@@ -826,10 +824,9 @@ interface Chest {
 }
 
 /** Returns where the accessories below the face sit, for `anatomy`. */
-export function readChest(anatomy: Anatomy): Chest {
+function readChest(anatomy: Anatomy): Chest {
   return {
     egg: anatomy.egg,
-    bone: BONE.head,
     knot: mapFacePoint(anatomy.egg, 24, 37.8, new Vector3()),
     fob: mapFacePoint(anatomy.egg, 24.4, 37.6, new Vector3()),
     unit: anatomy.egg.unit,
@@ -856,11 +853,11 @@ function addBowtie(list: PartList<Surface>, anatomy: Anatomy): void {
   flipWinding(right);
   for (const part of [left, right]) {
     part.translate(chest.knot.x, chest.knot.y, 1.4 * u);
-    list.add("trim", wrapOntoEgg(part, chest.egg, 0.002), chest.bone);
+    list.add("trim", wrapOntoEgg(part, chest.egg, 0.002), BONE.head);
   }
   const knot = buildDome(1.8 * u, 1.7 * u, 1.5 * u, 10);
   knot.translate(chest.knot.x, chest.knot.y, 1.2 * u);
-  list.add("trim", wrapOntoEgg(knot, chest.egg, 0.002), chest.bone);
+  list.add("trim", wrapOntoEgg(knot, chest.egg, 0.002), BONE.head);
 }
 
 /** Reverses the winding of every triangle of a non-indexed geometry. */
@@ -879,8 +876,7 @@ function flipWinding(geometry: BufferGeometry): void {
 
 /**
  * Builds a pocket watch's brass case, and the chain that runs to it from the
- * fob, in the chest bone's space (`readChest(anatomy).bone`). Returns the case
- * and the chain.
+ * fob, in the head's space. Returns the case and the chain.
  */
 export function buildWatchCase(anatomy: Anatomy): BufferGeometry[] {
   const { egg, fob, unit: u } = readChest(anatomy);
@@ -897,7 +893,7 @@ export function buildWatchCase(anatomy: Anatomy): BufferGeometry[] {
   return [wrapOntoEgg(watchCase, egg, 0.001), wrapOntoEgg(buildStroke(chain, 0.5 * u), egg, 0.001)];
 }
 
-/** Builds the cream dial of a pocket watch, in the chest bone's space. */
+/** Builds the cream dial of a pocket watch, in the head's space. */
 export function buildWatchDial(anatomy: Anatomy): BufferGeometry {
   const { egg, fob, unit: u } = readChest(anatomy);
   const dial = new CylinderGeometry(1.8 * u, 1.8 * u, 0.4 * u, 16);
@@ -1098,33 +1094,4 @@ export function buildSelectionRing(radius: number): BufferGeometry {
   ring.rotateX(-Math.PI / 2);
   ring.deleteAttribute("uv");
   return ring;
-}
-
-/** Builds the letter Z as a flat plate, its middle at the origin, `size` tall, facing +z. */
-export function buildLetterZ(size: number): BufferGeometry {
-  const s = size;
-  const t = s * 0.2;
-  const shape = new Shape();
-  shape.moveTo(-0.42 * s, 0.5 * s);
-  shape.lineTo(0.42 * s, 0.5 * s);
-  shape.lineTo(0.42 * s, 0.5 * s - t);
-  shape.lineTo(-0.16 * s, -0.5 * s + t);
-  shape.lineTo(0.44 * s, -0.5 * s + t);
-  shape.lineTo(0.44 * s, -0.5 * s);
-  shape.lineTo(-0.44 * s, -0.5 * s);
-  shape.lineTo(-0.44 * s, -0.5 * s + t);
-  shape.lineTo(0.14 * s, 0.5 * s - t);
-  shape.lineTo(-0.42 * s, 0.5 * s - t);
-  shape.lineTo(-0.42 * s, 0.5 * s);
-  const geometry = new ExtrudeGeometry(shape, {
-    depth: s * 0.1,
-    bevelEnabled: true,
-    bevelThickness: s * 0.04,
-    bevelSize: s * 0.04,
-    bevelSegments: 2,
-  });
-  geometry.translate(0, 0, -s * 0.05);
-  geometry.deleteAttribute("uv");
-  geometry.computeVertexNormals();
-  return geometry;
 }

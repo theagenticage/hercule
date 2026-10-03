@@ -1,7 +1,7 @@
 /**
- * A colleague's face in 3D: the Bureau book's eyes, brows and
- * mouths for each of the eight poses, the blush, the moustache, glasses and
- * monocle, and the pose's badge, raised off the egg like enamel and ink.
+ * A colleague's face in 3D: the Bureau book's eyes, brows and mouths for
+ * each pose a seated colleague can have (working, waiting and idle), the
+ * blush, the moustache, glasses and monocle, raised off the egg like ink.
  *
  * Every drawing comes from the 2D face (`faces/face-parts.tsx`): the same
  * points, in the same face units, mapped onto the egg. A face is one skinned
@@ -10,31 +10,21 @@
  * The eyes follow their own bones, so a blink squeezes them; everything else
  * follows the head.
  */
-import {
-  BufferGeometry,
-  LatheGeometry,
-  Matrix4,
-  Shape,
-  TorusGeometry,
-  Vector2,
-  Vector3,
-} from "three";
+import { BufferGeometry, Shape, TorusGeometry, Vector2, Vector3 } from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import type { Accessory } from "../../../faces/look";
-import type { Pose } from "@hercule/client-core";
+import type { SeatedPose } from "@hercule/client-core";
 import { mapFacePoint, measureEggRadius, placeOnEgg, type Anatomy, type Egg } from "./anatomy";
 import {
   BONE,
   PartList,
   buildDome,
   buildPlate,
-  buildRoundedRectangle,
   buildMonocleChain,
   buildStroke,
   buildWatchCase,
   buildWatchDial,
   paintLayers,
-  readChest,
   traceQuadratic,
   wrapOntoEgg,
 } from "./parts";
@@ -42,10 +32,10 @@ import { registerCache } from "../../engine/caches";
 import { readColor } from "../../engine/palette";
 
 /** The colours of a face, each painted into the vertices of its parts. */
-type FaceLayer = "ink" | "paper" | "badge" | "blush" | "brass";
+type FaceLayer = "ink" | "paper" | "blush" | "brass";
 
 /** The face's layers, in vertex order. */
-const FACE_LAYERS: ReadonlyArray<FaceLayer> = ["ink", "paper", "badge", "blush", "brass"];
+const FACE_LAYERS: ReadonlyArray<FaceLayer> = ["ink", "paper", "blush", "brass"];
 
 /** The y of the eyes' centres in the 2D face's units. */
 const EYE_Y = 26.6;
@@ -63,30 +53,6 @@ type FacePoint = readonly [number, number];
 export function readEyeCentre(egg: Egg, side: "left" | "right"): Vector3 {
   const flat = mapFacePoint(egg, EYE_X[side], EYE_Y, new Vector3());
   return placeOnEgg(egg, flat.x, flat.y, 0, new Vector3(), new Vector3());
-}
-
-/** Returns true when a pose's eyes are open, so they blink. */
-export function hasOpenEyes(pose: Pose): boolean {
-  return pose === "working" || pose === "waiting" || pose === "idle" || pose === "failed";
-}
-
-/**
- * Returns the token a pose's badge is enamelled in, or null for a pose
- * without a badge. The paused and away badges are pale, as the book's
- * outlined badges are.
- */
-function readBadgeToken(pose: Pose): "ok" | "fail" | "room-paper" | null {
-  switch (pose) {
-    case "done":
-      return "ok";
-    case "failed":
-      return "fail";
-    case "paused":
-    case "away":
-      return "room-paper";
-    default:
-      return null;
-  }
 }
 
 /** The parts of a face, before they are merged: layers, bones and the egg they sit on. */
@@ -171,8 +137,8 @@ function addDot(
   face.list.add(layer, geometry, bone);
 }
 
-/** Adds one eye in `pose`, as the book draws it, with its white glint when it is open. */
-function addEye(face: FaceBuild, pose: Pose, side: "left" | "right"): void {
+/** Adds one open eye in `pose`, as the book draws it, with its white glint. */
+function addEye(face: FaceBuild, pose: SeatedPose, side: "left" | "right"): void {
   const x = EYE_X[side];
   const eye = { eye: side } as const;
   const addOpenEye = (dy: number, ry: number) => {
@@ -190,42 +156,12 @@ function addEye(face: FaceBuild, pose: Pose, side: "left" | "right"): void {
     case "waiting":
       return addOpenEye(-0.5, 2.75);
     case "idle":
-    case "failed":
       return addOpenEye(0, 2.55);
-    case "paused":
-      return addLine(
-        face,
-        "ink",
-        [
-          [x - 2.2, EYE_Y + 0.2],
-          [x + 2.2, EYE_Y + 0.2],
-        ],
-        1.5,
-        eye,
-      );
-    case "asleep":
-      return addLine(
-        face,
-        "ink",
-        traceFaceQuadratic([x - 2.3, EYE_Y], [x, EYE_Y + 2], [x + 2.3, EYE_Y]),
-        1.5,
-        eye,
-      );
-    case "done":
-      return addLine(
-        face,
-        "ink",
-        traceFaceQuadratic([x - 2.3, EYE_Y + 1], [x, EYE_Y - 1.8], [x + 2.3, EYE_Y + 1]),
-        1.5,
-        eye,
-      );
-    case "away":
-      return addDot(face, "ink", [x - 1, EYE_Y + 0.3], 1.5, 1.5, { ...eye, height: 0.8 });
   }
 }
 
 /** Adds the brows of the poses the book draws with brows. */
-function addBrows(face: FaceBuild, pose: Pose): void {
+function addBrows(face: FaceBuild, pose: SeatedPose): void {
   switch (pose) {
     case "waiting":
       addLine(face, "ink", traceFaceQuadratic([16.9, 21.6], [19, 20.2], [21.1, 21.6]), 1.25);
@@ -251,62 +187,22 @@ function addBrows(face: FaceBuild, pose: Pose): void {
         1.25,
       );
       return;
-    case "failed":
-      addLine(
-        face,
-        "ink",
-        [
-          [16.8, 22.8],
-          [21, 21.3],
-        ],
-        1.25,
-      );
-      addLine(
-        face,
-        "ink",
-        [
-          [31.2, 22.8],
-          [27, 21.3],
-        ],
-        1.25,
-      );
-      return;
-    default:
+    case "idle":
       return;
   }
 }
 
 /**
  * Adds the mouth of `pose`. Under a moustache the mouth sits lower, and only
- * the waiting, done and failed mouths still show, as in the book.
+ * the waiting mouth still shows, as in the book.
  */
-function addMouth(face: FaceBuild, pose: Pose, wearsTache: boolean): void {
+function addMouth(face: FaceBuild, pose: SeatedPose, wearsTache: boolean): void {
   const y = wearsTache ? 34.4 : 32.6;
   switch (pose) {
     case "waiting":
       return addDot(face, "ink", [24, y + 0.2], 1.5, 1.7, { height: 0.5 });
-    case "done":
-      return addLine(
-        face,
-        "ink",
-        traceFaceQuadratic([21, y - 1.2], [24, y + 2], [27, y - 1.2]),
-        1.45,
-      );
-    case "failed":
-      return addLine(
-        face,
-        "ink",
-        [
-          ...traceFaceQuadratic([21.4, y + 0.6], [22.7, y - 0.7], [24, y + 0.6]),
-          ...traceFaceQuadratic([24, y + 0.6], [25.3, y + 1.9], [26.6, y + 0.6]).slice(1),
-        ],
-        1.45,
-      );
-  }
-  if (wearsTache) return;
-  switch (pose) {
     case "working":
-    case "paused":
+      if (wearsTache) return;
       return addLine(
         face,
         "ink",
@@ -316,12 +212,8 @@ function addMouth(face: FaceBuild, pose: Pose, wearsTache: boolean): void {
         ],
         1.45,
       );
-    case "asleep":
-      return addLine(face, "ink", traceFaceQuadratic([23, y], [24, y + 0.8], [25, y]), 1.45);
-    case "away":
-      for (const x of [22.2, 24.1, 26]) addDot(face, "ink", [x, y], 0.72, 0.72, { height: 0.5 });
-      return;
     case "idle":
+      if (wearsTache) return;
       return addLine(
         face,
         "ink",
@@ -439,149 +331,6 @@ function addMonocle(face: FaceBuild): void {
   addRim(face, EYE_X.left, 4.2, 1.2);
 }
 
-/** Adds the plaster the failed pose wears on its right cheek, with its pad. */
-function addPlaster(face: FaceBuild): void {
-  const { egg } = face;
-  const centre = mapFacePoint(egg, 14.6, 32.4, new Vector3());
-  // In the book the plaster tilts 30 degrees, its inner end higher.
-  const turn = new Matrix4().makeRotationZ(Math.PI / 6);
-  const strip = buildPlate(
-    buildRoundedRectangle(10 * egg.unitAcross, 4.6 * egg.unit, 2.3 * egg.unit),
-    0.3 * egg.unit,
-    4,
-  );
-  const pad = buildPlate(
-    buildRoundedRectangle(3 * egg.unitAcross, 3.4 * egg.unit, 0.7 * egg.unit),
-    0.3 * egg.unit,
-    3,
-  );
-  pad.translate(0, 0, 0.3 * egg.unit);
-  for (const part of [strip, pad]) {
-    part.applyMatrix4(turn);
-    part.translate(centre.x, centre.y, 0);
-    face.list.add("paper", wrapOntoEgg(part, egg, 0.3 * egg.unit), BONE.head);
-  }
-}
-
-/** Where a badge is pinned: the egg, the bone, its centre in the egg's face plane, and its radius. */
-interface BadgePlace {
-  readonly egg: Egg;
-  readonly bone: number;
-  readonly centre: Vector3;
-  readonly radius: number;
-}
-
-/**
- * Returns where a pose's badge is pinned. A bean wears it low on its left
- * (+x), where the book draws it, or on its right when a pocket watch hangs
- * there.
- */
-function readBadgePlace(anatomy: Anatomy, wearsWatch: boolean): BadgePlace {
-  const { egg } = anatomy;
-  return {
-    egg,
-    bone: BONE.head,
-    centre: mapFacePoint(egg, wearsWatch ? 13.6 : 34.4, 37.2, new Vector3()),
-    radius: 3 * egg.unit,
-  };
-}
-
-/**
- * Adds a pose's badge: an enamel pin with a flat top, and the book's symbol
- * on it, a check, an X, two bars or a crossed-out arc.
- */
-function addBadge(face: FaceBuild, anatomy: Anatomy, pose: Pose, wearsWatch: boolean): void {
-  if (readBadgeToken(pose) === null) return;
-  const { egg, bone, centre, radius } = readBadgePlace(anatomy, wearsWatch);
-  const height = radius * 0.32;
-  const pin = new LatheGeometry(
-    [
-      new Vector2(0.0001, 0),
-      new Vector2(radius * 0.96, 0),
-      new Vector2(radius, height * 0.45),
-      new Vector2(radius * 0.93, height * 0.88),
-      new Vector2(radius * 0.78, height),
-      new Vector2(0.0001, height),
-    ],
-    20,
-  );
-  pin.deleteAttribute("uv");
-  pin.rotateX(Math.PI / 2);
-  pin.translate(centre.x, centre.y, 0);
-  face.list.add("badge", wrapOntoEgg(pin, egg, 0), bone);
-  // The symbol, in the book's badge units: the badge there has a radius of 5.6.
-  const scale = radius / 5.6;
-  const addSymbol = (layer: FaceLayer, points: ReadonlyArray<FacePoint>, width: number) => {
-    const line = buildStroke(
-      points.map(([x, y]) => new Vector3(centre.x + x * scale, centre.y - y * scale, 0)),
-      (width / 2) * scale,
-    );
-    face.list.add(layer, wrapOntoEgg(line, egg, height), bone);
-  };
-  switch (pose) {
-    case "done":
-      addSymbol(
-        "paper",
-        [
-          [-2.4, 0.2],
-          [-0.8, 1.8],
-          [2.4, -1.6],
-        ],
-        1.7,
-      );
-      return;
-    case "failed":
-      addSymbol(
-        "paper",
-        [
-          [-1.7, -1.7],
-          [1.7, 1.7],
-        ],
-        1.7,
-      );
-      addSymbol(
-        "paper",
-        [
-          [1.7, -1.7],
-          [-1.7, 1.7],
-        ],
-        1.7,
-      );
-      return;
-    case "paused":
-      addSymbol(
-        "ink",
-        [
-          [-1.2, -1.8],
-          [-1.2, 1.8],
-        ],
-        1.5,
-      );
-      addSymbol(
-        "ink",
-        [
-          [1.2, -1.8],
-          [1.2, 1.8],
-        ],
-        1.5,
-      );
-      return;
-    case "away":
-      addSymbol(
-        "ink",
-        [
-          [-2.4, 1.8],
-          [2.4, -3],
-        ],
-        1.3,
-      );
-      addSymbol("ink", traceFaceQuadratic([-2.2, -1.8], [0.2, -4.2], [2.6, -1.8]), 1.3);
-      return;
-    default:
-      return;
-  }
-}
-
 /** Adds the two blushing cheeks. */
 function addBlush(face: FaceBuild): void {
   for (const x of [15, 33]) {
@@ -599,7 +348,7 @@ registerCache(() => faces.clear());
  */
 export function readFaceGeometry(
   anatomy: Anatomy,
-  pose: Pose,
+  pose: SeatedPose,
   accessories: ReadonlyArray<Accessory>,
 ): BufferGeometry {
   const wears = (accessory: Accessory) => accessories.includes(accessory);
@@ -626,21 +375,15 @@ export function readFaceGeometry(
   if (wears("monocle")) addMonocle(face);
   if (wears("monocle")) face.list.add("brass", buildMonocleChain(egg), BONE.head);
   if (wears("watch")) {
-    const { bone } = readChest(anatomy);
-    face.list.add("paper", buildWatchDial(anatomy), bone);
-    for (const part of buildWatchCase(anatomy)) face.list.add("brass", part, bone);
+    face.list.add("paper", buildWatchDial(anatomy), BONE.head);
+    for (const part of buildWatchCase(anatomy)) face.list.add("brass", part, BONE.head);
   }
-  if (pose === "failed") addPlaster(face);
-  addBadge(face, anatomy, pose, wears("watch"));
-  const badge = readBadgeToken(pose) ?? "room-paper";
   const geometry = paintLayers(face.list.mergeLayers(FACE_LAYERS), (layer) => {
     switch (layer) {
       case "ink":
         return readColor("face-ink");
       case "paper":
         return readColor("room-paper");
-      case "badge":
-        return readColor(badge);
       case "blush":
         return readColor("blush");
       case "brass":

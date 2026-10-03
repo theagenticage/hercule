@@ -90,7 +90,7 @@ const QUEUE_DISC_RADIUS = 0.65;
 const TOWARD_USER = Math.PI / 4;
 
 /** The actions in which a colleague sits. */
-const SEATED: ReadonlySet<Action> = new Set<Action>(["sit", "type", "read", "sip", "sleep"]);
+const SEATED: ReadonlySet<Action> = new Set<Action>(["sit", "type", "read", "sip"]);
 
 /** Where to stand beside a seat, as (sideways, forward) metres in the seat's own frame, best first. */
 const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [

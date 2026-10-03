@@ -3,12 +3,11 @@
  *
  * A rig is a skeleton of seventeen bones and two or three skinned meshes,
  * each painted in vertex colours so it costs one draw call: the body in
- * vinyl (the hue, its shade and tint, shoes and bowtie), the face in gloss
- * (features, badge and brass), and a hat in satin if it wears one. The
+ * vinyl (the hue, its shade, shoes and bowtie), the face in gloss
+ * (features and brass), and a hat in satin if it wears one. The
  * geometry is shared by every rig with the same look, so a rig owns only
  * its bones and a few small props, hidden until used: a cup and saucer, a
- * newspaper, the marigold palm, the sleeper's Zs, and the selection ring on
- * the floor.
+ * newspaper, the marigold palm, and the selection ring on the floor.
  *
  * `motion.ts` moves the bones; `face.ts` draws the face; `parts.ts` builds
  * the shapes; `anatomy.ts` sizes them.
@@ -22,7 +21,6 @@ import {
   Matrix4,
   Mesh,
   type Object3D,
-  Quaternion,
   Skeleton,
   SkinnedMesh,
   Sphere,
@@ -31,16 +29,15 @@ import {
 import { registerCache } from "../../engine/caches";
 import type { BuildColleagueRig, ColleagueRig } from "../../engine/contracts";
 import { paint, paintHue, paintVertexColors } from "../../engine/palette";
-import type { Pose } from "@hercule/client-core";
+import type { SeatedPose } from "@hercule/client-core";
 import { readAnatomy, type Anatomy } from "./anatomy";
-import { hasOpenEyes, readEyeCentre, readFaceGeometry } from "./face";
+import { readEyeCentre, readFaceGeometry } from "./face";
 import { Motion, Spring, measureDamping, type RigBones } from "./motion";
 import {
   BONE,
   BONE_PARENTS,
   buildCup,
   buildDome,
-  buildLetterZ,
   buildNewspaper,
   buildSaucer,
   buildSelectionRing,
@@ -81,17 +78,6 @@ function recordCamera(camera: Camera): void {
   hasCameraPosition = true;
 }
 
-const billboardPosition = new Vector3();
-const billboardScale = new Vector3();
-const billboardTurn = new Quaternion();
-
-/** Turns a mesh to face the camera as it is drawn, keeping its place and size. */
-function faceCamera(mesh: Object3D, camera: Camera): void {
-  mesh.matrixWorld.decompose(billboardPosition, billboardTurn, billboardScale);
-  camera.getWorldQuaternion(billboardTurn);
-  mesh.matrixWorld.compose(billboardPosition, billboardTurn, billboardScale);
-}
-
 /** Returns a smooth ease from 0 to 1. */
 function easeInOut(t: number): number {
   const x = Math.min(1, Math.max(0, t));
@@ -127,14 +113,12 @@ class Presence {
 // when the Office closes.
 let cupGeometry: BufferGeometry | null = null;
 let saucerGeometry: BufferGeometry | null = null;
-let letterGeometry: BufferGeometry | null = null;
 const palmGeometries = new Map<number, BufferGeometry>();
 const ringGeometries = new Map<number, BufferGeometry>();
 const newspaperGeometries = new Map<string, BufferGeometry>();
 registerCache(() => {
   cupGeometry = null;
   saucerGeometry = null;
-  letterGeometry = null;
   palmGeometries.clear();
   ringGeometries.clear();
   newspaperGeometries.clear();
@@ -248,8 +232,8 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
     object.add(mesh);
   }
 
-  let shownPose: Pose = "idle";
-  let nextPose: Pose | null = null;
+  let shownPose: SeatedPose = "idle";
+  let nextPose: SeatedPose | null = null;
   const face = createSkinnedMesh(
     readFaceGeometry(anatomy, shownPose, look.accessories),
     paintVertexColors("gloss"),
@@ -284,16 +268,6 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
     bones.torso.add(prop.mesh);
   }
 
-  // The sleeper's Zs, which always face the camera.
-  letterGeometry ??= buildLetterZ(1);
-  const letters = [0, 1].map(() => {
-    const letter = new Mesh(letterGeometry!, paint("muted", "matte"));
-    letter.frustumCulled = false;
-    letter.onBeforeRender = (_renderer, _scene, camera) => faceCamera(letter, camera);
-    object.add(letter);
-    return new Presence(letter);
-  });
-
   // The selection ring, flat on the floor.
   const ringRadius = anatomy.egg.halfWidth + 0.12;
   const ring = new Mesh(readRingGeometry(ringRadius), paint("accent", "matte"));
@@ -310,17 +284,16 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
   let hovered = false;
   const lookTarget = new Vector3();
   let hasLookTarget = false;
-  let letterClock = 0;
 
-  /** Swaps in the face of `pose`: its features and its badge. */
-  const showPose = (pose: Pose): void => {
+  /** Swaps in the face of `pose`. */
+  const showPose = (pose: SeatedPose): void => {
     shownPose = pose;
     face.geometry = readFaceGeometry(anatomy, pose, look.accessories);
   };
 
   /** Moves the blink on; returns true while the eyes are closing or opening. */
   const updateBlink = (dt: number): boolean => {
-    if (blinkClock < 0 && ambient > 0 && hasOpenEyes(shownPose)) {
+    if (blinkClock < 0 && ambient > 0) {
       nextBlink -= dt;
       if (nextBlink <= 0) {
         blinkClock = 0;
@@ -367,26 +340,6 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
   /** Returns the centre of a mitten, in the torso's space. Writes it to `out`. */
   const readMitten = (side: 0 | 1, out: Vector3): Vector3 =>
     out.copy(motion.wrists[side]).addScaledVector(motion.forearms[side], anatomy.handRadius * 0.75);
-
-  /** Floats the Zs up from above a sleeper's head. Returns true while they move. */
-  const updateLetters = (dt: number): boolean => {
-    const asleep = shownPose === "asleep";
-    let moving = false;
-    letterClock += dt * ambient;
-    const crown = motion.measureCrown() + hatHeight;
-    letters.forEach((letter, index) => {
-      letter.target = asleep ? 1 : 0;
-      moving = letter.update(dt) || moving;
-      if (!letter.mesh.visible) return;
-      // Each Z rises and shrinks away; with no ambient motion they hold still.
-      const cycle = ambient > 0 ? (letterClock / 2.8 + index * 0.5) % 1 : index === 0 ? 0.25 : 0.7;
-      const size = (index === 0 ? 0.075 : 0.055) * Math.sin(Math.PI * Math.min(1, cycle * 1.15));
-      letter.mesh.position.set(0.1 + 0.07 * cycle, crown + 0.05 + 0.2 * cycle, 0.02);
-      letter.mesh.scale.setScalar(Math.max(1e-3, size * easeInOut(letter.value)));
-      if (asleep && ambient > 0) moving = true;
-    });
-    return moving;
-  };
 
   const rig: ColleagueRig = {
     colleague,
@@ -441,11 +394,9 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
           ambient: easeInOut(ambient),
           notice: notice.value,
           look: glance ?? (hasLookTarget ? lookTarget : null),
-          asleep: shownPose === "asleep" || motion.readAction() === "sleep",
         }) || moving;
       moving = updateBlink(dt) || moving;
       moving = updateProps(dt) || moving;
-      moving = updateLetters(dt) || moving;
       return moving;
     },
     dispose() {

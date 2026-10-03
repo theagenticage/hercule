@@ -14,7 +14,7 @@
  */
 import type { Box3, Object3D, Vector3 } from "three";
 import type { ProjectTint } from "../../screens/project-tile";
-import type { Pose, SeatedPose } from "@hercule/client-core";
+import type { SeatedPose } from "@hercule/client-core";
 import type { Colleague, OfficeRequest, World } from "../world/types";
 import type { Frame, Stage } from "./stage";
 
@@ -75,8 +75,6 @@ export type Action =
   | "talk"
   /** Standing, nodding, as the other side of a conversation. */
   | "listen"
-  /** Asleep: slumped in an armchair, eyes closed. */
-  | "sleep"
   /** One happy hop on the spot, then back to standing. */
   | "hop";
 
@@ -92,8 +90,8 @@ export interface ColleagueRig {
   /** The height above the root of the top of the head or hat, for tags and bubbles. */
   readonly headHeight: number;
   setAction(action: Action): void;
-  /** Draws the face and badge the Bureau book gives a pose: eyes, mouth, plaster, check, Zzz. */
-  setFace(pose: Pose): void;
+  /** Draws the face the Bureau book gives a pose: its eyes, brows and mouth. */
+  setFace(pose: SeatedPose): void;
   /** Sets the gait's cadence to a walking speed in m/s. */
   setWalkSpeed(speed: number): void;
   /** Turns the head toward a world point, or back to straight ahead with null. */
@@ -219,10 +217,6 @@ interface OfficeSpots {
   readonly queue: ReadonlyArray<Spot>;
   /** Places to sit when idle away from the desk: the lounge's chairs. */
   readonly lounge: ReadonlyArray<Seat>;
-  /** Spots by the filing cabinets, where a colleague files a Task. */
-  readonly records: Spot | null;
-  /** Where a newly arrived colleague comes in: the front door, inside, facing in. */
-  readonly entrance: Spot;
   /** Where a colleague fetches tea: in front of the tea trolley, facing it. */
   readonly tea: Spot | null;
 }

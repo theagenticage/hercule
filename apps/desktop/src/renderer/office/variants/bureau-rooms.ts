@@ -99,7 +99,6 @@ export interface Fittings {
   /** Every desk with an owner, and the runner its owner runs on, for the fleet's desk tags. */
   readonly ownedDesks: Array<{ readonly desk: DeskHandle; readonly runnerId: string | null }>;
   yourDesk: Spot | null;
-  records: Spot | null;
   tea: Spot | null;
   entrance: Spot | null;
   board: CaseBoardHandle | null;

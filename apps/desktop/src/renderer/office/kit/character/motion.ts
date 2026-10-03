@@ -29,13 +29,7 @@ import { mapFacePoint, measureEggRadius, type Anatomy } from "./anatomy";
 /** How long `hop` takes, from the crouch to the landing; the rig then stands on its own. */
 export const HOP_SECONDS = 0.62;
 
-const SITTING_ACTIONS: ReadonlySet<Action> = new Set<Action>([
-  "sit",
-  "type",
-  "read",
-  "sip",
-  "sleep",
-]);
+const SITTING_ACTIONS: ReadonlySet<Action> = new Set<Action>(["sit", "type", "read", "sip"]);
 
 /** Returns true when `action` is done sitting on a seat. */
 function isSittingAction(action: Action): boolean {
@@ -268,12 +262,10 @@ class FootPlanner {
   private readonly feet: Pair<PlannedFoot>;
   private needsPlanting = true;
   private walking = false;
-  private readonly gait: Gait;
   /** Where each foot stands at rest, under its hip, in the root's space. */
   private readonly neutral: Pair<Vector3>;
 
-  constructor(gait: Gait, neutral: Pair<Vector3>) {
-    this.gait = gait;
+  constructor(neutral: Pair<Vector3>) {
     this.neutral = neutral;
     const createPlannedFoot = (): PlannedFoot => ({
       planted: true,
@@ -364,7 +356,7 @@ class FootPlanner {
     const from = scratchLocal.copy(foot.liftedFrom).applyMatrix4(inverseRoot);
     from.y = this.neutral[side].y;
     this.positions[side].lerpVectors(from, landing, eased);
-    this.positions[side].y += this.gait.lift * Math.sin(Math.PI * progress);
+    this.positions[side].y += GAIT.lift * Math.sin(Math.PI * progress);
     this.yaws[side] = wrapAngle(foot.liftedYaw - rootYaw) * (1 - eased);
     // The toe dips as the foot leaves the floor and lifts before it lands.
     this.pitches[side] = 0.3 * Math.sin(2 * Math.PI * progress);
@@ -372,7 +364,7 @@ class FootPlanner {
 
   /** Starts the walk cycle where the feet are, so no foot jumps. */
   private startWalking(): void {
-    const { stance } = this.gait;
+    const { stance } = GAIT;
     const stepping = SIDES.find((side) => !this.feet[side].planted);
     if (stepping === undefined) {
       // The left foot is about to lift; the right one has just landed.
@@ -394,7 +386,7 @@ class FootPlanner {
     inverseRoot: Matrix4,
     rootYaw: number,
   ): void {
-    const { stance, cycleLength, minimumCadence } = this.gait;
+    const { stance, cycleLength, minimumCadence } = GAIT;
     const cadence = Math.max(minimumCadence, cadenceSpeed / cycleLength);
     this.phase = wrapUnit(this.phase + cadence * dt);
     // The root travels this far while one foot stands; the foot lands half of it ahead.
@@ -516,8 +508,6 @@ interface MotionInput {
   readonly notice: number;
   /** A world point to look at, or null to look ahead (or glance around). */
   readonly look: Vector3 | null;
-  /** True while the colleague sleeps, so it does not look at anything. */
-  readonly asleep: boolean;
 }
 
 const scratchQuaternion = new Quaternion();
@@ -613,7 +603,7 @@ export class Motion {
     this.mouth = mouth.add(new Vector3(neck.x, neck.y, neck.z));
     const eyeLine = neck.y + mapFacePoint(egg, 24, 26.6, new Vector3()).y;
     this.newspaper = this.placeNewspaper(eyeLine);
-    this.planner = new FootPlanner(GAIT, this.neutralFeet);
+    this.planner = new FootPlanner(this.neutralFeet);
     for (const side of SIDES) bones.shoulders[side].position.copy(this.shoulders[side]);
   }
 
@@ -766,9 +756,6 @@ export class Motion {
         break;
       case "sip":
         this.writeSipping(p, t, ambient);
-        break;
-      case "sleep":
-        this.writeSleeping(p, t, ambient);
         break;
     }
     if (hasPlantedFeet(this.action)) {
@@ -1061,20 +1048,6 @@ export class Motion {
     p.torsoTurn.x -= 0.06 * sip;
   }
 
-  private writeSleeping(p: Posture, t: number, ambient: number): void {
-    this.writeSitting(p);
-    p.pelvis.z += 0.02;
-    // Slumped back and to one side; deep, slow breaths.
-    p.torsoTurn.x -= 0.12;
-    p.torsoTurn.z += 0.16;
-    const breath = Math.sin(2 * Math.PI * 0.17 * t) * ambient;
-    p.squash += 0.022 * breath;
-    for (const side of SIDES) {
-      p.footTurns[side].y += mirrorX(side) * 0.3;
-      p.hands[side].y += 0.006 * breath;
-    }
-  }
-
   /**
    * Turns the head toward the look target, or the camera, or a glance
    * around, smoothly and within a neck's reach. Returns true while it turns.
@@ -1083,9 +1056,7 @@ export class Motion {
     let yaw = 0;
     let pitch = 0;
     const yawLimit = 0.6;
-    if (input.asleep) {
-      // A sleeper looks nowhere.
-    } else if (input.look !== null) {
+    if (input.look !== null) {
       const local = scratchPoint.copy(input.look).applyMatrix4(this.inverseRoot);
       const headY = this.output.pelvis.y + this.anatomy.neck.y + this.anatomy.egg.height * 0.55;
       local.y -= headY;

@@ -97,7 +97,7 @@ export interface Shift {
 }
 
 /** The parts of a colleague each get their own tone of the colleague's hue. */
-type HuePart = "body" | "shade" | "tint" | "ink";
+type HuePart = "body" | "shade" | "ink";
 
 const OKLCH_PATTERN =
   /oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)(?:deg)?\s*(?:\/\s*([\d.]+)(%?))?\s*\)/;
@@ -169,7 +169,7 @@ function readNumber(name: string): number {
 }
 
 /** Returns the OKLCH colour of a colleague's part in the current theme, as tokens.css derives `--who`. */
-export function readHue(hue: Hue | "you" | "fail", part: HuePart): Oklch {
+export function readHue(hue: Hue | "you", part: HuePart): Oklch {
   const angle = readNumber(`hue-${hue}`);
   const l = readNumber("char-l");
   const c = readNumber("char-c");
@@ -178,8 +178,6 @@ export function readHue(hue: Hue | "you" | "fail", part: HuePart): Oklch {
       return { l, c, h: angle, alpha: 1 };
     case "shade":
       return { l: l - readNumber("char-shade"), c: c * 1.05, h: angle, alpha: 1 };
-    case "tint":
-      return { l: readNumber("char-tint-l"), c: readNumber("char-tint-c"), h: angle, alpha: 1 };
     case "ink":
       return { l: readNumber("char-ink-l"), c: c * 1.05, h: angle, alpha: 1 };
   }
@@ -295,7 +293,7 @@ export function paint(
  * `hue`, in `finish`. Marigold (`you`) is the raised palm's colour.
  */
 export function paintHue(
-  hue: Hue | "you" | "fail",
+  hue: Hue | "you",
   part: HuePart = "body",
   finish: Finish = "vinyl",
   shift: Shift = {},
