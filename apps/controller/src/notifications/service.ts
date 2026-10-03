@@ -41,6 +41,7 @@ import {
   type NotificationAction,
   type NotificationActInput,
   type NotificationProducer,
+  type SortDirection,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -52,7 +53,13 @@ import {
   type Actor,
   type SessionActor,
 } from "../actor";
-import { buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
+import {
+  buildPageInputFields,
+  nowIso,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { BindableOperations, type BindableOperationError } from "./bindable-operations";
 import { Notifier } from "./notifier";
@@ -86,6 +93,9 @@ export interface NotificationPage {
 }
 
 const NO_SUCH_NOTIFICATION = "no such notification";
+
+/** Newest first, because the notification that arrived last is the one most likely to need the user. */
+const DEFAULT_DIRECTION: SortDirection = "desc";
 
 /** The refusal for a run that calls `notification.withdraw`. */
 const RUN_CANNOT_WITHDRAW =
@@ -224,7 +234,7 @@ const make = Effect.gen(function* () {
           notifications.list(filter, {
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? "desc",
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
           }),
         );
         return {

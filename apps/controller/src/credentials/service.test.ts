@@ -120,6 +120,21 @@ describe("apiKey.query", () => {
       error: { code: "validation", details: { issues: [{ path: ["cursor"] }] } },
     });
   });
+
+  it("refuses a sort that names a field twice, and names the field", async () => {
+    const failure = await runAsUser(
+      Effect.flatMap(ApiKeys, (apiKeys) =>
+        Effect.flip(
+          apiKeys.query({
+            sort: [{ field: "createdAt" }, { field: "createdAt", direction: "desc" }],
+          }),
+        ),
+      ),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "validation" } });
+    expect(JSON.stringify(failure)).toMatch(/createdAt appears more than once/);
+  });
 });
 
 describe("apiKey.revoke", () => {

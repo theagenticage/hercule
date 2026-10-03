@@ -3,25 +3,24 @@
  * live in the `secrets` table, and the caller that returns a connection adds
  * their references.
  */
+import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ConnectionStatus } from "@hercule/plugin-host";
-import { GITHUB_CONNECTION_TYPE, type SortDirection } from "@hercule/contract";
+import { GITHUB_CONNECTION_TYPE } from "@hercule/contract";
 import {
-  decodeCursor,
-  encodeCursor,
-  buildKeyset,
   mintUuid,
   buildPage,
+  prepareKeysetListing,
   uuidFromString,
   uuidToString,
   type CursorError,
-  type CursorScope,
   type Page,
-  type PageRequest,
+  type ResolvedSortKey,
+  type SortColumn,
 } from "../db";
 
 /** The type of the GitHub connection that ships with Hercule. The contract defines it. */
@@ -71,14 +70,20 @@ export interface ConnectionEdit {
   readonly statusDetail?: string | null;
 }
 
-/** The field a connection listing is sorted by. */
+/** A field a connection listing can be sorted by. */
 export type ConnectionSortField = "createdAt" | "label";
 
-/** A listing request: the filters, the sort field and the paging parameters. */
-export interface ConnectionListRequest extends PageRequest {
+/**
+ * A listing request: the filters, the page size, the cursor and the sort keys.
+ * `sort` holds the keys most significant first, with their directions
+ * resolved.
+ */
+export interface ConnectionListRequest {
   readonly type: string | undefined;
   readonly status: ConnectionStatus | undefined;
-  readonly field: ConnectionSortField;
+  readonly limit: number;
+  readonly cursor: string | undefined;
+  readonly sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<ConnectionSortField>>;
 }
 
 interface ConnectionRow {
@@ -100,16 +105,15 @@ const COLUMNS =
   "id, plugin_id, type, label, display_name, account_id, status, status_detail, labels, config, " +
   "created_at, updated_at";
 
-const SORT_COLUMN: Record<ConnectionSortField, string> = {
-  createdAt: "created_at",
-  label: "label",
+/** How a connection listing sorts by each of its sortable fields. */
+const CONNECTION_SORT_COLUMNS: Record<ConnectionSortField, SortColumn<StoredConnection>> = {
+  createdAt: {
+    column: "created_at",
+    valueType: "string",
+    readValue: (connection) => connection.createdAt,
+  },
+  label: { column: "label", valueType: "string", readValue: (connection) => connection.label },
 };
-
-const buildCursorScope = (field: ConnectionSortField, direction: SortDirection): CursorScope => ({
-  op: "connection.query",
-  field,
-  direction,
-});
 
 /**
  * Parses a JSON column. Only this repository writes the JSON columns, so a
@@ -132,9 +136,6 @@ const toConnection = (row: ConnectionRow): StoredConnection => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
-
-const readSortKey = (connection: StoredConnection, field: ConnectionSortField): string =>
-  field === "label" ? connection.label : connection.createdAt;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -220,23 +221,25 @@ const make = Effect.gen(function* () {
         (rows) => rows.map(toConnection),
       ),
 
+    /**
+     * Returns one page of connections, filtered by type and status when those
+     * are given, in the order of the request's sort keys. Fails with a
+     * `CursorError` if the cursor is invalid.
+     */
     list: (
       request: ConnectionListRequest,
     ): Effect.Effect<Page<StoredConnection>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = buildCursorScope(request.field, request.direction);
-        const after =
-          request.cursor === undefined
-            ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+        const { keyset, order, encodeNextCursor } = yield* prepareKeysetListing(
+          sql,
+          "connection.query",
+          request.sort,
+          CONNECTION_SORT_COLUMNS,
+          "id",
+          request.cursor,
+        );
         const byType = request.type === undefined ? sql`` : sql`AND type = ${request.type}`;
         const byStatus = request.status === undefined ? sql`` : sql`AND status = ${request.status}`;
-        const { keyset, order } = buildKeyset(
-          sql,
-          [SORT_COLUMN[request.field], "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
-        );
         const rows = yield* sql<ConnectionRow>`
           SELECT ${sql.literal(COLUMNS)} FROM connections
           WHERE 1 = 1 ${byType} ${byStatus} AND ${keyset}
@@ -246,7 +249,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toConnection)),
-          (last) => encodeCursor(scope, readSortKey(last, request.field), last.id),
+          encodeNextCursor,
         );
       }),
   };

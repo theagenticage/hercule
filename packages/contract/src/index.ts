@@ -76,7 +76,9 @@ export {
   page,
   pageParams,
   readSortFields,
+  refuseRepeatedSortField,
   sortParam,
+  type SortKey,
 } from "./pagination";
 
 export { ACCESS_MODE_CHAIN, findNearestSupportedAccessMode } from "./access-modes";
@@ -113,7 +115,7 @@ export { Authenticated, SetupToken } from "./security";
 
 export { SetupPayload, SetupResult, SetupState } from "./groups/setup";
 export { LoginPayload, LoginResult, WsTicket } from "./groups/auth";
-export { ApiKey, MintedApiKey } from "./groups/api-key";
+export { API_KEY_SORT_FIELDS, ApiKey, MintedApiKey } from "./groups/api-key";
 export { SignedInUser } from "./groups/user";
 export {
   AccessMode,
@@ -136,7 +138,7 @@ export {
   PluginRefusalReason,
   PluginStatus,
 } from "./groups/plugin";
-export { MAX_PROFILE_GRANTS, Profile } from "./groups/profile";
+export { MAX_PROFILE_GRANTS, PROFILE_SORT_FIELDS, Profile } from "./groups/profile";
 export {
   CapabilitySnapshot,
   DeclaredCapabilities,
@@ -221,7 +223,7 @@ export {
   InputUpdatePayload,
 } from "./groups/input";
 export { StructuredResult, TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
-export { OwnerKind, SecretRef } from "./groups/secret";
+export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,
   Connection,

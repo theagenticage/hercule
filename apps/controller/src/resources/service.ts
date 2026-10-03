@@ -52,7 +52,13 @@ import {
 } from "@hercule/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { canonicalizeRemote, hasUserinfo, isClonableRemote } from "./remote";
 import { composeResource, resourceRepository, type StoredResource } from "./repository";
@@ -225,7 +231,7 @@ const make = Effect.gen(function* () {
           resources.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             kind,
             projectId,
           }),

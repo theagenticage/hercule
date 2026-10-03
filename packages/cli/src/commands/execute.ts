@@ -111,12 +111,13 @@ const resolveTail = async (
   const noun = listing.words[0]!;
 
   // Sort by creation time, not by the list's default order. Keyset paging
-  // skips no row only as long as the sort key does not change. A task list's
-  // default order is `updatedAt`, which every write changes: a task updated
-  // between two pages moves above the cursor and is never seen, so a tail
-  // that exists would get `not_found`. `createdAt` never changes.
+  // skips no row only as long as the value each row is sorted by does not
+  // change between two pages. A task list's default order is `updatedAt`,
+  // which every write changes: a task updated between two pages moves above
+  // the cursor and is never seen, so a tail that exists would get
+  // `not_found`. `createdAt` never changes.
   const stable = listing.sortFields.includes("createdAt")
-    ? { sort: { field: "createdAt", direction: "asc" } }
+    ? { sort: [{ field: "createdAt", direction: "asc" }] }
     : {};
   const items = await readAll(client, listing, stable, undefined);
   const matches = items

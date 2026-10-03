@@ -44,7 +44,13 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { requireOnline } from "./adapters";
@@ -219,7 +225,7 @@ const make = Effect.gen(function* () {
           runners.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             connectivity,
             lifecycle,
             label,

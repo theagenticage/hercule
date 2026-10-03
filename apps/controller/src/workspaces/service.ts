@@ -73,7 +73,13 @@ import {
   type WorkspaceStatus,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
 import {
@@ -613,7 +619,7 @@ const make = Effect.gen(function* () {
           workspaces.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             runnerId: filter.runnerId,
             resourceId: filter.resourceId,
             projectId: filter.projectId,

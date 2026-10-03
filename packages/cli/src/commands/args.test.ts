@@ -8,6 +8,7 @@ const lookUpCommand = (...words: ReadonlyArray<string>) => findCommandByWords(wo
 const profileCreate = lookUpCommand("profile", "create");
 const profileList = lookUpCommand("profile", "list");
 const taskCreate = lookUpCommand("task", "create");
+const taskList = lookUpCommand("task", "list");
 const taskUpdate = lookUpCommand("task", "update");
 const projectUpdate = lookUpCommand("project", "update");
 const sessionInput = lookUpCommand("session", "input");
@@ -139,17 +140,23 @@ describe("parseArguments", () => {
     ).resolves.toBeDefined();
   });
 
-  it("parses --sort into a field and an optional direction", async () => {
-    // Without a direction, none is set: the operation's default order applies.
-    expect((await parseArguments(profileList, ["--sort", "name"], refuseStdinRead)).sort).toEqual({
-      field: "name",
-    });
+  it("parses --sort into a list of one key, with a field and an optional direction", async () => {
+    // Without a direction, none is set: the API reads a key with no direction as asc.
+    expect((await parseArguments(profileList, ["--sort", "name"], refuseStdinRead)).sort).toEqual([
+      { field: "name" },
+    ]);
     expect(
       (await parseArguments(profileList, ["--sort", "name:desc"], refuseStdinRead)).sort,
-    ).toEqual({
-      field: "name",
-      direction: "desc",
-    });
+    ).toEqual([{ field: "name", direction: "desc" }]);
+  });
+
+  it("parses each --sort into its own key, in the order written", async () => {
+    const parsed = await parseArguments(
+      taskList,
+      ["--sort", "priority:desc", "--sort", "createdAt"],
+      refuseStdinRead,
+    );
+    expect(parsed.sort).toEqual([{ field: "priority", direction: "desc" }, { field: "createdAt" }]);
   });
 
   it("rejects a value outside a field's closed set", async () => {

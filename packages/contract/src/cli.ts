@@ -378,11 +378,23 @@ export const CLI = {
 
   "task.query": {
     command: "task list",
-    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. Use it to find the id that `hercule task read` and `hercule task update` take.",
+    help: "Lists tasks. Repeating a filter flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. Use it to find the id that `hercule task read` and `hercule task update` take.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--status", "open", "--status", "in-progress", "--label", "triage"] },
       { args: ["--text", "flaky login"] },
+      {
+        args: [
+          "--status",
+          "open",
+          "--sort",
+          "priority:desc",
+          "--sort",
+          "createdAt:desc",
+          "--limit",
+          "3",
+        ],
+      },
     ],
     fields: {
       refs: {
@@ -2093,7 +2105,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. If the provider enforces none of them, the reply shows that.",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch. If the provider enforces none of them, the reply shows that.",
       },
     },
   },
@@ -2142,7 +2154,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "The tool families to take away, replacing the ones set now; repeatable.",
+        help: "The tool families to take away, replacing the ones set now.",
       },
     },
   },
@@ -2236,7 +2248,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. Leave it off to take away edit only.",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch. Leave it off to take away edit only.",
       },
       heartbeat: {
         flag: "heartbeat",
@@ -2300,7 +2312,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "The tool families to take away, replacing the ones set now; repeatable.",
+        help: "The tool families to take away, replacing the ones set now.",
       },
       heartbeat: {
         flag: "heartbeat",
@@ -2395,7 +2407,10 @@ export const CLI = {
       { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
     ],
     fields: {
-      status: { flag: "status", help: "queued, starting, idle, busy or exited; repeatable." },
+      status: {
+        flag: "status",
+        help: "The session's status; repeat the flag to list busy and idle sessions together.",
+      },
       runnerId: {
         flag: "runner",
         help: "Only sessions on this Runner, by its id or a tail of eight or more characters.",

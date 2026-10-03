@@ -35,10 +35,13 @@ export const MintedApiKey = Schema.Struct({
   createdAt: Timestamp,
 });
 
+/** What an API key listing may be sorted by. The default is newest first. */
+export const API_KEY_SORT_FIELDS = ["createdAt"] as const;
+
 export const apiKey = HttpApiGroup.make("apiKey")
   .add(
     HttpApiEndpoint.get("query", "/api-keys", {
-      query: pageParams(["createdAt"]),
+      query: pageParams(API_KEY_SORT_FIELDS),
       success: page(ApiKey),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),

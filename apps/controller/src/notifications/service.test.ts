@@ -20,6 +20,7 @@ import {
   type Grant,
   type Notification,
   type NotificationCreateInput,
+  type SortDirection,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import type { Change } from "../db";
@@ -668,7 +669,7 @@ describe("notification.query", () => {
           newest: yield* actAs(USER, notifications.query({})),
           oldest: yield* actAs(
             USER,
-            notifications.query({ sort: { field: "createdAt", direction: "asc" } }),
+            notifications.query({ sort: [{ field: "createdAt", direction: "asc" }] }),
           ),
         };
       }),
@@ -714,7 +715,7 @@ describe("notification.query", () => {
         const notifications = yield* NotificationService;
         yield* withThreeNotifications;
         yield* withThreeNotifications;
-        const walk = (direction: "asc" | "desc") =>
+        const walk = (direction: SortDirection) =>
           Effect.gen(function* () {
             const titles: Array<string> = [];
             let cursor: string | undefined;
@@ -723,7 +724,7 @@ describe("notification.query", () => {
                 USER,
                 notifications.query({
                   limit: 2,
-                  sort: { field: "createdAt", direction },
+                  sort: [{ field: "createdAt", direction }],
                   ...(cursor === undefined ? {} : { cursor }),
                 }),
               );
@@ -755,7 +756,7 @@ describe("notification.query", () => {
               USER,
               notifications.query({
                 cursor: first.nextCursor!,
-                sort: { field: "createdAt", direction: "asc" },
+                sort: [{ field: "createdAt", direction: "asc" }],
               }),
             ),
           ),

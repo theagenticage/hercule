@@ -402,9 +402,12 @@ describe("the new-thread screen", () => {
       `Look at checkout\n\nStart working on task ${CART_TASK.id}: Cart total rounding on discounts`,
     );
     expect(document.activeElement).toBe(field);
-    // The cards ask for the project's most urgent open tasks.
+    // The cards ask for the project's most urgent open tasks, newest first
+    // within one priority.
     const tasksCall = calls.find((call) => call.path === "/api/v1/tasks");
-    expect(new URLSearchParams(tasksCall?.search).get("projectId")).toBe(WEBSHOP.id);
+    const params = new URLSearchParams(tasksCall?.search);
+    expect(params.get("projectId")).toBe(WEBSHOP.id);
+    expect(params.getAll("sort")).toEqual(["priority:desc", "createdAt:desc"]);
     expect(screen.queryByRole("region", { name: "Or start from one of these" })).toBeNull();
   });
 

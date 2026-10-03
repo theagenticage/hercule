@@ -488,18 +488,17 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope: CursorScope = {
           op: "run.query",
-          field: "createdAt",
-          direction: request.direction,
+          sort: [{ field: "createdAt", direction: request.direction }],
         };
         const after =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["created_at", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          [{ column: "created_at", direction: request.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const clauses = [keyset];
         if (request.workflowId !== undefined) {
@@ -525,7 +524,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(parseSummaryRow)),
-          (last) => encodeCursor(scope, last.createdAt, last.id),
+          (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
 

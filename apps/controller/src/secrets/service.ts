@@ -30,10 +30,14 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DEFAULT_PAGE_LIMIT,
+  SECRET_SORT_FIELDS,
+  SecretFilter,
+  createDecodeValidationError,
   createNotFoundError,
   createValidationError,
   type Forbidden,
@@ -45,7 +49,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
-import { withTransaction, type CursorError } from "../db";
+import { buildPageInputFields, refuseCursor, resolveSortDirection, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import {
   Secrets,
@@ -55,13 +59,14 @@ import {
 } from "./repository";
 
 /** Which secrets to list, and which page of the list to return. */
-export interface SecretQueryInput {
-  readonly ownerKind?: OwnerKind;
-  readonly ownerId?: string;
-  readonly limit?: number;
-  readonly cursor?: string;
-  readonly sort?: { readonly field: "name"; readonly direction?: SortDirection };
-}
+const SecretQueryInput = Schema.Struct({
+  ...SecretFilter.fields,
+  ...buildPageInputFields(SECRET_SORT_FIELDS),
+});
+
+export type SecretQueryInput = Schema.Schema.Type<typeof SecretQueryInput>;
+
+const decodeQuery = Schema.decodeUnknownEffect(SecretQueryInput);
 
 /** A value to store under an owner and a name. Rotation is the same call. */
 export interface SecretSetInput {
@@ -83,6 +88,9 @@ export interface SecretRefPage {
   readonly items: ReadonlyArray<SecretRef>;
   readonly nextCursor?: string;
 }
+
+/** Alphabetical, because people look for a secret by its name. */
+const DEFAULT_DIRECTION: SortDirection = "asc";
 
 /** The refusal message for each owner kind that `secret.set` and `secret.delete` may not write. */
 const REFUSAL_BY_OWNER_KIND: Partial<Record<OwnerKind, string>> = {
@@ -114,15 +122,6 @@ const failWithNameIssue = (error: SecretNameError): Effect.Effect<never, Validat
     createValidationError([{ path: [], message: error.message }], "the request is not valid"),
   );
 
-/** Converts a cursor error into a `validation` error on the `cursor` field. */
-const failWithCursorIssue = (error: CursorError): Effect.Effect<never, Validation> =>
-  Effect.fail(
-    createValidationError(
-      [{ path: ["cursor"], message: error.message }],
-      "the cursor is not valid",
-    ),
-  );
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const secrets = yield* Secrets;
@@ -140,18 +139,24 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<SecretRefPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("secret.query");
-        const page = yield* secrets.list({
-          ownerKind: input.ownerKind,
-          ownerId: input.ownerId,
-          limit: input.limit ?? DEFAULT_PAGE_LIMIT,
-          cursor: input.cursor,
-          direction: input.sort?.direction ?? "asc",
-        });
+        const { ownerKind, ownerId, limit, cursor, sort } = yield* Effect.mapError(
+          decodeQuery(input),
+          createDecodeValidationError,
+        );
+        const page = yield* refuseCursor(
+          secrets.list({
+            ownerKind,
+            ownerId,
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
+          }),
+        );
         return {
           items: page.items.map(toRef),
           ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
         };
-      }).pipe(Effect.catchTag("CursorError", failWithCursorIssue)),
+      }),
 
     /**
      * Stores a value, or rotates the value already stored under that name, and

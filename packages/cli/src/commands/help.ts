@@ -56,27 +56,69 @@ const describeRequirement = (requires: Requirement): string => {
   }
 };
 
-/** Wraps one paragraph at spaces so no line is longer than the width. */
-const wrapParagraph = (text: string, indent: string): ReadonlyArray<string> => {
-  const lines: Array<string> = [];
-  let line = indent;
+/**
+ * Splits text into the units a line may break between: words, except that a
+ * code span in backticks stays one unit, so a command a reader may copy is
+ * never split across two lines.
+ */
+const splitIntoBreakableUnits = (text: string): ReadonlyArray<string> => {
+  const units: Array<string> = [];
+  let inCode = false;
   for (const word of text.split(/\s+/).filter((each) => each !== "")) {
-    const candidate = line === indent ? `${line}${word}` : `${line} ${word}`;
-    if (candidate.length > WIDTH && line !== indent) {
+    if (inCode) units[units.length - 1] += ` ${word}`;
+    else units.push(word);
+    if ((word.split("`").length - 1) % 2 === 1) inCode = !inCode;
+  }
+  return units;
+};
+
+/** Returns the length of a line made of the indent and the units joined by spaces. */
+const measureLine = (indent: string, units: ReadonlyArray<string>): number =>
+  indent.length + units.join(" ").length;
+
+/**
+ * Wraps one paragraph at spaces so no line is longer than the width, and
+ * returns the lines, each starting with the indent. A code span longer than a
+ * line is the one exception: it stays whole and runs past the width.
+ *
+ * The last line never holds a single word when the line before it can spare
+ * one: a lone word at the end of a paragraph reads as if it were left over. A
+ * code span with spaces in it is long enough to stand on its own line.
+ */
+const wrapParagraph = (text: string, indent: string): ReadonlyArray<string> => {
+  const lines: Array<Array<string>> = [];
+  let line: Array<string> = [];
+  for (const unit of splitIntoBreakableUnits(text)) {
+    if (line.length > 0 && measureLine(indent, [...line, unit]) > WIDTH) {
       lines.push(line);
-      line = `${indent}${word}`;
+      line = [unit];
     } else {
-      line = candidate;
+      line.push(unit);
     }
   }
-  return line === indent ? lines : [...lines, line];
+  if (line.length > 0) lines.push(line);
+
+  const last = lines.at(-1);
+  const before = lines.at(-2);
+  if (
+    last !== undefined &&
+    before !== undefined &&
+    last.length === 1 &&
+    !last[0]!.includes(" ") &&
+    before.length > 1 &&
+    measureLine(indent, [before.at(-1)!, ...last]) <= WIDTH
+  ) {
+    last.unshift(before.pop()!);
+  }
+  return lines.map((units) => `${indent}${units.join(" ")}`);
 };
 
 /** Formats a label and its text, indenting wrapped lines of the text past the label. */
 const formatLabelledText = (label: string, width: number, text: string): ReadonlyArray<string> => {
   const indent = " ".repeat(width + 4);
   const [first = "", ...rest] = wrapParagraph(text, indent);
-  return [`  ${label.padEnd(width)}  ${first.trimStart()}`, ...rest];
+  // With no text, the label stands alone, with no padding after it.
+  return [`  ${label.padEnd(width)}  ${first.trimStart()}`.trimEnd(), ...rest];
 };
 
 /**
@@ -129,17 +171,31 @@ const buildPlaceholder = (field: Field): string => {
   }
 };
 
-/** What each error code means, used when the command's CLI row gives no more specific meaning. */
+/**
+ * What each error code means, used when the command's CLI row gives no more
+ * specific meaning. A validation error on a command that writes also says that
+ * nothing was written; `describeGenericError` adds that.
+ */
 const GENERIC: Record<ErrorCode, string> = {
   unauthenticated: "no credential, or one this operation does not accept",
   forbidden: "you lack the grant this operation needs",
-  validation: "an argument does not fit its field; nothing was written",
+  validation: "an argument does not fit its field",
   not_found: "no such record, or none this credential may see",
   conflict: "it collides with something that already exists",
   invalid_state: "the record is in a state that does not allow this",
   cap_exceeded: "a size or count cap was exceeded",
   internal: "the controller failed",
 };
+
+/**
+ * Returns the generic meaning of an error code for one command. Only a command
+ * that can write says "nothing was written" on a validation error: on a GET,
+ * which never writes, the words would suggest that something could have been.
+ */
+const describeGenericError = (command: Command, code: ErrorCode): string =>
+  code === "validation" && command.method !== "GET"
+    ? `${GENERIC.validation}; nothing was written`
+    : GENERIC[code];
 
 /** Returns the other commands a command's help text mentions, in order of first mention. */
 const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
@@ -203,12 +259,22 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       });
     }
     if (command.paged) {
+      // A list with one sort field never offers a repeat: the API refuses a
+      // field named twice, so a second --sort could only fail.
+      const canRepeatSort = command.sortFields.length > 1;
       rows.push(
         { label: "--limit <number>", notes: "optional; the page size" },
         { label: "--cursor <cursor>", notes: "optional; the nextCursor of the page before" },
         {
           label: "--sort <field>[:asc|desc]",
-          notes: `optional; one of: ${command.sortFields.join(", ")}`,
+          notes: [
+            "optional",
+            ...(canRepeatSort ? ["repeatable"] : []),
+            `one of: ${command.sortFields.join(", ")}`,
+          ].join("; "),
+          help: canRepeatSort
+            ? "Repeat to break ties: the first --sort orders the list, and each later one orders only the rows the ones before it leave equal. No direction means asc."
+            : "No direction means asc.",
         },
         {
           label: "--all",
@@ -251,7 +317,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       "",
       "paging:",
       ...wrapParagraph(
-        "One page at a time, newest first unless --sort says otherwise. The response includes nextCursor while more pages remain; pass it back as --cursor, or use --all to follow it to the end.",
+        "One page at a time, in the command's default order unless --sort says otherwise. The response includes nextCursor while more pages remain; pass it back as --cursor, or use --all to follow it to the end.",
         "  ",
       ),
     );
@@ -281,7 +347,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       command.meanings[code] ??
       (code === "forbidden" && grant !== undefined
         ? `you lack ${grant}; ask with \`hercule permission request ${grant}\``
-        : GENERIC[code]);
+        : describeGenericError(command, code));
     lines.push(...formatLabelledText(code, width, meaning));
   }
 
@@ -363,6 +429,49 @@ const listRootNouns = (): ReadonlyArray<{
   });
 };
 
+/**
+ * The conventions that apply to every command, each a label and its
+ * paragraphs. The exit codes are one paragraph each, so a code is never
+ * separated from its meaning by a line break.
+ */
+const CONVENTIONS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+  [
+    "ids",
+    [
+      "An id in full, or its last eight or more characters where a command's help says a list resolves them. Human output prints the last eight; --json prints them in full.",
+    ],
+  ],
+  ["--json", ["Prints the operation's output, or the error envelope, verbatim."]],
+  [
+    "stdin",
+    [
+      "A description, a prompt, a password, a config or a workflow's source is piped in, never passed as a flag. A required one is always read from stdin; an optional one only when its --<flag>-stdin flag is given.",
+    ],
+  ],
+  [
+    "paging",
+    [
+      "A list takes --limit, --cursor and --sort, and --all follows nextCursor to the end. Where a list sorts on more than one field, --sort may be repeated: each later --sort orders only the rows the ones before it leave equal.",
+    ],
+  ],
+  [
+    "exit",
+    [
+      "0 succeeded.",
+      "1 an error envelope came back, or `hercule workflow validate` found errors.",
+      "2 the command line was wrong, and nothing was sent.",
+      "3 no credential, or no controller.",
+      "`hercule service` works on this machine, and exits 1 when its verb failed there.",
+    ],
+  ],
+  [
+    "403",
+    [
+      "A forbidden envelope names the grant you lack. Ask the user for it with `hercule permission request <grant>`, unless the command's help says only the user may make the call: no grant allows that, so ask the user to run it.",
+    ],
+  ],
+];
+
 /** Builds the root help: `hercule --help`. */
 export const buildRootHelp = (): ReadonlyArray<string> => {
   const nouns = listRootNouns();
@@ -377,9 +486,9 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
   ];
 
   for (const { noun, verbs, nested } of nouns) {
-    lines.push(`  ${noun.padEnd(width)}  ${verbs.join(" ")}`.trimEnd());
+    lines.push(...formatLabelledText(noun, width, verbs.join(" ")));
     for (const [child, children] of nested) {
-      lines.push(`${indent}${child}: ${children.join(" ")}`);
+      lines.push(...wrapParagraph(`${child}: ${children.join(" ")}`, indent));
     }
     lines.push(...wrapParagraph(NOUNS[noun as keyof typeof NOUNS].summary, indent));
   }
@@ -387,28 +496,23 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
   lines.push(
     "",
     "other commands:",
-    "  hercule login <url>, hercule setup-url, hercule service <verb>, hercule serve, and the",
-    "  daemon forms of hercule runner.",
+    ...wrapParagraph(
+      "hercule login <url>, hercule setup-url, hercule service <verb>, hercule serve, and the daemon forms of hercule runner.",
+      "  ",
+    ),
     "",
     "conventions:",
-    "  ids       An id in full, or its last eight or more characters where a command's help",
-    "            says a list resolves them. Human output prints the last eight; --json",
-    "            prints them in full.",
-    "  --json    Prints the operation's output, or the error envelope, verbatim.",
-    "  stdin     A description, a prompt, a password, a config or a workflow's source is",
-    "            piped in, never passed as a flag. A required one is always read from stdin;",
-    "            an optional one only when its --<flag>-stdin flag is given.",
-    "  paging    A list takes --limit, --cursor and --sort; --all follows nextCursor to",
-    "            the end.",
-    "  exit      0 succeeded, 1 the controller returned an error envelope or `workflow",
-    "            validate` found errors, 2 the command line was wrong and nothing was sent, 3",
-    "            no credential or no controller. `hercule service` acts on this machine",
-    "            instead, and exits 1 when its verb failed there.",
-    "  403       A forbidden envelope names the grant you lack. Ask the user for it with",
-    "            `hercule permission request <grant>`, unless the command's help says only the",
-    "            user may make the call: no grant allows that, so ask the user to run it.",
+  );
+  const labelWidth = Math.max(...CONVENTIONS.map(([label]) => label.length));
+  for (const [label, [first = "", ...more]] of CONVENTIONS) {
+    lines.push(...formatLabelledText(label, labelWidth, first));
+    for (const paragraph of more) {
+      lines.push(...wrapParagraph(paragraph, " ".repeat(labelWidth + 4)));
+    }
+  }
+  lines.push(
     "",
-    "run `hercule <noun> --help` for a noun's verbs, `hercule <noun> <verb> --help` for one command.",
+    "run `hercule <noun> --help` for a noun's verbs, `hercule <noun> <verb> --help` for a command.",
   );
   return lines;
 };
