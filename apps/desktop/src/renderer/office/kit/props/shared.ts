@@ -36,6 +36,7 @@ import {
 } from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries, toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { registerCache } from "../../engine/caches";
 import {
   paint,
   paintVertexColors,
@@ -315,10 +316,17 @@ export function buildPropGroup<S extends string>(name: string, merged: MergedPro
   return group;
 }
 
-/** Returns a function that builds a value the first time it is called, and the same value after. */
+/**
+ * Returns a function that builds a value the first time it is called, and
+ * the same value after, until the Office closes and empties the caches.
+ */
 export function memoize<T>(build: () => T): () => T {
   let value: T | undefined;
   let built = false;
+  registerCache(() => {
+    value = undefined;
+    built = false;
+  });
   return () => {
     if (!built) {
       value = build();
@@ -328,9 +336,13 @@ export function memoize<T>(build: () => T): () => T {
   };
 }
 
-/** Returns a function that builds a value once per key, and the same value for that key after. */
+/**
+ * Returns a function that builds a value once per key, and the same value
+ * for that key after, until the Office closes and empties the caches.
+ */
 export function memoizeByKey<K, T>(build: (key: K) => T): (key: K) => T {
   const values = new Map<K, T>();
+  registerCache(() => values.clear());
   return (key) => {
     const known = values.get(key);
     if (known !== undefined) return known;

@@ -304,9 +304,12 @@ const sightDirection = new Vector3();
 function isOnSightRay(object: Object3D): boolean {
   if (!object.visible) return false;
   if (object instanceof Mesh) {
-    sightHits.length = 0;
     object.raycast(sightRay, sightHits);
-    if (sightHits.length > 0) return true;
+    const hit = sightHits.length > 0;
+    // A hit holds the mesh it hit, and through it the whole office, so the
+    // list is emptied at once rather than kept until the next ray.
+    sightHits.length = 0;
+    if (hit) return true;
   }
   return object.children.some(isOnSightRay);
 }

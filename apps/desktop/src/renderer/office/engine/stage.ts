@@ -27,7 +27,6 @@ import {
   PMREMGenerator,
   Scene,
   SRGBColorSpace,
-  Vector2,
   Vector3,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -40,7 +39,6 @@ import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { disposeContactShadows } from "./contact-shadow";
 import { isDarkTheme, readColor, readToken, refreshPalette, writeOklch } from "./palette";
 import { StillBuilding } from "./still-building";
 
@@ -67,25 +65,6 @@ export interface Frame {
  * moves something and wants the next frame drawn too.
  */
 export type FrameListener = (frame: Frame) => boolean;
-
-/** What the performance overlay shows. */
-export interface StageStats {
-  /** Frames drawn in the last second. 0 while nothing moves. */
-  readonly fps: number;
-  /** The CPU time of the last frame, listeners and draw calls together, in ms. */
-  readonly cpuMs: number;
-  readonly drawCalls: number;
-  readonly triangles: number;
-  readonly geometries: number;
-  readonly textures: number;
-  /** Every frame drawn since the stage started. */
-  readonly framesDrawn: number;
-  /** Every time the sun's shadows were drawn since the stage started. */
-  readonly shadowsDrawn: number;
-  /** The drawing buffer's size in device pixels. */
-  readonly bufferSize: string;
-  readonly quality: Quality;
-}
 
 /** The light settings of one time of day. */
 interface Light {
@@ -204,12 +183,8 @@ export class Stage {
   private readonly drawnCamera = { world: new Float64Array(16), projection: new Float64Array(16) };
   /** The still building, once `setBuilding` declares it; null draws the shadows every frame. */
   private building: StillBuilding | null = null;
-  private shadowsDrawn = 0;
   private quality: Quality = "auto";
   private timeOfDay: TimeOfDay = "auto";
-  private framesDrawn = 0;
-  private recentFrames: number[] = [];
-  private lastCpuMs = 0;
 
   private readonly container: HTMLElement;
 
@@ -221,15 +196,15 @@ export class Stage {
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = NeutralToneMapping;
     this.renderer.toneMappingExposure = 1;
-    // The stats count every pass of a frame, so the stage resets them once per frame.
-    this.renderer.info.autoReset = false;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFShadowMap;
     this.renderer.domElement.className = "office-canvas";
     container.append(this.renderer.domElement);
 
     const pmrem = new PMREMGenerator(this.renderer);
-    this.environmentTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const room = new RoomEnvironment();
+    this.environmentTexture = pmrem.fromScene(room, 0.04).texture;
+    room.dispose();
     pmrem.dispose();
     this.scene.environment = this.environmentTexture;
 
@@ -362,26 +337,6 @@ export class Stage {
     this.requestRender();
   }
 
-  /** Returns what the performance overlay shows. */
-  readStats(): StageStats {
-    const info = this.renderer.info;
-    const size = this.renderer.getDrawingBufferSize(new Vector2());
-    const now = performance.now();
-    this.recentFrames = this.recentFrames.filter((time) => now - time < 1000);
-    return {
-      fps: this.recentFrames.length,
-      cpuMs: this.lastCpuMs,
-      drawCalls: info.render.calls,
-      triangles: info.render.triangles,
-      geometries: info.memory.geometries,
-      textures: info.memory.textures,
-      framesDrawn: this.framesDrawn,
-      shadowsDrawn: this.shadowsDrawn,
-      bufferSize: `${String(size.x)} × ${String(size.y)}`,
-      quality: this.quality,
-    };
-  }
-
   /**
    * Stops drawing and frees everything the stage holds on the GPU: the
    * composer's targets and passes, the shadow map, the environment, and the
@@ -398,8 +353,6 @@ export class Stage {
     this.composer.dispose();
     this.sun.shadow.dispose();
     this.environmentTexture.dispose();
-    // The colleagues share one contact shadow, kept between builds, so the stage frees it last.
-    disposeContactShadows();
     this.renderer.dispose();
     // dispose() frees what three.js allocated, but the browser keeps the
     // context, and its GPU process keeps working for it, until it is lost.
@@ -516,23 +469,16 @@ export class Stage {
     this.lastFrameAt = started;
     this.elapsed += dt;
     const frame: Frame = { dt, time: this.elapsed };
-    this.renderer.info.reset();
     this.urgent = false;
     this.drawing = true;
     let again = false;
     for (const listener of this.listeners) again = listener(frame) || again;
     this.drawing = false;
     if (this.building?.detectChange() === true) this.renderer.shadowMap.needsUpdate = true;
-    if (this.renderer.shadowMap.needsUpdate || this.renderer.shadowMap.autoUpdate) {
-      this.shadowsDrawn++;
-    }
     this.camera.updateMatrixWorld();
     // A camera that moved in this frame will likely move in the next one too.
     if (this.recordCamera()) this.urgent = true;
     this.composer.render(dt);
-    this.framesDrawn++;
-    this.recentFrames.push(performance.now());
-    this.lastCpuMs = performance.now() - started;
     if (again || this.urgent) {
       this.scheduleFrame();
     } else {

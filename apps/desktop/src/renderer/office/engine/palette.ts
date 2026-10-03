@@ -10,6 +10,7 @@
  */
 import { Color, LinearSRGBColorSpace, MeshPhysicalMaterial, MeshStandardMaterial } from "three";
 import type { Hue } from "../../faces/look";
+import { registerCache } from "./caches";
 
 /** A colour in OKLCH, as the tokens write them. */
 export interface Oklch {
@@ -331,6 +332,15 @@ export function subscribePalette(listener: () => void): () => void {
   refreshListeners.add(listener);
   return () => refreshListeners.delete(listener);
 }
+
+// Leaving the Office forgets every shared material and every subscriber. The
+// subscribers left by then belong to the kits' caches, which are emptied at
+// the same time; the next office builds and subscribes again.
+registerCache(() => {
+  paintables.clear();
+  refreshListeners.clear();
+  probe = null;
+});
 
 /** Returns a token's colour as a three.js colour, for lights, fog and the background. */
 export function readColor(token: Token, shift: Shift = {}): Color {

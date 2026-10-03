@@ -38,6 +38,7 @@ import {
   traceQuadratic,
   wrapOntoEgg,
 } from "./parts";
+import { registerCache } from "../../engine/caches";
 import { readColor } from "../../engine/palette";
 
 /** The colours of a face, each painted into the vertices of its parts. */
@@ -598,6 +599,7 @@ function addBlush(face: FaceBuild): void {
 }
 
 const faces = new Map<string, BufferGeometry>();
+registerCache(() => faces.clear());
 
 /**
  * Returns the face of a colleague in `pose` as one skinned geometry painted

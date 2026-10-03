@@ -10,6 +10,7 @@
  * stop every walk and churn GPU memory on every Request.
  */
 import { Vector3, type Mesh, type Object3D } from "three";
+import { clearCaches } from "./engine/caches";
 import { createCameraRig, placeCamera } from "./engine/camera-rig";
 import { addContactShadow } from "./engine/contact-shadow";
 import {
@@ -75,7 +76,12 @@ const COLLEAGUE_VIEW_DISTANCE = 7.5;
 /** How far the camera stands from the selected colleague while the thread drawer is open, in metres. */
 const DRAWER_VIEW_DISTANCE = 12;
 
-/** Frees the geometry of every mesh under `root`. Materials are shared by the palette and stay. */
+/**
+ * Frees the geometry of every mesh under `root`. Most materials are shared
+ * between builds and stay until the Office closes; a mesh with a material or
+ * texture of its own, such as a sign's lettered face, frees them when its
+ * geometry is disposed.
+ */
 function disposeGeometry(root: Object3D): void {
   root.traverse((object) => {
     if ((object as Mesh).isMesh) (object as Mesh).geometry.dispose();
@@ -387,6 +393,7 @@ export function mountOfficeScene(
       themeObserver.disconnect();
       tearDownBuiltScene(built);
       camera.dispose();
+      clearCaches();
       stage.dispose();
       // The store outlives the scene, so the states of these colleagues
       // would otherwise still be read on the next visit.

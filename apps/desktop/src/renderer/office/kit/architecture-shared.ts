@@ -18,6 +18,7 @@ import {
   type WebGLProgramParametersWithUniforms,
 } from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { registerCache } from "../engine/caches";
 import {
   paint,
   readToken,
@@ -337,6 +338,21 @@ function redrawLabels(): void {
     else label.redraw();
   }
 }
+
+// Leaving the Office empties the kit's caches. The palette forgets its
+// materials and its subscribers at the same time, so the paint slots, the
+// mixed materials and the repaint subscription all start again with the next
+// office. `paintTable` and `paintedParts` stay, so they are disposed instead,
+// which removes the closed office's renderer from them.
+registerCache(() => {
+  paintSlots.clear();
+  paintTable.dispose();
+  paintedParts.dispose();
+  mixedMaterials.clear();
+  mixRepaints.length = 0;
+  repaintSubscribed = false;
+  labels.clear();
+});
 
 /**
  * Builds a canvas texture `width` by `height` pixels and paints it with

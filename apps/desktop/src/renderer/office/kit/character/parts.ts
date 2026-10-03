@@ -35,6 +35,7 @@ import {
 } from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Accessory, Hue } from "../../../faces/look";
+import { registerCache } from "../../engine/caches";
 import { readColor, readHue, subscribePalette, writeOklch } from "../../engine/palette";
 import type { Headwear } from "../../world/types";
 import { mapFacePoint, measureEggRadius, placeOnEgg, type Anatomy, type Egg } from "./anatomy";
@@ -1023,6 +1024,12 @@ interface LayeredBody {
 
 const layeredBodies = new Map<string, LayeredBody>();
 const paintedBodies = new Map<string, BodyGeometry>();
+// The palette forgets the painted bodies' repaints when the Office closes, at
+// the same time as these maps are emptied.
+registerCache(() => {
+  layeredBodies.clear();
+  paintedBodies.clear();
+});
 
 /**
  * Returns the body of a look, built once per look and then shared, painted

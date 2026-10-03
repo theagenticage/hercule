@@ -11,7 +11,7 @@ import {
   SphereGeometry,
 } from "three";
 import { LAMP, type Lamp } from "../engine/contracts";
-import { paint, readColor, subscribePalette } from "../engine/palette";
+import { paint, readColor } from "../engine/palette";
 import { buildPaintedMesh, placeBox } from "./architecture-shared";
 
 /** The lamppost's lantern centre, above its foot. */
@@ -58,14 +58,13 @@ export function buildLamppost(): Object3D {
   light.position.y = LANTERN_HEIGHT - 0.05;
   light.castShadow = false;
   object.add(light);
-  // The light takes the lit globe's warm brass, and follows it when the theme changes.
-  const repaintLight = () => light.color.copy(readColor("brass", { dl: 0.14, dc: -0.03 }));
-  repaintLight();
-  subscribePalette(repaintLight);
   const lamp: Lamp = {
     setOn(on) {
       globe.material = on ? paint("brass", "glow", { dl: 0.14, dc: -0.03 }) : unlit;
       light.intensity = on ? LAMP_CANDELA : 0;
+      // The light takes the lit globe's warm brass. The director switches
+      // every lamp after each change of theme, so it follows the theme here.
+      light.color.copy(readColor("brass", { dl: 0.14, dc: -0.03 }));
     },
   };
   object.userData[LAMP] = lamp;

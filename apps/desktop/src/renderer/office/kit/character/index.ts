@@ -29,6 +29,7 @@ import {
   Sphere,
   Vector3,
 } from "three";
+import { registerCache } from "../../engine/caches";
 import type { BuildColleagueRig, ColleagueRig } from "../../engine/contracts";
 import { paint, paintHue, paintVertexColors } from "../../engine/palette";
 import type { Pose } from "@hercule/client-core";
@@ -125,7 +126,8 @@ class Presence {
   }
 }
 
-// Geometry shared by every rig, built when the first rig needs it.
+// Geometry shared by every rig, built when the first rig needs it and dropped
+// when the Office closes.
 let cupGeometry: BufferGeometry | null = null;
 let saucerGeometry: BufferGeometry | null = null;
 let loupeGeometry: BufferGeometry | null = null;
@@ -134,6 +136,16 @@ let letterGeometry: BufferGeometry | null = null;
 const palmGeometries = new Map<number, BufferGeometry>();
 const ringGeometries = new Map<number, BufferGeometry>();
 const newspaperGeometries = new Map<string, BufferGeometry>();
+registerCache(() => {
+  cupGeometry = null;
+  saucerGeometry = null;
+  loupeGeometry = null;
+  lensGeometry = null;
+  letterGeometry = null;
+  palmGeometries.clear();
+  ringGeometries.clear();
+  newspaperGeometries.clear();
+});
 
 /**
  * Returns the marigold palm for a mitten of `radius`: a low pad on the left

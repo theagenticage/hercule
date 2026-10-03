@@ -469,10 +469,14 @@ export function buildNowServing(): NowServingHandle {
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   texture.anisotropy = 4;
-  const panel = new Mesh(
-    new PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT),
-    new MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.85, metalness: 0 }),
-  );
+  const geometry = new PlaneGeometry(PANEL_WIDTH, PANEL_HEIGHT);
+  const material = new MeshStandardMaterial({
+    map: texture,
+    transparent: true,
+    roughness: 0.85,
+    metalness: 0,
+  });
+  const panel = new Mesh(geometry, material);
   panel.position.set(0, 0.165, SIGN_DEPTH + 0.002);
   object.add(panel);
   let count = 0;
@@ -482,7 +486,15 @@ export function buildNowServing(): NowServingHandle {
   };
   redraw();
   void document.fonts.load("64px Limelight").then(redraw);
-  subscribePalette(redraw);
+  const unsubscribe = subscribePalette(redraw);
+  // The director disposes the geometry of every mesh when it tears the office
+  // down. The panel's texture, material and repaint belong to this sign
+  // alone, so they go with its geometry.
+  geometry.addEventListener("dispose", () => {
+    unsubscribe();
+    texture.dispose();
+    material.dispose();
+  });
   return {
     object,
     setNumber(next) {

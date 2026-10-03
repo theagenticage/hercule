@@ -148,6 +148,11 @@ export const LAMP = "lamp";
  * banker's lamp is not one: the sim lights it while the desk's owner works.
  */
 export interface Lamp {
+  /**
+   * Switches the lamp on or off. The director calls it after every change of
+   * theme too, with the same value or not, so a lamp repaints its light in
+   * the new theme's colours here.
+   */
   setOn(on: boolean): void;
 }
 

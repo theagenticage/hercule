@@ -1,7 +1,6 @@
 /**
  * The room's lights: the standard lamp. It is a `Lamp` the office switches
- * on in the evening: its shade lights up and, if it has one, its point light
- * comes on.
+ * on in the evening: its shade lights up and its point light comes on.
  *
  * Point lights are the most expensive thing in the kit: every one adds work
  * to every lit pixel of the frame. They never cast shadows, they reach only a
@@ -9,7 +8,7 @@
  */
 import { Group, PointLight, type Mesh, type Object3D } from "three";
 import { LAMP, type Lamp } from "../../engine/contracts";
-import { paint, subscribePalette } from "../../engine/palette";
+import { paint } from "../../engine/palette";
 import {
   PartList,
   addMeshes,
@@ -43,17 +42,15 @@ function paintLitParchment() {
 }
 
 /**
- * Builds a point light `intensity` candela bright, in lamplight's colour,
- * which follows the theme. It starts switched off and never casts a shadow.
+ * Builds a point light `intensity` candela bright, in lamplight's colour. It
+ * starts switched off and never casts a shadow.
  */
 function buildLampLight(intensity: number): PointLight {
   const light = new PointLight(0xffffff, intensity, LIGHT_RANGE, 2);
   light.castShadow = false;
   light.visible = false;
   light.name = "lamp-light";
-  const repaint = () => writeLamplight(light.color, 0.9);
-  repaint();
-  subscribePalette(repaint);
+  writeLamplight(light.color, 0.9);
   return light;
 }
 
@@ -61,13 +58,16 @@ function buildLampLight(intensity: number): PointLight {
  * Makes `object` a `Lamp`: switching it lights `shade` and shows `light`.
  * Returns the lamp, which is also stored in `object.userData[LAMP]`.
  */
-function attachLamp(object: Object3D, shade: Mesh, light: PointLight | null): Lamp {
+function attachLamp(object: Object3D, shade: Mesh, light: PointLight): Lamp {
   const lamp: Lamp = {
     setOn(on) {
       shade.material = on
         ? paintLitParchment()
         : paint("room-paper", "satin", LIGHT_SURFACES.shade.shift);
-      if (light !== null) light.visible = on;
+      light.visible = on;
+      // The director switches every lamp after each change of theme, so the
+      // light takes the new theme's lamplight here.
+      writeLamplight(light.color, 0.9);
     },
   };
   object.userData[LAMP] = lamp;

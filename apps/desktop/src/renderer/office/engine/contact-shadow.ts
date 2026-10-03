@@ -13,6 +13,7 @@ import {
   SRGBColorSpace,
   type Object3D,
 } from "three";
+import { registerCache } from "./caches";
 
 /** The disc's radius, in metres: a little wider than a standing colleague. */
 const RADIUS = 0.34;
@@ -57,13 +58,15 @@ function readShared(): NonNullable<typeof shared> {
  * Frees the disc's geometry, material and texture, which every colleague
  * shares and so no colleague frees. The next contact shadow builds them again.
  */
-export function disposeContactShadows(): void {
+function disposeContactShadows(): void {
   if (shared === null) return;
   shared.material.map?.dispose();
   shared.material.dispose();
   shared.geometry.dispose();
   shared = null;
 }
+
+registerCache(disposeContactShadows);
 
 /**
  * Lays a contact shadow under `object`, a colleague's root, whose origin sits
