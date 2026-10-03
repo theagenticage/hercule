@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - how the user looks around the office, and which walls drop so
+ * How the user looks around the office, and which walls drop so
  * the user can see into the rooms.
  *
  * The camera is a target on the floor, a distance, an azimuth and an

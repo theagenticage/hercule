@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the soft shadow under a colleague's feet. The sun's shadows are
+ * The soft shadow under a colleague's feet. The sun's shadows are
  * drawn once for the still building and kept, so a colleague, who moves, can
  * not cast into them: its shadow would stay where it stood when they were
  * drawn. A dark disc that fades toward its rim stands in for it, as in many

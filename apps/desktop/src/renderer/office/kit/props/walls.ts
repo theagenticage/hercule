@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - what hangs on the office's walls: the Case Room's cork board
+ * What hangs on the office's walls: the Case Room's cork board
  * of Proposals, the sunburst clock and the "Now serving" sign over the
  * user's desk. Each one's back is at z = 0, against the wall.
  */

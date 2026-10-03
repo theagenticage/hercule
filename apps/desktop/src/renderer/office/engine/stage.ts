@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the stage the office is drawn on: the WebGL renderer, the scene,
+ * The stage the office is drawn on: the WebGL renderer, the scene,
  * the camera, the light of the time of day, and a render loop that draws only
  * while something moves.
  *

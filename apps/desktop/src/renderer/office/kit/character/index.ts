@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - a colleague's 3D body: the Bureau crew's egg on short legs
+ * A colleague's 3D body: the Bureau crew's egg on short legs
  * (`bean`), or the same face on a grown-up figure in a suit (`suited`).
  *
  * A rig is a skeleton of seventeen bones and two or three skinned meshes,

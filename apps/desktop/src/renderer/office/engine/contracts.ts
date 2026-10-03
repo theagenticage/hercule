@@ -1,7 +1,6 @@
 /**
- * PROTOTYPE - the contracts between the office's parts. Each part lives in
- * its own files and is built by its own hand, so these types are the only
- * thing the parts agree on:
+ * The contracts between the office's parts. Each part lives in its own
+ * files, and these types are the only thing the parts agree on:
  *
  * - kit/character: a colleague's 3D body, `ColleagueRig`;
  * - kit/props and kit/architecture: furniture and rooms, `DeskHandle`;

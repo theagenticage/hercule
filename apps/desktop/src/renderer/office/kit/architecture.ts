@@ -1,8 +1,8 @@
 /**
- * PROTOTYPE - the office's architecture: floors, walls, signs, the
- * lift, the tubes, and the outdoors. The layouts import every builder from
- * this module; the larger builders live in `architecture-<topic>.ts` files
- * next to it and are re-exported here.
+ * The office's architecture: floors, walls, signs, the lift, the tubes, and
+ * the outdoors. The layouts import every builder from this module; the
+ * larger builders live in `architecture-<topic>.ts` files next to it and are
+ * re-exported here.
  *
  * Every builder returns an object whose origin sits on the floor, in the
  * middle of its footprint, with its front facing +z, unless its comment says

@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - how a colleague moves: a posture per action, blended from one
+ * How a colleague moves: a posture per action, blended from one
  * action to the next, with feet that plant on the floor and limbs that
  * reach their targets.
  *

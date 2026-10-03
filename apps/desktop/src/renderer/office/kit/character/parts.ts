@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the shapes a colleague is built from: its body, limbs, shoes,
+ * The shapes a colleague is built from: its body, limbs, shoes,
  * hats, accessories and the things it holds.
  *
  * A colleague's moving parts share one skeleton. Its whole body, in every

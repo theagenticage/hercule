@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - where the office keeps things: the filing cabinet.
+ * Where the office keeps things: the filing cabinet.
  */
 import type { Object3D } from "three";
 import {

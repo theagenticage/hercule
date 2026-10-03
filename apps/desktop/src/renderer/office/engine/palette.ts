@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the office's colours and materials, read from the Bureau's CSS
+ * The office's colours and materials, read from the Bureau's CSS
  * tokens, so the 3D office is drawn in the same colours as the rest of the
  * app and follows every theme.
  *

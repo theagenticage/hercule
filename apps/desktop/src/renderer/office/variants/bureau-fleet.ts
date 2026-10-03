@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the fleet on the Bureau floor. The office is planned by area of
+ * The fleet on the Bureau floor. The office is planned by area of
  * the code base, so the runners are a lens over it, never its plan:
  *
  * - every desk carries a small brass tag on its front with the name of the

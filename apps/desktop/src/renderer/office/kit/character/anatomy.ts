@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the measurements of a colleague's body, in metres, for both
+ * The measurements of a colleague's body, in metres, for both
  * character styles and all four body shapes.
  *
  * The egg a colleague is drawn as comes straight from the Bureau's 2D face:

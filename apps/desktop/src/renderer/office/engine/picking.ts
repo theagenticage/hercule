@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - finds the colleague under the pointer, generously.
+ * Finds the colleague under the pointer, generously.
  *
  * A colleague is small on screen from afar, so the picker does not cast a
  * ray against the body's triangles. It projects each colleague's feet and

@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the desks: a clerk's desk with its chair, and the user's
+ * The desks: a clerk's desk with its chair, and the user's
  * partner desk. A desk is the piece the office has most of (the ten-x fleet
  * has 140), so its geometry is merged into one mesh per finish and shared by
  * every desk: a desk with its chair is five meshes while its lamp is dark and

@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the office's seats: the club armchair and the waiting bench.
+ * The office's seats: the club armchair and the waiting bench.
  *
  * Every seat follows one rule the colleagues rely on: a seat's centre stands
  * directly above its marker, and its top is at `SEAT_HEIGHT`, so a colleague

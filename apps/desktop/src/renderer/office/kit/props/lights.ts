@@ -1,7 +1,7 @@
 /**
- * PROTOTYPE - the room's lights: the standard lamp. It
- * is a `Lamp` the office switches on in the evening: its shade lights up and,
- * if it has one, its point light comes on.
+ * The room's lights: the standard lamp. It is a `Lamp` the office switches
+ * on in the evening: its shade lights up and, if it has one, its point light
+ * comes on.
  *
  * Point lights are the most expensive thing in the kit: every one adds work
  * to every lit pixel of the frame. They never cast shadows, they reach only a

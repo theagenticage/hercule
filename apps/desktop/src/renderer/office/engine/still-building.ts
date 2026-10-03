@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the still building: the part of the office that holds still
+ * The still building: the part of the office that holds still
  * (walls, floors, furniture), watched so the stage can draw what never
  * changes once and keep it.
  *

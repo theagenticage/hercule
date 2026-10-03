@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - what makes the office lived in: potted plants, rugs, the tea
+ * What makes the office lived in: potted plants, rugs, the tea
  * trolley and the coat stand.
  */
 import { Shape, Vector3, type BufferGeometry, type Object3D } from "three";

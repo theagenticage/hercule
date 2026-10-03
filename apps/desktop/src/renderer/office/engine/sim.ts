@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the office's life: where every colleague is when the office
+ * The office's life: where every colleague is when the office
  * opens, and every walk after that, from the queue at the user's desk to a
  * cup of tea.
  *

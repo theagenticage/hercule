@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the outdoors round the campus: Deco lampposts and paved paths.
+ * The outdoors round the campus: Deco lampposts and paved paths.
  */
 import {
   BufferGeometry,

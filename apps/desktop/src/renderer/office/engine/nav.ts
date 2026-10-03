@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - walking through the office: a grid per storey, A* over it, and
+ * Walking through the office: a grid per storey, A* over it, and
  * string pulling, so a path is a few straight legs around the furniture.
  *
  * A layout declares each storey's floor, marks walls and furniture as solid,

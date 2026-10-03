@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the office's furniture and props, in the Crew Bureau's Art
+ * The office's furniture and props, in the Crew Bureau's Art
  * Deco. The layouts import every builder from here; the pieces live in the
  * files beside this one, by kind.
  *

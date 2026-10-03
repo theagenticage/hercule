@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the name tags drawn over the 3D office, as DOM elements placed
+ * The name tags drawn over the 3D office, as DOM elements placed
  * over each colleague's head, and the room labels of the overview.
  *
  * In the `smart` mode, the tags follow the camera's distance:

@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - a colleague's face in 3D: the Bureau book's eyes, brows and
+ * A colleague's face in 3D: the Bureau book's eyes, brows and
  * mouths for each of the eight poses, the blush, the moustache, glasses and
  * monocle, and the pose's badge, raised off the egg like enamel and ink.
  *

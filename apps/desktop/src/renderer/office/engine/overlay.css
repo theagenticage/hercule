@@ -1,5 +1,5 @@
 /*
- * PROTOTYPE - the name tags and room labels over the office, placed by
+ * The name tags and room labels over the office, placed by
  * overlay.ts. The script writes only `transform` and the `is-shown` class;
  * everything else is here. Tags fade in and out over --dur-2, so the levels
  * of the smart mode fade into each other.

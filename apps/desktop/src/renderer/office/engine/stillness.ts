@@ -1,10 +1,10 @@
 /**
- * PROTOTYPE - when the office stands still. It does while the Mac runs on its
- * battery, so the office costs no power while nothing happens, and while the
- * user asks the system to reduce motion (spec 17's rule that Reduce motion
- * turns every animation off).
+ * When the office stands still: while the Mac runs on its battery, so the
+ * office costs no power while nothing happens, and while the user asks the
+ * system to reduce motion (spec 17's rule that Reduce motion turns every
+ * animation off).
  *
- * Standing still is the prototype's liveliness 0: nobody wanders off and
+ * Standing still is the simulation's liveliness 0: nobody wanders off and
  * nobody breathes or types, so no frames are drawn. A colleague still walks
  * when its state changes, to the queue or back to its desk, and then the
  * frames stop again.

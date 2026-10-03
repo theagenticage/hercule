@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - the tools every prop is built with: rounded shapes, a list
+ * The tools every prop is built with: rounded shapes, a list
  * that collects a prop's parts and merges them into as few meshes as it can,
  * and the markers seats are found by.
  *

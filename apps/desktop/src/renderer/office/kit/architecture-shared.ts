@@ -1,5 +1,5 @@
 /**
- * PROTOTYPE - helpers the architecture kit's builders share: placing boxes,
+ * Helpers the architecture kit's builders share: placing boxes,
  * merging many small parts into one mesh, and drawing text on a canvas
  * texture that follows the theme.
  */
