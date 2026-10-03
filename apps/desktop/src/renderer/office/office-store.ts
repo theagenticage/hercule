@@ -66,8 +66,6 @@ export function subscribeOffice(listener: () => void): () => void {
 /** A command from the panels and the keys to the scene. */
 export type OfficeCommand =
   | { readonly kind: "overview" }
-  | { readonly kind: "focus-room"; readonly roomId: string }
-  | { readonly kind: "focus-colleague"; readonly colleagueId: string }
   /** Turns the camera around the point it looks at: a positive turn is clockwise from above. */
   | { readonly kind: "turn-camera"; readonly degrees: number }
   | { readonly kind: "zoom-camera"; readonly direction: "in" | "out" }

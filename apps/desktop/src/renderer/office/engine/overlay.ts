@@ -63,7 +63,7 @@ import {
 import { countColleaguesByRoom, isWaiting } from "./room-counts";
 import { isCameraMoving, isShown, readCameraView } from "./camera-rig";
 import { isColleagueHidden, registerTagHitTest } from "./picking";
-import { readColleagueStates, sendOfficeCommand, type TagMode } from "../office-store";
+import { readColleagueStates, setOffice, type TagMode } from "../office-store";
 import "./overlay.css";
 
 export interface Overlay {
@@ -740,7 +740,7 @@ export function createOverlay(
     pressedAt = null;
     if (travelled > CLICK_SLOP) return;
     const label = findRoomLabelAt(event.clientX, event.clientY);
-    if (label !== null) sendOfficeCommand({ kind: "focus-room", roomId: label.room.id });
+    if (label !== null) setOffice({ selectedId: null, roomId: label.room.id, drawer: false });
   };
   const onPointerMove = (event: PointerEvent): void => {
     if (event.buttons !== 0) return;

@@ -136,7 +136,7 @@ export function useOfficeKeys(world: World): void {
           const waiting = listColleaguesInPose(world, readColleagueStates(), "waiting");
           const nextId = findNextColleagueId(waiting, state.selectedId, event.shiftKey ? -1 : 1);
           if (nextId === null) return;
-          sendOfficeCommand({ kind: "focus-colleague", colleagueId: nextId });
+          setOffice({ selectedId: nextId });
           break;
         }
         default: {

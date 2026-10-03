@@ -15,7 +15,7 @@ import { countColleaguesByRoom } from "../engine/room-counts";
 import {
   readColleagueStates,
   readOffice,
-  sendOfficeCommand,
+  setOffice,
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
@@ -124,7 +124,7 @@ export function RoomDirectory({
             layout={layout}
             roomId={state.roomId}
             onPick={(roomId) => {
-              sendOfficeCommand({ kind: "focus-room", roomId });
+              setOffice({ selectedId: null, roomId, drawer: false });
               close();
             }}
           />

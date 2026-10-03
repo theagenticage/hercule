@@ -15,6 +15,7 @@ import {
   readColleagueStates,
   readOffice,
   sendOfficeCommand,
+  setOffice,
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
@@ -60,7 +61,7 @@ function PoseCounts({ world }: { readonly world: World }): JSX.Element {
             title={`Select the next colleague ${words}`}
             onClick={() => {
               const colleagueId = findNextColleagueId(colleagues, state.selectedId, 1);
-              if (colleagueId !== null) sendOfficeCommand({ kind: "focus-colleague", colleagueId });
+              if (colleagueId !== null) setOffice({ selectedId: colleagueId });
             }}
           >
             <PoseMark pose={pose} />

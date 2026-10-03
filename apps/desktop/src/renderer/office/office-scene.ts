@@ -298,12 +298,6 @@ export function mountOfficeScene(
         setOffice({ selectedId: null, roomId: null, drawer: false });
         camera.flyTo(built.layout.overview);
         break;
-      case "focus-room":
-        setOffice({ selectedId: null, roomId: command.roomId, drawer: false });
-        break;
-      case "focus-colleague":
-        setOffice({ selectedId: command.colleagueId });
-        break;
       case "turn-camera":
         camera.turn(command.degrees);
         break;
