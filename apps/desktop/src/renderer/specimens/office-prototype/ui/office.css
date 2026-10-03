@@ -102,15 +102,16 @@
    The canvas keeps its size, so nothing is drawn again for the slide, and
    picking follows, because it measures the canvas where it is. */
 .office-stage {
-  transition: translate var(--dur-3) var(--ease-out);
+  transition: transform var(--dur-3) var(--ease-out);
 }
 .office[data-drawer="true"] .office-stage {
-  translate: calc(var(--drawer-width) / -2) 0;
+  transform: translateX(calc(var(--drawer-width) / -2));
 }
 
 /* The drawer is the app's main pane, slid in from the right: the same
    surface and hairline, with a shadow that lifts it over the office. Closed,
-   it waits past the pane's right edge, clear of its own shadow. */
+   it waits past the pane's right edge, clear of its own shadow, and its
+   `inert` attribute keeps it out of focus and clicks. */
 .office-drawer {
   position: absolute;
   z-index: 20;
@@ -122,18 +123,11 @@
   box-shadow:
     -1px 0 0 var(--line-soft),
     var(--shadow-3);
-  translate: calc(100% + 48px) 0;
-  visibility: hidden;
-  transition:
-    translate var(--dur-3) var(--ease-out),
-    visibility 0s linear var(--dur-3);
+  transform: translateX(calc(100% + 48px));
+  transition: transform var(--dur-3) var(--ease-out);
 }
 .office-drawer[data-open="true"] {
-  translate: 0 0;
-  visibility: visible;
-  transition:
-    translate var(--dur-3) var(--ease-out),
-    visibility 0s;
+  transform: none;
 }
 
 /* The thread screen draws into a pane that places its header and composer
@@ -150,7 +144,9 @@
 /* ---------- The deck ---------- */
 /* The layer the panels sit on: the part of the office the user can see,
    which ends at the drawer's left edge while the drawer is open. It takes
-   no clicks itself, so the canvas under it still does. */
+   no clicks itself, so the canvas under it still does. Its edge moves at
+   once, with no transition: moving `right` lays the deck out again, and
+   the sliding drawer covers the change. */
 .office-deck {
   container: office-deck / inline-size;
   position: absolute;
@@ -160,7 +156,6 @@
   left: 0;
   right: 0;
   pointer-events: none;
-  transition: right var(--dur-3) var(--ease-out);
 }
 .office[data-drawer="true"] .office-deck {
   right: var(--drawer-width);
@@ -267,21 +262,14 @@
   padding: 14px 14px 12px;
   border-radius: var(--r-xl);
   opacity: 0;
-  translate: 0 -6px;
-  visibility: hidden;
+  transform: translateY(-6px);
   transition:
     opacity var(--dur-2) var(--ease-out),
-    translate var(--dur-2) var(--ease-out),
-    visibility 0s linear var(--dur-2);
+    transform var(--dur-2) var(--ease-out);
 }
 .office-card[data-open="true"] {
   opacity: 1;
-  translate: 0 0;
-  visibility: visible;
-  transition:
-    opacity var(--dur-2) var(--ease-out),
-    translate var(--dur-2) var(--ease-out),
-    visibility 0s;
+  transform: none;
 }
 .office-card-h {
   display: flex;
@@ -353,12 +341,12 @@
   text-overflow: ellipsis;
   transition:
     opacity var(--dur-3) var(--ease-out),
-    translate var(--dur-3) var(--ease-out);
+    transform var(--dur-3) var(--ease-out);
 }
 @starting-style {
   .office-card-ticker li:last-child {
     opacity: 0;
-    translate: 0 4px;
+    transform: translateY(4px);
   }
 }
 .office-card-ticker li::before {
@@ -601,21 +589,14 @@
   max-height: calc(100% - 56px - 72px);
   overflow-y: auto;
   opacity: 0;
-  translate: 0 -6px;
-  visibility: hidden;
+  transform: translateY(-6px);
   transition:
     opacity var(--dur-2) var(--ease-out),
-    translate var(--dur-2) var(--ease-out),
-    visibility 0s linear var(--dur-2);
+    transform var(--dur-2) var(--ease-out);
 }
 .office-controls[data-open="true"] {
   opacity: 1;
-  translate: 0 0;
-  visibility: visible;
-  transition:
-    opacity var(--dur-2) var(--ease-out),
-    translate var(--dur-2) var(--ease-out),
-    visibility 0s;
+  transform: none;
 }
 .office-controls .pop-h {
   padding-right: 10px;

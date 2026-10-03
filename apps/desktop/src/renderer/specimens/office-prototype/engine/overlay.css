@@ -20,18 +20,13 @@
   left: 0;
   white-space: nowrap;
   opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity var(--dur-2) var(--ease-out),
-    visibility 0s linear var(--dur-2);
+  transition: opacity var(--dur-2) var(--ease-out);
   will-change: transform, opacity;
 }
 
 .office-tag.is-shown,
 .office-room-label.is-shown {
   opacity: 1;
-  visibility: visible;
-  transition: opacity var(--dur-2) var(--ease-out);
 }
 
 /* A colleague's tag, as the Bureau book draws it: a pill off-centre to the right of the head. */
