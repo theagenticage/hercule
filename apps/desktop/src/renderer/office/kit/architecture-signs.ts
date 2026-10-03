@@ -185,8 +185,6 @@ export function buildWordmark(text: string, height: number): Object3D {
     void waitForDecoFont().then(() => {
       mesh.geometry.dispose();
       mesh.geometry = buildWordmarkGeometry(label, height);
-      // Nothing may be moving, so ask for a frame to show the new letters.
-      window.office?.stage.requestRender();
     });
   }
   const object = new Group();

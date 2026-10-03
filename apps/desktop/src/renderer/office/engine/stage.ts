@@ -170,13 +170,6 @@ const CAMERA_FRAME_RATE = 60;
  */
 const FRAME_SLACK_MS = 4;
 
-declare global {
-  interface Window {
-    /** The mounted office or lab page, for the screenshot tool and the console. */
-    office?: { readonly stage: Stage };
-  }
-}
-
 /** The stage: one WebGL canvas filling `container`. */
 export class Stage {
   readonly renderer: WebGLRenderer;

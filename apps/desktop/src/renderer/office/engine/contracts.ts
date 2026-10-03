@@ -342,21 +342,6 @@ export interface NavGraph {
 // ---------------------------------------------------------------------------
 // Behaviour.
 
-/** Things the controls can make happen, so the user can see the office react. */
-export type SimEvent =
-  /** A working colleague asks the user something: it walks to the queue with a raised hand. */
-  | { readonly kind: "ask"; readonly colleagueId?: string }
-  /** A colleague walks to another's desk to ask it something, and walks back. */
-  | { readonly kind: "visit"; readonly fromId?: string; readonly toId?: string }
-  /** A new thread starts: a new colleague arrives and walks to a free desk. */
-  | { readonly kind: "arrive" }
-  /** A turn fails: the colleague gets a plaster. */
-  | { readonly kind: "fail"; readonly colleagueId?: string }
-  /** A turn finishes: a hop, a check, then the colleague goes idle. */
-  | { readonly kind: "finish"; readonly colleagueId?: string }
-  /** An event arrives: a capsule runs through the tubes to Triage, who pins a Proposal. */
-  | { readonly kind: "event" };
-
 /**
  * A colleague's state as the sim holds it now. It starts as the world's
  * `Colleague` and changes as things happen: an answered colleague works
@@ -374,9 +359,6 @@ export interface ColleagueState {
 export interface Sim {
   /** Advances everyone. Returns true while anyone moves. */
   update(frame: Frame): boolean;
-  /** The user answered a colleague's request: it hops, walks back, and goes back to work. */
-  answer(colleagueId: string, answer: string): void;
-  trigger(event: SimEvent): void;
   /**
    * Moves a colleague into the state its thread is in now, after the
    * thread's pose or Request changed. The colleague's tag shows `state` at

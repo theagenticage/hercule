@@ -20,7 +20,6 @@ import type {
   Seat,
   Sim,
   SimContext,
-  SimEvent,
   Spot,
   Waypoint,
 } from "./contracts";
@@ -52,12 +51,6 @@ const TEA_SECONDS = 2.6;
 const TEA_BREAK_SECONDS = 16;
 /** Reaching up to pin one card. */
 const PIN_SECONDS = 1.6;
-/** A failed colleague's slump before it sits up. */
-const SLUMP_SECONDS = 1.4;
-/** How long a finished colleague shows the check before it goes idle. */
-const CHECK_SECONDS = 1.8;
-/** An arriving colleague's look to one side of the entrance. */
-const LOOK_AROUND_SECONDS = 0.8;
 /** From the office opening to Ada's walk to Investigate backup timeouts. */
 const ADA_VISIT_DELAY_SECONDS = 4;
 /** The gap between two small happenings, per liveliness level. */
@@ -140,18 +133,7 @@ const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
 // Types.
 
 /** What an actor's script is doing, so the happenings leave busy colleagues alone. */
-type Errand =
-  | "queue"
-  | "desk-wait"
-  | "answer"
-  | "visit"
-  | "tea"
-  | "lounge"
-  | "pin"
-  | "arrive"
-  | "fail"
-  | "finish"
-  | "home";
+type Errand = "queue" | "desk-wait" | "answer" | "visit" | "tea" | "lounge" | "pin" | "home";
 
 /** Where an actor rests between scripts. */
 type Place = "home" | "lounge" | "queue" | "desk-side" | "entrance" | "elsewhere";
@@ -1073,26 +1055,6 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
   const pickSettled = (accept: (actor: Actor) => boolean): Actor | undefined =>
     pickRandom([...actors.values()].filter((actor) => isSettled(actor) && accept(actor)));
 
-  /** Returns the colleague a trigger names, or a random settled one that `accept` takes. */
-  const pickTarget = (
-    colleagueId: string | undefined,
-    accept: (actor: Actor) => boolean,
-  ): Actor | undefined =>
-    colleagueId === undefined ? pickSettled(accept) : actors.get(colleagueId);
-
-  const isWorkingAtHome = (actor: Actor): boolean =>
-    actor.pose === "working" && actor.place === "home" && actor.colleague.role === "session";
-
-  /** A working colleague asks the user something: it walks to the back of the queue. */
-  const ask = (colleagueId?: string): void => {
-    const actor = pickTarget(colleagueId, isWorkingAtHome);
-    if (actor === undefined || actor.pose === "waiting") return;
-    setPose(actor, "waiting");
-    actor.ticket = nextTicket++;
-    setCup(actor, false);
-    joinQueue(actor);
-  };
-
   /**
    * One colleague walks to another's desk, stands beside it, and they talk
    * for a few seconds, looking at each other; then the visitor walks back.
@@ -1149,15 +1111,8 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     return ada !== undefined && host !== undefined ? [ada, host] : null;
   };
 
-  /** Plays a visit: the pair given, the scripted one, or two settled colleagues of one room. */
-  const triggerVisit = (fromId?: string, toId?: string): void => {
-    if (fromId !== undefined || toId !== undefined) {
-      const visitor = fromId === undefined ? pickSettled(() => true) : actors.get(fromId);
-      const host =
-        toId === undefined ? pickSettled((actor) => actor !== visitor) : actors.get(toId);
-      if (visitor !== undefined && host !== undefined) visit(visitor, host);
-      return;
-    }
+  /** Plays a visit: the scripted one, or else two settled colleagues of one room. */
+  const triggerVisit = (): void => {
     const scripted = findScriptedVisit();
     if (scripted !== null) {
       visit(...scripted);
@@ -1182,73 +1137,6 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
     if (host === undefined) return false;
     visit(visitor, host);
     return true;
-  };
-
-  /**
-   * A colleague arrives: it appears in the entrance, looks around, and walks
-   * to its desk to work. The rigs are fixed when the sim is built, so the
-   * arrival is a colleague who is away when there is one, or else an idle
-   * one whose desk is empty, from the lounge.
-   */
-  const arrive = (): void => {
-    const actor =
-      pickSettled((candidate) => candidate.pose === "away") ??
-      pickSettled((candidate) => candidate.place === "lounge" && candidate.pose === "idle") ??
-      pickSettled((candidate) => candidate.place === "home" && candidate.pose === "idle") ??
-      pickSettled(isWorkingAtHome);
-    if (actor === undefined) return;
-    const { entrance } = spots;
-    run(actor, "arrive", async () => {
-      if (actor.pose !== "away") {
-        setCup(actor, false);
-        placeAt(actor, entrance.position, entrance.floor, entrance.facing);
-      }
-      setAction(actor, "stand");
-      const eye = findEyePoint(actor);
-      const sidewaysX = Math.cos(actor.yaw) * 1.6;
-      const sidewaysZ = -Math.sin(actor.yaw) * 1.6;
-      const forwardX = Math.sin(actor.yaw) * 1.2;
-      const forwardZ = Math.cos(actor.yaw) * 1.2;
-      actor.rig.lookAt(eye.clone().add(new Vector3(sidewaysX + forwardX, 0, sidewaysZ + forwardZ)));
-      await wait(actor, LOOK_AROUND_SECONDS);
-      actor.rig.lookAt(eye.clone().add(new Vector3(forwardX - sidewaysX, 0, forwardZ - sidewaysZ)));
-      await wait(actor, LOOK_AROUND_SECONDS);
-      actor.rig.lookAt(null);
-      setPose(actor, "working");
-      await wait(actor, 0.3);
-      await walkHome(actor);
-    });
-  };
-
-  /** A turn fails: the colleague gets a plaster, slumps a moment, and sits up. */
-  const fail = (colleagueId?: string): void => {
-    const actor = pickTarget(colleagueId, isWorkingAtHome);
-    if (actor === undefined) return;
-    setPose(actor, "failed");
-    setCup(actor, false);
-    run(actor, "fail", async () => {
-      if (actor.place !== "home") await walkHome(actor, "sit");
-      setAction(actor, "sleep");
-      await wait(actor, SLUMP_SECONDS);
-      setAction(actor, "sit");
-    });
-  };
-
-  /** A turn finishes: a hop at the desk, the check, then idle with a cup. */
-  const finish = (colleagueId?: string): void => {
-    const actor = pickTarget(colleagueId, isWorkingAtHome);
-    if (actor === undefined) return;
-    setPose(actor, "done");
-    run(actor, "finish", async () => {
-      if (actor.place !== "home") await walkHome(actor, "sit");
-      setAction(actor, "hop");
-      await wait(actor, HOP_SECONDS);
-      setAction(actor, "sit");
-      await wait(actor, CHECK_SECONDS);
-      setPose(actor, "idle");
-      setCup(actor, true);
-      setAction(actor, "sip");
-    });
   };
 
   /**
@@ -1543,38 +1431,7 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       return moving;
     },
 
-    answer(colleagueId) {
-      const actor = actors.get(colleagueId);
-      if (actor === undefined || actor.pose !== "waiting") return;
-      setPose(actor, "working");
-      walkBackFromQueue(actor);
-    },
-
     setColleagueState,
-
-    trigger(event: SimEvent) {
-      switch (event.kind) {
-        case "ask":
-          ask(event.colleagueId);
-          break;
-        case "visit":
-          triggerVisit(event.fromId, event.toId);
-          break;
-        case "arrive":
-          arrive();
-          break;
-        case "fail":
-          fail(event.colleagueId);
-          break;
-        case "finish":
-          finish(event.colleagueId);
-          break;
-        case "event":
-          receiveEvent();
-          break;
-      }
-      stage.requestRender();
-    },
 
     setLiveliness(level) {
       liveliness = level;

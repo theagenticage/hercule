@@ -317,12 +317,12 @@ export function decoFont(pixels: number): string {
 
 /**
  * Returns the UI face's CSS shorthand at a pixel size, in the app's bold
- * weight (`--w-bold`). Room names
- * are drawn in the UI face, like every name in the app; the display face is
- * kept for the wordmark and numerals.
+ * weight (`--w-bold`). Room names are drawn in the UI face, like every name
+ * in the app; the display face is kept for the wordmark and numerals. The
+ * generic family keeps a canvas drawn before the face loads in a sans-serif.
  */
 export function uiFont(pixels: number): string {
-  return `640 ${String(pixels)}px "Bricolage Grotesque"`;
+  return `640 ${String(pixels)}px "Bricolage Grotesque", sans-serif`;
 }
 
 /** A canvas texture that redraws itself when the theme changes and when the display face arrives. */
@@ -375,11 +375,8 @@ export function buildCanvasLabel(
   texture.userData.owner = owner;
   subscribeKitRepaint();
   if (!document.fonts.check(font)) {
-    void document.fonts.load(font).then(() => {
-      redraw();
-      // Nothing may be moving, so ask for a frame to show the redrawn text.
-      window.office?.stage.requestRender();
-    });
+    // The scene asks for a frame once the page's fonts are ready, which shows the redrawn text.
+    void document.fonts.load(font).then(redraw);
   }
   return { texture, canvas };
 }
