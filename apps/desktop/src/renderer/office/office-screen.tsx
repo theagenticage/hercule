@@ -68,6 +68,16 @@ export function OfficeScreen({
     else setOffice({ selectedId: openSessionId, drawer: true, roomId: null });
   }, [openSessionId]);
 
+  // Nothing in the window is see-through while the Office is open: see the
+  // data-office rule in base.css for why.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.office = "open";
+    return () => {
+      delete root.dataset.office;
+    };
+  }, []);
+
   useEffect(() => {
     const unsubscribe = subscribeOffice(() => {
       const { drawer, selectedId } = readOffice();
