@@ -14,9 +14,11 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
-import type { Assistant, Conversation, Session, Task } from "@hercule/contract";
+import type { Assistant, Conversation, Profile, Session, Task } from "@hercule/contract";
 import {
   spawnThreadUnder,
+  findInstanceId,
+  spawnSessionOrFail,
   at,
   readProfileNamed,
   createProfile,
@@ -66,6 +68,41 @@ const parseRefusal = async (response: Response): Promise<Refusal> => {
 /** Spawns a worker: the built-in profile with task read, create and update, and no delete. */
 const spawnWorkerThread = async (arranged: Arranged): Promise<SpawnedThread> =>
   spawnThreadUnder(arranged, await readProfileNamed(arranged, "worker"));
+
+/**
+ * Creates an Agent named `name` on `profile`, spawns a session from it as the
+ * user, and reports that the session started. Returns the session, which is
+ * then `busy`. The runner has reported one event for it, at sequence number 1.
+ */
+const spawnFromAgent = async (
+  arranged: Arranged,
+  name: string,
+  profile: Profile,
+): Promise<Session> => {
+  const created = await post(
+    arranged.harness.base,
+    "/api/v1/agents",
+    {
+      name,
+      systemPrompt: "You carry work on.",
+      instanceId: findInstanceId(arranged, "full-provider"),
+      permissionProfileId: profile.id,
+    },
+    arranged.token,
+  );
+  expect(created.status, await created.clone().text()).toBe(200);
+  const agent = (await created.json()) as { readonly id: string };
+  const opened = await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "hello" });
+  await waitForStartFrames(arranged, opened.id, 1);
+  reportEvent(arranged.wire, 1, {
+    eventId: crypto.randomUUID(),
+    sessionId: opened.id,
+    at,
+    _tag: "session.started",
+    providerRefs: { nativeSessionId: "native-1" },
+  });
+  return waitForSession(arranged, opened.id, (one) => one.status === "busy");
+};
 
 const exitSession = async (arranged: Arranged, session: Session): Promise<void> => {
   reportEvent(arranged.wire, 2, {
@@ -389,44 +426,73 @@ describe("a session may not spawn a Thread", () => {
   });
 });
 
+/** Forks a session with the given token, as `session.continue` does. */
+const forkSession = (arranged: Arranged, id: string, token: string): Promise<Response> =>
+  post(
+    arranged.harness.base,
+    `/api/v1/sessions/${id}/continue`,
+    { mode: "fork", prompt: "carry this one on for me" },
+    token,
+  );
+
 describe("a session forking a session", () => {
-  it("may fork a session on its own profile, but not one on another profile", async () => {
+  it("may fork an Agent's session on its own profile, but not one on another profile", async () => {
     await withFleet(async (arranged) => {
       // The assistant profile is the built-in one with `session.spawn`, which
       // `session.continue` requires.
       const assistant = await readProfileNamed(arranged, "assistant");
       const mine = await spawnThreadUnder(arranged, assistant);
-      const base = arranged.harness.base;
 
-      // Two possible parents, each exited with a transcript on a connected
-      // runner, so both can be forked: one on this session's own profile, and
-      // one on a narrower profile it may not use. Neither is the calling
-      // session, whose token stops working when it exits.
-      const sibling = await spawnThreadUnder(arranged, assistant);
-      const stranger = await spawnWorkerThread(arranged);
-      await exitSession(arranged, sibling.session);
-      await exitSession(arranged, stranger.session);
+      // Two possible parents, each spawned from an Agent and exited with a
+      // transcript on a connected runner, so both can be forked: one on this
+      // session's own profile, and one on a narrower profile it may not use.
+      // Neither is the calling session, whose token stops working when it
+      // exits.
+      const sibling = await spawnFromAgent(arranged, "sibling", assistant);
+      const stranger = await spawnFromAgent(
+        arranged,
+        "stranger",
+        await readProfileNamed(arranged, "worker"),
+      );
+      await exitSession(arranged, sibling);
+      await exitSession(arranged, stranger);
 
-      const continueSession = (id: string): Promise<Response> =>
-        post(
-          base,
-          `/api/v1/sessions/${id}/continue`,
-          { mode: "fork", prompt: "carry this one on for me" },
-          mine.token,
-        );
-
-      const theirs = await continueSession(stranger.session.id);
+      const theirs = await forkSession(arranged, stranger.id, mine.token);
       expect(theirs.status).toBe(403);
       const refusal = await parseRefusal(theirs);
       expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
       expect(refusal.message.toLowerCase()).toContain("profile");
 
-      const own = await continueSession(sibling.session.id);
+      const own = await forkSession(arranged, sibling.id, mine.token);
       expect(own.status, await own.clone().text()).toBe(200);
       expect((await own.json()) as Session).toMatchObject({
         permissionProfileId: assistant.id,
-        parentSessionId: sibling.session.id,
+        parentSessionId: sibling.id,
+        agentId: sibling.agentId,
       });
+    });
+  });
+
+  it("may not fork a Thread, even on its own profile, while the user may", async () => {
+    await withFleet(async (arranged) => {
+      const assistant = await readProfileNamed(arranged, "assistant");
+      const mine = await spawnThreadUnder(arranged, assistant);
+      // A Thread on the caller's own profile, so the profile rule passes and
+      // only the Thread rule can refuse the fork.
+      const thread = await spawnThreadUnder(arranged, assistant);
+      await exitSession(arranged, thread.session);
+
+      const refused = await forkSession(arranged, thread.session.id, mine.token);
+      expect(refused.status).toBe(403);
+      const refusal = await parseRefusal(refused);
+      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
+      expect(refusal.message).toContain("only the user may fork a Thread");
+
+      const forked = await forkSession(arranged, thread.session.id, arranged.token);
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      const child = (await forked.json()) as Session;
+      expect(child.parentSessionId).toBe(thread.session.id);
+      expect(child.agentId).toBeNull();
     });
   });
 });
