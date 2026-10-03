@@ -167,3 +167,20 @@ The cost is memory: one more pi process per running child (each a Bun process; s
 - **Real delegation** goes through t3code's own `delegate_task` MCP tool, which starts a separate t3code thread ("app-owned" child) for any provider. Its shared model (`orchestrationV2.ts:632-667`) gives a subagent a parent node, an origin (`provider_native` or `app_owned`), status, progress, result and a nullable child thread id; the UI only offers "Open subagent thread" when that id is set. Claude children are tied to the parent by `parent_tool_use_id`, Codex children have real child threads and their approvals show in the parent.
 
 So t3code is no help for pi child control or approvals. Its useful lesson is the data model: a subagent as an item with an origin, a status, a progress line, and an optional link to a full child session.
+
+## Addendum: pi upstream direction, and two more extensions
+
+Added after the ticket closed, from a wider survey of the extensions on npm. The clones it read are in `/tmp/pi-subagent-research/`, which is temporary.
+
+- **pi upstream.** pi 1.0.0 has no subagents of its own. The experimental durable harness (`@earendil-works/pi-durable` 1.0.1 on npm; its source is `packages/coding-agent/src/experimental/durable/subagent.ts`) has them:
+  - each child is a conversation owned by a task;
+  - aborting the call aborts the child, but the child outlives the call, so the user can switch to it and keep talking;
+  - the README and examples 22-23 show spawn, steer, wait, stop and list.
+
+  Nothing commits to exposing this through `pi --mode rpc`. badlogic points multi-session work at a future "pi server" (pi issue #5700). Two issues were auto-closed with no action: #7808, a `pi.spawnChild` API, and #9403, passing the parent's `-e` to children. So Hercule's own extension is the only route for now. The pi spec should name pi-durable as the thing to re-check when Hercule pins a new pi version.
+- **pi-landstrip** (0.19.4, about 750 downloads a week):
+  - runs workers as `pi --mode rpc`, each with a real session;
+  - passes child dialogs up to the parent's `ctx.ui` one at a time, with `@agent · description · taskId[0:8]` at the start of the title (`dist/index.ts:5149-5175`, `2809-2813`);
+  - like williamcr01, it gives the child id only inside the title text.
+- **@quintinshaw/pi-dynamic-workflows** (about 5.8k downloads a week) shows the most detailed live tree on the RPC stream. Its `onUpdate` details carry `agents[]`, each with `id`, `callId`, `sessionId` and `sessionFile` (`display.ts:10-61`). A shape like this is worth copying for Hercule's own `subagent` tool.
+- **Untested risk.** pi does not check whether a tool call has finished before it emits `tool_execution_update` (`pi-agent-core/dist/agent-loop.js:541-543`). So an extension can still send an update after its tool call has finished. Hercule's normalizer should ignore an update for a call that has already ended, or treat it as a protocol error.
