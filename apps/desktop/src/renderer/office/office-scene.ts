@@ -413,6 +413,9 @@ export function mountOfficeScene(
       teardown(built);
       camera.dispose();
       stage.dispose();
+      // The store outlives the scene, so the states of these colleagues
+      // would otherwise still be read on the next visit.
+      publishColleagueStates(new Map());
     },
   };
 }
