@@ -1,8 +1,8 @@
 /**
  * Hercule on this Mac: at a launch with no controller URL saved, main looks
- * for Hercule's controller running here, and on the user's request starts
- * it as a Service Unit, through the installed binary. Spec 17 (§First run)
- * owns the rules.
+ * for the address of Hercule's controller here, and on the user's request
+ * starts it as a Service Unit, through the installed binary. Spec 17
+ * (§First run) owns the rules.
  */
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -60,9 +60,10 @@ export class LocalController extends Context.Service<
   {
     /**
      * Looks for Hercule's controller on this Mac with `hercule service
-     * status`. When the Service Unit runs it, or the default Hercule Home
-     * names a controller that answers, main saves its URL and reloads the
-     * window. Returns what main found; see LocalControllerFindOutcome.
+     * status`, and returns the address the binary reports for it, or why
+     * there is none; see LocalControllerFindOutcome. Checks nothing and saves
+     * nothing: the renderer saves the address through `controllerUrl.save`,
+     * which checks it.
      *
      * Fails with ControllerAlreadySaved when a controller URL is saved.
      */
@@ -93,9 +94,10 @@ export class LocalController extends Context.Service<
  * controller connection. `openFolder` opens a folder in Finder.
  *
  * `find` and `start` run one at a time, and a second waits for the first.
- * A reload of the window while Hercule starts runs `find` again, and both
- * would otherwise save the URL and reload the window. The second one then
- * finds the URL saved, and is refused.
+ * A reload of the window while Hercule starts runs `find` again, and the
+ * renderer would otherwise save the address `find` returns while `start`
+ * saves it too, reloading the window twice. The `find` then waits for the
+ * start, finds the URL saved, and is refused.
  */
 export const makeLocalControllerLayer = (
   openFolder: (path: string) => Effect.Effect<void>,
@@ -126,15 +128,8 @@ export const makeLocalControllerLayer = (
         }
       });
 
-      /**
-       * Looks for Hercule's controller on this Mac, as `find` does, and saves
-       * nothing. Returns `Answering` with the controller's origin when the
-       * connect check passes there, set up or not.
-       */
-      const findController: Effect.Effect<
-        | Exclude<LocalControllerFindOutcome, { readonly _tag: "Saved" }>
-        | { readonly _tag: "Answering"; readonly origin: string }
-      > = Effect.gen(function* () {
+      /** Looks for the address of Hercule's controller on this Mac; see `find`. */
+      const findController: Effect.Effect<LocalControllerFindOutcome> = Effect.gen(function* () {
         const status = yield* binary.readStatus.pipe(Effect.map(rememberLogsFolder), Effect.result);
         if (status._tag === "Failure") {
           return {
@@ -144,10 +139,9 @@ export const makeLocalControllerLayer = (
         }
         const { role, running, controllerUrl } = status.success;
         if (role === "runner") return { _tag: "Runner", running } as const;
-        if (controllerUrl === null) return { _tag: "NotFound", line: null } as const;
-        return isAnswering(yield* connection.check(controllerUrl))
-          ? ({ _tag: "Answering", origin: controllerUrl } as const)
-          : ({ _tag: "NotFound", line: null } as const);
+        return controllerUrl === null
+          ? ({ _tag: "NotFound", line: null } as const)
+          : ({ _tag: "Found", origin: controllerUrl } as const);
       });
 
       /**
@@ -248,15 +242,7 @@ export const makeLocalControllerLayer = (
       });
 
       return LocalController.of({
-        find: oneAtATime.withPermit(
-          Effect.gen(function* () {
-            yield* refuseWhenControllerSaved;
-            const found = yield* findController;
-            if (found._tag !== "Answering") return found;
-            yield* connection.saveAndReload(found.origin);
-            return { _tag: "Saved", origin: found.origin } as const;
-          }),
-        ),
+        find: oneAtATime.withPermit(Effect.andThen(refuseWhenControllerSaved, findController)),
         start: oneAtATime.withPermit(Effect.andThen(refuseWhenControllerSaved, startController)),
         showLogsFolder: Effect.suspend(() =>
           logsFolder === null ? Effect.fail(new NoLogsFolderSeen()) : openFolder(logsFolder),

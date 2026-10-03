@@ -100,19 +100,22 @@ export type ControllerUrlSaveOutcome = typeof ControllerUrlSaveOutcome.Type;
 /**
  * What main found when it looked for Hercule on this Mac, with
  * `hercule service status --json`, at a launch with no controller URL saved.
+ * Main saves nothing and checks nothing.
  *
- * - `Saved`: Hercule answered at the address the binary reported, set up or
- *   not. Main saved its URL and reloaded the window, as `controllerUrl.save`
- *   does.
+ * - `Found`: the binary reported `origin`, the address Hercule's controller
+ *   on this Mac opens at. Nothing may answer there yet. The renderer saves it
+ *   through `controllerUrl.save`, which runs the connect check first: a
+ *   controller that answers is saved and the window reloads, and any other
+ *   outcome means Hercule was not found.
  * - `Runner`: this Mac's Service Unit runs a runner, not Hercule's
  *   controller. `running` is true when its process runs. Main never
  *   installs over it: that would restart the runner and end its sessions.
- * - `NotFound`: main found no controller to save. `line` is the line the
- *   status command failed with, or null when nothing went wrong: no Service
- *   Unit, no binary, or nothing at the address that passes the connect check.
+ * - `NotFound`: main found no address. `line` is the line the status command
+ *   failed with, or null when nothing went wrong: there is no binary, or the
+ *   default Hercule Home's `config.toml` cannot be read.
  */
 export const LocalControllerFindOutcome = Schema.TaggedUnion({
-  Saved: { origin: Schema.String },
+  Found: { origin: Schema.String },
   Runner: { running: Schema.Boolean },
   NotFound: { line: Schema.NullOr(Schema.String) },
 });
@@ -328,7 +331,8 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     response: Schema.Void,
   },
   /**
-   * Looks for Hercule on this Mac, and saves its URL when it answers.
+   * Looks for Hercule on this Mac and returns the address it opens at. Saves
+   * nothing: the renderer saves the address through `controllerUrl.save`.
    * Refused when a controller URL is saved: the first run looks only before
    * one is.
    */

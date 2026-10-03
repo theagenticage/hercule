@@ -58,9 +58,9 @@ export const firstRunQuery = (bridge: Bridge) =>
   });
 
 /**
- * Looks for Hercule on this Mac, once per launch with no saved controller.
- * When Hercule answers, main saves its URL and reloads the window, so the
- * page never reads that answer.
+ * Looks for Hercule on this Mac, once per launch with no saved controller,
+ * and returns the address main found for it. Main saves nothing: the welcome
+ * saves the address through `controllerUrl.save`.
  */
 export const localControllerQuery = (bridge: Bridge) =>
   queryOptions({

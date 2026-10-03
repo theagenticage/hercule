@@ -146,28 +146,19 @@ const find = (service: LocalController["Service"]) => service.find;
 const start = (service: LocalController["Service"]) => service.start;
 
 describe("LocalController.find", () => {
-  it("saves Hercule's controller when it answers at the address the binary reports", async () => {
+  it("returns Found with the address the binary reports, and checks and saves nothing", async () => {
     fakes.status = Effect.succeed(CONTROLLER_REPORT);
-    expect(await run(find)).toEqual({ _tag: "Saved", origin: ORIGIN });
-    expect(calls).toEqual(["status", `check ${ORIGIN}`, `save ${ORIGIN}`]);
+    expect(await run(find)).toEqual({ _tag: "Found", origin: ORIGIN });
+    // A check or a save would show in the calls, as `check <origin>` or `save <origin>`.
+    expect(calls).toEqual(["status"]);
   });
 
-  it("saves a controller that answers but is not set up", async () => {
-    fakes.check = () => ({ _tag: "SetupIncomplete" });
-    expect(await run(find)).toEqual({ _tag: "Saved", origin: ORIGIN });
+  it("returns Found when no Service Unit runs, since a controller may run without one", async () => {
+    expect(await run(find)).toEqual({ _tag: "Found", origin: ORIGIN });
+    expect(calls).toEqual(["status"]);
   });
 
-  it.each<ControllerCheckOutcome>([
-    { _tag: "Unreachable" },
-    { _tag: "NotController" },
-    { _tag: "Redirected", targetOrigin: "http://127.0.0.1:5000" },
-  ])("returns NotFound, and saves nothing, when the check finds %j", async (outcome) => {
-    fakes.check = () => outcome;
-    expect(await run(find)).toEqual({ _tag: "NotFound", line: null });
-    expect(calls).toEqual(["status", `check ${ORIGIN}`]);
-  });
-
-  it("returns NotFound, and checks nothing, when the Home names no address", async () => {
+  it("returns NotFound when the Home names no address", async () => {
     fakes.status = Effect.succeed({ ...FRESH_REPORT, controllerUrl: null });
     expect(await run(find)).toEqual({ _tag: "NotFound", line: null });
     expect(calls).toEqual(["status"]);
@@ -183,7 +174,7 @@ describe("LocalController.find", () => {
     expect(await run(find)).toEqual({ _tag: "NotFound", line: "launchctl failed." });
   });
 
-  it("returns Runner, and checks nothing, when the Service Unit runs a runner", async () => {
+  it("returns Runner when the Service Unit runs a runner", async () => {
     fakes.status = Effect.succeed(RUNNER_REPORT);
     expect(await run(find)).toEqual({ _tag: "Runner", running: false });
     expect(calls).toEqual(["status"]);

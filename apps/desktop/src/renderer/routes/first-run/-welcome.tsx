@@ -1,4 +1,4 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import {
   useMutation,
   useQuery,
@@ -35,8 +35,8 @@ const DARK_ROOM: RoomContents = {
 
 /**
  * Renders the first run while no controller is saved: the welcome over the
- * dark room. The welcome looks for Hercule on this Mac once, and Open the
- * office starts it.
+ * dark room. The welcome looks for Hercule on this Mac once and saves the
+ * address it finds. Open the office starts Hercule.
  *
  * Both end in a reload when Hercule answers, because main saves the
  * controller's URL then. Until the reload, the welcome keeps showing that it
@@ -45,6 +45,17 @@ const DARK_ROOM: RoomContents = {
 export function NoControllerFirstRun(): JSX.Element {
   const { bridge } = useRouteContext({ from: "__root__" });
   const found = useQuery(localControllerQuery(bridge));
+  const save = useMutation({
+    mutationFn: (origin: string) => bridge.controllerUrl.save(origin),
+  });
+  // React's StrictMode runs an effect twice on mount, so the ref keeps the
+  // address from being saved twice, which would reload the window twice.
+  const saveRequested = useRef(false);
+  useEffect(() => {
+    if (found.data?._tag !== "Found" || saveRequested.current) return;
+    saveRequested.current = true;
+    save.mutate(found.data.origin);
+  });
   const start = useMutation({
     mutationFn: () => {
       // The reload that follows a start that worked loses this page, so the
@@ -57,7 +68,7 @@ export function NoControllerFirstRun(): JSX.Element {
     },
   });
 
-  const state = decideStartState(start) ?? decideFindState(found);
+  const state = decideStartState(start) ?? decideFindState(found, save);
 
   return (
     <FirstRunFrame
@@ -79,17 +90,25 @@ export function NoControllerFirstRun(): JSX.Element {
 }
 
 /**
- * Decides the welcome's state from the look for Hercule on this Mac. Hercule
- * found shows as searching until the reload.
+ * Decides the welcome's state from the look for Hercule on this Mac and the
+ * save of the address it found. An address that is being saved, or was saved,
+ * shows as searching until the reload. An address that fails the connect
+ * check means Hercule was not found.
  */
-const decideFindState = (find: UseQueryResult<LocalControllerFindOutcome>): WelcomeState => {
+const decideFindState = (
+  find: UseQueryResult<LocalControllerFindOutcome>,
+  save: UseMutationResult<ControllerUrlSaveOutcome, Error, string>,
+): WelcomeState => {
   // A rejection means main failed. The welcome treats it as finding nothing,
   // so Open the office can still start Hercule and say what goes wrong.
-  if (find.isError) return { kind: "fresh" };
+  if (find.isError || save.isError) return { kind: "fresh" };
   switch (find.data?._tag) {
     case undefined:
-    case "Saved":
       return { kind: "searching" };
+    case "Found":
+      return save.data === undefined || save.data._tag === "Saved"
+        ? { kind: "searching" }
+        : { kind: "fresh" };
     case "Runner":
       return { kind: "runner", running: find.data.running };
     case "NotFound":

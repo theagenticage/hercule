@@ -19,6 +19,7 @@ import {
   type Project,
 } from "@hercule/contract";
 import type {
+  ControllerUrlSaveOutcome,
   FirstRunProgress,
   LocalControllerStartOutcome,
   SetupTokenReadOutcome,
@@ -131,6 +132,34 @@ describe("the welcome, with no controller saved", () => {
       screen.getByRole<HTMLButtonElement>("button", { name: "Open the office" }).disabled,
     ).toBe(true);
   });
+
+  it("saves the controller it finds on this Mac, and keeps looking until the window reloads", async () => {
+    const fake = createFakeBridge({
+      find: () => Promise.resolve({ _tag: "Found", origin: LOCAL_URL }),
+    });
+    await renderApp(fake);
+    await waitFor(() => {
+      expect(fake.savedUrls).toEqual([LOCAL_URL]);
+    });
+    expect(screen.getByRole("status").textContent).toBe("Looking for Hercule on this Mac…");
+  });
+
+  it.each<[string, (url: string) => Promise<ControllerUrlSaveOutcome>]>([
+    ["Unreachable", (url) => Promise.resolve({ _tag: "Unreachable", origin: url })],
+    ["NotController", (url) => Promise.resolve({ _tag: "NotController", origin: url })],
+    ["a rejection", () => Promise.reject(new Error("main failed"))],
+  ])(
+    "offers to run Hercule on this Mac when the controller it finds fails the check with %s",
+    async (_tag, save) => {
+      const fake = createFakeBridge({
+        find: () => Promise.resolve({ _tag: "Found", origin: LOCAL_URL }),
+        save,
+      });
+      await renderApp(fake);
+      await screen.findByText("Hercule will run on this Mac");
+      expect(fake.savedUrls).toEqual([LOCAL_URL]);
+    },
+  );
 
   it("offers to run Hercule on this Mac when it finds nothing", async () => {
     await renderApp(createFakeBridge());
