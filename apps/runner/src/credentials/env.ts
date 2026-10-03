@@ -8,6 +8,7 @@
  */
 import { join as joinPath } from "node:path";
 import { locateCompiledBinary } from "@hercule/home";
+import { RUNNER_SOCKET_VARIABLE } from "./helper";
 
 /** Matches a word that the shell would not read as one plain word, so it needs quoting. */
 const QUOTABLE = /[^A-Za-z0-9_@%+=:,./-]/;
@@ -60,7 +61,7 @@ export const buildGitCredentialEnv = (options: {
         ] as const)),
   ];
   return {
-    HERCULE_RUNNER_SOCKET: options.socketPath,
+    [RUNNER_SOCKET_VARIABLE]: options.socketPath,
     GIT_CONFIG_COUNT: String(pairs.length),
     ...Object.fromEntries(
       pairs.flatMap((pair, at) => [

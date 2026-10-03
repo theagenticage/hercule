@@ -9,6 +9,11 @@
  * Spec 13 section 9 owns the rules.
  */
 export { buildGitCredentialEnv, buildSocketPath } from "./env";
-export { answerCredentialQuestion, RUNNER_WORKSPACE_VARIABLE, runCredentialAction } from "./helper";
+export {
+  answerCredentialQuestion,
+  RUNNER_SOCKET_VARIABLE,
+  RUNNER_WORKSPACE_VARIABLE,
+  runCredentialAction,
+} from "./helper";
 export { makeCredentialRelay, type CredentialRelay } from "./relay";
 export { serveCredentialSocket, type CredentialAsk } from "./socket";
