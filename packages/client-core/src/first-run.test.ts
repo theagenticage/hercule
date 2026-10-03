@@ -221,7 +221,7 @@ describe("buildRoomContents", () => {
     expect(TRIAGE_WITHOUT_CONNECTIONS).not.toMatch(/\d/);
   });
 
-  it("seats at most eight desks, and leaves this Mac off the plate of a remote controller", () => {
+  it("seats at most eight desks but writes the runner's real count on the plate, and leaves this Mac off the plate of a remote controller", () => {
     const room = buildRoomContents({
       ...EVERYTHING,
       ...ROOM,
@@ -229,7 +229,7 @@ describe("buildRoomContents", () => {
       localRunner: { ...BARE, maxConcurrentSessions: 12 },
     });
 
-    expect(room.wing).toMatchObject({ deskCount: 8, note: "8 desks" });
+    expect(room.wing).toMatchObject({ deskCount: 8, note: "12 desks" });
   });
 
   it("writes one desk in the singular", () => {

@@ -193,7 +193,8 @@ export const TRIAGE_READING_GITHUB = "reads GitHub";
 
 /**
  * How many desks a wing seats: the Office draws two rows of four. A runner
- * that hosts more sessions still gets this many.
+ * that hosts more sessions still gets this many, and its plate gives the real
+ * count.
  */
 const WING_DESKS = 8;
 
@@ -206,7 +207,8 @@ export interface RoomWing {
   readonly runnerName: string;
   /**
    * The plate's text after the name: "this Mac · 6 desks", "this Mac",
-   * "6 desks", or "" when there is nothing to add.
+   * "12 desks", or "" when there is nothing to add. The count is the
+   * runner's real one, even past the eight desks the wing draws.
    */
   readonly note: string;
   /** One desk per session the runner can host, at most eight; 0 until a provider is logged in. */
@@ -255,16 +257,17 @@ const buildWing = (
   providersDone: boolean,
   project: Project | undefined,
 ): RoomWing => {
-  const deskCount = providersDone ? Math.min(runner.maxConcurrentSessions, WING_DESKS) : 0;
+  const sessionCount = providersDone ? runner.maxConcurrentSessions : 0;
+  // The plate gives the real count, even when the wing draws fewer desks.
   return {
     runnerName: runner.name,
     note: [
       controllerOnThisMac ? "this Mac" : null,
-      deskCount === 0 ? null : `${deskCount} ${deskCount === 1 ? "desk" : "desks"}`,
+      sessionCount === 0 ? null : `${sessionCount} ${sessionCount === 1 ? "desk" : "desks"}`,
     ]
       .filter((part) => part !== null)
       .join(" · "),
-    deskCount,
+    deskCount: Math.min(sessionCount, WING_DESKS),
     firstThread:
       providersDone && project !== undefined
         ? { projectId: project.id, projectName: project.name }
