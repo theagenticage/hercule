@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { del, post, readErrorBody, type ServerHarness } from "../http/testing";
 import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
-import { spawnAgentWithGrants, WAIT_DEADLINE_MS } from "../sessions/testing";
+import { spawnThreadWithGrants, WAIT_DEADLINE_MS } from "../sessions/testing";
 import {
   createWorkflowOrFail,
   disablePlugin,
@@ -258,8 +258,8 @@ describe("the origin of a re-run", () => {
         definition: { name: "One task", steps: [buildCreateStep("create")] },
       });
       await waitForRunToFinish(base, arranged.token, originalId);
-      const allowed = await spawnAgentWithGrants(arranged, "submitter", ["run.start", "run.read"]);
-      const refused = await spawnAgentWithGrants(arranged, "reader", ["run.read"]);
+      const allowed = await spawnThreadWithGrants(arranged, "submitter", ["run.start", "run.read"]);
+      const refused = await spawnThreadWithGrants(arranged, "reader", ["run.read"]);
 
       const response = await requestRerun(base, refused.token, originalId, { mode: "replay" });
       const refusal = await readErrorBody(response);

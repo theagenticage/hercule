@@ -213,7 +213,7 @@ const buildConnection = (fake: Fake) => {
     herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin" },
-    binaryOf: (name) => `/usr/local/bin/${name}`,
+    findBinary: (name) => `/usr/local/bin/${name}`,
     workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
   };

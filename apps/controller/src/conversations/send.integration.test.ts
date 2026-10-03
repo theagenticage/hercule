@@ -22,7 +22,7 @@ import {
   listSessions,
   readSession,
   reportEvent,
-  spawnAgentUnder,
+  spawnThreadUnder,
   spawnSessionOrFail,
   waitForSession,
   waitForStartFrames,
@@ -480,7 +480,7 @@ describe("conversation.send from anyone but the user", () => {
         "agent.read",
         "agent.write",
       ]);
-      const { token } = await spawnAgentUnder(arranged, profile);
+      const { token } = await spawnThreadUnder(arranged, profile);
 
       const response = await requestSend(arranged, conversation.id, "hi", token);
 

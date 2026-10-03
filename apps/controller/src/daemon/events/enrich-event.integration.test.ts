@@ -20,8 +20,8 @@ import {
   readCursorAndHead,
   REF,
   waitForMatchedInputRows,
-  spawnStrandedAgent,
-  subscribeAgent,
+  spawnStrandedThread,
+  subscribeThread,
   spawnSubscriber,
   readSubscriptionRow,
   withPipeline,
@@ -41,14 +41,14 @@ describe("routing an event again after enrichment", () => {
     await withPipeline(async (arranged) => {
       const first = await spawnSubscriber(arranged, "first-holder");
       const second = await spawnSubscriber(arranged, "second-holder");
-      const early = await subscribeAgent(arranged, first, REF);
+      const early = await subscribeThread(arranged, first, REF);
       const eventId = await emitManualEvent(arranged, [REF], "the first match");
       await waitForMatchedInputRows(arranged.harness, early, (rows) => rows.length >= 1);
       const before = await waitUntilCaughtUp(arranged.harness);
 
       // The second subscription is created after the event was matched, so
       // nothing it could match on has happened yet.
-      const late = await subscribeAgent(arranged, second, OTHER_REF);
+      const late = await subscribeThread(arranged, second, OTHER_REF);
       expect(await readMatchedInputRows(arranged.harness, late)).toEqual([]);
 
       const response = await post(
@@ -98,7 +98,7 @@ describe("routing an event again after enrichment", () => {
 
       // The subscription waits for a ref the event does not have yet, so the
       // pass that read the event matched nothing.
-      const subscriptionId = await subscribeAgent(arranged, agent, OTHER_REF);
+      const subscriptionId = await subscribeThread(arranged, agent, OTHER_REF);
       await endPromptTurn(arranged, agent);
 
       const response = await post(
@@ -124,8 +124,8 @@ describe("routing an event again after enrichment", () => {
   it("wakes no holder that has ended for good, and ends the subscription instead", async () => {
     await withPipeline(
       async (arranged) => {
-        const holder = await spawnStrandedAgent(arranged, "gone-holder");
-        const subscriptionId = await subscribeAgent(arranged, holder, OTHER_REF);
+        const holder = await spawnStrandedThread(arranged, "gone-holder");
+        const subscriptionId = await subscribeThread(arranged, holder, OTHER_REF);
         const eventId = await emitManualEvent(arranged, [REF], "for a holder that is gone");
         await exitSession(arranged, holder, 1);
         expect((await readSession(arranged, holder.session.id)).resumable).toBe(false);

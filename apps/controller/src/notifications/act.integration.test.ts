@@ -24,7 +24,7 @@ import {
   listInputs,
   readApprovalNotifications,
   reportEvent,
-  spawnAgentWithGrants,
+  spawnThreadWithGrants,
   waitForFrames,
   waitForRunnerGone,
   waitForSession,
@@ -144,7 +144,7 @@ const mintApiKeyOrFail = async (base: string, token: string): Promise<string> =>
 };
 
 /**
- * Reports, as the runner, that the turn opened by a newly spawned agent's
+ * Reports, as the runner, that the turn opened by a newly spawned Thread's
  * prompt started and completed, at sequence numbers 2 and 3. Then waits until
  * the session is idle. The runner's next sequence number is 4.
  */
@@ -364,7 +364,7 @@ describe("an answer that cannot be taken", () => {
   it("is refused to a session, even one that holds notification.write", async () => {
     await withAgentFleet(async (arranged) => {
       const { harness, token } = arranged;
-      const agent = await spawnAgentWithGrants(arranged, "notifiers", [
+      const agent = await spawnThreadWithGrants(arranged, "notifiers", [
         "notification.read",
         "notification.write",
       ]);
@@ -382,13 +382,13 @@ describe("an answer that cannot be taken", () => {
 
 describe("an answer of the core's approval decision", () => {
   /**
-   * Starts an agent's session in a turn that waits on one command approval,
+   * Starts a Thread in a turn that waits on one command approval,
    * and returns the session with the approval decision the core raised.
    */
-  const startParkedAgent = async (
+  const startParkedThread = async (
     arranged: Arranged,
   ): Promise<{ readonly session: Session; readonly approval: Notification }> => {
-    const { session } = await spawnAgentWithGrants(arranged, "workers", []);
+    const { session } = await spawnThreadWithGrants(arranged, "workers", []);
     reportEvent(arranged.wire, 2, {
       eventId: crypto.randomUUID(),
       sessionId: session.id,
@@ -419,7 +419,7 @@ describe("an answer of the core's approval decision", () => {
   it("sends the answer to the runner and resolves the decision with it", async () => {
     await withAgentFleet(async (arranged) => {
       const { harness, token } = arranged;
-      const { session, approval } = await startParkedAgent(arranged);
+      const { session, approval } = await startParkedThread(arranged);
 
       const returned = await actOrFail(harness.base, token, approval.id, "allow");
 
@@ -442,7 +442,7 @@ describe("an answer of the core's approval decision", () => {
   it("is refused while the session's runner is not connected, and leaves the decision open", async () => {
     await withAgentFleet(async (arranged) => {
       const { harness, token } = arranged;
-      const { approval } = await startParkedAgent(arranged);
+      const { approval } = await startParkedThread(arranged);
       arranged.wire.close();
       await waitForRunnerGone(arranged);
 
@@ -487,7 +487,7 @@ describe("an agent's question", () => {
   it("stores the answer the user takes as input to the session that asked", async () => {
     await withAgentFleet(async (arranged) => {
       const { harness, token } = arranged;
-      const agent = await spawnAgentWithGrants(arranged, "askers", [
+      const agent = await spawnThreadWithGrants(arranged, "askers", [
         "notification.read",
         "notification.write",
       ]);
@@ -509,7 +509,7 @@ describe("an agent's question", () => {
   it("stores and sends nothing when the decision is withdrawn while the input is stored", async () => {
     await withAgentFleet(async (arranged) => {
       const { harness, token } = arranged;
-      const agent = await spawnAgentWithGrants(arranged, "askers", [
+      const agent = await spawnThreadWithGrants(arranged, "askers", [
         "notification.read",
         "notification.write",
       ]);

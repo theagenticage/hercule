@@ -4,17 +4,19 @@
  * runs. The scripted replies use the shapes captured from codex 0.154.0, not
  * invented ones.
  */
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber } from "effect";
+import { Duration, Effect, Fiber, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hercule/home/version";
 import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
+import type { ProviderRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
+import { NO_USER_MATERIAL_PATHS } from "../testing";
 import {
   API_KEY,
   type Answers,
@@ -269,7 +271,7 @@ describe("the process a probe runs on", () => {
 });
 
 describe("the home directories a session's app-server gets", () => {
-  it("starts the app-server with the updater off and its own Codex and HOME directories", async () => {
+  it("starts the app-server with the updater off and its own Codex and HOME directories, for a session that is not a Thread", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
     const ctx = buildContext(home);
@@ -293,7 +295,7 @@ describe("the home directories a session's app-server gets", () => {
     const neutral = join(home, "home");
     expect(spawn.env["CODEX_HOME"]).toBe(codexHome);
     // Moved, because CODEX_HOME alone does not isolate skills: Codex reads
-    // them from the user's own `~/.agents/skills`.
+    // them from `.agents/skills` in the user's own home directory.
     expect(spawn.env["HOME"]).toBe(neutral);
     expect(existsSync(codexHome)).toBe(true);
     expect(existsSync(neutral)).toBe(true);
@@ -305,6 +307,27 @@ describe("the home directories a session's app-server gets", () => {
       expect(spawn.env[key]).toBe(value);
     }
     await started;
+  });
+
+  it("keeps the real HOME for a Thread that sees the user's material, and still gives it the instance's own CODEX_HOME", async () => {
+    const home = createCodexHome();
+    const { seam, spawns } = buildScriptedSeam();
+    const ctx: ProviderRunnerContext = {
+      ...buildContext(home),
+      env: { ...buildContext(home).env, HOME: "/Users/someone" },
+      userMaterial: NO_USER_MATERIAL_PATHS,
+    };
+
+    await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
+
+    const spawn = spawns[0]!;
+    // Codex finds the user's skills in `.agents/skills` under the real HOME.
+    expect(spawn.env["HOME"]).toBe("/Users/someone");
+    const codexHome = join(home, "codex");
+    expect(spawn.env["CODEX_HOME"]).toBe(codexHome);
+    // Codex reads an `AGENTS.md` in its home for every session of the
+    // instance, so the user's instructions must never be placed there.
+    expect(readdirSync(codexHome)).toEqual([]);
   });
 });
 
@@ -1008,6 +1031,117 @@ describe("hercule-as-a-tool on a Codex thread", () => {
     expect(existsSync(join(scratch, "AGENTS.md"))).toBe(false);
     expect(readdirSync(scratch)).toEqual([]);
   });
+});
+
+describe("the user's own instructions on a Codex Thread", () => {
+  const USER_INSTRUCTIONS = "Always answer in English.\nKeep commits small.";
+
+  /** Writes the user's instructions file into a scratch directory and returns its path. */
+  const writeInstructions = (text: string): string => {
+    const file = join(createCodexHome(), "AGENTS.md");
+    writeFileSync(file, text);
+    return file;
+  };
+
+  /** Returns a context for a Thread whose user's instructions file is `instructionsFile`. */
+  const buildThreadContext = (
+    ctx: ProviderRunnerContext,
+    instructionsFile: string,
+  ): ProviderRunnerContext => ({
+    ...ctx,
+    herculeTool: TOOL,
+    userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+  });
+
+  const RESUME: SessionSpec["continue"] = { nativeSessionId: PRIOR, mode: "resume" };
+  const FORK: SessionSpec["continue"] = { nativeSessionId: PRIOR, mode: "fork" };
+
+  const OPENINGS: ReadonlyArray<readonly [string, SessionSpec, string]> = [
+    ["thread/start", SPEC, `${USER_INSTRUCTIONS}\n\n${TOOL.skill}`],
+    ["thread/resume", { ...SPEC, continue: RESUME }, `${USER_INSTRUCTIONS}\n\n${TOOL.skill}`],
+    ["thread/fork", { ...SPEC, continue: FORK }, `${USER_INSTRUCTIONS}\n\n${TOOL.skill}`],
+    [
+      "thread/start",
+      { ...SPEC, systemPrompt: SYSTEM_PROMPT },
+      `${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+    ],
+    [
+      "thread/resume",
+      { ...SPEC, systemPrompt: SYSTEM_PROMPT, continue: RESUME },
+      `${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+    ],
+    [
+      "thread/fork",
+      { ...SPEC, systemPrompt: SYSTEM_PROMPT, continue: FORK },
+      `${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+    ],
+  ];
+
+  it.each(OPENINGS)(
+    "sends the file's text between the system prompt and the skill on %s",
+    async (method, spec, instructions) => {
+      const { adapter, ctx, requests } = createDriving();
+      const file = writeInstructions(USER_INSTRUCTIONS);
+
+      await Effect.runPromise(adapter.startSession(SESSION, spec, buildThreadContext(ctx, file)));
+
+      expect(listSentParams(requests, method)).toEqual([
+        expect.objectContaining({ developerInstructions: instructions }),
+      ]);
+    },
+  );
+
+  it("reads the file again for each thread it opens, so a resumed thread gets the current text", async () => {
+    const file = writeInstructions("The old text.");
+    const first = createDriving();
+    await Effect.runPromise(
+      first.adapter.startSession(SESSION, SPEC, buildThreadContext(first.ctx, file)),
+    );
+    writeFileSync(file, "The new text.");
+    const second = createDriving();
+
+    await Effect.runPromise(
+      second.adapter.startSession(
+        SESSION,
+        { ...SPEC, continue: RESUME },
+        buildThreadContext(second.ctx, file),
+      ),
+    );
+
+    expect(listSentParams(second.requests, "thread/resume")).toEqual([
+      expect.objectContaining({ developerInstructions: `The new text.\n\n${TOOL.skill}` }),
+    ]);
+  });
+
+  it.each([
+    ["a file that no longer exists", () => join(createCodexHome(), "AGENTS.md"), "ENOENT"],
+    ["a directory", () => createCodexHome(), "it is not a regular file"],
+  ])(
+    "starts the Thread with only the skill, and logs a warning, when the instructions are %s",
+    async (_, makePath, reason) => {
+      const { adapter, ctx, requests } = createDriving();
+      const path = makePath();
+      const warnings: Array<string> = [];
+      const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(String(message));
+      });
+
+      await Effect.runPromise(
+        Effect.provide(
+          adapter.startSession(SESSION, SPEC, buildThreadContext(ctx, path)),
+          Logger.layer([collecting]),
+        ),
+      );
+
+      // The user's own files never stop a Thread from starting.
+      expect(listSentParams(requests, "thread/start")).toEqual([
+        expect.objectContaining({ developerInstructions: TOOL.skill }),
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(`Did not read ${path} into the Thread's instructions: `);
+      expect(warnings[0]).toContain(reason);
+    },
+  );
 });
 
 /** Builds an agent message item. A Codex answer is read from the turn's final agent message. */

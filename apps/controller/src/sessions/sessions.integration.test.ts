@@ -60,6 +60,7 @@ import { createPluginFixture, buildProviderDefinition } from "../plugins/testing
 import {
   listFrames,
   readApprovalNotifications,
+  readProfileNamed,
   waitForFrames,
   waitForResolvedApprovalNotification,
   reportEvent,
@@ -203,7 +204,10 @@ const NO_TICK = Duration.hours(1);
 /** Runs `body` against a controller with one joined, connected, logged-in runner, using this suite's providers and models. */
 const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  options: { readonly eventRoutingInterval?: Duration.Duration } = {},
+  options: {
+    readonly eventRoutingInterval?: Duration.Duration;
+    readonly firstRunnerIsLocal?: true;
+  } = {},
 ): Promise<void> =>
   sharedWithFleet(body, {
     plugins: buildPlugins(),
@@ -821,6 +825,92 @@ describe("session.spawn with an explicit runner or profile", () => {
 
       expect(response.status, await response.clone().text()).toBe(400);
     });
+  });
+});
+
+/**
+ * The start frame's `userMaterial` flag, which lets the runner give a Thread
+ * the user's own skills and instructions. The fleet's first runner plays the
+ * controller's local runner.
+ */
+describe("the `userMaterial` flag on a start frame", () => {
+  it("sets the flag for a Thread on the local runner, and not for a Thread on another runner", async () => {
+    await withFleet(
+      async (arranged) => {
+        const other = await arranged.enlist();
+
+        const local = await spawnSessionOrFail(arranged, {
+          prompt: "hello",
+          runnerId: arranged.runnerId,
+        });
+        const elsewhere = await spawnSessionOrFail(arranged, {
+          prompt: "hello",
+          runnerId: other.runnerId,
+        });
+
+        const [localStart] = await waitForStartFrames(arranged, local.id, 1);
+        expect(localStart!.userMaterial).toBe(true);
+        const [otherStart] = await waitForFrames<SessionStart>(other.wire, "sessionStart", 1);
+        expect(otherStart!.sessionId).toBe(elsewhere.id);
+        expect("userMaterial" in otherStart!).toBe(false);
+      },
+      { firstRunnerIsLocal: true },
+    );
+  });
+
+  it("leaves the flag off a session spawned from an Agent, even on the local runner", async () => {
+    await withFleet(
+      async (arranged) => {
+        const worker = await readProfileNamed(arranged, "worker");
+        const created = await post(
+          arranged.harness.base,
+          "/api/v1/agents",
+          {
+            name: "assessor",
+            systemPrompt: "You assess tasks.",
+            instanceId: findInstanceId(arranged, "full-provider"),
+            permissionProfileId: worker.id,
+          },
+          arranged.token,
+        );
+        expect(created.status, await created.clone().text()).toBe(200);
+        const agent = (await created.json()) as { readonly id: string };
+
+        const session = await spawnSessionOrFail(arranged, {
+          agentId: agent.id,
+          prompt: "assess this",
+        });
+
+        const [start] = await waitForStartFrames(arranged, session.id, 1);
+        expect("userMaterial" in start!).toBe(false);
+      },
+      { firstRunnerIsLocal: true },
+    );
+  });
+
+  it("sets the flag again on a fork and a resume of a Thread on the local runner", async () => {
+    await withFleet(
+      async (arranged) => {
+        const parent = await startAndEndSession(arranged, "hello");
+
+        const forked = await continueSession(arranged, parent.id, {
+          mode: "fork",
+          prompt: "carry on",
+        });
+        expect(forked.status, await forked.clone().text()).toBe(200);
+        const child = (await forked.json()) as Session;
+        const [childStart] = await waitForStartFrames(arranged, child.id, 1);
+        expect(childStart!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "fork" });
+        expect(childStart!.userMaterial).toBe(true);
+
+        const resumed = await sendInput(arranged, parent.id, { text: "still there?" });
+        expect(resumed.status, await resumed.clone().text()).toBe(200);
+        const starts = await waitForStartFrames(arranged, parent.id, 2);
+        expect(starts[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
+        expect(starts[1]!.userMaterial).toBe(true);
+      },
+      { firstRunnerIsLocal: true },
+    );
   });
 });
 

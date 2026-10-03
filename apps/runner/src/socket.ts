@@ -346,7 +346,7 @@ export const connect = (
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,
         baseEnv: process.env,
-        binaryOf: findBinaryPath,
+        findBinary: findBinaryPath,
         workspaces: options.workspaces,
         socketPath: options.socketPath,
       },

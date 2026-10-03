@@ -642,6 +642,15 @@ export const SessionStart = Schema.Struct({
   gitIdentity: Schema.optionalKey(GitIdentity),
   /** The branch the session's checkout is switched to before the harness starts. */
   checkoutBranch: Schema.optionalKey(Fact),
+  /**
+   * Present when the session sees the user's own material: skills and
+   * instructions from the default locations of the user's own harness
+   * installation on the runner's machine (spec 06 section 9.1). The controller
+   * sets it only for a Thread placed on its local runner. It carries no path,
+   * because only the runner knows where those locations are. A runner that
+   * does not know this field ignores it, and the session runs isolated.
+   */
+  userMaterial: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type SessionStart = Schema.Schema.Type<typeof SessionStart>;

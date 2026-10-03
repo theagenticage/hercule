@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Profile } from "@hercule/contract";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   readProfileNamed,
   createProfile,
   WAIT_DEADLINE_MS,
@@ -99,7 +99,10 @@ describe("security entries in the event log", () => {
   it("leaves them out of a worker session's page, and keeps the rest of the log in it", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
+      const { token } = await spawnThreadUnder(
+        arranged,
+        await readProfileNamed(arranged, "worker"),
+      );
       const base = arranged.harness.base;
 
       const page = await listEvents(base, token, "?limit=500");
@@ -124,7 +127,10 @@ describe("security entries in the event log", () => {
   it("fails a worker session's read of one with not_found, and returns the entry to the user", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
+      const { token } = await spawnThreadUnder(
+        arranged,
+        await readProfileNamed(arranged, "worker"),
+      );
       const base = arranged.harness.base;
 
       for (const kind of SECURITY_KINDS) {
@@ -152,7 +158,7 @@ describe("security entries in the event log", () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
       const auditor = await createProfile(arranged, "auditor", ["event.read", "event.audit"]);
-      const { token } = await spawnAgentUnder(arranged, auditor);
+      const { token } = await spawnThreadUnder(arranged, auditor);
       const base = arranged.harness.base;
 
       const page = await listEvents(base, token, "?limit=500");

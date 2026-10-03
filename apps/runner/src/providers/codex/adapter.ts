@@ -2,9 +2,11 @@
  * The Codex adapter. It talks to Codex only through app-server connections,
  * and every file an app-server uses lives under the instance's own home
  * directory. Using the developer's own Codex directory would mix Hercule's
- * sessions with the user's login, skills and memory.
+ * sessions with the user's login, skills and memory. A Thread on the local
+ * runner is the one session that sees the user's own skills and instructions,
+ * and even then nothing is written into the instance's Codex directory.
  */
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -28,7 +30,7 @@ import type {
   TurnInput,
 } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
-import type { ProviderAdapter, ProviderRunnerContext } from "../index";
+import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
@@ -225,12 +227,56 @@ const readThreadId = (params: unknown): string | undefined => {
 
 /**
  * Builds the developer instructions for one thread. A Codex thread accepts only
- * one set of instructions, so the session's system prompt and the skill are
- * joined: the prompt first, then a blank line, then the skill. If either is
- * missing, the other is used alone, so the text never starts with a blank line.
+ * one set of instructions, so the parts are joined with a blank line between
+ * them, in this order:
+ *
+ * - the session's system prompt;
+ * - the user's own instructions, for a Thread that sees the user's material;
+ * - the skill.
+ *
+ * A missing or empty part is left out, so the text never starts with a blank
+ * line or has two blank lines in a row.
  */
-const buildDeveloperInstructions = (systemPrompt: string | undefined, skill: string): string =>
-  [systemPrompt, skill].filter((part) => part !== undefined && part !== "").join("\n\n");
+const buildDeveloperInstructions = (
+  systemPrompt: string | undefined,
+  userInstructions: string | undefined,
+  skill: string,
+): string =>
+  [systemPrompt, userInstructions, skill]
+    .filter((part) => part !== undefined && part !== "")
+    .join("\n\n");
+
+/**
+ * Reads the user's own instructions file. Returns its text, or `undefined`
+ * when the session does not see the user's material or the user has no file.
+ * Never fails: when the path is not a regular file or cannot be read, it logs
+ * a warning with the path and the reason, never the file's text, and returns
+ * `undefined`. A Thread never fails to start because of the user's own files
+ * (spec 06 section 9.1).
+ *
+ * The file is read again every time a thread is opened, so a resumed or
+ * forked thread gets the current text.
+ */
+const readUserInstructions = (
+  material: UserMaterial | undefined,
+): Effect.Effect<string | undefined> => {
+  const path = material?.instructionsFile;
+  if (path === undefined) return Effect.succeed(undefined);
+  return Effect.try({
+    try: () => {
+      if (!statSync(path).isFile()) throw new Error("it is not a regular file");
+      return readFileSync(path, "utf8");
+    },
+    catch: (error) => (error instanceof Error ? error.message : String(error)),
+  }).pipe(
+    Effect.catch((reason) =>
+      Effect.as(
+        Effect.logWarning(`Did not read ${path} into the Thread's instructions: ${reason}`),
+        undefined,
+      ),
+    ),
+  );
+};
 
 /**
  * Builds a text-only turn input. Turn input is text only for now; attachments
@@ -332,18 +378,28 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * Builds the environment for a Codex process, creating the instance's
-   * `codex` and `home` directories if needed. `CODEX_HOME` alone does not
-   * isolate a session: Codex also reads skills from the user's
-   * `~/.agents/skills`, so `HOME` is moved to an empty directory of the
-   * instance's own. This is done here, not in the shared session context,
-   * because a moved `HOME` breaks Claude's Keychain lookup.
+   * `codex` directory, and for a session that does not see the user's
+   * material its `home` directory, if they are missing. `CODEX_HOME` alone
+   * does not isolate a session: Codex also reads skills from `.agents/skills`
+   * in the user's home directory, so `HOME` is moved to an empty directory of
+   * the instance's own.
+   *
+   * A Thread that sees the user's material keeps the real `HOME`, so Codex
+   * finds the user's skills there by itself. This is why the runner gives a
+   * Codex Thread no skill paths (see `findCodexMaterial` in
+   * `user-material/index.ts`). Changing `HOME` per session is safe because
+   * every session has its own app-server process. A probe and a login never
+   * see the user's material, so they always get the moved `HOME`.
+   *
+   * This is done here, not in the shared session context, because a moved
+   * `HOME` breaks Claude's Keychain lookup.
    */
   const prepareEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => {
     const codexHome = join(ctx.home, "codex");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    if (ctx.userMaterial !== undefined) return { ...ctx.env, CODEX_HOME: codexHome };
     const neutral = join(ctx.home, "home");
-    for (const directory of [codexHome, neutral]) {
-      mkdirSync(directory, { recursive: true, mode: 0o700 });
-    }
+    mkdirSync(neutral, { recursive: true, mode: 0o700 });
     return { ...ctx.env, CODEX_HOME: codexHome, HOME: neutral };
   };
 
@@ -749,9 +805,16 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   /**
    * Builds the params shared by starting, resuming and forking a thread: the
    * session's directory, model and access mode, and its instructions. The
-   * system prompt and the skill are sent as developer instructions, which all
-   * three methods accept (spec 06 section 9.3). No `AGENTS.md` is written, so
-   * the scratch directory a session runs in stays empty.
+   * system prompt, the user's own instructions and the skill are sent as
+   * developer instructions, which all three methods accept (spec 06 section
+   * 9.3). No `AGENTS.md` is written, so the scratch directory a session runs
+   * in stays empty.
+   *
+   * The user's instructions go in the developer instructions rather than into
+   * the instance's Codex directory. Codex reads an `AGENTS.md` there for every
+   * session and has no setting to turn that off, and every session of the
+   * instance shares that directory, so a file there would reach assistant
+   * sessions and workflow steps too.
    *
    * Nothing in this adapter reads `disallowedTools`. Codex cannot restrict
    * tools, and the Agent record and the Session record both report the field
@@ -760,6 +823,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const buildThreadParams = (
     spec: SessionSpec,
     ctx: ProviderRunnerContext,
+    userInstructions: string | undefined,
   ): Pick<
     ThreadStartParams,
     | "cwd"
@@ -774,7 +838,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
-      developerInstructions: buildDeveloperInstructions(spec.systemPrompt, ctx.herculeTool.skill),
+      developerInstructions: buildDeveloperInstructions(
+        spec.systemPrompt,
+        userInstructions,
+        ctx.herculeTool.skill,
+      ),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
     };
@@ -797,17 +865,18 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(`no ${CODEX_BINARY} on this machine`);
+        const userInstructions = yield* readUserInstructions(ctx.userMaterial);
         const host = yield* startSessionHost(sessionId, ctx, binary);
         const carried = spec.continue;
         const opened = yield* Effect.matchEffect(
           carried === undefined
             ? host.rpc.request("thread/start", {
-                ...buildThreadParams(spec, ctx),
+                ...buildThreadParams(spec, ctx, userInstructions),
                 ephemeral: false,
               } satisfies ThreadStartParams)
             : host.rpc.request(carried.mode === "resume" ? "thread/resume" : "thread/fork", {
                 threadId: carried.nativeSessionId,
-                ...buildThreadParams(spec, ctx),
+                ...buildThreadParams(spec, ctx, userInstructions),
               } satisfies ThreadResumeParams & ThreadForkParams),
           {
             onFailure: (error: RpcError) => {

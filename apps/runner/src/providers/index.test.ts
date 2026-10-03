@@ -39,7 +39,7 @@ describe("the adapters in this runner build", () => {
       herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
       controllerUrl: "https://controller.example:4938",
       baseEnv: { PATH: "/usr/bin" },
-      binaryOf: () => undefined,
+      findBinary: () => undefined,
       workspaces: makeWorkspaces({ storageDir: "/var/hercule/runner" }),
       socketPath: "/var/hercule/runner/daemon.sock",
     };

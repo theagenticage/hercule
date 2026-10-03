@@ -9,6 +9,8 @@
  */
 import {
   existsSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -22,6 +24,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
+import { NO_USER_MATERIAL_PATHS } from "../providers/testing";
 import { makeWorkspaces } from "../workspaces";
 import {
   addBranch,
@@ -58,7 +61,7 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
     herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody" },
-    binaryOf: (name) => `/usr/local/bin/${name}`,
+    findBinary: (name) => `/usr/local/bin/${name}`,
     workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
     ...overrides,
@@ -143,7 +146,7 @@ describe("what a workspace-less session runs in", () => {
   });
 
   it("uses the harness path the probe found, and none when it found none", () => {
-    const outcome = resolveSync(buildSessionStart(), buildMachine({ binaryOf: () => undefined }));
+    const outcome = resolveSync(buildSessionStart(), buildMachine({ findBinary: () => undefined }));
 
     // No guessed path: when the machine has no harness, it is up to the
     // adapter to fail the start.
@@ -486,6 +489,41 @@ describe("the git credential environment a session runs with", () => {
     expect(
       without._tag === "Success" ? without.success.ctx.env["GH_TOKEN"] : "set",
     ).toBeUndefined();
+  });
+});
+
+describe("the user's own material", () => {
+  /** Returns a machine whose runner HOME holds the user's Claude instructions. */
+  const buildMachineWithUserMaterial = (): Machine => {
+    const userHome = createRoot();
+    mkdirSync(join(userHome, ".claude"));
+    writeFileSync(join(userHome, ".claude", "CLAUDE.md"), "the user's instructions");
+    return buildMachine({ baseEnv: { PATH: "/usr/bin", HOME: userHome } });
+  };
+
+  it("is left out of a session whose frame does not set the userMaterial flag", () => {
+    const machine = buildMachineWithUserMaterial();
+
+    const outcome = resolveSync(buildSessionStart(), machine);
+
+    expect(outcome._tag).toBe("Success");
+    // No key at all, so the adapter keeps the harness isolated.
+    expect(outcome._tag === "Success" && "userMaterial" in outcome.success.ctx).toBe(false);
+    expect(readdirSync(join(machine.providersDir, INSTANCE))).toEqual([]);
+  });
+
+  it("reaches a session whose frame sets the userMaterial flag, and Claude Code's is linked into the instance home", () => {
+    const machine = buildMachineWithUserMaterial();
+
+    const outcome = resolveSync(buildSessionStart({ userMaterial: true }), machine);
+
+    expect(outcome._tag).toBe("Success");
+    expect(outcome._tag === "Success" ? outcome.success.ctx.userMaterial : undefined).toEqual(
+      NO_USER_MATERIAL_PATHS,
+    );
+    const link = join(machine.providersDir, INSTANCE, "CLAUDE.md");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readFileSync(link, "utf8")).toBe("the user's instructions");
   });
 });
 

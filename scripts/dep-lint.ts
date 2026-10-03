@@ -45,6 +45,13 @@
  * Inside it, the same two rules hold one level down: its folders form a DAG,
  * and one folder reaches another only through that folder's `index.ts`.
  *
+ * One rule is a fence inside the runner: only `sessions/context.ts`, which
+ * resolves a session from its start frame, imports `user-material/`. That
+ * module finds the user's own skills and instructions in each harness's
+ * default locations, and links Claude Code's into the instance home, for a
+ * Thread on the local runner. Every other session stays isolated from them
+ * (spec 06 section 9.1, ADR 0032).
+ *
  * One rule is about the workspace, not an import graph: the Agent SDK's eight
  * per-platform CLI packages (one is 196 MB) are excluded at install, and the
  * shipped binary would include them if they were installed again. The pnpm
@@ -495,8 +502,8 @@ const listFolders = async (dir: string): Promise<ReadonlyArray<string>> => {
  * Checks whether a file is shipped code: a `.ts` file that is not a test or a
  * test harness. Tests and harnesses are left out on purpose: vitest loads them
  * one file at a time, and driving one domain through another's harness is
- * what a colocated integration test is for. This rule is about the order in
- * which the controller loads its own modules at boot.
+ * what a colocated integration test is for. The rules that use this check
+ * are about what shipped code imports, not what a test imports.
  */
 const isShipped = (name: string): boolean =>
   name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== "testing.ts";
@@ -506,23 +513,45 @@ const listShippedFiles = async (dir: string): Promise<ReadonlyArray<string>> =>
     .filter((entry) => entry.isFile() && isShipped(entry.name))
     .map((entry) => resolve(entry.parentPath, entry.name));
 
+const transpiler = new Bun.Transpiler({ loader: "ts" });
+
+/** A relative import in a file: the specifier as written, and the path it resolves to. */
+type RelativeImport = { readonly specifier: string; readonly resolvedPath: string };
+
+/**
+ * Lists the relative runtime imports in `file`: static imports, re-exports,
+ * and `import()` and `require()` with a written specifier. Each resolved path
+ * is the specifier resolved against the file's folder, with no extension
+ * added. Imports by package name are left out.
+ *
+ * `scanImports` drops `import type`, so a type-only import is never listed.
+ * That is what the rules below want: a type creates no import at runtime.
+ */
+const listRelativeImports = async (file: string): Promise<ReadonlyArray<RelativeImport>> =>
+  transpiler
+    .scanImports(await Bun.file(file).text())
+    .filter((record) => record.path.startsWith("."))
+    .map((record) => ({
+      specifier: record.path,
+      resolvedPath: resolve(dirname(file), record.path),
+    }));
+
 const domains = await listFolders(controllerSrc);
 
 /**
- * Returns the domain an import in `file` reaches, when the specifier resolves
- * to `src/<domain>`: the domain's index, which is the boundary other domains
+ * Returns the domain an import reaches, when its resolved path is
+ * `src/<domain>`: the domain's index, which is the boundary other domains
  * import it through, and the module whose evaluation order matters here. A
  * deep `<domain>/<file>` reaches one module and never loads that index, so it
- * is not an edge between the two domains.
+ * is not an edge between the two domains. Returns undefined otherwise.
  *
- * The specifier is resolved against the importing file rather than read as
- * text, because a file one folder down, such as `daemon/sessions/placement.ts`,
+ * The check takes the resolved path rather than the specifier as written,
+ * because a file one folder down, such as `daemon/sessions/placement.ts`,
  * reaches the sessions domain as `../../sessions`, while its own `../sessions`
  * is a folder inside the controller daemon and no domain at all.
  */
-const findReachedDomain = (file: string, specifier: string): string | undefined => {
-  if (!specifier.startsWith(".")) return undefined;
-  const reached = relative(controllerSrc, resolve(dirname(file), specifier));
+const findReachedDomain = (resolvedPath: string): string | undefined => {
+  const reached = relative(controllerSrc, resolvedPath);
   return domains.includes(reached) ? reached : undefined;
 };
 
@@ -530,12 +559,10 @@ const edges = new Map<string, Set<string>>();
 for (const domain of domains) {
   const out = new Set<string>();
   for (const file of await listShippedFiles(resolve(controllerSrc, domain))) {
-    const text = await Bun.file(file).text();
-    const transpiler = new Bun.Transpiler({ loader: "ts" });
-    // `scanImports` drops `import type`, which creates no runtime edge: a type
-    // that crosses a domain boundary cannot be evaluated too early.
-    for (const record of transpiler.scanImports(text)) {
-      const other = findReachedDomain(file, record.path);
+    // A type-only import is not listed, and that is safe here: a type that
+    // crosses a domain boundary cannot be evaluated too early.
+    for (const { resolvedPath } of await listRelativeImports(file)) {
+      const other = findReachedDomain(resolvedPath);
       if (other !== undefined && other !== domain) out.add(other);
     }
   }
@@ -607,8 +634,8 @@ if (domains.length > 0) {
  *
  * ADR 0033 records both rules.
  *
- * Like the domain graph, this one reads runtime imports only: `scanImports`
- * drops `import type`.
+ * Like the domain graph, this one reads runtime imports only: a type-only
+ * import is not an edge.
  */
 const daemonSrc = resolve(controllerSrc, "daemon");
 
@@ -631,18 +658,15 @@ for (const file of daemonFolders.length === 0 ? [] : await listShippedFiles(daem
   const from = findDaemonNode(file);
   const out = daemonEdges.get(from) ?? new Set<string>();
   daemonEdges.set(from, out);
-  const transpiler = new Bun.Transpiler({ loader: "ts" });
-  for (const record of transpiler.scanImports(await Bun.file(file).text())) {
-    if (!record.path.startsWith(".")) continue;
-    const reached = resolve(dirname(file), record.path);
-    const inside = relative(daemonSrc, reached);
+  for (const { specifier, resolvedPath } of await listRelativeImports(file)) {
+    const inside = relative(daemonSrc, resolvedPath);
     if (inside.startsWith("..")) continue;
-    const to = findDaemonNode(reached);
+    const to = findDaemonNode(resolvedPath);
     if (to === from) continue;
     out.add(to);
     const folder = to.slice(0, -1);
     if (to.endsWith("/") && inside !== folder && inside !== join(folder, "index")) {
-      deepImports.push(`${relative(daemonSrc, file)} imports "${record.path}"`);
+      deepImports.push(`${relative(daemonSrc, file)} imports "${specifier}"`);
     }
   }
 }
@@ -674,6 +698,68 @@ if (daemonFolders.length > 0) {
     `dep-lint: the controller daemon's ${String(daemonFolders.length)} folders form a DAG ` +
       "and are imported through their index.",
   );
+}
+
+/**
+ * The fence around the user's own material. `apps/runner/src/user-material/`
+ * finds the user's own skills and instructions in each harness's default
+ * locations: `~/.claude`, `~/.codex`, `~/.pi/agent` and `~/.agents/skills`.
+ * It links Claude Code's into the instance home, and returns the paths it
+ * found for Codex and pi. Only a Thread on the local runner may see this
+ * material, so only the session context resolver, `sessions/context.ts`, may
+ * import the folder. Files inside the folder may import each other.
+ *
+ * An import counts when its specifier, resolved against its file, is the
+ * folder itself, such as `"../user-material"`, or any path inside it, such as
+ * `"../user-material/index"`. Static imports, re-exports, `import()` and
+ * `require()` with a written specifier all count. These do not:
+ *
+ * - `import type`, which `listRelativeImports` leaves out: a type reaches
+ *   nothing at runtime;
+ * - a specifier built at runtime, which no scan of the source can resolve;
+ * - an import by package name, because `@hercule/runner` exports only its
+ *   entrypoint.
+ *
+ * Tests and harnesses are exempt, as in the checks above. The check passes
+ * when the folder does not exist, as in the copies `scripts/dep-lint.test.ts`
+ * makes of this script.
+ */
+const runnerSrc = resolve(root, "apps/runner/src");
+const userMaterialDir = resolve(runnerSrc, "user-material");
+const userMaterialImporter = resolve(runnerSrc, "sessions/context.ts");
+
+/** Checks whether `path` is the user material folder or a path inside it. */
+const isInUserMaterial = (path: string): boolean =>
+  path === userMaterialDir || path.startsWith(join(userMaterialDir, sep));
+
+const userMaterialImports: Array<string> = [];
+const runnerFiles = existsSync(userMaterialDir) ? await listShippedFiles(runnerSrc) : [];
+for (const file of runnerFiles) {
+  if (file === userMaterialImporter || isInUserMaterial(file)) continue;
+  for (const { specifier, resolvedPath } of await listRelativeImports(file)) {
+    if (isInUserMaterial(resolvedPath)) {
+      userMaterialImports.push(`${relative(runnerSrc, file)} imports "${specifier}"`);
+    }
+  }
+}
+
+if (userMaterialImports.length > 0) {
+  console.error("dep-lint: a runner file other than sessions/context.ts imports user-material/:");
+  for (const imported of userMaterialImports) console.error(`    ${imported}`);
+  console.error(
+    "user-material/ finds the user's own skills and instructions in each harness's default " +
+      "locations, and links Claude Code's into the instance home. Only a Thread on the local " +
+      "runner may see them; every other session stays isolated from the user's own material " +
+      "(spec 06 section 9.1, ADR 0032). So the one file that may import the folder is " +
+      "sessions/context.ts, which resolves a session from its start frame and calls the " +
+      "folder only when the frame's userMaterial flag is set. Make the call there, and pass " +
+      "what the other file needs through the session's context.",
+  );
+  process.exit(1);
+}
+
+if (runnerFiles.length > 0) {
+  console.log("dep-lint: only sessions/context.ts imports the runner's user-material/.");
 }
 
 const SDK = "@anthropic-ai/claude-agent-sdk";

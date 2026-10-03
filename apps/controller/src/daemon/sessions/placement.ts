@@ -142,6 +142,11 @@ const THREAD_IS_THE_USERS =
   "a Thread is the user's own, and no session may open one; " +
   "send agentId to spawn from an Agent";
 
+/** The error message when any actor but the user forks a Thread. */
+const THREAD_FORK_IS_THE_USERS =
+  "only the user may fork a Thread, because the fork is a new Thread and a Thread is the user's own; " +
+  "spawn from an Agent with agentId instead, or ask the user to fork it";
+
 /** The error message when a session continues a session on a different permission profile. */
 const NOT_ITS_PROFILE = "a session may only continue a session on its own permission profile";
 
@@ -813,12 +818,18 @@ const make = Effect.gen(function* () {
      * state is (spec 06 section 4.1). Resuming the parent itself is done by
      * `session.input`.
      *
+     * Only the user may fork a Thread. The fork keeps the parent's lineage,
+     * so a fork of a Thread is a new Thread, and a Thread on the controller's
+     * local runner sees the user's own material. If any other actor could
+     * fork one, it could open a Thread with a prompt of its own choosing,
+     * which `session.spawn` already refuses.
+     *
      * The fork takes the parent's profile rather than the user's thread
-     * defaults. So, unlike a Thread, a session may create one, but only from a
-     * parent on its own profile. Any other parent would be an escalation:
-     * `session.read` is unscoped, so a session can find every other session,
-     * and forking one on a wider profile would give it that profile's grants
-     * with a prompt of its own choosing.
+     * defaults. So a session may fork a session spawned from an Agent, but
+     * only from a parent on its own profile. Any other parent would be an
+     * escalation: `session.read` is unscoped, so a session can find every
+     * other session, and forking one on a wider profile would give it that
+     * profile's grants with a prompt of its own choosing.
      */
     continueSession: (input: ContinueInput): Effect.Effect<Session, ContinueError> =>
       Effect.gen(function* () {
@@ -830,6 +841,11 @@ const make = Effect.gen(function* () {
         const parent = yield* one(id);
         if (parent.conversationId !== null) {
           return yield* Effect.fail(createInvalidStateError(CONVERSATION_FORK_REFUSED));
+        }
+        if (parent.agentId === null && actor._tag !== "user") {
+          return yield* Effect.fail(
+            createForbiddenError("session.spawn", THREAD_FORK_IS_THE_USERS),
+          );
         }
         if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
           return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));

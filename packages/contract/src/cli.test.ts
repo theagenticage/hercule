@@ -595,6 +595,7 @@ describe("the refusals no grant lifts", () => {
       expect(forbidden).toContain("ask the user");
     }
     expect(spawn).toContain("only the user may start a Thread");
-    expect(fork).toContain("a session may fork only sessions on its own profile");
+    expect(fork).toContain("only the user may fork a Thread");
+    expect(fork).toContain("a session may fork only an Agent's sessions on its own profile");
   });
 });
