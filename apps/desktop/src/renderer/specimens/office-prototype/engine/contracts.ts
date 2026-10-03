@@ -135,6 +135,22 @@ export interface Cutaway {
 }
 
 // ---------------------------------------------------------------------------
+// Room lights.
+
+/** The key under which a room light stores its `Lamp`, in `userData`. */
+export const LAMP = "lamp";
+
+/**
+ * A light the office switches on in the evening and at night: a floor lamp, a
+ * wall sconce, a pendant, a street lamp. The director finds every `Lamp`
+ * under a layout's root and switches them all with the time of day. A desk's
+ * banker's lamp is not one: the sim lights it while the desk's owner works.
+ */
+export interface Lamp {
+  setOn(on: boolean): void;
+}
+
+// ---------------------------------------------------------------------------
 // Furniture.
 
 /** A piece of furniture to sit on: the object, and the seat's spot in the object's own space. */

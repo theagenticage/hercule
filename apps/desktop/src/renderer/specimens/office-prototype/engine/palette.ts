@@ -302,9 +302,22 @@ export function paintHue(
   return share(key, finish, () => readHue(hue, part), shift);
 }
 
+const refreshListeners = new Set<() => void>();
+
 /** Repaints every shared material from the current theme. Call it after the theme changes. */
 export function refreshPalette(): void {
   for (const paintable of paintables.values()) applyPaint(paintable);
+  for (const listener of refreshListeners) listener();
+}
+
+/**
+ * Calls `listener` after every repaint, so what the palette does not paint
+ * itself, such as text drawn on a canvas texture, can redraw in the new
+ * theme's colours. Returns the function that unsubscribes.
+ */
+export function subscribePalette(listener: () => void): () => void {
+  refreshListeners.add(listener);
+  return () => refreshListeners.delete(listener);
 }
 
 /** Returns a token's colour as a three.js colour, for lights, fog and the background. */

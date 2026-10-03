@@ -2,7 +2,7 @@
  * PROTOTYPE - how the user looks around the office. STUB: three's orbit
  * controls, until the camera part replaces this. Keep the exported signature.
  */
-import { Vector3, type Box3, type PerspectiveCamera } from "three";
+import { Vector3, type Box3, type Object3D, type PerspectiveCamera } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { CameraView } from "./contracts";
 import type { Frame } from "./stage";
@@ -16,6 +16,12 @@ export interface CameraRig {
   follow(target: (() => Vector3) | null): void;
   /** Limits panning to the office's box. */
   setBounds(bounds: Box3): void;
+  /**
+   * Finds every wall under `root` that can be cut away (a `Cutaway` in its
+   * `userData`), so the camera can lower the walls between it and what the
+   * user looks at. Called after every rebuild of the office.
+   */
+  trackWalls(root: Object3D): void;
   dispose(): void;
 }
 
@@ -50,6 +56,7 @@ export function createCameraRig(
     },
     follow() {},
     setBounds() {},
+    trackWalls() {},
     dispose() {
       controls.dispose();
     },

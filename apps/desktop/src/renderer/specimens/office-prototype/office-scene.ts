@@ -6,13 +6,20 @@
  */
 import { Vector3, type Mesh, type Object3D } from "three";
 import { createCameraRig, placeCamera } from "./engine/camera-rig";
-import type { CameraView, ColleagueRig, OfficeLayout, Sim } from "./engine/contracts";
+import {
+  LAMP,
+  type CameraView,
+  type ColleagueRig,
+  type Lamp,
+  type OfficeLayout,
+  type Sim,
+} from "./engine/contracts";
 import { createNavBuilder } from "./engine/nav";
 import { createOverlay, type Overlay } from "./engine/overlay";
 import { createPicker, type Picker } from "./engine/picking";
 import { buildSim } from "./engine/sim";
 import { Stage } from "./engine/stage";
-import { buildColleagueRig } from "./kit/character";
+import { buildColleagueRig, setAmbientMotion } from "./kit/character";
 import {
   onOfficeCommand,
   readOffice,
@@ -30,6 +37,8 @@ interface Built {
   readonly sim: Sim;
   readonly overlay: Overlay;
   readonly picker: Picker;
+  /** The room lights under the layout's root, which the time of day switches. */
+  readonly lamps: ReadonlyArray<Lamp>;
 }
 
 /** What the page and the tools read of a mounted office. */
@@ -52,6 +61,16 @@ function disposeGeometry(root: Object3D): void {
   });
 }
 
+/** Returns every room light under `root`. */
+function findLamps(root: Object3D): ReadonlyArray<Lamp> {
+  const lamps: Lamp[] = [];
+  root.traverse((object) => {
+    const lamp = object.userData[LAMP] as Lamp | undefined;
+    if (lamp !== undefined) lamps.push(lamp);
+  });
+  return lamps;
+}
+
 /** Builds the office for `world` into `container`, and returns its handle. */
 export function mountOfficeScene(container: HTMLElement, world: World): OfficeScene {
   const stage = new Stage(container);
@@ -72,17 +91,39 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     }
     const sim = buildSim({ world, layout, rigs, stage });
     sim.setLiveliness(state.liveliness);
-    const overlay = createOverlay(container, stage.camera, rigs);
+    const overlay = createOverlay(container, stage.camera, rigs, layout.rooms);
     overlay.setMode(state.tags);
     stage.setShadowBounds(layout.bounds);
     camera.setBounds(layout.bounds);
+    camera.trackWalls(layout.root);
+    const lamps = findLamps(layout.root);
     return {
       layout,
       rigs,
       sim,
       overlay,
       picker: createPicker(stage.renderer.domElement, stage.camera, rigs),
+      lamps,
     };
+  };
+
+  /** Lights the room lamps in the evening and at night, and puts them out by day. */
+  const switchLamps = (): void => {
+    const time = stage.resolveTimeOfDay();
+    const on = time === "evening" || time === "night";
+    for (const lamp of built.lamps) lamp.setOn(on);
+  };
+
+  /** Tells a building with storeys which one the user looks at, so it can lift away the ones above. */
+  const focusFloor = (): void => {
+    const { layout } = built;
+    if (layout.focusFloor === undefined) return;
+    if (state.selectedId !== null) {
+      layout.focusFloor(layout.homes.get(state.selectedId)?.floor ?? null);
+      return;
+    }
+    const room = layout.rooms.find((candidate) => candidate.id === state.roomId);
+    layout.focusFloor(room?.floor ?? null);
   };
 
   const teardown = ({ layout, rigs, sim, overlay }: Built): void => {
@@ -129,7 +170,10 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     }
   };
 
+  setAmbientMotion(state.liveliness > 0);
   built = build();
+  switchLamps();
+  focusFloor();
   placeCamera(stage.camera, decideView());
   camera.flyTo(decideView());
   applySelection(null);
@@ -148,16 +192,28 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     if (previous.variant !== state.variant || previous.style !== state.style) {
       teardown(built);
       built = build();
+      switchLamps();
+      focusFloor();
       applySelection(null);
       camera.flyTo(decideView());
     }
-    if (previous.theme !== state.theme) stage.applyTheme();
-    if (previous.timeOfDay !== state.timeOfDay) stage.setTimeOfDay(state.timeOfDay);
+    if (previous.theme !== state.theme) {
+      stage.applyTheme();
+      switchLamps();
+    }
+    if (previous.timeOfDay !== state.timeOfDay) {
+      stage.setTimeOfDay(state.timeOfDay);
+      switchLamps();
+    }
     if (previous.quality !== state.quality) stage.setQuality(state.quality);
-    if (previous.liveliness !== state.liveliness) built.sim.setLiveliness(state.liveliness);
+    if (previous.liveliness !== state.liveliness) {
+      setAmbientMotion(state.liveliness > 0);
+      built.sim.setLiveliness(state.liveliness);
+    }
     if (previous.tags !== state.tags) built.overlay.setMode(state.tags);
     applySelection(previous);
     if (previous.selectedId !== state.selectedId || previous.roomId !== state.roomId) {
+      focusFloor();
       camera.flyTo(decideView());
     }
     stage.requestRender();

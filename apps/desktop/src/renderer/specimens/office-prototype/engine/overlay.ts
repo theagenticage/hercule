@@ -4,7 +4,7 @@
  * replaces this with smart tags. Keep the exported signature.
  */
 import { Vector3, type PerspectiveCamera } from "three";
-import type { ColleagueRig } from "./contracts";
+import type { ColleagueRig, RoomInfo } from "./contracts";
 import type { TagMode } from "../office-store";
 import "./overlay.css";
 
@@ -23,7 +23,9 @@ export function createOverlay(
   container: HTMLElement,
   camera: PerspectiveCamera,
   rigs: ReadonlyMap<string, ColleagueRig>,
+  rooms: ReadonlyArray<RoomInfo>,
 ): Overlay {
+  void rooms;
   const layer = document.createElement("div");
   layer.className = "office-tags";
   container.append(layer);
