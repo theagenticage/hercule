@@ -1,4 +1,4 @@
-/* PROTOTYPE - the office's styles. */
+/* The Office's styles. */
 
 .office {
   position: relative;
@@ -106,26 +106,6 @@
     inset 0 1px 0 var(--glass-edge),
     var(--glass-shadow);
 }
-.office .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: var(--r-pill);
-  background: var(--sunken);
-  color: var(--muted);
-  font-size: var(--t-12);
-  font-weight: var(--w-medium);
-  white-space: nowrap;
-}
-.office .chip--you {
-  background: var(--you-tint);
-  color: var(--you-ink);
-}
-.office .btn--danger {
-  color: var(--fail-ink);
-}
 .office .who-text {
   display: flex;
   flex-direction: column;
@@ -147,17 +127,6 @@
   color: var(--faint);
   font-size: var(--t-12);
   white-space: nowrap;
-}
-.office .next-q {
-  margin: 8px 0 10px;
-  font-size: var(--t-13);
-  font-weight: var(--w-medium);
-}
-.office .next-a {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
 }
 .office .next-of {
   margin-left: auto;
@@ -234,13 +203,6 @@
   font-size: var(--t-12);
   font-weight: var(--w-medium);
 }
-.office-card-note {
-  display: block;
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: var(--t-12);
-  font-weight: var(--w-regular);
-}
 .office-card-request code {
   padding: 1px 5px;
   border-radius: var(--r-xs);
@@ -248,63 +210,6 @@
   font-size: 12px;
   overflow-wrap: anywhere;
   user-select: text;
-}
-
-/* The activity ticker: the newest line last and in ink, the older ones
-   fading the further back they are. */
-.office-card-ticker {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--muted);
-  font-size: var(--t-12);
-}
-.office-card-ticker li {
-  position: relative;
-  overflow: hidden;
-  padding-left: 14px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  transition:
-    opacity var(--dur-3) var(--ease-out),
-    transform var(--dur-3) var(--ease-out);
-}
-@starting-style {
-  .office-card-ticker li:last-child {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-.office-card-ticker li::before {
-  content: "";
-  position: absolute;
-  top: calc(0.5lh - 2.5px);
-  left: 3px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--line);
-}
-.office-card-ticker li:last-child {
-  color: var(--ink);
-}
-.office-card-ticker li:last-child::before {
-  background: var(--faint);
-}
-.office-card-ticker li:nth-last-child(3) {
-  opacity: 0.7;
-}
-.office-card-ticker li:nth-last-child(4) {
-  opacity: 0.4;
-}
-.office-card-ticker li[data-you="true"] {
-  color: var(--you-ink);
-}
-.office-card-ticker li[data-you="true"]::before {
-  background: var(--you);
 }
 
 /* The facts: a name column in faint ink, then the values. */
@@ -328,9 +233,6 @@
   min-width: 0;
   margin: 0;
   color: var(--ink);
-}
-.office-card-burning {
-  color: var(--fail-ink);
 }
 .office-card-foot {
   display: flex;
@@ -364,74 +266,8 @@
   padding: 0 8px 0 10px;
   font-weight: var(--w-bold);
 }
-.office .pill-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 8px;
-  font-weight: var(--w-medium);
-  transition: background var(--dur-1);
-}
-.office .pill-btn:hover,
-.office .pill-btn[aria-expanded="true"] {
-  background: var(--hover);
-}
-.office .pill-btn[aria-pressed="true"] {
-  background: var(--selected);
-}
-.office .pill-btn--icon {
-  justify-content: center;
-  width: 28px;
-  padding: 0;
-  color: var(--muted);
-}
-.office .pill-btn--icon:hover,
-.office .pill-btn--icon[aria-pressed="true"] {
-  color: var(--ink);
-}
-.office .pill-sep {
-  width: 1px;
-  height: 18px;
-  margin: 0 2px;
-  background: var(--line);
-}
 .office .ptab[aria-expanded="true"] {
   background: var(--hover);
-}
-.office .flow-btn {
-  gap: 9px;
-  padding-right: 5px;
-}
-.office .toggle {
-  position: relative;
-  flex: none;
-  width: 36px;
-  height: 22px;
-  border-radius: var(--r-pill);
-  background: var(--line);
-  transition: background var(--dur-2);
-}
-.office .toggle::after {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
-  transition: transform var(--dur-2) var(--ease-spring);
-}
-/* On is ink, not green: green is kept for passing tests and added lines. */
-.office [aria-checked="true"] > .toggle {
-  background: var(--ink);
-}
-.office [aria-checked="true"] > .toggle::after {
-  background: var(--raised);
-  transform: translateX(14px);
 }
 
 /* The counts: the book's `.sum`, each count a button that walks through the
@@ -465,28 +301,18 @@
   color: var(--you-ink);
 }
 
-/* With six counts the bar is about 1150px wide, so below 1240px Simulate
-   keeps only its icon. */
-@container office-deck (width < 1240px) {
-  .office-top:has(.sum > :nth-child(6)) .pill-btn .office-top-label {
-    display: none;
-  }
-}
 /* With the drawer open the bar has about 650px: the counts keep their marks
-   and numbers, Simulate its icon, the office's pill drops its title, and
-   Event flow moves to the controls panel. */
+   and numbers, and the office's pill drops its title. */
 @container office-deck (width < 900px) {
   .sum-words,
-  .office-top .pill-btn .office-top-label,
-  .office-top .pill-title,
-  .office-flow-pill {
+  .office-top .pill-title {
     display: none;
   }
 }
 
 /* ---------- The top bar's menus ---------- */
 /* The composer's `.pop`, dropping 6px below its trigger instead of rising
-   above it. It ends above the variant bar's band at the bottom. */
+   above it. */
 .office-menu {
   inset: auto;
   width: 300px;
@@ -503,112 +329,4 @@
 }
 .office-menu .line .count {
   flex: none;
-}
-.office-menu .q-h .proj {
-  font-weight: var(--w-bold);
-}
-
-/* ---------- The controls panel ---------- */
-/* A `.pop` that stays put at the top right, under the top bar. */
-.office-controls {
-  position: absolute;
-  top: 56px;
-  right: 14px;
-  width: 340px;
-  max-height: calc(100% - 56px - 72px);
-  overflow-y: auto;
-  opacity: 0;
-  transform: translateY(-6px);
-  transition:
-    opacity var(--dur-2) var(--ease-out),
-    transform var(--dur-2) var(--ease-out);
-}
-.office-controls[data-open="true"] {
-  opacity: 1;
-  transform: none;
-}
-.office-controls .pop-h {
-  padding-right: 10px;
-}
-.office-controls .pop-h .icon-btn {
-  margin-left: auto;
-}
-.office-setting {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding-bottom: 6px;
-}
-.office-setting .seg {
-  margin-left: 6px;
-}
-.office-setting .seg button {
-  padding: 0 9px;
-}
-.office-setting-note {
-  margin-left: auto;
-  color: var(--faint);
-  font-weight: var(--w-regular);
-}
-.office-swatches {
-  display: flex;
-  gap: 6px;
-  margin-left: 6px;
-}
-/* Each swatch draws its theme's surface and accent: the inner span carries
-   the theme, so its tokens are that theme's. */
-.office-swatch {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  transition: box-shadow var(--dur-1);
-}
-.office-swatch:hover {
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.office-swatch[aria-pressed="true"] {
-  box-shadow: inset 0 0 0 2px var(--ink);
-}
-.office-swatch > span {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--surface) 50%, var(--accent) 50%);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.office-switch {
-  height: 34px;
-}
-
-/* ---------- The performance readout ---------- */
-/* At the bottom left, above the band the variant bar floats in, so it meets
-   neither the bar nor the controls panel at the right. */
-.office-perf {
-  position: absolute;
-  left: 14px;
-  bottom: 64px;
-  display: grid;
-  grid-template-columns: repeat(2, auto);
-  gap: 3px 16px;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: var(--r-md);
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
-  font-size: var(--t-11);
-  font-variant-numeric: tabular-nums;
-}
-.office-perf > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-.office-perf dt {
-  color: var(--faint);
-}
-.office-perf dd {
-  margin: 0;
-  color: var(--ink);
 }

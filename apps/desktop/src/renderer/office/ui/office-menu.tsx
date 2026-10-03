@@ -1,6 +1,6 @@
 /**
- * PROTOTYPE - a menu that drops down from a button in the office's top bar:
- * the room directory and the Simulate menu.
+ * Renders a menu that drops down from a button in the Office's top bar. The
+ * room directory is the one menu that opens this way.
  *
  * The menu is the browser's own popover, as the composer's menus are (see
  * screens/thread/composer-menu.tsx), but it opens below its trigger instead
