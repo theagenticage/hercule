@@ -1,13 +1,19 @@
 /**
- * The Office Map the Office is built from: its fixed rooms and their
- * furniture, what a wing and a room stand for, and the named rule by which
- * the place grows as threads arrive (CONTEXT.md, "Office Map").
+ * The Office Map type, and the Bureau: for now the only Office Map.
  *
- * This is version 0.1: a plain value with one map in it, the Bureau. The
- * code still owns the geometry, the growth rule itself and the animations;
- * the map decides which fixed rooms exist, in what order, under what name,
- * which furniture stands in them, which spots they offer to colleagues, and
- * what stands at each desk. `variants/bureau-rooms.ts` reads it.
+ * An Office Map is a plain typed value. `variants/bureau-rooms.ts` reads only
+ * its fixed rooms: which exist, in what order, under what name, which
+ * furniture stands in them, and which spots they offer to colleagues. The
+ * other fields describe what the code does anyway:
+ *
+ * - `growth`, `wing` and `room` each allow one value, the one the code
+ *   implements;
+ * - `desk`, `id` and `name` are not read: every thread sits at a clerk's desk.
+ *
+ * The code owns each room's geometry, the growth rule itself and the
+ * animations. Left for later (#336): a real map format with its own schema,
+ * growth rules the map spells out instead of naming one the code knows, maps
+ * other than the Bureau, and importing maps.
  */
 
 /** A piece of furniture the code knows how to build and place. */
@@ -46,6 +52,13 @@ export interface FixedRoom {
   readonly spots: ReadonlyArray<SpotKind>;
 }
 
+/**
+ * The description an Office is built from: its fixed rooms and their
+ * furniture, what a wing and a room stand for, and the named rule by which
+ * the place grows as threads arrive. The Office stays one view whatever its
+ * map: a bureau, a tower and a cave would be three maps that seat the same
+ * threads in different places.
+ */
 export interface OfficeMap {
   readonly id: string;
   readonly name: string;
@@ -65,7 +78,7 @@ export interface OfficeMap {
   readonly fixedRooms: ReadonlyArray<FixedRoom>;
 }
 
-/** The Bureau: the one Office Map of version 0.1. */
+/** The Bureau: thread rooms in wings north of the Gallery, fixed rooms along the street south of it. */
 export const BUREAU_MAP: OfficeMap = {
   id: "bureau",
   name: "Bureau",
