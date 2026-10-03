@@ -12,11 +12,12 @@ function stepVariant(step: number): void {
   setOffice({ variant: next.key, roomId: null });
 }
 
-/** True when the keyboard's focus is in a field, where the arrows move the caret. */
-const isTyping = (target: EventTarget | null): boolean =>
+/** Returns true when `target`, the keyboard's focus, is a field, where the arrows move the caret. */
+export const isTyping = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
   (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
+/** Renders the bar at the bottom that steps between the office's layouts, with the arrow keys too. */
 export function VariantBar(): JSX.Element | null {
   const state = useSyncExternalStore(subscribeOffice, readOffice);
   useEffect(() => {

@@ -4,7 +4,7 @@
  * draws. Assistants, Triage and Juno are not threads, so the sidebar leaves
  * them out.
  */
-import type { OpenRequest, Session } from "@hercule/contract";
+import type { OpenRequest, ProviderInstance, Session } from "@hercule/contract";
 import { buildProject, buildRunner } from "@hercule/client-core/threads/testing";
 import type { SidebarRecords } from "../../shell-page";
 import {
@@ -16,7 +16,8 @@ import {
   type SpecimenModel,
 } from "../../sidebar-fixture";
 import { FIX_THREAD, THREAD_PAGE_RECORDS } from "../../thread-fixture";
-import type { Colleague, World } from "./types";
+import type { ColleagueState } from "../engine/contracts";
+import type { Colleague, Pose, World } from "./types";
 
 const PROJECT_IDS = {
   webshop: "p-webshop",
@@ -64,6 +65,10 @@ const parseMinutesAgo = (label: string): number => {
   return Number(match[1]) * (match[2] === "h" ? 60 : 1);
 };
 
+/** Returns the status a session has while its colleague is in `pose`. */
+const decideSessionStatus = (pose: Pose): "idle" | "busy" =>
+  pose === "idle" || pose === "paused" ? "idle" : "busy";
+
 /** Builds the session the sidebar lists for one colleague. */
 const buildColleagueSession = (colleague: Colleague): Session => {
   if (colleague.threadId === FIX_THREAD.session.id) return FIX_THREAD.session;
@@ -71,13 +76,45 @@ const buildColleagueSession = (colleague: Colleague): Session => {
     id: colleague.id,
     title: colleague.title,
     projectId: colleague.project === null ? "p-webshop" : PROJECT_IDS[colleague.project],
-    status: colleague.pose === "idle" || colleague.pose === "paused" ? "idle" : "busy",
+    status: decideSessionStatus(colleague.pose),
     minutesAgo: parseMinutesAgo(colleague.stateLabel),
     model: pickModel(colleague.model),
     runnerId: colleague.runnerId ?? "r-studio-mac",
     openRequest: buildOpenRequest(colleague),
   });
 };
+
+/**
+ * Returns the session the sidebar lists for `colleague` while the office's sim
+ * holds it in the state `live`: waiting on a request the sim made up, or
+ * working again once the user answered. A colleague still in the state the
+ * world gives it keeps the session the page opened with.
+ */
+export function buildLiveSession(colleague: Colleague, live: ColleagueState | undefined): Session {
+  const session = buildColleagueSession(colleague);
+  if (live === undefined || (live.pose === colleague.pose && live.request === colleague.request)) {
+    return session;
+  }
+  return {
+    ...session,
+    status: decideSessionStatus(live.pose),
+    openRequest: buildOpenRequest({ ...colleague, ...live }),
+  };
+}
+
+/**
+ * Returns `instance` with its capability snapshot copied to every runner in
+ * `world`. The shared fixture logs each provider in on one machine only, and
+ * the thread footer would call every other runner "not logged in".
+ */
+function logInOnEveryRunner(instance: ProviderInstance, world: World): ProviderInstance {
+  return {
+    ...instance,
+    snapshots: world.runners.flatMap((runner) =>
+      instance.snapshots.slice(0, 1).map((snapshot) => ({ ...snapshot, runnerId: runner.id })),
+    ),
+  };
+}
 
 /** Returns every list the sidebar reads, for `world`. */
 export function buildSidebarRecords(world: World): SidebarRecords {
@@ -94,7 +131,7 @@ export function buildSidebarRecords(world: World): SidebarRecords {
     workspaces: THREAD_PAGE_RECORDS.workspaces,
     resources: [],
     runners: world.runners.map((runner) => buildRunner(runner.id, runner.name)),
-    instances: SPECIMEN_INSTANCES,
+    instances: SPECIMEN_INSTANCES.map((instance) => logInOnEveryRunner(instance, world)),
     user: { username: "Rogier" },
   };
 }

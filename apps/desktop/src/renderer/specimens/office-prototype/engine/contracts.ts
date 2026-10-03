@@ -14,7 +14,7 @@
  * looks from the south-east, down at the office.
  */
 import type { Box3, Object3D, Vector3 } from "three";
-import type { Colleague, Pose, World } from "../world/types";
+import type { Colleague, OfficeRequest, Pose, World } from "../world/types";
 import type { Frame, Stage } from "./stage";
 
 // ---------------------------------------------------------------------------
@@ -262,6 +262,11 @@ export interface OfficeLayout {
    * the seconds until the capsule arrives, or 0 when the office has no tubes.
    */
   sendCapsule?(): number;
+  /**
+   * Shows or hides the pneumatic tubes, as the Event flow switch asks. A
+   * capsule sent while the tubes are hidden still takes its full ride.
+   */
+  setFlow?(on: boolean): void;
   /** Pins one more Proposal card on the case board. */
   pinProposal?(): void;
   dispose(): void;
@@ -331,6 +336,19 @@ export type SimEvent =
   /** An event arrives: a capsule runs through the tubes to Triage, who pins a Proposal. */
   | { readonly kind: "event" };
 
+/**
+ * A colleague's state as the sim holds it now. It starts as the world's
+ * `Colleague` and changes as things happen: an answered colleague works
+ * again, a failed one shows its plaster.
+ */
+export interface ColleagueState {
+  readonly pose: Pose;
+  /** The request the colleague waits on the user with, or null. */
+  readonly request: OfficeRequest | null;
+  /** The short state the name tag shows when there is no request, such as "typing" or "idle 2h". */
+  readonly stateLabel: string;
+}
+
 /** The office's life: who walks where, and what each colleague is doing. */
 export interface Sim {
   /** Advances everyone. Returns true while anyone moves. */
@@ -340,6 +358,14 @@ export interface Sim {
   trigger(event: SimEvent): void;
   /** How lively the office is: 0 still (only state changes move anyone), 1 calm, 2 bustling. */
   setLiveliness(level: 0 | 1 | 2): void;
+  /**
+   * Returns every colleague's state now, by id, including colleagues who
+   * arrived after the office opened. Returns the same map until a state
+   * changes, so a React panel can read it with `useSyncExternalStore`.
+   */
+  readStates(): ReadonlyMap<string, ColleagueState>;
+  /** Calls `listener` after any colleague's state changes. Returns the function that unsubscribes. */
+  subscribeStates(listener: () => void): () => void;
   dispose(): void;
 }
 

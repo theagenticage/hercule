@@ -22,6 +22,7 @@ import { Stage } from "./engine/stage";
 import { buildColleagueRig, setAmbientMotion } from "./kit/character";
 import {
   onOfficeCommand,
+  publishColleagueStates,
   readOffice,
   setOffice,
   subscribeOffice,
@@ -79,6 +80,9 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
   );
   let state = readOffice();
   let built: Built;
+  // The URL may open the office at night or at low quality; later changes arrive through the store.
+  stage.setTimeOfDay(state.timeOfDay);
+  stage.setQuality(state.quality);
 
   const build = (): Built => {
     const layout = LAYOUTS[state.variant]({ world, nav: createNavBuilder() });
@@ -89,8 +93,13 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
       rigs.set(colleague.id, rig);
       stage.scene.add(rig.object);
     }
+    layout.setFlow?.(state.flow);
     const sim = buildSim({ world, layout, rigs, stage });
     sim.setLiveliness(state.liveliness);
+    // The panels and the sidebar read the colleagues' states from the store,
+    // so they follow whichever office is built now.
+    publishColleagueStates(sim.readStates());
+    sim.subscribeStates(() => publishColleagueStates(sim.readStates()));
     const overlay = createOverlay(container, stage.camera, rigs, layout.rooms);
     overlay.setMode(state.tags);
     stage.setShadowBounds(layout.bounds);
@@ -114,16 +123,20 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 
-  /** Tells a building with storeys which one the user looks at, so it can lift away the ones above. */
+  /**
+   * Tells a building with storeys which one the user looks at, so it lifts
+   * away the ones above and the overlay hides their labels.
+   */
   const focusFloor = (): void => {
-    const { layout } = built;
+    const { layout, overlay } = built;
     if (layout.focusFloor === undefined) return;
-    if (state.selectedId !== null) {
-      layout.focusFloor(layout.homes.get(state.selectedId)?.floor ?? null);
-      return;
-    }
     const room = layout.rooms.find((candidate) => candidate.id === state.roomId);
-    layout.focusFloor(room?.floor ?? null);
+    const floor =
+      state.selectedId !== null
+        ? (layout.homes.get(state.selectedId)?.floor ?? null)
+        : (room?.floor ?? null);
+    layout.focusFloor(floor);
+    overlay.setFocusedFloor(floor);
   };
 
   const teardown = ({ layout, rigs, sim, overlay }: Built): void => {
@@ -174,9 +187,19 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
   built = build();
   switchLamps();
   focusFloor();
-  placeCamera(stage.camera, decideView());
-  camera.flyTo(decideView());
+  // The office opens with a short glide down onto the first view, so it reads
+  // as a place the camera arrives in rather than a picture.
+  const opening = decideView();
+  placeCamera(stage.camera, {
+    ...opening,
+    distance: opening.distance * 1.35,
+    azimuth: opening.azimuth - 24,
+    elevation: Math.min(opening.elevation + 12, 70),
+  });
+  camera.flyTo(opening);
   applySelection(null);
+  // Signs drawn on canvases redraw once their typeface loads, after the first frames.
+  void document.fonts.ready.then(() => stage.requestRender());
 
   const stopFrames = stage.onFrame((frame) => {
     let moving = built.sim.update(frame);
@@ -211,6 +234,7 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
       built.sim.setLiveliness(state.liveliness);
     }
     if (previous.tags !== state.tags) built.overlay.setMode(state.tags);
+    if (previous.flow !== state.flow) built.layout.setFlow?.(state.flow);
     applySelection(previous);
     if (previous.selectedId !== state.selectedId || previous.roomId !== state.roomId) {
       focusFloor();

@@ -6,7 +6,7 @@
  *
  * The scene and the panels subscribe; anything can call `setOffice`.
  */
-import type { CharacterStyle, SimEvent } from "./engine/contracts";
+import type { CharacterStyle, ColleagueState, SimEvent } from "./engine/contracts";
 import type { Quality, TimeOfDay } from "./engine/stage";
 import type { FleetSize } from "./world/types";
 
@@ -58,7 +58,9 @@ const DEFAULTS: OfficeState = {
   style: "bean",
   quality: "high",
   liveliness: 1,
-  flow: false,
+  // The design opens with the tubes hidden. The prototype shows them, so the
+  // capsules that carry events to Triage are seen without looking for a switch.
+  flow: true,
   tags: "smart",
   sidebar: true,
   perf: false,
@@ -150,6 +152,33 @@ export function sendOfficeCommand(command: OfficeCommand): void {
 export function onOfficeCommand(listener: (command: OfficeCommand) => void): () => void {
   commandListeners.add(listener);
   return () => commandListeners.delete(listener);
+}
+
+// ---------------------------------------------------------------------------
+// The colleagues' live states, as the scene's sim holds them, for the panels.
+
+let colleagueStates: ReadonlyMap<string, ColleagueState> = new Map();
+const stateListeners = new Set<() => void>();
+
+/**
+ * Returns every colleague's state now, by id. A colleague missing from the
+ * map has the state the world gives it. The same map until a state changes.
+ */
+export function readColleagueStates(): ReadonlyMap<string, ColleagueState> {
+  return colleagueStates;
+}
+
+/** Replaces the colleagues' states and tells every subscriber. Only the scene calls it. */
+export function publishColleagueStates(states: ReadonlyMap<string, ColleagueState>): void {
+  if (states === colleagueStates) return;
+  colleagueStates = states;
+  for (const listener of stateListeners) listener();
+}
+
+/** Calls `listener` after the colleagues' states change. Returns the function that unsubscribes. */
+export function subscribeColleagueStates(listener: () => void): () => void {
+  stateListeners.add(listener);
+  return () => stateListeners.delete(listener);
 }
 
 document.documentElement.dataset.theme = state.theme;

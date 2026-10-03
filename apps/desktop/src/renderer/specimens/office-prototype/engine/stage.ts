@@ -77,7 +77,19 @@ interface Light {
   /** The sun's colour, as an OKLCH lightness, chroma and hue. */
   readonly sun: readonly [number, number, number];
   readonly skyIntensity: number;
+  /**
+   * The sky light's hue in place of the theme's, or undefined to follow the
+   * theme. Night takes a moonlit blue in every theme, so it reads as night
+   * even where the theme's rooms are pale.
+   */
+  readonly skyHue?: number;
   readonly environment: number;
+  /**
+   * Scales the sky and the environment in a light theme, or 1 when undefined.
+   * A light theme paints its rooms pale, so the same light that reads as dusk
+   * in a dark theme reads as an overcast day in a light one.
+   */
+  readonly lightThemeScale?: number;
 }
 
 const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
@@ -104,6 +116,7 @@ const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
     sun: [0.86, 0.11, 58],
     skyIntensity: 0.85,
     environment: 0.3,
+    lightThemeScale: 0.65,
   },
   night: {
     azimuth: 320,
@@ -111,7 +124,9 @@ const LIGHTS: Readonly<Record<Exclude<TimeOfDay, "auto">, Light>> = {
     sunIntensity: 0.55,
     sun: [0.82, 0.04, 250],
     skyIntensity: 0.38,
+    skyHue: 255,
     environment: 0.12,
+    lightThemeScale: 0.45,
   },
 };
 
@@ -270,11 +285,17 @@ export class Stage {
     // dark theme paints its rooms dark already, and a dark light on top would
     // draw them nearly black. How bright the sky is comes from the time of day.
     const sunToken = readToken("room-sun");
-    writeOklch(this.sky.color, { l: 0.96, c: Math.min(sunToken.c, 0.05), h: sunToken.h });
+    writeOklch(
+      this.sky.color,
+      light.skyHue === undefined
+        ? { l: 0.96, c: Math.min(sunToken.c, 0.05), h: sunToken.h }
+        : { l: 0.9, c: 0.06, h: light.skyHue },
+    );
     const floorToken = readToken("room-floor");
     writeOklch(this.sky.groundColor, { l: 0.62, c: floorToken.c, h: floorToken.h });
-    this.sky.intensity = light.skyIntensity;
-    this.scene.environmentIntensity = light.environment;
+    const scale = isDarkTheme() ? 1 : (light.lightThemeScale ?? 1);
+    this.sky.intensity = light.skyIntensity * scale;
+    this.scene.environmentIntensity = light.environment * scale;
     const [l, c, h] = light.sun;
     writeOklch(this.sun.color, { l, c, h });
     this.sun.intensity = light.sunIntensity;

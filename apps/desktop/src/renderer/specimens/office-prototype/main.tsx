@@ -24,26 +24,61 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { createClient } from "@hercule/client-core";
+import { createClient, type FetchLike } from "@hercule/client-core";
 import { createPendingSubmissions } from "../../app/pending-submissions";
 import { createQueryClient } from "../../app/query-client";
 import { Shell } from "../../shell";
-import { FIX_THREAD } from "../thread-fixture";
 import { CONTROLLER_URL, REFUSING_BRIDGE, refuseRequest, seedQueryCache } from "../shell-page";
-import { readOffice, sendOfficeCommand, setOffice, subscribeOffice } from "./office-store";
+import { sessionQuery, threadsQuery } from "../../app/queries";
+import {
+  readColleagueStates,
+  readOffice,
+  sendOfficeCommand,
+  setOffice,
+  subscribeColleagueStates,
+  subscribeOffice,
+} from "./office-store";
+import { sendAnswer } from "./ui/answers";
 import { OfficeView } from "./ui/office-view";
 import { VariantBar } from "./ui/variant-bar";
 import { buildWorld } from "./world/fixture";
-import { buildSidebarRecords } from "./world/records";
+import { buildLiveSession, buildSidebarRecords } from "./world/records";
+import { buildThreadScreenRecords } from "./world/transcripts";
 
 const initial = readOffice();
 const world = buildWorld(initial.fleet);
 const records = buildSidebarRecords(world);
 const threadIds = new Set(records.threads.map((thread) => thread.id));
 
-const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
+/** The path of the two requests the thread drawer's dock answers a colleague with. */
+const RESPOND_PATH = /^\/api\/v1\/sessions\/([^/]+)\/respond-to-(?:approval-request|question)$/;
+
+/**
+ * Answers the dock's respond requests as the office's controller would, and
+ * refuses every other request. The answer goes to the office like an answer
+ * from the dossier card, so the colleague leaves the queue either way. The
+ * response is the session still waiting, as a real controller returns it.
+ */
+const serveRequest: FetchLike = async (url, init) => {
+  const colleagueId = RESPOND_PATH.exec(new URL(url).pathname)?.[1];
+  const colleague = world.colleagues.find((each) => each.id === colleagueId);
+  if (colleague === undefined) return refuseRequest(url, init);
+  const session = queryClient.getQueryData(sessionQuery(client, colleague.id).queryKey);
+  // The client sends the payload as bytes, not as a string.
+  const body = (await new Response(init?.body).json()) as { decision?: string };
+  sendAnswer(colleague, body.decision ?? "answered");
+  return new Response(JSON.stringify(session), { headers: { "content-type": "application/json" } });
+};
+
+const client = createClient({ baseUrl: CONTROLLER_URL, fetch: serveRequest });
 const queryClient = createQueryClient();
-seedQueryCache(queryClient, client, records, { thread: FIX_THREAD });
+// Nothing can read a seeded record again, so the cache keeps every one: a
+// thread nobody has opened for five minutes must still open.
+const defaults = queryClient.getDefaultOptions();
+queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, gcTime: Infinity } });
+for (const thread of buildThreadScreenRecords(world, records.threads)) {
+  seedQueryCache(queryClient, client, records, { thread });
+}
 
 /** Draws the shell with the office in its main pane. New thread brings a new colleague into the office. */
 function OfficeShell(): JSX.Element {
@@ -104,10 +139,14 @@ const readRouteThreadId = (): string | null =>
   /^\/threads\/([^/]+)$/.exec(router.state.location.pathname)?.[1] ?? null;
 
 // The sidebar marks the thread the address opens, and the office marks the
-// selected colleague. These two keep them the same, whichever side moved.
+// selected colleague. These two keep them the same, whichever side moved. A
+// thread the sidebar opens also opens the drawer, as a thread opens its page
+// in the app; one the office selects leaves the drawer as it is.
 router.subscribe("onResolved", () => {
   const id = readRouteThreadId();
-  if (id !== null && id !== readOffice().selectedId) setOffice({ selectedId: id, roomId: null });
+  if (id !== null && id !== readOffice().selectedId) {
+    setOffice({ selectedId: id, roomId: null, drawer: true });
+  }
 });
 subscribeOffice(() => {
   const { selectedId, fleet } = readOffice();
@@ -122,6 +161,24 @@ subscribeOffice(() => {
   } else if (routeId !== null) {
     router.history.push("/office");
   }
+});
+
+// The sidebar and the thread drawer follow the office's sim: a colleague who
+// starts waiting shows under Waiting on you with its request in the dock,
+// and one the user answered leaves both.
+let previousStates = readColleagueStates();
+subscribeColleagueStates(() => {
+  const states = readColleagueStates();
+  for (const colleague of world.colleagues) {
+    const live = states.get(colleague.id);
+    if (live === previousStates.get(colleague.id) || !threadIds.has(colleague.id)) continue;
+    const session = buildLiveSession(colleague, live);
+    queryClient.setQueryData(threadsQuery(client).queryKey, (threads) =>
+      threads?.map((each) => (each.id === session.id ? session : each)),
+    );
+    queryClient.setQueryData(sessionQuery(client, session.id).queryKey, session);
+  }
+  previousStates = states;
 });
 
 await router.load();

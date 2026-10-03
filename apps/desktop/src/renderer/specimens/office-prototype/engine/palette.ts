@@ -262,6 +262,8 @@ function applyPaint({ material, read, shift }: Paintable): void {
   }
 }
 
+const WHITE: Oklch = { l: 1, c: 0, h: 0, alpha: 1 };
+
 /** Returns the shared material for a key, building and painting it the first time. */
 function share(key: string, finish: Finish, read: () => Oklch, shift: Shift): MeshStandardMaterial {
   const known = paintables.get(key);
@@ -300,6 +302,17 @@ export function paintHue(
 ): MeshStandardMaterial {
   const key = `hue:${hue}|${part}|${finish}|${String(shift.dl ?? 0)}|${String(shift.dc ?? 0)}`;
   return share(key, finish, () => readHue(hue, part), shift);
+}
+
+/**
+ * Returns the shared white material in `finish` for meshes that carry their
+ * colours in their vertices, such as the props kit's merged furniture. Its
+ * own colour stays white so the vertex colours show unchanged.
+ */
+export function paintVertexColors(finish: Finish): MeshStandardMaterial {
+  const material = share(`vertex-colours|${finish}`, finish, () => WHITE, {});
+  material.vertexColors = true;
+  return material;
 }
 
 const refreshListeners = new Set<() => void>();
