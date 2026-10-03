@@ -310,7 +310,8 @@ export class Stage {
     }
     if (SPIKE.glass === "dot") {
       const dot = document.createElement("div");
-      dot.style.cssText = `position: fixed; left: 50%; top: 50%; z-index: 100; width: 8px; height: 8px; pointer-events: none; backdrop-filter: ${blur};`;
+      // The faint fill makes sure the dot paints, so Chromium keeps its backdrop filter.
+      dot.style.cssText = `position: fixed; left: 50%; top: 50%; z-index: 100; width: 8px; height: 8px; pointer-events: none; background: rgb(255 255 255 / 0.01); backdrop-filter: ${blur};`;
       document.body.append(dot);
     }
     this.sun.layers.enableAll();
