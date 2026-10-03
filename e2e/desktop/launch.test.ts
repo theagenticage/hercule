@@ -26,7 +26,10 @@ import {
   FIRST_SCREEN_TIMEOUT_MS,
   SHOWN_WITHOUT_FIRST_SCREEN_ERROR,
 } from "../../apps/desktop/src/main/window-visibility";
+import { writeSettings } from "../../apps/desktop/scripts/packaged-app";
 import {
+  createUserDataDirForTest,
+  findUnusedLoopbackUrl,
   launchForTest,
   launchWithSavedController,
   startServerForTest,
@@ -154,10 +157,18 @@ async function prepareFirstShowCapture(app: ElectronApplication, page: Page): Pr
  * a busy machine main can show the window before the preparation is done. A
  * launch like that can check nothing, so it is quit and the app is started
  * again. Fails after 3 such launches.
+ *
+ * The app starts with a saved controller that nothing answers at, so it opens
+ * on the connect screen, whose address field has focus. With no saved
+ * controller it would open on the first run's welcome, which has no focused
+ * field and shows a spinner while it looks for Hercule, so its first screen
+ * changes after the window shows.
  */
 async function launchWithFirstShowCapture(): Promise<LaunchedApp> {
   for (let launch = 1; launch <= 3; launch += 1) {
-    const launched = await launchForTest(undefined, prepareFirstShowCapture);
+    const userDataDir = createUserDataDirForTest();
+    writeSettings(userDataDir, { controllerUrl: await findUnusedLoopbackUrl() });
+    const launched = await launchForTest(userDataDir, prepareFirstShowCapture);
     const preparedBeforeShow = await launched.app.evaluate(() => {
       const { caretHiddenAt, shownAt } = (globalThis as FirstShowGlobal).firstShow!;
       return shownAt !== null && caretHiddenAt !== null && caretHiddenAt < shownAt;

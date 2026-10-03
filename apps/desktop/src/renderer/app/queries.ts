@@ -31,6 +31,65 @@ export const setupQuery = (client: HerculeClient) =>
   });
 
 /**
+ * The options of a read from main that the page reads once and then keeps:
+ * main's answer changes only through this page's own writes, or after a
+ * reload, which starts a new cache. It never retries, because main does not
+ * fail on its own.
+ */
+const KEPT_BRIDGE_READ_OPTIONS = {
+  staleTime: Infinity,
+  gcTime: Infinity,
+  retry: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
+/**
+ * Reads what main keeps of the first run for the saved controller: the steps
+ * the user put off, or null when no first run is in progress. The first run
+ * writes the cached value each time it writes main's, so the entry guard
+ * reads it from the cache.
+ */
+export const firstRunQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["first-run"],
+    queryFn: () => bridge.firstRunProgress.read(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/**
+ * Looks for Hercule on this Mac, once per launch with no saved controller,
+ * and returns the address main found for it. Main saves nothing: the welcome
+ * saves the address through `controllerUrl.save`.
+ */
+export const localControllerQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["local-controller"],
+    queryFn: () => bridge.localController.find(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/**
+ * Reads the saved controller's setup token from main. Main hands out a pasted
+ * token only once, so the answer is kept until the first run invalidates it,
+ * after the controller refuses the token.
+ */
+export const setupTokenQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["setup-token"],
+    queryFn: () => bridge.setupToken.read(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/** Reads the name of the user's account on this Mac, which the first run offers as the username. */
+export const macUserQuery = (bridge: Bridge) =>
+  queryOptions({
+    queryKey: ["mac-user"],
+    queryFn: () => bridge.macUser.read(),
+    ...KEPT_BRIDGE_READ_OPTIONS,
+  });
+
+/**
  * The options of every read the live connection keeps current: the sidebar's
  * and the open thread's. Such a read is never fetched again because time
  * passed, the window got focus or the network came back. It is fetched again
@@ -205,6 +264,33 @@ export const startTasksQuery = (client: HerculeClient, projectId: string) =>
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
+/**
+ * Reads the controller's own record. Its `localRunnerId` is the runner on the
+ * controller's machine, or `null` when no runner runs there.
+ */
+export const controllerQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.controller(),
+    queryFn: () => client.controller.read(),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every Connection, for the first run's GitHub step. */
+export const connectionsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.connections(),
+    queryFn: () => readEveryPage((page) => client.connection.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** Reads every assistant, for the one the first run's room seats in the lobby. */
+export const assistantsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.assistants(),
+    queryFn: () => readEveryPage((page) => client.assistant.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
 /** Reads the signed-in user's name, for the sidebar's foot. */
 export const userQuery = (client: HerculeClient) =>
   queryOptions({
@@ -285,9 +371,12 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
   });
 
 /**
- * Reads everything the shell shows into `queryClient`: the sidebar's records
- * and the signed-in user. Resolves once every read is cached, and fails with
- * the first read that fails.
+ * Reads everything the shell shows into `queryClient`: the sidebar's records,
+ * the Connections and the signed-in user. Resolves once every read is cached,
+ * and fails with the first read that fails.
+ *
+ * The New project form and the starter threads read the Connections, to know
+ * whether a GitHub Connection exists, so neither waits for them when it opens.
  *
  * The shell's loader calls it, and so does a test that renders one part of a
  * screen alone, so the part finds the same records cached as in the app.
@@ -303,7 +392,37 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(resourcesQuery(client)),
     queryClient.ensureQueryData(runnersQuery(client)),
     queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
+  ]);
+};
+
+/**
+ * Reads everything the first run shows once the user has an account into
+ * `queryClient`: the records its steps and its room are drawn from, the
+ * signed-in user and their settings, and what main keeps of the first run.
+ * Resolves once every read is cached, and fails with the first read that
+ * fails.
+ *
+ * The first run's loader calls it when it resumes a first run, and its
+ * account step calls it right after setup, so the next step never waits.
+ */
+export const ensureFirstRunData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  bridge: Bridge,
+): Promise<void> => {
+  await Promise.all([
+    queryClient.ensureQueryData(controllerQuery(client)),
+    queryClient.ensureQueryData(runnersQuery(client)),
+    queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(connectionsQuery(client)),
+    queryClient.ensureQueryData(projectsQuery(client)),
+    queryClient.ensureQueryData(assistantsQuery(client)),
+    queryClient.ensureQueryData(resourcesQuery(client)),
+    queryClient.ensureQueryData(userQuery(client)),
+    queryClient.ensureQueryData(settingsQuery(client)),
+    queryClient.ensureQueryData(firstRunQuery(bridge)),
   ]);
 };
 

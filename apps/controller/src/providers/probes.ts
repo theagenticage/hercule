@@ -50,6 +50,14 @@ export const ProviderProbeInterval = Context.Reference<Duration.Duration>(
 
 type StoreError = SqlError | Schema.SchemaError | SecretDecryptError;
 
+/** A login whose end the controller waits for the runner to report. */
+interface AwaitedLogin {
+  readonly runnerId: string;
+  readonly instanceId: string;
+  /** True once the login's `loginStart` was answered with its URL. */
+  printed: boolean;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const instances = yield* providerRepository;
@@ -144,18 +152,172 @@ const make = Effect.gen(function* () {
   const sweepRunner = (runnerId: string): Effect.Effect<void> =>
     logSweepFailure(Effect.flatMap(instances.list(), (all) => sweep([runnerId], all)));
 
+  /**
+   * Probes the instance with this id on the runner, stores the snapshot, and
+   * returns it. Fails with `NotFound` if no such instance exists.
+   */
+  const probeInstance = (
+    runnerId: string,
+    instanceId: string,
+  ): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
+    Effect.flatMap(
+      instances.one(instanceId),
+      (found): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
+        Option.isNone(found)
+          ? Effect.fail(createNotFoundError("no such provider instance"))
+          : probeOne(runnerId, found.value),
+    );
+
+  // The logins whose end this controller waits to hear about, keyed by runner
+  // and the request id of the login's `loginStart`. A runner reports the end
+  // of a login, so without this map a runner could make the controller probe
+  // whenever it likes, and the runner in the key keeps one runner from ending
+  // another's login. Nothing is removed when a runner disconnects: the
+  // login's child keeps running on the runner, and its end is reported once
+  // the runner is back.
+  //
+  // The map stays small without timers. A login that has not printed its URL
+  // yet leaves the map when its answer arrives or its wait runs out. A login
+  // that printed its URL leaves it when it ends, or when a newer login on the
+  // same runner and instance prints its URL, because the runner stops the
+  // older login to start the newer one. So the map holds at most one printed
+  // login per runner and instance, plus the logins still starting.
+  const awaitedLoginEnds = new Map<string, AwaitedLogin>();
+  const buildLoginKey = (runnerId: string, requestId: string): string => `${runnerId}:${requestId}`;
+
+  // The probes that ended logins cause, keyed by runner and instance, so at
+  // most one runs per instance on a runner.
+  const probingAfterLoginEnd = new Set<string>();
+  const probeAgainAfterLoginEnd = new Set<string>();
+  const buildInstanceKey = (runnerId: string, instanceId: string): string =>
+    `${runnerId}:${instanceId}`;
+
+  /**
+   * Probes the instance once, then again for as long as another login ended
+   * while the probe ran. Removes the key from `probingAfterLoginEnd` when the
+   * last probe ends, also when it fails.
+   */
+  const probeUntilSettled = (
+    runnerId: string,
+    instanceId: string,
+    key: string,
+  ): Effect.Effect<void, StoreError | NotFound> =>
+    Effect.gen(function* () {
+      do {
+        probeAgainAfterLoginEnd.delete(key);
+        yield* probeInstance(runnerId, instanceId);
+      } while (probeAgainAfterLoginEnd.has(key));
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          probingAfterLoginEnd.delete(key);
+          probeAgainAfterLoginEnd.delete(key);
+        }),
+      ),
+    );
+
   return {
-    probe: (
+    probe: probeInstance,
+
+    /**
+     * Records that the login sent as the `loginStart` with this request id is
+     * starting on this runner for this instance, so that its end, if the
+     * runner reports one, is accepted. Call it before the runner is asked to
+     * start the login: the runner may report the end before the caller has
+     * read the answer.
+     */
+    expectLoginEnd: (
       runnerId: string,
       instanceId: string,
-    ): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
-      Effect.flatMap(
-        instances.one(instanceId),
-        (found): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
-          Option.isNone(found)
-            ? Effect.fail(createNotFoundError("no such provider instance"))
-            : probeOne(runnerId, found.value),
-      ),
+      requestId: string,
+    ): Effect.Effect<void> =>
+      Effect.sync(() => {
+        awaitedLoginEnds.set(buildLoginKey(runnerId, requestId), {
+          runnerId,
+          instanceId,
+          printed: false,
+        });
+      }),
+
+    /**
+     * Stops waiting for the end of the login sent as the `loginStart` with
+     * this request id. Call it when the runner refused the login or the
+     * caller stopped waiting for the answer: the login either did not start
+     * or its URL never reached the user.
+     */
+    forgetLoginEnd: (runnerId: string, requestId: string): Effect.Effect<void> =>
+      Effect.sync(() => {
+        awaitedLoginEnds.delete(buildLoginKey(runnerId, requestId));
+      }),
+
+    /**
+     * Records that the login sent as the `loginStart` with this request id
+     * printed its URL. The runner stopped every earlier login on this runner
+     * for this instance to start this one, so the ends of those that had
+     * printed their URL are no longer awaited. An earlier login still waiting
+     * for its URL is left alone: its own answer, a failure, removes it.
+     *
+     * This login's end stays awaited only when `reportsEnd` is true, which is
+     * the case for a device login: a login finished by pasting a code reports
+     * no end.
+     */
+    recordPrintedLogin: (
+      runnerId: string,
+      instanceId: string,
+      requestId: string,
+      { reportsEnd }: { readonly reportsEnd: boolean },
+    ): Effect.Effect<void> =>
+      Effect.sync(() => {
+        for (const [key, login] of awaitedLoginEnds) {
+          if (login.printed && login.runnerId === runnerId && login.instanceId === instanceId) {
+            awaitedLoginEnds.delete(key);
+          }
+        }
+        const key = buildLoginKey(runnerId, requestId);
+        const login = awaitedLoginEnds.get(key);
+        // Absent when the runner reported the end before this answer was read.
+        if (login === undefined) return;
+        if (reportsEnd) login.printed = true;
+        else awaitedLoginEnds.delete(key);
+      }),
+
+    /**
+     * Probes the login's instance on the runner after the runner reported
+     * that the device login with this request id ended. Returns when the
+     * probe is stored.
+     *
+     * Ignores the report, and logs it, unless `expectLoginEnd` was called for
+     * this runner and request id and no end has been accepted for it since.
+     * An honest runner can send such a report too, for example when the
+     * login's answer came after the controller stopped waiting for it, so
+     * ignoring it does not close the connection.
+     *
+     * At most one probe runs per runner and instance. A login started and
+     * ended while that probe runs causes exactly one more probe after it,
+     * because the running probe may have read the state from before the login.
+     */
+    probeAfterLoginEnd: (
+      runnerId: string,
+      requestId: string,
+    ): Effect.Effect<void, StoreError | NotFound> =>
+      Effect.suspend(() => {
+        const loginKey = buildLoginKey(runnerId, requestId);
+        const login = awaitedLoginEnds.get(loginKey);
+        if (login === undefined) {
+          return Effect.logInfo(
+            "Ignored a runner's report that a login ended, because no login was waiting for it",
+          ).pipe(Effect.annotateLogs({ runnerId, requestId }));
+        }
+        awaitedLoginEnds.delete(loginKey);
+        const { instanceId } = login;
+        const key = buildInstanceKey(runnerId, instanceId);
+        if (probingAfterLoginEnd.has(key)) {
+          probeAgainAfterLoginEnd.add(key);
+          return Effect.void;
+        }
+        probingAfterLoginEnd.add(key);
+        return probeUntilSettled(runnerId, instanceId, key);
+      }),
 
     sweepRunner,
 

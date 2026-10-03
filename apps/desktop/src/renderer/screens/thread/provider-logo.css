@@ -1,10 +1,5 @@
-/* A provider's mark sits on the text line like a character, and never
-   shrinks in a flex row. As the Bureau book's .br and .pi. */
-.br {
-  flex: none;
-  display: inline-block;
-  vertical-align: middle;
-}
+/* pi, which has no mark, is drawn as the character π in a square the size of
+   a mark. As the Bureau book's .pi. */
 .pi {
   display: inline-grid;
   place-items: center;

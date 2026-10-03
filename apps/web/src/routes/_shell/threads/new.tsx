@@ -71,7 +71,7 @@ function NewThread(): JSX.Element {
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
+  const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
@@ -85,7 +85,7 @@ function NewThread(): JSX.Element {
     instances,
     runners,
     profiles,
-    localRunnerId,
+    thisMacRunnerId,
     projectId: search.project ?? null,
     workspaceId: search.workspace ?? null,
   });

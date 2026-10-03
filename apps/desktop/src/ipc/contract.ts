@@ -30,6 +30,7 @@
 import { Schema } from "effect";
 import type * as ClientCore from "@hercule/client-core";
 import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/contract";
+import { isHttpUrl } from "./http-url";
 
 /**
  * An IPC channel the renderer calls and main answers: the renderer sends one
@@ -50,17 +51,32 @@ export interface RendererToMainIpcChannel {
 }
 
 /**
+ * The outcomes of the connect check for a controller origin, `origin`, where
+ * something answered but the app cannot connect. ControllerUrlSaveOutcome
+ * describes each; LocalControllerStartOutcome has them too.
+ */
+const ControllerRefusalCases = {
+  Redirected: { origin: Schema.String, targetOrigin: Schema.String },
+  NotController: { origin: Schema.String },
+  OriginNotAllowed: { origin: Schema.String },
+  PreflightRefused: { origin: Schema.String, methods: Schema.Array(Schema.String) },
+};
+
+/**
  * What happened when main was asked to save the controller URL the user
  * typed. Only `Saved` saves anything.
  *
- * Every outcome but `InvalidUrl` carries `origin`, the controller's origin
+ * Every outcome but `InvalidAddress` carries `origin`, the controller's origin
  * main parsed from the text and checked, such as `http://127.0.0.1:4937`.
  * The screen shows it rather than the text, which may differ in spaces,
  * capitals, a trailing `/` or a default port.
  *
- * - `Saved`: a set-up controller answered, and its URL is saved.
- * - `InvalidUrl`: the text is not an http or https URL with nothing after
- *   the host and port.
+ * - `Saved`: a controller answered, set up or not, and its URL is saved.
+ *   When the controller is not set up and the text was a setup URL, main
+ *   keeps the URL's token in memory, for `setupToken.read`.
+ * - `InvalidAddress`: the text is neither an http or https URL with nothing
+ *   after the host and port, nor a setup URL: such a URL followed by
+ *   `/setup?token=<token>`, as `hercule setup-url` prints it.
  * - `Unreachable`: nothing answered within 5 seconds.
  * - `Redirected`: the origin redirects the controller's API to the same path
  *   at another origin, `targetOrigin`, such as a proxy sending http to https.
@@ -72,20 +88,133 @@ export interface RendererToMainIpcChannel {
  * - `PreflightRefused`: the controller accepts the desktop app, but the CORS
  *   preflight refuses the app's calls with each method in `methods`, such as
  *   `DELETE`, as a proxy in front of the controller can.
- * - `SetupIncomplete`: the controller is not set up yet. Main has opened its
- *   setup page in the browser.
  */
 export const ControllerUrlSaveOutcome = Schema.TaggedUnion({
   Saved: { origin: Schema.String },
-  InvalidUrl: {},
+  InvalidAddress: {},
   Unreachable: { origin: Schema.String },
-  Redirected: { origin: Schema.String, targetOrigin: Schema.String },
-  NotController: { origin: Schema.String },
-  OriginNotAllowed: { origin: Schema.String },
-  PreflightRefused: { origin: Schema.String, methods: Schema.Array(Schema.String) },
-  SetupIncomplete: { origin: Schema.String },
+  ...ControllerRefusalCases,
 });
 export type ControllerUrlSaveOutcome = typeof ControllerUrlSaveOutcome.Type;
+
+/**
+ * What main found when it looked for Hercule on this Mac, with
+ * `hercule service status --json`, at a launch with no controller URL saved.
+ * Main saves nothing and checks nothing.
+ *
+ * - `Found`: the binary reported `origin`, the address Hercule's controller
+ *   on this Mac opens at. Whether anything answers there is not checked.
+ *   The renderer saves it through `controllerUrl.save`, which runs the
+ *   connect check first: a controller that answers is saved and the window
+ *   reloads, and any other outcome means Hercule was not found.
+ * - `Runner`: this Mac's Service Unit runs a runner, not Hercule's
+ *   controller. `running` is true when its process runs. Main never
+ *   installs over it: that would restart the runner and end its sessions.
+ * - `NotFound`: main found no address. `line` is the line the status command
+ *   failed with, or null when nothing went wrong: there is no binary, or the
+ *   default Hercule Home's `config.toml` cannot be read.
+ */
+export const LocalControllerFindOutcome = Schema.TaggedUnion({
+  Found: { origin: Schema.String },
+  Runner: { running: Schema.Boolean },
+  NotFound: { line: Schema.NullOr(Schema.String) },
+});
+export type LocalControllerFindOutcome = typeof LocalControllerFindOutcome.Type;
+
+/**
+ * What happened when main started Hercule on this Mac with
+ * `hercule service install --json`, or found it already running.
+ *
+ * - `Saved`: Hercule answered. Main saved its URL and reloaded the window.
+ * - `Runner`: this Mac's Service Unit runs a runner; `running` is true when
+ *   its process runs. Either the Service Unit already ran one, and main
+ *   installed nothing, or the Hercule Home is a runner's, so the install set
+ *   up the runner.
+ * - `NotInstalled`: there is no Hercule binary at `~/.local/bin/hercule`.
+ * - `StartFailed`: a step failed. `line` is the last line the binary wrote to
+ *   stderr, without its `hercule: ` prefix, or why main could not read the
+ *   user's `PATH` from their login shell.
+ * - `NoAnswer`: Hercule was started, but nothing answered at `origin`
+ *   within 30 seconds, or the command still ran after 90 seconds and main
+ *   stopped it. `logsFolder` is the Hercule Home's logs folder, which may say
+ *   why; `logsFolder.show` opens it.
+ * - `Redirected`, `NotController`, `OriginNotAllowed` and
+ *   `PreflightRefused`: something answered at `origin`, but the connect
+ *   check refused it, as for `controllerUrl.save`. Main stops waiting at
+ *   once: waiting would not change the answer.
+ */
+export const LocalControllerStartOutcome = Schema.TaggedUnion({
+  Saved: { origin: Schema.String },
+  Runner: { running: Schema.Boolean },
+  NotInstalled: {},
+  StartFailed: { line: Schema.String },
+  NoAnswer: { origin: Schema.String, logsFolder: Schema.String },
+  ...ControllerRefusalCases,
+});
+export type LocalControllerStartOutcome = typeof LocalControllerStartOutcome.Type;
+
+/**
+ * Where main found the setup token of the saved controller.
+ *
+ * - `Token`: the token, from the setup URL the user pasted, or from
+ *   `hercule setup-url` on this Mac when it names the saved controller.
+ * - `PasteNeeded`: main has no token for the saved controller. The user runs
+ *   `hercule setup-url` on the controller's machine and pastes the setup
+ *   URL it prints.
+ */
+export const SetupTokenReadOutcome = Schema.TaggedUnion({
+  Token: { token: Schema.String },
+  PasteNeeded: {},
+});
+export type SetupTokenReadOutcome = typeof SetupTokenReadOutcome.Type;
+
+/**
+ * The folder the user picked for a project, as git describes it. `name` is
+ * the folder's own name, such as `api` for `/Users/me/code/api`, and
+ * `branch` is the branch checked out, or null when none is (a detached
+ * HEAD).
+ *
+ * - `Cancelled`: the user closed the dialog without picking a folder.
+ * - `Repository`: a git repository whose `origin` remote is at `remote`,
+ *   with no user name or password in it.
+ * - `NoRemote`: a git repository with no `origin` remote.
+ * - `NotGit`: a folder that is not in a git repository.
+ * - `GitFailed`: git could not read the folder for another reason, such as
+ *   git not being installed. `line` is the last line git wrote to stderr.
+ */
+export const FolderPickOutcome = Schema.TaggedUnion({
+  Cancelled: {},
+  Repository: { name: Schema.String, remote: Schema.String, branch: Schema.NullOr(Schema.String) },
+  NoRemote: { name: Schema.String, branch: Schema.NullOr(Schema.String) },
+  NotGit: { name: Schema.String },
+  GitFailed: { name: Schema.String, line: Schema.String },
+});
+export type FolderPickOutcome = typeof FolderPickOutcome.Type;
+
+/**
+ * A step of the first run, in the order the first run shows them. Client-core
+ * owns the steps, as `FIRST_RUN_STEPS`. The list is spelled again here,
+ * checked against client-core's, because main imports client-core only as
+ * types: a runtime import would add client-core to main's startup file.
+ */
+export const FirstRunStep = Schema.Literals([
+  "account",
+  "providers",
+  "github",
+  "project",
+] satisfies typeof ClientCore.FIRST_RUN_STEPS);
+export type FirstRunStep = ClientCore.FirstRunStep;
+
+/** What main keeps of the first run for the saved controller: the steps the user put off. */
+export const FirstRunProgress = Schema.Struct({ putOff: Schema.Array(FirstRunStep) });
+export type FirstRunProgress = typeof FirstRunProgress.Type;
+
+/** An absolute `http:` or `https:` URL. */
+const HttpUrl = Schema.String.check(
+  Schema.makeFilter((url: string) =>
+    isHttpUrl(url) ? undefined : `Expected an http: or https: URL, got ${url}`,
+  ),
+);
 
 /** A menu item the page carries out: Sign Out, New Thread, or Send. */
 export const MenuCommand = Schema.Literals(["signOut", "newThread", "send"]);
@@ -122,9 +251,11 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     response: Schema.NullOr(Schema.String),
   },
   /**
-   * Checks the controller at the URL the user typed and, when it is ready for
-   * the desktop app, saves the URL and reloads the window. Saving a different
-   * controller signs the user out and removes the stored token.
+   * Checks the controller at the address the user typed and, when it is ready
+   * for the desktop app, saves its URL and reloads the window. The address is
+   * a controller's origin, or a setup URL, which carries the setup token
+   * too. Saving a different controller signs the user out and removes the
+   * stored token.
    */
   "controllerUrl.save": {
     request: Schema.String,
@@ -197,6 +328,77 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
    */
   "waitingThreads.set": {
     request: Schema.Array(WaitingThread),
+    response: Schema.Void,
+  },
+  /**
+   * Looks for Hercule on this Mac and returns the address it opens at. Saves
+   * nothing: the renderer saves the address through `controllerUrl.save`.
+   * Refused when a controller URL is saved: the first run looks only before
+   * one is.
+   */
+  "localController.find": {
+    request: Schema.Undefined,
+    response: LocalControllerFindOutcome,
+  },
+  /**
+   * Starts Hercule on this Mac as a Service Unit, waits for it to answer, and
+   * saves its URL. Takes up to two minutes. Refused when a controller URL is
+   * saved, and while a start runs: the renderer waits for the first.
+   */
+  "localController.start": {
+    request: Schema.Undefined,
+    response: LocalControllerStartOutcome,
+  },
+  /**
+   * Opens in Finder the logs folder of the Hercule Home on this Mac, as the
+   * binary last reported it to `localController.find` or
+   * `localController.start`. Refused before the binary has reported one.
+   */
+  "logsFolder.show": {
+    request: Schema.Undefined,
+    response: Schema.Void,
+  },
+  /**
+   * Reads the setup token of the saved controller. A pasted token is
+   * returned once. Refused when no controller URL is saved.
+   */
+  "setupToken.read": {
+    request: Schema.Undefined,
+    response: SetupTokenReadOutcome,
+  },
+  /** Reads the name of the user's account on this Mac, such as `rogier`. */
+  "macUser.read": {
+    request: Schema.Undefined,
+    response: Schema.Struct({ username: Schema.String }),
+  },
+  /**
+   * Asks the user to pick a folder in the system's dialog, and describes it
+   * with git. Main never changes the folder.
+   */
+  "folder.pick": {
+    request: Schema.Undefined,
+    response: FolderPickOutcome,
+  },
+  /**
+   * Reads the first-run steps the user put off for the saved controller, or
+   * null when main keeps none for that controller.
+   */
+  "firstRunProgress.read": {
+    request: Schema.Undefined,
+    response: Schema.NullOr(FirstRunProgress),
+  },
+  /**
+   * Saves the first-run steps the user put off for the saved controller, or
+   * removes them when the request is null. Refused when no controller URL is
+   * saved.
+   */
+  "firstRunProgress.save": {
+    request: Schema.NullOr(FirstRunProgress),
+    response: Schema.Void,
+  },
+  /** Opens an `http:` or `https:` URL in the default browser. Refuses any other URL. */
+  "link.open": {
+    request: Schema.Struct({ url: HttpUrl }),
     response: Schema.Void,
   },
 } as const satisfies Record<`${string}.${string}`, RendererToMainIpcChannel>;

@@ -14,7 +14,9 @@
     "perf": "node scripts/perf.ts",
     "first-frame": "node scripts/first-frame.ts",
     "compare:bureau": "node scripts/compare-bureau.ts",
-    "capture:sidebar-states": "node scripts/capture-sidebar-states.ts"
+    "capture:sidebar-states": "node scripts/capture-sidebar-states.ts",
+    "capture:room": "node scripts/capture-room.ts",
+    "capture:first-run": "node scripts/capture-first-run.ts"
   },
   "devDependencies": {
     "@babel/core": "8.0.1",

@@ -20,7 +20,7 @@ import { memo, useId, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { describePose, joinLabelText, type Pose } from "@hercule/client-core";
 import { buildLook, Face } from "../faces";
-import { PlusIcon } from "../icons";
+import { PlusIcon } from "../icons/plus";
 import { Mark } from "../marks";
 import { AgeLabel } from "../screens/age-label";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";

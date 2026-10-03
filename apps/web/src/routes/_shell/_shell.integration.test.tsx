@@ -34,6 +34,7 @@ const api: Readonly<Record<string, Handler>> = {
       publicKey: "bm90LWEta2V5",
       version: "0.1.0",
       defaultRunnerId: null,
+      localRunnerId: null,
     },
   },
 };

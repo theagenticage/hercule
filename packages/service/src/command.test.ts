@@ -201,6 +201,8 @@ describe("install", () => {
       role: "serve",
       home,
       unitFile: UNIT_FILE,
+      controllerUrl: "http://127.0.0.1:4937",
+      logsDir: join(home, "logs"),
     });
     expect(err).toEqual([
       "Installing the unit for `hercule serve`: this Home holds no runner.json.",
@@ -269,10 +271,22 @@ describe("install", () => {
     expect(actions).toEqual([]);
   });
 
-  it("prints the path of a config.toml it cannot parse", async () => {
+  it("refuses a config.toml it cannot parse, before reaching the Supervisor", async () => {
+    // The unit's process would stop at the same error at every start.
     writeFileSync(join(home, "config.toml"), "[data\n");
+    expect(await run(["install", "--json"])).toBe(1);
+    expect(err).toEqual([
+      expect.stringMatching(new RegExp(`^hercule: ${join(home, "config.toml")} `)),
+    ]);
+    expect(out).toEqual([]);
+    expect(actions).toEqual([]);
+  });
+
+  it("refuses a config.toml with a value Hercule cannot use", async () => {
+    writeFileSync(join(home, "config.toml"), 'bind.host = "http://example.com"\n');
     expect(await run(["install"])).toBe(1);
-    expect(err[0]).toMatch(new RegExp(`^hercule: ${join(home, "config.toml")} `));
+    expect(err[0]).toMatch(new RegExp(`^hercule: bind.host in ${join(home, "config.toml")} `));
+    expect(actions).toEqual([]);
   });
 });
 
@@ -326,6 +340,95 @@ describe("the other verbs", () => {
   it("status prints the status", async () => {
     expect(await run(["status"])).toBe(0);
     expect(out).toEqual(["No Hercule service is installed on this machine."]);
+  });
+});
+
+describe("the --json report", () => {
+  /** Runs a verb with `--json`, checks that it succeeded, and returns the parsed JSON. */
+  const runForReport = async (
+    verb: string,
+    request: Partial<ServiceCommandRequest> = {},
+  ): Promise<Record<string, unknown>> => {
+    expect(await run([verb, "--json"], request)).toBe(0);
+    return JSON.parse(out.join("\n")) as Record<string, unknown>;
+  };
+
+  // The desktop app reads these fields without importing this package, so a
+  // rename must fail here first, and be made in spec 15 section 4 too.
+  it.each(SERVICE_VERBS)("%s prints exactly the fields spec 15 section 4 lists", async (verb) => {
+    const report = await runForReport(verb);
+    expect(Object.keys(report).sort()).toEqual([
+      "controllerUrl",
+      "home",
+      "installed",
+      "logsDir",
+      "pid",
+      "role",
+      "running",
+      "unitFile",
+    ]);
+  });
+
+  it("describes the installed unit's Home, even when this command ran for another", async () => {
+    const unitHome = mkdtempSync(join(tmpdir(), "hercule-service-unit-home-"));
+    try {
+      writeFileSync(join(unitHome, "config.toml"), "bind.port = 5050\n");
+      installed = {
+        installed: true,
+        running: true,
+        pid: 42,
+        role: "serve",
+        home: unitHome,
+        unitFile: UNIT_FILE,
+      };
+      const report = await runForReport("status");
+      expect(report.home).toBe(unitHome);
+      expect(report.logsDir).toBe(join(unitHome, "logs"));
+      expect(report.controllerUrl).toBe("http://127.0.0.1:5050");
+    } finally {
+      rmSync(unitHome, { recursive: true, force: true });
+    }
+  });
+
+  it("describes this command's Home when no unit is installed", async () => {
+    writeFileSync(join(home, "config.toml"), "bind.port = 6060\n");
+    const report = await runForReport("status");
+    expect(report.home).toBeNull();
+    expect(report.logsDir).toBe(join(home, "logs"));
+    expect(report.controllerUrl).toBe("http://127.0.0.1:6060");
+  });
+
+  it("describes this command's Home when the installed unit names no Home", async () => {
+    installed = {
+      installed: true,
+      running: false,
+      pid: null,
+      role: null,
+      home: null,
+      unitFile: UNIT_FILE,
+    };
+    const report = await runForReport("status");
+    expect(report.logsDir).toBe(join(home, "logs"));
+    expect(report.controllerUrl).toBe("http://127.0.0.1:4937");
+  });
+
+  it("builds controllerUrl from config.toml, and turns a wildcard host into loopback", async () => {
+    writeFileSync(join(home, "config.toml"), 'bind.host = "0.0.0.0"\nbind.port = 8080\n');
+    expect((await runForReport("status")).controllerUrl).toBe("http://127.0.0.1:8080");
+  });
+
+  it("ignores HERCULE_* variables, which the unit does not see", async () => {
+    const report = await runForReport("status", {
+      env: { HERCULE_BIND_HOST: "100.64.0.1", HERCULE_BIND_PORT: "5000" },
+    });
+    expect(report.controllerUrl).toBe("http://127.0.0.1:4937");
+  });
+
+  it("prints a null controllerUrl when config.toml cannot be read", async () => {
+    writeFileSync(join(home, "config.toml"), "[data\n");
+    const report = await runForReport("status");
+    expect(report.controllerUrl).toBeNull();
+    expect(report.logsDir).toBe(join(home, "logs"));
   });
 });
 

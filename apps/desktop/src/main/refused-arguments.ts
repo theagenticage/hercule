@@ -55,7 +55,7 @@ const isAllowedArgument = (arg: string): boolean =>
  *
  * - `packaged` is Electron's `app.isPackaged`. Development runs are never
  *   refused.
- * - `inspectorOpen` tells whether the Node inspector is open. Pass the
+ * - `inspectorOpen` is whether the Node inspector is open. Pass the
  *   inspector's real state, `inspector.url() !== undefined`, rather than
  *   whether `--inspect` is on the command line, so that `--inspect` passed to
  *   a release package, whose fuses ignore it, does not get around the check.
@@ -66,3 +66,28 @@ export const findRefusedArgument = (
   inspectorOpen: boolean,
 ): string | undefined =>
   packaged && !inspectorOpen ? args.find((arg) => !isAllowedArgument(arg)) : undefined;
+
+/** The switch that names the Hercule binary main runs in place of the installed one. */
+const BINARY_PATH_SWITCH = "--hercule-binary=";
+
+/**
+ * Returns the path the last `--hercule-binary=<path>` in `args` names, or
+ * undefined when there is none, or when the app does not accept the switch.
+ * `packaged` and `inspectorOpen` are as for findRefusedArgument.
+ *
+ * The end-to-end tests pass it to run a stand-in binary rather than the one
+ * installed on the Mac. The switch is accepted only where findRefusedArgument
+ * accepts every argument: in a development run, or with the inspector open.
+ * A release package, whose fuses keep the inspector closed, refuses it, so
+ * no other program can make the app run a binary of its choosing.
+ */
+export const readBinaryPathArgument = (
+  args: ReadonlyArray<string>,
+  packaged: boolean,
+  inspectorOpen: boolean,
+): string | undefined => {
+  if (packaged && !inspectorOpen) return undefined;
+  return args
+    .findLast((arg) => arg.startsWith(BINARY_PATH_SWITCH))
+    ?.slice(BINARY_PATH_SWITCH.length);
+};

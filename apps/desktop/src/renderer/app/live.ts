@@ -2,12 +2,14 @@
  * Runs the live connection while the shell is mounted, and keeps the
  * sidebar's reads current through it.
  *
- * The shell subscribes to four topics:
+ * The shell subscribes to five topics:
  *
  * - `session`, for the thread list (and an open thread's own reads);
  * - `runner`, for the runners, whose connectivity draws a thread as away;
  * - `provider`, for the providers, whose catalogs name each thread's model;
- * - `task`, for the open tasks a Draft Thread offers to start from.
+ * - `task`, for the open tasks a Draft Thread offers to start from;
+ * - `connection`, for the GitHub Connection the New project form clones
+ *   through, which may be made in the web app while this app runs.
  *
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
@@ -27,7 +29,13 @@ import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
 
 /** The topics the shell keeps subscribed. */
-const SHELL_TOPICS: readonly MutableLiveTopic[] = ["session", "runner", "provider", "task"];
+const SHELL_TOPICS: readonly MutableLiveTopic[] = [
+  "session",
+  "runner",
+  "provider",
+  "task",
+  "connection",
+];
 
 /**
  * Subscribes to the shell's topics, then starts the live connection, and

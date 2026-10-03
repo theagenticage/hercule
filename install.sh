@@ -13,9 +13,13 @@
 # - the binary, at ~/.local/bin/hercule;
 # - the desktop app, at /Applications/Hercule.app.
 #
-# A first install starts nothing. It prints the next step instead: `hercule
-# service install` to run Hercule on this Mac, or the join command from the
-# Fleet's "Add machine" to make this Mac a runner of a controller elsewhere.
+# A first install starts nothing. It prints the next step instead. With the
+# default Hercule Home, that is first the app, which asks whether this Mac
+# runs Hercule or connects to it elsewhere. Then, for every Home, `hercule
+# service install` to run Hercule on this Mac without the app, or the join
+# command from the Fleet's "Add machine" to make this Mac a runner of a
+# controller elsewhere. The app is named only for the default Home, because
+# the app always uses that Home.
 #
 # An update is a run that finds the service unit installed
 # (~/Library/LaunchAgents/sh.hercule.service.plist). It runs `hercule service
@@ -226,7 +230,12 @@ main() {
   fi
 
   if ! $is_update; then
-    printf '\nNothing is running yet. To run Hercule on this Mac, start it as a service, then open the setup page in your browser; the second command prints its address:\n\n  %s service install\n  %s setup-url\n' "$hercule_command" "$hercule_command"
+    if [ "$hercule_home" = "$HOME/.hercule" ]; then
+      printf '\nNothing is running yet. To set up Hercule, open Hercule in your Applications folder.\n'
+      printf '\nTo run Hercule on this Mac without the app, start it as a service, then open the setup page in your browser; the second command prints its address:\n\n  %s service install\n  %s setup-url\n' "$hercule_command" "$hercule_command"
+    else
+      printf '\nNothing is running yet. To run Hercule on this Mac, start it as a service, then open the setup page in your browser; the second command prints its address:\n\n  %s service install\n  %s setup-url\n' "$hercule_command" "$hercule_command"
+    fi
     printf '\nTo make this Mac a runner of a controller on another machine instead, run the join command from the Fleet'\''s "Add machine" in that controller'\''s web app'
     if [ "$hercule_command" != hercule ]; then
       printf ', with %s in place of hercule' "$hercule_command"

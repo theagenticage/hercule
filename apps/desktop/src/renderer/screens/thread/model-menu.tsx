@@ -11,7 +11,7 @@ import {
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import { ChevronRightIcon } from "../../icons";
+import { ChevronRightIcon } from "../../icons/chevron-right";
 import { MenuLine } from "./menu-line";
 import { ProviderLogo } from "./provider-logo";
 

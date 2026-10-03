@@ -12,6 +12,7 @@
  * warns as well, because it includes every interface the machine has, which is
  * exactly what the warning is about.
  */
+import { isWildcardHost } from "@hercule/home";
 
 const isLoopback = (host: string): boolean =>
   host === "localhost" || host === "::1" || host === "[::1]" || /^127\./.test(host);
@@ -37,7 +38,7 @@ const isTailscaleV6 = (host: string): boolean =>
  */
 export const buildPerimeterWarning = (host: string, port: number): string | undefined => {
   if (isLoopback(host) || isTailscaleV4(host) || isTailscaleV6(host)) return undefined;
-  const where = host === "0.0.0.0" || host === "::" ? "every network interface" : host;
+  const where = isWildcardHost(host) ? "every network interface" : host;
   return (
     `Hercule is listening on ${where}:${port} over plain HTTP. That is outside its ` +
     `supported perimeter of a LAN or a tailnet: anyone who can reach this address ` +

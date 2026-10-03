@@ -1,7 +1,7 @@
 /**
  * Builds the model field of Settings > Threads: the models of the picked
- * instance, read from the local runner's snapshot when there is one, and from
- * the instance's first snapshot otherwise. The composer's model menu reads
+ * instance, read from the snapshot of the runner a new thread would be placed
+ * on when there is one, and from the instance's first snapshot otherwise. The composer's model menu reads
  * the catalog per runner in the same way (`model-menu.ts`).
  *
  * A stored model slug that the snapshot no longer offers stays in the list,
@@ -26,14 +26,13 @@ export interface ThreadModelField {
 
 export const buildThreadModelField = (
   instance: Pick<ProviderInstance, "snapshots">,
-  localRunnerId: string | null,
+  runnerId: string | null,
   current: string | undefined,
 ): ThreadModelField => {
   const snapshot =
-    (localRunnerId === null
+    (runnerId === null
       ? undefined
-      : instance.snapshots.find((each) => each.runnerId === localRunnerId)) ??
-    instance.snapshots[0];
+      : instance.snapshots.find((each) => each.runnerId === runnerId)) ?? instance.snapshots[0];
 
   // A probe that is not logged in still reports a catalog (the harness returns
   // its cached list), so having a snapshot does not mean "logged in". The model

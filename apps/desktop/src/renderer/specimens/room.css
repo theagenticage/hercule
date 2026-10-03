@@ -1,0 +1,57 @@
+/* The room specimen's layout. One step fills the 1440 × 900 window, as the
+   book's first-run.html does. The sheet of every step draws each room at
+   1440 × 900 and shrinks it to half, so every shot is framed exactly as in
+   the window. */
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.room-stage {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.room-sheet {
+  display: grid;
+  grid-template-columns: repeat(2, 720px);
+  gap: 24px;
+  padding: 24px;
+}
+
+.room-cell {
+  margin: 0;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.room-cell figcaption {
+  padding: 6px 0;
+  font-size: var(--t-12);
+  color: var(--muted);
+}
+
+.room-cell-window {
+  position: relative;
+  width: 720px;
+  height: 450px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.room-cell-window .room-stage {
+  position: absolute;
+  inset: auto;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 900px;
+  transform: scale(0.5);
+  transform-origin: 0 0;
+}

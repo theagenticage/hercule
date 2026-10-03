@@ -2,6 +2,7 @@
  * Main's side of the IPC contract: one handler per renderer-to-main channel,
  * registered with Electron once at boot.
  */
+import { userInfo } from "node:os";
 import { ipcMain } from "electron";
 import { Effect, type ManagedRuntime } from "effect";
 import {
@@ -12,9 +13,12 @@ import {
 } from "../../ipc/contract";
 import { AppSettings, type NoControllerSaved } from "../app-settings";
 import { ControllerConnection } from "../controller-connection";
+import { ThisMac } from "../this-mac";
+import type { ControllerAlreadySaved, NoLogsFolderSeen } from "../local-controller";
 import { MainWindow } from "../main-window";
 import { MainMenu } from "../menu";
 import { RunnerIdentity } from "../runner-identity";
+import { openInBrowser } from "../security";
 import { StoredToken } from "../stored-token";
 import { ThreadNotifications } from "../thread-notifications";
 import { answerIpcMessage } from "./message";
@@ -30,6 +34,7 @@ type IpcHandlerServices =
   | MainWindow
   | RunnerIdentity
   | StoredToken
+  | ThisMac
   | ThreadNotifications;
 
 /**
@@ -37,7 +42,7 @@ type IpcHandlerServices =
  * current state. Main refuses the message, and the error's message is the
  * reason. An outcome the user can cause is part of the response instead.
  */
-type IpcHandlerError = NoControllerSaved;
+type IpcHandlerError = NoControllerSaved | ControllerAlreadySaved | NoLogsFolderSeen;
 
 /**
  * What main does for each channel, given the decoded request. The table is
@@ -57,6 +62,20 @@ const IPC_HANDLERS: {
   "goMenu.set": (threads) => MainMenu.use((menu) => menu.setGoThreads(threads)),
   "waitingThreads.set": (threads) =>
     ThreadNotifications.use((notifications) => notifications.setWaitingThreads(threads)),
+  "localController.find": () => ThisMac.use((thisMac) => thisMac.findLocalController),
+  "localController.start": () => ThisMac.use((thisMac) => thisMac.startLocalController),
+  "logsFolder.show": () => ThisMac.use((thisMac) => thisMac.showLogsFolder),
+  "setupToken.read": () => ThisMac.use((thisMac) => thisMac.readSetupToken),
+  "macUser.read": () => Effect.sync(() => ({ username: userInfo().username })),
+  "folder.pick": () => ThisMac.use((thisMac) => thisMac.pickFolder),
+  "firstRunProgress.read": () => AppSettings.use((settings) => settings.readFirstRunProgress),
+  // The settings file is in the app's own folder, so a write that fails is a
+  // defect.
+  "firstRunProgress.save": (progress) =>
+    AppSettings.use((settings) => settings.saveFirstRunProgress(progress)).pipe(
+      Effect.catchTag("PlatformError", Effect.die),
+    ),
+  "link.open": ({ url }) => openInBrowser(url),
 };
 
 /**

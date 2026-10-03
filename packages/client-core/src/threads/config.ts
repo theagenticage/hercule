@@ -62,7 +62,7 @@ export type ThreadKind = Thread["kind"];
 export interface ThreadCatalogs {
   readonly instances: readonly ProviderInstance[];
   readonly runners: readonly Runner[];
-  readonly localRunnerId: string | null;
+  readonly thisMacRunnerId: string | null;
   readonly projects?: readonly Project[];
   readonly resources?: readonly Resource[];
   readonly workspaces?: readonly Workspace[];

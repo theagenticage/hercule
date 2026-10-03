@@ -4,6 +4,8 @@
  */
 import { Effect, Layer, Result } from "effect";
 import {
+  buildControllerOrigin,
+  loadBootstrapConfig,
   locateCompiledBinary,
   locateLogsDir,
   parseGlobalOptions,
@@ -63,7 +65,13 @@ const SERVICE_HELP: ReadonlyArray<string> = [
   "  status     print whether a unit is installed, what it runs, and its pid",
   "",
   "flags:",
-  "  --json  print { installed, running, pid, role, home, unitFile } once the verb is done",
+  "  --json  print { installed, running, pid, role, home, unitFile, controllerUrl, logsDir } once",
+  "          the verb is done",
+  "",
+  "In that JSON, home is the Hercule Home the installed unit runs, which can be another Home than",
+  "this command's. controllerUrl and logsDir describe that same Home, or this command's Home when",
+  "no unit is installed: the address Hercule answers at on this machine, from that Home's",
+  "config.toml alone (null when Hercule cannot read it), and its logs folder.",
   "",
   "The process logs to <home>/logs/controller.log or runner.log; what it prints before its log",
   "opens goes to the .stderr.log beside it.",
@@ -71,6 +79,38 @@ const SERVICE_HELP: ReadonlyArray<string> = [
   "exit: 0 succeeded, 1 the verb failed on this machine, with one line that explains what to",
   "do, 2 the command line was wrong and nothing changed.",
 ];
+
+/**
+ * What every verb prints with `--json` once it is done (spec 15 section 4):
+ * the status of the Service Unit, and two fields about one Hercule Home. That
+ * Home is `home`, the Home the installed unit runs, so the address and the
+ * logs belong to the Hercule the unit keeps running, even when this command
+ * ran with another `--home`. When no unit is installed, or the unit names no
+ * Home, it is the Home this command ran for.
+ *
+ * - `controllerUrl`: the origin a process on this machine opens Hercule at,
+ *   or `null` when the Home's `config.toml` cannot be used.
+ * - `logsDir`: the Home's logs folder.
+ */
+export interface ServiceReport extends ServiceStatus {
+  readonly controllerUrl: string | null;
+  readonly logsDir: string;
+}
+
+/**
+ * Returns the origin a process on this machine opens Hercule at for a Hercule
+ * Home, such as `http://127.0.0.1:4937`. It is built from `bind.host` and
+ * `bind.port` in the Home's `config.toml`, or their defaults. Returns `null`
+ * when `config.toml` cannot be read, or holds a value Hercule cannot use.
+ *
+ * `-c` flags and `HERCULE_*` variables are ignored, because the Service Unit
+ * runs Hercule with `config.toml` alone.
+ */
+const buildControllerUrl = (home: string): Effect.Effect<string | null> =>
+  loadBootstrapConfig({ home, overrides: [], env: {} }).pipe(
+    Effect.map((config) => buildControllerOrigin(config.bindHost, config.bindPort)),
+    Effect.orElseSucceed(() => null),
+  );
 
 /** Returns the one line that describes a status for a person. */
 export const describeStatus = (status: ServiceStatus): string => {
@@ -86,7 +126,7 @@ export const describeStatus = (status: ServiceStatus): string => {
 export interface ServiceCommandRequest {
   /** The arguments after `service`, with the global options removed. */
   readonly args: ReadonlyArray<string>;
-  /** The absolute Hercule Home, from `--home` or `HERCULE_HOME`. */
+  /** The absolute Hercule Home, from `--home`, else `HERCULE_HOME`, else `~/.hercule`. */
   readonly home: string;
   readonly overrides: ConfigOverrides;
   readonly env: Env;
@@ -193,7 +233,13 @@ export const runServiceCommand = async (
   }
   const status = outcome.success;
   if (json) {
-    request.out(JSON.stringify(status, null, 2));
+    const reportedHome = status.installed && status.home !== null ? status.home : request.home;
+    const report: ServiceReport = {
+      ...status,
+      controllerUrl: await Effect.runPromise(buildControllerUrl(reportedHome)),
+      logsDir: locateLogsDir(reportedHome),
+    };
+    request.out(JSON.stringify(report, null, 2));
   } else if (verb !== "uninstall") {
     request.out(describeStatus(status));
   }

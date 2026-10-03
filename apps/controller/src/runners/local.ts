@@ -7,15 +7,20 @@
  * local, and this module knows only what it printed on stdout. Its join token
  * is sent on stdin, the one channel that neither shows in `ps` nor is inherited
  * by the processes the child starts.
+ *
+ * `controller.read` returns the local runner's id through `LocalRunnerId`,
+ * which reads it from the running child on every call rather than from a
+ * stored copy.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type * as Scope from "effect/Scope";
+import * as Scope from "effect/Scope";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { locateCompiledBinary, type LogLevel } from "@hercule/home";
 import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
@@ -98,13 +103,34 @@ export class LocalRunnerFailed extends Schema.TaggedError<LocalRunnerFailed>()(
 ) {}
 
 export interface LocalRunner {
-  /** Returns the local runner's id. It is kept only here: no column says which runner is local. */
+  /**
+   * Returns the local runner's id, or `undefined` until the child has
+   * reported it. It is kept only here: no column says which runner is local.
+   */
   readonly runnerId: () => string | undefined;
   /** Stops the local runner. Calling it twice has the same effect as once. */
   readonly stop: Effect.Effect<void>;
 }
 
-const decodeAnnouncement = Schema.decodeUnknownEffect(LocalAnnouncement);
+/**
+ * Where a service reads the local runner's id. Its `read` returns the id the
+ * running child reported, or `undefined` when the child has not reported one
+ * yet or when this controller starts no local runner.
+ *
+ * It has no default, so a service that reads it cannot be built without
+ * someone deciding where the id comes from. The boot provides it next to the
+ * local runner it starts, and a test provides its own.
+ */
+export class LocalRunnerId extends Context.Service<
+  LocalRunnerId,
+  { readonly read: () => string | undefined }
+>()("hercule/controller/runners/LocalRunnerId") {}
+
+/**
+ * Parses one announcement line, and returns `None` when the line is not JSON
+ * or is not an announcement this build can read.
+ */
+const parseAnnouncement = Schema.decodeUnknownOption(Schema.fromJsonString(LocalAnnouncement));
 const encodeEnrolment = Schema.encodeUnknownSync(LocalEnrolment);
 
 /**
@@ -132,43 +158,118 @@ export const createCrashCounter = (
   };
 };
 
+/** The first line of the child's stdout, and the announcement it parses to. */
+export interface FirstLine {
+  readonly line: string;
+  /** `None` when the line is not an announcement this build can read. */
+  readonly announcement: Option.Option<LocalAnnouncement>;
+}
+
+/** The announcement lines at the start of the child's stdout. */
+export interface ChildAnnouncements {
+  /** Completes with the first line, or with `undefined` if the output ends first. */
+  readonly first: Deferred.Deferred<FirstLine | undefined>;
+  /**
+   * Completes with the runner id from the second line, which the child writes
+   * only after a first line that asked to join. Completes with `undefined`
+   * when the first line was anything else, when the second line is not an
+   * announcement this build can read, or when the output ends first, as it
+   * does when the join fails.
+   */
+  readonly joinedRunnerId: Deferred.Deferred<string | undefined>;
+}
+
+/** Creates the announcements of one child, neither of them completed yet. */
+export const makeChildAnnouncements: Effect.Effect<ChildAnnouncements> = Effect.all({
+  first: Deferred.make<FirstLine | undefined>(),
+  joinedRunnerId: Deferred.make<string | undefined>(),
+});
+
 /**
- * Returns the child's first stdout line, or `undefined` if the output ends
- * first. The rest of the output is copied to this process's stdout. The pipe
- * is read to the end either way, because a child whose stdout buffer fills up
- * would block on its next log line.
+ * Reads the child's stdout to its end, completes `announcements` from its
+ * first lines, and passes everything after them to `forward`. It never fails:
+ * a read that fails is logged, and ends the reading.
+ *
+ * The pipe is read to the end either way, because a child whose stdout buffer
+ * fills up would block on its next log line. However the reading ends (the
+ * output ends, a read fails, or the fiber is interrupted), each announcement
+ * that has not completed yet completes with `undefined`, so nothing waits on
+ * a child that will never write it.
  */
-const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | undefined> => {
-  let resolveAnnouncement: (line: string | undefined) => void = () => undefined;
-  const first = new Promise<string | undefined>((resolve) => {
-    resolveAnnouncement = resolve;
-  });
-  void (async () => {
-    const decoder = new TextDecoder();
-    let head = "";
-    let heard = false;
-    try {
-      for await (const chunk of stdout) {
-        const text = decoder.decode(chunk, { stream: true });
-        if (heard) {
-          process.stdout.write(text);
-          continue;
-        }
-        head += text;
-        const newline = head.indexOf("\n");
-        if (newline < 0) continue;
-        heard = true;
-        resolveAnnouncement(head.slice(0, newline));
-        process.stdout.write(head.slice(newline + 1));
+export const readChildOutput = (
+  stdout: ReadableStream<Uint8Array>,
+  announcements: ChildAnnouncements,
+  forward: (text: string) => void,
+): Effect.Effect<void> => {
+  const reader = stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+
+  /** Reads the next chunk, or returns `undefined` when the output has ended. */
+  const readChunk = Effect.map(
+    Effect.tryPromise(() => reader.read()),
+    (chunk) => (chunk.done ? undefined : decoder.decode(chunk.value, { stream: true })),
+  );
+
+  /** Returns the next whole line, or `undefined` when the output ends first. */
+  const readLine = Effect.gen(function* () {
+    while (true) {
+      const newline = buffered.indexOf("\n");
+      if (newline >= 0) {
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        return line;
       }
-    } catch (cause) {
-      // A broken pipe means the child is gone. Waiting for the handshake
-      // deadline would hold up the boot for half a minute.
-      process.stderr.write(`hercule: the local runner's output ended: ${String(cause)}\n`);
+      const text = yield* readChunk;
+      if (text === undefined) return undefined;
+      buffered += text;
     }
-    if (!heard) resolveAnnouncement(undefined);
-  })();
-  return first;
+  });
+
+  const forwardRest = Effect.gen(function* () {
+    let text: string | undefined = buffered;
+    while (text !== undefined) {
+      if (text !== "") forward(text);
+      text = yield* readChunk;
+    }
+  });
+
+  const readAll = Effect.gen(function* () {
+    const line = yield* readLine;
+    if (line === undefined) return;
+    const announcement = parseAnnouncement(line);
+    yield* Deferred.succeed(announcements.first, { line, announcement });
+    if (Option.isSome(announcement) && "join" in announcement.value) {
+      const second = yield* readLine;
+      if (second === undefined) return;
+      const joined = parseAnnouncement(second);
+      yield* Deferred.succeed(
+        announcements.joinedRunnerId,
+        Option.isSome(joined) && "runnerId" in joined.value ? joined.value.runnerId : undefined,
+      );
+    }
+    yield* forwardRest;
+  });
+
+  return readAll.pipe(
+    // A broken pipe means the child is gone. Completing the announcements
+    // here, rather than waiting for the handshake deadline, keeps the boot
+    // from being held up for half a minute.
+    Effect.catch((error) =>
+      Effect.logWarning(`The local runner's output ended: ${String(error.cause)}`),
+    ),
+    Effect.ensuring(
+      Effect.andThen(
+        Effect.all([
+          // Completing a Deferred that has already completed does nothing.
+          Deferred.succeed(announcements.first, undefined),
+          Deferred.succeed(announcements.joinedRunnerId, undefined),
+        ]),
+        // Releases the pipe when the reading was interrupted during a read.
+        Effect.ignore(Effect.tryPromise(() => reader.cancel())),
+      ),
+    ),
+  );
 };
 
 /**
@@ -199,6 +300,12 @@ export const startLocalRunner = (
     let stopping = false;
     const loop = createCrashCounter(CRASH_LOOP_LIMIT, Duration.toMillis(CRASH_LOOP_WINDOW));
 
+    // The readers of every child's stdout run in their own scope rather than
+    // as children of the supervisor, so stopping the supervisor does not cut
+    // off the output of a child that is still shutting down. The scope is made
+    // before the stop is registered, so it closes after the stop.
+    const readers = yield* Scope.fork(yield* Effect.scope);
+
     /**
      * Kills the child when the process exits. The drain's deadline calls
      * `process.exit`, which runs no finalizer, and an orphaned child would keep
@@ -220,28 +327,31 @@ export const startLocalRunner = (
       });
       child = spawned;
 
-      const line = yield* Effect.raceFirst(
-        Effect.promise(() => readAnnouncement(spawned.stdout)),
+      const announcements = yield* makeChildAnnouncements;
+      yield* Effect.forkIn(
+        readChildOutput(spawned.stdout, announcements, (text) => process.stdout.write(text)),
+        readers,
+      );
+      const first = yield* Effect.raceFirst(
+        Deferred.await(announcements.first),
         Effect.as(Effect.sleep(options.handshakeDeadline), undefined),
       );
       // A child that printed nothing either died or is stuck. Killing it turns
       // both cases into one exit, which the supervisor handles. The boot goes
       // on either way, rather than making the whole API wait for a runner.
-      if (line === undefined) {
+      if (first === undefined) {
         spawned.kill("SIGKILL");
         yield* Effect.logWarning("The local runner started but did not print its announcement.");
         return spawned;
       }
-      const said = yield* Effect.mapError(
-        Effect.flatMap(
-          Effect.try({ try: () => JSON.parse(line) as unknown, catch: () => undefined }),
-          decodeAnnouncement,
-        ),
-        () =>
+      if (Option.isNone(first.announcement)) {
+        return yield* Effect.fail(
           new LocalRunnerFailed({
-            message: `the local runner's first line was ${JSON.stringify(line)}, which this build cannot read`,
+            message: `the local runner's first line was ${JSON.stringify(first.line)}, which this build cannot read`,
           }),
-      );
+        );
+      }
+      const announcement = first.announcement.value;
 
       // A failed write means the child has exited, which the supervisor handles; it is not a failure here.
       const writeEnrolment = (enrolment?: string): Effect.Effect<void> =>
@@ -252,8 +362,8 @@ export const startLocalRunner = (
           }),
         );
 
-      if ("runnerId" in said) {
-        announced = said.runnerId;
+      if ("runnerId" in announcement) {
+        announced = announcement.runnerId;
         // Close the pipe, or the child keeps waiting for an enrolment.
         yield* writeEnrolment();
         return spawned;
@@ -263,6 +373,18 @@ export const startLocalRunner = (
       const invitation = yield* joinTokens.create(yield* nowIso);
       yield* writeEnrolment(
         `${JSON.stringify(encodeEnrolment({ controllerUrl: inherited.controllerUrl, token: invitation.token }))}\n`,
+      );
+      // The child joins through this controller's API, which does not listen
+      // until the boot is over, so the id the join gives the child is read in
+      // the background rather than waited for here. A second line this build
+      // cannot read leaves the id unknown until the child's next start.
+      yield* Effect.forkIn(
+        Effect.flatMap(Deferred.await(announcements.joinedRunnerId), (runnerId) =>
+          Effect.sync(() => {
+            if (runnerId !== undefined) announced = runnerId;
+          }),
+        ),
+        readers,
       );
       return spawned;
     });

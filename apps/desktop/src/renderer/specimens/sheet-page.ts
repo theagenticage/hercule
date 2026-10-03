@@ -73,13 +73,13 @@ export interface Crew {
 /**
  * Returns the `Crew` object that the book's crew.js sets on `window`. Fails
  * when crew.js has not run on this page: a reference page must load
- * /design/crew-bureau/crew.js before its module.
+ * /design/crew-bureau-2/crew.js before its module.
  */
 export function readCrew(): Crew {
   const { Crew: crew } = window as Window & { readonly Crew?: Crew };
   if (crew === undefined) {
     throw new Error(
-      "The Bureau book's crew.js has not run on this page. Load /design/crew-bureau/crew.js before this module.",
+      "The Bureau book's crew.js has not run on this page. Load /design/crew-bureau-2/crew.js before this module.",
     );
   }
   return crew;

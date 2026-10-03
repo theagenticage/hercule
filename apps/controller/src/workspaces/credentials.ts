@@ -32,7 +32,7 @@ import { githubTokens, type GithubToken } from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";
 import { SessionTokens } from "../permissions";
-import { canonicalRemoteOf } from "../resources";
+import { canonicalizeRemote } from "../resources";
 
 /**
  * The port through which the credential rule learns whether a workspace step
@@ -218,7 +218,7 @@ const make = Effect.gen(function* () {
           requestId: request.requestId,
           error,
         });
-        const canonicalRemote = canonicalRemoteOf(request.remote);
+        const canonicalRemote = canonicalizeRemote(request.remote);
         if (canonicalRemote === undefined) return buildRefusalAnswer("unauthorized");
         const held = yield* findHeldResource(runnerId, request, canonicalRemote);
         if (Option.isNone(held)) return buildRefusalAnswer("unauthorized");

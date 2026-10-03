@@ -1,5 +1,6 @@
 import type { JSX, ReactNode } from "react";
-import { CheckIcon, ChevronRightIcon } from "../../icons";
+import { CheckIcon } from "../../icons/check";
+import { ChevronRightIcon } from "../../icons/chevron-right";
 
 /**
  * Renders one row of a composer menu: the name, up to two lines under it, a

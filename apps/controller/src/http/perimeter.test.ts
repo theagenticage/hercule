@@ -28,5 +28,7 @@ describe("buildPerimeterWarning", () => {
   it("warns about a wildcard bind, describing it as every network interface", () => {
     expect(buildPerimeterWarning("0.0.0.0", 4937)).toContain("every network interface");
     expect(buildPerimeterWarning("::", 4937)).toContain("every network interface");
+    expect(buildPerimeterWarning("[::]", 4937)).toContain("every network interface");
+    expect(buildPerimeterWarning("0:0:0:0:0:0:0:0", 4937)).toContain("every network interface");
   });
 });

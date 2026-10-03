@@ -1,7 +1,9 @@
 /**
  * Tests connecting the desktop app to a controller (spec 17, §Reaching the
- * controller): the connect screen's check and each of its outcomes, and the
- * connect screen the app opens on when the saved controller is down.
+ * controller): main's connect check and each of its outcomes, and the connect
+ * screen the app opens on when the saved controller is down. An app with no
+ * saved controller opens on the first run's welcome, so the tests connect
+ * through the first run's remote screen, which runs the same check.
  *
  * Each test starts the packaged test package with a fresh user data
  * directory. A controller is the compiled binary in a scratch Hercule Home;
@@ -15,24 +17,13 @@ import { PASSWORD, USERNAME } from "../../scripts/controller-process";
 import {
   answerWithEmptyPage,
   connectTo,
+  findUnusedLoopbackUrl,
   launchForTest,
   readAlertText,
   recordExternalOpens,
   startControllerForTest,
-  startLoopbackServer,
   startServerForTest,
 } from "./harness";
-
-/**
- * Returns the address of a loopback port that nothing listens on: the port of
- * a server that has just stopped. Another process could bind the port in
- * between, but that is unlikely enough for a test.
- */
-async function findUnusedLoopbackUrl(): Promise<string> {
-  const server = await startLoopbackServer((_request, response) => response.end());
-  await server.close();
-  return server.url;
-}
 
 /**
  * Starts recording every uncaught exception in the app's main process, and
@@ -123,18 +114,18 @@ describe("the connect screen", () => {
     expect(readSettings(userDataDir)).not.toHaveProperty("controllerUrl");
   });
 
-  it("opens setup in the browser for a controller that is not set up, and saves nothing", async () => {
+  it("saves a controller that is not set up, and opens no browser", async () => {
     const controller = await startControllerForTest({ setUp: false });
     const { app, page, userDataDir } = await launchForTest();
     const readOpened = await recordExternalOpens(app);
 
     await connectTo(page, controller.url);
 
-    expect(await readAlertText(page)).toBe(
-      "This controller is not set up yet. Finish setup in the browser window that just opened, then connect again.",
-    );
-    expect(await readOpened()).toEqual([`${controller.url}/setup`]);
-    expect(readSettings(userDataDir)).not.toHaveProperty("controllerUrl");
+    // The app sets the controller up in its first run, so main saves it and
+    // reloads the window. Which screen the reloaded window shows is the first
+    // run's to test.
+    await expect.poll(() => readSettings(userDataDir)["controllerUrl"]).toBe(controller.url);
+    expect(await readOpened()).toEqual([]);
   });
 
   it("is where a signed-in app opens when its controller is down, saying so", async () => {

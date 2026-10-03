@@ -64,6 +64,24 @@ window.ResizeObserver = class {
 };
 
 /**
+ * jsdom has no `window.matchMedia`. The Office room asks it whether the user
+ * reduced motion each time its shot or its contents change, so each test that
+ * moves the first run from one step to the next would fail without it. The
+ * stub matches no query. A test that needs a match replaces it.
+ */
+window.matchMedia = (query: string) =>
+  ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }) satisfies MediaQueryList;
+
+/**
  * jsdom has a `<dialog>` element with an `open` attribute, but no
  * `showModal` or `close`. The project picker opens with `showModal`, and
  * closes with `close`, which fires `close` on the dialog as a browser does,
@@ -90,4 +108,23 @@ HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
   if (!this.open) return;
   this.open = false;
   this.dispatchEvent(new Event("close"));
+};
+
+/**
+ * jsdom has no `AnimationEvent`. Without it, React listens for the old
+ * `webkitAnimationEnd` in place of `animationend`, and an event fired with
+ * `fireEvent.animationEnd` never reaches an `onAnimationEnd` handler. jsdom
+ * runs no animations, so a test that waits for one to end fires the event
+ * itself: the Office settles its new pieces when their animation ends.
+ */
+window.AnimationEvent = class extends Event {
+  readonly animationName: string;
+  readonly elapsedTime: number;
+  readonly pseudoElement: string;
+  constructor(type: string, init: AnimationEventInit = {}) {
+    super(type, init);
+    this.animationName = init.animationName ?? "";
+    this.elapsedTime = init.elapsedTime ?? 0;
+    this.pseudoElement = init.pseudoElement ?? "";
+  }
 };

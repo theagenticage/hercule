@@ -31,7 +31,7 @@ import { MainMenu } from "./menu";
 import { SafeStorage } from "./safe-storage";
 import { ThreadNotifications } from "./thread-notifications";
 
-/** What the sheet says when the Keychain cannot encrypt the token. */
+/** The text the sheet shows when the Keychain cannot encrypt the token. */
 const KEYCHAIN_WARNING =
   "Hercule could not save your sign-in to the Keychain, so you will need to sign in again next time.";
 
@@ -162,7 +162,7 @@ const make = Effect.gen(function* () {
             .pipe(Effect.catchTag("PlatformError", Effect.die));
         }
         const controllerUrl = yield* settings.readControllerUrl;
-        if (controllerUrl === null) return yield* new NoControllerSaved();
+        if (controllerUrl === null) return yield* new NoControllerSaved("a login token");
         yield* reflectSignedIn(true);
         yield* encryptAndStore(controllerUrl, token);
       }),

@@ -12,7 +12,7 @@
  * Switching runners rebuilds the whole menu.
  */
 import type { ModelDescriptor, ProviderInstance } from "@hercule/contract";
-import { describeModelCount } from "../provider-rows";
+import { describeModelCount } from "../model-count";
 import {
   findAccountName,
   buildInstanceLabel,
@@ -99,7 +99,7 @@ export const buildModelMenu = (
   current: ThreadConfig,
   view: ModelMenuView,
 ): ModelMenu => {
-  const runner = findReferenceRunner(catalogs.runners, current.runnerId, catalogs.localRunnerId);
+  const runner = findReferenceRunner(catalogs.runners, current.runnerId, catalogs.thisMacRunnerId);
   const filter = view.filter.trim().toLowerCase();
   const listModels = (instance: ProviderInstance): readonly ModelDescriptor[] =>
     findSnapshotOn(instance, runner?.id)?.models ?? [];

@@ -148,6 +148,7 @@ const buildController = (
       publicKey: "bm90LWEta2V5",
       version: CONTROLLER_VERSION,
       defaultRunnerId: options.defaultRunnerId ?? null,
+      localRunnerId: null,
     },
   },
   [`GET /api/v1/runners/${runner.id}`]: { body: runner },
@@ -654,9 +655,6 @@ describe("Runner > providers", () => {
           held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
           return { body: LOGGED_IN };
         },
-        // Every finished login is followed by a probe, so the page shows the
-        // account the machine now holds.
-        [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => ({ body: LOGGED_IN }),
       },
     });
 
@@ -689,21 +687,26 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(readPageText()).toContain("rogier@example.com");
     });
+    // The controller probes the machine before it answers the code, so the
+    // page only reads the new snapshot and never asks for a second probe.
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
-  it("finishes a device-code login without a pasted code, then probes the machine", async () => {
+  it("finishes a device login by itself once the controller announces the new snapshot", async () => {
     const user = userEvent.setup();
     let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
-    const { api } = await openApp(ONLINE, {
+    // Probed after the login started, so it is proof the login worked.
+    const fresh = buildSnapshot({ probedAt: "2026-09-05T09:20:00.000Z", auth: LOGGED_IN.auth });
+    const { api, live } = await openApp(ONLINE, {
       instances: held,
       extra: {
         "GET /api/v1/providers": () => ({ body: held }),
         [`POST /api/v1/providers/${CLAUDE_ID}/login`]: {
-          body: { url: AUTHORIZE_URL, userCode: "CH61-0FI2N" },
-        },
-        [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => {
-          held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
-          return { body: LOGGED_IN };
+          body: {
+            url: AUTHORIZE_URL,
+            userCode: "CH61-0FI2N",
+            expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+          },
         },
       },
     });
@@ -713,19 +716,22 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(readPageText()).toContain("CH61-0FI2N");
     });
-    // The user finishes this login with the vendor in their browser, then
-    // presses Done to tell Hercule.
-    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
 
-    // The credential is on the machine but the stored snapshot is older, so
-    // the account only appears after the machine is probed again.
-    await waitFor(() => {
-      expect(readPageText()).toContain("rogier@example.com");
+    // The user finishes the login with the vendor in their browser. The
+    // runner reports that the vendor's login ended, and the controller probes
+    // the machine again and announces the new snapshot.
+    held = [buildClaudeCodeInstance([fresh]), CODEX];
+    act(() => {
+      live.push("provider", { _tag: "invalidate", ids: [CLAUDE_ID], kind: "updated" });
     });
-    const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
-    expect(asked).toHaveLength(1);
-    expect(asked[0]?.body).toEqual({ instanceId: CLAUDE_ID });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(readPageText()).toContain("rogier@example.com");
     expect(api.calls.filter((call) => call.path.endsWith("/login-code"))).toEqual([]);
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
   it("probes one instance on demand and shows the result", async () => {

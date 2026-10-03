@@ -18,10 +18,16 @@ import {
   buildAppArgs,
   findExecutable,
   findPackagedApp,
+  writeSettings,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
 import { buildAppEnv } from "../../apps/desktop/scripts/processes";
-import { createUserDataDirForTest, runSecondInstance, waitForExit } from "./harness";
+import {
+  createUserDataDirForTest,
+  findUnusedLoopbackUrl,
+  runSecondInstance,
+  waitForExit,
+} from "./harness";
 
 /**
  * The fuses spec 17 sets, by name, and the state each must be in.
@@ -84,13 +90,19 @@ describe("the release package", () => {
     expect(checked).toEqual(RELEASE_FUSES);
   });
 
-  it("holds only out/ and package.json in its app.asar", () => {
+  it("holds only the three bundles in out/ and package.json in its app.asar", () => {
     const archive = join(findPackagedApp("release"), "Contents/Resources/app.asar");
 
-    // Main, the preload and the renderer are bundled into out/. Anything else
-    // here, such as node_modules or source, ships to every user for nothing.
+    // Main, the preload and the renderer are bundled into out/main,
+    // out/preload and out/renderer. Anything else here, such as node_modules,
+    // source, or the screenshots the design checks write to out/, ships to
+    // every user for nothing.
+    const bundles = ["/out/main", "/out/preload", "/out/renderer"];
     const unexpected = listPackage(archive, { isPack: false }).filter(
-      (path) => path !== "/package.json" && path !== "/out" && !path.startsWith("/out/"),
+      (path) =>
+        path !== "/package.json" &&
+        path !== "/out" &&
+        !bundles.some((bundle) => path === bundle || path.startsWith(`${bundle}/`)),
     );
     expect(unexpected).toEqual([]);
   });
@@ -113,7 +125,13 @@ describe("the release package", () => {
     // Every other test runs the test package, so this is the one run of what
     // ships. It is started as a plain process: its inspect arguments are off,
     // so Playwright cannot drive it.
+    //
+    // It also refuses `--hercule-binary`, so with no controller saved its
+    // first run would look for Hercule with this Mac's own binary. A saved
+    // controller that nothing answers at keeps it from looking: the app opens
+    // on the connect screen instead.
     const userDataDir = createUserDataDirForTest();
+    writeSettings(userDataDir, { controllerUrl: await findUnusedLoopbackUrl() });
     const first = spawn(findExecutable("release"), buildAppArgs(userDataDir), {
       env: buildAppEnv(),
       stdio: "ignore",

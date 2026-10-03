@@ -1,0 +1,14 @@
+/* The login dialog that the draft's Log in button opens. The book draws no
+   such dialog: it is the first run's provider row on the glass of the
+   project picker, as wide as the first run's card is inside its padding. */
+.login-dialog {
+  width: 448px;
+}
+.pop-sec.login-dialog-body {
+  padding: 14px;
+}
+/* The book's marked rows sit under a step's heading; here the dialog's
+   header is above them. */
+.login-dialog-body > .hx {
+  margin-top: 0;
+}

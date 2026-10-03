@@ -47,8 +47,15 @@ export {
   buildRedirectUri,
   listSetupFlows,
   decideDeviceFlowStep,
+  describeDeviceFlowWait,
+  DEVICE_FLOW_ENDINGS,
+  describeGitHubSignInEnding,
+  describeGitHubSignInFailure,
+  waitForDeviceFlow,
   type ConnectionType,
   type DeviceFlowStep,
+  type DeviceFlowWatcher,
+  type GitHubSignInEnding,
   type SetupFlow,
 } from "./connections";
 export {
@@ -138,10 +145,61 @@ export {
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
+export {
+  decideDeviceLoginStep,
+  describeDeviceLoginWait,
+  startProviderLogin,
+  type DeviceLogin,
+  type DeviceLoginStep,
+  type StartedProviderLogin,
+} from "./device-login";
+export {
+  computeNextMinuteTick,
+  countMinutesLeft,
+  describeCodeExpiry,
+  describeMinutes,
+} from "./minutes-left";
+export { isLoginCodeRejected } from "./login-code";
 export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
+export {
+  createProjectWithRepositories,
+  isNewProjectCreated,
+  type NewProjectForm,
+  type NewProjectSubmission,
+  type RepositorySubmission,
+} from "./new-project";
+export { completeSetup, validatePasswordLength } from "./setup";
+export {
+  addPutOffStep,
+  buildAllSetRecap,
+  findDoneSteps,
+  buildFirstRunHost,
+  findGitHubAccount,
+  buildFirstRunLadder,
+  buildProvidersStepText,
+  buildRoomContents,
+  decideFirstRunStep,
+  FIRST_RUN_STEPS,
+  type AllSetRecap,
+  type FirstRunDoneSteps,
+  type FirstRunHost,
+  type FirstRunReads,
+  type FirstRunRungStatus,
+  type FirstRunStep,
+  type ProvidersStepText,
+  type RoomContents,
+  type RoomWing,
+} from "./first-run";
+export { formatControllerAddress, isLoopbackOrigin } from "./controller-origin";
+export { formatNameList } from "./name-list";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
-export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
+export {
+  addCompletedStep,
+  findNextOnboardingStep,
+  ONBOARDING_STEPS,
+  type OnboardingStep,
+} from "./onboarding";
 export {
   chooseStamps,
   formatPreciseStamp,
@@ -258,7 +316,14 @@ export { buildBranchField, type BranchField } from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { buildThreadWorkspaceLabel } from "./threads/thread-workspace";
 export { describeWorkStretch, summarizeWork } from "./threads/work-summary";
-export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
+export {
+  describeRemoteRefusal,
+  isClonableRemote,
+  isGitHubRemote,
+  parseRepositoryName,
+  REMOTE_REFUSAL,
+  REMOTE_USERINFO_REFUSAL,
+} from "./remote";
 export {
   buildComposerPlaceholder,
   type DraftSubject,
@@ -274,6 +339,11 @@ export {
 } from "./threads/workspaces";
 export { buildSubmission } from "./threads/submission";
 export { appendToMessage, buildStartCards } from "./threads/start-cards";
+export {
+  chooseStarterThreads,
+  describeEmptyIntake,
+  type StarterThread,
+} from "./threads/starter-threads";
 export {
   buildDraftConfig,
   computeInstanceDefaults,

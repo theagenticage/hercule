@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares five pairs of
+ * For each theme, Whitehaven and Orient Express, it compares seven pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -26,7 +26,10 @@
  *   away from its bottom and the composer shrunk. Both pages are opened with
  *   `?state=scrolled`;
  * - the draft (the main pane) of session-empty.html: the book's page edited
- *   by specimens/draft-reference.ts, and the draft specimen (draft.html).
+ *   by specimens/draft-reference.ts, and the draft specimen (draft.html);
+ * - the draft of a fresh install, with starter threads in place of the start
+ *   cards: the same pages, opened with `?state=first`, and again with
+ *   `?state=first-no-repo` for a project with no repository.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -88,7 +91,7 @@ interface PageItem {
 interface RegionPair {
   /** The region's name in the report and in its images' file names. */
   readonly name: string;
-  /** The book's page, under /design/crew-bureau/desktop/. */
+  /** The book's page, under /design/crew-bureau-2/desktop/. */
   readonly bookPage: string;
   /** The module that edits the book's page to show the fixture's data, under /specimens/. */
   readonly referenceModule: string;
@@ -278,6 +281,8 @@ const DRAFT_PARTS = [
   ".start-top > *",
   ".start-top .bars > i",
   ".start > b",
+  ".intake-note",
+  ".intake-note > svg",
 ];
 
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
@@ -315,6 +320,26 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     bookPage: "session-empty.html",
     referenceModule: "draft-reference.ts",
     specimenPage: "draft.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: DRAFT_PARTS,
+  },
+  {
+    name: "draft-first",
+    bookPage: "session-empty.html",
+    referenceModule: "draft-reference.ts",
+    specimenPage: "draft.html",
+    state: "first",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: DRAFT_PARTS,
+  },
+  {
+    name: "draft-first-no-repo",
+    bookPage: "session-empty.html",
+    referenceModule: "draft-reference.ts",
+    specimenPage: "draft.html",
+    state: "first-no-repo",
     region: MAIN_PANE_REGION,
     scope: "main.main",
     parts: DRAFT_PARTS,
@@ -478,7 +503,7 @@ async function compareRegion(
   const query = `?theme=${theme}${state === undefined ? "" : `&state=${state}`}`;
   const [reference, specimen] = await Promise.all([
     openSheet(
-      new URL(`/design/crew-bureau/desktop/${bookPage}${query}`, sheetsUrl).href,
+      new URL(`/design/crew-bureau-2/desktop/${bookPage}${query}`, sheetsUrl).href,
       new URL(referenceModule, sheetsUrl).href,
     ),
     openSheet(`${sheetsUrl}${specimenPage}${query}`),

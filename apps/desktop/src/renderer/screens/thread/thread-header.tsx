@@ -16,7 +16,9 @@ import {
   threadsQuery,
   workspacesQuery,
 } from "../../app/queries";
-import { EditorIcon, MoreIcon, PlusIcon } from "../../icons";
+import { EditorIcon } from "../../icons/editor";
+import { MoreIcon } from "../../icons/more";
+import { PlusIcon } from "../../icons/plus";
 import { Mark } from "../../marks";
 import { AgeLabel } from "../age-label";
 import { pickProjectTint, ProjectTile } from "../project-tile";

@@ -1,9 +1,10 @@
 /**
  * Test doubles for main's unit tests: a fake window, a settings file in a
- * temporary folder, and a fake HTTP server with Node's `fetch` to reach it.
+ * temporary folder, a fake HTTP server with Node's `fetch` to reach it, and
+ * helpers for tests that run programs.
  * Imported only by `*.test.ts`.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -32,9 +33,14 @@ export interface FakeMainWindow {
   readonly calls: Array<string>;
   /** What `isFocused` returns; a test may change it. */
   focused: boolean;
+  /** The folder `pickFolder` returns, or null for a cancelled dialog; a test may change it. */
+  pickedFolder: string | null;
 }
 
-/** Builds a fake window that records each call, and that starts without the focus. */
+/**
+ * Builds a fake window that records each call, that starts without the
+ * focus, and whose folder dialog is cancelled.
+ */
 export const makeFakeMainWindow = (): FakeMainWindow => {
   const calls: Array<string> = [];
   const record = (call: string): Effect.Effect<void> =>
@@ -44,6 +50,7 @@ export const makeFakeMainWindow = (): FakeMainWindow => {
   const fake: FakeMainWindow = {
     calls,
     focused: false,
+    pickedFolder: null,
     layer: Layer.succeed(MainWindow)({
       load: record("load"),
       reload: record("reload"),
@@ -52,9 +59,32 @@ export const makeFakeMainWindow = (): FakeMainWindow => {
       isFocused: Effect.sync(() => fake.focused),
       showAndSend: (name, payload) => record(`showAndSend ${name} ${JSON.stringify(payload)}`),
       showWarning: (message) => record(`showWarning ${message}`),
+      pickFolder: record("pickFolder").pipe(Effect.map(() => fake.pickedFolder)),
     }),
   };
   return fake;
+};
+
+/** Writes a `/bin/sh` script with `body` at `path`, and makes it executable. */
+export const writeShellScript = (path: string, body: string): void => {
+  writeFileSync(path, `#!/bin/sh\n${body}\n`);
+  chmodSync(path, 0o755);
+};
+
+// The desktop scripts and the end-to-end suite check for a running process
+// too, and they cannot import this file, so the one copy lives with them.
+export { isProcessRunning } from "../../scripts/processes.ts";
+
+/**
+ * Waits until `check` returns true, checking every 20 milliseconds, and
+ * fails after 5 seconds.
+ */
+export const waitUntil = async (check: () => boolean): Promise<void> => {
+  for (let tries = 0; tries < 250; tries++) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("The condition did not hold within 5 seconds.");
 };
 
 /** A settings file in a temporary folder of its own. */

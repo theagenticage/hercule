@@ -28,7 +28,7 @@ const withConnectedRelay = async (
   await Effect.runPromise(
     Effect.scoped(
       Effect.flatMap(
-        relay.attached((frame) =>
+        relay.attachConnection((frame) =>
           Effect.sync(() => {
             sent.push(frame);
           }),

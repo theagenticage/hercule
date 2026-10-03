@@ -22,11 +22,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Duration, Effect, Option } from "effect";
+import { Deferred, Duration, Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bootWith, type BootOutcome, type ControllerServices } from "../bootstrap";
 import { operationLayers, serve } from "../http";
+import { waitUntil } from "../sessions/testing";
 import { Settings } from "../settings";
 import {
   CRASH_LOOP_LIMIT,
@@ -35,6 +36,8 @@ import {
   LOCAL_RUNNER_BACKOFF,
   LOCAL_RUNNER_COMMAND,
   LOCAL_RUNNER_STOP_DEADLINE,
+  makeChildAnnouncements,
+  readChildOutput,
   RunnerAlerts,
   type LocalRunnerOptions,
 } from "./local";
@@ -125,7 +128,10 @@ if (text.trim() !== "") {
         body: "{}",
       });
       if (response.ok) {
-        record({ what: "joined", at: Date.now(), answer: await response.json() });
+        const answer = await response.json();
+        record({ what: "joined", at: Date.now(), answer });
+        // The real child says which runner it now is, as a second line.
+        process.stdout.write(JSON.stringify({ runnerId: answer.runnerId }) + "\\n");
         break;
       }
       record({ what: "refused", at: Date.now(), status: response.status });
@@ -278,18 +284,27 @@ describe("the first boot of an empty home", () => {
     const port = await findFreePort();
     const child = buildStubChild(home, JSON.stringify({ join: true }));
 
-    const seen = await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
+    const seen = await bootAndHold(home, port, { ...FAST, command: child.command }, (outcome) =>
       Effect.gen(function* () {
         yield* Effect.promise(() =>
           waitForNotes(child.notes, (notes) => notes.some((note) => note.what === "joined")),
         );
         const id = String(child.notes().find((note) => note.what === "joined")?.answer?.runnerId);
+        // The child writes its new id after the join, and the controller reads
+        // it from a real pipe, so there is no event to wait for but the id
+        // itself. `readChildOutput`'s own tests check the reading without one.
+        yield* Effect.promise(() =>
+          waitUntil("read the runner id the child wrote after its join", () =>
+            outcome.localRunner?.runnerId(),
+          ),
+        );
         const runners = yield* runnerRepository;
         return {
           names: yield* Effect.orDie(runnerNames),
           minted: yield* Effect.orDie(tokensMinted),
           defaultRunnerId: yield* Effect.orDie((yield* Settings).defaultRunnerId()),
           row: Option.getOrThrow(yield* Effect.orDie(runners.read(id))),
+          held: outcome.localRunner?.runnerId(),
         };
       }),
     );
@@ -332,6 +347,9 @@ describe("the first boot of an empty home", () => {
     // The controller's own machine is the fleet's general-purpose runner:
     // reserved is something a person asks for on a machine of their own.
     expect(seen.row.reserved).toBe(false);
+    // The controller knows its local runner from the first boot on, not only
+    // after the child's next start.
+    expect(seen.held).toBe(joined?.answer?.runnerId);
   }, 30_000);
 
   it("creates no token and no join for a child that already has its runner id", async () => {
@@ -628,6 +646,95 @@ describe("stopping", () => {
     expect(took).toBeLessThan(20_000);
     expect(child.notes().filter((note) => note.what === "spawned")).toHaveLength(1);
   }, 30_000);
+});
+
+/**
+ * Reads `chunks` as the child's stdout through `readChildOutput`, and returns
+ * the announcements and everything forwarded after them. The stream ends
+ * after the last chunk, as a child's stdout ends when it exits.
+ */
+const readChunks = (chunks: ReadonlyArray<string>) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const encoder = new TextEncoder();
+      const stdout = new ReadableStream<Uint8Array>({
+        start: (controller) => {
+          for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+          controller.close();
+        },
+      });
+      let forwarded = "";
+      const announcements = yield* makeChildAnnouncements;
+      yield* readChildOutput(stdout, announcements, (text) => {
+        forwarded += text;
+      });
+      const first = yield* Deferred.await(announcements.first);
+      const joinedRunnerId = yield* Deferred.await(announcements.joinedRunnerId);
+      return { first: first?.line, joinedRunnerId, forwarded };
+    }),
+  );
+
+describe("reading the child's stdout", () => {
+  const RUNNER_ID = "0199f0b7-0002-7000-8000-000000000000";
+  const KNOWN = `{"runnerId":"${RUNNER_ID}"}`;
+  const JOIN = `{"join":true}`;
+
+  it("reads a runner id on the first line, and forwards every later line", async () => {
+    expect(await readChunks([`${KNOWN}\nlog one\n`, "log two\n"])).toEqual({
+      first: KNOWN,
+      joinedRunnerId: undefined,
+      forwarded: "log one\nlog two\n",
+    });
+  });
+
+  it("reads the runner id the child writes after a join", async () => {
+    expect(await readChunks([`${JOIN}\n`, `${KNOWN}\n`, "log\n"])).toEqual({
+      first: JOIN,
+      joinedRunnerId: RUNNER_ID,
+      forwarded: "log\n",
+    });
+  });
+
+  it("reads lines split across chunks, and several lines in one chunk", async () => {
+    const whole = `${JOIN}\n${KNOWN}\nlog\n`;
+    expect(await readChunks([whole.slice(0, 5), whole.slice(5, 20), whole.slice(20)])).toEqual({
+      first: JOIN,
+      joinedRunnerId: RUNNER_ID,
+      forwarded: "log\n",
+    });
+  });
+
+  it("completes both announcements empty when the output ends before a whole line", async () => {
+    expect(await readChunks(["no newline"])).toEqual({
+      first: undefined,
+      joinedRunnerId: undefined,
+      forwarded: "",
+    });
+  });
+
+  it("knows no runner id when the output ends after a join, as it does when the join fails", async () => {
+    expect(await readChunks([`${JOIN}\n`])).toEqual({
+      first: JOIN,
+      joinedRunnerId: undefined,
+      forwarded: "",
+    });
+  });
+
+  it("knows no runner id when the line after a join is not an announcement", async () => {
+    expect(await readChunks([`${JOIN}\nnot json\n`])).toEqual({
+      first: JOIN,
+      joinedRunnerId: undefined,
+      forwarded: "",
+    });
+  });
+
+  it("returns the first line even when it is not an announcement", async () => {
+    expect(await readChunks(["not json\n"])).toEqual({
+      first: "not json",
+      joinedRunnerId: undefined,
+      forwarded: "",
+    });
+  });
 });
 
 describe("counting exits within a window", () => {

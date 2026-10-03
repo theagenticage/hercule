@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { HerculeClient, LoginTarget } from "@hercule/client-core";
+import type { HerculeClient, Live, LoginTarget } from "@hercule/client-core";
 import { ProviderLogin } from "../provider-login";
 
 /**
@@ -12,11 +12,12 @@ import { ProviderLogin } from "../provider-login";
  * on one machine and works only there. Spec 06 §3.1 owns that rule.
  */
 export const buildLoginSlot =
-  (client: HerculeClient, onLoggedIn: () => void) =>
+  (client: HerculeClient, live: Live, onLoggedIn: () => void) =>
   (login: LoginTarget, className: string): ReactNode => (
     <ProviderLogin
       className={className}
       client={client}
+      live={live}
       instanceId={login.instanceId}
       runnerId={login.runnerId}
       subject={login.subject}

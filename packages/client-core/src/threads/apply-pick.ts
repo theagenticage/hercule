@@ -62,7 +62,7 @@ export const applyPick = (
       const forInstance = computeInstanceDefaults(
         instance,
         catalogs.runners,
-        catalogs.localRunnerId,
+        catalogs.thisMacRunnerId,
       );
       return { ...omitOptions(picks), instanceId: pick.value, ...forInstance };
     }

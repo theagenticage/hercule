@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findRefusedArgument } from "./refused-arguments";
+import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
 
 /** The arguments the end-to-end tests start the app with. */
 const TEST_ARGS = ["-ApplePersistenceIgnoreState", "YES", "--user-data-dir=/tmp/hercule-e2e"];
@@ -64,5 +64,33 @@ describe("findRefusedArgument", () => {
 
   it("refuses nothing in development", () => {
     expect(findRefusedArgument(refusedArgs, false, false)).toBeUndefined();
+  });
+});
+
+describe("readBinaryPathArgument", () => {
+  const args = [...TEST_ARGS, "--hercule-binary=/tmp/stand-in/hercule"];
+
+  it("reads the path in a development run and with the inspector open", () => {
+    expect(readBinaryPathArgument(args, false, false)).toBe("/tmp/stand-in/hercule");
+    expect(readBinaryPathArgument(args, true, true)).toBe("/tmp/stand-in/hercule");
+  });
+
+  it("ignores the switch in a packaged app with the inspector closed, which refuses it", () => {
+    expect(readBinaryPathArgument(args, true, false)).toBeUndefined();
+    expect(findRefusedArgument(args, true, false)).toBe("--hercule-binary=/tmp/stand-in/hercule");
+  });
+
+  it("reads the last path when the switch is given twice", () => {
+    expect(
+      readBinaryPathArgument(
+        [...TEST_ARGS, "--hercule-binary=/tmp/first/hercule", "--hercule-binary=/tmp/last/hercule"],
+        false,
+        false,
+      ),
+    ).toBe("/tmp/last/hercule");
+  });
+
+  it("returns undefined without the switch", () => {
+    expect(readBinaryPathArgument(TEST_ARGS, false, false)).toBeUndefined();
   });
 });

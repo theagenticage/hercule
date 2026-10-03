@@ -109,6 +109,7 @@ function Sessions(): JSX.Element {
                 <ProviderLogin
                   key={row.id}
                   client={client}
+                  live={live}
                   instanceId={row.id}
                   runnerId={local.id}
                   subject={`${row.name} on this machine`}

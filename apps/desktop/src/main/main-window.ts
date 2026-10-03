@@ -63,5 +63,12 @@ export class MainWindow extends Context.Service<
      * and returns without waiting for the user to close it.
      */
     readonly showWarning: (message: string) => Effect.Effect<void>;
+
+    /**
+     * Shows the system's dialog for picking a folder, in a sheet on the
+     * window, and returns the folder's absolute path once the user picks
+     * one, or null when the user cancels.
+     */
+    readonly pickFolder: Effect.Effect<string | null>;
   }
 >()("hercule/desktop/MainWindow") {}

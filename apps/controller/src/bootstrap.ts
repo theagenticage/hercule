@@ -23,7 +23,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import type { Plugin } from "@hercule/plugin-host";
-import type { HomePaths } from "@hercule/home";
+import { buildControllerOrigin, type HomePaths } from "@hercule/home";
 import { makeProcessLogLayer } from "@hercule/process-log";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
@@ -64,6 +64,7 @@ import {
 } from "./secrets";
 import {
   JoinTokensLayer,
+  LocalRunnerId,
   RunnerConnections,
   RunnerConnectionsLayer,
   startLocalRunner,
@@ -96,9 +97,6 @@ import { WorkspaceService, WorkspaceServiceLayer, type WorkspaceStepActivity } f
 /** Setup tokens are created and stored like every other Hercule token. */
 export { hashToken };
 
-/** The two bind hosts that mean "every interface". A URL needs a reachable address instead. */
-const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
-
 /** The result of a boot. `setupUrl` is `undefined` once setup is complete. */
 export interface BootOutcome {
   readonly paths: HomePaths;
@@ -120,19 +118,6 @@ export type BootError =
   | SettingError
   | GrantsError
   | LocalRunnerFailed;
-
-/**
- * Returns the origin a process on this machine uses to reach the controller. A
- * wildcard bind host becomes loopback, because nothing can open
- * `http://0.0.0.0:4937`; an IPv6 literal is put in brackets. `bind.host` is
- * validated when the config is resolved, so here it is only a host; a value
- * `URL` cannot parse would be a bug, not a URL nobody can open.
- */
-export function buildControllerOrigin(bindHost: string, bindPort: number): string {
-  const host = WILDCARD_HOSTS.has(bindHost) ? "127.0.0.1" : bindHost;
-  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-  return `http://${authority}:${bindPort}`;
-}
 
 /** Returns the one-time setup URL, at an address a browser on this machine can open. */
 export function buildSetupUrl(bindHost: string, bindPort: number, token: string): string {
@@ -252,6 +237,7 @@ export type ControllerServices =
   | WorkspaceService
   | WorkspaceStepActivity
   | ConnectionService
+  | LocalRunnerId
   | HerculeHome
   | BootstrapConfig;
 
@@ -401,7 +387,15 @@ export const bootWith = <A, E>(
       return { paths, identityId: record.id, setupUrl: url, localRunner } satisfies BootOutcome;
     });
 
-    return yield* Effect.scoped(Effect.flatMap(steps, use)).pipe(
+    return yield* Effect.scoped(
+      Effect.flatMap(steps, (outcome) =>
+        // Provided here, next to the local runner the boot started, so a
+        // service built in `use` reads the id from the running child.
+        Effect.provideService(use(outcome), LocalRunnerId, {
+          read: () => outcome.localRunner?.runnerId(),
+        }),
+      ),
+    ).pipe(
       Effect.provide(withPlugins.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
       // A failed statement becomes one line that includes the file name,
       // because a controller that fails at boot has printed nothing else yet.

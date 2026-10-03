@@ -6,7 +6,7 @@
  *
  * crew.js returns each piece as a string of markup, so this is the one file
  * in the renderer that may set `innerHTML`. The markup is the book's own,
- * from the copy in docs/design/crew-bureau that is kept unedited.
+ * from its second edition in docs/design/crew-bureau-2.
  */
 import "./sheet.css";
 import { SHEET, type IconName, type Piece } from "./cells";

@@ -99,10 +99,15 @@
         gap: 8px;
         margin: 0 0 10px 2px;
       }
-      /* A fresh install (?state=first) has nothing in Intake yet: it offers starter threads instead,
-         and says when Intake fills. */
-      html:not([data-state="first"]) .when-first,
-      html[data-state="first"] .when-busy {
+      /* A fresh install has nothing in Intake yet: it offers starter threads instead, and says what
+         fills Intake. ?state=first is a project with its repository, so the starters are about code.
+         ?state=first-no-repo is a project whose repository waits for GitHub: the agent works without
+         a checkout, so the starters are about research, writing and plans. */
+      html:not([data-state="first"]):not([data-state="first-no-repo"]) .when-first,
+      html[data-state="first"] .when-busy,
+      html[data-state="first-no-repo"] .when-busy,
+      html:not([data-state="first-no-repo"]) .when-no-repo,
+      html[data-state="first-no-repo"] .when-repo {
         display: none;
       }
       .intake-note {
@@ -133,7 +138,8 @@
             <div class="newbie">
               <span class="newbie-face"><i data-face="New thread in webshop" data-pose="idle" data-size="68"></i></span>
               <h1>What should the agent do in webshop?</h1>
-              <p>It gets its own worktree of webshop, on a new branch from main.</p>
+              <p class="when-repo">It gets its own worktree of webshop, on a new branch from main.</p>
+              <p class="when-no-repo">webshop has no repository yet, so the agent works without a checkout.</p>
             </div>
 
             <div class="composer">
@@ -150,15 +156,16 @@
                 </div>
               </div>
               <div class="lip">
-                <span><i data-i="worktree" data-size="13"></i>New worktree</span>
-                <span><i data-i="branch" data-size="13"></i>from main</span>
+                <span class="when-repo"><i data-i="worktree" data-size="13"></i>New worktree</span>
+                <span class="when-repo"><i data-i="branch" data-size="13"></i>from main</span>
+                <span class="when-no-repo"><i data-i="worktree" data-size="13"></i>No checkout</span>
                 <span class="spacer"></span>
                 <span><i data-i="laptop" data-size="13"></i>studio-mac</span>
               </div>
             </div>
 
             <div class="starts-h section-h when-first"><i data-i="sparkle" data-size="14"></i>Or start from one of these</div>
-            <div class="starts when-first">
+            <div class="starts when-first when-repo">
               <button class="start">
                 <span class="start-top"><i data-i="eye" data-size="14"></i><span>Get to know it</span></span>
                 <b>Walk me through how webshop is put together</b>
@@ -172,7 +179,22 @@
                 <b>Bring the README up to date with how webshop runs today</b>
               </button>
             </div>
-            <p class="intake-note when-first"><i data-i="intake" data-size="14"></i>Intake is empty for now. Triage first reads GitHub at 11:00 and brings what needs work here.</p>
+            <div class="starts when-first when-no-repo">
+              <button class="start">
+                <span class="start-top"><i data-i="file" data-size="14"></i><span>Something to present</span></span>
+                <b>Make me a short presentation about …</b>
+              </button>
+              <button class="start">
+                <span class="start-top"><i data-i="search" data-size="14"></i><span>Something to find out</span></span>
+                <b>Research … and summarise what you find, with sources</b>
+              </button>
+              <button class="start">
+                <span class="start-top"><i data-i="list" data-size="14"></i><span>Something to plan</span></span>
+                <b>Write a one-page plan for …</b>
+              </button>
+            </div>
+            <p class="intake-note when-first when-repo"><i data-i="intake" data-size="14"></i>Intake is empty for now. Triage reads GitHub a few times a day and brings what needs work here.</p>
+            <p class="intake-note when-first when-no-repo"><i data-i="intake" data-size="14"></i>Intake is empty for now. Connect GitHub, and Triage brings what needs work here.</p>
 
             <div class="starts-h section-h when-busy"><i data-i="intake" data-size="14"></i>Start from Intake</div>
             <div class="starts when-busy">

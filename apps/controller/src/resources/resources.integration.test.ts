@@ -19,7 +19,7 @@ import {
   registerConnectionType,
   type Plugin,
 } from "@hercule/plugin-host";
-import { del, get, post, send } from "../http/testing";
+import { del, get, post, readErrorBody, send } from "../http/testing";
 import type { AuditKind } from "../events";
 import { waitUntil, type Arranged } from "../sessions/testing";
 import { readErrorCode, withFleet } from "../workspaces/testing";
@@ -175,6 +175,23 @@ describe("resource.create", () => {
 
       // The rejected call created nothing.
       expect((await queryResources(arranged)).map((one) => one.id)).toEqual([https.id]);
+    });
+  });
+
+  it("rejects a remote with a user name or password, and says why", async () => {
+    await withResources(async (arranged) => {
+      const refused = await readErrorBody(
+        await createResource(arranged, {
+          kind: "repo",
+          remote: "https://octocat:ghp_secret@github.com/acme/web.git",
+        }),
+      );
+      expect(refused.code).toBe("validation");
+      expect(refused.issues).toEqual([["remote"]]);
+      expect(refused.text).toContain("cannot hold a user name or password");
+      // The credential is not echoed back in the refusal.
+      expect(refused.text).not.toContain("ghp_secret");
+      expect(await queryResources(arranged)).toEqual([]);
     });
   });
 

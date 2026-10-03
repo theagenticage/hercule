@@ -9,6 +9,7 @@ import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
+import { LocalRunnerId } from "../runners";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { SettingsLayer } from "../settings";
 import { Controller, ControllerLayer } from "./service";
@@ -37,10 +38,15 @@ const buildStack = () => {
   );
 };
 
-/** Creates the identity, as the boot does, then runs `body` as `actor`. */
+/**
+ * Creates the identity, as the boot does, then runs `body` as `actor`. The
+ * local runner's id is read through `localRunner`, which is provided where the
+ * service is built, as `hercule serve` provides it.
+ */
 const withIdentity = <A, E>(
   body: Effect.Effect<A, E, Controller | ControllerIdentity>,
   actor: Actor | null = USER,
+  localRunner: { readonly read: () => string | undefined } = { read: () => undefined },
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -50,7 +56,7 @@ const withIdentity = <A, E>(
         ? body
         : body.pipe(Effect.provideService(CurrentActor, actor));
       return { record, result };
-    }).pipe(Effect.provide(buildStack())),
+    }).pipe(Effect.provide(buildStack()), Effect.provideService(LocalRunnerId, localRunner)),
   );
 
 describe("controller.read", () => {
@@ -69,7 +75,41 @@ describe("controller.read", () => {
       Effect.flatMap(Controller, (controller) => controller.read()),
     );
 
-    expect(Object.keys(result).sort()).toEqual(["defaultRunnerId", "id", "publicKey", "version"]);
+    expect(Object.keys(result).sort()).toEqual([
+      "defaultRunnerId",
+      "id",
+      "localRunnerId",
+      "publicKey",
+      "version",
+    ]);
+  });
+
+  it("returns no local runner when the controller starts none", async () => {
+    const { result } = await withIdentity(
+      Effect.flatMap(Controller, (controller) => controller.read()),
+    );
+
+    expect(result.localRunnerId).toBeNull();
+  });
+
+  it("reads the local runner's id from the running child on every call", async () => {
+    // The child reports its id only once it has joined, so the first read
+    // comes before it and the second after it.
+    let reported: string | undefined;
+    const runnerId = "0199f0b7-0002-7000-8000-000000000000";
+    const { result } = await withIdentity(
+      Effect.gen(function* () {
+        const controller = yield* Controller;
+        const before = yield* controller.read();
+        reported = runnerId;
+        const after = yield* controller.read();
+        return { before: before.localRunnerId, after: after.localRunnerId };
+      }),
+      USER,
+      { read: () => reported },
+    );
+
+    expect(result).toEqual({ before: null, after: runnerId });
   });
 
   it("rejects a caller without the grant before it reads anything", async () => {

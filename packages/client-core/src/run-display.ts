@@ -21,6 +21,7 @@ import type {
   WorkflowAction,
 } from "@hercule/contract";
 import { describeActor, type ActorReading, type ActorTarget } from "./actor-display";
+import { formatNameList } from "./name-list";
 import { formatDuration } from "./threads/duration";
 import { formatStamp } from "./time-context";
 
@@ -431,9 +432,6 @@ export interface RunnerWait {
   readonly text: string;
 }
 
-/** Joins action ids the way a sentence lists them: "git.commit, git.push and git.tag". */
-const ACTION_LIST_FORMAT = new Intl.ListFormat("en-GB", { type: "conjunction" });
-
 /**
  * Returns which steps of a running run wait for a runner, and the line they
  * show, with times in `timezone`. A step waits only when its action runs in
@@ -486,7 +484,7 @@ export const describeRunnerWait = (
     );
     return {
       stepIds,
-      text: `Waiting for a runner that can run ${ACTION_LIST_FORMAT.format(planActionIds)}`,
+      text: `Waiting for a runner that can run ${formatNameList(planActionIds, "and")}`,
     };
   }
 

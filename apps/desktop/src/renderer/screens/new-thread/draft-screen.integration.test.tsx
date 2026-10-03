@@ -2,8 +2,8 @@
  * Tests the new-thread screen as the app opens it at `/`: the question and
  * the lead, a draft that cannot start, starting a thread with ⏎ or Thread >
  * Send, a start the controller refuses, a start made once when the user
- * comes back while it runs, the draft kept per place, the start cards, and
- * the picks a start carries.
+ * comes back while it runs, the draft kept per place, the start cards, the
+ * starter threads while Intake is empty, and the picks a start carries.
  *
  * The menus are the browser's popovers, which jsdom does not implement, so
  * their content is tested on its own. Here a pick is written into the
@@ -12,7 +12,13 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProviderInstance, Runner, Task } from "@hercule/contract";
+import {
+  GITHUB_CONNECTION_TYPE,
+  type Connection,
+  type ProviderInstance,
+  type Runner,
+  type Task,
+} from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
 import {
@@ -52,6 +58,20 @@ const CART_TASK: Task = {
   createdAt: "2026-09-10T08:00:00.000Z",
   updatedAt: "2026-09-10T08:00:00.000Z",
   statusChangedAt: "2026-09-10T08:00:00.000Z",
+};
+
+/** A GitHub Connection, for the starters' line about what fills Intake. */
+const GITHUB_CONNECTION: Connection = {
+  id: "01a06d02-7800-7000-8000-000000000001",
+  type: GITHUB_CONNECTION_TYPE,
+  label: "rogier",
+  displayName: "rogier",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: "2026-09-05T09:00:00.000Z",
+  updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
 /**
@@ -102,8 +122,9 @@ describe("the new-thread screen", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should the agent do?");
     expect(screen.getByText("It works without a checkout.")).toBeTruthy();
     expect(readLip()).toBe("No workspace" + "moss");
-    // A draft with no project has no tasks to start from.
+    // A draft with no project has no tasks to start from, nor starters.
     expect(screen.queryByRole("heading", { name: "Start from Intake" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Or start from one of these" })).toBeNull();
   });
 
   it("names a main workspace it joins as the thread's lip does, on the machine the workspace is on", async () => {
@@ -387,6 +408,53 @@ describe("the new-thread screen", () => {
     const params = new URLSearchParams(tasksCall?.search);
     expect(params.get("projectId")).toBe(WEBSHOP.id);
     expect(params.getAll("sort")).toEqual(["priority:desc", "createdAt:desc"]);
+    expect(screen.queryByRole("region", { name: "Or start from one of these" })).toBeNull();
+  });
+
+  it("offers code starters while the project's Intake is empty, and a click fills the message without sending", async () => {
+    const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`);
+
+    const starters = await screen.findByRole("region", { name: "Or start from one of these" });
+    expect(
+      within(starters)
+        .getAllByRole("button")
+        .map((each) => each.textContent),
+    ).toEqual([
+      "Get to know it" + "Walk me through how webshop is put together",
+      "A first fix" + "Find a failing or flaky test and fix it",
+      "A small chore" + "Bring the README up to date with how webshop runs today",
+    ]);
+    expect(within(starters).getByText(/^Intake is empty for now/).textContent).toBe(
+      "Intake is empty for now. Connect GitHub, and Triage brings what needs work here.",
+    );
+    expect(screen.queryByRole("region", { name: "Start from Intake" })).toBeNull();
+
+    await userEvent.click(within(starters).getByRole("button", { name: /^Get to know it/ }));
+
+    expect(field.value).toBe("Walk me through how webshop is put together");
+    expect(document.activeElement).toBe(field);
+    expect(readSpawns(calls)).toHaveLength(0);
+  });
+
+  it("offers knowledge-work starters in a project without a repository, and says Triage reads GitHub once it is connected", async () => {
+    await openDraft(`/?project=${WEBSHOP.id}`, {
+      "GET /api/v1/resources": { body: { items: [] } },
+      "GET /api/v1/connections": { body: { items: [GITHUB_CONNECTION] } },
+    });
+
+    const starters = await screen.findByRole("region", { name: "Or start from one of these" });
+    expect(
+      within(starters)
+        .getAllByRole("button")
+        .map((each) => each.textContent),
+    ).toEqual([
+      "Something to present" + "Make me a short presentation about …",
+      "Something to find out" + "Research … and summarise what you find, with sources",
+      "Something to plan" + "Write a one-page plan for …",
+    ]);
+    expect((await within(starters).findByText(/^Intake is empty for now/)).textContent).toBe(
+      "Intake is empty for now. Triage reads GitHub and brings what needs work here.",
+    );
   });
 
   it("shows the picks in the lip and the lead, and starts the thread with them", async () => {
