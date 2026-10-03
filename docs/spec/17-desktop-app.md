@@ -738,7 +738,7 @@ The physical footprint of an empty app, measured later with a visible 1440 by 90
 What the numbers show:
 
 - **Idle faces are not free.** Bureau starts each face's blink at a different time, so with 40 faces on screen one of them is almost always blinking. That keeps the GPU process awake about 16 times as often as a still page, and wakes the renderer about 30 times a second while nothing happens.
-- **Glass costs almost nothing on this machine.** Composer glass while streaming measured within noise of no glass.
+- **Glass costs almost nothing on this machine.** Composer glass while streaming measured within noise of no glass. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* That holds over a page that changes little. Over the Office's canvas, which changes with every frame, glass costs much more (see [Rules](#rules), rule 5).
 
 ### Budgets
 
@@ -778,9 +778,16 @@ These are starting budgets. The first performance pass measures the real thread 
 | The first screen's JavaScript | The Office and three.js are a chunk of their own, loaded the first time the Office opens. The first screen grows only by the sidebar's Office button, the Go menu item and the route |
 | Memory with the Office open, and the Office chunk's size | The first measurement records each. From then on, each limit is that reading plus 10% |
 
-- **The idle row and the Office.** The idle row allows the GPU at most 12 wakeups a second, and an Office drawing 30 frames a second wakes it about 30 times. The idle row is the limit for the app while nothing happens. On mains power, a visible Office is something happening: its colleagues live, and the CPU row above holds its cost instead. When the Office stands still, the idle row applies to it again.
+- **The idle row and the Office.** The idle row allows the renderer no wakeups from the app and the GPU at most 12 a second. An Office drawing 30 frames a second wakes the renderer about 65 times a second and the GPU process about 300, so a living Office can never meet the idle row. The idle row is the limit for the app while nothing happens. On mains power, a visible Office is something happening: its colleagues live, and the CPU row above holds its cost instead. When the Office stands still, the idle row applies to it again.
 - **An unfocused window keeps its 30 frames a second** while it is visible. A living Office on a second screen is what the Office is for. Whether the Office should stand still in more cases is decided after the first measurement.
-- **Why the CPU limits are what they are.** The research for #332 ([#333](https://github.com/theagenticage/hercule/issues/333)) measured the prototype at 30 frames a second, at High quality with ambient occlusion, at 15 to 19% of one core for the renderer and 30 to 34% for the GPU process. At Medium quality, with the static furniture merged into one mesh per material and the shadows drawn once, it measured about 11% and 9%. The limits sit above the first reading, so v1 can ship with the 30-frame cap alone, and come down to the first measurement plus 10%, as every budget does.
+- **Why the CPU limits are what they are.** The research for #332 ([#333](https://github.com/theagenticage/hercule/issues/333)) measured the prototype with the reference fleet, in % of one core for the renderer and the GPU process:
+  - as it was, with no cap: 88 frames a second, 45 and 85;
+  - capped at 30 frames a second: 16 and 31;
+  - capped, and without the glass: 14 and 12, so the glass costs the GPU process about 19;
+  - capped, without the glass, and without ambient occlusion at a pixel ratio of 1.5: 9 to 10 and 7 to 8;
+  - standing still: 0 and 0, with no wakeups.
+
+  The limits sit above the capped reading, so v1 can ship with the cap alone. They come down to the first measurement plus 10%, as every budget does.
 - **Memory and the chunk have no limit for the first merge.** No measurement of the Office inside the packaged app exists yet, so a limit set now would be a guess, and a limit set from the measurement it gates would hold nothing. The first run's room already reads above the app's memory budget ([#330](https://github.com/theagenticage/hercule/issues/330)).
 
 ### Rules
@@ -817,7 +824,7 @@ These rules keep the budgets:
      - The connect check after `hercule service install`: main checks every half second for at most 30 seconds, because the controller announces nothing while it starts.
      - A provider's login does not poll: its end arrives on the `provider` live topic.
 5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0, and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
-   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Glass over the Office costs far more than glass over a still page. The page under a blur changes with every frame the Office draws, so the blur is drawn again each time. On the reference machine, the Office's glass costs the GPU process 15 to 16 points of one core at 30 frames a second. Its top bar and room labels keep their glass, and the Office's measurement records that cost.
+   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Glass over the Office costs far more than glass over a still page. The page under a blur changes with every frame the Office draws, so the blur is drawn again each time. On the reference machine, the Office's glass costs the GPU process about 19 points of one core at 30 frames a second. Its top bar and room labels keep their glass, and the Office's measurement records that cost.
 6. **The first paint is cheap:**
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
