@@ -28,6 +28,7 @@ import {
 import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
+import { NO_USER_MATERIAL_PATHS } from "./testing";
 
 /** The hercule-as-a-tool files, which the runner prepares once at startup. */
 const HERCULE_TOOL = {
@@ -395,6 +396,13 @@ const SPEC: SessionSpec = {
 
 const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
 
+/**
+ * The context of a Thread that sees User Material. For Claude the paths are
+ * empty: the runner links the material into the instance's home instead, and
+ * the field being present is what marks the session.
+ */
+const THREAD: ProviderRunnerContext = { ...WORKING, userMaterial: NO_USER_MATERIAL_PATHS };
+
 /** A fake harness for a session. The test sends it messages one at a time. */
 interface Driving {
   readonly adapter: ProviderAdapter;
@@ -623,8 +631,9 @@ describe("a Claude Code session", () => {
 
     const [options] = run.options;
     expect(options?.cwd).toBe("/home/me/repo");
-    // Only the project source: the user's own `~/.claude` stays out, because
-    // the config directory is still the instance's home (spec 06 section 9.1).
+    // Only the project source: this session is not a Thread that sees User
+    // Material, so it never reads the instance's home as the user source
+    // (spec 06 section 9.1).
     expect(options?.settingSources).toEqual(["project"]);
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(CONTEXT.home);
     expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
@@ -640,10 +649,42 @@ describe("a Claude Code session", () => {
     // so nothing is copied per session and it never clashes with a Thread's own
     // `.claude/` directory (spec 06 section 9.3).
     expect(options?.plugins).toEqual([{ type: "local", path: HERCULE_TOOL.claudePluginDir }]);
-    // Checked together with the plugin: the skill must be found with no setting
-    // sources at all, so it comes from Hercule and not from whatever files
-    // happen to be on this runner (spec 06 section 10.1).
+    // Checked together with the plugin: a workspace-less session that sees no
+    // User Material loads no setting source at all, so the skill can only
+    // come from Hercule's plugin and not from whatever files happen to be on
+    // this runner (spec 06 section 10.1).
     expect(options?.settingSources).toEqual([]);
+  });
+
+  it("loads the user source for a Thread that sees User Material, so it reads the links in the instance's home", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, THREAD));
+
+    const [options] = run.options;
+    expect(options?.cwd).toBe(THREAD.cwd);
+    expect(options?.settingSources).toEqual(["user"]);
+    // The user source is the config directory, which stays the instance's
+    // home: the runner linked the user's material there (spec 06 section 9.1).
+    expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(THREAD.home);
+    // User Material is skills and instructions only. MCP servers and auto
+    // memory stay off for a Thread, as for every other session.
+    expect(options?.strictMcpConfig).toBe(true);
+    expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
+    expect(options?.plugins).toEqual([{ type: "local", path: HERCULE_TOOL.claudePluginDir }]);
+  });
+
+  it("loads the user and project sources for a Thread with a workspace that sees User Material", async () => {
+    const run = createDriving();
+    const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, spec, { ...THREAD, cwd: "/home/me/repo" }),
+    );
+
+    const [options] = run.options;
+    expect(options?.cwd).toBe("/home/me/repo");
+    expect(options?.settingSources).toEqual(["user", "project"]);
+    expect(options?.strictMcpConfig).toBe(true);
+    expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
   });
 
   // The Claude permission mode for each access mode (spec 06 section 8.1). The

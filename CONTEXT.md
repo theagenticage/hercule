@@ -45,7 +45,7 @@ An agent a session's harness delegated work to while the session runs. It works 
 _Avoid_: task (Task is a unit of human intent, not Claude Code's word for a subagent), child session, sub-session, collab agent, child agent
 
 **User Material**:
-The user's own knowledge and configuration from a local harness installation - skills, subagent definitions, instructions, commands, settings. Linked live into Threads on runners that have it; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
+The user's own knowledge and configuration from a local harness installation - skills, subagent definitions, instructions, commands, settings. Seen live by Threads on the controller's local runner; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
 _Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles
 
 **Run**:

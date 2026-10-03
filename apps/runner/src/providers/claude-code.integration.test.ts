@@ -2,18 +2,30 @@
  * Checks that the real vendor SDK still returns the shapes that the stubbed
  * tests in `claude-code.test.ts` assume.
  *
- * The probe test uses a temporary config directory and never touches the
- * developer's own `~/.claude`. The session tests cannot do that: a login is
- * stored only in the config directory, and on macOS it is a Keychain item
- * keyed by that directory, so it cannot be copied into a temporary one. So
- * the session tests use the developer's own login, spend a few tokens, and
- * run only when opted in.
+ * The probe test and the User Material tests use a temporary config directory
+ * and never touch the developer's own `~/.claude`. The User Material tests can
+ * do that because they only read what a session loaded at startup and never
+ * send a turn, so a placeholder API key is enough. The other session tests
+ * cannot: a login is stored only in the config directory, and on macOS it is a
+ * Keychain item keyed by that directory, so it cannot be copied into a
+ * temporary one. So those tests use the developer's own login, spend a few
+ * tokens, and run only when opted in.
  */
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
+import { query as sdkQuery, type Query } from "@anthropic-ai/claude-agent-sdk";
 import type { OutputSchema, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
@@ -23,9 +35,11 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
 import { prepareTooling } from "../sessions/tooling";
-import { claudeCode } from "./claude-code";
+import { claudeCode, makeClaudeCodeAdapter } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
+import { runProcess } from "./process";
 import type { ProviderRunnerContext } from "./index";
+import { NO_USER_MATERIAL_PATHS } from "./testing";
 
 const binary = Bun.which("claude") ?? undefined;
 
@@ -611,5 +625,139 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
       expect(await Effect.runPromise(claudeCode.listSessions)).toEqual([]);
     },
     Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+});
+
+const THREAD_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff09";
+const ISOLATED_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0a";
+
+/**
+ * Checks that the real CLI loads User Material from the instance's home only
+ * for a Thread that sees it. The home is laid out the way the runner links a
+ * user's material into it:
+ *
+ * - `skills` is a directory symlink to the user's `~/.claude/skills`, whose
+ *   entry is itself a relative symlink into `~/.agents/skills`, as on a
+ *   machine where the skills are shared between harnesses.
+ * - `CLAUDE.md` is a symlink to the user's `~/.claude/CLAUDE.md`.
+ *
+ * Both the home and the user's directory are temporary. The sessions never
+ * send a turn: the test asks the CLI what it loaded at startup, which needs no
+ * login.
+ */
+describe.skipIf(binary === undefined)("User Material in a real Claude Code session", () => {
+  /** Lays out a user's material and an instance home that links to it. */
+  const linkUserMaterial = (): { readonly root: string; readonly home: string } => {
+    const root = createTemporaryHome();
+    const userHome = join(root, "user");
+    const skill = join(userHome, ".agents", "skills", "probe-skill");
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(
+      join(skill, "SKILL.md"),
+      "---\nname: probe-skill\ndescription: A skill this test looks for.\n---\n\nNothing.\n",
+    );
+    const claudeDir = join(userHome, ".claude");
+    mkdirSync(join(claudeDir, "skills"), { recursive: true });
+    symlinkSync("../../.agents/skills/probe-skill", join(claudeDir, "skills", "probe-skill"));
+    writeFileSync(join(claudeDir, "CLAUDE.md"), "# Personal\n\nThe user's own instructions.\n");
+
+    const home = join(root, "instance");
+    mkdirSync(home);
+    symlinkSync(join(claudeDir, "skills"), join(home, "skills"));
+    symlinkSync(join(claudeDir, "CLAUDE.md"), join(home, "CLAUDE.md"));
+    return { root, home };
+  };
+
+  /**
+   * Starts a workspace-less session through the adapter, with the real SDK,
+   * and returns the skills and memory files the CLI reports it loaded. The
+   * session is stopped before this returns.
+   */
+  const readLoadedMaterial = async (
+    sessionId: string,
+    userMaterial: ProviderRunnerContext["userMaterial"],
+  ): Promise<{
+    readonly home: string;
+    readonly skills: ReadonlyArray<string>;
+    readonly memoryFiles: ReadonlyArray<{ readonly path: string; readonly type: string }>;
+  }> => {
+    const { root, home } = linkUserMaterial();
+    const scratch = join(root, "scratch");
+    mkdirSync(scratch);
+    let running: Query | undefined;
+    const adapter = makeClaudeCodeAdapter({
+      stream: ({ options, input }) => {
+        const started = sdkQuery({ prompt: input, options });
+        running = started;
+        return {
+          [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+          interrupt: () => started.interrupt().then(() => undefined),
+          setModel: (model) => started.setModel(model),
+          close: () => void started.return(undefined).catch(() => undefined),
+        };
+      },
+      query: () => {
+        throw new Error("these tests start sessions, not probes");
+      },
+      run: runProcess,
+    });
+    const context: ProviderRunnerContext = {
+      cwd: scratch,
+      home,
+      binary: binary!,
+      // `HOME` points into the temporary directory too, so nothing the CLI
+      // finds under the developer's own home can reach the session.
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        HOME: join(root, "user"),
+        ANTHROPIC_API_KEY: "sk-ant-placeholder",
+      },
+      secrets: {},
+      herculeTool: prepareTool(),
+      ...(userMaterial === undefined ? {} : { userMaterial }),
+    };
+
+    await Effect.runPromise(adapter.startSession(sessionId, SPEC, context));
+    try {
+      await running!.initializationResult();
+      // `summary` is computed from local estimates. `full` would count tokens
+      // through the API, which the placeholder key cannot do.
+      const usage = await running!.getContextUsage({ detail: "summary" });
+      return {
+        home,
+        skills: (usage.skills?.skillFrontmatter ?? [])
+          .flatMap((skill) =>
+            skill.source === "built-in" ? [] : [`${skill.name} (${skill.source})`],
+          )
+          .sort(),
+        memoryFiles: usage.memoryFiles.map(({ path, type }) => ({ path, type })),
+      };
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+    }
+  };
+
+  it(
+    "lists the user's skills and instructions in a Thread that sees User Material",
+    async () => {
+      const loaded = await readLoadedMaterial(THREAD_SESSION_ID, NO_USER_MATERIAL_PATHS);
+
+      // Hercule's own skill comes from its plugin, beside the user's.
+      expect(loaded.skills).toEqual(["hercule:hercule (plugin)", "probe-skill (userSettings)"]);
+      expect(loaded.memoryFiles).toEqual([{ path: join(loaded.home, "CLAUDE.md"), type: "User" }]);
+    },
+    Duration.toMillis(PROBE_DEADLINE) * 2,
+  );
+
+  it(
+    "loads none of it in a session that does not see User Material",
+    async () => {
+      const loaded = await readLoadedMaterial(ISOLATED_SESSION_ID, undefined);
+
+      // The links are in the same home, but the CLI never reads them.
+      expect(loaded.skills).toEqual(["hercule:hercule (plugin)"]);
+      expect(loaded.memoryFiles).toEqual([]);
+    },
+    Duration.toMillis(PROBE_DEADLINE) * 2,
   );
 });

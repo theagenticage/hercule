@@ -305,6 +305,8 @@ export interface QueuedSession {
   readonly githubConnectionId: string | null;
   readonly providerId: string;
   readonly config: unknown;
+  /** The Agent the session was spawned from; `null` for a Thread. */
+  readonly agentId: string | null;
 }
 
 /** A session's ingest state; see `ingestState`. */
@@ -389,6 +391,10 @@ const make = Effect.gen(function* () {
           session.githubConnectionId === undefined
             ? null
             : uuidFromString(session.githubConnectionId);
+        // A session with no Agent is a Thread, and a Thread on the controller's
+        // local runner sees the user's own material (spec 06 section 9.1). A
+        // new caller that writes a session for an Agent, an assistant or a
+        // workflow step must set its Agent.
         const agent = session.agentId === undefined ? null : uuidFromString(session.agentId);
         const conversation =
           session.conversationId === undefined ? null : uuidFromString(session.conversationId);
@@ -808,6 +814,7 @@ const make = Effect.gen(function* () {
           readonly github_connection_id: Uint8Array | null;
           readonly provider_id: string;
           readonly config: string;
+          readonly agent_id: Uint8Array | null;
         }>`
           SELECT s.id, s.created_at, s.spec,
                  -- The branch is used only once: the runner switches the main
@@ -816,7 +823,7 @@ const make = Effect.gen(function* () {
                  -- would change the branch under whatever the user has done in
                  -- that checkout since.
                  CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
-                 s.github_connection_id, pi.provider_id, pi.config
+                 s.github_connection_id, pi.provider_id, pi.config, s.agent_id
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
             -- A session waits until its workspace is ready. Starting it
@@ -840,6 +847,7 @@ const make = Effect.gen(function* () {
               row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
             providerId: row.provider_id,
             config: JSON.parse(row.config) as unknown,
+            agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
           })),
       ),
 

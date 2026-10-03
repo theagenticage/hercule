@@ -2,7 +2,10 @@
  * The pi adapter. It runs one pi process per session and talks to it in pi's
  * RPC mode. Everything the process reads or writes lives under the instance's
  * own agent directory. If pi used the developer's own directory, Hercule's
- * sessions would mix with the user's login, skills and settings.
+ * sessions would mix with the user's login, skills and settings. The one
+ * exception is a Thread on the controller's local runner, which also reads the
+ * user's own skills, prompt templates and instructions, each named on its
+ * command line.
  */
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,7 +28,7 @@ import type {
   SessionSpec,
   TurnInput,
 } from "@hercule/protocol";
-import type { ProviderAdapter, ProviderRunnerContext } from "../index";
+import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
 import { buildUserMessage } from "../events";
 import { buildFailedProbe } from "../probe";
 import { runProcess, spawnPi, type Run } from "../process";
@@ -326,6 +329,24 @@ const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>
 };
 
 /**
+ * Builds the flags that load the user's own material into one pi process:
+ * `--skill` per skill directory, `--prompt-template` per prompt template
+ * directory, and `--append-system-prompt` with the instructions file when the
+ * user has one. Returns no flags when there is no material, which is the case
+ * for every session that is not a Thread on the controller's local runner.
+ */
+const buildUserMaterialFlags = (material: UserMaterial | undefined): ReadonlyArray<string> =>
+  material === undefined
+    ? []
+    : [
+        ...material.skillDirs.flatMap((dir) => ["--skill", dir]),
+        ...material.promptTemplateDirs.flatMap((dir) => ["--prompt-template", dir]),
+        ...(material.instructionsFile === undefined
+          ? []
+          : ["--append-system-prompt", material.instructionsFile]),
+      ];
+
+/**
  * Builds pi's command-line arguments for a session. A new session gets
  * Hercule's session id with `--session-id`. A resume passes the transcript with
  * `--session` instead: pi rejects the two together, because the transcript
@@ -348,7 +369,9 @@ const buildArgv = (
     // it, which is accepted. A session without one runs in an empty scratch
     // directory and reads no context file, so no stray file on this runner can
     // reach it. Either way the agent directory pi also reads is the instance's
-    // home, never the user's own (spec 06 section 9.1).
+    // home, never the user's own (spec 06 section 9.1). A Thread that sees the
+    // user's material gets the user's instructions file through its own flag,
+    // after the Agent's own system prompt.
     ...(spec.workspaceId === null ? ["--no-context-files"] : []),
     // Load nothing else of the user's own: a Hercule session runs only on what
     // the controller configured for it, not on whatever this machine has
@@ -376,6 +399,18 @@ const buildArgv = (
     ...(spec.systemPrompt === undefined
       ? []
       : ["--append-system-prompt", buildSystemPromptPath(ctx.home, sessionId)]),
+    // A Thread on the controller's local runner is the exception to the
+    // `--no-*` flags above: it also sees the user's own skills, prompt
+    // templates and instructions (spec 06 section 9.1). pi still loads a
+    // directory named with `--skill` or `--prompt-template` under those flags.
+    // The material goes on this process's command line, not into the
+    // instance's agent directory, because every session of the instance reads
+    // that directory. The user's extensions never load, even for a Thread.
+    //
+    // pi appends each `--append-system-prompt` in the order given, so the
+    // user's instructions come after the Agent's own system prompt, as they
+    // do for Codex.
+    ...buildUserMaterialFlags(ctx.userMaterial),
     // pi reads a flag with an empty value as an unknown flag, so the flag is
     // left out when there is nothing to exclude.
     ...(excluded.length === 0 ? [] : ["--exclude-tools", excluded.join(",")]),

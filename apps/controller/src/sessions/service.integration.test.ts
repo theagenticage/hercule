@@ -157,6 +157,8 @@ const insertQueuedSession = (
     readonly githubConnectionId?: string;
     /** An existing profile row, for a test whose session token has to resolve. */
     readonly permissionProfileId?: string;
+    /** The Agent the session runs as. Without it the session is a Thread. */
+    readonly agentId?: string;
   },
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -166,7 +168,7 @@ const insertQueuedSession = (
       id,
       title: "a session",
       permissionProfileId: options.permissionProfileId ?? mintId(),
-      agentId: undefined,
+      agentId: options.agentId,
       conversationId: undefined,
       instanceId: options.instanceId,
       runnerId,
@@ -258,18 +260,27 @@ const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({
 /** The identity the connection's account in these tests commits as. */
 const ALICE = { name: "alice", email: "alice@users.noreply.github.com" };
 
-/** Calls `starting` the way the controller daemon does: inside the caller's transaction. */
+/**
+ * Calls `starting` the way the controller daemon does: inside the caller's
+ * transaction. Without `options.localRunnerId` the controller has no local
+ * runner.
+ */
 const claimStarting = (
   runnerId: string,
   room: number,
   readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>,
+  options: { readonly localRunnerId?: string } = {},
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const sessions = yield* SessionService;
     return yield* withTransaction(
       sql,
-      sessions.starting(runnerId, room, { readGithubAccount, secretsOf: NO_SECRETS }),
+      sessions.starting(runnerId, room, {
+        readGithubAccount,
+        readSecrets: NO_SECRETS,
+        localRunnerId: options.localRunnerId,
+      }),
     );
   });
 
@@ -450,6 +461,43 @@ describe("SessionService.starting", () => {
     expect("gitIdentity" in result.claimed[0]!.frame).toBe(false);
   });
 
+  it("sets the `userMaterial` flag only for a Thread on the local runner", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const spec = buildSpec(instanceId, "clever");
+        const localRunnerId = mintId();
+        const otherRunnerId = mintId();
+        const localThread = yield* insertQueuedSession(localRunnerId, { instanceId, spec });
+        const localAgentSession = yield* insertQueuedSession(localRunnerId, {
+          instanceId,
+          spec,
+          agentId: mintId(),
+        });
+        const otherThread = yield* insertQueuedSession(otherRunnerId, { instanceId, spec });
+        const noAccount = () => Effect.succeed(undefined);
+        return {
+          local: mapFramesBySession(
+            yield* claimStarting(localRunnerId, 2, noAccount, { localRunnerId }),
+          ),
+          other: mapFramesBySession(
+            yield* claimStarting(otherRunnerId, 1, noAccount, { localRunnerId }),
+          ),
+          localThread,
+          localAgentSession,
+          otherThread,
+        };
+      }),
+    );
+
+    expect(result.local.get(result.localThread)!.userMaterial).toBe(true);
+    // An Agent's session never gets the flag, and neither does a Thread on
+    // another runner. Both frames leave the key out rather than setting it to
+    // false.
+    expect("userMaterial" in result.local.get(result.localAgentSession)!).toBe(false);
+    expect("userMaterial" in result.other.get(result.otherThread)!).toBe(false);
+  });
+
   it("leaves a row whose stored spec will not decode queued, and starts the rest of the batch", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -607,7 +655,8 @@ describe("SessionService.starting", () => {
             sql,
             sessions.starting(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
-              secretsOf: NO_SECRETS,
+              readSecrets: NO_SECRETS,
+              localRunnerId: undefined,
             }),
           );
           const fiber = yield* Effect.forkChild(claim);

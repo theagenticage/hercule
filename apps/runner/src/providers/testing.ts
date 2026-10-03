@@ -4,7 +4,8 @@
  * - a scratch home per test;
  * - a stream of lines a test pushes into;
  * - waiting for an adapter that reports on its event stream rather than
- *   through the return value of the call.
+ *   through the return value of the call;
+ * - the User Material of a Thread that has no paths to pass.
  *
  * They live here rather than in one adapter's folder so that copies cannot
  * drift apart, for example a wait with a different timeout, or a home one copy
@@ -15,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import type { ProviderEvent } from "@hercule/protocol";
+import type { UserMaterial } from "./index";
 
 const homes: Array<string> = [];
 
@@ -103,3 +105,14 @@ export const filterByTag = <Tag extends ProviderEvent["_tag"]>(
   tag: Tag,
 ): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
   seen.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
+
+/**
+ * User Material with no paths: what a Thread gets when its user has none of
+ * the material, and what a Claude Code Thread always gets, because Claude
+ * reads the user's material through links in its instance home.
+ */
+export const NO_USER_MATERIAL_PATHS: UserMaterial = {
+  skillDirs: [],
+  promptTemplateDirs: [],
+  instructionsFile: undefined,
+};

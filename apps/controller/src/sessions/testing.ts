@@ -264,10 +264,16 @@ export interface Enlisted {
  * The controller's server options, plus what the fleet needs: the runner's
  * facts and models, and the plugins, which a fleet cannot do without.
  */
-export type FleetOptions = Omit<ServerOptions, "plugins"> & {
+export type FleetOptions = Omit<ServerOptions, "plugins" | "readLocalRunnerId"> & {
   readonly plugins: ReadonlyArray<Plugin>;
   readonly facts: RunnerFacts;
   readonly models: ReadonlyArray<ModelDescriptor>;
+  /**
+   * Makes the fleet's first runner the controller's local runner. Without it
+   * the controller has no local runner. A runner added with `enlist` is never
+   * the local one.
+   */
+  readonly firstRunnerIsLocal?: true;
 };
 
 /**
@@ -280,9 +286,12 @@ export type FleetOptions = Omit<ServerOptions, "plugins"> & {
  */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  { facts, models, ...server }: FleetOptions,
-): Promise<void> =>
-  withServer(async (harness) => {
+  { facts, models, firstRunnerIsLocal, ...server }: FleetOptions,
+): Promise<void> => {
+  // The runner's id is known only once it joins, after the server is up.
+  let localRunnerId: string | undefined;
+  const options = { ...server, readLocalRunnerId: () => localRunnerId };
+  return withServer(async (harness) => {
     const token = await completeSetup(harness.base);
     const joined = await send("POST", harness.base, "/api/v1/runners/join", {
       body: {},
@@ -290,6 +299,9 @@ export const withFleet = (
     });
     expect(joined.status, await joined.clone().text()).toBe(201);
     const answer = (await joined.json()) as JoinAnswer;
+    // Set before the runner connects, so every dispatch to it sees it as the
+    // local runner.
+    if (firstRunnerIsLocal === true) localRunnerId = answer.runnerId;
     const wire = await dial(harness.base, answer.credential, facts, models);
     // A real runner reports its sessions right after its hello (none, on a
     // fresh connection). Most tests want dispatch working from their first
@@ -346,7 +358,8 @@ export const withFleet = (
     } finally {
       for (const one of wires) one.close();
     }
-  }, server);
+  }, options);
+};
 
 /** Returns the id of the provider instance created for a provider, by the provider's id. */
 export const findInstanceId = (arranged: Arranged, providerId: string): string => {
@@ -443,7 +456,7 @@ const AGENT_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: []
 /** Runs `body` against a fleet whose one runner can run a session on any built-in profile. */
 export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  options: Omit<ServerOptions, "plugins"> = {},
+  options: Omit<FleetOptions, "plugins" | "facts" | "models"> = {},
 ): Promise<void> =>
   withFleet(body, {
     plugins: [createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin],

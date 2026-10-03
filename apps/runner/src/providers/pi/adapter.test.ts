@@ -4,11 +4,13 @@
  * pi 0.85.1's, and the commands and responses follow the shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
+import type { UserMaterial } from "../index";
+import { NO_USER_MATERIAL_PATHS } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
 import { OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {
@@ -173,6 +175,89 @@ describe("launching pi for a session", () => {
     // an exit here too would report the same end twice.
     await settle();
     expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+});
+
+/** The User Material the runner finds on a machine that has all of the user's material. */
+const USER_MATERIAL: UserMaterial = {
+  skillDirs: ["/Users/someone/.agents/skills", "/Users/someone/.pi/agent/skills"],
+  promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
+  instructionsFile: "/Users/someone/.pi/agent/AGENTS.md",
+};
+
+/** The flags that load `USER_MATERIAL` into pi, in the order the adapter adds them. */
+const USER_MATERIAL_FLAGS = [
+  "--skill",
+  "/Users/someone/.agents/skills",
+  "--skill",
+  "/Users/someone/.pi/agent/skills",
+  "--prompt-template",
+  "/Users/someone/.pi/agent/prompts",
+  "--append-system-prompt",
+  "/Users/someone/.pi/agent/AGENTS.md",
+];
+
+/** Starts a session on a fake pi with the given user material. Returns the setup and the pi spawned. */
+const startSessionWithMaterial = async (
+  userMaterial: UserMaterial | undefined,
+  spec: SessionSpec = SPEC,
+): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
+  const run = createDriving();
+  const ctx = { ...run.ctx, ...(userMaterial === undefined ? {} : { userMaterial }) };
+  await Effect.runPromise(run.adapter.startSession(SESSION, spec, ctx));
+  return { ...run, ctx, child: run.spawns[0]! };
+};
+
+describe("launching pi for a Thread that sees the user's own material", () => {
+  it("loads the user's skills, prompt templates and instructions by name, and keeps pi's own discovery off", async () => {
+    const run = await startSessionWithMaterial(USER_MATERIAL);
+
+    // The `--no-*` flags stay: they stop pi's own discovery, while a directory
+    // named on the command line still loads. Extensions stay off even here.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home),
+      ...USER_MATERIAL_FLAGS,
+    ]);
+  });
+
+  it("puts the user's instructions after the Agent's own system prompt", async () => {
+    const run = await startSessionWithMaterial(USER_MATERIAL, {
+      ...SPEC,
+      systemPrompt: "You review pull requests.",
+    });
+
+    // pi appends each `--append-system-prompt` in the order given.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home),
+      "--append-system-prompt",
+      join(run.ctx.home, `system-prompt-${SESSION}.txt`),
+      ...USER_MATERIAL_FLAGS,
+    ]);
+  });
+
+  it("adds nothing for a Thread whose user has no material on this machine", async () => {
+    const run = await startSessionWithMaterial(NO_USER_MATERIAL_PATHS);
+
+    expect(run.child.command).toEqual([run.ctx.binary, ...buildFlags(run.ctx.home)]);
+  });
+
+  it("adds none of the user's material to an isolated session", async () => {
+    const run = await startSessionWithMaterial(undefined);
+
+    expect(run.child.command).not.toContain("--skill");
+    expect(run.child.command).not.toContain("--prompt-template");
+    expect(run.child.command).not.toContain("--append-system-prompt");
+  });
+
+  it("writes nothing of the user's material into the instance's agent directory", async () => {
+    const thread = await startSessionWithMaterial(USER_MATERIAL);
+    const isolated = await startSessionWithMaterial(undefined);
+
+    // Every session of the instance reads that directory, so anything written
+    // there for a Thread would reach the instance's other sessions too.
+    expect(readdirSync(thread.ctx.home).sort()).toEqual(readdirSync(isolated.ctx.home).sort());
   });
 });
 

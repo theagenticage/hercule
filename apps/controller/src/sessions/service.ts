@@ -190,9 +190,10 @@ export interface StartRequest {
 }
 
 /**
- * The readers a start frame needs from outside this domain, passed in by the
- * caller. The controller daemon passes its own credential readers, so this
- * domain never reads a secret itself.
+ * What a start frame needs from outside this domain, passed in by the caller:
+ * the credential readers, and the id of the controller's local runner. The
+ * controller daemon passes its own credential readers, so this domain never
+ * reads a secret itself.
  */
 export interface StartNeeds {
   readonly readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>;
@@ -202,10 +203,15 @@ export interface StartNeeds {
    * session: a session started without its key would report that it is not
    * logged in.
    */
-  readonly secretsOf: (
+  readonly readSecrets: (
     instanceId: string,
     providerId: string,
   ) => Effect.Effect<Record<string, string>, SqlError | SecretDecryptError>;
+  /**
+   * The id of the controller's local runner, or `undefined` while it is not
+   * known. A Thread starting on this runner gets the `userMaterial` flag.
+   */
+  readonly localRunnerId: string | undefined;
 }
 
 /** One user input to store, and the model selection the session runs under from then on. */
@@ -813,7 +819,9 @@ const make = Effect.gen(function* () {
     /**
      * Moves up to `room` of this runner's oldest queued sessions to
      * `starting`, and returns the complete start frame for each: the token,
-     * the spec, and the GitHub account it pushes as, when a Connection is set.
+     * the spec, the GitHub account it pushes as, when a Connection is set, and
+     * the `userMaterial` flag that lets a Thread on the local runner see User
+     * Material.
      * Joins the caller's transaction and reads what the frames need inside it,
      * which is fine because a database read and a decrypt do not wait on a
      * runner. The daemon sends the frames only after that transaction commits.
@@ -853,7 +861,7 @@ const make = Effect.gen(function* () {
             // read now rather than stored, like the account's token: the frame
             // is the only place it is written down.
             const secrets = yield* Effect.option(
-              needs.secretsOf(spec.value.instanceId, row.providerId),
+              needs.readSecrets(spec.value.instanceId, row.providerId),
             );
             if (Option.isNone(secrets)) {
               keyless.push(row.id);
@@ -888,6 +896,13 @@ const make = Effect.gen(function* () {
                   ? {}
                   : { ghToken: account.token, gitIdentity: account.gitIdentity }),
                 ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
+                // Only a Thread on the local runner sees User Material (spec
+                // 06 section 9.1). The flag is decided here at every start
+                // rather than stored on the spec, so a resume or a fork of a
+                // Thread is decided again.
+                ...(row.agentId === null && needs.localRunnerId === runnerId
+                  ? { userMaterial: true }
+                  : {}),
               },
             });
           }

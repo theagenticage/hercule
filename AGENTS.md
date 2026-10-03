@@ -139,7 +139,7 @@ pnpm install
 pnpm typecheck   # tsc over the backend, packages/ui, apps/web, and apps/desktop
 pnpm lint        # eslint --max-warnings 0, then prettier --check
 pnpm test        # vitest across every package: the backend on Bun, the React packages on Node
-pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; the controller's domains, and the controller daemon's folders, form a DAG
+pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; only sessions/context.ts imports the runner's user-material/; the controller's domains, and the controller daemon's folders, form a DAG
 ```
 
 Then the packaging pair, which CI runs after those four. `pnpm test:binary` runs the

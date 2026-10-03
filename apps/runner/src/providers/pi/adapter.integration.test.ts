@@ -11,7 +11,7 @@
  * Every run gets a throwaway agent directory: the developer's own `~/.pi` is
  * never touched.
  */
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
@@ -24,9 +24,15 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
 import { pi } from "./adapter";
-import type { ProviderRunnerContext } from "../index";
+import type { ProviderRunnerContext, UserMaterial } from "../index";
 import { buildContext, SPEC } from "./testing";
-import { cleanupHomes, createScratchHome, filterByTag, waitUntil } from "../testing";
+import {
+  cleanupHomes,
+  createScratchHome,
+  filterByTag,
+  NO_USER_MATERIAL_PATHS,
+  waitUntil,
+} from "../testing";
 import { pointAtFakeModel, startFakeModelServer, type FakeModelServer } from "./upstream";
 
 const binary = Bun.which("pi") ?? undefined;
@@ -260,56 +266,86 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
   }, 60_000);
 });
 
+/** The fake model servers the tests below start, stopped once the file is done. */
+const upstreams: Array<FakeModelServer> = [];
+afterAll(() => {
+  for (const upstream of upstreams.splice(0)) upstream.stop();
+});
+
+/**
+ * Starts a real pi session on the fake model server, in the given directory,
+ * sends one input, and stops the session once pi has asked the model. Returns
+ * the body of that first request, which holds pi's whole system prompt. No key
+ * is needed, because the model is the fake server.
+ *
+ * The session's `HOME` is `userHome`, or an empty scratch directory when the
+ * test passes none, so pi never sees the developer's own home. The session
+ * sees User Material only when the test passes `userMaterial`.
+ */
+const sendFirstRequest = async (
+  workspaceId: SessionSpec["workspaceId"],
+  cwd: string,
+  user: { readonly home?: string; readonly material?: UserMaterial } = {},
+): Promise<string> => {
+  const upstream = startFakeModelServer();
+  upstreams.push(upstream);
+  const home = createScratchDir();
+  pointAtFakeModel(home, upstream.baseUrl);
+  const userHome = user.home ?? createScratchDir();
+  // The user's own pi points at the fake model too. A session that reads the
+  // user's agent directory by mistake then still asks the model, so the
+  // test's assertion reports the mistake rather than a timeout.
+  const userAgentDir = join(userHome, ".pi", "agent");
+  mkdirSync(userAgentDir, { recursive: true });
+  pointAtFakeModel(userAgentDir, upstream.baseUrl);
+
+  const sessionId = crypto.randomUUID();
+  await Effect.runPromise(
+    pi.startSession(
+      sessionId,
+      {
+        ...SPEC,
+        workspaceId,
+        modelSelection: { model: "fake-model", options: { thinking: "low" } },
+      },
+      {
+        ...buildContext(home, cwd),
+        binary: binary!,
+        env: { PATH: process.env["PATH"] ?? "", HOME: userHome },
+        ...(user.material === undefined ? {} : { userMaterial: user.material }),
+      },
+    ),
+  );
+  await Effect.runPromise(pi.sendInput(sessionId, { text: "What is the code word?" }));
+  await waitUntil("pi asked the model", () => upstream.asked() >= 1, PATIENCE_MS);
+  await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
+  return upstream.requests()[0]!;
+};
+
+/** Returns a marker unique to one test, for finding text in pi's request. */
+const createMarker = (label: string): string =>
+  `hercule-${label}-${crypto.randomUUID().slice(0, 8)}`;
+
 /**
  * Checks that the real pi reads the `AGENTS.md` in a session's cwd when the
- * session has a workspace, and ignores it when the session has none. The
- * model is the fake server, so no key is needed: the test reads the request
- * pi sends it, where pi puts its context files into the system prompt.
+ * session has a workspace, and ignores it when the session has none. pi puts
+ * its context files into the system prompt, which the request to the model
+ * holds.
  */
 describe.skipIf(binary === undefined)("a real pi and the AGENTS.md in its cwd", () => {
-  const upstreams: Array<FakeModelServer> = [];
-  afterAll(() => {
-    for (const upstream of upstreams.splice(0)) upstream.stop();
-  });
-
-  /**
-   * Starts a session in a directory holding an `AGENTS.md` with a marker,
-   * sends one input, and stops the session once pi has asked the model.
-   * Returns the marker and the body of that first request.
-   */
-  const sendFirstRequest = async (
-    workspaceId: SessionSpec["workspaceId"],
-  ): Promise<{ readonly marker: string; readonly request: string }> => {
-    const upstream = startFakeModelServer();
-    upstreams.push(upstream);
-    const home = createScratchDir();
-    pointAtFakeModel(home, upstream.baseUrl);
+  /** Creates a cwd holding an `AGENTS.md` with a marker. Returns the cwd and the marker. */
+  const createProject = (): { readonly cwd: string; readonly marker: string } => {
     const cwd = createScratchDir();
-    const marker = `hercule-project-${crypto.randomUUID().slice(0, 8)}`;
+    const marker = createMarker("project");
     writeFileSync(join(cwd, "AGENTS.md"), `# Project\n\nThe project's code word is ${marker}.\n`);
-
-    const sessionId = crypto.randomUUID();
-    await Effect.runPromise(
-      pi.startSession(
-        sessionId,
-        {
-          ...SPEC,
-          workspaceId,
-          modelSelection: { model: "fake-model", options: { thinking: "low" } },
-        },
-        { ...buildContext(home, cwd), binary: binary!, env: { PATH: process.env["PATH"] ?? "" } },
-      ),
-    );
-    await Effect.runPromise(pi.sendInput(sessionId, { text: "What is the code word?" }));
-    await waitUntil("pi asked the model", () => upstream.asked() >= 1, PATIENCE_MS);
-    await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
-    return { marker, request: upstream.requests()[0]! };
+    return { cwd, marker };
   };
 
   it(
     "puts the workspace's AGENTS.md into the system prompt",
     async () => {
-      const { marker, request } = await sendFirstRequest("0199e0e7-0000-7000-8000-00000000000b");
+      const { cwd, marker } = createProject();
+      const request = await sendFirstRequest("0199e0e7-0000-7000-8000-00000000000b", cwd);
       expect(request).toContain(marker);
     },
     BUDGET_MS,
@@ -318,8 +354,85 @@ describe.skipIf(binary === undefined)("a real pi and the AGENTS.md in its cwd", 
   it(
     "leaves an AGENTS.md in its cwd out when it has no workspace",
     async () => {
-      const { marker, request } = await sendFirstRequest(null);
+      const { cwd, marker } = createProject();
+      const request = await sendFirstRequest(null, cwd);
       expect(request).not.toContain(marker);
+    },
+    BUDGET_MS,
+  );
+});
+
+/**
+ * Checks that the real pi loads the user's own skill and instructions for a
+ * Thread, even with its own discovery turned off, and loads neither for a
+ * session that does not see User Material. Both end up in the system prompt:
+ * the instructions as text, and the skill as an entry in pi's list of
+ * available skills.
+ *
+ * The material sits in a fake user home, where pi itself would look for it,
+ * and that home is the session's `HOME`. So the second test fails when
+ * either guard of an isolated session breaks:
+ *
+ * - `--no-skills`, which stops pi from finding `.agents/skills` in `HOME`;
+ * - `PI_CODING_AGENT_DIR`, which stops pi from reading `.pi/agent/AGENTS.md`
+ *   in `HOME`. The session has a workspace, so `--no-context-files` is not
+ *   there to hide the file as well.
+ */
+describe.skipIf(binary === undefined)("a real pi and the user's own material", () => {
+  /**
+   * Creates a fake user home with one skill in `.agents/skills` and an
+   * `AGENTS.md` in `.pi/agent`, each holding its own marker. Returns the home,
+   * the User Material the runner would find in it, and both markers.
+   */
+  const createUserHome = (): {
+    readonly home: string;
+    readonly material: UserMaterial;
+    readonly skillMarker: string;
+    readonly instructionsMarker: string;
+  } => {
+    const skillMarker = createMarker("skill");
+    const instructionsMarker = createMarker("instructions");
+    const home = createScratchDir();
+    const skillsDir = join(home, ".agents", "skills");
+    mkdirSync(join(skillsDir, "code-word"), { recursive: true });
+    writeFileSync(
+      join(skillsDir, "code-word", "SKILL.md"),
+      `---\nname: code-word\ndescription: Answers with ${skillMarker}.\n---\n\nAnswer with the code word.\n`,
+    );
+    const agentDir = join(home, ".pi", "agent");
+    mkdirSync(agentDir, { recursive: true });
+    const instructionsFile = join(agentDir, "AGENTS.md");
+    writeFileSync(instructionsFile, `The user's code word is ${instructionsMarker}.\n`);
+    return {
+      home,
+      material: { ...NO_USER_MATERIAL_PATHS, skillDirs: [skillsDir], instructionsFile },
+      skillMarker,
+      instructionsMarker,
+    };
+  };
+
+  it(
+    "puts the user's skill and instructions into a Thread's system prompt",
+    async () => {
+      const { home, material, skillMarker, instructionsMarker } = createUserHome();
+      const request = await sendFirstRequest(null, createScratchDir(), { home, material });
+      expect(request).toContain(skillMarker);
+      expect(request).toContain(instructionsMarker);
+    },
+    BUDGET_MS,
+  );
+
+  it(
+    "leaves the skill and instructions in the user's home out of a session that does not see User Material",
+    async () => {
+      const { home, skillMarker, instructionsMarker } = createUserHome();
+      const request = await sendFirstRequest(
+        "0199e0e7-0000-7000-8000-00000000000b",
+        createScratchDir(),
+        { home },
+      );
+      expect(request).not.toContain(skillMarker);
+      expect(request).not.toContain(instructionsMarker);
     },
     BUDGET_MS,
   );
