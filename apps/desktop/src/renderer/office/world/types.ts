@@ -59,8 +59,6 @@ export interface Colleague {
   readonly runnerId: string | null;
   /** The model's display name, or null when it is not known. */
   readonly model: string | null;
-  /** What the colleague did last, oldest first: one line each. */
-  readonly activity: ReadonlyArray<string>;
   /** The request as the Office's tag and queue show it, or null. */
   readonly request: OfficeRequest | null;
   /** The thread's open Request, which the dossier card answers, or null. */

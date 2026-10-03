@@ -58,7 +58,6 @@ function buildColleague(session: Session, pose: Pose): Colleague {
     project: session.projectId,
     runnerId: session.runnerId,
     model: session.modelSelection.model,
-    activity: [],
     request:
       session.openRequest === null
         ? null
