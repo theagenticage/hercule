@@ -46,7 +46,7 @@ export function DeviceSignIn({
   const queryClient = useQueryClient();
 
   const [step, setStep] = useState<DeviceFlowStep>(() =>
-    decideDeviceFlowStep(deviceStart, undefined),
+    decideDeviceFlowStep(deviceStart, undefined, Date.now()),
   );
   // A failed poll request leaves the flow open, so its status line stays up
   // until the next reply.

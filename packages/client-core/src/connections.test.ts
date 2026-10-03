@@ -12,6 +12,7 @@ import {
   listSetupFlows,
   decideDeviceFlowStep,
   describeDeviceFlowWait,
+  DEVICE_CODE_EXPIRED,
   describeGitHubSignInEnding,
   describeGitHubSignInFailure,
   waitForDeviceFlow,
@@ -226,9 +227,11 @@ describe("decideDeviceFlowStep", () => {
     expiresAt: "2026-10-02T12:15:00.000Z",
     interval: 5,
   };
+  // Five minutes before the code expires.
+  const NOW = Date.parse("2026-10-02T12:10:00.000Z");
 
   it("waits the start's interval before the first poll", () => {
-    expect(decideDeviceFlowStep(deviceStart, undefined)).toEqual({
+    expect(decideDeviceFlowStep(deviceStart, undefined, NOW)).toEqual({
       kind: "waiting",
       status: "pending",
       delay: 5000,
@@ -236,17 +239,17 @@ describe("decideDeviceFlowStep", () => {
   });
 
   it("waits the interval the last reply returned while the flow is open", () => {
-    expect(decideDeviceFlowStep(deviceStart, { status: "pending", interval: 5 })).toEqual({
+    expect(decideDeviceFlowStep(deviceStart, { status: "pending", interval: 5 }, NOW)).toEqual({
       kind: "waiting",
       status: "pending",
       delay: 5000,
     });
-    expect(decideDeviceFlowStep(deviceStart, { status: "slow-down", interval: 10 })).toEqual({
+    expect(decideDeviceFlowStep(deviceStart, { status: "slow-down", interval: 10 }, NOW)).toEqual({
       kind: "waiting",
       status: "slow-down",
       delay: 10_000,
     });
-    expect(decideDeviceFlowStep(deviceStart, { status: "unreachable", interval: 5 })).toEqual({
+    expect(decideDeviceFlowStep(deviceStart, { status: "unreachable", interval: 5 }, NOW)).toEqual({
       kind: "waiting",
       status: "unreachable",
       delay: 5000,
@@ -256,7 +259,7 @@ describe("decideDeviceFlowStep", () => {
   it("ends the flow with the controller's reason", () => {
     for (const status of ["expired", "denied", "failed"] as const) {
       const message = "the code expired before it was approved";
-      expect(decideDeviceFlowStep(deviceStart, { status, message })).toEqual({
+      expect(decideDeviceFlowStep(deviceStart, { status, message }, NOW)).toEqual({
         kind: "ended",
         status,
         message,
@@ -264,10 +267,42 @@ describe("decideDeviceFlowStep", () => {
     }
   });
 
+  it("never waits past the moment the code expires", () => {
+    const threeSecondsLeft = Date.parse(deviceStart.expiresAt) - 3000;
+    expect(decideDeviceFlowStep(deviceStart, undefined, threeSecondsLeft)).toEqual({
+      kind: "waiting",
+      status: "pending",
+      delay: 3000,
+    });
+    expect(
+      decideDeviceFlowStep(deviceStart, { status: "slow-down", interval: 10 }, threeSecondsLeft),
+    ).toEqual({ kind: "waiting", status: "slow-down", delay: 3000 });
+  });
+
+  it("ends the flow as expired once the code's expiry has passed, whatever the last reply", () => {
+    const expiry = Date.parse(deviceStart.expiresAt);
+    const ending = { kind: "ended", status: "expired", message: DEVICE_CODE_EXPIRED };
+    expect(decideDeviceFlowStep(deviceStart, undefined, expiry)).toEqual(ending);
+    for (const status of ["pending", "slow-down", "unreachable"] as const) {
+      expect(decideDeviceFlowStep(deviceStart, { status, interval: 5 }, expiry + 1)).toEqual(
+        ending,
+      );
+    }
+  });
+
+  it("still returns a reply that ended the flow after the code's expiry", () => {
+    const connection = {} as Connection;
+    const late = Date.parse(deviceStart.expiresAt) + 60_000;
+    expect(decideDeviceFlowStep(deviceStart, { status: "done", connection }, late)).toEqual({
+      kind: "done",
+      connection,
+    });
+  });
+
   it("returns the new connection once the flow is done", () => {
     // The connection is passed through untouched, so any record will do.
     const connection = {} as Connection;
-    expect(decideDeviceFlowStep(deviceStart, { status: "done", connection })).toEqual({
+    expect(decideDeviceFlowStep(deviceStart, { status: "done", connection }, NOW)).toEqual({
       kind: "done",
       connection,
     });
@@ -335,7 +370,9 @@ describe("waitForDeviceFlow", () => {
   } satisfies Connection;
 
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // Fifteen minutes before the code expires.
+    vi.setSystemTime("2026-10-02T12:00:00.000Z");
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -348,13 +385,13 @@ describe("waitForDeviceFlow", () => {
   };
 
   /** Starts the wait on a stub controller, and records what it reports. */
-  const startWait = (poll: Handler) => {
+  const startWait = (poll: Handler, deviceStart = DEVICE_START) => {
     const api = createApiStub({ [POLL]: poll });
     const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
     const stop = new AbortController();
     const steps: DeviceFlowStep[] = [];
     const failures: unknown[] = [];
-    const last = waitForDeviceFlow(client, DEVICE_START, {
+    const last = waitForDeviceFlow(client, deviceStart, {
       signal: stop.signal,
       onStep: (step) => steps.push(step),
       onRequestFailure: (error) => failures.push(error),
@@ -418,6 +455,56 @@ describe("waitForDeviceFlow", () => {
     expect(wait.countPolls()).toBe(2);
     await vi.advanceTimersByTimeAsync(1);
     expect((await wait.last).kind).toBe("done");
+  });
+
+  it("ends as expired when the code expires, without another poll", async () => {
+    // The code expires 12 seconds from now: polls go out at 5 and 10 seconds.
+    const wait = startWait(answerPolls({ body: { status: "pending", interval: 5 } }), {
+      ...DEVICE_START,
+      expiresAt: "2026-10-02T12:00:12.000Z",
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(wait.countPolls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const ending = { kind: "ended", status: "expired", message: DEVICE_CODE_EXPIRED };
+    expect(await wait.last).toEqual(ending);
+    expect(wait.steps.at(-1)).toEqual(ending);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wait.countPolls()).toBe(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ends as expired when the code expires after a poll request failed", async () => {
+    const wait = startWait(
+      answerPolls(
+        { body: { status: "pending", interval: 5 } },
+        { status: 500, body: buildErrorBody("internal", "the database is locked") },
+      ),
+      { ...DEVICE_START, expiresAt: "2026-10-02T12:00:12.000Z" },
+    );
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(wait.failures).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(await wait.last).toMatchObject({ kind: "ended", status: "expired" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wait.countPolls()).toBe(2);
+  });
+
+  it("reports a code that has expired already as expired, and never polls", async () => {
+    const wait = startWait(answerPolls({ body: { status: "pending", interval: 5 } }), {
+      ...DEVICE_START,
+      expiresAt: "2026-10-02T11:59:00.000Z",
+    });
+
+    const ending = { kind: "ended", status: "expired", message: DEVICE_CODE_EXPIRED };
+    expect(await wait.last).toEqual(ending);
+    expect(wait.steps).toEqual([ending]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wait.countPolls()).toBe(0);
   });
 
   it("stops polling and leaves no timer once the signal aborts", async () => {

@@ -889,7 +889,8 @@ describe("Connections > a device flow", () => {
     setupId: "setup-1",
     userCode: "WDJB-MJHT",
     verificationUri: "https://glasshouse.test/login/device",
-    expiresAt: "2026-10-02T09:00:00.000Z",
+    // Far off, so no test runs into the code's expiry by accident.
+    expiresAt: "2099-01-01T00:00:00.000Z",
     interval: 5,
   };
   const START_PATH = "/api/v1/oauth/device/start";
@@ -940,7 +941,8 @@ describe("Connections > a device flow", () => {
     await user.click(
       within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
     );
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // `Date` is faked too, so the code's expiry comes with the fake time.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
     await pumpUntil(isCodeShown(START.userCode));
     return app;
@@ -1062,6 +1064,29 @@ describe("Connections > a device flow", () => {
     expect(listWrites(api).filter((call) => call.path === START_PATH)[1]?.body).toEqual({
       type: "glasshouse/glass",
     });
+  });
+
+  it("ends the flow when the code expires, and polls no more", async () => {
+    const { api } = await startSignIn({
+      // The code works for 12 seconds from the start, so polls go out at 5 and 10.
+      [`POST ${START_PATH}`]: () => ({
+        body: { ...START, expiresAt: new Date(Date.now() + 12_000).toISOString() },
+      }),
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "pending", interval: 5 }),
+    });
+
+    await advanceClock(10_500);
+    expect(countPolls(api)).toBe(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    await advanceClock(1500);
+
+    expect(readPageText(screen.getByRole("alert"))).toContain(
+      "The sign-in expired before it was approved.",
+    );
+    expect(screen.queryByText(START.userCode)).toBeNull();
+    expect(screen.getByRole("button", { name: "Start again" })).toBeDefined();
+    await advanceClock(60_000);
+    expect(countPolls(api)).toBe(2);
   });
 
   // The controller's own words for each ending, beside the line the screen shows.

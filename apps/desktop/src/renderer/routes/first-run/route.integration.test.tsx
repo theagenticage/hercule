@@ -491,16 +491,20 @@ describe("the first run's steps", () => {
     /**
      * Opens the GitHub step, with the providers put off, and answers each poll
      * with the next of `polls`, then the last again. A `done` poll adds the
-     * Connection to the list, as the controller does.
+     * Connection to the list, as the controller does. Each sign-in starts
+     * with the code `buildStart` returns, at the moment it starts.
      */
-    const openGitHub = async (polls: readonly unknown[] = [{ status: "pending", interval: 5 }]) => {
+    const openGitHub = async (
+      polls: readonly unknown[] = [{ status: "pending", interval: 5 }],
+      buildStart: () => typeof START = () => START,
+    ) => {
       let connections: readonly Connection[] = [];
       let index = 0;
       const app = await openSignedIn({
         firstRun: { putOff: ["providers"] },
         handlers: {
           "GET /api/v1/connections": () => ({ body: { items: connections } }),
-          "POST /api/v1/oauth/device/start": { body: START },
+          "POST /api/v1/oauth/device/start": () => ({ body: buildStart() }),
           [`POST ${POLL_PATH}`]: () => {
             const poll = polls[Math.min(index++, polls.length - 1)];
             if ((poll as { status: string }).status === "done") connections = [GITHUB];
@@ -519,7 +523,8 @@ describe("the first run's steps", () => {
 
     /** Presses Sign in with GitHub under a fake clock, and waits for the code. */
     const signIn = async (): Promise<void> => {
-      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      // `Date` is faked too, so the code's expiry comes with the fake time.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
       fireEvent.click(screen.getByRole("button", { name: "Sign in with GitHub" }));
       await pumpUntil(() => screen.queryByText(START.userCode) !== null);
     };
@@ -549,6 +554,27 @@ describe("the first run's steps", () => {
       await advanceClock(60_000);
       expect(readCalls(calls, "POST", POLL_PATH)).toHaveLength(polls);
       expect(fake.firstRunWrites).toEqual([{ putOff: ["providers", "github"] }]);
+    });
+
+    it("ends the sign-in when the code expires, polls no more, and offers Start again", async () => {
+      // The code works for 12 seconds from the start, so polls go out at 5 and 10.
+      const { calls } = await openGitHub(undefined, () => ({
+        ...START,
+        expiresAt: new Date(Date.now() + 12_000).toISOString(),
+      }));
+      await signIn();
+      await advanceClock(10_000);
+      expect(readCalls(calls, "POST", POLL_PATH)).toHaveLength(2);
+      expect(screen.queryByRole("button", { name: "Start again" })).toBeNull();
+
+      await advanceClock(2_000);
+      await pumpUntil(() => screen.queryByRole("button", { name: "Start again" }) !== null);
+      expect(screen.getByText("The sign-in expired before it was approved.")).toBeTruthy();
+      // The wait line, with its spinner, is gone with the code.
+      expect(screen.queryByText(START.userCode)).toBeNull();
+      expect(screen.queryByRole("status")).toBeNull();
+      await advanceClock(60_000);
+      expect(readCalls(calls, "POST", POLL_PATH)).toHaveLength(2);
     });
 
     it("explains a sign-in the user declined, and starts again", async () => {
