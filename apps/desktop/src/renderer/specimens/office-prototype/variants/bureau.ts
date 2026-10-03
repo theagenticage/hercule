@@ -120,6 +120,8 @@ export const buildBureau: BuildOfficeLayout = ({ world, nav }) => {
       lounge,
       caseBoard: null,
       records: null,
+      entrance: { position: new Vector3(center.x, 0, bounds.max.z), facing: Math.PI, floor: 0 },
+      tea: null,
     },
     nav: nav.build(),
     overview: {

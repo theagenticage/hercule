@@ -232,6 +232,10 @@ export interface OfficeSpots {
   readonly caseBoard: Spot | null;
   /** Spots by the filing cabinets, where a colleague files a Task. */
   readonly records: Spot | null;
+  /** Where a newly arrived colleague comes in: the front door, inside, facing in. */
+  readonly entrance: Spot;
+  /** Where a colleague fetches tea: in front of the tea trolley, facing it. */
+  readonly tea: Spot | null;
 }
 
 /** One whole office: what a variant builds from the world. */
@@ -253,6 +257,13 @@ export interface OfficeLayout {
    * office, so a building with storeys can lift away the ones above it.
    */
   focusFloor?(floor: number | null): void;
+  /**
+   * Sends an event's capsule through the pneumatic tubes to Triage. Returns
+   * the seconds until the capsule arrives, or 0 when the office has no tubes.
+   */
+  sendCapsule?(): number;
+  /** Pins one more Proposal card on the case board. */
+  pinProposal?(): void;
   dispose(): void;
 }
 
