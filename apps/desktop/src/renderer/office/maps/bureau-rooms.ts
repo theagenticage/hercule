@@ -29,7 +29,6 @@ import {
   buildTeaTrolley,
   buildWallClock,
   buildYourDesk,
-  type CaseBoardHandle,
   type NowServingHandle,
 } from "../kit/props";
 import type { FixedRoom, Furniture, OfficeMap, SpotKind } from "./office-map";
@@ -101,7 +100,6 @@ export interface Fittings {
   yourDesk: Spot | null;
   tea: Spot | null;
   entrance: Spot | null;
-  board: CaseBoardHandle | null;
   nowServing: NowServingHandle | null;
 }
 
@@ -392,9 +390,9 @@ function designThreadRoom(
 }
 
 /**
- * Designs the Triage room: Triage's desk before the case board. The desk
- * stays empty, because no Triage character is drawn, and the board shows no
- * cards, because the Office does not read Proposals yet.
+ * Designs the Triage room: Triage's desk before the case board. Both stay
+ * empty until Triage exists (#91): no Triage character is drawn at the desk,
+ * and no Proposals are pinned on the board.
  */
 function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
   const { has } = readFixedRoom(fixed);
@@ -410,19 +408,13 @@ function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
       boardZone + 1.0,
       0.86,
     ),
-    furnish(room, fitter, fittings) {
+    furnish(room, fitter) {
       const inside = computeFloorInsideWalls(room.rect);
       if (has("case-board")) {
         const boardX = (inside.minX + inside.maxX) / 2 + 0.3;
         const board = buildCaseBoard(boardWidth);
-        board.setCards(0, 0);
-        const boardTop = new Box3().setFromObject(board.object).max.y;
-        fitter.place(
-          buildBoardStand(board.object, boardWidth, boardTop),
-          boardX,
-          inside.minZ + 0.3,
-        );
-        fittings.board = board;
+        const boardTop = new Box3().setFromObject(board).max.y;
+        fitter.place(buildBoardStand(board, boardWidth, boardTop), boardX, inside.minZ + 0.3);
       }
       // Triage's own desk, west of the board.
       if (has("clerks-desk")) {

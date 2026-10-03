@@ -1,22 +1,16 @@
 /**
- * What hangs on the office's walls: the Case Room's cork board
- * of Proposals, the sunburst clock and the "Now serving" sign over the
- * user's desk. Each one's back is at z = 0, against the wall.
+ * What hangs on the office's walls: the Triage room's case board, the
+ * sunburst clock and the "Now serving" sign over the user's desk. Each one's
+ * back is at z = 0, against the wall.
  */
 import {
   CanvasTexture,
-  CylinderGeometry,
   Group,
-  InstancedMesh,
-  Matrix4,
   Mesh,
   MeshStandardMaterial,
   PlaneGeometry,
-  Quaternion,
   SRGBColorSpace,
   Shape,
-  Vector3,
-  type BufferGeometry,
   type Object3D,
 } from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -30,7 +24,6 @@ import {
   buildRing,
   buildSheet,
   buildSphere,
-  createRandom,
   memoize,
   memoizeByKey,
   paintSurface,
@@ -46,108 +39,9 @@ const BOARD_SURFACES = {
   brass: { token: "brass", finish: "brass", shadow: false },
 } as const satisfies Record<string, Surface>;
 
-const CARD_PAPER: Surface = { token: "room-paper", finish: "paper", shadow: false };
-const CARD_PIN: Surface = { token: "brass", finish: "brass", shadow: false };
-const CARD_INK: Surface = { token: "muted", finish: "matte", shadow: false };
-const CARD_BURNING: Surface = { token: "fail", finish: "matte", shadow: false };
-/** The red thread between cards: the book's oklch(0.55 0.15 25), a darker, quieter red than `fail`. */
-const THREAD: Surface = {
-  token: "fail",
-  finish: "matte",
-  shift: { dl: -0.07, dc: -0.04 },
-  shadow: false,
-};
-
-/** The most cards a board shows; past that, the board is full. */
-const BOARD_CAPACITY = 24;
 /** The bottom and top of the cork, in the board's space. */
 const CORK_BOTTOM = 0.81;
 const CORK_TOP = 1.99;
-
-/**
- * Builds a card's geometry in three groups, for an instanced mesh with three
- * materials: the paper, the pin (and, on a burning card, its band), and the
- * handwriting. The card hangs from its pin at the origin, facing +z.
- */
-function buildCardGeometry(burning: boolean): BufferGeometry {
-  const paper = buildSheet(0.15, 0.112, 0.003).translate(0, -0.1, 0.0015);
-  const marks = [buildSphere(0.0085, 8, 6).translate(0, 0, 0.006)];
-  if (burning) marks.push(buildSheet(0.15, 0.02, 0.0035).translate(0, -0.042, 0.0018));
-  const pin = mergeGeometries(marks.map((part) => part.toNonIndexed()));
-  const lines = [0, 1, 2].map((line) =>
-    buildSheet(line === 2 ? 0.06 : 0.1, 0.0045, 0.0034).translate(
-      -0.015 + (line === 2 ? -0.02 : 0),
-      -0.064 - line * 0.015,
-      0.0015,
-    ),
-  );
-  const ink = mergeGeometries(lines);
-  if (pin === null || ink === null) throw new Error("The props kit could not build a case card.");
-  const merged = mergeGeometries([paper.toNonIndexed(), pin, ink.toNonIndexed()], true);
-  if (merged === null) throw new Error("The props kit could not build a case card.");
-  return merged;
-}
-
-const readCardGeometry = memoize(() => buildCardGeometry(false));
-const readBurningCardGeometry = memoize(() => buildCardGeometry(true));
-const readThreadGeometry = memoize(() => new CylinderGeometry(0.0022, 0.0022, 1, 4, 1, true));
-
-/** Where a card hangs on a board: its pin, and how far it is turned. */
-interface CardSlot {
-  readonly pin: Vector3;
-  readonly turn: number;
-}
-
-/** A thread between two cards' pins, by their slot numbers. */
-interface ThreadSlot {
-  readonly from: number;
-  readonly to: number;
-}
-
-/**
- * Lays out where a board `width` wide pins its cards, in the order they are
- * pinned, and which cards a thread joins. The cards land in the same places every time
- * for the same width.
- */
-const planBoard = memoizeByKey((width: number) => {
-  const random = createRandom(Math.round(width * 100) + 11);
-  const columns = Math.max(1, Math.floor((width - 0.22) / 0.19));
-  const rows = 5;
-  const pitchX = (width - 0.22) / columns;
-  const all: CardSlot[] = [];
-  for (let row = 0; row < rows; row++) {
-    for (let column = 0; column < columns; column++) {
-      all.push({
-        pin: new Vector3(
-          -width / 2 + 0.11 + (column + 0.5) * pitchX + (random() - 0.5) * 0.05,
-          CORK_TOP - 0.06 - row * 0.225 + (random() - 0.5) * 0.04,
-          0.058,
-        ),
-        turn: (random() - 0.5) * 0.16,
-      });
-    }
-  }
-  for (let index = all.length - 1; index > 0; index--) {
-    const other = Math.floor(random() * (index + 1));
-    [all[index], all[other]] = [all[other]!, all[index]!];
-  }
-  const slots = all.slice(0, BOARD_CAPACITY);
-  const threads: ThreadSlot[] = [];
-  slots.forEach((slot, index) => {
-    if (index === 0 || random() > 0.5) return;
-    let nearest = -1;
-    let nearestDistance = Infinity;
-    for (let other = 0; other < index; other++) {
-      const distance = slots[other]!.pin.distanceTo(slot.pin);
-      if (distance < nearestDistance && distance > 0.15) {
-        nearest = other;
-        nearestDistance = distance;
-      }
-    }
-    if (nearest >= 0 && nearestDistance < 0.75) threads.push({ from: nearest, to: index });
-  });
-  return { slots, threads };
-});
 
 const readBoardGeometry = memoizeByKey((width: number) => {
   const parts = new PartList(BOARD_SURFACES);
@@ -183,81 +77,20 @@ const readBoardGeometry = memoizeByKey((width: number) => {
   return parts.merge();
 });
 
-/** The cork board of Proposals: how many cards it shows, and how many of them burn. */
-export interface CaseBoardHandle {
-  readonly object: Object3D;
-  setCards(total: number, burning: number): void;
-}
-
 /**
- * Builds the Case Room's board, `width` wide, mounted on a wall: its back is
- * at z = 0. The board stands from y = 0.74 to 2.08 (its frame), its cork from
- * 0.81 to 1.99, and it is 0.09 deep. It is `width` + 0.04 wide at its rails.
+ * Builds the Triage room's case board, `width` wide, mounted on a wall: its
+ * back is at z = 0. The board stands from y = 0.74 to 2.08 (its frame), its
+ * cork from 0.81 to 1.99, and it is 0.09 deep. It is `width` + 0.04 wide at
+ * its rails.
  *
- * `setCards(total, burning)` pins `total` cards, up to 24, in paper with a
- * brass pin; `burning` of them carry a band and a pin in `fail`. Red thread
- * joins some of the pinned cards. The board starts empty.
+ * The board is built empty. Once Triage exists (#91), Triage pins Proposals
+ * on it as cards.
  */
-export function buildCaseBoard(width: number): CaseBoardHandle {
+export function buildCaseBoard(width: number): Object3D {
   const object = new Group();
   object.name = "case-board";
   addMeshes(object, readBoardGeometry(width));
-  const { slots, threads } = planBoard(width);
-  const cards = new InstancedMesh(
-    readCardGeometry(),
-    [paintSurface(CARD_PAPER), paintSurface(CARD_PIN), paintSurface(CARD_INK)],
-    BOARD_CAPACITY,
-  );
-  const burningCards = new InstancedMesh(
-    readBurningCardGeometry(),
-    [paintSurface(CARD_PAPER), paintSurface(CARD_BURNING), paintSurface(CARD_INK)],
-    BOARD_CAPACITY,
-  );
-  const threadMesh = new InstancedMesh(readThreadGeometry(), paintSurface(THREAD), BOARD_CAPACITY);
-  for (const mesh of [cards, burningCards, threadMesh]) {
-    mesh.count = 0;
-    mesh.receiveShadow = true;
-    object.add(mesh);
-  }
-  const matrix = new Matrix4();
-  const rotation = new Quaternion();
-  const up = new Vector3(0, 1, 0);
-  const unit = new Vector3(1, 1, 1);
-  const placeCard = (mesh: InstancedMesh, instance: number, slot: CardSlot) => {
-    rotation.setFromAxisAngle(new Vector3(0, 0, 1), slot.turn);
-    mesh.setMatrixAt(instance, matrix.compose(slot.pin, rotation, unit));
-  };
-  return {
-    object,
-    setCards(total, burning) {
-      const shown = Math.max(0, Math.min(BOARD_CAPACITY, Math.floor(total)));
-      const burn = Math.max(0, Math.min(shown, Math.floor(burning)));
-      slots.slice(0, shown).forEach((slot, index) => {
-        if (index < burn) placeCard(burningCards, index, slot);
-        else placeCard(cards, index - burn, slot);
-      });
-      burningCards.count = burn;
-      cards.count = shown - burn;
-      let threadCount = 0;
-      for (const thread of threads) {
-        if (thread.to >= shown) continue;
-        const from = slots[thread.from]!.pin.clone().setZ(0.064);
-        const to = slots[thread.to]!.pin.clone().setZ(0.064);
-        const direction = to.clone().sub(from);
-        const length = direction.length();
-        rotation.setFromUnitVectors(up, direction.normalize());
-        threadMesh.setMatrixAt(
-          threadCount++,
-          matrix.compose(from.add(to).multiplyScalar(0.5), rotation, new Vector3(1, length, 1)),
-        );
-      }
-      threadMesh.count = threadCount;
-      for (const mesh of [cards, burningCards, threadMesh]) {
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.computeBoundingSphere();
-      }
-    },
-  };
+  return object;
 }
 
 // ---------------------------------------------------------------------------

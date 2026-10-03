@@ -72,7 +72,6 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
     yourDesk: null,
     tea: null,
     entrance: null,
-    board: null,
     nowServing: null,
   };
   for (const room of plan.rooms) designs.get(room.id)?.furnish(room, fitter, fittings);

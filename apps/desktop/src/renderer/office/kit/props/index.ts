@@ -11,12 +11,6 @@
 export { buildDesk, buildYourDesk } from "./desk";
 export { buildArmchair, buildBench } from "./seating";
 export { buildCabinet } from "./storage";
-export {
-  buildCaseBoard,
-  buildNowServing,
-  buildWallClock,
-  type CaseBoardHandle,
-  type NowServingHandle,
-} from "./walls";
+export { buildCaseBoard, buildNowServing, buildWallClock, type NowServingHandle } from "./walls";
 export { buildCoatStand, buildPlant, buildRug, buildTeaTrolley } from "./decor";
 export { buildFloorLamp } from "./lights";
