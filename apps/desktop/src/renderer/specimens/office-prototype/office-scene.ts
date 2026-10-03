@@ -123,20 +123,25 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 
+  // The storey the building shows now, so the frame loop can tell when the
+  // followed colleague takes the lift to another one.
+  let focusedFloor: number | null = null;
+
   /**
    * Tells a building with storeys which one the user looks at, so it lifts
-   * away the ones above and the overlay hides their labels.
+   * away the ones above and the overlay hides their labels. With a colleague
+   * selected, that is the storey the colleague stands on now, not its desk's:
+   * a colleague waiting in the lobby's queue would be hidden under its own
+   * storey otherwise.
    */
   const focusFloor = (): void => {
-    const { layout, overlay } = built;
+    const { layout, overlay, sim } = built;
     if (layout.focusFloor === undefined) return;
     const room = layout.rooms.find((candidate) => candidate.id === state.roomId);
-    const floor =
-      state.selectedId !== null
-        ? (layout.homes.get(state.selectedId)?.floor ?? null)
-        : (room?.floor ?? null);
-    layout.focusFloor(floor);
-    overlay.setFocusedFloor(floor);
+    focusedFloor =
+      state.selectedId !== null ? sim.readFloor(state.selectedId) : (room?.floor ?? null);
+    layout.focusFloor(focusedFloor);
+    overlay.setFocusedFloor(focusedFloor);
   };
 
   const teardown = ({ layout, rigs, sim, overlay }: Built): void => {
@@ -203,6 +208,13 @@ export function mountOfficeScene(container: HTMLElement, world: World): OfficeSc
 
   const stopFrames = stage.onFrame((frame) => {
     let moving = built.sim.update(frame);
+    if (
+      built.layout.focusFloor !== undefined &&
+      state.selectedId !== null &&
+      built.sim.readFloor(state.selectedId) !== focusedFloor
+    ) {
+      focusFloor();
+    }
     moving = (built.layout.update?.(frame) ?? false) || moving;
     moving = camera.update(frame) || moving;
     built.overlay.update();

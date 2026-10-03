@@ -41,7 +41,8 @@ in section, like a doll's house with its front cut away.
 - The lobby is on the ground floor. Each runner has a storey of its own above it, in fleet order.
 - The assistants live in the penthouse under a stepped crown. A brass lift links every storey.
 - When you look at one storey (pick a room, or a colleague), the storeys above it lift up and fade
-  away, so the camera looks straight into it.
+  away, so the camera looks straight into it. A followed colleague who takes the lift takes the
+  view to its new storey.
 - Growth is vertical: a new runner is a new storey.
 
 **C - the Campus** (`variants/campus*.ts`). A campus of pavilions, one per machine, round a paved
@@ -62,7 +63,8 @@ plaza.
   - `suited`: the same face on a grown-up figure in a suit.
 
   Both are skinned rigs of 17 bones that walk, sit, type, read, sip tea, sleep and raise a hand.
-  Feet stay on the floor.
+  Feet stay on the floor. Each colleague draws as two meshes, body and face (three with a hat), so
+  a fleet of 140 stays affordable.
 - **The sim** (`engine/sim.ts`, `engine/nav.ts`). Every colleague runs one short script at a time
   ("stand up, walk to the queue, raise a hand"). Colleagues walk a nav graph through doors and
   corridors, never through walls. An office where nobody walks draws no frames between happenings.
@@ -70,7 +72,9 @@ plaza.
   Bureau 2 palette, so every theme repaints the whole office. Brass is used for trim only, and
   nothing glows.
 - **Light** (`engine/stage.ts`). Morning, noon, evening and night. `auto` follows the theme: day in a
-  light theme, evening in a dark one. Room lamps switch on in the evening.
+  light theme, evening in a dark one. Room lamps switch on in the evening. At night the sky turns a
+  moonlit blue in every theme, and in a light theme evening and night also dim the sky, so they
+  still read as evening and night on a pale page.
 
 ## Interaction model
 
@@ -85,7 +89,8 @@ plaza.
   leaving the office. Its request dock answers too.
 - **A thread in the sidebar** selects that colleague and opens its drawer.
 - **The top bar**:
-  - Office (overview) and Rooms (a directory grouped by project);
+  - Office (overview) and Rooms, a directory: the storeys or buildings first, then the code rooms
+    by project, then the office's own rooms. Each room names the storey or building it is in;
   - the Event flow switch;
   - the counts: each count is a button that selects the next colleague in that state;
   - Simulate (ask, visit, arrive, fail, finish, event);
@@ -128,7 +133,60 @@ plaza.
 
 ## Cost
 
-_Measured at integration._
+Measured on an Apple M4 Max (40-core GPU) in Chromium on Metal, in a 1440 x 900 window at 2x (a
+2336 x 1800 canvas beside the sidebar), at High quality and Calm liveliness. The display caps frames
+at 120 a second. "CPU" is the JavaScript time per drawn frame.
+
+| Variant | Fleet | Draw calls | Triangles | CPU per frame | Frames a second | JS heap |
+|---|---|---|---|---|---|---|
+| A Bureau | Today (16) | 1811 | 1.9 M | 3.1 ms | 99 | 154 MB |
+| B Tower | Today (16) | 1397 | 1.4 M | 2.8 ms | 120 | 157 MB |
+| C Campus | Today (16) | 1743 | 1.8 M | 3.4 ms | 104 | 159 MB |
+| A Bureau | Ten times (142) | 5251 | 7.1 M | 14.0 ms | 78 | 209 MB |
+| B Tower | Ten times (142) | 5547 | 6.9 M | 12.9 ms | 83 | 200 MB |
+| C Campus | Ten times (142) | 6437 | 8.3 M | 15.9 ms | 70 | 255 MB |
+
+What the numbers say:
+
+- **Still draws nothing.** With Liveliness set to Still, the office draws no frames until something
+  happens. Calm and Bustling draw every frame while anyone walks, which is nearly always: an open
+  office on Calm draws about 100 frames a second all the time.
+- **Today's fleet is limited by the GPU at High quality.** The CPU needs only 3 ms, yet A and C stay
+  under 120. Medium leaves out ambient occlusion: draw calls halve (A 904, C 870), the CPU needs
+  2 ms, and every variant reaches 120.
+- **Ten times is limited by the CPU.** 13 to 16 ms of JavaScript per frame, which leaves nothing
+  for a 120 Hz display and little for 60 Hz. The CPU time grows with the draw calls, about 2 to 3
+  microseconds each, so draw calls are the first thing to cut.
+- An M4 Max is a fast machine. A base MacBook Air has a quarter of its GPU or less, so the GPU
+  limit above will bite there first.
+
+The levers, largest first:
+
+1. **Instance the repeated furniture.** Desks, chairs, typewriters, lamps and plants repeat
+   hundreds of times at ten times; one draw per kind of prop instead of one per copy.
+2. **Cap the frame rate of ambient motion.** Walk at 30 frames a second while the user does nothing,
+   and at full rate while the camera moves.
+3. **Ambient occlusion only at rest.** Draw it when the camera stops, or leave it out above a fleet
+   size.
+4. **Static shadows.** The building never moves: draw its shadows once, and only the colleagues'
+   shadows every frame.
+5. **One batch per character style.** Each colleague is already two or three meshes; a skinned,
+   instanced batch would make the whole fleet a handful of draws.
+
+## Rough parts
+
+Known and left as they are, because they do not change the answer:
+
+- **Characters** carry more triangles than they need, and close up their curves show facets. The
+  glasses' arms do not quite reach the head.
+- **The close-up** centres the colleague in the whole pane, so the dossier card covers the pane's
+  left third and can hide a neighbour's name tag.
+- **Tower**: at Ten times the overview is so far away that every colleague is a pip.
+- **Campus**: the conservatory does not read as glass; the plaques at the pavilion doors are small;
+  the trees differ between builds; with Event flow off, the tubes' kerbs still block paths.
+- **Bureau**: some palm leaves poke into the walls.
+- **Room names** are title case in the Bureau ("The Case Room") and sentence case in the Tower and
+  the Campus ("Case room").
 
 ## Open questions for Rogier
 
@@ -138,6 +196,7 @@ _Measured at integration._
   included. They can differ by the number of assistants.
 - **Room counts in the Rooms menu** count colleagues whose desk is in the room, not who is there
   now. The 3D room tags count who is there now.
+- **The card's Room** is the room of the colleague's desk, even while it stands in your queue.
 
 ## Verdict
 

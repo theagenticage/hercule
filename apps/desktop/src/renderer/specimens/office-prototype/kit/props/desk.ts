@@ -233,8 +233,9 @@ function addTypewriterParts(parts: PartSink<"machine" | "paper" | "brass">): voi
     "brass",
     buildRod(new Vector3(-0.175, 0.11, -0.07), new Vector3(-0.2, 0.135, -0.035), 0.004),
   );
-  // The sheet in the machine, curling back off the platen.
-  parts.add("paper", buildSheet(0.19, 0.15, 0.003), { y: 0.1, z: -0.085, rx: -0.22 });
+  // The sheet in the machine, curling back off the platen. It stands only a
+  // hand high, as on a page half typed, so it never hides the typist's face.
+  parts.add("paper", buildSheet(0.19, 0.09, 0.003), { y: 0.1, z: -0.085, rx: -0.22 });
   // Three rows of round keys on the sloped front, and the space bar.
   const rows = [9, 9, 8];
   rows.forEach((count, row) => {

@@ -261,9 +261,10 @@ function furnishCaseRoom(
 }
 
 /**
- * Furnishes the user's office: the partner desk near the north wall under
- * the "Now serving" sign, and the queue straight south of it. Returns the
- * user's chair and the queue, head first.
+ * Furnishes the user's office: the partner desk where the partitions end,
+ * turned so the user's chair is toward the street, and the queue straight
+ * north of it toward the "Now serving" sign. The waiting colleagues face the
+ * user and the camera. Returns the user's chair and the queue, head first.
  */
 function furnishOffice(
   draft: TowerDraft,
@@ -273,18 +274,20 @@ function furnishOffice(
   const group = draft.storeys[0]!;
   const north = rect.minZ + WALL_THICKNESS / 2;
   const middle = (rect.minX + rect.maxX) / 2;
-  const deskZ = north + 1.56;
+  // The chair reaches a little into the walkway along the front, which
+  // leaves the queue's tail clear of the north wall.
+  const deskZ = PARTITION_END - 0.7;
   const desk = buildYourDesk();
-  placeObject(group, desk.object, middle, deskZ);
+  placeObject(group, desk.object, middle, deskZ, Math.PI);
   draft.nav.blockObject(0, desk.object);
   const sign = buildNowServing();
   placeObject(group, sign.object, middle, north, 0, 1.75);
   sign.setNumber(world.colleagues.filter((colleague) => colleague.request !== null).length);
   addOfficeCorners(draft, rect, north);
-  placeObject(group, buildPendant(), middle, deskZ + 0.6);
-  // The visitor's place is 0.95 south of the desk's middle; the queue starts there.
+  placeObject(group, buildPendant(), middle, deskZ - 0.6);
+  // The visitor's place is 0.95 north of the desk's middle; the queue starts there.
   const queue = Array.from({ length: QUEUE_LENGTH }, (_, index) =>
-    buildSpot(middle, deskZ + 0.95 + index * QUEUE_PITCH, Math.PI, 0),
+    buildSpot(middle, deskZ - 0.95 - index * QUEUE_PITCH, 0, 0),
   );
   return { yourDesk: readSpot(desk.seatMarker, 0), queue };
 }

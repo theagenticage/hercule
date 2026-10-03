@@ -51,7 +51,13 @@
  * pointer, and the overlay itself handles clicks on room labels.
  */
 import { Vector3, type PerspectiveCamera } from "three";
-import { WALL_HEIGHT, type ColleagueRig, type ColleagueState, type RoomInfo } from "./contracts";
+import {
+  WALL_HEIGHT,
+  findFloorRoom,
+  type ColleagueRig,
+  type ColleagueState,
+  type RoomInfo,
+} from "./contracts";
 import { isCameraMoving, isShown, readCameraView } from "./camera-rig";
 import { isColleagueHidden, registerTagHitTest } from "./picking";
 import { readColleagueStates, sendOfficeCommand, type TagMode } from "../office-store";
@@ -350,22 +356,9 @@ export function createOverlay(
   const labels = sizedRooms.map(createRoomLabel);
   for (const label of labels) layer.append(label.element);
   const labelsByRoom = new Map(labels.map((label) => [label.room, label]));
-  // The smallest "floor" room on a room's storey whose plan holds the room's middle stands for it.
   for (const label of labels) {
-    if (label.room.kind === "floor") continue;
-    const middle = label.room.bounds.getCenter(new Vector3());
-    label.floorLabel =
-      labels.find(({ room }) => {
-        const { min, max } = room.bounds;
-        return (
-          room.kind === "floor" &&
-          room.floor === label.room.floor &&
-          middle.x >= min.x &&
-          middle.x <= max.x &&
-          middle.z >= min.z &&
-          middle.z <= max.z
-        );
-      }) ?? null;
+    const floorRoom = findFloorRoom(label.room, rooms);
+    label.floorLabel = floorRoom === null ? null : (labelsByRoom.get(floorRoom) ?? null);
   }
   const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
 

@@ -220,6 +220,31 @@ export interface RoomInfo {
   readonly project: string | null;
 }
 
+/**
+ * Returns the room of kind "floor" that stands for `room`, such as a storey of
+ * the Tower or a pavilion of the Campus: the smallest one on the same storey
+ * whose plan holds the middle of `room`. Returns null for a "floor" room
+ * itself, and for a room outside every "floor" room.
+ */
+export function findFloorRoom(room: RoomInfo, rooms: ReadonlyArray<RoomInfo>): RoomInfo | null {
+  if (room.kind === "floor") return null;
+  const x = (room.bounds.min.x + room.bounds.max.x) / 2;
+  const z = (room.bounds.min.z + room.bounds.max.z) / 2;
+  let smallest: RoomInfo | null = null;
+  let smallestArea = Infinity;
+  for (const candidate of rooms) {
+    const { min, max } = candidate.bounds;
+    if (candidate.kind !== "floor" || candidate.floor !== room.floor) continue;
+    if (x < min.x || x > max.x || z < min.z || z > max.z) continue;
+    const area = (max.x - min.x) * (max.z - min.z);
+    if (area < smallestArea) {
+      smallest = candidate;
+      smallestArea = area;
+    }
+  }
+  return smallest;
+}
+
 /** The fixed places the sim sends colleagues to. */
 export interface OfficeSpots {
   /** Where the user's desk is; the queue faces it. */
@@ -364,6 +389,12 @@ export interface Sim {
    * changes, so a React panel can read it with `useSyncExternalStore`.
    */
   readStates(): ReadonlyMap<string, ColleagueState>;
+  /**
+   * Returns the storey colleague `colleagueId` stands on now, which differs
+   * from its desk's storey while it waits in the queue or visits a colleague.
+   * Returns null for an id the sim does not know.
+   */
+  readFloor(colleagueId: string): number | null;
   /** Calls `listener` after any colleague's state changes. Returns the function that unsubscribes. */
   subscribeStates(listener: () => void): () => void;
   dispose(): void;

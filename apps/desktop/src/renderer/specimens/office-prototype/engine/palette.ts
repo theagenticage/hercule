@@ -300,7 +300,7 @@ export function paintHue(
   finish: Finish = "vinyl",
   shift: Shift = {},
 ): MeshStandardMaterial {
-  const key = `hue:${hue}|${part}|${finish}|${String(shift.dl ?? 0)}|${String(shift.dc ?? 0)}`;
+  const key = `hue:${hue}|${part}|${finish}|${String(shift.dl ?? 0)}|${String(shift.dc ?? 0)}|${String(shift.dh ?? 0)}`;
   return share(key, finish, () => readHue(hue, part), shift);
 }
 

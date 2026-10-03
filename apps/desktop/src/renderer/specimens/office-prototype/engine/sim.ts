@@ -1473,6 +1473,10 @@ export function createSim({ world, layout, rigs, stage }: SimContext): Sim & Sim
       return states;
     },
 
+    readFloor(colleagueId) {
+      return actors.get(colleagueId)?.floor ?? null;
+    },
+
     subscribeStates(listener) {
       stateListeners.add(listener);
       return () => {

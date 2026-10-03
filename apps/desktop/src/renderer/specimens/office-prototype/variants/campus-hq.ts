@@ -4,8 +4,10 @@
  *
  * - the Case Room in the west, where Triage sits by the case board and the
  *   pneumatic tubes from every pavilion end;
- * - the user's office in the middle, behind the front door, with the queue
- *   running from the door to the partner desk under the "Now serving" sign;
+ * - the user's office in the middle, behind the front door: the partner desk
+ *   in the middle of the room, the user's chair toward the door, and the
+ *   queue running north from the desk toward the "Now serving" sign, so the
+ *   waiting colleagues face the user and the camera;
  * - the lounge in the north-east, with armchairs and the tea trolley;
  * - the records in the south-east, a row of filing cabinets.
  *
@@ -64,7 +66,7 @@ export const HQ_DEPTH = 9;
 /** The width of the front door. */
 const FRONT_DOOR = 1.6;
 /** How many colleagues the queue has room for. */
-const QUEUE_LENGTH = 8;
+const QUEUE_LENGTH = 7;
 /** The distance between two colleagues in the queue. */
 const QUEUE_STEP = 0.66;
 
@@ -264,30 +266,36 @@ export function buildHeadquarters(
     return item;
   };
 
-  // The user's office: the partner desk under the sign, the queue down the middle.
+  // The user's office: the partner desk turned so the user faces north, the
+  // queue straight north of it, toward the sign. The desk stands far enough
+  // south for the queue's tail to keep clear of the north wall.
   const yourDesk = buildYourDesk();
-  const deskZ = north + 1.95;
-  place(yourDesk.object, 0, deskZ);
+  const deskZ = south - 3.3;
+  place(yourDesk.object, 0, deskZ, Math.PI);
   const rug = buildTintedRug(3.6, 2.9, "room-inlay");
-  rug.position.set(0, 0, deskZ - 0.15);
+  rug.position.set(0, 0, deskZ + 0.15);
   object.add(rug);
   const nowServing = buildNowServing();
   nowServing.object.position.set(0, 1.72, north + inner);
   object.add(nowServing.object);
   for (const x of [-2.45, 2.45]) place(buildPlant("tall"), x, north + 0.55);
-  const queueStart = deskZ + 0.95;
+  // The head stands where the desk's visitor stands, 0.95 north of its middle.
+  const queueHead = deskZ - 0.95;
   const queueMarkers = Array.from({ length: QUEUE_LENGTH }, (_, index) =>
-    placeMarker(object, 0, queueStart + index * QUEUE_STEP, Math.PI),
+    placeMarker(object, 0, queueHead - index * QUEUE_STEP, 0),
   );
-  const stanchionLength = (QUEUE_LENGTH - 1.4) * QUEUE_STEP;
-  const stanchions = buildStanchions(stanchionLength, 1.25);
-  place(stanchions, 0, queueStart + 0.5 + stanchionLength / 2, 0, false);
+  // The stanchions run from a step behind the head to just short of the
+  // tail, so both ends of the line stay open to walk in and out of.
+  const stanchionNorth = queueHead - (QUEUE_LENGTH - 1) * QUEUE_STEP + 0.3;
+  const stanchionSouth = queueHead - 0.5;
+  const stanchions = buildStanchions(stanchionSouth - stanchionNorth, 1.25);
+  place(stanchions, 0, (stanchionNorth + stanchionSouth) / 2, 0, false);
   for (const x of [-0.625, 0.625]) {
     nav.block({
       minX: x - 0.05,
       maxX: x + 0.05,
-      minZ: queueStart + 0.5 - 0.05,
-      maxZ: queueStart + 0.5 + stanchionLength + 0.05,
+      minZ: stanchionNorth - 0.05,
+      maxZ: stanchionSouth + 0.05,
     });
   }
   const entrance = placeMarker(object, 0, south - 0.55, Math.PI);
