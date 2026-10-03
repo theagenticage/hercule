@@ -465,10 +465,16 @@ export const LOGIN_ENDED_CAPABILITY = "loginEnded";
  * nothing back, so this is the only way the controller learns that the user
  * finished it in the browser. The frame carries no outcome: the controller
  * probes the instance again, and the probe says whether the login worked.
+ *
+ * `requestId` is the request id of the `LoginStart` that started the login.
+ * It names one login rather than an instance, so the controller can tell this
+ * login's end from the end of an earlier login on the same instance. The
+ * controller knows which instance the login belongs to, so the frame does not
+ * repeat it.
  */
 export const LoginEnded = Schema.Struct({
   _tag: Schema.Literal("loginEnded"),
-  instanceId: InstanceId,
+  requestId: RequestId,
 });
 
 export type LoginEnded = Schema.Schema.Type<typeof LoginEnded>;

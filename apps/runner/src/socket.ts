@@ -487,6 +487,7 @@ export const connect = (
               message: describeMissingAdapter(request.providerId),
             })
           : options.providerLogins.start(
+              request.requestId,
               request.instanceId,
               adapter,
               // A login is the harness writing its own credential on this

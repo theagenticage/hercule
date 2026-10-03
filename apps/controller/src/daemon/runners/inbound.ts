@@ -114,7 +114,7 @@ const make = Effect.gen(function* () {
         // for a login this controller started.
         return forkAndAbsorbFailures(
           "Probing an instance after its login ended failed",
-          probes.probeAfterLoginEnd(traffic.runnerId, traffic.ended.instanceId),
+          probes.probeAfterLoginEnd(traffic.runnerId, traffic.ended.requestId),
         );
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's

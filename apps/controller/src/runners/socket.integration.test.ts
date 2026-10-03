@@ -2219,15 +2219,16 @@ describe("logging a runner's provider instance in", () => {
 
   /**
    * Starts a device login on the runner, answers it the way the runner does,
-   * and returns once the controller answered the caller. `nth` is the index of
-   * this login's `loginStart` among those the wire has received.
+   * and returns the login's request id once the controller answered the
+   * caller. `nth` is the index of this login's `loginStart` among those the
+   * wire has received.
    */
   const startDeviceLogin = async (
     harness: ServerHarness,
     token: string,
     login: { readonly instanceId: string; readonly runnerId: string; readonly wire: Wire },
     nth = 0,
-  ): Promise<void> => {
+  ): Promise<string> => {
     const pending = startLogin(harness.base, token, login.instanceId, login.runnerId);
     const request = await waitForFrame<LoginStart>(login.wire, "loginStart", nth);
     login.wire.send({
@@ -2238,6 +2239,7 @@ describe("logging a runner's provider instance in", () => {
     });
     const response = await pending;
     expect(response.status, await response.clone().text()).toBe(200);
+    return request.requestId;
   };
 
   const answerProbe = (wire: Wire, probe: ProbeRequest): void => {
@@ -2277,8 +2279,8 @@ describe("logging a runner's provider instance in", () => {
     nth: number,
   ): Promise<void> => {
     const before = login.wire.frames.length;
-    await startDeviceLogin(harness, token, login, nth);
-    login.wire.send({ _tag: "loginEnded", instanceId: login.instanceId });
+    const requestId = await startDeviceLogin(harness, token, login, nth);
+    login.wire.send({ _tag: "loginEnded", requestId });
     answerProbe(login.wire, await waitForProbe(login.wire, login.instanceId, before));
   };
 
@@ -2292,14 +2294,14 @@ describe("logging a runner's provider instance in", () => {
         // Let the probe every connection starts go out first, so the one
         // awaited below can only be the one the frame caused.
         await waitForProbe(wire, claude.id, 0);
-        await startDeviceLogin(harness, token, {
+        const requestId = await startDeviceLogin(harness, token, {
           instanceId: claude.id,
           runnerId: joined.runnerId,
           wire,
         });
         const before = wire.frames.length;
 
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        wire.send({ _tag: "loginEnded", requestId });
 
         answerProbe(wire, await waitForProbe(wire, claude.id, before));
         // The probe stores the snapshot, which announces it on the provider
@@ -2329,7 +2331,7 @@ describe("logging a runner's provider instance in", () => {
         // A runner cannot make the controller probe whenever it likes. The
         // report is not a protocol error either: the Codex login below runs
         // over the same connection.
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        wire.send({ _tag: "loginEnded", requestId: crypto.randomUUID() });
 
         await settleCodexLogin(
           harness,
@@ -2345,6 +2347,39 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
+  it("ignores the end of a login that another runner reports", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const other = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      const intruder = await greet(harness.base, other.credential);
+      try {
+        await waitForProbe(wire, claude.id, 0);
+        await waitForProbe(intruder.wire, claude.id, 0);
+        const requestId = await startDeviceLogin(harness, token, {
+          instanceId: claude.id,
+          runnerId: joined.runnerId,
+          wire,
+        });
+        const before = wire.frames.length;
+
+        // Had the other runner's report been read, it would have used up the
+        // login, and the report from the login's own runner would cause no
+        // probe.
+        intruder.wire.send({ _tag: "loginEnded", requestId });
+        wire.send({ _tag: "loginEnded", requestId });
+
+        answerProbe(wire, await waitForProbe(wire, claude.id, before));
+        expect(countProbes(intruder.wire, claude.id)).toBe(1);
+      } finally {
+        wire.close();
+        intruder.wire.close();
+      }
+    });
+  });
+
   it("probes once for one login, however often the runner reports its end", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
@@ -2354,16 +2389,16 @@ describe("logging a runner's provider instance in", () => {
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
-        await startDeviceLogin(harness, token, {
+        const requestId = await startDeviceLogin(harness, token, {
           instanceId: claude.id,
           runnerId: joined.runnerId,
           wire,
         });
         const before = wire.frames.length;
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        wire.send({ _tag: "loginEnded", requestId });
         answerProbe(wire, await waitForProbe(wire, claude.id, before));
 
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        wire.send({ _tag: "loginEnded", requestId });
         await settleCodexLogin(
           harness,
           token,
@@ -2390,14 +2425,14 @@ describe("logging a runner's provider instance in", () => {
       const sentinel = { instanceId: codex.id, runnerId: joined.runnerId, wire };
       try {
         await waitForProbe(wire, claude.id, 0);
-        await startDeviceLogin(harness, token, login, 0);
+        const firstLogin = await startDeviceLogin(harness, token, login, 0);
         let before = wire.frames.length;
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        wire.send({ _tag: "loginEnded", requestId: firstLogin });
         // Held unanswered, so the next login ends while this probe runs.
         const first = await waitForProbe(wire, claude.id, before);
 
-        await startDeviceLogin(harness, token, login, 1);
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        const secondLogin = await startDeviceLogin(harness, token, login, 1);
+        wire.send({ _tag: "loginEnded", requestId: secondLogin });
         await settleCodexLogin(harness, token, sentinel, 2);
         expect(countProbes(wire, claude.id)).toBe(2);
 
@@ -2415,13 +2450,225 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
+  it("probes when a login ends that replaced a login which then failed", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex");
+      const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
+      try {
+        await waitForProbe(wire, claude.id, 0);
+        const pendingFirst = startLogin(harness.base, token, claude.id, joined.runnerId);
+        const first = await waitForFrame<LoginStart>(wire, "loginStart", 0);
+        const pendingSecond = startLogin(harness.base, token, claude.id, joined.runnerId);
+        const second = await waitForFrame<LoginStart>(wire, "loginStart", 1);
+
+        // The runner stops the first login to start the second, so the first
+        // fails only after the controller began waiting for the second's end.
+        wire.send({
+          _tag: "loginFailed",
+          requestId: first.requestId,
+          message: "the login ended without a URL",
+        });
+        const failed = await pendingFirst;
+        expect(failed.status, await failed.clone().text()).toBe(409);
+        wire.send({
+          _tag: "loginUrl",
+          requestId: second.requestId,
+          url: DEVICE_URL,
+          userCode: "CH61-0FI2N",
+        });
+        const started = await pendingSecond;
+        expect(started.status, await started.clone().text()).toBe(200);
+        const before = wire.frames.length;
+
+        wire.send({ _tag: "loginEnded", requestId: second.requestId });
+
+        answerProbe(wire, await waitForProbe(wire, claude.id, before));
+        await settleCodexLogin(
+          harness,
+          token,
+          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          2,
+        );
+        // The probe every connection starts, and the one the second login's end caused.
+        expect(countProbes(wire, claude.id)).toBe(2);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes when a device login ends after a newer login on it was refused", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
+      try {
+        await waitForProbe(wire, claude.id, 0);
+        const requestId = await startDeviceLogin(harness, token, login, 0);
+        const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
+        const refused = await waitForFrame<LoginStart>(wire, "loginStart", 1);
+        // A runner refuses a login it cannot run before it stops the login
+        // already running, so the first login keeps going.
+        wire.send({
+          _tag: "loginFailed",
+          requestId: refused.requestId,
+          message: "no claude on this machine",
+        });
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(409);
+        const before = wire.frames.length;
+
+        wire.send({ _tag: "loginEnded", requestId });
+
+        answerProbe(wire, await waitForProbe(wire, claude.id, before));
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes when a device login ends after a newer login on it got no answer", async () => {
+    await withRegistry(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+        const joined = await enlist(harness);
+        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const { wire } = await greet(harness.base, joined.credential);
+        const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
+        try {
+          await waitForProbe(wire, claude.id, 0);
+          const requestId = await startDeviceLogin(harness, token, login, 0);
+          // The newer login's answer never arrives, for example because the
+          // connection dropped before the runner read the request.
+          const response = await startLogin(harness.base, token, claude.id, joined.runnerId);
+          expect(response.status, await response.clone().text()).toBe(409);
+          const before = wire.frames.length;
+
+          wire.send({ _tag: "loginEnded", requestId });
+
+          answerProbe(wire, await waitForProbe(wire, claude.id, before));
+        } finally {
+          wire.close();
+        }
+      },
+      { loginDeadline: LOGIN_DEADLINE },
+    );
+  });
+
+  it("ignores the end of a device login that a later device login replaced", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex");
+      const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
+      const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
+      try {
+        await waitForProbe(wire, claude.id, 0);
+        const first = await startDeviceLogin(harness, token, login, 0);
+        const second = await startDeviceLogin(harness, token, login, 1);
+        const third = await startDeviceLogin(harness, token, login, 2);
+
+        // The runner stopped the first two logins to start the next, and
+        // reports no end for a login it stopped. The controller stopped
+        // waiting for them, so a report for either causes no probe.
+        wire.send({ _tag: "loginEnded", requestId: first });
+        wire.send({ _tag: "loginEnded", requestId: second });
+        await settleCodexLogin(
+          harness,
+          token,
+          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          3,
+        );
+        expect(countProbes(wire, claude.id)).toBe(1);
+
+        const before = wire.frames.length;
+        wire.send({ _tag: "loginEnded", requestId: third });
+        answerProbe(wire, await waitForProbe(wire, claude.id, before));
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("ignores the end of a device login that a paste-a-code login replaced", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex");
+      const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
+      try {
+        await waitForProbe(wire, claude.id, 0);
+        const replaced = await startDeviceLogin(
+          harness,
+          token,
+          { instanceId: claude.id, runnerId: joined.runnerId, wire },
+          0,
+        );
+        const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
+        const request = await waitForFrame<LoginStart>(wire, "loginStart", 1);
+        wire.send({ _tag: "loginUrl", requestId: request.requestId, url: AUTHORIZE_URL });
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+
+        wire.send({ _tag: "loginEnded", requestId: replaced });
+        await settleCodexLogin(
+          harness,
+          token,
+          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          2,
+        );
+
+        expect(countProbes(wire, claude.id)).toBe(1);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("ignores the end of a paste-a-code login, whose code submission already reports it", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex");
+      const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
+      try {
+        await waitForProbe(wire, claude.id, 0);
+        const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
+        const request = await waitForFrame<LoginStart>(wire, "loginStart", 0);
+        wire.send({ _tag: "loginUrl", requestId: request.requestId, url: AUTHORIZE_URL });
+        const response = await pending;
+        expect(response.status, await response.clone().text()).toBe(200);
+
+        wire.send({ _tag: "loginEnded", requestId: request.requestId });
+        await settleCodexLogin(
+          harness,
+          token,
+          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          1,
+        );
+
+        expect(countProbes(wire, claude.id)).toBe(1);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
   it("ignores the end of a login reported before the hello", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await findInstanceFor(harness.base, token, "claude-code");
       const first = await greet(harness.base, joined.credential);
-      await startDeviceLogin(harness, token, {
+      const requestId = await startDeviceLogin(harness, token, {
         instanceId: claude.id,
         runnerId: joined.runnerId,
         wire: first.wire,
@@ -2435,13 +2682,13 @@ describe("logging a runner's provider instance in", () => {
         // holds a credential, so its report is not read. Had it been read, it
         // would have used up the login, and the report after the hello below
         // would cause no probe.
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        wire.send({ _tag: "loginEnded", requestId });
         wire.send(buildHello());
         await waitForFrame(wire, "controllerHello");
         await waitForProbe(wire, claude.id, 0);
         const before = wire.frames.length;
 
-        wire.send({ _tag: "loginEnded", instanceId: claude.id });
+        wire.send({ _tag: "loginEnded", requestId });
 
         await waitForProbe(wire, claude.id, before);
       } finally {

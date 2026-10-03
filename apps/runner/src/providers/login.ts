@@ -126,6 +126,8 @@ interface Printed {
 }
 
 interface Held {
+  /** The request id of the `loginStart` that started this login. Its `LoginEnded` carries it. */
+  readonly requestId: string;
   readonly child: LoginChild;
   /**
    * The URL, plus the code when the vendor prints one. Resolves to `undefined`
@@ -164,6 +166,7 @@ type ReportLoginEnded = (frame: LoginEnded) => Effect.Effect<void, unknown>;
 
 export interface Logins {
   readonly start: (
+    requestId: string,
     instanceId: string,
     adapter: ProviderAdapter,
     ctx: ProviderRunnerContext,
@@ -184,14 +187,15 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
   let reporting: ReportLoginEnded | undefined;
 
   /**
-   * Reports that a device login ended. A failed send is dropped: the
+   * Reports that a device login ended, under the request id that started it,
+   * so the controller knows which of its logins ended. A failed send is dropped: the
    * connection is going away, and the next one probes every instance anyway.
    */
-  const reportEnded = (instanceId: string): Effect.Effect<void> =>
+  const reportEnded = (login: Held): Effect.Effect<void> =>
     Effect.suspend(() =>
       reporting === undefined
         ? Effect.void
-        : Effect.ignore(reporting({ _tag: "loginEnded", instanceId })),
+        : Effect.ignore(reporting({ _tag: "loginEnded", requestId: login.requestId })),
     );
 
   const forgetLogin = (instanceId: string, login: Held): Effect.Effect<void> =>
@@ -230,12 +234,16 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             }),
           ),
           Effect.andThen(stopLogin(instanceId, login)),
-          Effect.andThen(isDeviceLogin(login) ? reportEnded(instanceId) : Effect.void),
+          Effect.andThen(isDeviceLogin(login) ? reportEnded(login) : Effect.void),
         ),
       );
     });
 
-  const openLogin = (instanceId: string, command: LoginCommand): Effect.Effect<Held> =>
+  const openLogin = (
+    requestId: string,
+    instanceId: string,
+    command: LoginCommand,
+  ): Effect.Effect<Held> =>
     Effect.gen(function* () {
       const child = spawn(command.command, command.env);
       const pattern = command.userCode;
@@ -282,6 +290,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         for (const waiting of complaints.splice(0)) waiting(line);
       }).catch(() => undefined);
       const login: Held = {
+        requestId,
         child,
         address: () => url,
         abandon: () => {
@@ -309,7 +318,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           Effect.runPromise(
             Effect.suspend(() =>
               held.get(instanceId) === login && isDeviceLogin(login)
-                ? Effect.andThen(forgetLogin(instanceId, login), reportEnded(instanceId))
+                ? Effect.andThen(forgetLogin(instanceId, login), reportEnded(login))
                 : forgetLogin(instanceId, login),
             ),
           ),
@@ -320,7 +329,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     });
 
   return {
-    start: (instanceId, adapter, ctx) =>
+    start: (requestId, instanceId, adapter, ctx) =>
       Effect.gen(function* () {
         if (adapter.login === undefined) {
           return buildLoginFailed(`${adapter.providerId} has no login in this runner build`);
@@ -332,7 +341,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         // so only one login per instance can be waiting.
         const previous = held.get(instanceId);
         if (previous !== undefined) yield* stopLogin(instanceId, previous);
-        const login = yield* openLogin(instanceId, adapter.login(ctx, ctx.binary));
+        const login = yield* openLogin(requestId, instanceId, adapter.login(ctx, ctx.binary));
         const printed = yield* Effect.promise(() => login.printed);
         if (printed === undefined) {
           yield* stopLogin(instanceId, login);

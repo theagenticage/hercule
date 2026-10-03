@@ -355,32 +355,29 @@ const make = Effect.gen(function* () {
         );
         const instance = yield* readInstanceOrFail(id);
         yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        const requestId = crypto.randomUUID();
         // Expected before the runner is asked, because a device login that
         // fails at once can report its end before this fiber reads the answer.
-        yield* probes.expectLoginEnd(runnerId, id);
+        // It is forgotten when the ask fails or is interrupted, since a login
+        // whose answer is never read would otherwise stay awaited for as long
+        // as the controller runs.
+        yield* probes.expectLoginEnd(runnerId, id, requestId);
         const answer = yield* askRunner(
           runnerId,
-          {
-            _tag: "loginStart",
-            requestId: crypto.randomUUID(),
-            instanceId: id,
-            providerId: instance.providerId,
-          },
+          { _tag: "loginStart", requestId, instanceId: id, providerId: instance.providerId },
           yield* ProviderLoginDeadline,
-        ).pipe(Effect.tapError(() => probes.forgetLoginEnd(runnerId, id)));
+        ).pipe(Effect.onError(() => probes.forgetLoginEnd(runnerId, requestId)));
         if (answer._tag !== "loginUrl") {
-          yield* probes.forgetLoginEnd(runnerId, id);
+          yield* probes.forgetLoginEnd(runnerId, requestId);
           return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
         }
         // Absent rather than empty: a code means the login is finished in the
-        // user's browser, not through this exchange.
-        if (answer.userCode === undefined) {
-          // A login finished by pasting a code reports no end. It also
-          // replaced any device login before it on this runner, and the runner
-          // never reports the end of a replaced login.
-          yield* probes.forgetLoginEnd(runnerId, id);
-          return { url: answer.url };
-        }
+        // user's browser, not through this exchange. A login finished by
+        // pasting a code reports no end.
+        yield* probes.recordPrintedLogin(runnerId, id, requestId, {
+          reportsEnd: answer.userCode !== undefined,
+        });
+        if (answer.userCode === undefined) return { url: answer.url };
         if (answer.expiresInSeconds === undefined) {
           return { url: answer.url, userCode: answer.userCode };
         }

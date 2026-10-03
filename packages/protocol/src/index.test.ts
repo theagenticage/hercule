@@ -150,7 +150,7 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   },
   { _tag: "loginFailed", requestId: REQUEST_ID, message: "no login in progress" },
   { _tag: "loginResult", requestId: REQUEST_ID, ok: false, message: "Invalid code." },
-  { _tag: "loginEnded", instanceId: INSTANCE_ID },
+  { _tag: "loginEnded", requestId: REQUEST_ID },
   {
     _tag: "sessionEvent",
     seq: 12,
