@@ -19,7 +19,7 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import type { Pose } from "@hercule/client-core";
+import { describePose, isSeatedPose, POSES, type Pose } from "@hercule/client-core";
 import type { World } from "../world/types";
 import { PoseMark } from "./dossier-card";
 import { OfficeIcon } from "../../icons/office";
@@ -27,20 +27,10 @@ import { findNextColleagueId, listColleaguesInPose } from "./office-keys";
 import { RoomDirectory } from "./room-directory";
 
 /**
- * The counts of the bar, in its order: the poses each one counts, and the
- * words after its number. Its mark is its first pose's. A colleague that is
- * done counts as idle, which it becomes a moment later, and one that is away
- * counts as asleep, so the bar holds six counts at most and fits beside the
- * other pills.
+ * The poses the bar counts, in its order: every pose a thread can have while
+ * it has a colleague in the Office.
  */
-const COUNTS: ReadonlyArray<{ readonly poses: ReadonlyArray<Pose>; readonly words: string }> = [
-  { poses: ["working"], words: "working" },
-  { poses: ["waiting"], words: "waiting on you" },
-  { poses: ["paused"], words: "paused" },
-  { poses: ["failed"], words: "failed" },
-  { poses: ["idle", "done"], words: "idle" },
-  { poses: ["asleep", "away"], words: "asleep" },
-];
+const COUNTED_POSES: ReadonlyArray<Pose> = POSES.filter(isSeatedPose);
 
 /** Renders the counts of who is doing what. Poses nobody is in are left out. */
 function PoseCounts({ world }: { readonly world: World }): JSX.Element {
@@ -48,10 +38,10 @@ function PoseCounts({ world }: { readonly world: World }): JSX.Element {
   const states = useSyncExternalStore(subscribeColleagueStates, readColleagueStates);
   return (
     <span className="pill sum" role="group" aria-label="Who is doing what">
-      {COUNTS.map(({ poses, words }) => {
-        const colleagues = poses.flatMap((pose) => listColleaguesInPose(world, states, pose));
+      {COUNTED_POSES.map((pose) => {
+        const colleagues = listColleaguesInPose(world, states, pose);
         if (colleagues.length === 0) return null;
-        const pose = poses[0]!;
+        const words = describePose(pose);
         return (
           <button
             key={pose}
