@@ -8,7 +8,7 @@ import type { OpenRequest } from "@hercule/contract";
 import type { Accessory, Hue, Shape } from "../../faces/look";
 import type { ProjectTint } from "../../screens/project-tile";
 
-/** The headwear only assistants wear. */
+/** A hat a colleague can wear. */
 export type Headwear = "cloche" | "headset" | "beret";
 
 /** Whether a colleague is a thread's agent, an assistant, or the Triage workflow. */
@@ -19,6 +19,7 @@ export interface CrewLook {
   readonly hue: Hue;
   readonly shape: Shape;
   readonly accessories: ReadonlyArray<Accessory>;
+  /** The colleague's hat, or null. No look sets one yet: #338 decides who wears which. */
   readonly headwear: Headwear | null;
 }
 
