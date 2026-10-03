@@ -198,6 +198,16 @@
   padding-bottom: 12px;
   border-radius: var(--r-lg);
 }
+/* The answers show no key caps. The dock's keys work only while the focus is
+   inside the dock. Elsewhere on the card, ↩ opens the thread and esc closes
+   the card, as the card's footer shows, so a cap of ↩ beside Allow would
+   point to the wrong action. */
+.office-card-request .ans {
+  grid-template-columns: 156px 1fr;
+}
+.office-card-request .ans kbd {
+  display: none;
+}
 .office-card-ask {
   display: flex;
   align-items: center;
