@@ -125,30 +125,36 @@ export const describeStatus = (status: ServiceStatus): string => {
 };
 
 /**
- * Fails when the installed Service Unit runs a Hercule Home other than `home`,
- * or names no Home, so a command inside a session cannot tell whose unit it
- * is. Succeeds when no unit is installed.
+ * Succeeds only when an installed unit file names `home` as the Hercule Home
+ * its service runs. Fails in every other case: the unit runs another Home,
+ * its unit file names no Home, or no unit file is installed at all.
  *
  * There is one unit per machine user, so `start`, `stop`, `restart` and
  * `uninstall` act on it whatever `--home` says. Inside a session that unit is
- * usually the user's live Hercule, which a session must not stop. Both paths
- * are resolved before they are compared, because a plist written by hand may
- * spell the same folder with a trailing slash.
+ * usually the user's live Hercule, which a session must not stop. A missing
+ * unit file does not mean nothing runs: launchd keeps a job it loaded after
+ * the file is deleted, and restarts it when it exits, so `uninstall` would
+ * still unload it. Both paths are resolved before they are compared, because
+ * a plist written by hand may spell the same folder with a trailing slash.
  */
-const refuseUnitOfAnotherHome = (
+const requireUnitOfNamedHome = (
   status: ServiceStatus,
   home: string,
   verb: ServiceVerb,
 ): Effect.Effect<void, ServiceError> => {
-  if (!status.installed) return Effect.void;
-  if (status.home !== null && resolve(status.home) === resolve(home)) return Effect.void;
-  const runs =
-    status.home === null
-      ? "a Hercule Home its unit file does not name"
-      : `the Hercule Home ${status.home}`;
+  if (status.installed && status.home !== null && resolve(status.home) === resolve(home)) {
+    return Effect.void;
+  }
+  const found = !status.installed
+    ? status.running
+      ? `No Hercule unit file is installed on this machine, but a Hercule service runs as pid ${String(status.pid)}, for a Home that cannot be read.`
+      : "No Hercule unit file is installed on this machine."
+    : status.home === null
+      ? `The Hercule service on this machine runs a Hercule Home its unit file does not name, not ${home}.`
+      : `The Hercule service on this machine runs the Hercule Home ${status.home}, not ${home}.`;
   return Effect.fail(
     new ServiceError({
-      message: `The Hercule service on this machine runs ${runs}, not ${home}. Inside a session, \`hercule service ${verb}\` may only act on the service of the Home it names, because the other one may be the user's live Hercule. Run it outside the session.`,
+      message: `${found} Inside a session, \`hercule service ${verb}\` may only act on a service whose unit file names the Home it was given, because any other may be the user's live Hercule. Run it outside the session.`,
     }),
   );
 };
@@ -236,7 +242,7 @@ export const runServiceCommand = async (
     if (verb !== "install" && verb !== "status" && isInSession(request.env)) {
       // `install` needs no check here: the Supervisor's `prepare` refuses a
       // unit that runs another Home.
-      yield* refuseUnitOfAnotherHome(yield* supervisor.readStatus, home, verb);
+      yield* requireUnitOfNamedHome(yield* supervisor.readStatus, home, verb);
     }
     switch (verb) {
       case "install": {
@@ -254,8 +260,14 @@ export const runServiceCommand = async (
         const before = yield* supervisor.readStatus;
         const after = yield* supervisor.uninstall;
         if (!before.installed) {
+          // A service can outlive its deleted unit file: launchd unloads such
+          // a job on `uninstall`, systemd leaves it running. Say which happened.
           printForPerson(
-            "No Hercule service is installed on this machine, so there is nothing to uninstall.",
+            after.running
+              ? `No Hercule unit file is installed, but a Hercule service still runs as pid ${String(after.pid)}.`
+              : before.running
+                ? `No Hercule unit file was installed, but a Hercule service was running as pid ${String(before.pid)}. It is stopped now.`
+                : "No Hercule service is installed on this machine.",
           );
         } else {
           printForPerson(`Uninstalled the Hercule service and deleted ${before.unitFile}.`);

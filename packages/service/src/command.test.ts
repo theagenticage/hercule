@@ -28,6 +28,8 @@ let actions: Array<string>;
 let installedUnits: Array<ServiceUnit>;
 let out: Array<string>;
 let err: Array<string>;
+/** Whether the fake `uninstall` leaves a running service whose unit file is gone, as systemd does. */
+let uninstallLeavesOrphanRunning: boolean;
 
 const NOT_INSTALLED: Omit<ServiceStatus, "unitFile"> = {
   installed: false,
@@ -60,7 +62,9 @@ const FakeSupervisor = Layer.sync(Supervisor, () =>
       }),
     uninstall: Effect.sync(() => {
       actions.push("uninstall");
-      installed = { ...NOT_INSTALLED, unitFile: UNIT_FILE };
+      if (installed.installed || !uninstallLeavesOrphanRunning) {
+        installed = { ...NOT_INSTALLED, unitFile: UNIT_FILE };
+      }
       return installed;
     }),
     start: Effect.sync(() => {
@@ -104,6 +108,7 @@ beforeEach(() => {
   installedUnits = [];
   out = [];
   err = [];
+  uninstallLeavesOrphanRunning = false;
 });
 
 afterEach(() => {
@@ -321,12 +326,29 @@ describe("uninstall", () => {
     ]);
   });
 
-  it("says there was nothing to uninstall", async () => {
+  it("says no service is installed when none is", async () => {
+    expect(await run(["uninstall"])).toBe(0);
+    expect(out).toEqual(["No Hercule service is installed on this machine."]);
+    expect(actions).toEqual(["uninstall"]);
+  });
+
+  it("says it stopped a service that ran without a unit file", async () => {
+    installed = { ...NOT_INSTALLED, running: true, pid: 4242, unitFile: UNIT_FILE };
+
     expect(await run(["uninstall"])).toBe(0);
     expect(out).toEqual([
-      "No Hercule service is installed on this machine, so there is nothing to uninstall.",
+      "No Hercule unit file was installed, but a Hercule service was running as pid 4242. It is stopped now.",
     ]);
-    expect(actions).toEqual(["uninstall"]);
+  });
+
+  it("says a service without a unit file still runs when uninstall left it running", async () => {
+    installed = { ...NOT_INSTALLED, running: true, pid: 4242, unitFile: UNIT_FILE };
+    uninstallLeavesOrphanRunning = true;
+
+    expect(await run(["uninstall"])).toBe(0);
+    expect(out).toEqual([
+      "No Hercule unit file is installed, but a Hercule service still runs as pid 4242.",
+    ]);
   });
 });
 
@@ -380,7 +402,7 @@ describe("a verb that acts on the unit, inside a session", () => {
       expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
       expect(actions).toEqual([]);
       expect(err).toEqual([
-        `hercule: The Hercule service on this machine runs the Hercule Home /live, not ${home}. Inside a session, \`hercule service ${verb}\` may only act on the service of the Home it names, because the other one may be the user's live Hercule. Run it outside the session.`,
+        `hercule: The Hercule service on this machine runs the Hercule Home /live, not ${home}. Inside a session, \`hercule service ${verb}\` may only act on a service whose unit file names the Home it was given, because any other may be the user's live Hercule. Run it outside the session.`,
       ]);
     },
   );
@@ -401,10 +423,32 @@ describe("a verb that acts on the unit, inside a session", () => {
     expect(err).toEqual([]);
   });
 
-  it.each(ACTING_VERBS)("runs %s when no unit is installed", async (verb) => {
-    expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(0);
-    expect(actions).toEqual([verb]);
-  });
+  // A missing unit file does not prove that nothing runs: launchd keeps a job
+  // whose plist was deleted, and restarts it when it exits, with or without a
+  // pid at this moment.
+  it.each(ACTING_VERBS)(
+    "refuses %s when no unit file is installed but a service runs",
+    async (verb) => {
+      installed = { ...NOT_INSTALLED, running: true, pid: 4242, unitFile: UNIT_FILE };
+
+      expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+      expect(actions).toEqual([]);
+      expect(err[0]).toContain(
+        "No Hercule unit file is installed on this machine, but a Hercule service runs as pid 4242, for a Home that cannot be read.",
+      );
+    },
+  );
+
+  it.each(ACTING_VERBS)(
+    "refuses %s when no unit file is installed and no pid runs",
+    async (verb) => {
+      expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+      expect(actions).toEqual([]);
+      expect(err).toEqual([
+        `hercule: No Hercule unit file is installed on this machine. Inside a session, \`hercule service ${verb}\` may only act on a service whose unit file names the Home it was given, because any other may be the user's live Hercule. Run it outside the session.`,
+      ]);
+    },
+  );
 
   it.each(ACTING_VERBS)("runs %s on another Home's unit outside a session", async (verb) => {
     installUnitFor("/live");
