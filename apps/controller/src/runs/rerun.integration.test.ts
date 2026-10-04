@@ -288,7 +288,7 @@ describe("the origin of a re-run", () => {
 describe("a replay of a run whose step acts through a Connection", () => {
   /** The message of the refusal for a caller without the connection.use grant. */
   const REPLAY_REFUSAL =
-    "This run's workflow was sent with run.start and has a step that acts through a Connection its sender chose. Replaying it needs the connection.use grant, which this session lacks. Ask the user to replay the run, or to grant connection.use.";
+    "This run's workflow was sent with run.start, and its sender chose the Connection a step acts through, or one it may give to a run it starts. Replaying it needs the connection.use grant, which this session lacks. Ask the user to replay the run, or to grant connection.use.";
 
   it("is refused to a session without connection.use when the workflow was sent, and allowed when it was stored or the caller holds the grant", async () => {
     await withRunFleet(

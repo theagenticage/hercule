@@ -88,7 +88,10 @@ import {
   listConnectionParams,
   listReferencedAgentIds,
   listReferencedConnectionIds,
+  listStartedWorkflowIds,
   validateDefinition,
+  type ConnectionParam,
+  type ConnectionParamReferences,
   type ResolvedReferences,
 } from "./validation";
 
@@ -262,9 +265,13 @@ type CallError = Unauthenticated | Forbidden | Validation | SqlError;
  */
 type ChangeByIdError = Exclude<CallError, Validation> | NotFound | InvalidState;
 
-/** The message of the `Forbidden` error for a save of a workflow with a step that acts through a Connection. */
+/**
+ * The message of the `Forbidden` error for a save of a workflow with a
+ * connection param: a step that acts through a Connection, or that may give
+ * one to a run it starts.
+ */
 const SAVE_CONNECTION_USE_REFUSAL =
-  "This workflow has a step that acts through a Connection, and choosing that Connection needs the connection.use grant, which this session lacks. Ask the user to save the workflow, or to grant connection.use.";
+  "This workflow has a step that acts through a Connection, or that may give a Connection to a run it starts, and choosing that Connection needs the connection.use grant, which this session lacks. Ask the user to save the workflow, or to grant connection.use.";
 
 /** Fails with a `Validation` error that lists every error in `problems`, if there are any. */
 const failOnErrors = (problems: WorkflowIssues): Effect.Effect<void, Validation> =>
@@ -306,15 +313,30 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<ResolvedReferences, SqlError> =>
     Effect.gen(function* () {
       return {
-        actions: new Map(
-          (yield* host.listActiveWorkflowActions()).map((action) => [action.id, action]),
-        ),
+        ...(yield* readConnectionParamReferences(definition)),
         eventKinds: new Map(
           (yield* eventKinds.list()).map((eventKind) => [eventKind.kind, eventKind]),
         ),
         agentKindById: yield* agents.readKinds(listReferencedAgentIds(definition)),
         connectionTypeById: yield* connections.readTypes(listReferencedConnectionIds(definition)),
         connectionTypes: new Set(yield* host.listActiveConnectionTypes()),
+      };
+    });
+
+  /**
+   * Reads what finding the connection params of `definition` needs: the
+   * available actions, and the inputs of the stored workflows its
+   * `run.start` steps name.
+   */
+  const readConnectionParamReferences = (
+    definition: WorkflowDefinition,
+  ): Effect.Effect<ConnectionParamReferences, SqlError> =>
+    Effect.gen(function* () {
+      return {
+        actions: new Map(
+          (yield* host.listActiveWorkflowActions()).map((action) => [action.id, action]),
+        ),
+        startedWorkflowInputsById: yield* workflows.readInputs(listStartedWorkflowIds(definition)),
       };
     });
 
@@ -330,21 +352,33 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Checks that `actor` may save `definition`. Fails with `Forbidden` when a
-   * step acts through a Connection and the actor lacks the `connection.use`
-   * grant. The step's `connection` param chooses the Connection, as an id or
-   * as the input a run fills in, and every run of the workflow acts through
-   * it, whoever starts the run.
+   * Checks that `actor` may save `definition`, and returns its warnings.
+   * Fails with:
+   *
+   * - `Validation` listing every error, when the definition does not
+   *   validate;
+   * - `Forbidden` when the definition has a connection param (see
+   *   `listConnectionParams`) and the actor lacks the `connection.use`
+   *   grant. The param chooses the Connection a step acts through, as an id
+   *   or as the input a run fills in, and every run of the workflow acts
+   *   through it, whoever starts the run.
+   *
+   * A save calls this inside its transaction, so the rows cannot change
+   * between the checks and the write.
    */
-  const requireConnectionUseToSave = (
+  const checkSave = (
     definition: WorkflowDefinition,
     actor: Actor,
-  ): Effect.Effect<void, Forbidden> =>
+  ): Effect.Effect<WorkflowIssues, Validation | Forbidden | SqlError> =>
     Effect.gen(function* () {
-      const actions = yield* host.listActiveWorkflowActions();
-      if (listConnectionParams(definition, actions).length === 0) return;
-      const refused = checkActorHoldsGrant("connection.use", actor, SAVE_CONNECTION_USE_REFUSAL);
-      if (refused !== undefined) return yield* Effect.fail(refused);
+      const references = yield* readReferences(definition);
+      const problems = yield* validateDefinition(definition, references);
+      yield* failOnErrors(problems);
+      if (listConnectionParams(definition, references).length > 0) {
+        const refused = checkActorHoldsGrant("connection.use", actor, SAVE_CONNECTION_USE_REFUSAL);
+        if (refused !== undefined) return yield* Effect.fail(refused);
+      }
+      return problems;
     });
 
   /**
@@ -395,6 +429,19 @@ const make = Effect.gen(function* () {
      */
     validateDefinition: (definition: WorkflowDefinition): Effect.Effect<WorkflowIssues, SqlError> =>
       readReferencesAndValidate(definition),
+
+    /**
+     * Returns the connection params of `definition`, as `listConnectionParams`
+     * finds them against the actions and stored workflows that exist now.
+     * Checks no grant: the run engine calls it to decide whether a start
+     * chooses the Connection a step acts through.
+     */
+    listConnectionParams: (
+      definition: WorkflowDefinition,
+    ): Effect.Effect<ReadonlyArray<ConnectionParam>, SqlError> =>
+      Effect.map(readConnectionParamReferences(definition), (references) =>
+        listConnectionParams(definition, references),
+      ),
 
     /**
      * Parses a workflow a request sent as `source` or `definition`, and
@@ -529,9 +576,7 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const problems = yield* readReferencesAndValidate(parsedSource.definition);
-            yield* failOnErrors(problems);
-            yield* requireConnectionUseToSave(parsedSource.definition, actor);
+            const problems = yield* checkSave(parsedSource.definition, actor);
             // Read the clock once, inside the transaction, so the workflow,
             // its triggers and the audit event all get the same timestamp.
             const savedAt = yield* nowIso;
@@ -580,11 +625,7 @@ const make = Effect.gen(function* () {
             const problems =
               parsedSource === undefined
                 ? undefined
-                : yield* readReferencesAndValidate(parsedSource.definition);
-            if (problems !== undefined) yield* failOnErrors(problems);
-            if (parsedSource !== undefined) {
-              yield* requireConnectionUseToSave(parsedSource.definition, actor);
-            }
+                : yield* checkSave(parsedSource.definition, actor);
             const savedAt = yield* nowIso;
             const { workflow: stored, changed } = yield* failIfWorkflowNotFound(
               workflows.update(
