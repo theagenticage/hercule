@@ -108,3 +108,26 @@ export function computeDeskKey(world: World): string {
     world.runners.map((runner) => [runner.id, runner.name, runner.slots]),
   ]);
 }
+
+/**
+ * Checks whether two versions of a colleague are in the same state: the same
+ * pose, label, and request in every field. The built office moves a colleague
+ * into its new state only when this is false, so a field left out here would
+ * leave the Office showing the older value.
+ */
+export function isSameColleagueState(a: Colleague, b: Colleague): boolean {
+  return a.pose === b.pose && a.stateLabel === b.stateLabel && isSameRequest(a.request, b.request);
+}
+
+/** Checks whether two requests are equal in every field. */
+function isSameRequest(a: OfficeRequest | null, b: OfficeRequest | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.kind === b.kind &&
+    a.short === b.short &&
+    a.prompt === b.prompt &&
+    a.answers.length === b.answers.length &&
+    a.answers.every((answer, index) => answer === b.answers[index]) &&
+    a.waitingSince === b.waitingSince
+  );
+}

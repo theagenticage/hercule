@@ -38,8 +38,8 @@ import {
   type OfficeState,
 } from "./office-store";
 import { buildBureau } from "./maps/bureau";
-import { computeDeskKey } from "./world/build-world";
-import type { Colleague, World } from "./world/types";
+import { computeDeskKey, isSameColleagueState } from "./world/build-world";
+import type { World } from "./world/types";
 
 /**
  * Everything one build of the scene made from one world: the built office,
@@ -96,17 +96,6 @@ function findLamps(root: Object3D): ReadonlyArray<Lamp> {
     if (lamp !== undefined) lamps.push(lamp);
   });
   return lamps;
-}
-
-/** Checks whether a colleague's tag would read the same in both states: same pose, label and request. */
-function isSameState(a: Colleague, b: Colleague): boolean {
-  return (
-    a.pose === b.pose &&
-    a.stateLabel === b.stateLabel &&
-    a.request?.short === b.request?.short &&
-    a.request?.prompt === b.request?.prompt &&
-    a.request?.answers.join("\n") === b.request?.answers.join("\n")
-  );
 }
 
 /** Counts the colleagues in `world` who wait on the user. */
@@ -355,7 +344,7 @@ export function mountOfficeScene(
         let changed = false;
         for (const colleague of next.colleagues) {
           const old = before.get(colleague.id);
-          if (old !== undefined && isSameState(old, colleague)) continue;
+          if (old !== undefined && isSameColleagueState(old, colleague)) continue;
           built.sim.setColleagueState(
             colleague.id,
             { pose: colleague.pose, request: colleague.request, stateLabel: colleague.stateLabel },

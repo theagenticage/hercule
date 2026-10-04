@@ -6,7 +6,9 @@
  *   first, even when they waited less than a minute apart;
  * - a thread that changes pose keeps the desk key, so the Office plays the
  *   change on the built office instead of rebuilding it;
- * - a new thread changes the desk key, so the Office is rebuilt.
+ * - a new thread changes the desk key, so the Office is rebuilt;
+ * - a colleague's state counts as changed when any field of its request
+ *   changed, so the Office never keeps showing an older request.
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest, Session } from "@hercule/contract";
@@ -18,7 +20,8 @@ import {
   WEBSHOP_PROJECT,
   buildSession,
 } from "@hercule/client-core/threads/testing";
-import { buildWorld, computeDeskKey } from "./build-world";
+import { buildWorld, computeDeskKey, isSameColleagueState } from "./build-world";
+import type { Colleague, OfficeRequest } from "./types";
 
 const REQUEST: OpenRequest = {
   requestId: "req-1",
@@ -87,5 +90,44 @@ describe("computeDeskKey", () => {
     expect(computeDeskKey(build([working, idle, another]))).not.toBe(
       computeDeskKey(build([working, idle])),
     );
+  });
+});
+
+describe("isSameColleagueState", () => {
+  const asking = buildSession({
+    id: "s-asking",
+    status: "busy",
+    runnerId: MOSS.id,
+    openRequest: REQUEST,
+    lastActivityAt: "2026-10-04T09:00:00.000Z",
+  });
+  /** Returns the colleague the world draws for `session`. */
+  const buildColleagueFor = (session: Session): Colleague => build([session]).colleagues[0]!;
+
+  it("keeps a colleague whose thread changed nothing the Office shows", () => {
+    expect(isSameColleagueState(buildColleagueFor(asking), buildColleagueFor(asking))).toBe(true);
+  });
+
+  it("tells a newer Request for the same command apart by when it started waiting", () => {
+    const newer = { ...asking, lastActivityAt: "2026-10-04T09:05:00.000Z" };
+
+    expect(isSameColleagueState(buildColleagueFor(asking), buildColleagueFor(newer))).toBe(false);
+  });
+
+  it("tells apart a change to any field of the request", () => {
+    const colleague = buildColleagueFor(asking);
+    const request = colleague.request!;
+    const changes: { [Field in keyof OfficeRequest]-?: OfficeRequest[Field] } = {
+      kind: "question",
+      short: "Run git pull?",
+      prompt: "git pull",
+      answers: ["Deny", "Allow"],
+      waitingSince: "2026-10-04T09:05:00.000Z",
+    };
+
+    for (const field of Object.keys(request) as Array<keyof OfficeRequest>) {
+      const changed = { ...colleague, request: { ...request, [field]: changes[field] } };
+      expect(isSameColleagueState(colleague, changed), field).toBe(false);
+    }
   });
 });
