@@ -516,9 +516,21 @@ export const buildFeedIntervalsDraft = (
     }),
   );
 
+/** The message under a feed's interval field when its text is not a whole number of seconds. */
+export const FEED_INTERVAL_UNREADABLE = "Enter a whole number of seconds.";
+
+/** The result of reading the interval fields: the intervals to save, or the feeds whose text cannot be read. */
+export type FeedIntervalsReading =
+  | { readonly feedIntervals: Connection["feedIntervals"] }
+  | { readonly errors: Readonly<Record<string, string>> };
+
 /**
- * Returns the `feedIntervals` to save from the draft. A field left empty, or
- * holding only spaces, is left out, so that feed polls at its default.
+ * Converts the draft into the `feedIntervals` to save. A field left empty, or
+ * holding only spaces, is left out, so that feed polls at its default. A field
+ * holding anything but the digits of a whole number, such as "abc", "1.5" or
+ * "-5", is an error on that feed, and nothing is saved. Sending such text
+ * would either fail with a message about types or, because `Number` reads
+ * "1e3" and "0x10" as numbers, save a number the user did not type.
  *
  * The map is sent whole and replaces the stored one, so an interval stored
  * for a feed the type no longer declares is dropped; the controller would
@@ -529,13 +541,17 @@ export const buildFeedIntervalsDraft = (
 export const buildFeedIntervalsPayload = (
   feeds: ReadonlyArray<ConnectionFeed>,
   draft: FeedIntervalsDraft,
-): Connection["feedIntervals"] =>
-  Object.fromEntries(
-    feeds.flatMap((feed) => {
-      const typed = (draft[feed.name] ?? "").trim();
-      return typed === "" ? [] : [[feed.name, Number(typed)]];
-    }),
-  );
+): FeedIntervalsReading => {
+  const feedIntervals: Record<string, number> = {};
+  const errors: Record<string, string> = {};
+  for (const feed of feeds) {
+    const typed = (draft[feed.name] ?? "").trim();
+    if (typed === "") continue;
+    if (/^\d+$/.test(typed)) feedIntervals[feed.name] = Number(typed);
+    else errors[feed.name] = FEED_INTERVAL_UNREADABLE;
+  }
+  return Object.keys(errors).length === 0 ? { feedIntervals } : { errors };
+};
 
 /**
  * The validation errors of a refused `connection.update`, split by the part

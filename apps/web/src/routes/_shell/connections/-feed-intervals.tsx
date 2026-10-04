@@ -13,8 +13,9 @@ import {
  * its default, which the placeholder shows. Renders nothing for a type that
  * polls no feeds.
  *
- * The fields are not limited to each feed's minimum here. The controller
- * checks the minimum, and its errors are shown under the fields.
+ * Text that is not a whole number is refused before the save, under its
+ * field. The fields are not limited to each feed's minimum here. The
+ * controller checks the minimum, and its errors are shown under the fields.
  */
 export function FeedIntervalFields({
   idPrefix,
@@ -50,11 +51,13 @@ export function FeedIntervalFields({
                 fields, so an error appears directly under the input. */}
             <p className="text-fine text-faint">{describeFeedInterval(feed, typeName)}</p>
             <div className="flex items-center gap-2">
+              {/* A text field, not a number field: for text the browser cannot
+                  read as a number, such as "abc", a number field hands over an
+                  empty value, so the form could not say what is wrong. */}
               <Input
                 id={inputId}
                 className="w-[140px]"
-                type="number"
-                step={1}
+                inputMode="numeric"
                 placeholder={String(feed.defaultIntervalSeconds)}
                 value={draft[feed.name] ?? ""}
                 onChange={(event) => {

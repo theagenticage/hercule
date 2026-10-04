@@ -1015,6 +1015,31 @@ describe("Connections > configuring how often a connection is polled", () => {
     expect(listWrites(api)[0]?.body).toMatchObject({ feedIntervals: {} });
   });
 
+  it("refuses an interval that is not a whole number under its field, and sends nothing", async () => {
+    const complaint = "Enter a whole number of seconds.";
+    const { api, user } = await openPolling(GLASS);
+    const repos = screen.getByLabelText<HTMLInputElement>("Repos");
+
+    await user.type(repos, "abc");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await screen.findByText(complaint);
+    expectMessageAtField(complaint, repos, screen.getByLabelText("Check runs"));
+    // What the user typed stays, so they can see what to fix.
+    expect(repos.value).toBe("abc");
+    expect(listWrites(api)).toHaveLength(0);
+
+    await user.clear(repos);
+    await user.type(repos, "300");
+    expect(screen.queryByText(complaint)).toBeNull();
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toMatchObject({ feedIntervals: { repos: 300 } });
+  });
+
   it("shows an interval below the feed's minimum under that feed, and keeps the form open", async () => {
     const complaint =
       "Poll repos every 60 seconds or slower; Glasshouse does not allow a shorter interval.";
