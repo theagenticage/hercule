@@ -46,6 +46,15 @@
  *   No fiber waits for the step: its result arrives later from the runner
  *   (`recordStepResult`), and the end transaction runs then.
  *
+ * A signal trigger has no action. From the run's start until it ends, the
+ * run holds a subscription for each of its signal triggers. An event that
+ * matches one, and correlates with the run, writes a pending record for the
+ * trigger, holding the signal's output (`signals.ts`), and wakes the run.
+ * Its child fiber completes that record and routes the run, in one
+ * transaction. A run with a signal trigger does not complete when its steps
+ * are done: it sleeps until the next signal, and ends only through a
+ * terminal step, a failure or a cancel.
+ *
  * Each time a child fiber ends, the run's execution reads the run again and
  * starts the child fibers that are now ready, until the run has ended. Then
  * it interrupts the child fibers still executing, as a cancel does. When the
@@ -125,6 +134,7 @@ import { PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
+import { runHeldSubscriptions } from "../subscriptions";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
 import { RunExecutor } from "./executor";
 import {
@@ -133,7 +143,7 @@ import {
   type RunOutcome,
   type StepRecordId,
 } from "./repository";
-import { decideRouting, isStepConditionMet } from "./routing";
+import { decideRouting, isStepConditionMet, listSignalTriggerIds } from "./routing";
 import {
   describeMissingCapableRunner,
   listCapableRunners,
@@ -144,6 +154,7 @@ import {
   buildRunFailedNotification,
   decideRunFailedUnlessRaised,
 } from "./run-events";
+import { makeSignalMatching } from "./signals";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
@@ -352,6 +363,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
+  const runHeld = yield* runHeldSubscriptions;
   // The listener that publishes a committed change on the live topics. A
   // run's execution is carried out apart from the request that started it,
   // so the listener is provided to the execution here.
@@ -364,6 +376,7 @@ export const makeRunEngine = Effect.gen(function* () {
     (runId) => executeInBackground(runId),
     (runId, outcome, at) => writeRunEnding(runId, outcome, at),
   );
+  const { recordSignalMatch } = yield* makeSignalMatching((runId) => executeInBackground(runId));
 
   /**
    * Ends a run: cancels every step record of it that is still pending or
@@ -372,7 +385,9 @@ export const makeRunEngine = Effect.gen(function* () {
    * sees an ended run with a step record still pending or running.
    *
    * A run that had a workspace releases its lease on it here, with the
-   * retention its ending calls for (`decideRetention`).
+   * retention its ending calls for (`decideRetention`). The subscriptions
+   * the run holds for its signal triggers end here too, so no signal
+   * arrives for a run that has ended.
    *
    * The run's platform event (`run.completed`, `run.failed` or
    * `run.cancelled`) is emitted here too, in the same transaction, so every
@@ -405,6 +420,7 @@ export const makeRunEngine = Effect.gen(function* () {
         if (run.workspaceId !== undefined) {
           yield* workspaces.release({ kind: "run", id: runId }, decideRetention(outcome), at);
         }
+        yield* runHeld.end(runId, at);
         const eventId = yield* platformEvents.emit(
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),
         );
@@ -748,8 +764,30 @@ export const makeRunEngine = Effect.gen(function* () {
   });
 
   /**
+   * Completes a pending record of a signal trigger, which an event wrote
+   * (see `signals.ts`), and routes the run from the trigger as from a step
+   * that completed, in one transaction. The record already holds the
+   * signal's output, so nothing else is executed. A record that is no longer
+   * pending, because the run ended first, is left alone.
+   */
+  const deliverSignal = (runId: string, record: StepRecordKey): Effect.Effect<void, SqlError> =>
+    Effect.catchTag(
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const at = yield* nowIso;
+          yield* runs.completeSignalStep(runId, record, at);
+          yield* routeAfterStep(runId, record.stepId, at);
+        }),
+      ),
+      "StepRecordEnded",
+      () => Effect.void,
+    );
+
+  /**
    * Executes one step record of a run, on a child fiber of the run's
-   * execution (see `executeRun`). A pending record is started first (see
+   * execution (see `executeRun`). A signal trigger's record is delivered
+   * (see `deliverSignal`). A pending record is started first (see
    * `startStepRecord`). A running record is one a restart cut off, and only
    * a built-in action's record gets here that way: it is executed again.
    *
@@ -769,6 +807,10 @@ export const makeRunEngine = Effect.gen(function* () {
   ): Effect.Effect<RecordProgress, SqlError> =>
     Effect.catchCause(
       Effect.gen(function* () {
+        if (listSignalTriggerIds(run.plan).includes(record.stepId)) {
+          yield* deliverSignal(run.id, record);
+          return "executed" as const;
+        }
         if (record.status === "running") {
           // `startStep` stores the input of every record it starts, so a
           // running record without one is a bug. The run fails with
@@ -911,8 +953,13 @@ export const makeRunEngine = Effect.gen(function* () {
             // until a step result or a runner wakes it.
             return;
           }
+          if (busySteps.size === 0 && listSignalTriggerIds(run.plan).length > 0) {
+            // A run with a signal trigger keeps listening once its steps are
+            // done (see `decideRouting`): it sleeps until a signal wakes it.
+            return;
+          }
           if (busySteps.size === 0) {
-            // A run always has a pending or running record until it ends:
+            // A run without a signal trigger always has a pending or running record until it ends:
             // starting a run creates its entry records, and routing ends the
             // run in the same transaction that ends its last record. Runs
             // left without one by an earlier engine were completed by
@@ -1101,6 +1148,9 @@ export const makeRunEngine = Effect.gen(function* () {
 
     /** Writes the run of a start trigger that matched an event (see `start.ts`). */
     startTriggeredRun,
+
+    /** Records an event that matched a run's signal trigger (see `signals.ts`). */
+    recordSignalMatch,
 
     /**
      * `run.cancel`: cancels a pending or running run and returns it.

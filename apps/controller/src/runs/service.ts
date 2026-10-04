@@ -1,7 +1,8 @@
 /**
  * The run operations: `run.start`, `run.rerun`, `run.cancel`, `run.query` and `run.read`,
- * writing the run of a start trigger that matched an event, resuming unfinished
- * runs when the controller starts, and what the
+ * writing the run of a start trigger that matched an event, recording an event
+ * that matched a run's signal trigger, resuming unfinished runs when the
+ * controller starts, and what the
  * controller daemon calls about workspace steps: their results, the runners
  * and workspaces that fail under them, and the steps a runner is owed.
  * Everything but querying and reading is the run engine's (`engine.ts`).
@@ -73,6 +74,7 @@ const make = Effect.gen(function* () {
     start: engine.start,
     rerun: engine.rerun,
     startTriggeredRun: engine.startTriggeredRun,
+    recordSignalMatch: engine.recordSignalMatch,
 
     /** `run.cancel`: cancels a run and returns it, as the run engine's `cancel` describes. */
     cancel: engine.cancel,

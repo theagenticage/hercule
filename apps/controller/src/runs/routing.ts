@@ -18,6 +18,8 @@
  *   the source is not live and no live step has a path to it. Conditions and
  *   `maxTraversals` are ignored when looking for a path, so a step upstream
  *   of a loop's active record counts as able to run until the loop is done.
+ * - A signal trigger that has not fired yet counts as live: its subscription
+ *   is open from the run's start, so it can still fire.
  * - An edge fired when the run has followed it at least once.
  */
 import * as Effect from "effect/Effect";
@@ -75,6 +77,14 @@ export interface RoutingDecision {
 }
 
 /**
+ * Returns the ids of a plan's signal triggers. A signal trigger's step records
+ * carry its id as their step id, because steps and triggers share one set of
+ * ids.
+ */
+export const listSignalTriggerIds = (plan: RoutedRun["plan"]): ReadonlyArray<string> =>
+  (plan.triggers ?? []).flatMap((trigger) => (trigger.kind === "signal" ? [trigger.id] : []));
+
+/**
  * Checks whether a step's condition holds, so its record may start. A step
  * without a condition always may. Fails with `ExpressionError` if the
  * condition cannot be evaluated, or gives something other than true or false.
@@ -96,6 +106,11 @@ export const isStepConditionMet = (
  * are all settled and none fired never runs: it gets no record, and the
  * steps only it leads to can then never run either.
  *
+ * A signal trigger that has not fired yet can still run, so a join it leads
+ * to waits for its first firing rather than running without it. Once the
+ * trigger has fired, its edges settle like those of a step that completed,
+ * so later firings into the join are not waited for: the join runs once.
+ *
  * `live` holds the live steps, including the ones that are about to get a
  * record. A ready step becomes live itself, so a join that another ready
  * join has a path to is not ready yet: that path leaves one of its incoming
@@ -110,7 +125,8 @@ const listReadyJoins = (
 ): ReadonlyArray<string> => {
   const edges = run.plan.edges ?? [];
   const withRecord = new Set(run.steps.map((record) => record.stepId));
-  const canStillRun = collectReachableSteps(edges, live);
+  const unfiredSignals = listSignalTriggerIds(run.plan).filter((id) => !withRecord.has(id));
+  const canStillRun = collectReachableSteps(edges, [...live, ...unfiredSignals]);
   const candidates = run.plan.steps
     .filter((step) => step.join === "all" && !withRecord.has(step.id))
     .filter((step) => {
@@ -148,7 +164,10 @@ const listReadyJoins = (
  * looked at.
  *
  * Then every `join: all` step that has become ready gets a record (see
- * `listReadyJoins`). When no step is live after that, the run completes.
+ * `listReadyJoins`). When no step is live after that, the run completes,
+ * unless its plan has a signal trigger: the trigger's subscription stays
+ * open until the run ends, so such a run waits for its next signal and ends
+ * only through a terminal step, a failure or a cancel.
  */
 export const decideRouting = (
   run: RoutedRun,
@@ -223,6 +242,8 @@ export const decideRouting = (
     const readyJoins = listReadyJoins(run, traversals, live);
     readyStepIds.push(...readyJoins);
     return buildDecision(
-      live.size === 0 && readyJoins.length === 0 ? { _tag: "completed" } : { _tag: "continues" },
+      live.size === 0 && readyJoins.length === 0 && listSignalTriggerIds(run.plan).length === 0
+        ? { _tag: "completed" }
+        : { _tag: "continues" },
     );
   });

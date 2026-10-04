@@ -29,6 +29,7 @@ import type {
   StepError,
   StepRecord,
   StepStatus,
+  Subscription,
   TriggerEvent,
   WorkflowDefinition,
   WorkspacePolicy,
@@ -48,6 +49,7 @@ import {
   type PageRequest,
   withTransaction,
 } from "../db";
+import { runHeldSubscriptions } from "../subscriptions";
 
 /** A run to insert, before it has an id. */
 export interface NewRun {
@@ -372,7 +374,8 @@ const parseRunStatusColumns = (row: RunRow) => {
 };
 
 /**
- * Parses a run row, its step rows and its traversal rows into a `Run`. The JSON
+ * Parses a run row, its step rows and its traversal rows into a `Run`, with
+ * the live subscriptions the run holds. The JSON
  * columns are parsed without being decoded again: the run engine wrote them
  * from values that were already validated. An edge with no traversal row
  * has been followed 0 times.
@@ -381,6 +384,7 @@ const parseRunRow = (
   row: RunRow,
   steps: ReadonlyArray<StepRow>,
   traversals: ReadonlyArray<TraversalRow>,
+  subscriptions: ReadonlyArray<Subscription>,
 ): Run => {
   const plan = JSON.parse(row.plan) as WorkflowDefinition;
   const edgeTraversals = (plan.edges ?? []).map(() => 0);
@@ -395,8 +399,7 @@ const parseRunRow = (
     ...(row.workspace_id === null ? {} : { workspaceId: uuidToString(row.workspace_id) }),
     steps: steps.map(parseStepRow),
     edgeTraversals,
-    // Nothing opens a run-held subscription yet: signal triggers do not run.
-    subscriptions: [],
+    subscriptions,
     ...(row.original_run_id === null ? {} : { originalRunId: uuidToString(row.original_run_id) }),
     ...(row.trigger_event === null
       ? {}
@@ -418,6 +421,7 @@ const parseSummaryRow = (row: SummaryRow): RunSummary => ({
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const runHeld = yield* runHeldSubscriptions;
 
   const announceChange = (id: string, kind: "created" | "updated"): Effect.Effect<void> =>
     announce({ _tag: "record", topic: "run", id, kind });
@@ -460,9 +464,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns a run with its step records in the order they were created and
-     * its edge traversal counts, or `None` if no run has the id. The reads are
-     * one transaction, so they are all from the same moment.
+     * Returns a run with its step records in the order they were created, its
+     * edge traversal counts and its live subscriptions, or `None` if no run
+     * has the id. The reads are one transaction, so they are all from the
+     * same moment.
      */
     read: (id: string): Effect.Effect<Option.Option<Run>, SqlError> =>
       withTransaction(
@@ -480,7 +485,8 @@ const make = Effect.gen(function* () {
           const traversals = yield* sql<TraversalRow>`
             SELECT edge_index, count FROM run_edge_traversals WHERE run_id = ${bytes}
           `;
-          return Option.some(parseRunRow(row, steps, traversals));
+          const subscriptions = yield* runHeld.list(id);
+          return Option.some(parseRunRow(row, steps, traversals, subscriptions));
         }),
       ),
 
@@ -625,6 +631,66 @@ const make = Effect.gen(function* () {
       stepIds.length === 0
         ? Effect.void
         : Effect.andThen(insertSteps(runId, stepIds, at), announceChange(runId, "updated")),
+
+    /**
+     * Adds a pending step record for a signal trigger that an event fired,
+     * holding the signal's output and the event's id. Its iteration is one
+     * more than the trigger's latest record in the run. Returns whether a
+     * record was added: an event fires a signal trigger at most once per run,
+     * so the same event routed again, after it was enriched, adds nothing.
+     *
+     * The record stays pending until the run's execution completes it (see
+     * `completeSignalStep`), so the routing pass that matched the event never
+     * routes the run itself.
+     */
+    insertSignalStep: (
+      runId: string,
+      signal: {
+        readonly triggerId: string;
+        readonly eventId: number;
+        readonly output: Schema.Json;
+      },
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const bytes = uuidFromString(runId);
+        const inserted = yield* sql`
+          INSERT INTO run_steps (run_id, step_id, iteration, status, output, event_id, created_at)
+          SELECT ${bytes}, ${signal.triggerId}, COALESCE(MAX(iteration), 0) + 1, 'pending',
+                 ${JSON.stringify(signal.output)}, ${signal.eventId}, ${at}
+          FROM run_steps WHERE run_id = ${bytes} AND step_id = ${signal.triggerId}
+          ON CONFLICT (run_id, step_id, event_id) WHERE event_id IS NOT NULL DO NOTHING
+          RETURNING step_id
+        `;
+        if (inserted.length === 0) return false;
+        yield* announceChange(runId, "updated");
+        return true;
+      }),
+
+    /**
+     * Moves a signal trigger's pending step record to completed, keeping the
+     * output `insertSignalStep` stored on it. A signal does no work, so the
+     * record starts and finishes at the same moment. Fails with
+     * `StepRecordEnded` if the record is not pending any more, for example
+     * because its run has ended.
+     */
+    completeSignalStep: (
+      runId: string,
+      step: StepRecordId,
+      at: string,
+    ): Effect.Effect<void, SqlError | StepRecordEnded> =>
+      Effect.gen(function* () {
+        const completed = yield* sql`
+          UPDATE run_steps SET status = 'completed', started_at = ${at}, finished_at = ${at}
+          WHERE run_id = ${uuidFromString(runId)} AND step_id = ${step.stepId}
+            AND iteration = ${step.iteration} AND status = 'pending'
+          RETURNING step_id
+        `;
+        if (completed.length === 0) {
+          return yield* Effect.fail(new StepRecordEnded({ runId, stepId: step.stepId }));
+        }
+        yield* announceChange(runId, "updated");
+      }),
 
     /**
      * Moves a pending step record to running, and stores the step's input:

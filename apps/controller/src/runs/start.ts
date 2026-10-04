@@ -45,6 +45,7 @@ import { afterCommit, nowIso, withTransaction } from "../db";
 import { CONNECTION_PARAM, PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
+import { runHeldSubscriptions } from "../subscriptions";
 import {
   readConnectionInputName,
   workflowRepository,
@@ -135,22 +136,11 @@ const REPLAY_REFUSALS: RefusalMessages = {
 /**
  * Returns an issue for each element of a definition that runs cannot execute
  * yet, each at its path. Such a workflow can be saved, but starting a run of
- * it is refused: a run that ignored a step or a trigger it cannot execute
- * would do something the author did not write.
+ * it is refused: a run that ignored a step it cannot execute would do
+ * something the author did not write.
  */
-const listUnsupportedElements = (definition: WorkflowDefinition): ReadonlyArray<Issue> => {
-  const triggerIssues = (definition.triggers ?? []).flatMap((trigger, index) =>
-    trigger.kind === "signal"
-      ? [
-          {
-            path: ["triggers", String(index)],
-            message:
-              "Runs cannot wait for signal triggers yet. Remove the signal trigger to run this workflow.",
-          },
-        ]
-      : [],
-  );
-  const stepIssues = definition.steps.flatMap((step: PlanStep, index): ReadonlyArray<Issue> => {
+const listUnsupportedElements = (definition: WorkflowDefinition): ReadonlyArray<Issue> =>
+  definition.steps.flatMap((step: PlanStep, index): ReadonlyArray<Issue> => {
     if (step.kind !== "agent") return [];
     return [
       {
@@ -159,8 +149,6 @@ const listUnsupportedElements = (definition: WorkflowDefinition): ReadonlyArray<
       },
     ];
   });
-  return [...triggerIssues, ...stepIssues];
-};
 
 /**
  * A run about to be written: the plan it runs, the stored workflow the plan
@@ -240,6 +228,7 @@ export const makeRunStart = (
     const settings = yield* Settings;
     const runners = yield* runnerRepository;
     const connections = yield* connectionRepository;
+    const runHeld = yield* runHeldSubscriptions;
 
     /**
      * Checks that a run started by a step of another run is not nested
@@ -376,8 +365,8 @@ export const makeRunStart = (
     /**
      * Writes the run `readRunToWrite` returns: checks that it can run (see
      * `checkRunnable`), that a runner can run it (see `checkCapableRunner`),
-     * checks how deep the run is nested, and writes the run
-     * and its entry step records. Returns the run's id at once, without
+     * checks how deep the run is nested, and writes the run, its entry step
+     * records and a subscription for each of its signal triggers. Returns the run's id at once, without
      * waiting for any step. Fails, starting no run, with:
      *
      * - `Validation` when `checkRunnable` or `checkCapableRunner` refuses the run;
@@ -399,6 +388,7 @@ export const makeRunStart = (
           const resolvedInputs = yield* checkRunnable(plan, inputs, refusals);
           yield* checkCapableRunner(plan);
           yield* checkNesting(origin);
+          const at = yield* nowIso;
           const runId = yield* runs.insert(
             {
               workflowId,
@@ -408,8 +398,9 @@ export const makeRunStart = (
               entryStepIds: listEntrySteps(plan).map((step) => step.id),
               ...(originalRunId === undefined ? {} : { originalRunId }),
             },
-            yield* nowIso,
+            at,
           );
+          yield* runHeld.open(runId, plan, at);
           // After the commit, so the execution reads the rows this
           // transaction wrote. It runs even if the caller disconnects after
           // the commit, so a run that exists always starts. A run started by
@@ -609,7 +600,8 @@ export const makeRunStart = (
      *
      * Nobody is waiting on this start to refuse it, so a run that cannot
      * start is still written, and fails at once with `validation-error` and
-     * a message that says what did not validate. The failure raises its
+     * a message that says what did not validate, and opens no subscription
+     * for its signal triggers. The failure raises its
      * notification like any failed run, so the user learns that the
      * trigger's runs are failing. The checks are those of `run.start`,
      * except two:
@@ -667,6 +659,8 @@ export const makeRunStart = (
             at,
           );
         } else {
+          // Only a run that starts listens for its signal triggers.
+          yield* runHeld.open(runId, plan, at);
           yield* afterCommit(() => executeInBackground(runId));
         }
         return runId;

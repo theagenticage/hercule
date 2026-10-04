@@ -392,23 +392,6 @@ describe("the graphs a run accepts", () => {
           },
           path: ["steps", "1"],
         },
-        {
-          element: "a signal trigger",
-          definition: {
-            name: "Signal trigger",
-            triggers: [
-              {
-                id: "task_changed",
-                kind: "signal",
-                on: { kind: "task.updated" },
-                correlation: { event: "event.payload.taskId", run: "steps.create.output.id" },
-              },
-            ],
-            steps: [buildCreateStep("create"), buildCreateStep("follow_up")],
-            edges: [{ from: "task_changed", to: "follow_up" }],
-          },
-          path: ["triggers", "0"],
-        },
       ];
 
       for (const { element, definition, path } of fixtures) {
@@ -427,22 +410,14 @@ describe("the graphs a run accepts", () => {
       const workflow = await createWorkflowOrFail(base, token, {
         definition: {
           name: "Two unsupported elements",
-          triggers: [
-            {
-              id: "task_changed",
-              kind: "signal",
-              on: { kind: "task.updated" },
-              correlation: { event: "event.payload.taskId", run: "steps.first.output.id" },
-            },
-          ],
           steps: [
             buildCreateStep("first"),
             { id: "review", kind: "agent", agent: agentId, prompt: "Review the task." },
-            buildCreateStep("follow_up"),
+            { id: "approve", kind: "agent", agent: agentId, prompt: "Approve the task." },
           ],
           edges: [
             { from: "first", to: "review" },
-            { from: "task_changed", to: "follow_up" },
+            { from: "review", to: "approve" },
           ],
         },
       });
@@ -450,8 +425,8 @@ describe("the graphs a run accepts", () => {
       const response = await requestRun(base, token, workflow.id);
 
       await expectRefusedAt(harness, response, [
-        ["triggers", "0"],
         ["steps", "1"],
+        ["steps", "2"],
       ]);
     });
   });
