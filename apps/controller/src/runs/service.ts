@@ -33,6 +33,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
+import type { ConnectionTypes } from "../connections";
 import { buildPageInputFields, refuseCursor, resolveSortDirection, type AfterCommit } from "../db";
 import type { PlatformEvents } from "../events";
 import type { Notifier } from "../notifications";
@@ -139,6 +140,7 @@ export const RunServiceLayer: Layer.Layer<
   | WorkspaceSteps
   | PlatformEvents
   | Notifier
+  | ConnectionTypes
 > = Layer.effect(RunService)(make);
 
 /**

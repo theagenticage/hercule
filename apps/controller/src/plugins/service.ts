@@ -163,18 +163,20 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns every workflow action a step can call, with its input schema as
-     * JSON Schema. Fails with `Forbidden` if the caller lacks the grant.
+     * JSON Schema, and the Connection type of each action that acts through
+     * one. Fails with `Forbidden` if the caller lacks the grant.
      */
     queryWorkflowActions: (): Effect.Effect<ReadonlyArray<WorkflowAction>, Forbidden> =>
       Effect.gen(function* () {
         yield* requireGrant("workflowAction.query");
         const actions = yield* host.listActiveWorkflowActions();
-        return actions.map(({ id, displayName, description, runsIn, inputSchema }) => ({
+        return actions.map(({ id, displayName, description, runsIn, inputSchema, connection }) => ({
           id,
           displayName,
           description,
           runsIn,
           inputSchema,
+          ...(connection === undefined ? {} : { connection }),
         }));
       }),
 

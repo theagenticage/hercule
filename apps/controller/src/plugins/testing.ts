@@ -11,7 +11,9 @@ import { Effect, Layer, Schema } from "effect";
 import {
   HOST_API,
   PluginError,
+  registerConnectionType,
   registerWorkflowAction,
+  type ActionContext,
   type ActivationContext,
   type Plugin,
   type PluginCapability,
@@ -210,3 +212,82 @@ export const buildActionPlugin = (id: string, action: WorkflowActionContribution
 
 /** A plugin with the id `notes` that declares `NOTE_APPEND_ACTION`, for tests of action steps. */
 export const notesPlugin: Plugin = buildActionPlugin("notes", NOTE_APPEND_ACTION);
+
+/** The qualified Connection type that `buildForgePlugin` declares. */
+export const FORGE_CONNECTION_TYPE = "forge/forge";
+
+/** The qualified id a step uses to call the review action of `buildForgePlugin`. */
+export const FORGE_REVIEW_ACTION_ID = "forge/pr.review";
+
+/** The verdicts the forge review action accepts, as a GitHub review does. */
+export const FORGE_REVIEW_VERDICTS = ["approve", "request-changes", "comment"] as const;
+
+/** The forge plugin, and every `ActionContext` its review action was called with. */
+export interface ForgePlugin {
+  readonly plugin: Plugin;
+  readonly contexts: ReadonlyArray<ActionContext>;
+  /** The decoded input of every call, in the same order as `contexts`. */
+  readonly inputs: ReadonlyArray<unknown>;
+}
+
+/**
+ * Builds a plugin with the id `forge`, for tests of an action that acts
+ * through a Connection. It declares:
+ *
+ * - the Connection type `forge/forge`, set up by pasting a `token`, or
+ *   through a redirect flow when `tokenUrl` is given. The redirect flow lets
+ *   a test give a Connection a token set whose refresh goes to `tokenUrl`;
+ * - the workflow action `forge/pr.review`, which acts through a `forge/forge`
+ *   Connection, takes a `verdict` from a fixed list, and records the context
+ *   and input of every call.
+ *
+ * The plugin config accepts `clientId`, which a refresh needs.
+ */
+export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): ForgePlugin => {
+  const contexts: Array<ActionContext> = [];
+  const inputs: Array<unknown> = [];
+  const { tokenUrl } = options;
+  const plugin: Plugin = {
+    manifest: {
+      id: "forge",
+      displayName: "Forge",
+      hostApi: HOST_API,
+      capabilities: ["connections", "workflow-actions"],
+      configSchema: Schema.Struct({ clientId: Schema.optionalKey(Schema.String) }),
+    },
+    register: (host) =>
+      Effect.andThen(
+        registerConnectionType(host, {
+          type: "forge",
+          displayName: "Forge",
+          setup: [
+            { kind: "credentials", fields: [{ name: "token", label: "Token" }] },
+            ...(tokenUrl === undefined ? [] : [{ kind: "oauth" as const }]),
+          ],
+          ...(tokenUrl === undefined
+            ? {}
+            : { oauth: { authorizationUrl: tokenUrl, tokenUrl, scopes: ["repo"] } }),
+          validate: () => Effect.succeed({ displayName: "octocat", accountId: "1" }),
+        }),
+        registerWorkflowAction(host, {
+          id: "pr.review",
+          displayName: "Review a pull request",
+          description: "Submits a review with a verdict on a pull request.",
+          connection: { type: FORGE_CONNECTION_TYPE },
+          input: Schema.Struct({
+            verdict: Schema.Literals(FORGE_REVIEW_VERDICTS),
+            body: Schema.optionalKey(Schema.String),
+          }),
+          output: Schema.Struct({ reviewed: Schema.Boolean }),
+          execute: (input, context) =>
+            Effect.sync(() => {
+              contexts.push(context);
+              inputs.push(input);
+              return { reviewed: true };
+            }),
+        }),
+      ),
+    activate: () => Effect.succeed(Effect.void),
+  };
+  return { plugin, contexts, inputs };
+};

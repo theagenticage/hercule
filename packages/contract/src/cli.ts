@@ -1323,7 +1323,7 @@ export const CLI = {
 
   "workflowAction.query": {
     command: "workflow-action list",
-    help: "Lists every action a workflow step can call right now, with the params each one takes. An optional param ends in ?, and --json prints the params as JSON Schema and says where each action runs: `controller`, or `workspace` for an action a runner runs in the run's workspace, such as git.commit. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin is running.",
+    help: "Lists every action a workflow step can call right now, with the params each one takes. An optional param ends in ?. An action that acts through a Connection takes the param connection, set to the id of a Connection of its type or to a template; --json gives that type as connection.type and leaves the param out of the JSON Schema. --json prints the params as JSON Schema and says where each action runs: `controller`, or `workspace` for an action a runner runs in the run's workspace, such as git.commit. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin is running.",
     examples: [{ args: [] }, { args: ["--json"] }],
     fields: {},
   },

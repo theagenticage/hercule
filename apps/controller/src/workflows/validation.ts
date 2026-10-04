@@ -53,7 +53,12 @@ import {
   type ExpressionError,
   type ExpressionScope,
 } from "../expressions";
-import type { RegisteredWorkflowAction, WorkspaceActionId } from "../plugins";
+import {
+  CONNECTION_PARAM,
+  separateConnectionParam,
+  type RegisteredWorkflowAction,
+  type WorkspaceActionId,
+} from "../plugins";
 import { isKnownTimezone } from "../settings";
 import { listEdgeEndIssues, listGraphIssues, type GraphEdge, type GraphNodes } from "./graph";
 
@@ -105,9 +110,15 @@ export const listReferencedAgentIds = (definition: WorkflowDefinition): Readonly
 
 /**
  * Returns the ids of the Connections that a definition refers to, without
- * duplicates: in the `connectionId` of a trigger's event selector, and as the default of a
- * Connection input. A default that is not a valid id cannot refer to a
- * Connection, so it is skipped.
+ * duplicates:
+ *
+ * - in the `connectionId` of a trigger's event selector;
+ * - as the default of a Connection input;
+ * - in the `connection` param of an action step, when it is written as a
+ *   literal id rather than a template.
+ *
+ * A default or a param that is not a valid id cannot refer to a Connection,
+ * so it is skipped.
  */
 export const listReferencedConnectionIds = (
   definition: WorkflowDefinition,
@@ -123,6 +134,10 @@ export const listReferencedConnectionIds = (
     ...(definition.inputs ?? []).flatMap((input) =>
       input.connection !== undefined && isId(input.default) ? [input.default] : [],
     ),
+    ...definition.steps.flatMap((step) => {
+      const connection = step.kind === "action" ? step.params?.[CONNECTION_PARAM] : undefined;
+      return isId(connection) ? [connection] : [];
+    }),
   ]),
 ];
 
@@ -557,12 +572,89 @@ const listParamIssues = (
   });
 
 /**
+ * Matches a template that is exactly one input, such as `{{ inputs.account }}`,
+ * and captures the input's name.
+ */
+const SINGLE_INPUT_TEMPLATE = /^\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/;
+
+/**
+ * Checks the `connection` param of a step whose action acts through a
+ * Connection of type `wanted`. Returns the issues at the param's path, or none
+ * when the param is missing: `listActionIssues` reports a missing param
+ * together with the action's other missing params.
+ *
+ * - A literal must be the id of an existing Connection of type `wanted`.
+ * - A template that is exactly one input, such as `{{ inputs.account }}`,
+ *   must read a Connection input of type `wanted`.
+ * - Any other template is accepted, because its value is known only when a
+ *   run renders it. The run engine checks the Connection then.
+ *
+ * Whether the Connection is disabled is not checked here, in the same way as
+ * the default of a Connection input: a disabled Connection can be enabled
+ * again before the workflow runs. A run is refused when it starts with one.
+ */
+const listConnectionParamIssues = (
+  connection: unknown,
+  path: ReadonlyArray<string>,
+  wanted: string,
+  inputs: ReadonlyArray<Input>,
+  references: ResolvedReferences,
+): ReadonlyArray<Issue> => {
+  const fix = `Write the id of a Connection of type ${wanted}, or a template that reads a Connection input of that type, such as {{ inputs.account }}.`;
+  if (typeof connection !== "string") {
+    return [
+      {
+        path,
+        message: `The param connection names the Connection the action acts through, so it must be the id of a Connection of type ${wanted}, or a template. ${fix}`,
+      },
+    ];
+  }
+  if (isTemplate(connection)) {
+    const name = SINGLE_INPUT_TEMPLATE.exec(connection)?.[1];
+    if (name === undefined) return [];
+    const input = inputs.find((candidate) => candidate.name === name);
+    if (input === undefined) {
+      return [{ path, message: `The workflow has no input named ${name}. ${fix}` }];
+    }
+    if (input.connection === undefined) {
+      return [
+        {
+          path,
+          message: `The input ${name} is not a Connection input, and the action acts through a Connection of type ${wanted}. ${fix}`,
+        },
+      ];
+    }
+    return input.connection.type === wanted
+      ? []
+      : [
+          {
+            path,
+            message: `The input ${name} is a Connection of type ${quoteAuthorText(input.connection.type)}, but the action acts through a Connection of type ${wanted}. ${fix}`,
+          },
+        ];
+  }
+  const found = isId(connection) ? references.connectionTypeById.get(connection) : undefined;
+  if (found === undefined) return [{ path, message: `No Connection has this id. ${fix}` }];
+  return found === wanted
+    ? []
+    : [
+        {
+          path,
+          message: `This Connection is of type ${found}, but the action acts through a Connection of type ${wanted}. ${fix}`,
+        },
+      ];
+};
+
+/**
  * Validates an action step's action and params:
  *
  * - the action must exist;
  * - every required param must be present;
  * - every param must be one that the action takes;
- * - the params must decode against the action's input schema.
+ * - the params must decode against the action's input schema;
+ * - an action that acts through a Connection needs the param `connection`,
+ *   which `listConnectionParamIssues` checks. That param is not in the
+ *   action's input schema, so it is left out of the decode.
  *
  * A string that contains `{{` is a template, wherever it is in the params, and
  * its value is known only when a run renders it. So a template is accepted
@@ -575,7 +667,7 @@ const listActionIssues = (
   index: number,
   references: ResolvedReferences,
   templates: ReadonlyArray<PlacedTemplate>,
-  workspace: WorkspacePolicy | undefined,
+  definition: WorkflowDefinition,
 ): ReadonlyArray<Issue> => {
   const path = ["steps", String(index)];
   const action = references.actions.get(step.action);
@@ -590,20 +682,45 @@ const listActionIssues = (
       },
     ];
   }
-  const params = step.params ?? {};
-  const taken = listActionParams(action);
+  const { connection, actionParams: params } =
+    action.connection === undefined
+      ? { connection: undefined, actionParams: step.params ?? {} }
+      : separateConnectionParam(step.params ?? {});
+  const taken = [
+    ...(action.connection === undefined ? [] : [{ name: CONNECTION_PARAM, optional: false }]),
+    ...listActionParams(action),
+  ];
   const takenNames = new Set(taken.map((param) => param.name));
+  const given = new Set([
+    ...Object.keys(params),
+    ...(connection === undefined ? [] : [CONNECTION_PARAM]),
+  ]);
   const missing = taken
-    .filter((param) => !param.optional && !Object.hasOwn(params, param.name))
+    .filter((param) => !param.optional && !given.has(param.name))
     .map((param) => param.name);
   const unknown = Object.keys(params).filter((name) => !takenNames.has(name));
-  const issues: Array<Issue> = [...listWorkspaceIssues(step, index, action, workspace)];
+  const issues: Array<Issue> = [...listWorkspaceIssues(step, index, action, definition.workspace)];
   if (missing.length > 0) {
     const isSingleParam = missing.length === 1;
+    const connectionHint =
+      action.connection !== undefined && missing.includes(CONNECTION_PARAM)
+        ? ` The param connection names the Connection the action acts through: the id of a Connection of type ${action.connection.type}, or a template that reads a Connection input of that type, such as {{ inputs.account }}.`
+        : "";
     issues.push({
       path: [...path, "params"],
-      message: `The action ${action.id} needs the ${isSingleParam ? "param" : "params"} ${joinNames(missing)}. Add ${isSingleParam ? "it" : "them"} under params.`,
+      message: `The action ${action.id} needs the ${isSingleParam ? "param" : "params"} ${joinNames(missing)}. Add ${isSingleParam ? "it" : "them"} under params.${connectionHint}`,
     });
+  }
+  if (action.connection !== undefined && connection !== undefined) {
+    issues.push(
+      ...listConnectionParamIssues(
+        connection,
+        [...path, "params", CONNECTION_PARAM],
+        action.connection.type,
+        definition.inputs ?? [],
+        references,
+      ),
+    );
   }
   for (const name of unknown) {
     issues.push({
@@ -746,14 +863,14 @@ const checkStep = (
   step: Step,
   index: number,
   references: ResolvedReferences,
-  workspace: WorkspacePolicy | undefined,
+  definition: WorkflowDefinition,
 ): Effect.Effect<ReadonlyArray<Issue>> => {
   const path = ["steps", String(index)];
   let templates: ReadonlyArray<PlacedTemplate>;
   let issues: ReadonlyArray<Issue>;
   if (step.kind === "action") {
     templates = listTemplates(step.params ?? {}, [...path, "params"]);
-    issues = listActionIssues(step, index, references, templates, workspace);
+    issues = listActionIssues(step, index, references, templates, definition);
   } else {
     templates = [{ path: [...path, "prompt"], template: step.prompt }];
     issues = listAgentIssues(step, index, references);
@@ -837,7 +954,7 @@ export const validateDefinition = (
         checkTrigger(trigger, index, definition, references),
       )).flat(),
       ...(yield* Effect.forEach(definition.steps, (step, index) =>
-        checkStep(step, index, references, definition.workspace),
+        checkStep(step, index, references, definition),
       )).flat(),
       ...(yield* Effect.forEach(definedEdges, (edge, index) =>
         Effect.map(checkEdgeCondition(edge, index), (conditionIssues) => [
