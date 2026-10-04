@@ -240,6 +240,7 @@ export {
   CredentialRef,
   GITHUB_CONNECTION_TYPE,
   MAX_CONNECTION_LABEL_LENGTH,
+  MAX_FEED_INTERVAL_SECONDS,
 } from "./groups/connection";
 export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
 export {

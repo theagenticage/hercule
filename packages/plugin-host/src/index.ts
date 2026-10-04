@@ -47,6 +47,8 @@ export {
   EventSourceNames,
   FeedDeclaration,
   MAX_CONTRIBUTION_NAME_LENGTH,
+  MAX_EMITTED_PAYLOAD_BYTES,
+  MAX_EMITTED_RAW_BYTES,
   ProviderDefinition,
   WorkflowActionNames,
   type ActionContext,

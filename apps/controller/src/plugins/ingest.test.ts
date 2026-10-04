@@ -5,12 +5,22 @@
  * database and the notifier are real.
  */
 import { describe, expect, it } from "vitest";
-import { Clock, Duration, Effect, Option } from "effect";
+import { Clock, Duration, Effect, Fiber, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { AuthError, PluginError, type FeedDeclaration } from "@hercule/plugin-host";
+import { MAX_FEED_INTERVAL_SECONDS } from "@hercule/contract";
 import { connectionRepository, type StoredConnection } from "../connections";
-import { computeFeedInterval, computeRetryDelay, IngestLoops } from "./ingest";
+import { nowIso } from "../db";
+import { Secrets } from "../secrets";
+import {
+  CLOSE_TIMEOUT_SECONDS,
+  computeFeedInterval,
+  computeRetryDelay,
+  FAILURES_BEFORE_ERROR,
+  IngestLoops,
+  POLL_TIMEOUT_SECONDS,
+} from "./ingest";
 import { PluginHost } from "./index";
 import {
   asUser,
@@ -25,7 +35,7 @@ const START = Date.parse("2026-09-01T12:00:00.000Z");
 
 /** Runs a test body on a fresh plugin stack and a `TestClock` set to `START`. */
 const run = <A, E>(
-  body: Effect.Effect<A, E, PluginHost | IngestLoops | SqlClient.SqlClient>,
+  body: Effect.Effect<A, E, PluginHost | IngestLoops | Secrets | SqlClient.SqlClient>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.andThen(TestClock.setTime(START), body).pipe(
@@ -93,7 +103,7 @@ const recordPollTimes = (fixture: EventSourceFixture, feed: string): Array<numbe
   return times;
 };
 
-const failing = () => Effect.fail(new PluginError({ message: "Acme answered 502" }));
+const failWithBadGateway = () => Effect.fail(new PluginError({ message: "Acme answered 502" }));
 
 describe("computeFeedInterval", () => {
   const feed: FeedDeclaration = { defaultIntervalSeconds: 60, minIntervalSeconds: 30 };
@@ -180,6 +190,22 @@ describe("IngestLoops polling", () => {
     expect(times).toEqual([0, 200, 260, 320]);
   });
 
+  it("ignores a wait that is not a finite number, and caps a longer one at one day", async () => {
+    const fixture = createEventSourceFixture();
+    const hints = [Number.NaN, Number.POSITIVE_INFINITY, 1e9];
+    fixture.poll = () => Effect.succeed({ nextAfterSeconds: hints.shift() ?? 0 });
+    const times = recordPollTimes(fixture, "notifications");
+
+    await run(
+      Effect.gen(function* () {
+        yield* openConnection(fixture);
+        yield* advance(120 + MAX_FEED_INTERVAL_SECONDS);
+      }),
+    );
+
+    expect(times).toEqual([0, 60, 120, 120 + MAX_FEED_INTERVAL_SECONDS]);
+  });
+
   it("never runs two polls of one handle at a time", async () => {
     const fixture = createEventSourceFixture({
       feeds: {
@@ -204,7 +230,7 @@ describe("IngestLoops polling", () => {
 describe("IngestLoops failures", () => {
   it("backs off, sets error with one notification at the fifth failure, and keeps polling", async () => {
     const fixture = createEventSourceFixture();
-    fixture.poll = failing;
+    fixture.poll = failWithBadGateway;
     const times = recordPollTimes(fixture, "notifications");
 
     const seen = await run(
@@ -234,7 +260,7 @@ describe("IngestLoops failures", () => {
 
   it("sets the Connection back to connected after a success, with the detail cleared", async () => {
     const fixture = createEventSourceFixture();
-    fixture.poll = failing;
+    fixture.poll = failWithBadGateway;
 
     const seen = await run(
       Effect.gen(function* () {
@@ -249,6 +275,132 @@ describe("IngestLoops failures", () => {
 
     expect(seen.failed.status).toBe("error");
     expect(seen.recovered).toEqual({ status: "connected", detail: undefined });
+  });
+
+  it("keeps an error Connection in error when it is opened again and its feed still fails", async () => {
+    const fixture = createEventSourceFixture();
+    fixture.poll = failWithBadGateway;
+
+    const seen = await run(
+      Effect.gen(function* () {
+        const { connection, ingest } = yield* openConnection(fixture);
+        yield* advance(1740);
+        const before = (yield* readStatus(connection)).status;
+        const notesBefore = (yield* listConnectionErrorTitles).length;
+        yield* ingest.close(connection.id);
+        // Opened again as the reconciler would: from the Connection as it is now stored.
+        const stored = Option.getOrThrow(
+          yield* Effect.flatMap(connectionRepository, (connections) =>
+            connections.one(connection.id),
+          ),
+        );
+        const source = (yield* Effect.flatMap(PluginHost, (host) =>
+          host.listActiveEventSources(),
+        ))[0];
+        if (source === undefined) return yield* Effect.die("the fixture registered no source");
+        yield* ingest.open(source, stored);
+        yield* advance(0);
+        const afterReopen = (yield* readStatus(connection)).status;
+        yield* advance(1740);
+        return {
+          before,
+          notesBefore,
+          afterReopen,
+          after: (yield* readStatus(connection)).status,
+          notes: (yield* listConnectionErrorTitles).length,
+        };
+      }),
+    );
+
+    expect(seen).toEqual({
+      before: "error",
+      notesBefore: 1,
+      afterReopen: "error",
+      after: "error",
+      notes: 1,
+    });
+  });
+
+  it("keeps a Connection in error until every feed has polled successfully", async () => {
+    const fixture = createEventSourceFixture({
+      feeds: {
+        notifications: { defaultIntervalSeconds: 60 },
+        repos: { defaultIntervalSeconds: 60 },
+      },
+    });
+    fixture.poll = (feed) => (feed === "notifications" ? failWithBadGateway() : Effect.succeed({}));
+
+    const seen = await run(
+      Effect.gen(function* () {
+        const { connection } = yield* openConnection(fixture);
+        yield* advance(1740);
+        const failed = (yield* readStatus(connection)).status;
+        yield* advance(600);
+        const stillFailing = (yield* readStatus(connection)).status;
+        fixture.poll = () => Effect.succeed({});
+        yield* advance(900);
+        return { failed, stillFailing, recovered: (yield* readStatus(connection)).status };
+      }),
+    );
+
+    expect(seen).toEqual({ failed: "error", stillFailing: "error", recovered: "connected" });
+  });
+
+  it("stops a poll that runs longer than 5 minutes, and counts it as a failure", async () => {
+    const fixture = createEventSourceFixture();
+    fixture.poll = () => Effect.never;
+    const times = recordPollTimes(fixture, "notifications");
+
+    const seen = await run(
+      Effect.gen(function* () {
+        const { connection } = yield* openConnection(fixture);
+        yield* advance(3240);
+        return yield* readStatus(connection);
+      }),
+    );
+
+    // Each poll is stopped after 300 seconds, then waits 120, 240, 480 and 900 seconds.
+    expect(times).toEqual([0, 420, 960, 1740, 2940]);
+    expect(seen.status).toBe("error");
+    expect(seen.detail).toContain(`stopped after ${POLL_TIMEOUT_SECONDS} seconds`);
+  });
+
+  it("does not count a poll whose emit is refused because the Connection was disabled", async () => {
+    const fixture = createEventSourceFixture();
+    let emitted = 0;
+    fixture.poll = () => {
+      const handle = fixture.opened[0];
+      if (handle === undefined) return Effect.die("the source was never opened");
+      emitted += 1;
+      return Effect.as(
+        handle.context.emit({
+          kind: EVENT_SOURCE_FIXTURE.kind,
+          dedupKey: `thing-${emitted}`,
+          occurredAt: "2026-09-01T12:00:00Z",
+          payload: { title: "Shipped" },
+          refs: [],
+        }),
+        {},
+      );
+    };
+    const times = recordPollTimes(fixture, "notifications");
+
+    const written = await run(
+      Effect.gen(function* () {
+        const { connection } = yield* openConnection(fixture);
+        const connections = yield* connectionRepository;
+        yield* connections.update(connection.id, { status: "disabled" }, yield* nowIso);
+        yield* advance(300);
+        const sql = yield* SqlClient.SqlClient;
+        return yield* sql<{ readonly dedupKey: string }>`
+          SELECT dedup_key AS dedupKey FROM events WHERE kind = ${EVENT_SOURCE_FIXTURE.kind}
+        `;
+      }),
+    );
+
+    // Not counted, so the feed keeps its interval instead of backing off.
+    expect(times).toEqual([0, 60, 120, 180, 240, 300]);
+    expect(written).toEqual([{ dedupKey: "thing-1" }]);
   });
 
   it("counts a crash in poll as a failure", async () => {
@@ -268,13 +420,13 @@ describe("IngestLoops failures", () => {
 
   it("leaves a status the user set while the polls were failing", async () => {
     const fixture = createEventSourceFixture();
-    fixture.poll = failing;
+    fixture.poll = failWithBadGateway;
 
     const seen = await run(
       Effect.gen(function* () {
         const { connection } = yield* openConnection(fixture);
         const connections = yield* connectionRepository;
-        yield* connections.update(connection.id, { status: "disabled" }, new Date().toISOString());
+        yield* connections.update(connection.id, { status: "disabled" }, yield* nowIso);
         yield* advance(1740);
         return { status: yield* readStatus(connection), titles: yield* listConnectionErrorTitles };
       }),
@@ -300,12 +452,48 @@ describe("IngestLoops failures", () => {
     expect(fixture.calls).toEqual(["open", "poll notifications", "polled notifications", "close"]);
     expect(seen.open).toEqual([]);
   });
+
+  it("ignores an AuthError when the credentials were replaced while the poll ran", async () => {
+    const fixture = createEventSourceFixture();
+
+    const seen = await run(
+      Effect.gen(function* () {
+        const secrets = yield* Secrets;
+        let polls = 0;
+        // The first poll is rejected, but the user reconnects with a new token
+        // before the rejection comes back.
+        fixture.poll = () => {
+          polls += 1;
+          const handle = fixture.opened[0];
+          if (polls > 1 || handle === undefined) return Effect.succeed({});
+          const owner = { kind: "connection", id: handle.connection.id } as const;
+          return Effect.andThen(
+            Effect.orDie(secrets.set(owner, "token", Redacted.make("a-new-token"))),
+            Effect.fail(new AuthError({ message: "Acme rejected the token" })),
+          );
+        };
+        const { connection, ingest } = yield* openConnection(fixture);
+        yield* advance(60);
+        return {
+          status: yield* readStatus(connection),
+          open: yield* ingest.listOpen(),
+          calls: [...fixture.calls],
+        };
+      }),
+    );
+
+    expect(seen.status).toEqual({ status: "connected", detail: undefined });
+    // Polled again one interval later, with the handle still open.
+    expect(seen.calls.filter((call) => call === "poll notifications")).toHaveLength(2);
+    expect(seen.calls).not.toContain("close");
+    expect(seen.open).toHaveLength(1);
+  });
 });
 
 describe("IngestLoops opening", () => {
   it("retries a failing open with backoff, counting toward error like a poll", async () => {
     const fixture = createEventSourceFixture();
-    let failures = 5;
+    let failures = FAILURES_BEFORE_ERROR;
     fixture.open = () =>
       failures-- > 0 ? Effect.fail(new PluginError({ message: "Acme is down" })) : Effect.void;
 
@@ -394,6 +582,24 @@ describe("IngestLoops closing", () => {
         const { ingest } = yield* openConnection(fixture);
         const host = yield* PluginHost;
         yield* host.stop(EVENT_SOURCE_FIXTURE.pluginId);
+        return yield* ingest.listOpen();
+      }),
+    );
+
+    expect(open).toEqual([]);
+    expect(fixture.calls.at(-1)).toBe("close");
+  });
+
+  it("gives up on a close that does not return within 10 seconds", async () => {
+    const fixture = createEventSourceFixture();
+    fixture.close = () => Effect.never;
+
+    const open = await run(
+      Effect.gen(function* () {
+        const { connection, ingest } = yield* openConnection(fixture);
+        const closing = yield* Effect.forkChild(ingest.close(connection.id));
+        yield* advance(CLOSE_TIMEOUT_SECONDS);
+        yield* Fiber.join(closing);
         return yield* ingest.listOpen();
       }),
     );

@@ -153,6 +153,9 @@ export interface IngestConnection {
  *   plugin's id.
  * - `raw` is the external system's own body, as a JSON object. It is stored,
  *   and no expression can read it.
+ *
+ * The host refuses a `payload` larger than `MAX_EMITTED_PAYLOAD_BYTES` and a
+ * `raw` larger than `MAX_EMITTED_RAW_BYTES`, each measured as UTF-8 JSON.
  */
 export interface EmittedEvent {
   readonly kind: string;
@@ -164,6 +167,20 @@ export interface EmittedEvent {
   readonly system?: string;
   readonly raw?: Schema.JsonObject;
 }
+
+/**
+ * The largest `payload` an emitted event may carry, as UTF-8 JSON: 256 KiB.
+ * It leaves room for a long text field, such as a GitHub issue body of 65,536
+ * characters, while keeping one event from bloating the log.
+ */
+export const MAX_EMITTED_PAYLOAD_BYTES = 256 * 1024;
+
+/**
+ * The largest `raw` an emitted event may carry, as UTF-8 JSON: 64 KiB. Nothing
+ * reads `raw` but a person debugging a plugin, so a plugin should trim it to
+ * the fields that help with that.
+ */
+export const MAX_EMITTED_RAW_BYTES = 64 * 1024;
 
 /** The Resources linked to the Connection an ingest handle is opened for. */
 export interface ConnectionResources {
@@ -192,8 +209,9 @@ export interface IngestContext {
   /**
    * Appends one event to the event log, stamped with this Connection. Fails
    * with a `PluginError` when the kind is not one the event source declared,
-   * or the payload does not match the kind's schema. Emitting an event whose dedup
-   * key the log already holds succeeds and writes nothing.
+   * when the payload does not match the kind's schema, or when the payload or
+   * `raw` is larger than its limit. Emitting an event whose dedup key the log
+   * already holds succeeds and writes nothing.
    */
   readonly emit: (event: EmittedEvent) => Effect.Effect<void, PluginError>;
   /**
@@ -218,7 +236,8 @@ export interface PollResult {
    * The shortest wait before this feed is polled again, in seconds, when the
    * external system asked for one (a `Retry-After` or `X-Poll-Interval`
    * header). The host never polls sooner than the feed's interval, and never
-   * sooner than this.
+   * sooner than this. A value above 86,400 (one day) counts as one day, and
+   * a value that is not a finite number is ignored.
    */
   readonly nextAfterSeconds?: number;
 }
@@ -233,14 +252,16 @@ export interface IngestHandle {
    * Fetches what changed in one feed since the last poll and emits an event
    * for each change. Fails with an `AuthError` when the credentials were
    * rejected, and with a `PluginError` for any other failure, which the host
-   * retries with backoff.
+   * retries with backoff. The host stops a poll that runs longer than 5
+   * minutes and counts it as a failure.
    */
   readonly poll: (feed: string) => Effect.Effect<PollResult, AuthError | PluginError>;
   /**
    * Releases what `open` acquired. The host calls it when it stops ingesting
    * the Connection: before it opens a new handle for the same Connection, when
    * the Connection is deleted, disabled or needs reauthorization, and when the
-   * plugin stops.
+   * plugin stops. The host waits at most 10 seconds for it, then logs an error
+   * and moves on.
    */
   readonly close: Effect.Effect<void>;
 }
@@ -267,7 +288,11 @@ export interface EventSourceContribution {
   readonly id: string;
   readonly connectionType: string;
   readonly kinds: Record<string, EventKindDeclaration>;
-  /** The feeds the host polls, by name, such as `notifications`. */
+  /**
+   * The feeds the host polls, by name, such as `notifications`. A source
+   * declares at least one, and no feed's default interval may be longer than
+   * one day (86,400 seconds): the host refuses the source otherwise.
+   */
   readonly feeds: Record<string, FeedDeclaration>;
   /**
    * Starts ingesting for one Connection. The host opens a handle for every

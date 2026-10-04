@@ -25,7 +25,12 @@ import {
   type ServerHarness,
   type ServerOptions,
 } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import {
+  buildProviderDefinition,
+  createPluginFixture,
+  IDLE_FEEDS,
+  IDLE_INGEST_OPEN,
+} from "../plugins/testing";
 import type { DeclaredTrigger } from "./repository";
 import type { WorkflowPage } from "./service";
 
@@ -70,8 +75,8 @@ const localGithubPlugin: Plugin = {
         id: "github",
         connectionType: "github/github",
         // A source that polls nothing: these tests are about its kinds.
-        feeds: {},
-        open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
+        feeds: IDLE_FEEDS,
+        open: IDLE_INGEST_OPEN,
         kinds: {
           "github.pr.labeled": {
             description: "The labels on a pull request changed.",
