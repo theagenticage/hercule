@@ -8,7 +8,7 @@
  * host refuses to load a plugin whose schema uses anything else, so such a
  * plugin has no schema here.
  */
-import type { PluginConfigureInput } from "@hercule/contract";
+import type { Issue, PluginConfigureInput } from "@hercule/contract";
 import { readValidationIssues } from "./errors";
 import { readJsonObject, readStringList } from "./json-shape";
 
@@ -148,15 +148,54 @@ export interface ConfigIssues {
   /** The error message for each field, keyed by field name. */
   readonly perField: Readonly<Record<string, string>>;
   /**
+   * The error message for each entry of a list field, keyed by field name and
+   * then by the entry's position, counted from 0. The form shows each one
+   * under its entry, so the user can tell which entry is wrong.
+   */
+  readonly perEntry: Readonly<Record<string, Readonly<Record<number, string>>>>;
+  /**
    * Whether any error does not belong to a rendered field. The form must then
    * show a general error, or the write fails and the card shows nothing.
    */
   readonly rest: boolean;
 }
 
+const NO_CONFIG_ISSUES: ConfigIssues = { perField: {}, perEntry: {}, rest: false };
+
+/**
+ * Matches validation issues to the fields a form renders. Each issue's path
+ * starts at a field name: a caller whose paths start with a group name, such
+ * as `config`, removes it first.
+ *
+ * - A path of a field name and a position, such as `["repos", "2"]`, goes
+ *   under that entry of the list field. The positions match the entries on
+ *   screen, because the forms clear a save's errors on any edit.
+ * - Any other path that starts at a rendered field goes under that field.
+ * - Any other issue sets `rest`.
+ *
+ * Only the first error of each field, and of each entry, is kept.
+ */
+export const matchConfigIssues = (
+  issues: ReadonlyArray<Issue>,
+  fields: ReadonlyArray<{ readonly name: string }>,
+): ConfigIssues => {
+  const rendered = new Set(fields.map((field) => field.name));
+  const perField: Record<string, string> = {};
+  const perEntry: Record<string, Record<number, string>> = {};
+  let rest = false;
+  for (const { path, message } of issues) {
+    const [field, position] = path;
+    if (field === undefined || !rendered.has(field)) rest = true;
+    else if (path.length === 2 && position !== undefined && /^\d+$/.test(position))
+      (perEntry[field] ??= {})[Number(position)] ??= message;
+    else perField[field] ??= message;
+  }
+  return { perField, perEntry, rest };
+};
+
 /**
  * Returns the errors of a failed write, matched to the fields this form
- * renders.
+ * renders, as `matchConfigIssues` describes.
  *
  * A write with more than one set of fields (for example a connection's pasted
  * credentials next to the type's own settings) puts the set's name first in
@@ -169,18 +208,24 @@ export const readConfigIssues = (
   fields: ReadonlyArray<{ readonly name: string }>,
   prefix?: string,
 ): ConfigIssues => {
-  if (error === null || error === undefined) return { perField: {}, rest: false };
+  if (error === null || error === undefined) return NO_CONFIG_ISSUES;
   const issues = readValidationIssues(error);
-  if (issues === undefined) return { perField: {}, rest: true };
+  if (issues === undefined) return { ...NO_CONFIG_ISSUES, rest: true };
+  if (prefix === undefined) return matchConfigIssues(issues, fields);
 
-  const rendered = new Set(fields.map((field) => field.name));
-  const perField: Record<string, string> = {};
-  let rest = false;
-  for (const issue of issues) {
-    const [head, next] = issue.path;
-    const field = prefix === undefined ? head : head === prefix ? next : undefined;
-    if (field !== undefined && rendered.has(field)) perField[field] ??= issue.message;
-    else rest = true;
-  }
-  return { perField, rest };
+  const inGroup = listIssuesInGroup(issues, prefix);
+  const matched = matchConfigIssues(inGroup, fields);
+  return inGroup.length === issues.length ? matched : { ...matched, rest: true };
 };
+
+/**
+ * Returns the issues whose path starts with the group's name, with that name
+ * removed from each path.
+ */
+export const listIssuesInGroup = (
+  issues: ReadonlyArray<Issue>,
+  group: string,
+): ReadonlyArray<Issue> =>
+  issues.flatMap((issue) =>
+    issue.path[0] === group ? [{ path: issue.path.slice(1), message: issue.message }] : [],
+  );

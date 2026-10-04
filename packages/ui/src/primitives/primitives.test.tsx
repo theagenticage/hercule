@@ -220,6 +220,26 @@ describe("StringList", () => {
     expect(screen.queryByLabelText("Tag entry 3")).toBeNull();
   });
 
+  it("shows each entry's error under that entry and marks only that entry invalid", () => {
+    render(
+      <StringList
+        label="Tag"
+        values={["alpha", "beta", "gamma"]}
+        errors={{ 1: "must be lower case" }}
+        onChange={() => {}}
+      />,
+    );
+
+    const error = screen.getByRole("alert");
+    expect(error.textContent).toBe("must be lower case");
+    // The message sits in the same entry block as the second field, right under it.
+    const second = screen.getByLabelText("Tag entry 2");
+    expect(second.parentElement?.nextElementSibling).toBe(error);
+    expect(second.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByLabelText("Tag entry 1").getAttribute("aria-invalid")).toBeNull();
+    expect(screen.getByLabelText("Tag entry 3").getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("shows only the Add button when the list is empty", () => {
     render(<Example initial={[]} />);
     expect(screen.queryByLabelText("Tag entry 1")).toBeNull();

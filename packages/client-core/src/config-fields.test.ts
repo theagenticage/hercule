@@ -225,6 +225,7 @@ describe("readConfigIssues", () => {
 
     expect(readConfigIssues(refusal, fields)).toEqual({
       perField: { endpoint: "must be an https URL", retries: "must be at least 1" },
+      perEntry: {},
       rest: false,
     });
   });
@@ -232,10 +233,12 @@ describe("readConfigIssues", () => {
   it("sets rest for an error that belongs to no rendered field", () => {
     expect(readConfigIssues(new ApiError("internal", "the database is locked"), fields)).toEqual({
       perField: {},
+      perEntry: {},
       rest: true,
     });
     expect(readConfigIssues(new Error("the controller could not be reached"), fields)).toEqual({
       perField: {},
+      perEntry: {},
       rest: true,
     });
     // An error about the payload as a whole belongs to the form, not a field.
@@ -244,18 +247,49 @@ describe("readConfigIssues", () => {
         new ApiError("validation", "no", { issues: [{ path: [], message: "no" }] }),
         fields,
       ),
-    ).toEqual({ perField: {}, rest: true });
+    ).toEqual({ perField: {}, perEntry: {}, rest: true });
     // Without `rest`, an error on a setting this form does not render would be shown nowhere.
     expect(
       readConfigIssues(
         new ApiError("validation", "no", { issues: [{ path: ["gone"], message: "unknown key" }] }),
         fields,
       ),
-    ).toEqual({ perField: {}, rest: true });
+    ).toEqual({ perField: {}, perEntry: {}, rest: true });
+  });
+
+  it("puts an error about one entry of a list field under that entry", () => {
+    const listFields = buildConfigFields(
+      buildObjectSchema({ tags: { type: "array", items: { type: "string" } } }),
+    );
+    const refusal = new ApiError("validation", "the config does not match", {
+      issues: [
+        { path: ["tags", "2"], message: "must not be empty" },
+        { path: ["tags", "2"], message: "a second error for the same entry" },
+        { path: ["tags"], message: "at most 5 tags" },
+      ],
+    });
+
+    expect(readConfigIssues(refusal, listFields)).toEqual({
+      perField: { tags: "at most 5 tags" },
+      perEntry: { tags: { 2: "must not be empty" } },
+      rest: false,
+    });
+  });
+
+  it("puts an error deeper than an entry under its field, so it is still shown", () => {
+    const refusal = new ApiError("validation", "no", {
+      issues: [{ path: ["endpoint", "host", "0"], message: "unreadable host" }],
+    });
+
+    expect(readConfigIssues(refusal, fields)).toEqual({
+      perField: { endpoint: "unreadable host" },
+      perEntry: {},
+      rest: false,
+    });
   });
 
   it("returns no errors when the write did not fail", () => {
-    expect(readConfigIssues(null, fields)).toEqual({ perField: {}, rest: false });
+    expect(readConfigIssues(null, fields)).toEqual({ perField: {}, perEntry: {}, rest: false });
   });
 
   it("reads a group's fields from paths that start with the group's name", () => {
@@ -268,11 +302,13 @@ describe("readConfigIssues", () => {
 
     expect(readConfigIssues(refusal, [{ name: "token" }], "credentials")).toEqual({
       perField: { token: "that token was rejected" },
+      perEntry: {},
       // The settings error matches no field this form renders.
       rest: true,
     });
     expect(readConfigIssues(refusal, fields, "config")).toEqual({
       perField: { endpoint: "must be an https URL" },
+      perEntry: {},
       rest: true,
     });
   });
@@ -284,6 +320,10 @@ describe("readConfigIssues", () => {
 
     // The type is gone, so this form renders no fields. Without `rest`, the
     // message would belong to a field nobody can see and never be shown.
-    expect(readConfigIssues(refusal, [], "config")).toEqual({ perField: {}, rest: true });
+    expect(readConfigIssues(refusal, [], "config")).toEqual({
+      perField: {},
+      perEntry: {},
+      rest: true,
+    });
   });
 });

@@ -149,6 +149,7 @@ export function ConfigureConnection({
               field={field}
               value={draft[field.name] ?? ""}
               error={issues.config[field.name]}
+              entryErrors={issues.configEntries[field.name]}
               onChange={(value) => {
                 edit();
                 setDraft((current) => ({ ...current, [field.name]: value }));

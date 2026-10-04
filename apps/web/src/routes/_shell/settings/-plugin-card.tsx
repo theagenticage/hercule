@@ -119,7 +119,7 @@ export function PluginCard({
           id={plugin.id}
           fields={fields}
           config={plugin.config}
-          issues={issues.perField}
+          issues={issues}
           saving={configure.isPending}
           onEdit={() => {
             if (!configure.isIdle) configure.reset();

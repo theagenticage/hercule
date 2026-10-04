@@ -723,7 +723,29 @@ describe("readConnectionIssues", () => {
 
     expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
       config: { folder: "must not be empty" },
+      configEntries: {},
       feedIntervals: { repos: "Poll repos every 60 seconds or slower" },
+      rest: false,
+    });
+  });
+
+  it("puts an error about one entry of a list setting under that entry", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [
+        { path: ["config", "repos", "1"], message: "Write the repository as owner/repo." },
+        { path: ["config", "repos", "3"], message: "Write the repository as owner/repo." },
+      ],
+    });
+
+    expect(readConnectionIssues(refusal, [{ name: "repos" }], [REPOS])).toEqual({
+      config: {},
+      configEntries: {
+        repos: {
+          1: "Write the repository as owner/repo.",
+          3: "Write the repository as owner/repo.",
+        },
+      },
+      feedIntervals: {},
       rest: false,
     });
   });
@@ -737,6 +759,7 @@ describe("readConnectionIssues", () => {
     });
     expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
       config: {},
+      configEntries: {},
       feedIntervals: {},
       rest: true,
     });
@@ -751,6 +774,7 @@ describe("readConnectionIssues", () => {
   it("finds nothing before the first save", () => {
     expect(readConnectionIssues(null, fields, [REPOS])).toEqual({
       config: {},
+      configEntries: {},
       feedIntervals: {},
       rest: false,
     });

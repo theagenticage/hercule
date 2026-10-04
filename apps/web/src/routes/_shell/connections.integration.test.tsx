@@ -74,7 +74,10 @@ const PAPER_TYPE = {
   ],
   configSchema: {
     type: "object",
-    properties: { folder: { type: "string", title: "Folder" } },
+    properties: {
+      folder: { type: "string", title: "Folder" },
+      tags: { type: "array", items: { type: "string" }, title: "Tags" },
+    },
     required: [],
     additionalProperties: false,
   },
@@ -900,6 +903,32 @@ describe("Connections > configuring a connection", () => {
       screen.getByLabelText(/folder/i),
       screen.getByLabelText("Name"),
     );
+  });
+
+  it("shows a rejected list entry's error under that entry, not under the whole list", async () => {
+    const user = userEvent.setup();
+    const complaint = "Write a tag as one word, such as invoices.";
+    const TAGGED: Connection = {
+      ...PAPER,
+      config: { folder: "inbox", tags: ["receipts", "not one word", "travel"] },
+    };
+    await openApp([TAGGED], {
+      [`PATCH /api/v1/connections/${TAGGED.id}`]: buildRefusal("the settings were refused", [
+        { path: ["config", "tags", "1"], message: complaint },
+      ]),
+    });
+
+    await user.click(
+      within(await findConnectionRow(TAGGED)).getByRole("button", { name: "Configure" }),
+    );
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await screen.findByText(complaint);
+    const second = screen.getByLabelText("Tags entry 2");
+    expectMessageAtField(complaint, second, screen.getByLabelText("Tags entry 1"));
+    expectMessageAtField(complaint, second, screen.getByLabelText("Tags entry 3"));
+    // The error sits under its entry, so it is not repeated under the list or the buttons.
+    expect(screen.getAllByText(complaint)).toHaveLength(1);
   });
 
   it("shows only the name and the topic for a type with no settings of its own", async () => {
