@@ -11,6 +11,7 @@
  * already decoded a request's id against the contract, and a caller inside
  * the controller passes an id it read from a stored row.
  */
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -41,6 +42,7 @@ import {
   type InvalidState,
   type NotFound,
   type ProviderInstance,
+  type ProviderLoginStarted,
   type RunnerDetail,
   type Unauthenticated,
   type Validation,
@@ -341,11 +343,10 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the URL the harness printed; the user opens it in their own
-     * browser, since the runner's machine may have none.
+     * browser, since the runner's machine may have none. For a device login it
+     * also returns the code to type there and when that code expires.
      */
-    login: (
-      input: LoginInput,
-    ): Effect.Effect<{ readonly url: string; readonly userCode?: string }, AskError> =>
+    login: (input: LoginInput): Effect.Effect<ProviderLoginStarted, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.login");
         const { id, runnerId } = yield* Effect.mapError(
@@ -354,23 +355,40 @@ const make = Effect.gen(function* () {
         );
         const instance = yield* readInstanceOrFail(id);
         yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        const requestId = crypto.randomUUID();
+        // Expected before the runner is asked, because a device login that
+        // fails at once can report its end before this fiber reads the answer.
+        // It is forgotten when the ask fails or is interrupted, since a login
+        // whose answer is never read would otherwise stay awaited for as long
+        // as the controller runs.
+        yield* probes.expectLoginEnd(runnerId, id, requestId);
         const answer = yield* askRunner(
           runnerId,
-          {
-            _tag: "loginStart",
-            requestId: crypto.randomUUID(),
-            instanceId: id,
-            providerId: instance.providerId,
-          },
+          { _tag: "loginStart", requestId, instanceId: id, providerId: instance.providerId },
           yield* ProviderLoginDeadline,
-        );
-        if (answer._tag !== "loginUrl")
+        ).pipe(Effect.onError(() => probes.forgetLoginEnd(runnerId, requestId)));
+        if (answer._tag !== "loginUrl") {
+          yield* probes.forgetLoginEnd(runnerId, requestId);
           return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
+        }
         // Absent rather than empty: a code means the login is finished in the
-        // user's browser, not through this exchange.
+        // user's browser, not through this exchange. A login finished by
+        // pasting a code reports no end.
+        yield* probes.recordPrintedLogin(runnerId, id, requestId, {
+          reportsEnd: answer.userCode !== undefined,
+        });
+        if (answer.userCode === undefined) return { url: answer.url };
+        if (answer.expiresInSeconds === undefined) {
+          return { url: answer.url, userCode: answer.userCode };
+        }
+        // The runner sends how long the code lasts, not when it ends, so the
+        // instant is computed on this clock and the two clocks never need to
+        // agree.
+        const now = yield* Clock.currentTimeMillis;
         return {
           url: answer.url,
-          ...(answer.userCode === undefined ? {} : { userCode: answer.userCode }),
+          userCode: answer.userCode,
+          expiresAt: new Date(now + answer.expiresInSeconds * 1000).toISOString(),
         };
       }),
 
@@ -399,9 +417,9 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
         }
         if (!answer.ok) {
-          const said = answer.message ?? "that code was rejected";
+          const refusal = answer.message ?? "that code was rejected";
           return yield* Effect.fail(
-            createValidationError([{ path: ["code"], message: said }], said),
+            createValidationError([{ path: ["code"], message: refusal }], refusal),
           );
         }
         // Records who put a credential on which runner. Never the URL or the

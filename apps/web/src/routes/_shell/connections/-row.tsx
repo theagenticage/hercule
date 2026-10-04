@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, cn } from "@hercule/ui";
 import {
   queryKeys,
+  showsAccountBesideLabel,
+  showsPluginName,
   type ConnectionType,
   type HerculeClient,
   readErrorMessage,
@@ -48,14 +50,25 @@ export function ConnectionRow({
 
   /**
    * The parts of the secondary line: the plugin that declares the type, the
-   * account, and the connection's topic. The plugin comes first, because two
-   * plugins may declare the same type name and the name above does not show
-   * which one this is. The line is built from parts so that each separator is
-   * its own element, spaced by the row's gap rather than by spaces in the text.
+   * account, and the connection's topic. Each part is left out when it adds
+   * nothing:
+   *
+   * - The plugin tells apart two plugins that declare the same type name, so
+   *   it is left out when it is named like the type above.
+   * - The account is left out when the name above already shows it, or when
+   *   the account has no name.
+   * - The topic is left out when the connection has none.
+   *
+   * The line is built from parts so that each separator is its own element,
+   * spaced by the row's gap rather than by spaces in the text.
    */
   const facts = [
-    ...(type === undefined ? [] : [{ key: "plugin", text: type.pluginName, tone: "text-faint" }]),
-    { key: "account", text: connection.displayName, tone: "text-muted" },
+    ...(type === undefined || !showsPluginName(type)
+      ? []
+      : [{ key: "plugin", text: type.pluginName, tone: "text-faint" }]),
+    ...(showsAccountBesideLabel(connection)
+      ? [{ key: "account", text: connection.displayName, tone: "text-muted" }]
+      : []),
     ...(connection.labels[0] === undefined
       ? []
       : [{ key: "topic", text: connection.labels[0], tone: "text-faint" }]),
@@ -107,14 +120,18 @@ export function ConnectionRow({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
-        {facts.map((fact, index) => (
-          <Fragment key={fact.key}>
-            {index === 0 ? null : <span className="text-faint">·</span>}
-            <span className={fact.tone}>{fact.text}</span>
-          </Fragment>
-        ))}
-      </div>
+      {/* With every part left out there are no facts, and an empty line
+          would leave a gap. */}
+      {facts.length === 0 ? null : (
+        <div className="flex flex-wrap items-baseline gap-x-1.5 pt-px text-fine">
+          {facts.map((fact, index) => (
+            <Fragment key={fact.key}>
+              {index === 0 ? null : <span className="text-faint">·</span>}
+              <span className={fact.tone}>{fact.text}</span>
+            </Fragment>
+          ))}
+        </div>
+      )}
 
       {connection.statusDetail === undefined ? null : (
         <p className="text-fine text-muted">{connection.statusDetail}</p>
@@ -130,7 +147,9 @@ export function ConnectionRow({
 
       {panel === "delete" ? (
         <InPlaceQuestion
-          question="Remove this connection? Its stored credentials go with it."
+          question={`Remove this connection? Hercule forgets its credentials but does not revoke them at ${type?.displayName ?? "the provider"}. Revoke them there if they are no longer needed.`}
+          // Every word matters here, so the question wraps rather than being cut short.
+          stacked
           declineLabel="Cancel"
           acceptLabel="Confirm"
           onDecline={close}

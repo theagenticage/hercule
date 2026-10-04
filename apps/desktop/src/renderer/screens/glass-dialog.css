@@ -1,0 +1,21 @@
+/* A modal dialog on glass (`.pop` in menus.css), 18vh from the top of the
+   window, over a scrim. Spec 14 places the project picker there, and the
+   other dialogs New thread opens sit in the same place. Each dialog sets its
+   own width. */
+.glass-dialog {
+  flex-direction: column;
+  max-width: calc(100% - 48px);
+  max-height: calc(100% - 18vh - 24px);
+  margin: 18vh auto auto;
+  outline: none;
+}
+/* Only while open: a closed dialog is hidden by the browser's own
+   `display: none`, which a plain `display` here would override. A dialog is
+   closed for a moment when it mounts, before it opens, and after Esc closes
+   it, before it unmounts. */
+.glass-dialog[open] {
+  display: flex;
+}
+.glass-dialog::backdrop {
+  background: var(--scrim);
+}

@@ -22,6 +22,12 @@ export const ControllerInfo = Schema.Struct({
   version: Schema.NonEmptyString,
   /** The runner a placement falls back to, or null while none is chosen. */
   defaultRunnerId: Schema.NullOr(Id),
+  /**
+   * The runner this controller started on its own machine, or null while it
+   * has not joined yet or when this controller starts none. Read from the
+   * running child on every call; nothing stores it, so it cannot be set.
+   */
+  localRunnerId: Schema.NullOr(Id),
 });
 
 export type ControllerInfo = Schema.Schema.Type<typeof ControllerInfo>;

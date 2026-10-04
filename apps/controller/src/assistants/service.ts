@@ -53,7 +53,14 @@ import {
   type StoredAgent,
 } from "../agents";
 import { ConversationService } from "../conversations";
-import { announce, buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
+import {
+  announce,
+  buildPageInputFields,
+  nowIso,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
@@ -218,7 +225,7 @@ const make = Effect.gen(function* () {
           assistants.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
           }),
         );
         const byId = new Map(

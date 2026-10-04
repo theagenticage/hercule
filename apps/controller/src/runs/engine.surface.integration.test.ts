@@ -13,8 +13,8 @@ import type { Run, RunSummary } from "@hercule/contract";
 import { get, readErrorBody } from "../http/testing";
 import {
   readProfileNamed,
-  spawnAgentUnder,
-  spawnAgentWithGrants,
+  spawnThreadUnder,
+  spawnThreadWithGrants,
   WAIT_DEADLINE_MS,
 } from "../sessions/testing";
 import {
@@ -151,8 +151,8 @@ describe("run.start of a sent workflow", () => {
     await withRunFleet(async (arranged) => {
       const base = arranged.harness.base;
       const definition = { name: "One task", steps: [buildCreateStep("create")] };
-      const allowed = await spawnAgentWithGrants(arranged, "submitter", ["run.start", "run.read"]);
-      const refused = await spawnAgentWithGrants(arranged, "reader", ["run.read"]);
+      const allowed = await spawnThreadWithGrants(arranged, "submitter", ["run.start", "run.read"]);
+      const refused = await spawnThreadWithGrants(arranged, "reader", ["run.read"]);
 
       const response = await requestStart(base, refused.token, { definition });
       const refusal = await readErrorBody(response);
@@ -286,7 +286,7 @@ describe("GET /runs", () => {
       const workflow = await createWorkflowOrFail(base, arranged.token, {
         definition: { name: "One task", steps: [buildCreateStep("create")] },
       });
-      const agent = await spawnAgentWithGrants(arranged, "starter", ["run.start", "run.read"]);
+      const agent = await spawnThreadWithGrants(arranged, "starter", ["run.start", "run.read"]);
       const byUser = await startRun(base, arranged.token, workflow.id);
       const bySession = await startRun(base, agent.token, workflow.id);
       await waitForRunToFinish(base, arranged.token, byUser);
@@ -319,7 +319,7 @@ describe("the grants for runs", () => {
           const runId = await startRun(base, arranged.token, workflow.id);
           await waitForHeldExecutions(held, 1);
           // The shipped worker profile has run.read and not run.write.
-          const worker = await spawnAgentUnder(
+          const worker = await spawnThreadUnder(
             arranged,
             await readProfileNamed(arranged, "worker"),
           );
@@ -335,7 +335,7 @@ describe("the grants for runs", () => {
           expect((await readRun(base, arranged.token, runId)).status).toBe("running");
 
           // A session with run.write may cancel the same run.
-          const canceller = await spawnAgentWithGrants(arranged, "canceller", [
+          const canceller = await spawnThreadWithGrants(arranged, "canceller", [
             "run.read",
             "run.write",
           ]);
@@ -359,7 +359,7 @@ describe("the grants for runs", () => {
       });
       const runId = await startRun(base, arranged.token, workflow.id);
       await waitForRunToFinish(base, arranged.token, runId);
-      const agent = await spawnAgentWithGrants(arranged, "reader-of-tasks", ["task.read"]);
+      const agent = await spawnThreadWithGrants(arranged, "reader-of-tasks", ["task.read"]);
 
       for (const path of ["/api/v1/runs", `/api/v1/runs/${runId}`]) {
         const response = await get(base, path, agent.token);

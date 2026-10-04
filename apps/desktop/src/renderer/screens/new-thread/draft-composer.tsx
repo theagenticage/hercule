@@ -7,15 +7,13 @@ import {
   type DraftView,
   type RecentModel,
 } from "@hercule/client-core";
-import {
-  BranchIcon,
-  LaptopIcon,
-  MicIcon,
-  PlusIcon,
-  SendIcon,
-  ShieldIcon,
-  WorkspaceIcon,
-} from "../../icons";
+import { BranchIcon } from "../../icons/branch";
+import { LaptopIcon } from "../../icons/laptop";
+import { MicIcon } from "../../icons/mic";
+import { PlusIcon } from "../../icons/plus";
+import { SendIcon } from "../../icons/send";
+import { ShieldIcon } from "../../icons/shield";
+import { WorkspaceIcon } from "../../icons/workspace";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
 import { isSendKey } from "../thread/send-key";

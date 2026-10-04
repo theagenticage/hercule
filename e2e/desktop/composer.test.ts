@@ -22,6 +22,7 @@
  */
 import type { Locator, Page } from "playwright";
 import { describe, expect, it } from "vitest";
+import { pollUntil } from "../../apps/desktop/scripts/poll";
 import { arrangeFleet, keepWindowOnTop, openSignedIn, openThread } from "./harness";
 
 /** The parts of the open thread's composer that a test reads or clicks. */
@@ -129,10 +130,37 @@ async function waitForComposerTransitions(page: Page): Promise<void> {
 }
 
 /**
+ * Captures the part of the window that `clip` covers once it has stopped
+ * changing, and returns the capture: it captures again until two captures
+ * in a row are the same. Fails when the part keeps changing for 5 s.
+ *
+ * Right after the page changes, Chromium now and then hands over a frame it
+ * has not finished drawing, in which a few hundred pixels below the
+ * composer's card are one shade off. The next capture is right again. So one
+ * capture alone can differ from another capture of the same page.
+ */
+async function captureSettled(
+  page: Page,
+  clip: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): Promise<Buffer> {
+  let previous = await page.screenshot({ clip });
+  return pollUntil(
+    async () => {
+      const next = await page.screenshot({ clip });
+      const settled = next.equals(previous);
+      previous = next;
+      return settled ? next : undefined;
+    },
+    { timeoutMs: 5_000, intervalMs: 0, timeoutMessage: "the captured part kept changing for 5 s" },
+  );
+}
+
+/**
  * Checks whether any of the transcript shows below the composer's card,
  * across the card's width: the strip the lip sits in. The strip is captured
- * twice, as drawn and with the transcript hidden, and the transcript shows
- * there when the two captures differ.
+ * twice, as drawn and with the transcript hidden, each once it has stopped
+ * changing (see `captureSettled`), and the transcript shows there when the
+ * two captures differ.
  *
  * The lip is hidden in both captures, because Chromium draws its text a
  * shade differently once the transcript behind it is hidden.
@@ -157,9 +185,9 @@ async function showsTranscriptBelowCard(page: Page): Promise<boolean> {
     height: pane.bottom - card.bottom,
   };
   await setVisibility(".lip", "hidden");
-  const drawn = await page.screenshot({ clip });
+  const drawn = await captureSettled(page, clip);
   await setVisibility('section[aria-label="Transcript"]', "hidden");
-  const hidden = await page.screenshot({ clip });
+  const hidden = await captureSettled(page, clip);
   await setVisibility('section[aria-label="Transcript"], .lip', "");
   return !drawn.equals(hidden);
 }

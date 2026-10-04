@@ -4,9 +4,9 @@
  * base.css sets the tokens to 0s under Reduce motion, so Chromium starts no
  * transition at all.
  *
- * The test starts the packaged test package on the connect screen, whose
- * Connect button fades its background on hover. Run `pnpm build:desktop`
- * first.
+ * The test starts the packaged test package on the first run's welcome, whose
+ * Open the office button fades its background on hover. Run
+ * `pnpm build:desktop` first.
  */
 import { expect, it } from "vitest";
 import { launchForTest } from "./harness";
@@ -16,7 +16,10 @@ type TransitionLog = typeof globalThis & { transitionsRun?: string[] };
 
 it("starts no transition when a control is hovered with Reduce motion on, and one with it off", async () => {
   const { page } = await launchForTest();
-  const button = page.getByRole("button", { name: "Connect" });
+  // The button is off while the welcome looks for Hercule on this Mac, and a
+  // button that is off does not change on hover.
+  const button = page.getByRole("button", { name: "Open the office", disabled: false });
+  await button.waitFor();
   const readBackground = () => button.evaluate((element) => getComputedStyle(element).background);
 
   // `transitionrun` fires for every transition Chromium starts, before its

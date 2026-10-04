@@ -28,6 +28,8 @@ let actions: Array<string>;
 let installedUnits: Array<ServiceUnit>;
 let out: Array<string>;
 let err: Array<string>;
+/** Whether the fake `uninstall` leaves a running service whose unit file is gone, as systemd does. */
+let uninstallLeavesOrphanRunning: boolean;
 
 const NOT_INSTALLED: Omit<ServiceStatus, "unitFile"> = {
   installed: false,
@@ -60,7 +62,9 @@ const FakeSupervisor = Layer.sync(Supervisor, () =>
       }),
     uninstall: Effect.sync(() => {
       actions.push("uninstall");
-      installed = { ...NOT_INSTALLED, unitFile: UNIT_FILE };
+      if (installed.installed || !uninstallLeavesOrphanRunning) {
+        installed = { ...NOT_INSTALLED, unitFile: UNIT_FILE };
+      }
       return installed;
     }),
     start: Effect.sync(() => {
@@ -87,7 +91,7 @@ const run = (
   runServiceCommand(
     {
       args,
-      home,
+      homeOption: home,
       overrides: [],
       env: { PATH: "/usr/bin" },
       out: (line) => out.push(line),
@@ -104,6 +108,7 @@ beforeEach(() => {
   installedUnits = [];
   out = [];
   err = [];
+  uninstallLeavesOrphanRunning = false;
 });
 
 afterEach(() => {
@@ -160,6 +165,19 @@ describe("the command line", () => {
     expect(actions).toEqual([]);
   });
 
+  it("inside a session, prints the help but refuses a verb when no Home is named", async () => {
+    // The status verb is used because it is harmless if the refusal ever breaks:
+    // the Supervisor here is a fake, and status writes nothing.
+    const inSession = { homeOption: undefined, env: { PATH: "/usr/bin", HERCULE_SESSION: "1" } };
+
+    expect(await run(["--help"], inSession)).toBe(0);
+    expect(await run(["status"], inSession)).toBe(2);
+    // One line, with no pointer to the help, which cannot name the missing Home.
+    expect(err).toHaveLength(1);
+    expect(err[0]).toMatch(/^hercule: --home: this command runs inside a Hercule session/);
+    expect(actions).toEqual([]);
+  });
+
   it.each(["install", "restart", "status"])(
     "refuses a -c flag on %s, which the unit would not see",
     async (verb) => {
@@ -201,6 +219,8 @@ describe("install", () => {
       role: "serve",
       home,
       unitFile: UNIT_FILE,
+      controllerUrl: "http://127.0.0.1:4937",
+      logsDir: join(home, "logs"),
     });
     expect(err).toEqual([
       "Installing the unit for `hercule serve`: this Home holds no runner.json.",
@@ -233,7 +253,7 @@ describe("install", () => {
   it("refuses a Hercule Home with a line break in its path", async () => {
     const odd = join(home, "odd\nExecStartPre=/bin/sh");
     mkdirSync(odd, { recursive: true });
-    expect(await run(["install"], { home: odd })).toBe(1);
+    expect(await run(["install"], { homeOption: odd })).toBe(1);
     expect(err).toEqual([
       `hercule: The Hercule Home ${JSON.stringify(odd)} has a control character, which a unit file cannot hold. Use a path without one.`,
     ]);
@@ -269,10 +289,22 @@ describe("install", () => {
     expect(actions).toEqual([]);
   });
 
-  it("prints the path of a config.toml it cannot parse", async () => {
+  it("refuses a config.toml it cannot parse, before reaching the Supervisor", async () => {
+    // The unit's process would stop at the same error at every start.
     writeFileSync(join(home, "config.toml"), "[data\n");
+    expect(await run(["install", "--json"])).toBe(1);
+    expect(err).toEqual([
+      expect.stringMatching(new RegExp(`^hercule: ${join(home, "config.toml")} `)),
+    ]);
+    expect(out).toEqual([]);
+    expect(actions).toEqual([]);
+  });
+
+  it("refuses a config.toml with a value Hercule cannot use", async () => {
+    writeFileSync(join(home, "config.toml"), 'bind.host = "http://example.com"\n');
     expect(await run(["install"])).toBe(1);
-    expect(err[0]).toMatch(new RegExp(`^hercule: ${join(home, "config.toml")} `));
+    expect(err[0]).toMatch(new RegExp(`^hercule: bind.host in ${join(home, "config.toml")} `));
+    expect(actions).toEqual([]);
   });
 });
 
@@ -294,12 +326,29 @@ describe("uninstall", () => {
     ]);
   });
 
-  it("says there was nothing to uninstall", async () => {
+  it("says no service is installed when none is", async () => {
+    expect(await run(["uninstall"])).toBe(0);
+    expect(out).toEqual(["No Hercule service is installed on this machine."]);
+    expect(actions).toEqual(["uninstall"]);
+  });
+
+  it("says it stopped a service that ran without a unit file", async () => {
+    installed = { ...NOT_INSTALLED, running: true, pid: 4242, unitFile: UNIT_FILE };
+
     expect(await run(["uninstall"])).toBe(0);
     expect(out).toEqual([
-      "No Hercule service is installed on this machine, so there is nothing to uninstall.",
+      "No Hercule unit file was installed, but a Hercule service was running as pid 4242. It is stopped now.",
     ]);
-    expect(actions).toEqual(["uninstall"]);
+  });
+
+  it("says a service without a unit file still runs when uninstall left it running", async () => {
+    installed = { ...NOT_INSTALLED, running: true, pid: 4242, unitFile: UNIT_FILE };
+    uninstallLeavesOrphanRunning = true;
+
+    expect(await run(["uninstall"])).toBe(0);
+    expect(out).toEqual([
+      "No Hercule unit file is installed, but a Hercule service still runs as pid 4242.",
+    ]);
   });
 });
 
@@ -326,6 +375,184 @@ describe("the other verbs", () => {
   it("status prints the status", async () => {
     expect(await run(["status"])).toBe(0);
     expect(out).toEqual(["No Hercule service is installed on this machine."]);
+  });
+});
+
+describe("a verb that acts on the unit, inside a session", () => {
+  const SESSION_ENV = { PATH: "/usr/bin", HERCULE_SESSION: "1" };
+  const ACTING_VERBS = ["start", "stop", "restart", "uninstall"] as const;
+
+  /** Installs the fake unit for the Hercule Home `unitHome`. */
+  const installUnitFor = (unitHome: string | null): void => {
+    installed = {
+      installed: true,
+      running: true,
+      pid: 42,
+      role: "serve",
+      home: unitHome,
+      unitFile: UNIT_FILE,
+    };
+  };
+
+  it.each(ACTING_VERBS)(
+    "refuses %s when the unit runs another Home, and leaves the unit alone",
+    async (verb) => {
+      installUnitFor("/live");
+
+      expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+      expect(actions).toEqual([]);
+      expect(err).toEqual([
+        `hercule: The Hercule service on this machine runs the Hercule Home /live, not ${home}. Inside a session, \`hercule service ${verb}\` may only act on a service whose unit file names the Home it was given, because any other may be the user's live Hercule. Run it outside the session.`,
+      ]);
+    },
+  );
+
+  it.each(ACTING_VERBS)("refuses %s when the unit names no Home", async (verb) => {
+    installUnitFor(null);
+
+    expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+    expect(actions).toEqual([]);
+    expect(err[0]).toContain("runs a Hercule Home its unit file does not name");
+  });
+
+  it.each(ACTING_VERBS)("runs %s when the unit runs the Home it names", async (verb) => {
+    installUnitFor(home);
+
+    expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(0);
+    expect(actions).toEqual([verb]);
+    expect(err).toEqual([]);
+  });
+
+  // A missing unit file does not prove that nothing runs: launchd keeps a job
+  // whose plist was deleted, and restarts it when it exits, with or without a
+  // pid at this moment.
+  it.each(ACTING_VERBS)(
+    "refuses %s when no unit file is installed but a service runs",
+    async (verb) => {
+      installed = { ...NOT_INSTALLED, running: true, pid: 4242, unitFile: UNIT_FILE };
+
+      expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+      expect(actions).toEqual([]);
+      expect(err[0]).toContain(
+        "No Hercule unit file is installed on this machine, but a Hercule service runs as pid 4242, for a Home that cannot be read.",
+      );
+    },
+  );
+
+  it.each(ACTING_VERBS)(
+    "refuses %s when no unit file is installed and no pid runs",
+    async (verb) => {
+      expect(await run([verb], { homeOption: home, env: SESSION_ENV })).toBe(1);
+      expect(actions).toEqual([]);
+      expect(err).toEqual([
+        `hercule: No Hercule unit file is installed on this machine. Inside a session, \`hercule service ${verb}\` may only act on a service whose unit file names the Home it was given, because any other may be the user's live Hercule. Run it outside the session.`,
+      ]);
+    },
+  );
+
+  it.each(ACTING_VERBS)("runs %s on another Home's unit outside a session", async (verb) => {
+    installUnitFor("/live");
+
+    expect(await run([verb], { homeOption: home })).toBe(0);
+    expect(actions).toEqual([verb]);
+  });
+
+  it("still reports the status of another Home's unit", async () => {
+    installUnitFor("/live");
+
+    expect(await run(["status"], { homeOption: home, env: SESSION_ENV })).toBe(0);
+    expect(out).toEqual([
+      "The Hercule service runs `hercule serve` for the Hercule Home /live, as pid 42.",
+    ]);
+  });
+});
+
+describe("the --json report", () => {
+  /** Runs a verb with `--json`, checks that it succeeded, and returns the parsed JSON. */
+  const runForReport = async (
+    verb: string,
+    request: Partial<ServiceCommandRequest> = {},
+  ): Promise<Record<string, unknown>> => {
+    expect(await run([verb, "--json"], request)).toBe(0);
+    return JSON.parse(out.join("\n")) as Record<string, unknown>;
+  };
+
+  // The desktop app reads these fields without importing this package, so a
+  // rename must fail here first, and be made in spec 15 section 4 too.
+  it.each(SERVICE_VERBS)("%s prints exactly the fields spec 15 section 4 lists", async (verb) => {
+    const report = await runForReport(verb);
+    expect(Object.keys(report).sort()).toEqual([
+      "controllerUrl",
+      "home",
+      "installed",
+      "logsDir",
+      "pid",
+      "role",
+      "running",
+      "unitFile",
+    ]);
+  });
+
+  it("describes the installed unit's Home, even when this command ran for another", async () => {
+    const unitHome = mkdtempSync(join(tmpdir(), "hercule-service-unit-home-"));
+    try {
+      writeFileSync(join(unitHome, "config.toml"), "bind.port = 5050\n");
+      installed = {
+        installed: true,
+        running: true,
+        pid: 42,
+        role: "serve",
+        home: unitHome,
+        unitFile: UNIT_FILE,
+      };
+      const report = await runForReport("status");
+      expect(report.home).toBe(unitHome);
+      expect(report.logsDir).toBe(join(unitHome, "logs"));
+      expect(report.controllerUrl).toBe("http://127.0.0.1:5050");
+    } finally {
+      rmSync(unitHome, { recursive: true, force: true });
+    }
+  });
+
+  it("describes this command's Home when no unit is installed", async () => {
+    writeFileSync(join(home, "config.toml"), "bind.port = 6060\n");
+    const report = await runForReport("status");
+    expect(report.home).toBeNull();
+    expect(report.logsDir).toBe(join(home, "logs"));
+    expect(report.controllerUrl).toBe("http://127.0.0.1:6060");
+  });
+
+  it("describes this command's Home when the installed unit names no Home", async () => {
+    installed = {
+      installed: true,
+      running: false,
+      pid: null,
+      role: null,
+      home: null,
+      unitFile: UNIT_FILE,
+    };
+    const report = await runForReport("status");
+    expect(report.logsDir).toBe(join(home, "logs"));
+    expect(report.controllerUrl).toBe("http://127.0.0.1:4937");
+  });
+
+  it("builds controllerUrl from config.toml, and turns a wildcard host into loopback", async () => {
+    writeFileSync(join(home, "config.toml"), 'bind.host = "0.0.0.0"\nbind.port = 8080\n');
+    expect((await runForReport("status")).controllerUrl).toBe("http://127.0.0.1:8080");
+  });
+
+  it("ignores HERCULE_* variables, which the unit does not see", async () => {
+    const report = await runForReport("status", {
+      env: { HERCULE_BIND_HOST: "100.64.0.1", HERCULE_BIND_PORT: "5000" },
+    });
+    expect(report.controllerUrl).toBe("http://127.0.0.1:4937");
+  });
+
+  it("prints a null controllerUrl when config.toml cannot be read", async () => {
+    writeFileSync(join(home, "config.toml"), "[data\n");
+    const report = await runForReport("status");
+    expect(report.controllerUrl).toBeNull();
+    expect(report.logsDir).toBe(join(home, "logs"));
   });
 });
 

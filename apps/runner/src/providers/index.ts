@@ -59,6 +59,33 @@ export interface ProviderRunnerContext {
     readonly skill: string;
     readonly claudePluginDir: string;
   };
+  /**
+   * The paths of the user's own material this session's harness is given.
+   * The field being present is what marks the session as one that sees User
+   * Material: a Thread on the controller's local runner, whose start frame
+   * has the `userMaterial` flag set (spec 06 section 9.1). The field is
+   * absent for every other session, and for a probe, an install or a login,
+   * so their adapters keep the harness isolated.
+   */
+  readonly userMaterial?: UserMaterial;
+}
+
+/**
+ * The paths of the user's own material that an adapter passes to its harness
+ * for one process. Each path existed on this machine when the runner looked
+ * for it; a source that does not exist is left out.
+ *
+ * Every field is empty for a harness that reads the material through links
+ * in its instance home instead. Claude Code is that harness: it reads the
+ * links only when the adapter asks it to load the user's settings.
+ */
+export interface UserMaterial {
+  /** Directories of skills the harness is told to load by path. */
+  readonly skillDirs: ReadonlyArray<string>;
+  /** Directories of prompt templates the harness loads explicitly. */
+  readonly promptTemplateDirs: ReadonlyArray<string>;
+  /** The user's personal instructions file, or undefined when the user has none. */
+  readonly instructionsFile: string | undefined;
 }
 
 export interface InstallOutcome {
@@ -181,6 +208,8 @@ export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
 export const providerLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+
+export { CLAUDE_CODE, CODEX, PI };
 
 export const describeMissingAdapter = (providerId: string): string =>
   `no adapter for ${providerId} in this runner build`;

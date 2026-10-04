@@ -1,17 +1,11 @@
 /**
- * Tests `controller.read` and `controller.update` over a real socket, for the
- * default runner, which is the one field a caller may change.
+ * Tests `controller.read` and `controller.update` over a real socket: the
+ * default runner, which is the one field a caller may change, and the local
+ * runner, which no caller can.
  */
 import { describe, expect, it } from "vitest";
-import type { Runner } from "@hercule/contract";
+import type { ControllerInfo, Runner } from "@hercule/contract";
 import { completeSetup, get, send, withServer } from "../http/testing";
-
-interface ControllerInfo {
-  readonly id: string;
-  readonly publicKey: string;
-  readonly version: string;
-  readonly defaultRunnerId: string | null;
-}
 
 /** A well-formed id no runner has. */
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
@@ -155,6 +149,31 @@ describe("the controller's default runner", () => {
       expect((await updateController(harness.base, token, {})).status).toBe(200);
 
       expect(await readControllerInfo(harness.base, token)).toEqual(before);
+    });
+  });
+});
+
+describe("the controller's local runner", () => {
+  it("is the id the local runner reported", async () => {
+    const localRunnerId = "0199e0e7-4444-7000-8000-000000000000";
+    await withServer(
+      async (harness) => {
+        const token = await completeSetup(harness.base);
+
+        expect((await readControllerInfo(harness.base, token)).localRunnerId).toBe(localRunnerId);
+      },
+      { readLocalRunnerId: () => localRunnerId },
+    );
+  });
+
+  it("cannot be set, because the controller only reads it from its child", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+
+      const response = await updateController(harness.base, token, { localRunnerId: UNKNOWN_ID });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+      expect((await readControllerInfo(harness.base, token)).localRunnerId).toBeNull();
     });
   });
 });

@@ -180,7 +180,7 @@ describe("buildDraftConfig", () => {
     instances: [claude],
     runners: [LOCAL],
     profiles: [UNRESTRICTED],
-    localRunnerId: LOCAL.id,
+    thisMacRunnerId: LOCAL.id,
   };
 
   it("starts a draft in its project from the defaults, joining no workspace, with the stored workspace setting", () => {

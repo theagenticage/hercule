@@ -1,8 +1,9 @@
 /**
  * The bootstrap config in `config.toml`: the four keys every role may need
  * before anything else starts (spec 15 section 6). The controller reads all
- * four, the runner reads `log.level`, and `hercule service` reads `data.dir`
- * to find the controller database.
+ * four, and the runner reads `log.level`. `hercule service` reads `data.dir`
+ * to find the controller database, and `bind.host` and `bind.port` to report
+ * the address the controller is opened at.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Context, Effect, Schema } from "effect";

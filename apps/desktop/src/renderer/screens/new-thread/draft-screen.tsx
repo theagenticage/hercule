@@ -3,7 +3,7 @@
  * the header, then a column in the middle of the pane with a face and a
  * question, the Draft Thread's composer, and the start cards.
  */
-import { useRef, useState, useSyncExternalStore, type JSX } from "react";
+import { lazy, Suspense, useRef, useState, useSyncExternalStore, type JSX } from "react";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
@@ -16,10 +16,12 @@ import {
   findDraftSubject,
   isMutationRunning,
   joinPhraseText,
+  listProjectRepos,
   listWorkspaceThreads,
   queryKeys,
   readErrorMessage,
   type ComposerPick,
+  type LoginTarget,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionSpawnInput } from "@hercule/contract";
@@ -35,6 +37,12 @@ import { DraftHeader } from "./draft-header";
 import { StartCards } from "./start-cards";
 import "../thread/composer.css";
 import "./new-thread.css";
+
+// The login dialog is loaded the first time Log in opens it, so its code is
+// not part of the first screen's scripts (spec 17 §Performance).
+const ProviderLoginDialog = lazy(() =>
+  import("../provider-login").then((module) => ({ default: module.ProviderLoginDialog })),
+);
 
 /** What one start carried: the request, and the draft it was built from. */
 interface SentDraft {
@@ -56,9 +64,11 @@ interface SentDraft {
  *   joins;
  * - a face and a question, "What should the agent do in webshop?", then the
  *   lead: where the thread will work and on which machine, or why it cannot
- *   start yet;
+ *   start yet. When the reason is a provider instance that is not logged in,
+ *   a Log in button follows it and opens the login in a dialog;
  * - the composer, see `DraftComposer`;
- * - the start cards, when the draft is in a project, see `StartCards`.
+ * - the start cards, or the starter threads while the project has no open
+ *   task, when the draft is in a project, see `StartCards`.
  *
  * ⏎ or Send starts the thread with what the composer shows, and opens it once
  * the controller has started it. A failed start keeps the draft and shows
@@ -131,6 +141,8 @@ export function DraftScreen({
   // Whether the column is scrolled away from its top, so part of it is under
   // the header. Only then does it fade under the header (thread-header.css).
   const [scrolled, setScrolled] = useState(false);
+  // The login the Log in button opened, while its dialog is open.
+  const [login, setLogin] = useState<LoginTarget | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const canSend = fields.blocked === null && pending.message.text.trim() !== "" && !starting;
@@ -199,6 +211,18 @@ export function DraftScreen({
             ) : (
               <p>
                 <b className="newbie-blocked">Can&apos;t start yet.</b> {fields.blocked.reason}.
+                {fields.blocked.login === null ? null : (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => setLogin(fields.blocked?.login ?? null)}
+                    >
+                      Log in
+                    </button>
+                  </>
+                )}
               </p>
             )}
           </div>
@@ -222,9 +246,11 @@ export function DraftScreen({
             onPick={pick}
             onSubmit={submit}
           />
-          {projectId === null ? null : (
+          {project === undefined ? null : (
             <StartCards
-              projectId={projectId}
+              projectId={project.id}
+              projectName={project.name}
+              hasRepository={listProjectRepos(catalogs.resources, project.id).length > 0}
               onStart={(message) => {
                 const { text } = pendingSubmissions.read(key).message;
                 pendingSubmissions.writeText(key, appendToMessage(text, message));
@@ -234,6 +260,19 @@ export function DraftScreen({
           )}
         </div>
       </div>
+      {login === null ? null : (
+        // Without its own boundary, the dialog's load would suspend the draft
+        // behind it.
+        <Suspense fallback={null}>
+          <ProviderLoginDialog
+            target={login}
+            onClose={() => {
+              setLogin(null);
+              fieldRef.current?.focus();
+            }}
+          />
+        </Suspense>
+      )}
     </>
   );
 }

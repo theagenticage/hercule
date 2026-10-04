@@ -1,12 +1,19 @@
 /**
- * Checks that a real Codex session answers with its output schema, and
- * reports a schema failure when no value can satisfy the schema. Codex itself
- * constrains the turn's final assistant message; these tests check that the
- * runner's result matches: `ok` with a value that really fits, and a
- * `schema-failure` that arrives as an ended turn rather than a hang.
+ * Checks the Codex adapter against a real `codex` binary, in two suites.
  *
- * The suite needs two opt-ins, so that `pnpm test` never quietly spends a
- * developer's subscription:
+ * The first checks what a Thread that sees the user's material is shown, and
+ * what another session is shown. It renders the prompt with
+ * `codex debug prompt-input`, which needs no login and calls no API, so it
+ * runs whenever `codex` is on the `PATH`.
+ *
+ * The second checks that a real Codex session answers with its output
+ * schema, and reports a schema failure when no value can satisfy the schema.
+ * Codex itself constrains the turn's final assistant message; these tests
+ * check that the runner's result matches: `ok` with a value that really fits,
+ * and a `schema-failure` that arrives as an ended turn rather than a hang.
+ *
+ * The second suite needs two opt-ins, so that `pnpm test` never quietly
+ * spends a developer's subscription:
  *
  * - `HERCULE_LIVE_SESSION_TEST` must be set.
  * - `CODEX_HOME` must name the directory to copy the login from. The
@@ -15,7 +22,7 @@
  * The login is copied into a throwaway instance home, because the session
  * runs under that home.
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -28,8 +35,10 @@ import {
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
-import { codex } from "./adapter";
+import { codex, makeCodexAdapter } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
+import { NO_USER_MATERIAL_PATHS } from "../testing";
+import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
 const binary = Bun.which("codex") ?? undefined;
 
@@ -70,6 +79,98 @@ const buildContext = (home: string): ProviderRunnerContext => ({
   env: { PATH: process.env["PATH"] ?? "" },
   secrets: {},
   herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
+});
+
+/**
+ * Renders the prompt Codex would send for a session the adapter starts with
+ * `ctx`, and returns it as JSON text. The adapter runs against a scripted
+ * app-server, which records the environment it was started with and the
+ * developer instructions of its thread. `codex debug prompt-input` is then run
+ * with that environment, and the developer instructions are passed as the
+ * `developer_instructions` config value, the setting that the app-server's
+ * `developerInstructions` param overrides.
+ */
+const renderPrompt = async (ctx: ProviderRunnerContext): Promise<string> => {
+  const { seam, spawns, requests } = buildScriptedSeam();
+  await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
+  const { developerInstructions } = listSentParams(requests, "thread/start")[0] as {
+    readonly developerInstructions: string;
+  };
+  const rendered = Bun.spawnSync({
+    cmd: [
+      binary!,
+      "debug",
+      "prompt-input",
+      "-c",
+      "check_for_update_on_startup=false",
+      "-c",
+      // A JSON string is also a valid TOML string for this text.
+      `developer_instructions=${JSON.stringify(developerInstructions)}`,
+      "hello",
+    ],
+    cwd: ctx.cwd!,
+    env: Object.fromEntries(
+      Object.entries(spawns[0]!.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    ),
+  });
+  expect(rendered.exitCode, rendered.stderr.toString()).toBe(0);
+  return rendered.stdout.toString();
+};
+
+describe.skipIf(binary === undefined)("what a real Codex is shown of the user's material", () => {
+  const SKILL = "hercule-test-user-skill";
+  const INSTRUCTIONS = "hercule-test-user-instructions: always answer in English.";
+  const GLOBAL = "hercule-test-global-agents-file";
+
+  /**
+   * Creates a stand-in for the user's home directory: one skill in
+   * `.agents/skills`, and an `AGENTS.md` in its `.codex` directory. The
+   * adapter points `CODEX_HOME` at the instance's own directory, so Codex must
+   * never read that `AGENTS.md` by itself.
+   */
+  const createUserHome = (): string => {
+    const home = createScratchDir("user");
+    mkdirSync(join(home, ".agents", "skills", SKILL), { recursive: true });
+    writeFileSync(
+      join(home, ".agents", "skills", SKILL, "SKILL.md"),
+      `---\nname: ${SKILL}\ndescription: A skill only the user has.\n---\n\nSay hi.\n`,
+    );
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".codex", "AGENTS.md"), GLOBAL);
+    return home;
+  };
+
+  it("shows a Thread the user's skills and instructions", async () => {
+    const userHome = createUserHome();
+    const instructionsFile = join(createScratchDir("instructions"), "AGENTS.md");
+    writeFileSync(instructionsFile, INSTRUCTIONS);
+    const ctx = buildContext(createScratchDir("home"));
+
+    const prompt = await renderPrompt({
+      ...ctx,
+      env: { ...ctx.env, HOME: userHome },
+      userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+    });
+
+    expect(prompt).toContain(SKILL);
+    expect(prompt).toContain(INSTRUCTIONS);
+    // The user's `.codex/AGENTS.md` stays out: Codex reads its instance's own
+    // CODEX_HOME, so the instructions reach the Thread only through the
+    // developer instructions.
+    expect(prompt).not.toContain(GLOBAL);
+  });
+
+  it("shows any other session none of the user's material", async () => {
+    const userHome = createUserHome();
+    const ctx = buildContext(createScratchDir("home"));
+
+    const prompt = await renderPrompt({ ...ctx, env: { ...ctx.env, HOME: userHome } });
+
+    expect(prompt).not.toContain(SKILL);
+    expect(prompt).not.toContain(GLOBAL);
+  });
 });
 
 const ready =

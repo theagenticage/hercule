@@ -3,8 +3,8 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildProjectPickerRows } from "@hercule/client-core";
 import { projectsQuery, resourcesQuery, threadsQuery, workspacesQuery } from "../../app/queries";
+import { GlassDialog } from "../glass-dialog";
 import { pickProjectTint, ProjectTile } from "../project-tile";
-import "../thread/menus.css";
 import "./project-picker.css";
 
 /**
@@ -34,22 +34,26 @@ const findNextRow = (list: HTMLElement, step: 1 | -1): HTMLButtonElement | undef
  * - ⌘1 to ⌘9 pick the first nine projects directly.
  * - Esc, or a click on the scrim, closes the picker.
  *
- * Picking a project closes the picker, then calls `onPick` with the project,
- * where the caller opens a Draft Thread in it. The web app's picker also has
- * a New project row; the desktop app cannot create a project, so it has none,
- * and it is not opened when there is no project.
+ * The last row is New project, which closes the picker and calls
+ * `onNewProject`, where the caller opens the New project dialog. With no
+ * projects, a No project row comes first, so a thread can still start
+ * without a project.
  *
- * `onClose` is called when the picker closes, whether a project was picked
- * or not. The caller then unmounts the picker.
+ * Picking a row closes the picker, then calls `onPick` with the project, or
+ * with `undefined` for No project, where the caller opens a Draft Thread.
+ * The picker closes first because an open modal dialog keeps the focus
+ * inside it, so the draft could not take it.
  *
- * The picker closes before `onPick` is called because an open modal dialog
- * keeps the focus inside it, so the draft could not take it.
+ * `onClose` is called when the picker closes, whether a row was picked or
+ * not. The caller then unmounts the picker.
  */
 export function ProjectPicker({
   onPick,
+  onNewProject,
   onClose,
 }: {
-  readonly onPick: (projectId: string) => void;
+  readonly onPick: (projectId: string | undefined) => void;
+  readonly onNewProject: () => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
@@ -61,19 +65,15 @@ export function ProjectPicker({
   const rows = buildProjectPickerRows({ projects, resources, workspaces, sessions: threads });
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  // Whether the last press began on the scrim. A press inside the dialog that
-  // is released on the scrim, as when the user selects text, fires its click
-  // on the dialog element itself, just as a click on the scrim does.
-  const pressedScrimRef = useRef(false);
 
   useEffect(() => {
-    dialogRef.current?.showModal();
     // Which element a modal dialog focuses when it opens has changed between
-    // browser versions, so the first row is focused here.
+    // browser versions, so the first row is focused here. The dialog has
+    // opened by now: a child's effects run before its parent's.
     listRef.current?.querySelector("button")?.focus();
   }, []);
 
-  const openProject = (projectId: string): void => {
+  const openProject = (projectId: string | undefined): void => {
     dialogRef.current?.close();
     onPick(projectId);
   };
@@ -97,22 +97,12 @@ export function ProjectPicker({
   };
 
   return (
-    <dialog
-      ref={dialogRef}
-      className="pop picker"
-      aria-label="New thread in"
-      // The browser closes the dialog itself on Esc, and then fires `close`.
+    <GlassDialog
+      dialogRef={dialogRef}
+      className="picker"
+      label="New thread in"
       onClose={onClose}
       onKeyDown={handleKeyDown}
-      // A press on the scrim reaches the dialog itself; a press inside the
-      // dialog reaches one of its children, which fill it.
-      onPointerDown={(event) => {
-        pressedScrimRef.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) => {
-        if (pressedScrimRef.current && event.target === event.currentTarget)
-          event.currentTarget.close();
-      }}
     >
       <div className="pop-h">
         <b>New thread in</b>
@@ -135,6 +125,29 @@ export function ProjectPicker({
             {row.shortcut === null ? null : <kbd>{row.shortcut}</kbd>}
           </button>
         ))}
+        {rows.length === 0 ? (
+          <button
+            type="button"
+            className="line picker-row"
+            onClick={() => {
+              openProject(undefined);
+            }}
+          >
+            <span className="grow">
+              <ProjectTile tint={null} name="No project" />
+            </span>
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="line picker-row"
+          onClick={() => {
+            dialogRef.current?.close();
+            onNewProject();
+          }}
+        >
+          <span className="grow picker-new">New project</span>
+        </button>
       </div>
       <p className="pop-foot picker-keys">
         <span>
@@ -147,6 +160,6 @@ export function ProjectPicker({
           <kbd>Esc</kbd> Close
         </span>
       </p>
-    </dialog>
+    </GlassDialog>
   );
 }

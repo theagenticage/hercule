@@ -20,7 +20,6 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
@@ -29,12 +28,11 @@ import type {
   CredentialRequest,
   GitIdentity,
 } from "@hercule/protocol";
-import { connectionRepository, isGithubConnection } from "../connections";
+import { githubTokens, type GithubToken } from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";
 import { SessionTokens } from "../permissions";
-import { canonicalRemoteOf } from "../resources";
-import { Secrets, type SecretDecryptError, type SecretNameError } from "../secrets";
+import { canonicalizeRemote } from "../resources";
 
 /**
  * The port through which the credential rule learns whether a workspace step
@@ -63,9 +61,6 @@ export class WorkspaceStepActivity extends Context.Service<
   }
 >()("hercule/controller/workspaces/WorkspaceStepActivity") {}
 
-/** The field the shipped GitHub type stores its token under. */
-const PAT = "pat";
-
 /**
  * Builds the git identity an account commits as: its login, and the noreply
  * address GitHub gives an account that keeps its email private. The runner
@@ -77,19 +72,11 @@ const buildGitIdentity = (login: string): GitIdentity => ({
   email: `${login}@users.noreply.github.com`,
 });
 
-/** The token a Connection holds and the login it belongs to. */
-interface GitCredential {
-  readonly token: string;
-  readonly login: string;
-}
-
 /** A GitHub account as work uses it: the token it pushes with and the identity it commits as. */
 export interface GithubAccount {
   readonly token: string;
   readonly gitIdentity: GitIdentity;
 }
-
-type CredentialError = SqlError | SecretNameError | SecretDecryptError;
 
 /**
  * Reads the GitHub account behind a Connection. It is kept apart from
@@ -98,30 +85,10 @@ type CredentialError = SqlError | SecretNameError | SecretDecryptError;
  * `WorkspaceStepActivity` port that rule reads.
  */
 export const githubAccounts = Effect.gen(function* () {
-  const connections = yield* connectionRepository;
-  const secrets = yield* Secrets;
-
-  /**
-   * Returns the GitHub token a Connection holds, and the login it belongs to.
-   * Returns `none` if the connection is gone, is not a GitHub connection, or
-   * holds no token, because none of those can authenticate a push. Fails if
-   * the database or the secret store fails.
-   */
-  const findCredential = (
-    connectionId: string,
-  ): Effect.Effect<Option.Option<GitCredential>, CredentialError> =>
-    Effect.gen(function* () {
-      const found = yield* connections.one(connectionId);
-      if (Option.isNone(found) || !isGithubConnection(found.value)) return Option.none();
-      const token = yield* secrets.get({ kind: "connection", id: connectionId }, PAT);
-      return Option.map(token, (value) => ({
-        token: Redacted.value(value),
-        login: found.value.displayName,
-      }));
-    });
+  const { findGithubToken } = yield* githubTokens;
 
   return {
-    findCredential,
+    findGithubToken,
 
     /**
      * Returns the GitHub account of a Connection, for work that starts with
@@ -132,7 +99,7 @@ export const githubAccounts = Effect.gen(function* () {
      */
     readGithubAccount: (connectionId: string): Effect.Effect<GithubAccount | undefined> =>
       Effect.map(
-        Effect.catchCause(findCredential(connectionId), (cause) =>
+        Effect.catchCause(findGithubToken(connectionId), (cause) =>
           // An interruption is not an unreadable connection. A cause that
           // contains one is passed on rather than logged, so a caller waiting
           // on this read learns it was interrupted instead of seeing
@@ -141,7 +108,7 @@ export const githubAccounts = Effect.gen(function* () {
             ? Effect.interrupt
             : Effect.as(
                 Effect.logError("A GitHub connection could not be read", cause),
-                Option.none<GitCredential>(),
+                Option.none<GithubToken>(),
               ),
         ),
         (credential) =>
@@ -239,24 +206,24 @@ const make = Effect.gen(function* () {
     /**
      * Builds the answer frame for one credential request: the token and
      * username, or `unauthorized` or `no_connection` as explained at the top of
-     * this file. Fails if the database or the secret store fails.
+     * this file. Fails if the database fails.
      */
     answer: (
       runnerId: string,
       request: CredentialRequest,
-    ): Effect.Effect<CredentialAnswer, CredentialError> =>
+    ): Effect.Effect<CredentialAnswer, SqlError> =>
       Effect.gen(function* () {
         const buildRefusalAnswer = (error: CredentialRefusal): CredentialAnswer => ({
           _tag: "credentialAnswer",
           requestId: request.requestId,
           error,
         });
-        const canonicalRemote = canonicalRemoteOf(request.remote);
+        const canonicalRemote = canonicalizeRemote(request.remote);
         if (canonicalRemote === undefined) return buildRefusalAnswer("unauthorized");
         const held = yield* findHeldResource(runnerId, request, canonicalRemote);
         if (Option.isNone(held)) return buildRefusalAnswer("unauthorized");
         if (held.value.connectionId === null) return buildRefusalAnswer("no_connection");
-        const credential = yield* accounts.findCredential(held.value.connectionId);
+        const credential = yield* accounts.findGithubToken(held.value.connectionId);
         if (Option.isNone(credential)) return buildRefusalAnswer("no_connection");
         return {
           _tag: "credentialAnswer",

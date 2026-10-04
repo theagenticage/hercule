@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
+import firstRunCss from "../screens/first-run/first-run.css?raw";
 import shellCss from "../shell/shell.css?raw";
 import { readLastThread, rememberLastThread } from "./last-thread";
 import {
@@ -68,11 +69,9 @@ const findDragSelectors = (stylesheets: ReadonlyArray<string>): Array<string> =>
   );
 
 describe("where the app starts", () => {
-  it("shows the connect screen when no controller is saved", async () => {
+  it("shows the first run when no controller is saved", async () => {
     const { router } = await renderApp(createFakeBridge());
-    expect(router.state.location.pathname).toBe("/connect");
-    expect(screen.getByRole("textbox", { name: "Controller address" })).toBeTruthy();
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(router.state.location.pathname).toBe("/first-run");
   });
 
   it("shows the sign-in screen when a controller is saved but no token", async () => {
@@ -104,15 +103,24 @@ describe("where the app starts", () => {
     expect(screen.getByRole<HTMLInputElement>("textbox").value).toBe(CONTROLLER_URL);
   });
 
-  it("goes back to the connect screen when the saved controller is not set up", async () => {
+  it("goes to the first run when the saved controller is not set up", async () => {
     stubApi({ "GET /api/v1/setup": { body: { complete: false } } });
     const { router } = await renderApp(
       createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
     );
-    expect(router.state.location.pathname).toBe("/connect");
-    expect(screen.getByRole("alert").textContent).toBe(
-      "This controller is not set up yet. Press Connect to finish setup in the browser.",
+    expect(router.state.location.pathname).toBe("/first-run");
+  });
+
+  it("goes back to the first run while one is in progress", async () => {
+    stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
+    const { router } = await renderApp(
+      createFakeBridge({
+        controllerUrl: CONTROLLER_URL,
+        token: "bearer",
+        firstRun: { putOff: ["github"] },
+      }),
     );
+    expect(router.state.location.pathname).toBe("/first-run");
   });
 
   it("opens the thread that was open last on this controller", async () => {
@@ -237,9 +245,19 @@ describe("the drag regions", () => {
   });
 
   it("lets the whole window drag on the connect screen, except the column", async () => {
-    await renderApp(createFakeBridge());
+    await renderApp(createFakeBridge(), { path: "/connect" });
     expect(document.querySelector(".centered-screen > .centered-column")).not.toBeNull();
     expectDeclaration(centeredScreenCss, "centered-screen", "-webkit-app-region", "drag");
     expectDeclaration(centeredScreenCss, "centered-column", "-webkit-app-region", "no-drag");
+  });
+
+  it("lets the room drag on the first run, but not the card or the ladder", async () => {
+    await renderApp(createFakeBridge());
+    expect(document.querySelector(".fr > .fr-panel")).not.toBeNull();
+    expectDeclaration(firstRunCss, "fr", "-webkit-app-region", "drag");
+    // The card and the ladder share one rule, which `expectDeclaration` cannot read.
+    expect(firstRunCss).toMatch(
+      /\.fr-panel,\s*\.fr-ladder\s*\{[^}]*-webkit-app-region:\s*no-drag;/,
+    );
   });
 });

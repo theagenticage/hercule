@@ -121,8 +121,7 @@ const COLUMNS =
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "resource.query",
-  field: "createdAt",
-  direction,
+  sort: [{ field: "createdAt", direction }],
 });
 
 const toResource = (row: ResourceRow): StoredResource => {
@@ -353,12 +352,12 @@ const make = Effect.gen(function* () {
         const after =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["created_at", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          [{ column: "created_at", direction: request.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const clauses = [keyset];
         if (request.kind !== undefined) clauses.push(sql`kind = ${request.kind}`);
@@ -374,7 +373,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (found) => Effect.succeed(found.map(toResource)),
-          (last) => encodeCursor(scope, last.createdAt, last.id),
+          (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
   };

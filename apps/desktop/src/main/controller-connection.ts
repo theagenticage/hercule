@@ -1,22 +1,23 @@
 /**
- * Connecting the app to a controller: the user types a URL on the connect
- * screen, and main checks the controller there before it saves the URL.
- * Spec 17 (§Connecting) owns the rules.
+ * Connecting the app to a controller: the user types an address on the
+ * connect screen, or main finds Hercule on this Mac, and main checks the
+ * controller there before it saves its URL. Spec 17 (§Connecting) owns the
+ * rules.
  *
- * The check lives in `./controller-check`, which main imports only when the
- * user first connects, so it stays off the launch path.
+ * The check lives in `./controller-check`, which main imports only when it
+ * first checks a controller, so it stays off the launch path.
  *
- * This module imports no Electron: the layer is given the function that opens
- * a URL in the browser and the one the check sends its requests with, so the
- * service is unit tested with stand-ins for them.
+ * This module imports no Electron: the layer is given the function the check
+ * sends its requests with, so the service is unit tested with a stand-in.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { ControllerUrlSaveOutcome } from "../ipc/contract";
+import { isHttpUrl } from "../ipc/http-url";
 import { AppSettings } from "./app-settings";
+import type { ControllerCheckOutcome } from "./controller-check";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
-import { isHttpUrl } from "./http-url";
 import { MainWindow } from "./main-window";
 import { StoredToken } from "./stored-token";
 
@@ -39,38 +40,106 @@ export const parseControllerUrl = (text: string): string | null => {
   return url.href === `${url.origin}/` ? url.origin : null;
 };
 
+/**
+ * A controller address the user typed: the controller's origin, and the
+ * setup token when the address is a setup URL.
+ */
+export interface ControllerAddress {
+  readonly origin: string;
+  readonly setupToken: string | null;
+}
+
+/**
+ * Returns the origin of `text`, and its setup token, when `text` is either:
+ *
+ * - a controller's origin, as parseControllerUrl accepts it. Its setup token
+ *   is null;
+ * - a setup URL, as `hercule setup-url` prints it: such an origin
+ *   followed by `/setup?token=<token>`, with nothing else and a token that
+ *   is not empty.
+ *
+ * Returns null for any other text. The setup URL is the one exception to
+ * the rule that a controller is typed as its origin, because it is what the
+ * user copies from the controller's machine to set it up from this one.
+ */
+export const parseControllerAddress = (text: string): ControllerAddress | null => {
+  const origin = parseControllerUrl(text);
+  if (origin !== null) return { origin, setupToken: null };
+  if (!isHttpUrl(text)) return null;
+  const url = new URL(text);
+  const setupToken = url.searchParams.get("token");
+  // The full URL is the origin, the path and the query exactly when it has no
+  // user name, password or fragment, not even an empty one, "#".
+  const isSetupUrl =
+    url.href === `${url.origin}/setup${url.search}` &&
+    [...url.searchParams.keys()].join() === "token" &&
+    setupToken !== null &&
+    setupToken !== "";
+  return isSetupUrl ? { origin: url.origin, setupToken } : null;
+};
+
+/**
+ * Checks whether the connect check's `outcome` found a controller that
+ * answers and accepts the app, set up or not: one whose URL the app saves.
+ */
+export const isAnswering = (
+  outcome: ControllerCheckOutcome,
+): outcome is Extract<ControllerCheckOutcome, { readonly _tag: "Ready" | "SetupIncomplete" }> =>
+  outcome._tag === "Ready" || outcome._tag === "SetupIncomplete";
+
 /** The connection to a controller. */
 export class ControllerConnection extends Context.Service<
   ControllerConnection,
   {
     /**
-     * Checks the controller at the URL the user typed, `input`, and returns
-     * the outcome, with the origin parsed from `input` in every outcome but
-     * `InvalidUrl`:
+     * Checks the controller at the address the user typed, `input`, and
+     * returns the outcome, with the origin parsed from `input` in every
+     * outcome but `InvalidAddress`:
      *
-     * - `InvalidUrl` when `input` is not a controller's origin; see
-     *   parseControllerUrl. Nothing is requested;
-     * - `Saved` when the controller is ready for the app. A URL other than
-     *   the saved one signs the user out first, as Sign Out does. The URL is
-     *   saved, and the window reloads, so the page's Content Security Policy
-     *   names the new controller;
-     * - `SetupIncomplete` when the controller is not set up yet. Its setup
-     *   page opens in the browser, because setup is done in the web app;
+     * - `InvalidAddress` when `input` is not a controller address; see
+     *   parseControllerAddress. Nothing is requested;
+     * - `Saved` when a controller answered, set up or not. The URL is saved
+     *   as `saveAndReload` saves it. When the controller is not set up and
+     *   `input` is a setup URL, its token is kept in memory, for
+     *   `takePastedSetupToken`;
      * - the check's outcome otherwise; see ControllerCheckOutcome.
+     *
+     * A controller that is not set up is saved too, because the app sets it
+     * up in its first run; no browser opens.
      *
      * Only `Saved` changes the saved URL. Never fails.
      */
     readonly save: (input: string) => Effect.Effect<ControllerUrlSaveOutcome>;
+
+    /**
+     * Runs the connect check on the controller at `origin`, a controller's
+     * origin, and returns its outcome. Saves nothing. Never fails.
+     */
+    readonly check: (origin: string) => Effect.Effect<ControllerCheckOutcome>;
+
+    /**
+     * Saves `origin`, a controller's origin, as the controller URL, without
+     * checking it: the caller has checked it. A URL other than the saved one
+     * signs the user out first, as Sign Out does. The window then reloads,
+     * so the page's Content Security Policy names the new controller. Never
+     * fails.
+     */
+    readonly saveAndReload: (origin: string) => Effect.Effect<void>;
+
+    /**
+     * Returns the token of the setup URL the user pasted for `origin`,
+     * and forgets it, so that it is returned once. Returns null when the
+     * user has pasted none for `origin` since main started.
+     */
+    readonly takePastedSetupToken: (origin: string) => Effect.Effect<string | null>;
   }
 >()("hercule/desktop/ControllerConnection") {}
 
 /**
  * Builds the connection service on the settings file, the stored token and
- * the window. `openInBrowser` opens a URL in the default browser and never
- * fails. The check sends its requests with `fetchWithoutRedirects`.
+ * the window. The check sends its requests with `fetchWithoutRedirects`.
  */
 export const makeControllerConnectionLayer = (
-  openInBrowser: (url: string) => Effect.Effect<void>,
   fetchWithoutRedirects: FetchWithoutRedirects,
 ): Layer.Layer<ControllerConnection, never, AppSettings | StoredToken | MainWindow> =>
   Layer.effect(ControllerConnection)(
@@ -78,34 +147,60 @@ export const makeControllerConnectionLayer = (
       const settings = yield* AppSettings;
       const storedToken = yield* StoredToken;
       const window = yield* MainWindow;
+      // The setup URL the user pasted last. It is kept in memory only,
+      // so it outlives the window's reload, and is gone when main quits.
+      let pastedSetupUrl: { readonly origin: string; readonly token: string } | null = null;
+
+      /** Runs the connect check on `origin`, with the check imported when it is first needed. */
+      const check = (origin: string): Effect.Effect<ControllerCheckOutcome> =>
+        Effect.promise(() => import("./controller-check")).pipe(
+          Effect.flatMap(({ checkController }) => checkController(origin, fetchWithoutRedirects)),
+        );
+
+      /**
+       * Saves `origin` as the controller URL and reloads the window. A URL
+       * other than the saved one signs the user out first.
+       */
+      const saveAndReload = (origin: string): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          // The token belongs to the controller saved before. Signing out
+          // at once empties the menu, the dock badge and the
+          // notifications, which are about that controller's threads,
+          // without waiting for the reloaded page to find no token.
+          if (origin !== (yield* settings.readControllerUrl)) {
+            // Only storing a token can fail with NoControllerSaved.
+            yield* storedToken.write(null).pipe(Effect.catchTag("NoControllerSaved", Effect.die));
+          }
+          // The settings file is in the app's own folder, so a write that
+          // fails is a defect.
+          yield* settings
+            .saveControllerUrl(origin)
+            .pipe(Effect.catchTag("PlatformError", Effect.die));
+          yield* window.reload;
+        });
+
       return ControllerConnection.of({
         save: (input) =>
           Effect.gen(function* () {
-            const origin = parseControllerUrl(input);
-            if (origin === null) return { _tag: "InvalidUrl" } as const;
-            const { checkController } = yield* Effect.promise(() => import("./controller-check"));
-            const outcome = yield* checkController(origin, fetchWithoutRedirects);
-            if (outcome._tag === "Ready") {
-              // The token belongs to the controller saved before. Signing out
-              // at once empties the menu, the dock badge and the
-              // notifications, which are about that controller's threads,
-              // without waiting for the reloaded page to find no token.
-              if (origin !== (yield* settings.readControllerUrl)) {
-                // Only storing a token can fail with NoControllerSaved.
-                yield* storedToken
-                  .write(null)
-                  .pipe(Effect.catchTag("NoControllerSaved", Effect.die));
-              }
-              // The settings file is in the app's own folder, so a write that
-              // fails is a defect.
-              yield* settings
-                .saveControllerUrl(origin)
-                .pipe(Effect.catchTag("PlatformError", Effect.die));
-              yield* window.reload;
-              return { _tag: "Saved", origin } as const;
+            const address = parseControllerAddress(input);
+            if (address === null) return { _tag: "InvalidAddress" } as const;
+            const { origin, setupToken } = address;
+            const outcome = yield* check(origin);
+            if (!isAnswering(outcome)) return { ...outcome, origin };
+            if (outcome._tag === "SetupIncomplete" && setupToken !== null) {
+              pastedSetupUrl = { origin, token: setupToken };
             }
-            if (outcome._tag === "SetupIncomplete") yield* openInBrowser(`${origin}/setup`);
-            return { ...outcome, origin };
+            yield* saveAndReload(origin);
+            return { _tag: "Saved", origin } as const;
+          }),
+        check,
+        saveAndReload,
+        takePastedSetupToken: (origin) =>
+          Effect.sync(() => {
+            if (pastedSetupUrl?.origin !== origin) return null;
+            const { token } = pastedSetupUrl;
+            pastedSetupUrl = null;
+            return token;
           }),
       });
     }),

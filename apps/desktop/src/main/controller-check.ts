@@ -50,7 +50,7 @@ export type ControllerCheckOutcome =
   | { readonly _tag: "SetupIncomplete" };
 
 /** How long the check waits for the controller's answers, all the requests together. */
-const CHECK_TIMEOUT = "5 seconds";
+const CHECK_TIME_LIMIT = "5 seconds";
 
 /**
  * The methods the page's calls to the controller use: each method in the
@@ -220,7 +220,7 @@ export const checkController = (
     }
     return { _tag: state.value.complete ? "Ready" : "SetupIncomplete" } as const;
   }).pipe(
-    Effect.timeout(CHECK_TIMEOUT),
+    Effect.timeout(CHECK_TIME_LIMIT),
     Effect.catch(() => Effect.succeed({ _tag: "Unreachable" } as const)),
   );
 };

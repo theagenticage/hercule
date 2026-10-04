@@ -80,7 +80,7 @@ const LOGGED_OUT = buildInstance("claude-code", "Claude Code", [
 const buildCatalogs = (instances: readonly ProviderInstance[]) => ({
   instances,
   runners: [LOCAL],
-  localRunnerId: LOCAL.id,
+  thisMacRunnerId: LOCAL.id,
 });
 
 const buildConfig = (overrides: Record<string, unknown> = {}) => ({
@@ -135,7 +135,7 @@ describe("buildComposerFields", () => {
 
   it("blocks a draft when no runner is connected", () => {
     const fields = buildComposerFields(
-      { instances: [CLAUDE], runners: [], localRunnerId: null },
+      { instances: [CLAUDE], runners: [], thisMacRunnerId: null },
       buildConfig({ runnerId: null }),
       "draft",
     );
@@ -146,7 +146,7 @@ describe("buildComposerFields", () => {
   it("blocks a draft whose only runner is retired, as if no runner were connected", () => {
     const retired = buildRunner({ id: "r-gone", name: "atlas", lifecycle: "retired" });
     const fields = buildComposerFields(
-      { instances: [CLAUDE], runners: [retired], localRunnerId: null },
+      { instances: [CLAUDE], runners: [retired], thisMacRunnerId: null },
       buildConfig({ runnerId: null }),
       "draft",
     );
@@ -270,7 +270,7 @@ describe("buildComposerFields: the runner", () => {
   it("blocks a draft on a runner that was retired after the user picked it, and says so in its label", () => {
     const retired = { ...LOCAL, lifecycle: "retired" as const, connectivity: "offline" as const };
     const fields = buildComposerFields(
-      { instances: [CLAUDE], runners: [retired], localRunnerId: null },
+      { instances: [CLAUDE], runners: [retired], thisMacRunnerId: null },
       buildConfig({ runnerId: retired.id }),
       "draft",
     );
@@ -281,7 +281,7 @@ describe("buildComposerFields: the runner", () => {
 
   it("shows no machine when there are no runners", () => {
     const fields = buildComposerFields(
-      { instances: [CLAUDE], runners: [], localRunnerId: null },
+      { instances: [CLAUDE], runners: [], thisMacRunnerId: null },
       buildConfig({ runnerId: null }),
       "draft",
     );
@@ -482,7 +482,7 @@ const withRepos = (
 ) => ({
   instances: [CLAUDE],
   runners: [LOCAL, OTHER],
-  localRunnerId: LOCAL.id,
+  thisMacRunnerId: LOCAL.id,
   projects,
   resources,
   workspaces,

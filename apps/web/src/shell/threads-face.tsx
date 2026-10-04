@@ -87,7 +87,7 @@ export function ThreadsFace({
   // The runner on this browser's machine. It decides whether the project's
   // main workspace already exists where the draft would run.
   const { detectLocalRunner } = useRouteContext({ from: "/_shell" });
-  const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
+  const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   // At most one overlay is open: the project picker or the New project dialog.
   // The picker's New project row closes the picker and opens the dialog.
   const [overlay, setOverlay] = useState<"picker" | "new-project" | null>(null);
@@ -112,7 +112,7 @@ export function ThreadsFace({
           workspaceId: drafted.search.workspace ?? null,
           resources,
           workspaces,
-          runnerId: localRunnerId,
+          runnerId: thisMacRunnerId,
           preferred: preferredWorkspace,
         });
   const groups = buildThreadGroups({

@@ -203,7 +203,7 @@ export const buildComposerFields = (
   const runner = findReferenceRunner(
     catalogs.runners,
     joined?.runnerId ?? config.runnerId,
-    catalogs.localRunnerId,
+    catalogs.thisMacRunnerId,
   );
   const snapshot = instance === undefined ? undefined : findSnapshotOn(instance, runner?.id);
   const descriptor = snapshot?.models.find((model) => model.slug === config.model);
@@ -214,7 +214,7 @@ export const buildComposerFields = (
   const menu =
     instance === undefined
       ? null
-      : buildRunnerMenu(catalogs.runners, catalogs.localRunnerId, instance);
+      : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, instance);
   const countHostedSessions = (runnerId: string): number =>
     (catalogs.sessions ?? []).filter(
       (session) => session.runnerId === runnerId && session.exitedAt === null,

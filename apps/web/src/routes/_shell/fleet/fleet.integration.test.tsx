@@ -90,6 +90,7 @@ const buildController = (
       publicKey: "bm90LWEta2V5",
       version: CONTROLLER_VERSION,
       defaultRunnerId: null,
+      localRunnerId: null,
     },
   },
   "GET /api/v1/runners": { body: { items: runners } },

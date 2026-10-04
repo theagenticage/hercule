@@ -1,7 +1,7 @@
 /**
- * Helpers for the code that runs Electron as a child process: `./dev.ts`,
- * `./sheet-server.ts`, `./packaged-app.ts` and the desktop end-to-end suite
- * (`e2e/desktop/`).
+ * Helpers for the code that runs Electron or another program as a child
+ * process: `./dev.ts`, `./sheet-server.ts`, `./packaged-app.ts`, main's unit
+ * tests and the desktop end-to-end suite (`e2e/desktop/`).
  *
  * The perf script runs on plain Node and reaches this module through
  * `./packaged-app.ts`, so the module uses only TypeScript that Node can strip.
@@ -20,6 +20,19 @@ export const findFreePort = (): Promise<number> =>
       probe.close(() => resolve(port));
     });
   });
+
+/**
+ * Checks whether a process with the ID `pid` is running. A process that has
+ * exited but that its parent has not reaped yet still counts as running.
+ */
+export const isProcessRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 /** Returns the exit code a shell reports for a process killed by `signal`: 128 plus the signal's number. */
 export const exitCodeForSignal = (signal: NodeJS.Signals): number =>

@@ -6,8 +6,11 @@
  * (`/secrets/{ownerKind}/{ownerId}/{name}`); neither may contain the `|` the
  * encryption's associated data is built with.
  *
- * `ownerKind: "core"` is the controller's own key material - its signing key
- * lives there - and the service layer rejects writing it.
+ * The service layer rejects a set or delete for two owner kinds:
+ *
+ * - `core`, the controller's own key material, where its signing key lives.
+ * - `connection`, a Connection's credentials. New credentials must be checked
+ *   to belong to the same account, and only the Connection operations do that.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -45,6 +48,15 @@ export const SecretRef = Schema.Struct({
 
 export type SecretRef = Schema.Schema.Type<typeof SecretRef>;
 
+/** Which secrets `secret.query` lists: those of one owner kind, one owner, or both. */
+export const SecretFilter = Schema.Struct({
+  ownerKind: Schema.optionalKey(OwnerKind),
+  ownerId: Schema.optionalKey(OwnerSegment),
+});
+
+/** What a secret listing may be sorted by. People look for a secret by its name. */
+export const SECRET_SORT_FIELDS = ["name"] as const;
+
 const SecretPath = {
   ownerKind: OwnerKind,
   ownerId: OwnerSegment,
@@ -55,9 +67,8 @@ export const secret = HttpApiGroup.make("secret")
   .add(
     HttpApiEndpoint.get("query", "/secrets", {
       query: Schema.Struct({
-        ownerKind: Schema.optionalKey(OwnerKind),
-        ownerId: Schema.optionalKey(OwnerSegment),
-        ...pageParams(["name"]).fields,
+        ...SecretFilter.fields,
+        ...pageParams(SECRET_SORT_FIELDS).fields,
       }),
       success: page(SecretRef),
       error: [Unauthenticated, Forbidden, Validation, Internal],

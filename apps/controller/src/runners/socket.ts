@@ -35,6 +35,7 @@ import {
   PROTOCOL_VERSION,
   RunnerFactsRequest,
   RunnerToController,
+  LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -82,14 +83,18 @@ const UNKNOWN_CREDENTIAL = "unknown credential";
 const RETIRED = "this runner was retired; run `hercule runner join` to join the fleet again";
 
 /**
- * The capabilities this controller offers at hello: one for each workspace
- * action in its catalog, derived from the catalog so the two never disagree.
- * The negotiated list then holds the workspace actions the runner implements
- * and this controller knows, which is what run pinning checks.
+ * The capabilities this controller offers at hello:
+ *
+ * - one for each workspace action in its catalog, derived from the catalog so
+ *   the two never disagree. The negotiated list then holds the workspace
+ *   actions the runner implements and this controller knows, which is what run
+ *   pinning checks.
+ * - `LOGIN_ENDED_CAPABILITY`: this controller reads the `loginEnded` frame.
  */
-const CAPABILITIES: ReadonlyArray<string> = [...WORKSPACE_ACTION_IDS].map(
-  buildWorkspaceActionCapability,
-);
+const CAPABILITIES: ReadonlyArray<string> = [
+  ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
+  LOGIN_ENDED_CAPABILITY,
+];
 
 const UNREADABLE = "that is not a message this controller can read";
 const WRONG_VERSION =
@@ -261,6 +266,9 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "workspaceStepsReport":
             if (!greeted) return;
             return yield* connections.reportedWorkspaceSteps(runnerId, mine, message);
+          case "loginEnded":
+            if (!greeted) return;
+            return yield* connections.reportedLoginEnded(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;

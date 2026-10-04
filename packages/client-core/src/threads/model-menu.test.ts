@@ -63,7 +63,7 @@ const PI = buildInstance("pi", "pi", []);
 const buildCatalogs = (instances: readonly ProviderInstance[]) => ({
   instances,
   runners: [LOCAL],
-  localRunnerId: LOCAL.id,
+  thisMacRunnerId: LOCAL.id,
 });
 
 /** Returns the thread's config. The menu reads only the instance and the model. */

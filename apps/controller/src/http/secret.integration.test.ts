@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { VERSION } from "@hercule/home/version";
 import { completeSetup, send, withServer } from "./testing";
 
-const OWNER = "connection/0198e4b0-0000-7000-8000-000000000001";
+const OWNER = "runner/0198e4b0-0000-7000-8000-000000000001";
 const VALUE = "ghp_a-real-looking-token";
 
 const buildSecretsPath = (owner: string, name: string) => `/api/v1/secrets/${owner}/${name}`;
@@ -27,7 +27,7 @@ describe("secret.*", () => {
       expect(created.status).toBe(200);
       const createdBody = (await created.json()) as Record<string, unknown>;
       expect(createdBody).toMatchObject({
-        ownerKind: "connection",
+        ownerKind: "runner",
         ownerId: "0198e4b0-0000-7000-8000-000000000001",
         name: "api-token",
       });
@@ -43,7 +43,7 @@ describe("secret.*", () => {
       // allowed.
       expect(JSON.parse(listedText)).toMatchObject({
         items: [
-          { ownerKind: "connection", name: "api-token" },
+          { ownerKind: "runner", name: "api-token" },
           { ownerKind: "core", name: "controller.signing-key" },
         ],
       });
@@ -59,7 +59,7 @@ describe("secret.*", () => {
       const removed = await send("DELETE", base, buildSecretsPath(OWNER, "api-token"), { token });
       expect(removed.status).toBe(200);
 
-      const empty = await send("GET", base, "/api/v1/secrets?ownerKind=connection", { token });
+      const empty = await send("GET", base, "/api/v1/secrets?ownerKind=runner", { token });
       expect(await empty.json()).toEqual({ items: [] });
 
       // One audit row per change, each with the user as the actor.
@@ -95,6 +95,28 @@ describe("secret.*", () => {
     });
   });
 
+  it("rejects a write or a delete of a Connection's credentials, which would skip the account check", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const path = buildSecretsPath("connection/0198e4b0-0000-7000-8000-000000000002", "pat");
+
+      const written = await send("PUT", base, path, { body: { value: VALUE }, token });
+      expect(written.status).toBe(400);
+      expect(await written.json()).toMatchObject({
+        error: { code: "validation", message: expect.stringContaining("same account") as unknown },
+      });
+
+      const removed = await send("DELETE", base, path, { token });
+      expect(removed.status).toBe(400);
+      expect(await removed.json()).toMatchObject({
+        error: {
+          code: "validation",
+          message: expect.stringContaining("deleting the Connection") as unknown,
+        },
+      });
+    });
+  });
+
   it("rejects an owner id that contains the separator the encryption binding uses", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
@@ -126,7 +148,13 @@ describe("controller.read", () => {
 
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
-      expect(Object.keys(body).sort()).toEqual(["defaultRunnerId", "id", "publicKey", "version"]);
+      expect(Object.keys(body).sort()).toEqual([
+        "defaultRunnerId",
+        "id",
+        "localRunnerId",
+        "publicKey",
+        "version",
+      ]);
       expect(body["version"]).toBe(VERSION);
       expect(body["id"]).toEqual(expect.stringMatching(/^[0-9a-f]{8}-/));
     });

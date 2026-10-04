@@ -26,7 +26,7 @@ export interface CredentialRelay {
    * Sends requests through `send` for as long as the scope is open. When the
    * scope closes, every pending request fails instead of waiting forever.
    */
-  readonly attached: (send: Send) => Effect.Effect<void, never, Scope.Scope>;
+  readonly attachConnection: (send: Send) => Effect.Effect<void, never, Scope.Scope>;
   /** Sends a request to the controller and returns its answer. Rejects when no answer arrives. */
   readonly ask: (request: CredentialAsk) => Promise<CredentialAnswer>;
   /** Resolves the pending request that an answer from the controller belongs to. */
@@ -51,7 +51,7 @@ export const makeCredentialRelay = (
   };
 
   return {
-    attached: (send) =>
+    attachConnection: (send) =>
       Effect.asVoid(
         Effect.acquireRelease(
           Effect.sync(() => {

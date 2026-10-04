@@ -30,6 +30,7 @@ import {
   type InstallRequest,
   type InstallResult,
   type LoginCode,
+  type LoginEnded,
   type LoginFailed,
   type LoginResult,
   type LoginStart,
@@ -117,6 +118,11 @@ export type FleetTraffic =
       readonly _tag: "workspaceStepsReported";
       readonly runnerId: string;
       readonly report: WorkspaceStepsReport;
+    }
+  | {
+      readonly _tag: "loginEnded";
+      readonly runnerId: string;
+      readonly ended: LoginEnded;
     }
   | { readonly _tag: "placementsChanged"; readonly runnerId: string };
 
@@ -499,6 +505,16 @@ const make = Effect.gen(function* () {
       report: WorkspaceStepsReport,
     ): Effect.Effect<void> =>
       publish(id, connection, { _tag: "workspaceStepsReported", runnerId: id, report }),
+
+    /**
+     * Publishes that a device login on a runner ended. The controller daemon
+     * probes the instance again, and the probe says whether the login worked.
+     */
+    reportedLoginEnded: (
+      id: string,
+      connection: Connection,
+      ended: LoginEnded,
+    ): Effect.Effect<void> => publish(id, connection, { _tag: "loginEnded", runnerId: id, ended }),
 
     /**
      * Publishes that this runner may now have room for work, for example

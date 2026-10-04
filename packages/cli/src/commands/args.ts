@@ -18,14 +18,11 @@
  * line each, in the order its schema declares them. Never in the order the
  * markers were written, or the two passwords could silently swap.
  */
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import { listDecodeIssues, type SortKey } from "@hercule/contract";
 import { UsageError } from "../exit";
 import type { Command, Field } from "./tree";
-
-export interface SortArgument {
-  readonly field: string;
-  /** Absent when `--sort` has no direction, so the operation's default order applies. */
-  readonly direction?: "asc" | "desc";
-}
 
 export interface Arguments {
   /** The positional arguments, in order, as written. */
@@ -34,7 +31,8 @@ export interface Arguments {
   readonly query: Record<string, unknown>;
   readonly limit: number | undefined;
   readonly cursor: string | undefined;
-  readonly sort: SortArgument | undefined;
+  /** One key per `--sort`, in the order written; `undefined` when none was given. */
+  readonly sort: ReadonlyArray<SortKey> | undefined;
   /** Whether to follow `nextCursor` to the last page. */
   readonly all: boolean;
   readonly json: boolean;
@@ -129,14 +127,15 @@ const assignFieldValue = (into: Record<string, unknown>, field: Field, value: un
 };
 
 /**
- * Parses `--sort <field>[:<asc|desc>]`. Throws a `UsageError` for a field the
- * command cannot sort on, or an unknown direction.
+ * Parses one `--sort <field>[:<asc|desc>]` into a sort key. Throws a
+ * `UsageError` for a field the command cannot sort on, or an unknown
+ * direction.
  *
- * A field with no direction leaves the direction unset rather than assuming
- * `asc`: the operation declares its own default order, and choosing one here
- * would silently override it.
+ * A field with no direction leaves the direction unset, and the API reads a
+ * key with no direction as `asc`. A field named twice is not refused here but
+ * by `checkPaging`, with the contract's own message.
  */
-const parseSort = (text: string, command: Command, help: string): SortArgument => {
+const parseSort = (text: string, command: Command, help: string): SortKey => {
   const colon = text.indexOf(":");
   const field = colon === -1 ? text : text.slice(0, colon);
   if (!command.sortFields.includes(field)) {
@@ -151,6 +150,39 @@ const parseSort = (text: string, command: Command, help: string): SortArgument =
     throw new UsageError(`--sort: ${direction} is not asc or desc`, help);
   }
   return { field, direction };
+};
+
+/**
+ * Checks the paging flags against the contract's schema for them. Throws a
+ * `UsageError` naming each flag the schema refuses, such as a `--sort` that
+ * names a field twice or a `--limit` out of range.
+ *
+ * The client would refuse the same values when it encodes the request, but
+ * only after `execute` has looked up every id tail. A lookup is a call to the
+ * API, and one that finds nothing fails first, with its own error and exit
+ * code. Checking here means a wrong command line always exits 2 and sends
+ * nothing.
+ */
+const checkPaging = (
+  command: Command,
+  paging: {
+    readonly limit: number | undefined;
+    readonly cursor: string | undefined;
+    readonly sort: ReadonlyArray<SortKey> | undefined;
+  },
+  help: string,
+): void => {
+  if (command.pageQuery === undefined) return;
+  const given = Object.fromEntries(
+    Object.entries(paging).filter(([, value]) => value !== undefined),
+  );
+  const encoded = Schema.encodeUnknownResult(command.pageQuery)(given);
+  if (Result.isFailure(encoded)) {
+    const refused = listDecodeIssues(encoded.failure).map((issue) =>
+      issue.path[0] === undefined ? issue.message : `--${String(issue.path[0])}: ${issue.message}`,
+    );
+    throw new UsageError(refused.join("; "), help);
+  }
 };
 
 /**
@@ -233,7 +265,7 @@ export const parseArguments = async (
   const marked = new Set<Field>();
   let limit: number | undefined;
   let cursor: string | undefined;
-  let sort: SortArgument | undefined;
+  let sort: Array<SortKey> | undefined;
   let all = false;
   let json = false;
   let setupToken: string | undefined;
@@ -266,7 +298,9 @@ export const parseArguments = async (
       continue;
     }
     if (command.paged && name === "sort") {
-      sort = parseSort(value(), command, help);
+      // Each `--sort` adds a key after the ones before it, so the first one
+      // written orders the list and each later one breaks its ties.
+      (sort ??= []).push(parseSort(value(), command, help));
       continue;
     }
     if (command.requires === "setup-token" && name === "setup-token") {
@@ -315,6 +349,8 @@ export const parseArguments = async (
       help,
     );
   }
+
+  checkPaging(command, { limit, cursor, sort }, help);
 
   const missing = command.payload
     .filter((field) => !field.optional && !(field.name in payload) && !reading.includes(field))

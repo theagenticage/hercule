@@ -1,6 +1,6 @@
 import { useCallback, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useMatch, useRouteContext } from "@tanstack/react-router";
+import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useDraftThread } from "../app/draft-thread";
 import {
   projectsQuery,
@@ -13,18 +13,29 @@ import {
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
 import { useSendOnChange } from "../app/send-on-change";
-import { ComposeIcon, SearchIcon, SidebarIcon } from "../icons";
+import { ComposeIcon } from "../icons/compose";
+import { OfficeIcon } from "../icons/office";
+import { SearchIcon } from "../icons/search";
+import { SidebarIcon } from "../icons/sidebar";
 import { buildSidebar, listGoMenuThreads, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import "./sidebar.css";
 
 /**
+ * The classes the Office button adds while the Office is open. The router
+ * also sets `aria-current="page"` on it then.
+ */
+const SELECTED = { className: "is-on" } as const;
+
+/**
  * Renders the sidebar, as the Bureau book's crew.js draws it:
  *
  * - the top strip, where macOS draws the window's traffic lights, with the
  *   Hide the sidebar button;
- * - New thread, which calls `onNewThread`, and Search;
+ * - one row of actions: New thread, which calls `onNewThread`, then Search
+ *   and the Office as square icon buttons, where the book draws New thread
+ *   and Search as two rows and has no Office button;
  * - the thread list: Waiting on you, then the threads grouped by project and
  *   workspace, with the Draft Thread's row, while one is open, in the group
  *   it will join;
@@ -32,7 +43,13 @@ import "./sidebar.css";
  *
  * Hide the sidebar, Search and Settings are drawn but do nothing yet, and
  * carry `aria-disabled` to say so. The open thread is marked in the list by
- * its links, which the router marks as the current page.
+ * its links, which the router marks as the current page. The Office button
+ * is marked the same way while the Office is open.
+ *
+ * While the Office is open, the row of a thread with a colleague in the
+ * Office opens the thread in the Office's drawer instead of on its own
+ * screen, so the user stays in the Office. An asleep or away thread has no
+ * colleague, so its row still opens its own screen.
  *
  * The lists it reads are in the cache before the shell renders, because the
  * shell's loader reads them, so nothing here waits in practice. A live push
@@ -61,9 +78,15 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
       : { projectId: draftSearch.project ?? null, workspaceId: draftSearch.workspace ?? null },
   );
 
-  const selectedId =
-    useMatch({ from: "/_connected/_shell/threads/$sessionId", shouldThrow: false })?.params
-      .sessionId ?? null;
+  // The open thread: the one on its own screen, or the one in the Office's
+  // drawer while the Office is open.
+  const threadMatch = useMatch({
+    from: "/_connected/_shell/threads/$sessionId",
+    shouldThrow: false,
+  });
+  const officeMatch = useMatch({ from: "/_connected/_shell/office", shouldThrow: false });
+  const officeOpen = officeMatch !== undefined;
+  const selectedId = threadMatch?.params.sessionId ?? officeMatch?.search.session ?? null;
 
   // The sections whose "more" row the user pressed. Kept only while the
   // window is open: a restart shows every section capped again.
@@ -95,18 +118,22 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
       </div>
       {/* The space between a row's text and its key cap keeps the row's name
           "New thread ⌘N", not "New thread⌘N". A row is a flex box, which
-          draws no space between its items, so the layout is the book's. */}
+          draws no space between its items, so the layout is the book's. The
+          two icon buttons name their shortcut in their tooltip, as the
+          other icon buttons of the sidebar name themselves. */}
       <div className="side-actions">
         <button type="button" className="nav-row" onClick={onNewThread}>
           <ComposeIcon />
           <span>New thread</span> <kbd>⌘N</kbd>
         </button>
-        <button type="button" className="nav-row" aria-disabled="true">
+        <button type="button" className="icon-btn" title="Search ⌘K" aria-disabled="true">
           <SearchIcon />
-          <span>Search</span> <kbd>⌘K</kbd>
         </button>
+        <Link to="/office" className="icon-btn" title="Office ⌘⇧O" activeProps={SELECTED}>
+          <OfficeIcon />
+        </Link>
       </div>
-      <SidebarList items={items} onExpand={expandSection} />
+      <SidebarList items={items} officeOpen={officeOpen} onExpand={expandSection} />
       <SidebarFoot
         working={counts.working}
         waiting={counts.waiting}

@@ -1,13 +1,16 @@
 /**
  * The age clock: the one timer behind every label on screen that counts the
- * time since a moment. There are two kinds of such labels:
+ * time since or until a moment. There are three kinds of such labels:
  *
  * - an age, such as a thread row's "20m" or the "10m" a thread has waited on
  *   its open Request (`useAgeLabel`), which changes minutes or hours apart
  *   (`findNextAgeChange`);
  * - a duration, such as a live turn's "Working for 12s"
  *   (`useDurationText`), which changes every second under an hour
- *   (`findNextDurationChange`).
+ *   (`findNextDurationChange`);
+ * - the minutes a one-time code has left, such as "The code expires in 12
+ *   minutes." (`useMinutesLeft`), which change once a minute until the code
+ *   expires (`computeNextMinuteTick`).
  *
  * Instead of a timer per label, or one that ticks every second, the clock
  * keeps a single timer for the earliest moment at which some label on screen
@@ -26,6 +29,8 @@
  */
 import { useCallback, useSyncExternalStore } from "react";
 import {
+  computeNextMinuteTick,
+  countMinutesLeft,
   describeAge,
   findNextAgeChange,
   findNextDurationChange,
@@ -159,23 +164,26 @@ export const ageClock = createAgeClock();
 
 /**
  * Returns `format(now)` for the age clock's current time, and draws the
- * calling component again whenever that text changes. `findNextChange` finds
- * when the text of a label counting from `since` changes next, and is one of
- * the stable functions `findNextAgeChange` and `findNextDurationChange`.
+ * calling component again whenever that value changes. `findNextChange` finds
+ * when the value of a label counting from or to `moment` changes next, and is
+ * one of the stable functions `findNextAgeChange`, `findNextDurationChange`
+ * and `findNextMinuteLeftChange`.
  *
  * The label registers with the clock only while `counting` is true. Otherwise
- * it keeps the text it had, and reads a fresh one as soon as it counts again.
+ * it keeps the value it had, and reads a fresh one as soon as it counts again.
+ * The value is a string or a number, so that an unchanged value compares equal
+ * and draws nothing.
  */
-const useClockText = (
-  since: string,
+const useClockValue = <Value extends string | number | null>(
+  moment: string,
   counting: boolean,
-  findNextChange: (since: string, now: Date) => Date,
-  format: (now: Date) => string,
-): string => {
+  findNextChange: (moment: string, now: Date) => Date,
+  format: (now: Date) => Value,
+): Value => {
   const subscribe = useCallback(
     (onChange: () => void) =>
-      counting ? ageClock.watch((now) => findNextChange(since, now), onChange) : () => {},
-    [since, counting, findNextChange],
+      counting ? ageClock.watch((now) => findNextChange(moment, now), onChange) : () => {},
+    [moment, counting, findNextChange],
   );
   return useSyncExternalStore(subscribe, () => format(ageClock.readNow()));
 };
@@ -186,7 +194,7 @@ const useClockText = (
  * only while the label is inside the visible part of the list.
  */
 export const useAgeLabel = (at: string, onScreen: boolean): string =>
-  useClockText(at, onScreen, findNextAgeChange, (now) => formatAge(at, now));
+  useClockValue(at, onScreen, findNextAgeChange, (now) => formatAge(at, now));
 
 /**
  * Returns the age of `at` in words, such as "20 minutes ago" (`describeAge`),
@@ -195,7 +203,7 @@ export const useAgeLabel = (at: string, onScreen: boolean): string =>
  * in the same render.
  */
 export const useAgeWords = (at: string, onScreen: boolean): string =>
-  useClockText(at, onScreen, findNextAgeChange, (now) => describeAge(at, now));
+  useClockValue(at, onScreen, findNextAgeChange, (now) => describeAge(at, now));
 
 /**
  * Returns `describe(now)`, where `now` is the age clock's current time in
@@ -218,4 +226,23 @@ export const useDurationText = (
   counting: boolean,
   describe: (now: number) => string,
 ): string =>
-  useClockText(since, counting, findNextDurationChange, (now) => describe(now.getTime()));
+  useClockValue(since, counting, findNextDurationChange, (now) => describe(now.getTime()));
+
+/**
+ * Returns the moment after `now` at which the minutes left before
+ * `expiresAt` next change. Once the code has expired, the count never
+ * changes again, so the moment is as far off as a timer can wait.
+ */
+const findNextMinuteLeftChange = (expiresAt: string, now: Date): Date =>
+  new Date(computeNextMinuteTick(expiresAt, now.getTime()) ?? now.getTime() + MAX_TIMER_DELAY_MS);
+
+/**
+ * Returns how many whole minutes a one-time code that expires at `expiresAt`
+ * still works (`countMinutesLeft`), and keeps the count current, so it ticks
+ * down on screen until it reaches 0. Returns null, and sets no timer, when
+ * `expiresAt` is undefined because the code's issuer did not say.
+ */
+export const useMinutesLeft = (expiresAt: string | undefined): number | null =>
+  useClockValue(expiresAt ?? "", expiresAt !== undefined, findNextMinuteLeftChange, (now) =>
+    expiresAt === undefined ? null : countMinutesLeft(expiresAt, now.getTime()),
+  );

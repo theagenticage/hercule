@@ -1,7 +1,8 @@
 /**
  * Tests the shell route's data and wiring: the loader's reads, the live
- * connection that keeps them current, File > New Thread, and what the shell
- * sends main for the dock badge, the threads' notifications and the Go menu.
+ * connection that keeps them current, File > New Thread, Go > Office, and
+ * what the shell sends main for the dock badge, the threads' notifications
+ * and the Go menu.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -14,12 +15,14 @@ import { projectsQuery, threadsQuery } from "../../app/queries";
 import {
   buildErrorBody,
   buildSidebarHandlers,
+  buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  THREAD_FIXTURES,
   type Call,
   type Handler,
   type LiveStub,
@@ -33,6 +36,9 @@ vi.mock("@hercule/client-core", async (importOriginal) => {
   return { ...actual, invalidateWithoutCancelling: vi.fn(actual.invalidateWithoutCancelling) };
 });
 
+// The Office draws a 3D scene, which jsdom cannot, so a stub stands in for it.
+vi.mock("../../office/office-screen", () => ({ OfficeScreen: () => <p>The Office</p> }));
+
 afterEach(() => {
   onlineManager.setOnline(true);
 });
@@ -44,7 +50,7 @@ const countReads = (calls: readonly Call[], path: string): number =>
 /**
  * Starts the app signed in, at `path`, with the sidebar fixture and
  * `handlers` on top, and waits until the live connection holds the shell's
- * four subscriptions and every read has settled, including the reads the
+ * five subscriptions and every read has settled, including the reads the
  * first connection makes.
  */
 const startShell = async ({
@@ -58,10 +64,16 @@ const startShell = async ({
   return { calls, fake, ...app };
 };
 
-/** Waits until the live connection holds the shell's four subscriptions and no read is running. */
+/** Waits until the live connection holds the shell's five subscriptions and no read is running. */
 const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promise<void> => {
   await waitFor(() => {
-    expect([...live.readTopics()].sort()).toEqual(["provider", "runner", "session", "task"]);
+    expect([...live.readTopics()].sort()).toEqual([
+      "connection",
+      "provider",
+      "runner",
+      "session",
+      "task",
+    ]);
     expect(queryClient.isFetching()).toBe(0);
   });
 };
@@ -344,17 +356,60 @@ describe("File > New Thread", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens a Draft Thread in no project at once when there is no project to pick", async () => {
+  it("opens the project picker also when there is no project, to offer No project and New project", async () => {
     const { fake, router } = await startShell({
       path: `/threads/${FIXTURE_THREAD_IDS.runbook}`,
       handlers: { "GET /api/v1/projects": { body: { items: [] } } },
     });
 
     fake.sendMenuCommand("newThread");
-    await waitFor(() => {
-      expect(router.state.location.href).toBe("/");
-    });
+    const picker = await screen.findByRole("dialog", { name: "New thread in" });
+    expect(
+      within(picker)
+        .getAllByRole("button")
+        .map((row) => row.textContent),
+    ).toEqual(["No project", "New project"]);
+    expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.runbook}`);
+  });
+});
+
+describe("Go > Office", () => {
+  it("opens the Office, and closes the project picker", async () => {
+    const { fake, router } = await startShell({ path: `/threads/${FIXTURE_THREAD_IDS.runbook}` });
+    fake.sendMenuCommand("newThread");
+    await screen.findByRole("dialog", { name: "New thread in" });
+
+    fake.sendMenuCommand("openOffice");
+
+    expect(await screen.findByText("The Office")).toBeTruthy();
+    expect(router.state.location.href).toBe("/office");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens a thread chosen in the Go menu in the Office's drawer while the Office is open", async () => {
+    const { fake, router } = await startShell({
+      path: "/office",
+      handlers: buildThreadHandlers(THREAD_FIXTURES.finished),
+    });
+
+    fake.openThread(FIXTURE_THREAD_IDS.bunPin);
+
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ session: FIXTURE_THREAD_IDS.bunPin });
+    });
+    expect(router.state.location.pathname).toBe("/office");
+  });
+
+  it("opens a thread with no colleague in the Office on its own screen, even while the Office is open", async () => {
+    const { fake, router } = await startShell({ path: "/office" });
+
+    // "Rotate the backups key" has exited and cannot be resumed, so it is
+    // away and has no colleague.
+    fake.openThread(FIXTURE_THREAD_IDS.backupsKey);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
+    });
   });
 });
 

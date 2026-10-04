@@ -8,13 +8,19 @@
  *
  * The transport cannot enforce these two rules, so this service does:
  *
- * - **`core` is not writable.** The `core` owner holds the controller's own key
- *   material - its Ed25519 signing key is `core`/`controller.signing-key` - and
- *   overwriting it would break the controller's identity and, with it, every
- *   runner's trust in this controller. So a set or delete for `core` fails
- *   with `validation` on the `ownerKind` field. Its references are still
- *   listed: hiding a row that exists would be worse than showing one the API
- *   does not let you change.
+ * - **`core` and `connection` are not writable.** A set or delete for either
+ *   owner kind fails with `validation` on the `ownerKind` field:
+ *   - The `core` owner holds the controller's own key material - its Ed25519
+ *     signing key is `core`/`controller.signing-key` - and overwriting it
+ *     would break the controller's identity and, with it, every runner's
+ *     trust in this controller.
+ *   - A Connection's credentials may only be replaced by credentials for the
+ *     same account, and only the Connection operations check that. A write
+ *     here would skip the check and could quietly move the Connection, with
+ *     its triggers and Resources, to another account.
+ *
+ *   Their references are still listed: hiding a row that exists would be
+ *   worse than showing one the API does not let you change.
  * - **An owner id or a name containing `|`** would make the encryption's
  *   associated data ambiguous. The contract's schema rejects it before the
  *   payload is decoded. The repository rejects it again for in-process
@@ -24,10 +30,14 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DEFAULT_PAGE_LIMIT,
+  SECRET_SORT_FIELDS,
+  SecretFilter,
+  createDecodeValidationError,
   createNotFoundError,
   createValidationError,
   type Forbidden,
@@ -39,7 +49,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
-import { withTransaction, type CursorError } from "../db";
+import { buildPageInputFields, refuseCursor, resolveSortDirection, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import {
   Secrets,
@@ -49,13 +59,14 @@ import {
 } from "./repository";
 
 /** Which secrets to list, and which page of the list to return. */
-export interface SecretQueryInput {
-  readonly ownerKind?: OwnerKind;
-  readonly ownerId?: string;
-  readonly limit?: number;
-  readonly cursor?: string;
-  readonly sort?: { readonly field: "name"; readonly direction?: SortDirection };
-}
+const SecretQueryInput = Schema.Struct({
+  ...SecretFilter.fields,
+  ...buildPageInputFields(SECRET_SORT_FIELDS),
+});
+
+export type SecretQueryInput = Schema.Schema.Type<typeof SecretQueryInput>;
+
+const decodeQuery = Schema.decodeUnknownEffect(SecretQueryInput);
 
 /** A value to store under an owner and a name. Rotation is the same call. */
 export interface SecretSetInput {
@@ -78,12 +89,23 @@ export interface SecretRefPage {
   readonly nextCursor?: string;
 }
 
-/** The error message for a set or delete on the `core` owner. */
-const CORE_REFUSED =
-  "the `core` owner holds the controller's own key material and is not writable through the API";
+/** Alphabetical, because people look for a secret by its name. */
+const DEFAULT_DIRECTION: SortDirection = "asc";
 
-const createCoreRefusedError = (): Validation =>
-  createValidationError([{ path: ["ownerKind"], message: CORE_REFUSED }], CORE_REFUSED);
+/** The refusal message for each owner kind that `secret.set` and `secret.delete` may not write. */
+const REFUSAL_BY_OWNER_KIND: Partial<Record<OwnerKind, string>> = {
+  core: "the `core` owner holds the controller's own key material and is not writable through the API",
+  connection:
+    "a Connection's credentials are not writable through the secret operations, because new credentials must be checked to belong to the same account; replace them with `connection.setCredentials` or by reconnecting the Connection, and remove them by deleting the Connection",
+};
+
+/** Succeeds when the API may write secrets of this owner kind, and fails with `validation` when it may not. */
+const requireWritableOwnerKind = (ownerKind: OwnerKind): Effect.Effect<void, Validation> => {
+  const message = REFUSAL_BY_OWNER_KIND[ownerKind];
+  return message === undefined
+    ? Effect.void
+    : Effect.fail(createValidationError([{ path: ["ownerKind"], message }], message));
+};
 
 /** Converts a stored secret to the reference the API returns: no value and no internal row id. */
 const toRef = (stored: StoredSecret): SecretRef => ({
@@ -98,15 +120,6 @@ const toRef = (stored: StoredSecret): SecretRef => ({
 const failWithNameIssue = (error: SecretNameError): Effect.Effect<never, Validation> =>
   Effect.fail(
     createValidationError([{ path: [], message: error.message }], "the request is not valid"),
-  );
-
-/** Converts a cursor error into a `validation` error on the `cursor` field. */
-const failWithCursorIssue = (error: CursorError): Effect.Effect<never, Validation> =>
-  Effect.fail(
-    createValidationError(
-      [{ path: ["cursor"], message: error.message }],
-      "the cursor is not valid",
-    ),
   );
 
 const make = Effect.gen(function* () {
@@ -126,18 +139,24 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<SecretRefPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("secret.query");
-        const page = yield* secrets.list({
-          ownerKind: input.ownerKind,
-          ownerId: input.ownerId,
-          limit: input.limit ?? DEFAULT_PAGE_LIMIT,
-          cursor: input.cursor,
-          direction: input.sort?.direction ?? "asc",
-        });
+        const { ownerKind, ownerId, limit, cursor, sort } = yield* Effect.mapError(
+          decodeQuery(input),
+          createDecodeValidationError,
+        );
+        const page = yield* refuseCursor(
+          secrets.list({
+            ownerKind,
+            ownerId,
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
+          }),
+        );
         return {
           items: page.items.map(toRef),
           ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
         };
-      }).pipe(Effect.catchTag("CursorError", failWithCursorIssue)),
+      }),
 
     /**
      * Stores a value, or rotates the value already stored under that name, and
@@ -152,7 +171,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<SecretRef, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireUserActor("secret.set");
-        if (input.ownerKind === "core") return yield* Effect.fail(createCoreRefusedError());
+        yield* requireWritableOwnerKind(input.ownerKind);
 
         const owner = buildSecretOwner(input);
         const stored = yield* withTransaction(
@@ -181,7 +200,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("secret.delete");
-        if (input.ownerKind === "core") return yield* Effect.fail(createCoreRefusedError());
+        yield* requireWritableOwnerKind(input.ownerKind);
 
         const owner = buildSecretOwner(input);
         yield* withTransaction(

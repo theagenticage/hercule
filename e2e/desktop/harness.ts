@@ -49,6 +49,7 @@ import {
   writeSettings,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
+import { pollUntil } from "../../apps/desktop/scripts/poll";
 import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
   findCompiledBinary,
@@ -166,18 +167,25 @@ export async function launchWithSavedController(url: string): Promise<LaunchedAp
 }
 
 /**
- * Types `url` into the connect screen's address field and presses Connect.
- * Returns once the button is pressed; the caller waits for the outcome it
- * expects. On success main saves the URL and reloads the window.
+ * Connects an app with no saved controller to `url`, as a user on a fresh Mac
+ * does: on the first run's welcome it presses Connect to it, types `url` into
+ * the remote screen's address field and presses Continue. Returns once the
+ * button is pressed; the caller waits for the outcome it expects. On success
+ * main saves the URL and reloads the window.
+ *
+ * The remote screen runs the same check in main as the connect screen, which
+ * an app with a saved controller opens on when that controller is down.
  */
 export async function connectTo(page: Page, url: string): Promise<void> {
-  await page.getByRole("textbox", { name: "Controller address" }).fill(url);
-  await page.getByRole("button", { name: "Connect" }).click();
+  await page.getByRole("button", { name: "Connect to it" }).click();
+  await page.getByRole("textbox", { name: "Address", exact: true }).fill(url);
+  await page.getByRole("button", { name: "Continue" }).click();
 }
 
 /**
- * Waits for the line the connect or sign-in screen shows under its form, and
- * returns its text. Fails when no line shows within Playwright's timeout.
+ * Waits for the line the connect screen, the first run's remote screen or the
+ * sign-in screen shows under its form, and returns its text. Fails when no
+ * line shows within Playwright's timeout.
  */
 export async function readAlertText(page: Page): Promise<string | null> {
   const alert = page.getByRole("alert");
@@ -572,6 +580,17 @@ export async function startLoopbackServer(
   return describeLoopbackServer(server);
 }
 
+/**
+ * Returns the address of a loopback port that nothing listens on: the port of
+ * a server that has just stopped. Another process could bind the port in
+ * between, but that is unlikely enough for a test.
+ */
+export async function findUnusedLoopbackUrl(): Promise<string> {
+  const server = await startLoopbackServer((_request, response) => response.end());
+  await server.close();
+  return server.url;
+}
+
 /** Returns the origin of `server`, which listens on 127.0.0.1, and a function that stops it. */
 function describeLoopbackServer(server: Server): LoopbackServer {
   const { port } = server.address() as AddressInfo;
@@ -593,7 +612,14 @@ function describeLoopbackServer(server: Server): LoopbackServer {
  * The app asks only the ports a runner's identity endpoint can listen on, so
  * the server takes the first of them that is free, as a runner does. A
  * runner already on this Mac, the controller's own or the user's, holds one.
- * Fails when all of them are taken.
+ * Fails when all of them stay taken for `IDENTITY_PORT_WAIT_MS`.
+ *
+ * All of them can be taken for a moment. Every controller a test starts
+ * runs a runner of its own, which the harness retires. The controller then
+ * starts that runner again and again, and each start holds a port until the
+ * controller refuses it. With the test files running in parallel, and other
+ * suites on this Mac, ten such starts can overlap, so the server waits for a
+ * port to come free.
  */
 export async function startIdentityServerForTest(readRunnerId: () => string): Promise<number> {
   const server = createServer((request, response) => {
@@ -614,16 +640,23 @@ export async function startIdentityServerForTest(readRunnerId: () => string): Pr
         resolve(true);
       });
     });
-  for (let port = IDENTITY_PORT; port < IDENTITY_PORT + IDENTITY_PORT_COUNT; port += 1) {
-    if (await listen(port)) {
-      onTestFinished(describeLoopbackServer(server).close);
-      return port;
+  const listenOnFreePort = async (): Promise<number | undefined> => {
+    for (let port = IDENTITY_PORT; port < IDENTITY_PORT + IDENTITY_PORT_COUNT; port += 1) {
+      if (await listen(port)) return port;
     }
-  }
-  throw new Error(
-    `none of the ${String(IDENTITY_PORT_COUNT)} identity ports from ${String(IDENTITY_PORT)} was free`,
-  );
+    return undefined;
+  };
+  const port = await pollUntil(listenOnFreePort, {
+    timeoutMs: IDENTITY_PORT_WAIT_MS,
+    intervalMs: 100,
+    timeoutMessage: `none of the ${String(IDENTITY_PORT_COUNT)} identity ports from ${String(IDENTITY_PORT)} came free in ${String(IDENTITY_PORT_WAIT_MS / 1000)} s`,
+  });
+  onTestFinished(describeLoopbackServer(server).close);
+  return port;
 }
+
+/** How long `startIdentityServerForTest` waits for an identity port to come free. */
+const IDENTITY_PORT_WAIT_MS = 20_000;
 
 /** Starts a loopback server for the current test, and stops it when the test finishes. */
 export async function startServerForTest(

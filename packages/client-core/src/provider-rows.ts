@@ -5,6 +5,7 @@
  * than in the markup.
  */
 import type { ProviderInstance, ProviderSecretField, Runner } from "@hercule/contract";
+import { describeModelCount } from "./model-count";
 
 /** A row's install action: offered, blocked (shown dimmed with its reason), or not shown. */
 type Install = "offered" | "blocked" | "none";
@@ -19,7 +20,7 @@ export interface SecretFieldOffer extends ProviderSecretField {
 }
 
 /**
- * Adds the action label. A field that is already set says "Replace", because
+ * Adds the action label. A field that is already set is labelled "Replace", because
  * the stored value cannot be read, only overwritten.
  */
 const buildOffer = (field: ProviderSecretField): SecretFieldOffer => ({
@@ -31,6 +32,19 @@ export interface ProviderRow {
   readonly id: string;
   readonly providerId: string;
   readonly name: string;
+  /**
+   * Where the runner found the harness's binary, such as
+   * `/opt/homebrew/bin/claude`, or `null` when the binary is not there or the
+   * runner did not say where.
+   */
+  readonly path: string | null;
+  /**
+   * Where the harness is on the runner, in words for the row's second line:
+   * the path of its binary, `installed` when the runner found it but did not
+   * say where, `not installed`, or that the runner's build has no adapter
+   * for it.
+   */
+  readonly location: string;
   /** The harness version it reported, or `not reported`. */
   readonly version: string;
   /** How that version compares with the versions this build was tested with. */
@@ -68,12 +82,6 @@ const describeAccount = (snapshot: ProviderInstance["snapshots"][number] | undef
   return named.length === 0 ? (auth.backend ?? "signed in") : named.join(" · ");
 };
 
-/** Returns how many models an account has, in words: "no models", "1 model", "3 models". */
-export const describeModelCount = (count: number): string => {
-  if (count === 0) return "no models";
-  return count === 1 ? "1 model" : `${String(count)} models`;
-};
-
 /** Returns one row per provider instance, as seen on `runner`. */
 export const buildProviderRows = (
   runner: Runner,
@@ -84,9 +92,10 @@ export const buildProviderRows = (
     const adapter = (runner.facts?.adapters ?? []).includes(instance.providerId);
     // The binary name the runner reports from its `PATH` is the instance's
     // `binaryName`, so no lookup table is needed.
-    const present = (runner.facts?.providers ?? []).some(
-      (binary) => binary.name === instance.binaryName && binary.present,
+    const binary = (runner.facts?.providers ?? []).find(
+      (each) => each.name === instance.binaryName && each.present,
     );
+    const present = binary !== undefined;
     // Every action runs on the runner, so an offline runner offers none.
     const reachable = runner.connectivity === "online";
     // A credential can only be entered for a harness installed on this runner,
@@ -97,6 +106,8 @@ export const buildProviderRows = (
       id: instance.id,
       providerId: instance.providerId,
       name: instance.displayName,
+      path: binary?.path ?? null,
+      location: binary?.path ?? (present ? "installed" : adapter ? "not installed" : NO_ADAPTER),
       version: snapshot?.harnessVersion ?? "not reported",
       verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
       // Without an adapter, show that instead of what a stale snapshot reported.

@@ -5,9 +5,9 @@ import { revokeToken } from "../app/controller-client";
 import { LOGIN_PATH } from "../app/entry-guard";
 
 /**
- * The root route. It renders the matched child route: the connect screen, or
- * the `_connected` layout route, under which sit every screen that needs the
- * controller.
+ * The root route. It renders the matched child route: the first run, the
+ * connect screen, or the `_connected` layout route, under which sit every
+ * screen that needs the controller.
  *
  * It also carries out Sign Out from the app menu whenever a controller is
  * saved. Sign Out lives here rather than in the shell, so it also works from

@@ -1,6 +1,6 @@
 import { memo, type JSX } from "react";
 import { UserAvatar } from "../faces";
-import { SlidersIcon } from "../icons";
+import { SlidersIcon } from "../icons/sliders";
 
 /**
  * Renders the sidebar's foot: how many threads are working, waiting on you

@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Profile } from "@hercule/contract";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   readProfileNamed,
   createProfile,
   WAIT_DEADLINE_MS,
@@ -27,7 +27,7 @@ import { completeSetup, get, post, send, withServer, PASSWORD, USERNAME } from "
 /** Long enough to start a fleet and a session for each test. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
-const SECRET_OWNER = "connection/0198e4b0-0000-7000-8000-000000000001";
+const SECRET_OWNER = "runner/0198e4b0-0000-7000-8000-000000000001";
 
 /** One page of the log, as the API returns it. */
 interface EventPage {
@@ -68,7 +68,7 @@ const writeTheLog = async (arranged: Arranged): Promise<void> => {
   });
   expect(login.status).toBe(401);
 
-  // `secret.created`: a secret stored under a connection.
+  // `secret.created`: a secret stored under a runner.
   const secret = await send("PUT", base, `/api/v1/secrets/${SECRET_OWNER}/api-token`, {
     body: { value: "ghp_a-real-looking-token" },
     token: arranged.token,
@@ -99,7 +99,10 @@ describe("security entries in the event log", () => {
   it("leaves them out of a worker session's page, and keeps the rest of the log in it", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
+      const { token } = await spawnThreadUnder(
+        arranged,
+        await readProfileNamed(arranged, "worker"),
+      );
       const base = arranged.harness.base;
 
       const page = await listEvents(base, token, "?limit=500");
@@ -124,7 +127,10 @@ describe("security entries in the event log", () => {
   it("fails a worker session's read of one with not_found, and returns the entry to the user", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
+      const { token } = await spawnThreadUnder(
+        arranged,
+        await readProfileNamed(arranged, "worker"),
+      );
       const base = arranged.harness.base;
 
       for (const kind of SECURITY_KINDS) {
@@ -152,7 +158,7 @@ describe("security entries in the event log", () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
       const auditor = await createProfile(arranged, "auditor", ["event.read", "event.audit"]);
-      const { token } = await spawnAgentUnder(arranged, auditor);
+      const { token } = await spawnThreadUnder(arranged, auditor);
       const base = arranged.harness.base;
 
       const page = await listEvents(base, token, "?limit=500");

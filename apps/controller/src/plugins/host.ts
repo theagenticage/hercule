@@ -22,6 +22,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   deriveConfigJsonSchema,
   ConnectionType,
+  ConnectionValidationFailed,
   decodeAgainst,
   HOST_API,
   PluginError,
@@ -51,7 +52,12 @@ import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
 // both live in the connections domain: everything they touch is there. This is
 // the only direction the two point in.
-import { ConnectionTypes, PluginConfigs, type RegisteredConnectionType } from "../connections";
+import {
+  ConnectionTypes,
+  OAUTH_TOKENS,
+  PluginConfigs,
+  type RegisteredConnectionType,
+} from "../connections";
 import { toPluginError, describeFieldIssues, truncateMessage } from "./errors";
 import { registerEventSourceContribution, type RegisteredEventKind } from "./event-sources";
 import { pluginRepository, type NewContribution } from "./repository";
@@ -136,6 +142,32 @@ const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
 });
 
 /**
+ * Wraps a connection type's `validate` so that an empty `accountId` fails the
+ * validation. Returns the wrapped function; a non-empty `accountId` passes
+ * through unchanged.
+ *
+ * A reconnect compares the stored account id with the new one, and an empty
+ * id would match any other empty id, so the check would let another account
+ * in. An empty id is a bug in the plugin rather than a problem with the
+ * credentials, and the message says so.
+ */
+const refuseEmptyAccountId = (
+  validate: ConnectionTypeContribution["validate"],
+  type: string,
+  pluginId: string,
+): ConnectionTypeContribution["validate"] => {
+  const message =
+    `the connection type ${type} returned an empty account id, so the account cannot be ` +
+    `checked on a reconnect. This is a bug in the plugin ${pluginId}: report it to its author`;
+  return (credentials) =>
+    Effect.flatMap(validate(credentials), (account) =>
+      account.accountId === ""
+        ? Effect.fail(new ConnectionValidationFailed({ message }))
+        : Effect.succeed(account),
+    );
+};
+
+/**
  * Returns a one-line message for a failed plugin call: the `PluginError`'s
  * message, or the defect's message. Settings shows this line to the user, and
  * a whole stack trace would tell them less than its first sentence.
@@ -195,6 +227,55 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
  */
 const SECRET_FIELDS_ARE_PROVIDER_ONLY =
   "a secret-valued config field is supported on a provider definition only";
+
+/**
+ * Checks that a connection type declares what each of its token flows needs,
+ * and nothing it has no step for. Returns the reason the type is refused, or
+ * `undefined` when it is accepted.
+ *
+ * - An `oauth` step needs the `oauth` declaration, and a `device` step needs
+ *   the `device` declaration. Without it the flow has nowhere to go.
+ * - A declaration with no step for it is refused too, because nothing could
+ *   ever use it.
+ * - A type cannot offer both: a refresh would not know which client issued
+ *   the tokens it holds.
+ */
+const checkFlowDeclarations = (type: ConnectionType): string | undefined => {
+  const hasStep = (kind: "oauth" | "device"): boolean =>
+    type.setup.some((step) => step.kind === kind);
+  for (const kind of ["oauth", "device"] as const) {
+    if (hasStep(kind) && type[kind] === undefined) {
+      return `the ${kind} step needs the ${kind} declaration`;
+    }
+    if (!hasStep(kind) && type[kind] !== undefined) {
+      return `the ${kind} declaration needs a ${kind} step to use it`;
+    }
+  }
+  if (hasStep("oauth") && hasStep("device")) {
+    return "a type offers a redirect flow or a device flow, not both";
+  }
+  return undefined;
+};
+
+/**
+ * Checks that no pasted credential field uses the name the core stores a
+ * token set under. Returns the reason the type is refused, or `undefined`
+ * when it is accepted.
+ *
+ * A connection's secrets carry no other mark of how they were obtained: the
+ * core reads a secret named `oauth.tokens` as the token set from a redirect
+ * flow or a device flow. A pasted value under that name would be parsed as a
+ * token set, fail, and send a working connection to `needs-reauth`.
+ */
+const checkCredentialFieldNames = (type: ConnectionType): string | undefined => {
+  const reserved = type.setup.some(
+    (step) =>
+      step.kind === "credentials" && step.fields.some((field) => field.name === OAUTH_TOKENS),
+  );
+  return reserved
+    ? `the credential field name ${OAUTH_TOKENS} is reserved for the tokens of a redirect flow or a device flow: choose another name`
+    : undefined;
+};
 
 /**
  * Checks what can be decided from the manifest alone, before any plugin code
@@ -307,6 +388,15 @@ const buildRegistrationHost = (
                   }),
                 );
               }
+              const declarationFailure =
+                checkFlowDeclarations(decoded) ?? checkCredentialFieldNames(decoded);
+              if (declarationFailure !== undefined) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the connection type ${type}: ${declarationFailure}`,
+                  }),
+                );
+              }
               // A config schema goes into the catalog as the JSON Schema the
               // generated form is built from. The Effect Schema stays in memory,
               // where a connection's stored config is decoded against it.
@@ -345,7 +435,11 @@ const buildRegistrationHost = (
               // schema accepted rather than the plugin's own object.
               types.push({
                 pluginId: manifest.id,
-                contribution: { ...decoded, type, validate },
+                contribution: {
+                  ...decoded,
+                  type,
+                  validate: refuseEmptyAccountId(validate, type, manifest.id),
+                },
               });
             }),
         },

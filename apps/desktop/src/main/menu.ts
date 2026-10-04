@@ -31,10 +31,11 @@ import { MainWindow } from "./main-window";
  * - File holds New Thread, ⌘N, which calls `newThread`, and Close Window,
  *   ⌘W, where macOS users look for it. Closing the window hides it; the app
  *   keeps running.
- * - Go lists `goThreads`, the first nine threads of the sidebar, with ⌘1 to
- *   ⌘9, each titled with its thread's title. Choosing one calls
- *   `openThread` with its session id. With no thread, Go holds one dimmed
- *   "No Threads".
+ * - Go starts with Office, ⌘⇧O, which calls `openOffice`, because the
+ *   Office is a place to go, as a thread is. Below a separator it lists
+ *   `goThreads`, the first nine threads of the sidebar, with ⌘1 to ⌘9, each
+ *   titled with its thread's title. Choosing one calls `openThread` with its
+ *   session id. With no thread, one dimmed "No Threads" stands in for them.
  * - Thread holds Send, ⌘↵, which calls `send`. It is always enabled: main
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
@@ -55,6 +56,7 @@ const buildMenuTemplate = (options: {
   readonly goThreads: ReadonlyArray<GoMenuThread>;
   readonly signOut: () => void;
   readonly newThread: () => void;
+  readonly openOffice: () => void;
   readonly openThread: (sessionId: string) => void;
   readonly send: () => void;
 }): Array<MenuItemConstructorOptions> => {
@@ -103,14 +105,17 @@ const buildMenuTemplate = (options: {
     ...(options.development ? [view] : []),
     {
       label: "Go",
-      submenu:
-        options.goThreads.length === 0
+      submenu: [
+        { label: "Office", accelerator: "CmdOrCtrl+Shift+O", click: options.openOffice },
+        { type: "separator" },
+        ...(options.goThreads.length === 0
           ? [{ label: "No Threads", enabled: false }]
           : options.goThreads.map((thread, index) => ({
               label: thread.title,
               accelerator: `CmdOrCtrl+${String(index + 1)}`,
               click: () => options.openThread(thread.sessionId),
-            })),
+            }))),
+      ],
     },
     {
       label: "Thread",
@@ -126,7 +131,7 @@ export class MainMenu extends Context.Service<
   {
     /**
      * Enables Sign Out when `signedIn` is true. Otherwise disables it and
-     * empties the Go menu, whose threads the app can no longer open.
+     * removes the Go menu's threads, which the app can no longer open.
      */
     readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
 
@@ -142,11 +147,11 @@ export class MainMenu extends Context.Service<
 /**
  * Builds the MainMenu service on Electron's `Menu`: it builds the menu bar and
  * makes it the app's. Sign Out starts enabled when a login token is stored,
- * and Go starts empty until the page lists the sidebar's threads.
+ * and Go lists no thread until the page lists the sidebar's threads.
  *
- * Choosing Sign Out, New Thread or Send shows the window and sends the page
- * that menu command. Choosing a thread in Go shows the window and asks the
- * page to open it. `development` adds the View menu.
+ * Choosing Sign Out, New Thread, Office or Send shows the window and sends
+ * the page that menu command. Choosing a thread in Go shows the window and
+ * asks the page to open it. `development` adds the View menu.
  *
  * Each change builds the menu bar again, because macOS does not show a new
  * label on an item that is already built.
@@ -184,6 +189,7 @@ export const makeMainMenuLayer = (
               goThreads,
               signOut: () => sendMenuCommand("signOut"),
               newThread: () => sendMenuCommand("newThread"),
+              openOffice: () => sendMenuCommand("openOffice"),
               send: () => sendMenuCommand("send"),
               openThread: (sessionId) => runFork(window.showAndSend("thread.open", { sessionId })),
             }),

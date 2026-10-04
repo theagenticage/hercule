@@ -19,13 +19,30 @@
  *   book's two bars;
  * - the book's Task has no source and no bars, and is low here, one bar.
  *
+ * The book's page has two more states, for a fresh install whose Intake is
+ * still empty, and the specimen is opened with the same `?state=`:
+ *
+ * - `first`: the same draft, with no open task and a GitHub Connection, so
+ *   the starters are about code and the line under them says that Triage
+ *   reads GitHub;
+ * - `first-no-repo`: webshop has no repo and nothing is connected, so the
+ *   draft works without a checkout, the starters are about knowledge work,
+ *   and the line under them asks the user to connect GitHub.
+ *
  * Everything else is the sidebar specimen's (sidebar-fixture.ts).
  *
  * The reference sheet reads this module too (draft-reference.ts), to edit the
  * book's draft where the app draws the fixture's data instead of the book's.
  */
 import type { ThreadPicks } from "@hercule/client-core";
-import type { Resource, Task, TaskPriority, Workspace } from "@hercule/contract";
+import {
+  GITHUB_CONNECTION_TYPE,
+  type Connection,
+  type Resource,
+  type Task,
+  type TaskPriority,
+  type Workspace,
+} from "@hercule/contract";
 import { buildCheckout, buildRepo, buildWorkspace } from "@hercule/client-core/threads/testing";
 import type { DraftScreenRecords, SidebarRecords } from "./shell-page";
 import { CLAUDE_OPUS, SPECIMEN_NOW, SPECIMEN_RECORDS, STUDIO_MAC } from "./sidebar-fixture";
@@ -109,7 +126,41 @@ const DRAFT_PICKS: ThreadPicks = {
 export const WEBSHOP_DRAFT: DraftScreenRecords = {
   projectId: "p-webshop",
   startTasks: START_TASKS.map(buildOpenTask),
+  connections: [],
   picks: DRAFT_PICKS,
+};
+
+/** The user's GitHub Connection, made an hour before `SPECIMEN_NOW`. */
+const GITHUB_CONNECTION: Connection = {
+  id: "c-github",
+  type: GITHUB_CONNECTION_TYPE,
+  label: "rogier",
+  displayName: "rogier",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: new Date(SPECIMEN_NOW - 60 * 60_000).toISOString(),
+  updatedAt: new Date(SPECIMEN_NOW - 60 * 60_000).toISOString(),
+};
+
+/** The Draft Thread in webshop on a fresh install: no open task, and GitHub connected. */
+const FIRST_DRAFT: DraftScreenRecords = {
+  ...WEBSHOP_DRAFT,
+  startTasks: [],
+  connections: [GITHUB_CONNECTION],
+};
+
+/**
+ * The Draft Thread in webshop on a fresh install where GitHub was put off:
+ * webshop has no repo and nothing is connected, so there is no workspace to
+ * pick.
+ */
+const FIRST_NO_REPO_DRAFT: DraftScreenRecords = {
+  projectId: "p-webshop",
+  startTasks: [],
+  connections: [],
+  picks: { accessMode: "auto-accept-edits", model: CLAUDE_OPUS.slug, options: { effort: "high" } },
 };
 
 /** Every list the shell reads: the sidebar specimen's, with webshop's repo and its main workspace. */
@@ -117,4 +168,27 @@ export const DRAFT_PAGE_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
   resources: [WEBSHOP_REPO],
   workspaces: [WEBSHOP_MAIN_WORKSPACE],
+};
+
+/** The records and the draft the specimen draws for one state of the book's page. */
+export interface DraftFixture {
+  readonly records: SidebarRecords;
+  readonly draft: DraftScreenRecords;
+}
+
+/**
+ * Returns the fixture for the book's `?state=`: `first`, `first-no-repo`,
+ * or, for no state or any other, the draft with its start cards. When
+ * webshop has no repo, the shell's lists are the sidebar specimen's, which
+ * hold no repo and no workspace.
+ */
+export const chooseDraftFixture = (state: string | null): DraftFixture => {
+  switch (state) {
+    case "first":
+      return { records: DRAFT_PAGE_RECORDS, draft: FIRST_DRAFT };
+    case "first-no-repo":
+      return { records: SPECIMEN_RECORDS, draft: FIRST_NO_REPO_DRAFT };
+    default:
+      return { records: DRAFT_PAGE_RECORDS, draft: WEBSHOP_DRAFT };
+  }
 };

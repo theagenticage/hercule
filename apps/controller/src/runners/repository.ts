@@ -127,8 +127,7 @@ const computeEffectiveWatermark = (override: number | null): number =>
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "runner.query",
-  field: "name",
-  direction,
+  sort: [{ field: "name", direction }],
 });
 
 /**
@@ -472,12 +471,12 @@ const make = Effect.gen(function* () {
         const after =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["name", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          [{ column: "name", direction: request.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const clauses = [keyset];
         if (request.connectivity !== undefined) {
@@ -497,7 +496,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.forEach(page, toRunner),
-          (last) => encodeCursor(scope, last.name, last.id),
+          (last) => encodeCursor(scope, [last.name], last.id),
         );
       }),
   };

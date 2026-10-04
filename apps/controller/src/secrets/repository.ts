@@ -362,24 +362,23 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
           Effect.gen(function* () {
             const scope: CursorScope = {
               op: "secret.query",
-              field: "name",
-              direction: request.direction,
+              sort: [{ field: "name", direction: request.direction }],
             };
             const after =
               request.cursor === undefined
                 ? undefined
-                : yield* decodeCursor(request.cursor, scope, "string");
+                : yield* decodeCursor(request.cursor, scope, ["string"]);
             const byKind =
               request.ownerKind === undefined ? sql`` : sql`AND owner_kind = ${request.ownerKind}`;
             const byId =
               request.ownerId === undefined ? sql`` : sql`AND owner_id = ${request.ownerId}`;
-            // `(name, id)` rather than name alone: names repeat across owners
-            // and an id does not, so a page boundary is unambiguous.
+            // The id breaks ties between equal names: names repeat across
+            // owners and an id does not, so a page boundary is unambiguous.
             const { keyset, order } = buildKeyset(
               sql,
-              ["name", "id"],
-              after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-              request.direction,
+              [{ column: "name", direction: request.direction }],
+              ["id"],
+              after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
             );
             const rows = yield* sql<{
               readonly id: Bytes;
@@ -407,7 +406,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
                     rotatedAt: row.rotated_at,
                   })),
                 ),
-              (last) => encodeCursor(scope, last.name, last.id),
+              (last) => encodeCursor(scope, [last.name], last.id),
             );
           }),
 

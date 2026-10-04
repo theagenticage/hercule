@@ -2,37 +2,41 @@
  * Reads and writes project rows. Nothing here decides policy - who may write,
  * what a change means, what gets logged.
  *
- * A list is one keyset query over one sortable column plus the id, which the
- * partial indexes on `projects` cover. There is no search and no filter, so no
- * other query is needed.
+ * A list is one keyset query over the caller's sort columns plus the id. A
+ * list sorted by one column is served by the partial indexes on `projects`;
+ * a list sorted by several columns is sorted in memory, which is fine for the
+ * few projects anyone has. There is no search and no filter, so no other query
+ * is needed.
  */
+import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Project, SortDirection } from "@hercule/contract";
+import type { Project } from "@hercule/contract";
 import {
-  decodeCursor,
-  encodeCursor,
-  buildKeyset,
   mintUuid,
   buildPage,
+  prepareKeysetListing,
   uuidFromString,
   uuidToString,
   type CursorError,
-  type CursorScope,
   type Page,
+  type ResolvedSortKey,
+  type SortColumn,
 } from "../db";
 
-/** The column a project list is sorted by. */
+/** A field a project list can be sorted by. */
 export type ProjectSortField = "name" | "createdAt" | "updatedAt";
 
-/** The page size, cursor and sort order of a project list. */
+/**
+ * The page size, cursor and sort keys of a project list. `sort` holds the
+ * keys most significant first, with their directions resolved.
+ */
 export interface ProjectPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
-  readonly field: ProjectSortField;
-  readonly direction: SortDirection;
+  readonly sort: Arr.NonEmptyReadonlyArray<ResolvedSortKey<ProjectSortField>>;
 }
 
 /** Everything a new project row holds. */
@@ -59,17 +63,20 @@ interface ProjectRow {
 
 const COLUMNS = "id, name, description, created_at, updated_at, deleted_at";
 
-const SORT_COLUMN: Record<ProjectSortField, string> = {
-  name: "name",
-  createdAt: "created_at",
-  updatedAt: "updated_at",
+/** How a project list sorts by each of its sortable fields. */
+const PROJECT_SORT_COLUMNS: Record<ProjectSortField, SortColumn<Project>> = {
+  name: { column: "name", valueType: "string", readValue: (project) => project.name },
+  createdAt: {
+    column: "created_at",
+    valueType: "string",
+    readValue: (project) => project.createdAt,
+  },
+  updatedAt: {
+    column: "updated_at",
+    valueType: "string",
+    readValue: (project) => project.updatedAt,
+  },
 };
-
-const buildCursorScope = (field: ProjectSortField, direction: SortDirection): CursorScope => ({
-  op: "project.query",
-  field,
-  direction,
-});
 
 const toProject = (row: ProjectRow): Project => ({
   id: uuidToString(row.id),
@@ -79,17 +86,6 @@ const toProject = (row: ProjectRow): Project => ({
   updatedAt: row.updated_at,
   ...(row.deleted_at === null ? {} : { deletedAt: row.deleted_at }),
 });
-
-const readSortKey = (project: Project, field: ProjectSortField): string => {
-  switch (field) {
-    case "name":
-      return project.name;
-    case "createdAt":
-      return project.createdAt;
-    case "updatedAt":
-      return project.updatedAt;
-  }
-};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -144,17 +140,13 @@ const make = Effect.gen(function* () {
      */
     list: (request: ProjectPageRequest): Effect.Effect<Page<Project>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = buildCursorScope(request.field, request.direction);
-        // Every sortable column of a project holds text.
-        const after =
-          request.cursor === undefined
-            ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = buildKeyset(
+        const { keyset, order, encodeNextCursor } = yield* prepareKeysetListing(
           sql,
-          [SORT_COLUMN[request.field], "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          "project.query",
+          request.sort,
+          PROJECT_SORT_COLUMNS,
+          "id",
+          request.cursor,
         );
         const rows = yield* sql<ProjectRow>`
           SELECT ${sql.literal(COLUMNS)} FROM projects
@@ -164,7 +156,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toProject)),
-          (last) => encodeCursor(scope, readSortKey(last, request.field), last.id),
+          encodeNextCursor,
         );
       }),
   };

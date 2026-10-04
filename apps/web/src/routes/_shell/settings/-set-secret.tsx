@@ -1,33 +1,25 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, FormCard, Input, Select } from "@hercule/ui";
-import { queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
+import {
+  queryKeys,
+  type HerculeClient,
+  readErrorMessage,
+  WRITABLE_OWNER_KINDS,
+} from "@hercule/client-core";
 import type { OwnerKind } from "@hercule/contract";
 import { SaveStatus } from "../../../screens/save-status";
 
-/**
- * The owner kinds a user may write secrets for. `core` is left out: it is the
- * controller's own key material, and the secret service rejects writes to it.
- * The `satisfies` fails the build if the contract drops or renames one of
- * these four, which would otherwise leave an option that always fails.
- */
-const OWNER_KINDS = [
-  "connection",
-  "plugin",
-  "runner",
-  "provider-instance",
-] as const satisfies ReadonlyArray<OwnerKind>;
-
-const EMPTY = { ownerKind: OWNER_KINDS[0], ownerId: "", name: "", value: "" };
+const EMPTY = { ownerKind: WRITABLE_OWNER_KINDS[0], ownerId: "", name: "", value: "" };
 
 /**
  * The form that writes a secret for an owner the user names.
  *
  * Most secrets are written by their owner's own screen (a connection's setup
  * writes its credentials, for example). This form is for secrets that no
- * screen writes yet, and for restoring one by hand. Setting a name that
- * already exists rotates that secret, because the API uses the same call for
- * both.
+ * screen writes yet, and for restoring one by hand. It offers only the owner
+ * kinds the API lets a user write. Setting a name that already exists rotates
+ * that secret, because the API uses the same call for both.
  */
 export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.Element {
   const queryClient = useQueryClient();
@@ -68,7 +60,7 @@ export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.E
               setForm({ ...form, ownerKind: event.target.value as OwnerKind });
             }}
           >
-            {OWNER_KINDS.map((kind) => (
+            {WRITABLE_OWNER_KINDS.map((kind) => (
               <option key={kind} value={kind}>
                 {kind}
               </option>

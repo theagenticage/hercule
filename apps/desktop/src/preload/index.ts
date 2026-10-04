@@ -71,6 +71,29 @@ const bridge: Bridge = {
   waitingThreads: {
     set: (threads) => invokeChannel("waitingThreads.set", threads),
   },
+  localController: {
+    find: () => invokeChannel("localController.find"),
+    start: () => invokeChannel("localController.start"),
+  },
+  logsFolder: {
+    show: () => invokeChannel("logsFolder.show"),
+  },
+  setupToken: {
+    read: () => invokeChannel("setupToken.read"),
+  },
+  macUser: {
+    read: () => invokeChannel("macUser.read"),
+  },
+  folder: {
+    pick: () => invokeChannel("folder.pick"),
+  },
+  firstRunProgress: {
+    read: () => invokeChannel("firstRunProgress.read"),
+    save: (progress) => invokeChannel("firstRunProgress.save", progress),
+  },
+  link: {
+    open: (request) => invokeChannel("link.open", request),
+  },
   menu: {
     onCommand: (listener) => subscribeToChannel("menu.command", listener),
   },

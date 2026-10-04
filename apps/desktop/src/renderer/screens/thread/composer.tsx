@@ -36,16 +36,14 @@ import {
   workspacesQuery,
 } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
-import {
-  BranchIcon,
-  LaptopIcon,
-  MicIcon,
-  PlusIcon,
-  SendIcon,
-  ShieldIcon,
-  StopIcon,
-  WorkspaceIcon,
-} from "../../icons";
+import { BranchIcon } from "../../icons/branch";
+import { LaptopIcon } from "../../icons/laptop";
+import { MicIcon } from "../../icons/mic";
+import { PlusIcon } from "../../icons/plus";
+import { SendIcon } from "../../icons/send";
+import { ShieldIcon } from "../../icons/shield";
+import { StopIcon } from "../../icons/stop";
+import { WorkspaceIcon } from "../../icons/workspace";
 import { ModelPick, OptionsPick } from "./composer-picks";
 import { RequestDock } from "./dock";
 import { QueuedInputs } from "./queued-inputs";
@@ -153,7 +151,7 @@ export function ThreadComposer({
   const catalogs: ThreadCatalogs = {
     instances,
     runners,
-    localRunnerId: null,
+    thisMacRunnerId: null,
     projects,
     resources,
     workspaces,

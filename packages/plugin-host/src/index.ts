@@ -29,6 +29,7 @@ export {
   ConnectionUnavailable,
   ConnectionValidationFailed,
   CredentialField,
+  DeviceDeclaration,
   OAuthDeclaration,
   SetupStep,
   type ConnectionRegistration,
@@ -36,6 +37,7 @@ export {
   type ConnectionsRuntime,
   type ConnectionSummary,
   type ConnectionTypeContribution,
+  type ExternalAccount,
 } from "./connections";
 
 export {

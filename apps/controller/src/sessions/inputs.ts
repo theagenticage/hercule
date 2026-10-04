@@ -116,8 +116,7 @@ const toInput = (row: InputRow): StoredInput => ({
  */
 const buildCursorScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "input.query",
-  field: `createdAt:${sessionId}`,
-  direction,
+  sort: [{ field: `createdAt:${sessionId}`, direction }],
 });
 
 const make = Effect.gen(function* () {
@@ -282,12 +281,12 @@ const make = Effect.gen(function* () {
         const after =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["created_at", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          [{ column: "created_at", direction: request.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const rows = yield* sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
@@ -298,7 +297,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (found) => Effect.succeed(found.map(toInput)),
-          (last) => encodeCursor(scope, last.createdAt, last.id),
+          (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
 

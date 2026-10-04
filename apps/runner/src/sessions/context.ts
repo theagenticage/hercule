@@ -11,6 +11,7 @@ import type { SessionStart } from "@hercule/protocol";
 import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
+import { provisionUserMaterial } from "../user-material";
 
 /** The facts about this machine that a session's context is built from. */
 export interface Machine {
@@ -27,7 +28,7 @@ export interface Machine {
   /** The runner's own environment. A session's environment is built on top of it. */
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
   /** Returns the harness path the last probe found for a binary name, or undefined if it found none. */
-  readonly binaryOf: (binaryName: string) => string | undefined;
+  readonly findBinary: (binaryName: string) => string | undefined;
   /** The workspaces on this machine. A session with a workspace runs in it. */
   readonly workspaces: Workspaces;
   /** The socket the git credential helper connects to when it asks this runner for credentials. */
@@ -65,7 +66,8 @@ const readInstanceEnv = (config: unknown): Record<string, string> => {
  * Builds a session's environment in three layers, each overriding the one
  * before it (spec 06 section 4):
  *
- * - the runner's own environment, with git's own variables removed;
+ * - the runner's own environment, with git's and Hercule's own variables
+ *   removed;
  * - the instance's extra environment;
  * - Hercule's variables: the git credential helper, `GH_TOKEN`, the API URL,
  *   the session token, and `PATH`.
@@ -84,7 +86,11 @@ const readInstanceEnv = (config: unknown): Record<string, string> => {
  * substrate environment removes them. Otherwise a `GIT_ASKPASS` or a
  * `GIT_CONFIG_*` that the person who started the daemon exported for
  * themselves would answer credential prompts for the agent, or replace the
- * credential helper set below.
+ * credential helper set below. The runner's own `HERCULE_*` variables are
+ * removed the same way, so the session never inherits the runner's Home or
+ * settings. Every `HERCULE_*` variable the session does get is added after
+ * that removal: by the instance's extra environment, by the credential
+ * helper's variables, or by the lines below.
  */
 const buildEnv = (machine: Machine, frame: SessionStart): Record<string, string | undefined> => ({
   ...buildSubstrateEnv(machine.baseEnv),
@@ -167,8 +173,9 @@ const placeSession = (
 /**
  * Resolves the context an adapter needs to start a session: its cwd, the
  * instance's provider home, the harness binary, the environment and the
- * secrets. Fails with a message the user can read when the session cannot be
- * placed on this machine.
+ * secrets. When the frame's `userMaterial` flag is set, the context also
+ * carries the user's own material (spec 06 section 9.1). Fails with a message the user can read
+ * when the session cannot be placed on this machine.
  */
 export const resolveSessionContext = (
   frame: SessionStart,
@@ -182,18 +189,26 @@ export const resolveSessionContext = (
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       return dir;
     });
+    // Only a Thread on the controller's local runner sees the user's own
+    // material. The key is left out for every other session, so its adapter
+    // keeps the harness isolated from the user's installation.
+    const userMaterial =
+      frame.userMaterial === true
+        ? yield* provisionUserMaterial(frame.providerId, home, machine.baseEnv)
+        : undefined;
     return {
       scratch: placed.scratch,
       ctx: {
         cwd: placed.cwd,
         home,
-        binary: machine.binaryOf(binaryName),
+        binary: machine.findBinary(binaryName),
         env: buildEnv(machine, frame),
         // Passed to the adapter as they are, not added to the environment:
         // only the adapter knows which variable its harness reads a credential
         // from.
         secrets: frame.secrets,
         herculeTool: machine.herculeTool,
+        ...(userMaterial === undefined ? {} : { userMaterial }),
       },
     };
   });

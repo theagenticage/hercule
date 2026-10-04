@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
-import { buildProviderRows, describeModelCount } from "./provider-rows";
+import { buildProviderRows } from "./provider-rows";
 import { buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
 
 const buildProviderRow = (runner: Runner, one: ProviderInstance) =>
@@ -116,16 +116,39 @@ describe("buildProviderRows for a provider with a secret field", () => {
     expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).logIn).toBe(false);
   });
 
+  it("gives where the runner found the harness, and no path where it is not installed", () => {
+    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false))).toMatchObject({
+      path: "/usr/local/bin/pi",
+      location: "/usr/local/bin/pi",
+    });
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
+      path: null,
+      location: "no adapter in this runner build",
+    });
+    const withPiAdapter: Runner = {
+      ...WITH_CLAUDE,
+      facts: { ...WITH_CLAUDE.facts!, adapters: ["claude-code", "pi"] },
+    };
+    expect(buildProviderRow(withPiAdapter, buildKeyedInstance(false)).location).toBe(
+      "not installed",
+    );
+  });
+
+  it("says installed when the runner found the harness but did not say where", () => {
+    const pathless: Runner = {
+      ...WITH_PI,
+      facts: { ...WITH_PI.facts!, providers: [{ name: "pi", present: true }] },
+    };
+    expect(buildProviderRow(pathless, buildKeyedInstance(false))).toMatchObject({
+      path: null,
+      location: "installed",
+    });
+  });
+
   it("offers neither on a runner where the harness is not installed", () => {
     expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
       secretFields: [],
       logIn: false,
     });
-  });
-});
-
-describe("describeModelCount", () => {
-  it("says no models, one model, or how many", () => {
-    expect([0, 1, 3].map(describeModelCount)).toEqual(["no models", "1 model", "3 models"]);
   });
 });

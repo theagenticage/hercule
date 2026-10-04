@@ -23,23 +23,26 @@
  */
 import { writeSync } from "node:fs";
 import inspector from "node:inspector";
+import { homedir } from "node:os";
 import path from "node:path";
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
-import { app, Menu, Notification, protocol, safeStorage } from "electron";
+import { app, Menu, Notification, protocol, safeStorage, shell } from "electron";
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { AppScheme, makeAppSchemeLayer } from "./app-scheme";
 import { makeAppSettingsLayer } from "./app-settings";
 import { makeControllerConnectionLayer } from "./controller-connection";
 import { fetchWithoutRedirects } from "./fetch-without-redirects";
+import { makeThisMacLayer } from "./this-mac";
 import { registerIpcHandlers } from "./ipc";
 import { MainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
-import { findRefusedArgument } from "./refused-arguments";
+import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
 import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
-import { openInBrowser, secureSession, secureWebContents } from "./security";
+import { secureSession, secureWebContents } from "./security";
 import { StoredTokenLayer } from "./stored-token";
 import { makeThreadNotificationsLayer } from "./thread-notifications";
 import { MainWindowLayer } from "./window";
@@ -50,6 +53,26 @@ import { MainWindowLayer } from "./window";
  * packaged app load its page from anywhere but its own bundle.
  */
 const devServerUrl = app.isPackaged ? null : (process.env.HERCULE_DESKTOP_DEV_SERVER_URL ?? null);
+
+/**
+ * The Hercule binary main runs to find and start Hercule on this Mac: the
+ * installed one, where the install script puts it, unless an end-to-end test
+ * names a stand-in; see `readBinaryPathArgument`. The first argument is the
+ * executable's path.
+ */
+const binaryPath =
+  readBinaryPathArgument(process.argv.slice(1), app.isPackaged, inspector.url() !== undefined) ??
+  path.join(homedir(), ".local", "bin", "hercule");
+
+/** Opens `folder` in Finder. A folder Finder cannot open is logged as a warning. */
+const openFolder = (folder: string): Effect.Effect<void> =>
+  Effect.promise(() => shell.openPath(folder)).pipe(
+    // `openPath` resolves to an empty string when it opened the folder, and to
+    // an error message otherwise.
+    Effect.flatMap((error) =>
+      error === "" ? Effect.void : Effect.logWarning(`Could not open ${folder}: ${error}`),
+    ),
+  );
 
 /** Starts the app; see this module's comment. Call it once the single-instance lock is held. */
 const startApp = (): void => {
@@ -70,7 +93,8 @@ const startApp = (): void => {
   ).pipe(Layer.provideMerge(MainWindowLayer));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      makeControllerConnectionLayer(openInBrowser, fetchWithoutRedirects).pipe(
+      makeThisMacLayer({ binaryPath, openFolder }).pipe(
+        Layer.provideMerge(makeControllerConnectionLayer(fetchWithoutRedirects)),
         Layer.provideMerge(StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage)))),
       ),
       makeRunnerIdentityLayer(fetchWithoutRedirects),
@@ -128,8 +152,8 @@ if (refusedArgument !== undefined) {
   );
   app.exit(1);
 } else {
-  // Spec 17 (§Reaching the controller) says why the renderer needs each of
-  // these privileges.
+  // Spec 17 (§Reaching the controller) gives the reason the renderer needs
+  // each of these privileges.
   protocol.registerSchemesAsPrivileged([
     {
       scheme: APP_SCHEME,

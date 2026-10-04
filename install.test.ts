@@ -212,6 +212,31 @@ describe("install.sh", () => {
         `HERCULE_HOME='${join(home, "scratch-home")}' '${join(home, ".local", "bin", "hercule")}' service install\n`,
       );
       expect(stdout).toContain('"Add machine"');
+      // The app uses only the default Home, so it is no next step for this one.
+      expect(stdout).not.toContain("Applications folder");
+    },
+  );
+
+  it.runIf(isAppleSilicon)(
+    "names the app first on a first install with the default Home, then the commands",
+    () => {
+      const release = writeInstallableRelease();
+
+      const { status, stdout, home } = runInstall(release.dir);
+
+      expect(status).toBe(0);
+      const hercule = `'${join(home, ".local", "bin", "hercule")}'`;
+      const app = stdout.indexOf(
+        "Nothing is running yet. To set up Hercule, open Hercule in your Applications folder.\n",
+      );
+      const commands = stdout.indexOf(
+        `To run Hercule on this Mac without the app, start it as a service, then open the setup page in your browser; the second command prints its address:\n\n  ${hercule} service install\n  ${hercule} setup-url\n`,
+      );
+      expect(app).toBeGreaterThan(-1);
+      expect(commands).toBeGreaterThan(app);
+      expect(stdout.indexOf('"Add machine"')).toBeGreaterThan(commands);
+      // The default Home needs no HERCULE_HOME in the commands.
+      expect(stdout).not.toContain("HERCULE_HOME=");
     },
   );
 

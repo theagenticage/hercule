@@ -175,10 +175,18 @@ describe("MainMenu", () => {
     expect(window).toEqual(['showAndSend menu.command "newThread"']);
   });
 
-  it("holds one dimmed No Threads in Go at start", async () => {
-    expect(listMenuItems(await readFirstMenuBar(), "Go")).toEqual([
-      { label: "No Threads", enabled: false },
+  it("holds Office with ⌘⇧O, then a separator and one dimmed No Threads, in Go at start", async () => {
+    const items = listMenuItems(await readFirstMenuBar(), "Go");
+    expect(items.map((item) => [item.label ?? item.type, item.accelerator, item.enabled])).toEqual([
+      ["Office", "CmdOrCtrl+Shift+O", undefined],
+      ["separator", undefined, undefined],
+      ["No Threads", undefined, false],
     ]);
+  });
+
+  it("shows the window and sends the page openOffice when Office is chosen", async () => {
+    const { window } = await runWithMenu((_menu, choose) => choose("Go", "Office"));
+    expect(window).toEqual(['showAndSend menu.command "openOffice"']);
   });
 
   it("lists the threads the page sends in Go, with ⌘1, ⌘2 and on, while the user is signed in", async () => {
@@ -186,6 +194,8 @@ describe("MainMenu", () => {
       Effect.all([menu.setSignedIn(true), menu.setGoThreads(THREADS)]),
     );
     expect(listMenuItems(menuBar, "Go").map((item) => [item.label, item.accelerator])).toEqual([
+      ["Office", "CmdOrCtrl+Shift+O"],
+      [undefined, undefined],
       ["Fix the login bug", "CmdOrCtrl+1"],
       ["Write the release notes", "CmdOrCtrl+2"],
     ]);
@@ -211,7 +221,11 @@ describe("MainMenu", () => {
         menu.setGoThreads(THREADS),
       ]),
     );
-    expect(listMenuItems(menuBar, "Go").map((item) => item.label)).toEqual(["No Threads"]);
+    expect(listMenuItems(menuBar, "Go").map((item) => item.label)).toEqual([
+      "Office",
+      undefined,
+      "No Threads",
+    ]);
   });
 
   it("has Send with ⌘↵ in Thread, always enabled", async () => {

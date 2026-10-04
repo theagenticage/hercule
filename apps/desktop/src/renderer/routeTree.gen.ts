@@ -11,9 +11,11 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ConnectedRouteImport } from './routes/_connected'
 import { Route as ConnectRouteImport } from './routes/connect'
+import { Route as FirstRunRouteRouteImport } from './routes/first-run/route'
 import { Route as ConnectedShellRouteImport } from './routes/_connected/_shell'
 import { Route as ConnectedLoginRouteImport } from './routes/_connected/login'
 import { Route as ConnectedShellIndexRouteImport } from './routes/_connected/_shell/index'
+import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_shell/office'
 import { Route as ConnectedShellThreadsSessionIdRouteImport } from './routes/_connected/_shell/threads/$sessionId'
 
 const ConnectedRoute = ConnectedRouteImport.update({
@@ -23,6 +25,11 @@ const ConnectedRoute = ConnectedRouteImport.update({
 const ConnectRoute = ConnectRouteImport.update({
   id: '/connect',
   path: '/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FirstRunRouteRoute = FirstRunRouteRouteImport.update({
+  id: '/first-run',
+  path: '/first-run',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectedShellRoute = ConnectedShellRouteImport.update({
@@ -39,6 +46,11 @@ const ConnectedShellIndexRoute = ConnectedShellIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ConnectedShellRoute,
 } as any)
+const ConnectedShellOfficeRoute = ConnectedShellOfficeRouteImport.update({
+  id: '/office',
+  path: '/office',
+  getParentRoute: () => ConnectedShellRoute,
+} as any)
 const ConnectedShellThreadsSessionIdRoute =
   ConnectedShellThreadsSessionIdRouteImport.update({
     id: '/threads/$sessionId',
@@ -47,42 +59,63 @@ const ConnectedShellThreadsSessionIdRoute =
   } as any)
 
 export interface FileRoutesByFullPath {
+  '/first-run': typeof FirstRunRouteRoute
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/office': typeof ConnectedShellOfficeRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
 }
 export interface FileRoutesByTo {
+  '/first-run': typeof FirstRunRouteRoute
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/office': typeof ConnectedShellOfficeRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/first-run': typeof FirstRunRouteRoute
   '/_connected': typeof ConnectedRouteWithChildren
   '/connect': typeof ConnectRoute
   '/_connected/_shell': typeof ConnectedShellRouteWithChildren
   '/_connected/login': typeof ConnectedLoginRoute
+  '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
   '/_connected/_shell/': typeof ConnectedShellIndexRoute
   '/_connected/_shell/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/connect' | '/login' | '/threads/$sessionId'
+  fullPaths:
+    | '/first-run'
+    | '/'
+    | '/connect'
+    | '/login'
+    | '/office'
+    | '/threads/$sessionId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/connect' | '/login' | '/threads/$sessionId'
+  to:
+    | '/first-run'
+    | '/'
+    | '/connect'
+    | '/login'
+    | '/office'
+    | '/threads/$sessionId'
   id:
     | '__root__'
+    | '/first-run'
     | '/_connected'
     | '/connect'
     | '/_connected/_shell'
     | '/_connected/login'
+    | '/_connected/_shell/office'
     | '/_connected/_shell/'
     | '/_connected/_shell/threads/$sessionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  FirstRunRouteRoute: typeof FirstRunRouteRoute
   ConnectedRoute: typeof ConnectedRouteWithChildren
   ConnectRoute: typeof ConnectRoute
 }
@@ -101,6 +134,13 @@ declare module '@tanstack/react-router' {
       path: '/connect'
       fullPath: '/connect'
       preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/first-run': {
+      id: '/first-run'
+      path: '/first-run'
+      fullPath: '/first-run'
+      preLoaderRoute: typeof FirstRunRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_connected/_shell': {
@@ -124,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellIndexRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/office': {
+      id: '/_connected/_shell/office'
+      path: '/office'
+      fullPath: '/office'
+      preLoaderRoute: typeof ConnectedShellOfficeRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
     '/_connected/_shell/threads/$sessionId': {
       id: '/_connected/_shell/threads/$sessionId'
       path: '/threads/$sessionId'
@@ -135,11 +182,13 @@ declare module '@tanstack/react-router' {
 }
 
 interface ConnectedShellRouteChildren {
+  ConnectedShellOfficeRoute: typeof ConnectedShellOfficeRoute
   ConnectedShellIndexRoute: typeof ConnectedShellIndexRoute
   ConnectedShellThreadsSessionIdRoute: typeof ConnectedShellThreadsSessionIdRoute
 }
 
 const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
+  ConnectedShellOfficeRoute: ConnectedShellOfficeRoute,
   ConnectedShellIndexRoute: ConnectedShellIndexRoute,
   ConnectedShellThreadsSessionIdRoute: ConnectedShellThreadsSessionIdRoute,
 }
@@ -163,6 +212,7 @@ const ConnectedRouteWithChildren = ConnectedRoute._addFileChildren(
 )
 
 const rootRouteChildren: RootRouteChildren = {
+  FirstRunRouteRoute: FirstRunRouteRoute,
   ConnectedRoute: ConnectedRouteWithChildren,
   ConnectRoute: ConnectRoute,
 }

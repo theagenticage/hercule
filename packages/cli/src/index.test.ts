@@ -219,6 +219,25 @@ describe("hercule task list --help", () => {
     expect(findSection(out, "paging:"), "no paging section").toBeGreaterThan(-1);
     expect(out.slice(findSection(out, "returns:")).join("\n")).toContain("items[]");
   });
+
+  it("says --sort repeats and what a repeat means", async () => {
+    const flags = readBetweenSections(await runHelp("task", "list"), "flags:", "paging:");
+    const text = flags.replace(/\s+/g, " ");
+    expect(text).toContain("optional; repeatable; one of: updatedAt, createdAt, priority, status");
+    expect(text).toContain(
+      "Repeat to break ties: the first --sort orders the list, and each later one orders only the rows the ones before it leave equal. No direction means asc.",
+    );
+  });
+});
+
+describe("hercule profile list --help", () => {
+  // A list with one sort field cannot take a second --sort, because the API
+  // refuses a field named twice.
+  it("does not offer to repeat --sort", async () => {
+    const flags = readBetweenSections(await runHelp("profile", "list"), "flags:", "paging:");
+    expect(flags).not.toContain("repeatable");
+    expect(flags).toContain("No direction means asc.");
+  });
 });
 
 describe("hercule session respond-to-approval-request --help", () => {
@@ -297,6 +316,9 @@ describe("hercule --help", () => {
     expect(text).toContain("hercule permission request");
     expect(text.replace(/\s+/g, " ")).toContain(
       "unless the command's help says only the user may make the call",
+    );
+    expect(text.replace(/\s+/g, " ")).toContain(
+      "Where a list sorts on more than one field, --sort may be repeated",
     );
   });
 
@@ -469,6 +491,7 @@ describe("running an operation", () => {
       publicKey: "key",
       version: "0.1.0",
       defaultRunnerId: null,
+      localRunnerId: buildId("12345678"),
     }));
     await run("controller", "read");
     expect(io.stdout).toEqual([
@@ -476,6 +499,7 @@ describe("running an operation", () => {
       "publicKey        key",
       "version          0.1.0",
       "defaultRunnerId",
+      "localRunnerId    12345678",
     ]);
   });
 
@@ -507,7 +531,7 @@ describe("running an operation", () => {
 
   it("takes a secret's value from stdin and never from argv", async () => {
     const fetch = stubFetch(() => ({
-      ownerKind: "connection",
+      ownerKind: "plugin",
       ownerId: "github",
       name: "token",
       createdAt: "2026-09-04T10:00:00.000Z",
@@ -517,14 +541,39 @@ describe("running an operation", () => {
       fetch,
       stdin: "s3cret\n",
     });
-    expect(await main(["--home", home, "secret", "set", "connection", "github", "token"], io)).toBe(
-      0,
-    );
+    expect(await main(["--home", home, "secret", "set", "plugin", "github", "token"], io)).toBe(0);
     expect(fetch.calls[0]).toMatchObject({
       method: "PUT",
-      path: "/api/v1/secrets/connection/github/token",
+      path: "/api/v1/secrets/plugin/github/token",
       body: { value: "s3cret" },
     });
+  });
+
+  it("creates a connection from credentials alone, sending no label and no topics", async () => {
+    const created = {
+      id: buildId("aaaaaaa1"),
+      type: "github/github",
+      label: "octocat",
+      displayName: "octocat",
+      status: "connected",
+      labels: [],
+      config: {},
+      credentials: [{ name: "pat" }],
+      createdAt: "2026-09-04T10:00:00.000Z",
+      updatedAt: "2026-09-04T10:00:00.000Z",
+    };
+    const fetch = stubFetch(() => Response.json(created, { status: 201 }));
+    const io = stubIo({
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
+      fetch,
+      stdin: '{"pat":"x"}\n',
+    });
+
+    expect(
+      await main(["--home", home, "connection", "create", "--type", "github/github"], io),
+    ).toBe(0);
+    expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
+    expect(fetch.calls[0]?.body).toEqual({ type: "github/github", credentials: { pat: "x" } });
   });
 
   it("reads two passwords as two lines of stdin, in schema order", async () => {
@@ -547,9 +596,7 @@ describe("running an operation", () => {
 
   it("rejects --value on a secret and says how to give the value", async () => {
     const { io, run } = createStubCli();
-    expect(await run("secret", "set", "connection", "github", "token", "--value", "s3cret")).toBe(
-      2,
-    );
+    expect(await run("secret", "set", "plugin", "github", "token", "--value", "s3cret")).toBe(2);
     expect(io.stderr.join("\n")).toContain("--value-stdin");
   });
 });
@@ -615,6 +662,44 @@ describe("paging", () => {
     const { fetch, run } = createStubCli(() => ({ items: [] }));
     await run("profile", "list", "--sort", "name");
     expect(fetch.calls[0]?.query.get("sort")).toBe("name");
+  });
+
+  it("sends one sort parameter per --sort, in the order written", async () => {
+    const { fetch, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("task", "list", "--sort", "priority:desc", "--sort", "createdAt:desc")).toBe(
+      0,
+    );
+    expect(fetch.calls[0]?.query.getAll("sort")).toEqual(["priority:desc", "createdAt:desc"]);
+  });
+
+  it("exits 2 naming the field when --sort repeats one, and sends nothing", async () => {
+    const { fetch, io, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("task", "list", "--sort", "priority", "--sort", "priority:desc")).toBe(2);
+    expect(io.stderr.join("\n")).toContain("--sort: priority appears more than once");
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("exits 2 naming --limit when the page size is out of range, and sends nothing", async () => {
+    const { fetch, io, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("task", "list", "--limit", "0")).toBe(2);
+    expect(io.stderr.join("\n")).toContain("--limit: ");
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it.each([
+    [
+      ["--sort", "createdAt", "--sort", "createdAt:desc"],
+      "--sort: createdAt appears more than once",
+    ],
+    [["--limit", "0"], "--limit: "],
+  ])("refuses %j before looking up an id tail, so nothing is sent", async (paging, refusal) => {
+    // An id tail is looked up through the API before the request is made, so
+    // the paging flags are checked first. Otherwise a tail that matches no
+    // runner would fail with "no runner" and exit 1, not 2.
+    const { fetch, io, run } = createStubCli(() => ({ items: [] }));
+    expect(await run("session", "list", "--runner", "deadbeef", ...paging)).toBe(2);
+    expect(io.stderr.join("\n")).toContain(refusal);
+    expect(fetch.calls).toEqual([]);
   });
 
   it("rejects a sort direction that is neither asc nor desc", async () => {

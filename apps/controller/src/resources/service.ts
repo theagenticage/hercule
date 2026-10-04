@@ -52,9 +52,15 @@ import {
 } from "@hercule/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
-import { canonicalRemoteOf, isClonableRemote } from "./remote";
+import { canonicalizeRemote, hasUserinfo, isClonableRemote } from "./remote";
 import { composeResource, resourceRepository, type StoredResource } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -106,6 +112,9 @@ const findRepoOnlyField = (given: {
 
 const NOT_A_REMOTE =
   "that is not a remote Hercule can clone: write https://host/owner/repo or git@host:owner/repo";
+
+const REMOTE_WITH_CREDENTIAL =
+  "a remote cannot hold a user name or password: write https://host/owner/repo, and choose the Connection that holds the credential";
 
 const STANDS_ON =
   "a workspace still uses that resource; dispose of the workspace before deleting the resource, or retire its runner if it is a main workspace";
@@ -188,7 +197,14 @@ const make = Effect.gen(function* () {
     self: string | undefined,
   ): Effect.Effect<string, Validation | Conflict | SqlError> =>
     Effect.gen(function* () {
-      const canonical = isClonableRemote(remote) ? canonicalRemoteOf(remote) : undefined;
+      // Checked first: a remote with a user name or password has the shape
+      // NOT_A_REMOTE asks for, so that message would not say what is wrong.
+      if (hasUserinfo(remote)) {
+        return yield* Effect.fail(
+          createValidationError([{ path: ["remote"], message: REMOTE_WITH_CREDENTIAL }]),
+        );
+      }
+      const canonical = isClonableRemote(remote) ? canonicalizeRemote(remote) : undefined;
       if (canonical === undefined) {
         return yield* Effect.fail(
           createValidationError([{ path: ["remote"], message: NOT_A_REMOTE }]),
@@ -215,7 +231,7 @@ const make = Effect.gen(function* () {
           resources.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             kind,
             projectId,
           }),

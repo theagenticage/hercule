@@ -28,6 +28,20 @@ export default defineConfig({
     // `scripts/dev.ts` writes one for development, where it can switch them
     // on.
     minify: true,
+    rolldownOptions: {
+      output: {
+        // Everything main imports statically goes into `index.js`, and only
+        // what main imports with `import()` gets a chunk of its own. Without
+        // this group, the bundler moved the code `index.js` shares with
+        // those lazy modules, the Effect runtime, into a chunk that
+        // `index.js` imports at once. Main loads both at every launch. That
+        // split cost more in the names the two files export to each other
+        // than this group costs in the few Effect helpers only a lazy chunk
+        // uses, which now sit in `index.js` because their modules are among
+        // its static imports. On #313 the group saved 1.2 kB.
+        codeSplitting: { groups: [{ name: "index", tags: ["$initial"] }] },
+      },
+    },
   },
   ssr: {
     // An SSR build leaves every dependency external by default; this bundles

@@ -55,7 +55,13 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import {
+  nowIso,
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
@@ -159,7 +165,7 @@ const make = Effect.gen(function* () {
           agents.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
-            direction: sort?.direction ?? DEFAULT_DIRECTION,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
             permissionProfileId,
             // An assistant is chatted with, not spawned from, so agent pickers
             // must never offer one.

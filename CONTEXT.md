@@ -40,8 +40,12 @@ _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in 
 A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
+**Subagent**:
+An agent a session's harness delegated work to while the session runs. It works inside that session's process and settings, has turns and a transcript of its own within the session's, and may start subagents of its own. It is not a Session: it is never resumed or forked on its own, and it does not outlive its session's process.
+_Avoid_: task (Task is a unit of human intent, not Claude Code's word for a subagent), child session, sub-session, collab agent, child agent
+
 **User Material**:
-The user's own knowledge and configuration from a local harness installation - skills, subagents, instructions, commands, settings. Linked live into Threads on runners that have it; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
+The user's own knowledge and configuration from a local harness installation - skills, subagent definitions, instructions, commands, settings. Seen live by Threads on the controller's local runner; never seen by assistant sessions or workflow steps. UI copy may say "personal config".
 _Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles
 
 **Run**:
@@ -73,7 +77,7 @@ The port through which the runs domain hands a run's execution to be carried out
 _Avoid_: the run's scheduler (the Scheduler is the core component that fires `cron.tick` and scheduled wakes)
 
 **Turn**:
-One user-visible episode of a session: from a user input until the agent goes idle. Contains any number of model calls and tool executions; ends by stopping (completed, failed, interrupted), never by replying once.
+One user-visible episode of a session's own agent or of one of its subagents: from an input (the user's, or for a subagent its parent agent's) until that agent goes idle. Contains any number of model calls and tool executions; ends by stopping (completed, failed, interrupted), never by replying once. A session's status follows its own agent's turns only.
 _Avoid_: exchange, round, iteration
 
 **Request**:
@@ -333,7 +337,7 @@ A plugin's static self-description: identity, host API version, requested plugin
 ### Automation
 
 **Connection**:
-A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label, credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
+A core-owned, named link to one external account: a plugin-defined type, by its qualified id, plus label (the external account's name unless the user names it, at setup or later), credentials, and status (e.g. `gmail/gmail`/"work"). Event ingest runs per connection, every event is stamped with its connection, and outbound actions name the connection they act as.
 _Avoid_: account (reserved for a future Hercule user concept), instance
 
 **Event Source**:
@@ -482,5 +486,15 @@ An immediate action triage proposes with no task behind it ("merge these three d
 _Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
-A label that groups Intake: each Connection files its events into one default topic, and triage labels a proposal with a topic (the connection's, unless the content says otherwise). User-defined and ordered; a label, never a domain state.
+A label that groups Intake: a Connection may carry a topic its events file into, and triage labels a proposal with a topic (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined and ordered; a label, never a domain state.
 _Avoid_: category, area, folder
+
+### Office
+
+**Office**:
+The view that shows the user's sessions as characters at work in one 3D place: each session at a desk in a room, queuing at the user's desk while it has an open Request. One view, whatever its Office Map makes it look like.
+_Avoid_: virtual office, floor view, scene
+
+**Office Map**:
+The description an Office is built from: its fixed rooms and their furniture, what a wing and a room stand for, and the named rule by which the place grows as sessions arrive. A bureau, a tower and a cave are different office maps of the same Office; inside the Office the UI says "map".
+_Avoid_: map (bare, outside the Office), level, floor plan, layout, variant

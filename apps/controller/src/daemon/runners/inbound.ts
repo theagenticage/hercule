@@ -4,6 +4,7 @@
  * - the sessions a runner holds, and what happens in them;
  * - the result of provisioning a workspace, and of each workspace step;
  * - the git credentials a runner asks for;
+ * - the end of a device login, which calls for a fresh probe;
  * - every change that may have given a runner room for more work.
  *
  * There are two queues, each read by its own fiber. Session traffic has its
@@ -21,6 +22,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../../db";
+import { ProviderProbes } from "../../providers";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
 import { SessionService, type StoredInput } from "../../sessions";
@@ -35,6 +37,7 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
   const workspaceSteps = yield* WorkspaceSteps;
+  const probes = yield* ProviderProbes;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
 
@@ -102,6 +105,16 @@ const make = Effect.gen(function* () {
         return Effect.map(
           runs.listEndedWorkspaceSteps(traffic.runnerId, traffic.report.steps),
           workspaceSteps.settle,
+        );
+      case "loginEnded":
+        // A device login reads nothing back, so its end carries no outcome.
+        // A fresh probe of the instance on that runner tells whether the user
+        // finished it, and announces the new snapshot to everyone watching.
+        // Forked, because the probe waits on the runner. The probe runs only
+        // for a login this controller started.
+        return forkAndAbsorbFailures(
+          "Probing an instance after its login ended failed",
+          probes.probeAfterLoginEnd(traffic.runnerId, traffic.ended.requestId),
         );
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's
@@ -208,6 +221,7 @@ export const InboundLayer: Layer.Layer<
   | WorkspaceService
   | RunService
   | WorkspaceSteps
+  | ProviderProbes
   | Dispatch
   | Live
 > = Layer.effect(Inbound)(make);

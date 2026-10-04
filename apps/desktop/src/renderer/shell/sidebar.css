@@ -33,15 +33,31 @@
   -webkit-app-region: no-drag;
 }
 
+/* Not the book's, which draws New thread and Search as two full-width rows.
+   Here they share one row with the Office: New thread takes the width the
+   two icon buttons leave. The buttons are as tall as the row, 30px, so
+   their hover and selected backgrounds line up with New thread's, and the
+   2px between them is the space the book puts between the buttons of a
+   pill or a segmented control. */
 .side-actions {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 2px;
   flex: none;
 }
 .side-actions .nav-row {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
+}
+.side-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+/* The Office button while the Office is open, drawn as a selected row. */
+.side-actions .icon-btn.is-on {
+  background: var(--selected);
+  color: var(--ink);
 }
 
 /* The list scrolls under a fixed top and foot. Two departures from the book:

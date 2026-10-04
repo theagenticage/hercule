@@ -199,7 +199,13 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
       .handle("setCredentials", ({ params, payload }) =>
         withApiErrors(connections.setCredentials({ id: params.id, ...payload })),
       )
-      .handle("startOAuth", ({ payload }) => withApiErrors(connections.startOAuth(payload)));
+      .handle("startOAuth", ({ payload }) => withApiErrors(connections.startOAuth(payload)))
+      .handle("startDeviceFlow", ({ payload }) =>
+        withApiErrors(connections.startDeviceFlow(payload)),
+      )
+      .handle("pollDeviceFlow", ({ payload }) =>
+        withApiErrors(connections.pollDeviceFlow(payload)),
+      );
   }),
 );
 

@@ -1,8 +1,8 @@
 /**
- * Tests `buildThreadModelField(instance, localRunnerId, current)`, which
+ * Tests `buildThreadModelField(instance, runnerId, current)`, which
  * builds the model field of Settings > Threads: the picked instance's models,
- * from the local runner's snapshot when there is one, else from the
- * instance's first snapshot.
+ * from the snapshot of the runner a new thread would be placed on when there
+ * is one, else from the instance's first snapshot.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance } from "@hercule/contract";

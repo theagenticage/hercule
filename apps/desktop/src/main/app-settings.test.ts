@@ -12,6 +12,7 @@ import {
   NoControllerSaved,
   type WindowState,
 } from "./app-settings";
+import type { FirstRunProgress } from "../ipc/contract";
 import { makeTemporarySettingsFile } from "./testing";
 
 let file: string;
@@ -246,7 +247,7 @@ describe("the controller URL and the token", () => {
 
   it("refuse to save a token with no controller URL saved, and write nothing", async () => {
     const exit = await runWithAppSettings(Effect.exit(saveEncryptedToken(encrypted)));
-    expect(exit).toEqual(Exit.fail(new NoControllerSaved()));
+    expect(exit).toEqual(Exit.fail(new NoControllerSaved("a login token")));
     expect(existsSync(file)).toBe(false);
   });
 
@@ -306,5 +307,72 @@ describe("the controller URL and the token", () => {
       window: windowState,
       newerKey,
     });
+  });
+});
+
+describe("the first run's progress", () => {
+  const saveControllerUrl = (origin: string) =>
+    AppSettings.use((settings) => settings.saveControllerUrl(origin));
+  const readFirstRunProgress = AppSettings.use((settings) => settings.readFirstRunProgress);
+  const saveFirstRunProgress = (progress: FirstRunProgress | null) =>
+    AppSettings.use((settings) => settings.saveFirstRunProgress(progress));
+
+  it("is read for the saved controller", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        controllerUrl: "http://127.0.0.1:4937",
+        firstRun: { putOff: ["github"] },
+      }),
+    );
+    expect(await runWithAppSettings(readFirstRunProgress)).toEqual({ putOff: ["github"] });
+  });
+
+  it("is kept when the same controller is saved again", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", firstRun: { putOff: ["github"] } }),
+    );
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveControllerUrl("http://127.0.0.1:4937"), readFirstRunProgress),
+    );
+    expect(afterSave).toEqual({ putOff: ["github"] });
+  });
+
+  it("is removed in the same write when a different controller is saved", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ controllerUrl: "http://127.0.0.1:4937", firstRun: { putOff: ["github"] } }),
+    );
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveControllerUrl("https://hercule.example"), readFirstRunProgress),
+    );
+    expect(afterSave).toBeNull();
+    expect(readFileObject()).toEqual({ controllerUrl: "https://hercule.example" });
+  });
+
+  it("is saved beside the controller URL, and removed", async () => {
+    writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:4937" }));
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(
+        saveFirstRunProgress({ putOff: ["providers", "project"] }),
+        readFirstRunProgress,
+      ),
+    );
+    expect(afterSave).toEqual({ putOff: ["providers", "project"] });
+    expect(readFileObject()).toEqual({
+      controllerUrl: "http://127.0.0.1:4937",
+      firstRun: { putOff: ["providers", "project"] },
+    });
+    expect(
+      await runWithAppSettings(Effect.andThen(saveFirstRunProgress(null), readFirstRunProgress)),
+    ).toBeNull();
+    expect(readFileObject()).toEqual({ controllerUrl: "http://127.0.0.1:4937" });
+  });
+
+  it("is refused with no controller URL saved, and nothing is written", async () => {
+    const exit = await runWithAppSettings(Effect.exit(saveFirstRunProgress({ putOff: [] })));
+    expect(exit).toEqual(Exit.fail(new NoControllerSaved("the first run's progress")));
+    expect(existsSync(file)).toBe(false);
   });
 });

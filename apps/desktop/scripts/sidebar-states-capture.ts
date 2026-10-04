@@ -89,7 +89,7 @@ function listPages(
     {
       name: `${theme}-book-swarm`,
       url: new URL(
-        `/design/crew-bureau/desktop/session-active.html?theme=${theme}&state=swarm`,
+        `/design/crew-bureau-2/desktop/session-active.html?theme=${theme}&state=swarm`,
         sheetsUrl,
       ).href,
       moduleUrl: new URL("book-swarm.ts", sheetsUrl).href,

@@ -484,9 +484,13 @@
     return document.documentElement.dataset.intakeCount || (isSwarm() ? "90" : "9");
   }
 
-  /** Checks for the fresh install (?state=first): one project, no threads, nothing waiting. */
+  /**
+   * Checks for the fresh install: one project, no threads, nothing waiting. ?state=first has a
+   * project with its repository; ?state=first-no-repo has one whose repository waits for GitHub.
+   */
   function isFirst() {
-    return document.documentElement.dataset.state === "first";
+    var state = document.documentElement.dataset.state;
+    return state === "first" || state === "first-no-repo";
   }
 
   // What a fresh install has: the project the first run added, and the assistant setup creates.
@@ -519,7 +523,7 @@
     return (isFirst() ? FIRST_PROJECTS : PROJECTS).map(function (p) {
       var draft =
         selected === "new" && p[0] === "webshop"
-          ? '<a class="side-row is-on" href="session-empty.html"><span class="side-text"><span class="side-name">New thread</span><span class="side-meta">new worktree · studio-mac</span></span><span class="side-end">draft</span></a>'
+          ? '<a class="side-row is-on" href="session-empty.html"><span class="side-text"><span class="side-name">New thread</span><span class="side-meta">' + (document.documentElement.dataset.state === "first-no-repo" ? "no checkout" : "new worktree") + ' · studio-mac</span></span><span class="side-end">draft</span></a>'
           : "";
       return (
         '<section class="side-sec">' +

@@ -20,7 +20,7 @@
                          c: letter of introduction, one engraved column and no room
         ?step=welcome|account|harness|github|project|done
         ?state=<a state of that step>, listed in STATES below
-        ?github=skipped  the GitHub step was skipped (shows what that changes later on)
+        ?github=skipped  the GitHub step was skipped: the project then starts without its repository
         ?harness=later   the provider step was put off
       A page opened with ?step or ?state stands still: no timers, no arrivals. That keeps the book's
       frames and screenshots deterministic. Without them, the page plays from the start.
@@ -263,6 +263,11 @@
         color: var(--faint);
         white-space: nowrap;
       }
+      /* The flex display above would otherwise outrank the hidden attribute,
+         and the ladder would show on the welcome. */
+      .fr-ladder[hidden] {
+        display: none;
+      }
       [data-variant="a"] .fr-ladder {
         margin-top: 34px;
       }
@@ -356,6 +361,7 @@
         line-height: 1.5;
       }
       .st-note .ic,
+      .st-note .br,
       .st-note .cr {
         flex: none;
         margin-top: 1px;
@@ -877,6 +883,9 @@
       .lt-line .ic {
         color: var(--ok);
       }
+      .lt-line .lt-later .ic {
+        color: var(--faint);
+      }
       .lt-step.is-next .lt-line b {
         color: var(--faint);
         font-weight: var(--w-medium);
@@ -989,7 +998,9 @@
         // not set up yet; the remote-set-up state shows it after setup.
         var REMOTE = { machine: "build-box-1", address: "build-box-1:4937" };
         var REPO = { folder: "~/Dev/webshop", name: "webshop", slug: "rogier/webshop", remote: "git@github.com:rogier/webshop.git", branch: "main" };
-        var TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo,read:org,workflow,notifications&description=Hercule";
+        // The user code GitHub's device flow shows: eight letters and digits in two groups.
+        var GITHUB_CODE = "4C2F-9H7K";
+        var TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo,read:org,notifications,workflow&description=Hercule";
 
         var STEPS = ["welcome", "account", "harness", "github", "project", "done"];
         var LADDER = ["Account", "Providers", "GitHub", "Project"];
@@ -998,8 +1009,8 @@
           welcome: ["fresh", "searching", "starting", "start-failed", "start-error", "runner", "found", "already-set-up", "remote", "remote-not-set-up", "remote-set-up"],
           account: ["default", "error", "submitting"],
           harness: ["idle", "claude-paste", "claude-error", "codex-device", "ready", "none-found"],
-          github: ["empty", "checking", "connected", "refused"],
-          project: ["empty", "picked", "no-remote", "not-git", "private"],
+          github: ["empty", "code", "connected", "expired", "denied", "failed", "token", "token-checking", "token-refused"],
+          project: ["empty", "picked", "no-remote", "not-git"],
           done: ["default"],
         };
 
@@ -1015,7 +1026,7 @@
           codex: "idle",
           // The machine whose Hercule the app talks to: this Mac, or REMOTE once the user connects there.
           host: ME,
-          form: { remote: "", user: ME.user, pass: "", code: "", token: "", topic: "github", name: REPO.name, setup: "", url: "" },
+          form: { remote: "", user: ME.user, pass: "", code: "", token: "", name: REPO.name, setup: "", url: "" },
         };
         S.state = STATES[S.step].indexOf(q.get("state")) !== -1 ? q.get("state") : frozen ? STATES[S.step][0] : "searching";
         applyState();
@@ -1031,7 +1042,7 @@
           S.form.pass = S.step === "account" && st !== "default" ? (st === "error" ? "hunter2" : "correct horse") : "";
           if (S.step === "welcome") S.host = st === "remote-set-up" ? REMOTE : ME;
           S.form.remote = S.step === "welcome" && st === "remote-not-set-up" ? "http://" + REMOTE.address : "";
-          S.form.token = S.step === "github" && st !== "empty" ? (st === "refused" ? "ghp_2c41d9e0a7f3…" : "github_pat_11ABX3Q…") : "";
+          S.form.token = S.step === "github" && st === "token-checking" ? "github_pat_11ABX3Q…" : S.step === "github" && st === "token-refused" ? "ghp_2c41d9e0a7f3…" : "";
         }
 
         /** Returns how the copy names the machine that runs Hercule: "this Mac", or the other machine's name. */
@@ -1125,7 +1136,7 @@
           }
           if (w.triage) {
             var tri = { name: "Triage", pose: "idle", x: 3.5, y: O.TUBE_Y };
-            piece(w.github ? "triage+github" : "triage", tri.x + tri.y, O.desk(tri, w.github ? O.tubeToDesk(tri.x - 1.2) : null), [{ x: tri.x, y: tri.y, z: headZ, html: "<b>Triage</b><span>" + (w.github ? "next 11:00" : "no Connections yet") + "</span>" }], true);
+            piece(w.github ? "triage+github" : "triage", tri.x + tri.y, O.desk(tri, w.github ? O.tubeToDesk(tri.x - 1.2) : null), [{ x: tri.x, y: tri.y, z: headZ, html: "<b>Triage</b><span>" + (w.github ? "reads GitHub" : "no Connections yet") + "</span>" }], true);
           }
           if (w.github) {
             piece("plaque", -50, "", [{ x: 0.02, y: 4.72, z: 3.38, html: Crew.brand("github", 12) + "<b>GitHub</b><span>rogier</span>", cls: "tag--quiet" }]);
@@ -1285,7 +1296,7 @@
           }[st];
           var perks =
             '<ul class="perks">' +
-            '<li><span class="ico">' + icon("worktree") + "</span><span><b>A worktree for every thread</b>Each agent works on its own branch. Your checkout stays exactly as you left it.</span></li>" +
+            '<li><span class="ico">' + icon("worktree") + "</span><span><b>A workspace for every thread</b>Each agent works on its own branch. Your checkout stays exactly as you left it.</span></li>" +
             '<li><span class="ico">' + icon("intake") + "</span><span><b>Work arrives prepared</b>Triage reads what GitHub sends and brings you Proposals, not notifications.</span></li>" +
             '<li><span class="ico">' + Crew.mark("waiting", 16) + "</span><span><b>You keep the decisions</b>When an agent needs you, it raises its hand and waits.</span></li>" +
             "</ul>";
@@ -1371,7 +1382,7 @@
             '<div class="row fine">' + icon("clock", 14) + "<span>Times show in <b style=\"color:var(--muted)\">" + ME.tz + '</b></span><a class="link" data-act="noop">Change</a></div>' +
             "</div>" +
             '<div class="st-actions">' + busyButton("Create account", "Creating your account…", "create-account", st === "submitting") + "</div>" +
-            '<p class="st-note">' + Crew.face("Hercule", { pose: "asleep", size: 18 }) + "<span>This also sets up <b>Hercule, your assistant</b>. Give it a chat channel later in Settings › Assistants.</span></p>"
+            '<p class="st-note">' + Crew.face("Hercule", { pose: "asleep", size: 18 }) + "<span>This also sets up <b>Hercule, your assistant</b>. Give it a chat channel later in the web app’s Settings › Assistants.</span></p>"
           );
         }
 
@@ -1434,47 +1445,109 @@
           );
         }
 
+        // How a GitHub sign-in can end without a Connection: the line the web's Connections screen
+        // shows for it, then what to do. A failed sign-in shows the controller's own reason, which
+        // differs from case to case; the other two always mean the same thing.
+        var GITHUB_ENDINGS = {
+          expired: { icon: "clock", line: "The sign-in expired before it was approved.", next: "A code lasts 15 minutes. Start again for a new one." },
+          denied: { icon: "close", line: "The sign-in was declined, so nothing changed.", next: "Hercule was declined on GitHub’s approval page. Start again if that was a mistake." },
+          failed: { icon: "question", line: "The sign-in did not finish, so nothing changed.", next: "Device flow is turned off on the provider’s OAuth App for this type, so signing in with a code cannot work: paste a token instead." },
+        };
+
         function viewGithub() {
           var st = S.state;
+          var head =
+            kicker("github") +
+            '<h1 class="st-h">Connect GitHub</h1>' +
+            '<p class="st-sub">Hercule watches your repositories for new issues, reviews and failed checks. Triage reads them and brings you the ones that need work, ready to accept or dismiss.</p>';
+          var skip = '<button class="btn btn--quiet" data-act="github-skip"' + (st === "token-checking" ? " disabled" : "") + ">Skip for now</button>";
+          var toToken = '<p class="st-note">' + icon("key", 14) + '<span>Rather use a personal access token? <a class="link" data-act="github-token">Paste a token instead</a></span></p>';
           if (st === "connected") {
             return (
               kicker("github") +
               '<h1 class="st-h">GitHub is connected</h1>' +
-              '<p class="st-sub">Triage first reads it at 11:00, then a few times a day. What deserves your attention shows up in Intake as a Proposal.</p>' +
-              '<div class="card"><span class="hx-mark">' + Crew.brand("github", 18) + '</span><span class="card-text"><b>Connected as rogier</b><span>12 repositories · topic github</span></span><span class="hx-ok">' + icon("check", 14) + "</span></div>" +
+              '<p class="st-sub">Triage reads it a few times a day. What deserves your attention shows up in Intake as a Proposal.</p>' +
+              '<div class="card"><span class="hx-mark">' + Crew.brand("github", 18) + '</span><span class="card-text"><b>Connected as rogier</b><span>12 repositories</span></span><span class="hx-ok">' + icon("check", 14) + "</span></div>" +
               '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="github-continue">Continue</button></div>'
             );
           }
+          // Signing in with a code, drawn like Codex's device code on the Providers step. The app
+          // asks GitHub whether the code was approved, and moves on by itself when it was.
+          if (st === "code") {
+            return (
+              head +
+              '<div class="hx"><div class="hx-row">' +
+              '<div class="hx-head"><span class="hx-mark">' + Crew.brand("github", 18) + '</span><span class="hx-name"><b>GitHub</b><span>github.com/login/device</span></span><button class="btn btn--sm btn--quiet" data-act="github-cancel">Cancel</button></div>' +
+              '<div class="hx-more">' +
+              '<div class="hx-step"><b>1</b><span>Copy this code.<span class="code"><b>' + GITHUB_CODE + '</b><button class="btn btn--sm btn--quiet" data-act="copy">Copy</button></span></span></div>' +
+              '<div class="hx-step"><b>2</b><span>Open GitHub, enter the code and approve Hercule.<br /><button class="btn btn--sm" data-act="noop" title="https://github.com/login/device">' + icon("external", 14) + "Open GitHub</button></span></div>" +
+              '<span class="wait"><span class="spin"></span>Waiting for you to approve Hercule on GitHub. The code expires in 15 minutes.</span>' +
+              "</div></div></div>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" disabled>Continue</button>' + skip + "</div>"
+            );
+          }
+          if (GITHUB_ENDINGS[st]) {
+            var end = GITHUB_ENDINGS[st];
+            // When the sign-in itself cannot work, the token is the way on, so it moves up into the message.
+            var failed = st === "failed";
+            return (
+              head +
+              '<div class="warn">' + icon(end.icon, 14) + "<span><b>" + end.line + "</b> " + end.next +
+              (failed ? '<br /><button class="btn btn--sm" data-act="github-token">' + icon("key", 14) + "Paste a token instead</button>" : "") +
+              "</span></div>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="github-sign-in">Start again</button>' + skip + "</div>" +
+              (failed ? "" : toToken)
+            );
+          }
+          if (st === "token" || st === "token-checking" || st === "token-refused") {
+            var refused = st === "token-refused";
+            return (
+              kicker("github") +
+              '<h1 class="st-h">Connect GitHub with a token</h1>' +
+              '<p class="st-sub">Create a personal access token on GitHub, then paste it here. Triage reads your repositories with it, as it would after signing in.</p>' +
+              '<div class="st-form">' +
+              field({
+                key: "token",
+                label: "Personal access token",
+                type: "password",
+                aside: '<a class="link" data-act="noop" title="' + TOKEN_URL + '">Create one on GitHub ' + icon("external", 12) + "</a>",
+                placeholder: "github_pat_… or ghp_…",
+                mono: true,
+                focus: true,
+                bad: refused,
+                error: refused ? "GitHub refused this token: Bad credentials. Check that it hasn’t expired, then paste it again." : "",
+                hint: "The link opens GitHub with the scopes Hercule needs already ticked. Hercule keeps the token encrypted.",
+              }) +
+              "</div>" +
+              '<div class="st-actions">' + busyButton("Connect", "Checking the token…", "github-connect", st === "token-checking") + skip + "</div>" +
+              '<p class="st-note">' + Crew.brand("github", 14) + '<span>Rather not handle a token? <a class="link" data-act="github-sign-in">Sign in with GitHub instead</a></span></p>'
+            );
+          }
           return (
-            kicker("github") +
-            '<h1 class="st-h">Connect GitHub</h1>' +
-            '<p class="st-sub">Hercule watches your repositories for new issues, reviews and failed checks. Triage reads them and brings you the ones that need work, ready to accept or dismiss.</p>' +
-            '<div class="st-form">' +
-            field({
-              key: "token",
-              label: "Personal access token",
-              aside: '<a class="link" data-act="noop" title="' + TOKEN_URL + '">Create one on GitHub ' + icon("external", 12) + "</a>",
-              placeholder: "github_pat_… or ghp_…",
-              mono: true,
-              focus: true,
-              bad: st === "refused",
-              error: st === "refused" ? "GitHub refused this token: Bad credentials. Check that it hasn’t expired, then paste it again." : "",
-              hint: "The link opens GitHub with the scopes Hercule needs already ticked. Hercule keeps the token encrypted.",
-            }) +
-            field({ key: "topic", label: "Topic in Intake", hint: "Intake groups what GitHub sends under this topic." }) +
-            "</div>" +
-            '<div class="st-actions">' + busyButton("Connect", "Checking the token…", "github-connect", st === "checking") + '<button class="btn btn--quiet" data-act="github-skip"' + (st === "checking" ? " disabled" : "") + ">Skip for now</button></div>"
+            head +
+            '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="github-sign-in">' + Crew.brand("github", 16) + "Sign in with GitHub</button>" + skip + "</div>" +
+            toToken
           );
         }
 
         function viewProject() {
           var st = S.state;
-          var head = kicker("project") + '<h1 class="st-h">Add your first project</h1>' + '<p class="st-sub">A project is a set of repositories your agents work in. Pick one on this Mac; Hercule reads where it is hosted and clones it from there.</p>';
+          // Runners clone a repository through the GitHub Connection. Without it, the folder only
+          // names the project, and the repository is added once GitHub is connected.
+          var noRepo = S.github !== "connected";
+          var head =
+            kicker("project") +
+            '<h1 class="st-h">Add your first project</h1>' +
+            (noRepo
+              ? '<p class="st-sub">A project is a set of repositories your agents work in. Pick one on this Mac to name the project; its repository joins it once GitHub is connected.</p>'
+              : '<p class="st-sub">A project is a set of repositories your agents work in. Pick one on this Mac; Hercule reads where it is hosted and clones it from there.</p>');
           if (st === "empty") {
             return (
               head +
               '<button class="pick-folder" data-act="pick"><span class="ico">' + icon("worktree", 20) + "</span><b>Choose a folder…</b><span>or drop one here</span></button>" +
-              '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own worktrees, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>"
+              (noRepo
+                ? '<p class="st-note">' + icon("worktree", 14) + "<span>Until the repository joins, threads work without a checkout. <b>The folder you pick stays as it is.</b></span></p>"
+                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own workspaces, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>")
             );
           }
           var card = function (sub, badge) {
@@ -1497,15 +1570,22 @@
               '<div class="st-actions"><button class="btn btn--accent btn--lg" disabled>Add project</button></div>'
             );
           }
+          if (noRepo) {
+            return (
+              head +
+              card(Crew.brand("github", 11) + " " + REPO.slug + " · " + REPO.branch) +
+              '<div class="warn">' + icon("pause", 14) + "<span><b>webshop starts without its repository.</b> Runners clone it through a GitHub Connection, and you skipped that step. Connect GitHub, then add webshop’s repository." +
+              '<br /><button class="btn btn--sm" data-act="github-back">' + Crew.brand("github", 12) + "Connect GitHub now</button></span></div>" +
+              '<div class="st-form">' + field({ key: "name", label: "Project name" }) + "</div>" +
+              '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="add">Add project without a repository</button></div>'
+            );
+          }
           return (
             head +
             card(Crew.brand("github", 11) + " " + REPO.slug + " · " + REPO.branch) +
-            (st === "private"
-              ? '<div class="warn">' + icon("lock", 14) + "<span><b>" + REPO.slug + " is private.</b> Runners need a GitHub Connection to clone it, and you skipped that step.<br /><button class=\"btn btn--sm\" data-act=\"noop\">" + Crew.brand("github", 12) + "Connect GitHub</button></span></div>"
-              : "") +
             '<div class="st-form">' +
             field({ key: "name", label: "Project name" }) +
-            field({ key: "setup", label: "Setup command", aside: '<span class="fine" style="font-weight:400">optional</span>', placeholder: "pnpm install", mono: true, hint: "Runs in every new worktree before the agent starts." }) +
+            field({ key: "setup", label: "Setup command", aside: '<span class="fine" style="font-weight:400">optional</span>', placeholder: "pnpm install", mono: true, hint: "Runs in every new workspace before the agent starts." }) +
             "</div>" +
             '<div class="st-actions"><button class="btn btn--accent btn--lg" data-act="add">Add project</button></div>'
           );
@@ -1513,25 +1593,30 @@
 
         function viewDone() {
           var noHarness = S.harness !== "ready";
+          var noRepo = S.github !== "connected";
           var rows = [
             [Crew.you(20), "<b>" + ME.user + "</b>", ME.tz],
-            [Crew.brand("claude", 16), noHarness ? "<b>No provider yet</b>" : "<b>Claude Code and Codex</b>", noHarness ? '<em class="later">Log in from Settings</em>' : "logged in"],
-            [Crew.brand("github", 16), S.github === "connected" ? "<b>GitHub</b> as rogier" : "<b>GitHub</b>", S.github === "connected" ? "topic github" : "skipped"],
-            ['<span class="proj proj--webshop"></span>', "<b>webshop</b>", REPO.slug],
+            // A step the user put off links back to it.
+            [Crew.brand("claude", 16), noHarness ? "<b>No provider yet</b>" : "<b>Claude Code and Codex</b>", noHarness ? '<a class="link" data-act="harness-back">Do it now</a>' : "logged in"],
+            [Crew.brand("github", 16), noRepo ? "<b>GitHub</b>" : "<b>GitHub</b> as rogier", noRepo ? '<a class="link" data-act="github-back">Do it now</a>' : "12 repositories"],
+            ['<span class="proj proj--webshop"></span>', "<b>webshop</b>", noRepo ? '<em class="later">Add its repository after GitHub</em>' : REPO.slug],
           ];
           return (
             '<div class="newbie"><span class="newbie-face">' + (noHarness ? Crew.logo(30) : Crew.face("New thread in webshop", { pose: "idle", size: 46 })) + "</span>" + '<span><p class="st-kicker" style="margin:0 0 4px">All set</p><h1 class="st-h">Your office is open</h1></span></div>' +
             (noHarness
-              ? '<p class="st-sub">Agents need a provider before they can take a desk. Log in to Claude Code or Codex in Settings › Providers, and your first thread can start.</p>'
-              : '<p class="st-sub">Your first colleague is at its desk. Tell it what to do in webshop: it works in its own worktree, and raises its hand when it needs you.</p>') +
+              ? '<p class="st-sub">Agents need a provider before they can take a desk. Log in from your first thread’s draft, and it can start.</p>'
+              : noRepo
+                ? '<p class="st-sub">Your first colleague is at its desk. It can research, write and plan for webshop now. For code, connect GitHub, then add webshop’s repository.</p>'
+                : '<p class="st-sub">Your first colleague is at its desk. Tell it what to do in webshop: it works in its own workspace, and raises its hand when it needs you.</p>') +
             '<ul class="recap">' +
             rows
               .map(function (r) {
-                return "<li><span>" + r[0] + "</span><span>" + r[1] + "</span><em>" + r[2] + "</em></li>";
+                // A row whose note is already marked up keeps its own markup.
+                return "<li><span>" + r[0] + "</span><span>" + r[1] + "</span>" + (r[2].charAt(0) === "<" ? r[2] : "<em>" + r[2] + "</em>") + "</li>";
               })
               .join("") +
             "</ul>" +
-            '<div class="st-actions">' + (noHarness ? '<button class="btn btn--accent btn--lg" data-act="noop">Log in to a provider</button><button class="btn btn--quiet" data-act="first-thread">Open Hercule</button>' : '<button class="btn btn--accent btn--lg" data-act="first-thread">Start your first thread</button>') + "</div>"
+            '<div class="st-actions">' + (noHarness ? '<button class="btn btn--accent btn--lg" data-act="first-thread">Log in to a provider</button><button class="btn btn--quiet" data-act="first-thread">Open Hercule</button>' : '<button class="btn btn--accent btn--lg" data-act="first-thread">Start your first thread</button>') + "</div>"
           );
         }
 
@@ -1547,8 +1632,8 @@
           return {
             account: ["Account", ME.user + " · " + ME.tz],
             harness: ["Providers", S.harness === "ready" ? "Claude Code and Codex" : "Later"],
-            github: ["GitHub", S.github === "connected" ? "rogier · topic github" : "Skipped"],
-            project: ["Project", "webshop · " + REPO.slug],
+            github: ["GitHub", S.github === "connected" ? "rogier" : "Skipped"],
+            project: ["Project", "webshop · " + (S.github === "connected" ? REPO.slug : "no repository yet")],
           }[step];
         }
 
@@ -1562,7 +1647,9 @@
           return LADDER.map(function (label, n) {
             var done = n + 1 < i;
             var cls = done ? "is-done" : n + 1 === i ? "is-now" : "";
-            return '<li class="' + cls + '"><span class="n">' + (done && !isPutOff(STEPS[n + 1]) ? icon("check", 12) : n + 1) + "</span>" + label + "</li>";
+            // A finished step shows a tick, and a step put off a pause mark.
+            var mark = !done ? n + 1 : isPutOff(STEPS[n + 1]) ? icon("pause", 12) : icon("check", 12);
+            return '<li class="' + cls + '"><span class="n">' + mark + "</span>" + label + "</li>";
           }).join("");
         }
 
@@ -1578,7 +1665,7 @@
                 var body =
                   cls === "is-now"
                     ? '<div class="fr-body">' + VIEWS[step]() + "</div>"
-                    : '<div class="lt-line"><b>' + LADDER[n] + "</b>" + (cls === "is-done" ? "<span>" + line[1] + '</span><span class="spacer"></span>' + (isPutOff(step) ? "" : icon("check", 14)) : "") + "</div>";
+                    : '<div class="lt-line"><b>' + LADDER[n] + "</b>" + (cls === "is-done" ? "<span>" + line[1] + '</span><span class="spacer"></span>' + (isPutOff(step) ? '<span class="lt-later">' + icon("pause", 14) + "</span>" : icon("check", 14)) : "") + "</div>";
                 return '<li class="lt-step ' + cls + '"><span class="lt-num deco-num">' + (n + 1) + "</span>" + body + "</li>";
               })
               .join("") +
@@ -1696,12 +1783,32 @@
             S.harness = "later";
             go("github", "empty");
           },
+          // GitHub shows the code; the app asks GitHub whether it was approved, and moves on by
+          // itself when it was. In the prototype the user approves it after a few seconds.
+          "github-sign-in": function () {
+            go("github", "code");
+            later(3200, function () {
+              if (S.state === "code") go("github", "connected");
+            });
+          },
+          "github-cancel": function () {
+            go("github", "empty");
+          },
+          "github-token": function () {
+            go("github", "token");
+          },
           "github-connect": function () {
             if (!S.form.token.trim()) return;
-            go("github", "checking");
+            go("github", "token-checking");
             later(1000, function () {
-              go("github", /^(ghp_|github_pat_)/.test(S.form.token.trim()) ? "connected" : "refused");
+              go("github", /^(ghp_|github_pat_)/.test(S.form.token.trim()) ? "connected" : "token-refused");
             });
+          },
+          "github-back": function () {
+            go("github", "empty");
+          },
+          "harness-back": function () {
+            go("harness", "idle");
           },
           "github-continue": function () {
             S.github = "connected";
@@ -1712,13 +1819,14 @@
             go("project", "empty");
           },
           pick: function () {
-            go("project", S.github === "skipped" ? "private" : "picked");
+            go("project", "picked");
           },
           add: function () {
             go("done", "default");
           },
           "first-thread": function () {
-            location.href = "session-empty.html?state=first" + (q.get("theme") ? "&theme=" + q.get("theme") : "");
+            // A project without a repository offers starters for research, writing and plans, not code.
+            location.href = "session-empty.html?state=" + (S.github === "connected" ? "first" : "first-no-repo") + (q.get("theme") ? "&theme=" + q.get("theme") : "");
           },
         };
 

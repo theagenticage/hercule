@@ -460,18 +460,17 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope: CursorScope = {
           op: "workflow.query",
-          field: "updatedAt",
-          direction: request.direction,
+          sort: [{ field: "updatedAt", direction: request.direction }],
         };
         const after =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, "string");
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["updated_at", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          request.direction,
+          [{ column: "updated_at", direction: request.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const clauses = [keyset];
         if (request.enabled !== undefined) {
@@ -487,7 +486,7 @@ const make = Effect.gen(function* () {
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toSummary)),
-          (last) => encodeCursor(scope, last.updatedAt, last.id),
+          (last) => encodeCursor(scope, [last.updatedAt], last.id),
         );
       }),
 
@@ -604,8 +603,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope: CursorScope = {
           op: "trigger.query",
-          field: "createdAt",
-          direction: request.direction,
+          sort: [{ field: "createdAt", direction: request.direction }],
         };
         const after =
           request.cursor === undefined
@@ -613,9 +611,9 @@ const make = Effect.gen(function* () {
             : yield* decodeOwnedCursor(request.cursor, scope);
         const { keyset, order } = buildKeyset(
           sql,
-          ["triggers.created_at", "triggers.workflow_id", "triggers.trigger_id"],
+          [{ column: "triggers.created_at", direction: request.direction }],
+          ["triggers.workflow_id", "triggers.trigger_id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1]), after[2]],
-          request.direction,
         );
         const clauses = [keyset];
         if (request.workflowId !== undefined) {

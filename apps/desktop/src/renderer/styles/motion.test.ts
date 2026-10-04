@@ -14,7 +14,8 @@ import { describe, expect, it } from "vitest";
  * It also checks that:
  *
  * - Reduce motion can stop every animation;
- * - only one animation may run forever: the working pose's paws;
+ * - only two animations may run forever: the working pose's paws and the
+ *   spinner;
  * - no rule for every element (`*`) sets a transition, because an element
  *   transitions every property by default, layout included.
  *
@@ -52,10 +53,17 @@ const NO_PREFERENCE = "@media (prefers-reduced-motion: no-preference)";
 const REDUCE = "@media (prefers-reduced-motion: reduce)";
 
 /**
- * The rules allowed to run an animation forever. There is one: the working
- * pose's paws, which tap only beside the open thread's running turn.
+ * The rules allowed to run an animation forever:
+ *
+ * - the working pose's paws, which tap only beside the open thread's running
+ *   turn;
+ * - the spinner, which turns only while Hercule starts or a provider login
+ *   waits for the browser. Both waits end.
  */
-const ENDLESS_ANIMATIONS = [{ file: "faces/face.css", rule: ".cr--working.cr--animated .cr-tap" }];
+const ENDLESS_ANIMATIONS = [
+  { file: "faces/face.css", rule: ".cr--working.cr--animated .cr-tap" },
+  { file: "styles/controls.css", rule: ".spin" },
+];
 
 /** One declaration of a stylesheet, with the blocks it sits in. */
 interface Declaration {
@@ -316,6 +324,61 @@ describe("the renderer's motion", () => {
         blocks: [REDUCE, ":root"],
       })),
     );
+  });
+
+  it("moves the first run's room only when a step finishes, and nothing else on the first run", () => {
+    // Spec 17, The first run: the camera moves one layer's transform, new
+    // pieces settle from 14px above with transform and opacity, each over
+    // --dur-3, and nothing else moves. The lights coming on with the
+    // controller fade the veil over the same time.
+    const isMotion = (declaration: Declaration): boolean =>
+      /^(transition|animation)/.test(declaration.property) &&
+      !declaration.blocks.some((block) => block.startsWith("@keyframes"));
+    const describeMotion = (declaration: Declaration) => ({
+      rule: declaration.blocks.join(" › "),
+      [declaration.property]: declaration.value,
+    });
+    const room = declarations.filter(
+      (declaration) => declaration.file === "screens/office/office.css" && isMotion(declaration),
+    );
+    expect(room.map(describeMotion)).toEqual([
+      {
+        rule: ".office-room .room-camera.is-moving",
+        transition: "transform var(--dur-3) var(--ease-out)",
+      },
+      { rule: ".office-room .room-veil", transition: "opacity var(--dur-3) var(--ease-out)" },
+      {
+        rule: `${NO_PREFERENCE} › .office-room .room-arrival`,
+        animation: "room-settle var(--dur-3) var(--ease-out) both",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .office-room .room-arrival--character`,
+        "animation-timing-function": "var(--ease-spring)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .office-room .tag.is-new`,
+        animation: "room-label-settle var(--dur-3) var(--ease-out) both",
+      },
+      {
+        // A piece that arrives while the camera moves waits for it to stop.
+        rule: `${NO_PREFERENCE} › .office-room .room-arrival.is-late, .office-room .is-late .tag.is-new`,
+        "animation-delay": "var(--dur-3)",
+      },
+    ]);
+    expect(
+      declarations
+        .filter((declaration) => declaration.file === "screens/office/office.css")
+        .filter((declaration) => declaration.blocks[0] === "@keyframes room-settle")
+        .map(({ property, value }) => ({ [property]: value })),
+    ).toEqual([{ opacity: "0" }, { transform: "translateY(-14px)" }]);
+    // The card and its steps draw no motion of their own.
+    expect(
+      declarations.filter(
+        (declaration) =>
+          ["screens/first-run/first-run.css", "screens/step/step.css"].includes(declaration.file) &&
+          isMotion(declaration),
+      ),
+    ).toEqual([]);
   });
 
   it("reports each way a stylesheet can break the rule", () => {

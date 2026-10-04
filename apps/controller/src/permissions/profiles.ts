@@ -154,16 +154,17 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const scope: CursorScope = {
           op: "profile.query",
-          field: "name",
-          direction: page.direction,
+          sort: [{ field: "name", direction: page.direction }],
         };
         const after =
-          page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope, "string");
+          page.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(page.cursor, scope, ["string"]);
         const { keyset, order } = buildKeyset(
           sql,
-          ["name", "id"],
-          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
-          page.direction,
+          [{ column: "name", direction: page.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
         );
         const rows = yield* sql<Row>`
           SELECT id, name, grants, shipped, created_at, updated_at
@@ -173,7 +174,7 @@ const make = Effect.gen(function* () {
           rows,
           page.limit,
           (read) => Effect.forEach(read, toProfile),
-          (last) => encodeCursor(scope, last.name, last.id),
+          (last) => encodeCursor(scope, [last.name], last.id),
         );
       }),
 

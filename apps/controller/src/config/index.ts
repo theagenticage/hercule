@@ -6,7 +6,7 @@ import {
   InvalidOptionError,
   loadBootstrapConfig,
   parseGlobalOptions,
-  resolveHomePath,
+  resolveHomePathToActOn,
   writeDefaultConfigFile,
 } from "@hercule/home";
 import type { ConfigError } from "./errors";
@@ -22,7 +22,6 @@ export {
   buildHomePaths,
   InvalidOptionError,
   parseGlobalOptions,
-  resolveHomePath,
   locateSetupUrlFile,
   type GlobalOptions,
   type HomePaths,
@@ -61,7 +60,7 @@ export const layer = (
         });
       }
 
-      const home = resolveHomePath(options.home, env);
+      const home = yield* Effect.fromResult(resolveHomePathToActOn(options.home, env));
       const configFile = locateConfigFile(home);
 
       // The home must exist before `config.toml` can be written into it; the

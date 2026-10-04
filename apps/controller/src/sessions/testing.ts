@@ -264,10 +264,16 @@ export interface Enlisted {
  * The controller's server options, plus what the fleet needs: the runner's
  * facts and models, and the plugins, which a fleet cannot do without.
  */
-export type FleetOptions = Omit<ServerOptions, "plugins"> & {
+export type FleetOptions = Omit<ServerOptions, "plugins" | "readLocalRunnerId"> & {
   readonly plugins: ReadonlyArray<Plugin>;
   readonly facts: RunnerFacts;
   readonly models: ReadonlyArray<ModelDescriptor>;
+  /**
+   * Makes the fleet's first runner the controller's local runner. Without it
+   * the controller has no local runner. A runner added with `enlist` is never
+   * the local one.
+   */
+  readonly firstRunnerIsLocal?: true;
 };
 
 /**
@@ -280,9 +286,12 @@ export type FleetOptions = Omit<ServerOptions, "plugins"> & {
  */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  { facts, models, ...server }: FleetOptions,
-): Promise<void> =>
-  withServer(async (harness) => {
+  { facts, models, firstRunnerIsLocal, ...server }: FleetOptions,
+): Promise<void> => {
+  // The runner's id is known only once it joins, after the server is up.
+  let localRunnerId: string | undefined;
+  const options = { ...server, readLocalRunnerId: () => localRunnerId };
+  return withServer(async (harness) => {
     const token = await completeSetup(harness.base);
     const joined = await send("POST", harness.base, "/api/v1/runners/join", {
       body: {},
@@ -290,6 +299,9 @@ export const withFleet = (
     });
     expect(joined.status, await joined.clone().text()).toBe(201);
     const answer = (await joined.json()) as JoinAnswer;
+    // Set before the runner connects, so every dispatch to it sees it as the
+    // local runner.
+    if (firstRunnerIsLocal === true) localRunnerId = answer.runnerId;
     const wire = await dial(harness.base, answer.credential, facts, models);
     // A real runner reports its sessions right after its hello (none, on a
     // fresh connection). Most tests want dispatch working from their first
@@ -346,7 +358,8 @@ export const withFleet = (
     } finally {
       for (const one of wires) one.close();
     }
-  }, server);
+  }, options);
+};
 
 /** Returns the id of the provider instance created for a provider, by the provider's id. */
 export const findInstanceId = (arranged: Arranged, providerId: string): string => {
@@ -443,7 +456,7 @@ const AGENT_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: []
 /** Runs `body` against a fleet whose one runner can run a session on any built-in profile. */
 export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  options: Omit<ServerOptions, "plugins"> = {},
+  options: Omit<FleetOptions, "plugins" | "facts" | "models"> = {},
 ): Promise<void> =>
   withFleet(body, {
     plugins: [createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin],
@@ -542,34 +555,45 @@ export const readSessionToken = (frame: SessionStart): string => {
   return frame.token;
 };
 
-/** A started session on a profile, with the token its runner received. */
-export interface Agent {
+/**
+ * A Thread a test spawned: the session, which has no Agent behind it, and the
+ * session token its runner received. A test calls the API with the token to
+ * act as that session.
+ */
+export interface SpawnedThread {
   readonly session: Session;
   readonly token: string;
 }
 
 /**
- * Spawns and starts a session on a new profile with exactly these grants. The
+ * Spawns and starts a Thread on a new profile with exactly these grants. The
  * profile is created for the test, because a session's grants are the only
  * way to limit what the agent inside it may do.
  */
-export const spawnAgentWithGrants = async (
+export const spawnThreadWithGrants = async (
   arranged: Arranged,
   name: string,
   grants: ReadonlyArray<Grant>,
-): Promise<Agent> => spawnAgentUnder(arranged, await createProfile(arranged, name, grants));
+): Promise<SpawnedThread> =>
+  spawnThreadUnder(arranged, await createProfile(arranged, name, grants));
 
 /**
- * Spawns and starts a session on `profile`, and waits until the runner has
- * answered its prompt. Returns the session, which is then `busy`, with its
- * token.
+ * Spawns and starts a Thread on `profile`: a session with no Agent, so its
+ * `agentId` is null. Waits until the runner has answered its prompt, and
+ * returns the session, which is then `busy`, with its session token.
+ *
+ * A test that needs a session spawned from an Agent must create the Agent and
+ * spawn from it; this helper never does.
  *
  * The fake runner answers the prompt with `opened` and reports no turn
  * events, so the session stays `busy` with its prompt's turn until the test
  * reports that turn's end. The runner has reported one event, at sequence
  * number 1, so the test's next event is 2.
  */
-export const spawnAgentUnder = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
+export const spawnThreadUnder = async (
+  arranged: Arranged,
+  profile: Profile,
+): Promise<SpawnedThread> => {
   const opened = await spawnSessionOrFail(arranged, {
     prompt: "hello",
     permissionProfileId: profile.id,

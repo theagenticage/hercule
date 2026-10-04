@@ -18,7 +18,7 @@ import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract
 import { del, get, post, readErrorBody, send } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   at,
   readProfileNamed,
   createProfile,
@@ -341,7 +341,7 @@ describe("the agent over its five operations", () => {
       const instanceId = findInstanceId(arranged, "claude-provider");
       const agent = await createAgentForInstance(arranged, instanceId);
       const profile = await readProfileNamed(arranged, "unrestricted");
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await createProfile(arranged, "no-agents", ["task.read"]),
       );

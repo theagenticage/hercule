@@ -5,6 +5,7 @@ import {
   buildProviderRows,
   queryKeys,
   type HerculeClient,
+  type Live,
   type ProviderRow,
   readErrorMessage,
 } from "@hercule/client-core";
@@ -19,9 +20,11 @@ import { providersQuery } from "../../../app/queries";
  */
 export function Providers({
   client,
+  live,
   runner,
 }: {
   readonly client: HerculeClient;
+  readonly live: Live;
   readonly runner: RunnerDetail;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
@@ -65,6 +68,7 @@ export function Providers({
             key={row.id}
             row={row}
             client={client}
+            live={live}
             runnerId={runner.id}
             runnerName={runner.name}
             first={index === 0}
@@ -75,10 +79,13 @@ export function Providers({
             onInstall={() => {
               install.mutate(row.providerId);
             }}
-            // The stored snapshot does not know about the new credential yet, so
-            // the machine is probed again rather than the page refetching the
-            // same stale snapshot.
-            onCredentialEntered={() => {
+            // A login ends with the controller probing the machine, so the
+            // new snapshot is already stored and only needs reading.
+            onLoggedIn={reread}
+            // A saved secret is not probed by itself: the stored snapshot does
+            // not know about the new credential yet, so the machine is probed
+            // again rather than the page refetching the same stale snapshot.
+            onSecretSaved={() => {
               probe.mutate(row.id);
             }}
           />
@@ -96,23 +103,27 @@ export function Providers({
 function Row({
   row,
   client,
+  live,
   runnerId,
   runnerName,
   first,
   busy,
   onProbe,
   onInstall,
-  onCredentialEntered,
+  onLoggedIn,
+  onSecretSaved,
 }: {
   readonly row: ProviderRow;
   readonly client: HerculeClient;
+  readonly live: Live;
   readonly runnerId: string;
   readonly runnerName: string;
   readonly first: boolean;
   readonly busy: boolean;
   readonly onProbe: () => void;
   readonly onInstall: () => void;
-  readonly onCredentialEntered: () => void;
+  readonly onLoggedIn: () => void;
+  readonly onSecretSaved: () => void;
 }): JSX.Element {
   return (
     // Grouped so a screen reader reads one provider's facts and actions as
@@ -145,11 +156,12 @@ function Row({
         {row.logIn ? (
           <ProviderLogin
             client={client}
+            live={live}
             instanceId={row.id}
             runnerId={runnerId}
             subject={`${row.name} on ${runnerName}`}
             label={row.logInLabel}
-            onLoggedIn={onCredentialEntered}
+            onLoggedIn={onLoggedIn}
           />
         ) : null}
         {row.secretFields.map((field) => (
@@ -158,7 +170,7 @@ function Row({
             client={client}
             instanceId={row.id}
             field={field}
-            onSaved={onCredentialEntered}
+            onSaved={onSecretSaved}
           />
         ))}
         {row.probe ? (

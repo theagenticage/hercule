@@ -105,12 +105,14 @@ describe("the window", () => {
     const { app, page } = await launchForTest();
 
     // The check means something only if a control on screen has a transition
-    // that a theme change would start. The Connect button fades its
-    // background, which differs between the two themes.
+    // that a theme change would start. The welcome's Open the office button
+    // fades its background, which differs between the two themes. The test
+    // waits for the button to turn on, when the welcome has stopped looking
+    // for Hercule, because its spinner would otherwise be running.
+    const button = page.getByRole("button", { name: "Open the office", disabled: false });
+    await button.waitFor();
     expect(
-      await page
-        .getByRole("button", { name: "Connect" })
-        .evaluate((button) => getComputedStyle(button).transitionProperty),
+      await button.evaluate((element) => getComputedStyle(element).transitionProperty),
     ).toContain("background");
 
     // Records, right after each theme change, the transitions and animations

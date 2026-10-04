@@ -1,0 +1,349 @@
+/* The first run, as the Bureau book's desktop/first-run.html draws it in
+   variant B, "Grand opening": the Office room fills the window, and the
+   steps float over it on a glass card, with the step ladder on glass at the
+   top. The rules and class names are the book's, scoped under `.fr` so they
+   reach no other screen. The step parts the card shares with New thread's
+   dialogs live in step.css; the controls live in controls.css. */
+
+/* The window has a hidden title bar, so the room is the drag region, as the
+   centred screens' background is. The card and the ladder take clicks. */
+.fr {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  -webkit-app-region: drag;
+}
+.fr-stage {
+  position: absolute;
+  inset: 0;
+}
+
+/* The same glass the book's `.glass` draws, which `.pill` also uses. */
+.fr-panel,
+.fr-ladder {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- The card ---------- */
+.fr-panel {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  right: 32px;
+  display: flex;
+  flex-direction: column;
+  width: 448px;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  padding: 26px 30px 28px;
+  border-radius: var(--r-xl);
+  transform: translateY(-46%);
+}
+/* The column is as wide as the card and no wider, so a line that does not
+   wrap, such as the installer command, is cut with an ellipsis instead of
+   widening the column past the card's edge. */
+.fr-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+/* ---------- The brand on the welcome ---------- */
+.fr-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.fr-brand .wordmark {
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  padding-top: 2px;
+}
+/* The app's icon: the logo mark on lacquer, ringed in brass. The first inset
+   repaints the edge in lacquer, so the brass shows as a thin line inside it.
+   As the book's system.css draws it. */
+.fr .app-icon {
+  --size: 48px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 23%;
+  background: oklch(0.29 0.035 165);
+  box-shadow:
+    inset 0 0 0 calc(var(--size) * 0.06) oklch(0.29 0.035 165),
+    inset 0 0 0 calc(var(--size) * 0.075) oklch(0.72 0.085 85),
+    0 1px 2px oklch(0 0 0 / 0.2),
+    0 calc(var(--size) / 10) calc(var(--size) / 4) -2px oklch(0.2 0.03 60 / 0.3);
+}
+.fr .app-icon .logo {
+  width: 64%;
+  height: 64%;
+}
+
+/* ---------- The step ladder ---------- */
+.fr-ladder {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 12px;
+  list-style: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.fr-ladder li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.fr-ladder li + li::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  margin-right: 1px;
+  background: var(--line);
+}
+.fr-ladder .n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-weight: var(--w-bold);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.fr-ladder .is-now {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.fr-ladder .is-now .n {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--surface);
+}
+.fr-ladder .is-done {
+  color: var(--muted);
+}
+.fr-ladder .is-done .n {
+  background: var(--sunken);
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* ---------- A step's heading ---------- */
+.fr .st-kicker {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+}
+.fr .st-h {
+  margin: 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.fr .st-sub {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+/* A button at work keeps its colour: it is busy, not unavailable. */
+.fr .btn[aria-busy="true"] {
+  pointer-events: none;
+}
+
+/* ---------- The welcome ---------- */
+.fr .lead {
+  margin: 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.fr .perks {
+  display: grid;
+  gap: 14px;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.fr .perks li {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 12px;
+  align-items: start;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.fr .perks .ico {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--ink);
+}
+.fr .perks b {
+  display: block;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+/* The welcome's third perk is a state mark, which the book draws at 16px
+   there; everywhere else a mark is 14px. */
+.fr .perks .ico .mark .ic {
+  width: 16px;
+  height: 16px;
+}
+
+/* The line that shows where Hercule runs, and whether it answers. */
+.fr .reach {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 28px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.fr .reach b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.fr .reach .mono {
+  color: var(--faint);
+}
+.fr .dot-ok {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.fr .reach--off .dot-ok {
+  background: var(--faint);
+}
+/* The account step's timezone, in the line under the password. */
+.fr .row .tz {
+  color: var(--muted);
+}
+
+/* A path or a command, in a sunken box with a button at its end. */
+.fr .cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin-top: 12px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-12);
+}
+.fr .cmd > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+/* The box is set in the code font for the command, but its button is not code. */
+.fr .cmd .btn {
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+}
+
+/* ---------- All set ---------- */
+.fr-newbie {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.fr-newbie .st-kicker {
+  margin: 0 0 4px;
+}
+.fr-newbie-face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--sunken);
+}
+.fr-newbie-face::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--line);
+}
+.fr .recap {
+  display: grid;
+  gap: 2px;
+  margin: 24px 0 0;
+  padding: 6px;
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--sunken);
+}
+.fr .recap li {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 8px;
+}
+.fr .recap li > span:first-child {
+  display: grid;
+  place-items: center;
+}
+.fr .recap b {
+  font-weight: var(--w-bold);
+}
+.fr .recap em {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-style: normal;
+}
+.fr .recap em.later {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}

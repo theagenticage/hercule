@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { canonicalRemoteOf, isClonableRemote, extractRepoName } from "./remote";
+import { canonicalizeRemote, extractRepoName, hasUserinfo, isClonableRemote } from "./remote";
 
 describe("isClonableRemote", () => {
   it("accepts an https URL and git's scp-like user@host:owner/repo", () => {
@@ -38,13 +38,41 @@ describe("isClonableRemote", () => {
     }
   });
 
+  it("rejects an https URL with a user name or password before its host", () => {
+    for (const remote of [
+      "https://user:token@github.com/acme/web.git",
+      "https://x-access-token:ghp_secret@github.com/acme/web",
+      "https://user@github.com/acme/web",
+      "HTTPS://user:token@github.com/acme/web",
+      "https://@github.com/acme/web",
+    ]) {
+      expect(isClonableRemote(remote), remote).toBe(false);
+      expect(hasUserinfo(remote), remote).toBe(true);
+    }
+  });
+
+  it("does not take an @ after the host, or git's scp-like user, for a user name", () => {
+    for (const remote of [
+      "https://github.com/acme/web@main",
+      "https://github.com/acme/web?ref=a@b",
+      "git@github.com:acme/web.git",
+    ]) {
+      expect(hasUserinfo(remote), remote).toBe(false);
+    }
+    expect(isClonableRemote("git@github.com:acme/web.git")).toBe(true);
+  });
+
+  it("rejects a password in git's scp-like form", () => {
+    expect(isClonableRemote("git:secret@github.com:acme/web.git")).toBe(false);
+  });
+
   it("rejects the host/path form a runner reports, which still canonicalizes", () => {
     expect(isClonableRemote("github.com/acme/web")).toBe(false);
-    expect(canonicalRemoteOf("github.com/acme/web")).toBe("github.com/acme/web");
+    expect(canonicalizeRemote("github.com/acme/web")).toBe("github.com/acme/web");
   });
 
   it("canonicalizes a file URL to its path, but rejects it as a resource remote", () => {
-    expect(canonicalRemoteOf("file:///Users/rogier/code/web")).toBe("users/rogier/code/web");
+    expect(canonicalizeRemote("file:///Users/rogier/code/web")).toBe("users/rogier/code/web");
     expect(isClonableRemote("file:///Users/rogier/code/web")).toBe(false);
   });
 });

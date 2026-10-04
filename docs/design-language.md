@@ -191,8 +191,9 @@ check-in are **separate views** for now; merging is a post-dogfooding question.
   calm headline sentence leads with what burns ("1 burning · 6 proposals from 212 events ·
   2 need a call · 3 FYI · 198 handled quietly").
 - **Topic tabs** group the page (All / Code / Business / Personal / Ops). A topic is a
-  label: each Connection files into one default topic chosen at setup; triage agents label
-  a proposal with the connection's topic unless the content says otherwise. Tabs show every
+  label: a Connection may carry a topic it files into, and may have none; triage agents
+  label a proposal with the connection's topic, when it has one, unless the content says
+  otherwise *(amended 2026-10-02, [#323](https://github.com/theagenticage/hercule/issues/323))*. Tabs show every
   topic in use, user-ordered; a "Manage topics" affordance sits at the tabs' right edge.
 - **Needs a call** is verdict-based, never priority-based: it holds what triage could not
   decide (an unsure verdict, a tripped spawn bound). Its label says so.

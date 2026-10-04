@@ -16,11 +16,11 @@
  * buttons, and headings and the draft's row take focus from code only
  * (`tabIndex={-1}`), for when the focused item leaves the list.
  */
-import { memo, useId, type JSX } from "react";
+import { memo, useId, type ComponentProps, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, joinLabelText, type Pose } from "@hercule/client-core";
+import { describePose, isSeatedPose, joinLabelText, type Pose } from "@hercule/client-core";
 import { buildLook, Face } from "../faces";
-import { PlusIcon } from "../icons";
+import { PlusIcon } from "../icons/plus";
 import { Mark } from "../marks";
 import { AgeLabel } from "../screens/age-label";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
@@ -62,10 +62,40 @@ export const WaitingHeader = memo(function WaitingHeader({
 });
 
 /**
+ * Renders a link to the thread of `sessionId`, whose pose is `pose`. While
+ * `officeOpen` is true and the thread has a colleague in the Office, the link
+ * opens the thread in the Office's drawer; otherwise it opens the thread on
+ * its own screen, because an asleep or away thread has no colleague to
+ * select. The other props are the link's own. Either way the router marks the
+ * link as the current page while its thread is open.
+ */
+function ThreadLink({
+  sessionId,
+  pose,
+  officeOpen,
+  ...props
+}: Pick<
+  ComponentProps<"a">,
+  "className" | "style" | "aria-label" | "aria-describedby" | "children"
+> & {
+  readonly sessionId: string;
+  readonly pose: Pose;
+  readonly officeOpen: boolean;
+  readonly "data-key": string;
+}): JSX.Element {
+  return officeOpen && isSeatedPose(pose) ? (
+    <Link to="/office" search={{ session: sessionId }} activeProps={SELECTED} {...props} />
+  ) : (
+    <Link to="/threads/$sessionId" params={{ sessionId }} activeProps={SELECTED} {...props} />
+  );
+}
+
+/**
  * Renders a thread in Waiting on you: its waiting face, its title and the
  * question it asks. The link is named "<title>, waiting on you" and described
  * by the question; the face is hidden, because the name already says the
- * state.
+ * state. It opens the thread in the Office's drawer while `officeOpen` is
+ * true, because a waiting thread always has a colleague there.
  */
 export const WaitingRow = memo(function WaitingRow({
   itemKey,
@@ -73,18 +103,20 @@ export const WaitingRow = memo(function WaitingRow({
   sessionId,
   title,
   question,
+  officeOpen,
 }: Placement & {
   readonly sessionId: string;
   readonly title: string;
   readonly question: string;
+  readonly officeOpen: boolean;
 }): JSX.Element {
   const questionId = useId();
   return (
-    <Link
-      to="/threads/$sessionId"
-      params={{ sessionId }}
+    <ThreadLink
+      sessionId={sessionId}
+      pose="waiting"
+      officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
-      activeProps={SELECTED}
       data-key={itemKey}
       style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-row"] }}
       aria-label={`${title}, ${describePose("waiting")}`}
@@ -97,7 +129,7 @@ export const WaitingRow = memo(function WaitingRow({
           {question}
         </span>
       </span>
-    </Link>
+    </ThreadLink>
   );
 });
 
@@ -199,7 +231,9 @@ export const WorkspaceLabel = memo(function WorkspaceLabel({
  * The link is named "<title>, <pose words>", such as "Fix checkout, working",
  * and described by the second line and, when the end is not a mark, the end
  * in words, such as "offline" or "20 minutes ago". A mark says the pose,
- * which the name already holds, so it is hidden.
+ * which the name already holds, so it is hidden. While `officeOpen` is true,
+ * it opens the thread in the Office's drawer if the thread has a colleague
+ * there, and on its own screen if it does not.
  */
 export const ThreadRow = memo(function ThreadRow({
   itemKey,
@@ -211,6 +245,7 @@ export const ThreadRow = memo(function ThreadRow({
   end,
   activityAt,
   onScreen,
+  officeOpen,
 }: Placement & {
   readonly sessionId: string;
   readonly title: string;
@@ -219,6 +254,7 @@ export const ThreadRow = memo(function ThreadRow({
   readonly end: RowEnd;
   readonly activityAt: string;
   readonly onScreen: boolean;
+  readonly officeOpen: boolean;
 }): JSX.Element {
   const id = useId();
   const secondLineId = `${id}-second-line`;
@@ -228,11 +264,11 @@ export const ThreadRow = memo(function ThreadRow({
     .filter((each) => each !== null)
     .join(" ");
   return (
-    <Link
-      to="/threads/$sessionId"
-      params={{ sessionId }}
+    <ThreadLink
+      sessionId={sessionId}
+      pose={pose}
+      officeOpen={officeOpen}
       className="side-row side-item"
-      activeProps={SELECTED}
       data-key={itemKey}
       style={{ marginTop: leading, height: ITEM_HEIGHTS["thread-row"] }}
       aria-label={`${title}, ${describePose(pose)}`}
@@ -265,7 +301,7 @@ export const ThreadRow = memo(function ThreadRow({
           {end}
         </span>
       )}
-    </Link>
+    </ThreadLink>
   );
 });
 

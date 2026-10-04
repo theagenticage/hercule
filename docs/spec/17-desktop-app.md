@@ -9,13 +9,13 @@ This document covers:
 - the Electron security baseline and the IPC contract
 - the native behaviour the app must have
 - the design system
-- the first milestone's screens
+- the first milestone's screens, the Office among them
 - the performance budgets and rules
 - the slices and the tests
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, except the `link.open` channel (see [The IPC contract](#the-ipc-contract)).
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office).
 
 ## Scope of the first milestone
 
@@ -30,6 +30,16 @@ The first milestone is threads, in a native shell:
 
 Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule face and its screens, assistants, All sessions, Settings, the desktop app as installer, and Windows and Linux.
 
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run moves into v1: from "the app is installed" to a first thread, with no browser and no terminal ([The first run](#the-first-run)). It brings three pieces with it:
+
+- a still room, a subset of the Office that the first run furnishes step by step;
+- logging in to a provider, which the draft's Log in button also opens;
+- creating a project from a folder, which the project picker's New project row also opens.
+
+~~The live Office stays post-v1, and so does the app installing or updating Hercule's binary.~~ The app installing or updating Hercule's binary stays post-v1 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332): the live Office no longer does)*. `install.sh` still puts the binary and the app on the Mac ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §1); the app only runs that binary.
+
+*(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The Office moves into v1: the user's threads as colleagues at work in a 3D Bureau office, quiet enough that no fan spins ([The Office](#the-office)). The first run's room stays the still 2D drawing it is.
+
 ## Architecture
 
 ### Process model
@@ -38,7 +48,7 @@ The desktop app has three layers. Each has one job.
 
 | Layer | Runs | Owns | Written with |
 |---|---|---|---|
-| main | Node, in Electron's browser process | the window, the app menu, the `app` scheme and its files, the stored token and settings, notifications, the dock badge, external links, the local-runner probe | Effect 4 ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)) |
+| main | Node, in Electron's browser process | the window, the app menu, the `app` scheme and its files, the stored token and settings, notifications, the dock badge, external links, the local-runner probe; for the first run, running the `hercule` binary, the login shell that reads `PATH`, the folder dialog and `git` *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))* | Effect 4 ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)) |
 | preload | the renderer's isolated world | the bridge: one function per IPC channel, and nothing else | TypeScript without Effect |
 | renderer | a sandboxed Chromium renderer | every screen and component, and every call to the controller | React 19 with the React Compiler, TanStack Router, Query and Virtual; `client-core` for all data; no Effect code ([ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)) |
 
@@ -50,6 +60,7 @@ The desktop app has three layers. Each has one job.
   - anything that interprets domain data goes to `client-core`, with its own test.
 - **The router uses memory history.** A desktop window has no address bar, so no URL is shown or kept.
 - **Main stays thin.** It makes no calls to the controller, with one exception: the connection check in [Reaching the controller](#reaching-the-controller).
+  - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run adds no call to the controller: it reuses that check. It does add commands main runs on this Mac: the `hercule` binary, the user's login shell once to read `PATH`, and `git` once per folder picked ([The first run](#the-first-run)). Main links no new package for them, and reads no file in the Hercule Home.
 
 ### Package
 
@@ -109,6 +120,7 @@ Measured 2026-09-29 against Electron 44.4.5:
 - **Where the URL is kept.** Main keeps the URL in the app's settings file in its user data directory.
 - **The connect screen.** It asks for the URL, prefilled with `http://127.0.0.1:4937` (the default `bind.port`, [./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 - **The URL is an origin.** Main accepts an `http:` or `https:` URL with no user name, no password, no path other than `/`, no query and no fragment, and saves its origin. Anything else is refused with a message, never trimmed.
+  - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **A setup URL is the one exception.** That is the address `hercule setup-url` prints, `<origin>/setup?token=<token>`. Main splits it into the origin and the token, checks and saves the origin as above, and keeps the token in memory to hand it to the first run once ([Where the setup token comes from](#the-first-run)). The token is never written to disk. The split lives once in main, and both the connect screen and the first run's remote screen use it.
 - **Main checks the URL.** Main sends `setup.read` to it. This is main's one call to the controller: the renderer cannot make it, because its CSP (below) names only the controller it is connected to.
   - **The request goes through Chromium's network stack, the one the page uses,** not through Node's `fetch` and not through the contract's client. That way the check sees the macOS proxy settings and the certificates the Keychain trusts, as the page does. Main uses Electron's `net.request`, because `net.fetch` cannot return a redirect or send the preflight with the page's origin. The request sends no cookies or stored credentials. Main must read the response's `access-control-allow-origin` header, and the derived client does not expose response headers. Main still takes the operation's path from the contract's operation table, and decodes the body with the contract's `SetupState` schema. The check is its own module, imported the first time the user connects, so it is not on the launch path.
   - **The check gives up after 5 seconds,** and reads at most 64 kB of the answer. A larger answer is not a `SetupState`.
@@ -119,16 +131,134 @@ Measured 2026-09-29 against Electron 44.4.5:
     - The status is not 200, or the body is not a `SetupState`: the URL is not a Hercule controller. So does a status outside 200 to 599, such as `999`. Response headers that the page's network stack cannot represent, such as a header with a character above U+00FF, are ignored: the check reads only `location` and the CORS headers, and those are plain ASCII whenever they are valid.
     - The response's `access-control-allow-origin` does not allow the origin (by name or `*`): the controller is older than the desktop app and must be updated.
     - A preflight's answer is not 2xx, does not allow the origin (by name or `*`), does not name `authorization`, does not allow `content-type` (by name or `*`), or does not allow its method (by exact name or `*`): the app names every refused method, and asks the user to update the controller or check any proxy in front of it. A proxy is the likelier cause here, because the controller's own answer passed the step above. These are Chromium's rules for the page's calls. A preflight's answer need not list `GET`, `HEAD` or `POST`, which CORS always allows. `*` counts because the page's calls send no credentials; it never covers `authorization`.
-    - The controller's setup is not complete: the app says so and opens `<url>/setup` in the default browser. The desktop app is not the installer yet.
+    - The controller's setup is not complete: ~~the app says so and opens `<url>/setup` in the default browser. The desktop app is not the installer yet.~~ main saves the URL and reloads the window, and the app opens [the first run](#the-first-run) on that controller, at its account step. No browser opens *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
     - Otherwise the check passes: main saves the URL and reloads the window, so the new CSP names the new controller.
-- **A controller that is down at launch** shows the connect screen, with the saved URL and the "could not reach" line. Connecting checks again.
+- **A controller that is down at launch** shows the connect screen, with the saved URL and the "could not reach" line. Connecting checks again. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* This holds only when a URL is saved. With no saved URL, the app shows the first run's welcome instead of the connect screen ([The first run](#the-first-run)).
 - **A controller that does not answer at launch** is treated as down after 5 seconds. A connection can be accepted and never answered, and neither Chromium nor the client gives up on its own. While the app waits, and only once the wait is noticeable, it shows the lockup, "Connecting to `<url>`…", and a Change button that leads to the connect screen.
 - **Every request the renderer sends gives up after 5 seconds,** for the same reason, and reports the controller as unreachable. The 5 seconds cover the whole answer, body included, so a controller that sends the headers and then stalls is unreachable too. Two operations wait longer on a healthy controller: `session.input` and `input.steer` wait up to 10 seconds for the runner to confirm the message. ~~Slice 6, which adds the composer, gives those two a limit above that wait.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): slice 5 gives those two a limit of 15 seconds, above that wait, because its queued rows already steer.)* A limit shorter than the controller's own wait would report a failure for a message that still arrives, and a user who sends it again would send it twice.
-- **Onboarding is left to the browser.** Setup and onboarding both happen in the web app, before anyone connects the desktop app, so the desktop app has no onboarding step.
+- ~~**Onboarding is left to the browser.** Setup and onboarding both happen in the web app, before anyone connects the desktop app, so the desktop app has no onboarding step.~~ **The desktop app sets Hercule up itself** *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. Its first run starts Hercule on this Mac, or connects to Hercule on another machine, and then runs setup and onboarding in the app, with no browser and no terminal ([The first run](#the-first-run)). A user who set Hercule up on the web never sees it: the app shows sign-in.
 - **Changing controllers.** Changing the controller deletes the stored token (see [Auth and the token](#auth-and-the-token)).
 - **A screen that fails** *(added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275))* shows spec 14's "This screen did not load" screen ([./14-web-app.md](./14-web-app.md), the row "A screen that threw while rendering"), with the failure's own message. It covers a read that fails as well as a render that throws. It differs from the web app's in two ways:
   - It offers **Try again**, which loads every route on screen again, instead of Go to Sessions: the desktop app has no Sessions screen. While the routes load, the button reads "Trying again…" and ignores presses.
   - When the shell itself failed, the screen fills the window, and its foot reads "Controller at `<url>`" with the Change button that leads to the connect screen. It does not say "Connected to", because the failure may be that the controller stopped answering.
+
+### The first run
+
+*(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run takes a new user from "the app is installed" to a first thread, with no browser and no terminal. It decides what this Mac runs, then runs four steps in order: account, providers, GitHub and project. It ends on All set and a draft thread.
+
+- **The pixel reference** is the prototype `docs/design/crew-bureau-2/desktop/first-run.html` and the book's First run chapter ([Design system](#design-system)). Variant B, "Grand opening", is the one built: the Office fills the window under a glass card. Variant A is the fallback. Every state in the prototype's state menu is built, and the prototype's copy is the copy to ship, except where this section says otherwise.
+- **When it shows.** At launch with no saved URL, the app opens on the first run's welcome. When the connect check finds that setup is not complete, the app opens the first run at the account step. When the app's settings file says a first run is in progress for the saved controller, the app resumes it (see **Where the first run keeps its place** below).
+- **Its own chunk.** The first run and its room are one chunk of the renderer, loaded only on a first run. Main imports the modules that run programs for it the first time they are used. The first run's part of main's startup path is 4.7 kB (see [Measured](#measured)).
+
+**What this Mac runs.** The welcome decides it once:
+
+| What the user does | What runs on this Mac |
+|---|---|
+| Open the office (the default) | Hercule and its local runner, from login |
+| Opens the app on a Mac that is already another machine's runner | The runner, as before. The welcome finds it at launch, never offers Open the office, and offers Connect to it |
+| Connect to it, with any address | Only the app |
+
+**Main asks the binary, not the Hercule Home.** Main reads no file in the Home and links no package beyond `@hercule/contract` and `@hercule/client-core` ([ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md)). The binary owns the Home's layout, so the app spells none of it.
+
+- Main runs `~/.local/bin/hercule` by its full path, because a Mac app has no shell `PATH` of its own. It runs three commands: `hercule service status --json`, `hercule service install --json` and `hercule setup-url`. [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §4 has the verbs and the fields their `--json` output prints.
+- For each command, main removes every `HERCULE_*` variable from the environment and passes no `--home`, so the binary uses its default Home, `~/.hercule`. A Home anywhere else is not looked for: its user connects with the setup URL, as for another machine.
+- Main decodes the output with a schema of its own, for the fields it reads, because ADR 0037 keeps `@hercule/service` out of the app. Output that does not decode counts as a status that failed.
+- The renderer never runs a command or reads a file. It asks main through the bridge ([The IPC contract](#the-ipc-contract)).
+
+**Finding the local controller.** At a launch with no saved URL, the welcome shows "Looking for Hercule on this Mac…" while main runs `hercule service status --json`:
+
+- When the Service Unit runs the role `runner`, the welcome shows **runner**: "This Mac is a runner", with Connect to it and no Open the office. Installing again would restart the runner and end the sessions it hosts. Its line says whether the runner is running or stopped; the app does not start it.
+- Otherwise main runs the connect check ([The controller URL and the connect screen](#the-controller-url-and-the-connect-screen)) against the `controllerUrl` the status printed. When the check passes, main saves the URL and reloads the window, so the CSP names the controller. Setup not complete is **found**: Open the office goes straight to the account step. Setup complete is **already set up**: the app shows sign-in. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* That is the sign-in screen any launch with a saved URL shows, where the book draws the welcome with "already set up" and a Sign in button: main has saved the URL and reloaded the window by then, and a launch at a saved controller that is set up opens on sign-in. *(Amended 2026-10-03, [#313](https://github.com/theagenticage/hercule/issues/313).)* The renderer asks for the check and the save: `localController.find` only reports the `controllerUrl`, and the renderer passes it to `controllerUrl.save`, as the connect screen passes the address the user typed.
+- Anything else is **fresh**: nothing answers, the connect check refuses what answers, the `controllerUrl` is null, there is no binary, or the status fails. Open the office then starts Hercule, and says what is wrong if that fails.
+
+Status runs once per launch with no saved URL. After the first run the URL is saved, so in practice it runs only on the first launch.
+
+Main finds and starts Hercule one at a time. A reload of the window while Hercule starts finds Hercule again; that find waits for the start, then finds the URL saved and is refused, so the URL is saved and the window reloaded once.
+
+**Starting Hercule.** Open the office, in the fresh state, first runs `hercule service status --json` again. When the Service Unit runs the role `runner`, the welcome shows **runner**. When it runs `serve` and is running, main skips steps 1 and 2 and goes straight to step 3 with the `controllerUrl` the status printed: installing again would restart Hercule and end the sessions its local runner hosts. Otherwise:
+
+1. Main reads the user's `PATH` once, from their login shell: ~~`$SHELL -ilc` prints `PATH` between two markers~~ `$SHELL -ilc` runs `/usr/bin/env -0` between two markers, and main takes `PATH` from that environment, because fish expands `$PATH` to a list separated by spaces *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*, with stdin closed and a limit of 5 seconds. Main kills the shell's process group soon after the shell exits, so a process the startup files leave running neither keeps main waiting nor stays behind *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. The Service Unit records its caller's `PATH` ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §4), and a Mac app inherits launchd's minimal one, so without this the runner would find no `claude`, `codex` or `git`. The shell runs as a login and interactive shell because many `PATH` lines live in `.zshrc`. The markers drop anything the shell's startup files print, and the closed stdin and the limit keep a prompt from hanging the start. If the read fails, the start fails with that reason: the Service Unit must not record a `PATH` the user does not have.
+2. Main runs `hercule service install --json` with that `PATH`. The command installs the Service Unit and starts Hercule, and also starts a unit that is installed but stopped. Main stops it by its PID if it still runs after 90 seconds.
+3. When the command exits 0 with the role `serve`, main runs the connect check against the `controllerUrl` it printed, every half second for up to 30 seconds, while nothing answers. When the check passes, main saves the URL and reloads, and the welcome continues as for found. When something answers but the check refuses it, main stops waiting at once, because waiting would not change the answer, and the welcome shows **start-error**. When the command exits 0 with the role `runner`, the Home already said this Mac is a runner, and the welcome shows **runner**.
+
+While this runs, the button holds one spinner and reads "Starting Hercule…". macOS shows its own "Background Items Added" notification when the Service Unit is registered; the welcome's "starts at login" line says so before it appears.
+
+**When Hercule does not start,** the welcome shows one of two states. Both have Try again, which runs the start again, and "It runs on another machine". Neither shows before the command has exited or been stopped, so Try again never starts a second command while the first still runs.
+
+- **no-answer**, which the book calls start-failed: the command exited 0 but nothing answered within 30 seconds, or main stopped the command after 90 seconds. It names the Home's logs folder, the `logsDir` the binary printed last, with Show in Finder, and says that nothing answers at the `controllerUrl`. Main opens the folder itself; the renderer passes no path.
+- **start-error**: the command failed, or something answered at the `controllerUrl` but the connect check refused it. For a refusal it shows the line the connect screen shows for the same outcome. For a failed command it shows the last line the command wrote to stderr, without its `hercule: ` prefix. Spec 15 §4 makes every such failure one line that says what to do, and Try again stands for its "run this again". The `PATH` read's error shows here too. With no file at `~/.local/bin/hercule`, the line says Hercule is not installed on this Mac, with the installer's command and Copy.
+
+**Another machine.** Connect to it opens the remote screen, which is the connect screen drawn on the first run's card: one address field, Continue, and Use this Mac. It takes either kind of address:
+
+- **A plain address:** main runs the connect check. When Hercule there is set up, the user signs in. When it is not, the field says to run `hercule setup-url` on that machine and paste the address it prints. Every other outcome shows the connect check's own line.
+- *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Where the remote screen differs from the book:
+  - Use this Mac shows only when the user opened the remote screen from the welcome, and goes back to it. It does not show on a runner, which never offers Open the office. It also does not show when main has already saved a controller elsewhere that waits for its setup URL, because going back to this Mac would need a channel that forgets the saved URL.
+  - The line for a controller that is not set up names its address, host and port, such as `build-box-1:4937`. The book names the machine, and the app knows only the address.
+- **A setup URL:** main splits it into the origin and the token, checks and saves the origin, and keeps the token in memory across the reload ([The controller URL and the connect screen](#the-controller-url-and-the-connect-screen)). The four steps then run on that machine.
+
+This Mac then runs nothing of Hercule. A remote controller runs the same four steps. The providers step lists the controller's own runner, which `controller.read` names in `localRunnerId`, and every "this Mac" in the copy becomes that runner's name. The project step still picks a folder on this Mac, only to read its remote.
+
+**Where the setup token comes from,** in this order:
+
+1. the setup URL the user pasted, which main keeps in memory until the token is used, and then forgets;
+2. `hercule setup-url`, when the origin of the address it prints is the saved controller's. After a relaunch, a remote controller's pasted token is gone, and the origin check keeps main from sending that controller this Mac's token instead;
+3. otherwise, the user pastes the setup URL, as for another machine.
+
+The token crosses the bridge once and is never stored. Each start of Hercule mints a new token, so a token can be stale by the time it is used. When `setup.complete` refuses it, Try again asks for the token again.
+
+**The four steps.** A ladder beside the card numbers them; a finished step shows a tick.
+
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* As the book draws it in variant B, the ladder floats on glass at the top of the window, over the room. It shows from the account step on, and not on the welcome or the remote screen. Which step shows is decided from the controller's state when the step opens, and the step then stays until the user moves on, even when its fact turns true. A login that ends on the providers step leaves the user there to press Continue. Continue, Do this later, Skip for now and an added project decide again. An error that comes from the controller, such as a refused GitHub token or a failed login, shows the controller's own message, where the book draws an example message.
+
+1. **Account.** `setup.complete { username, password, timezone }`. The username is prefilled with the Mac account name, which main passes. The timezone comes from the Mac, with a Change link. The password hint and its error come from the contract's `MIN_PASSWORD_LENGTH`. Then the app stores the token, writes the first-run record, and marks the web's onboarding steps done ([./14-web-app.md](./14-web-app.md) §Onboarding and first run). *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The record comes straight after `setup.complete`, so a quit before the onboarding write still resumes the first run. When a write after `setup.complete` fails, Create account tries again, and first asks the controller whether setup already went through, because the controller refuses a second `setup.complete`. *(Amended 2026-10-03, [#313](https://github.com/theagenticage/hercule/issues/313).)* A quit or a relaunch after a failed onboarding write resumes the first run past this step, so leaving All set marks the onboarding steps done when the settings still lack any, before it clears the first-run record.
+2. **Providers.** The provider instances of the controller's runner, with whether each harness is on that machine. Each has its own Log in, done in the app with `provider.login` and `provider.submitLoginCode`: Claude Code takes a pasted code, and Codex shows a device code. The device code's expiry comes from the reply's `expiresAt`, never from a number in the app. The login's end arrives on the `provider` live topic, so the app does not poll. "Open sign-in page" opens the vendor's page in the default browser. When no harness is found, each offers Install (`runner.installHarness`). The same login backs the draft's Log in button ([Design system](#design-system), **A new thread**).
+   - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Where the book draws what is not data, the app draws what it knows:
+     - Each row's second line says where the harness is on the runner, as `@hercule/client-core`'s provider row reads it: its path, in monospace, or "installed", "not installed", or why the runner cannot drive it. The book's "Anthropic's coding agent" is a description no record holds.
+     - While Install runs, its button reads "Installing…" with no spinner, because rule 2 of [Rules](#rules) allows a spinner only while Hercule starts or a login waits.
+     - Copy selects the code where it is drawn and runs the browser's copy command. `navigator.clipboard.writeText` needs the `clipboard-sanitized-write` permission, and main grants the renderer none ([Security baseline](#security-baseline)); the copy command needs only the click. The button then reads "Copied", or "Copy failed", so the user knows to select the code by hand.
+     - The draft's Log in opens the login dialog with the login already started, because the user has just asked for it once.
+     - Until the controller's runner has joined, the step has no rows. It says that it waits for the runner, and offers Do this later. The book has no such state, because its runner is always there. The runner's arrival comes over the live connection, so the app does not poll.
+3. **GitHub.** Sign in with GitHub is the default. The app calls `connection.startDeviceFlow`, shows the user code with Copy, opens its `verificationUri` with Open GitHub, then calls `connection.pollDeviceFlow` at the interval the reply gives until it answers `done`. `pending` and `unreachable` keep waiting, `slow-down` waits longer, and `expired`, `denied` and `failed` show their line with Start again. *(Amended 2026-10-03, [#313](https://github.com/theagenticage/hercule/issues/313).)* The app also ends the wait itself when the code's `expiresAt` passes, even if a poll failed or no reply said `expired`: it sends no further poll and shows the `expired` line with Start again. The step sends no labels. "Paste a token instead" opens the token form, sent with `connection.create`; its "Create one on GitHub" opens GitHub's classic token page with the scopes of [./08-events-and-connections.md](./08-events-and-connections.md) §9.3 already ticked.
+   - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Once connected, the step names the account and the host it is on, `github.com`, where the book counts the account's repositories: no record holds that count. Its line leaves out the book's "Triage reads it a few times a day", because no copy names a time Triage reads GitHub (see **The room** below).
+4. **Project.** Choose a folder opens the native folder dialog. Main runs `git` once in the folder, to read its `origin` remote and current branch, and answers with the remote, a repository with no remote, or a folder that is not a git repository. The project name comes from the folder's name, and the setup command is optional. Adding calls `project.create`, then `resource.create { kind: "repo", remote, setupCommand, projectIds }` with the GitHub Connection, after checking the remote with `client-core`'s `isClonableRemote`. The folder itself is never changed: threads clone from the remote into workspaces of their own. The same form backs the project picker's New project row.
+   - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* What the form draws, where it differs from the book:
+     - Choose a folder has no "or drop one here": taking a dropped folder needs a bridge channel that reads its path, which the app does not have. The line is left out rather than drawn with nothing behind it.
+     - The folder's card names the folder by its name, in monospace as the book sets its path, with where its repository is hosted and its branch on the line under it.
+     - Main also answers when `git` could not read the folder, with git's one line. The form treats it like a folder that is not a git repository: it says which, and offers "Create <name> without a repository".
+     - A repository with no remote, or with a remote that `isClonableRemote` refuses (such as a path on this Mac), asks for the remote URL, and still shows the project name and the setup command, where the book shows only the remote.
+     - With more than one GitHub Connection, the form clones through the first, and says which under the fields.
+     - When the project is created but its repository is not, the form says why: Add project sends the repository again, and "Continue without the repository" goes on with the project as it is. Closing the picker's dialog then opens no draft. The project is in the picker's list, and joins the sidebar with its first thread, as every project does.
+
+**Putting a step off.** Providers has "Do this later", and GitHub has "Skip for now". A step put off shows a pause mark in the ladder where a finished step shows a tick, and All set says what is missing and where to finish it. When GitHub was put off, the project step still picks a folder to name the project, but creates the project without a repository, and says so; "Connect GitHub now" goes back to the GitHub step. A project without a repository works: its threads run without a checkout ([./14-web-app.md](./14-web-app.md) §Onboarding and first run).
+
+**All set** shows the furnished room and a summary card, one row per step. "Start your first thread" opens the New thread draft in the new project and clears the first-run record. Without a logged-in provider there are no desks, and the screen offers "Log in to a provider" instead. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* "Log in to a provider" also clears the first-run record and opens the draft in the new project. The draft cannot start, and its Log in button opens the login ([Design system](#design-system), **A new thread**), so the login lives in one place. *(Amended 2026-10-03, [#313](https://github.com/theagenticage/hercule/issues/313).)* Either button first marks the web's onboarding steps done when the settings lack any (see **Account** above). When that write fails, All set shows the controller's message and keeps the first run, and the button tries again.
+
+**Where the first run keeps its place.** A step's done state comes from the controller:
+
+- account: setup is complete;
+- providers: an instance is logged in on the controller's runner;
+- GitHub: a GitHub Connection exists;
+- project: a project exists.
+
+The app's settings file keeps only what the controller cannot answer: that a first run is in progress for the saved controller, and which steps were put off. Both are written when `setup.complete` succeeds and cleared when the user leaves All set. The controller stores nothing new. Quitting during the first run and launching again resumes at the first step that is neither done nor put off; `client-core` decides which.
+
+**The room** is a still subset of the Office, which stays post-v1. It is built so the Office can grow from it:
+
+- It has the room shell; one wing for the controller's runner; the user's desk and hat stand; the lobby club chair with Hercule, the assistant setup creates, asleep in it; Triage's desk and its tube from the GitHub plaque; and the first thread's desk.
+- It has no live updates, no filing cabinets, no other wings and no capsules in the tube.
+- The wing has one desk per slot of the runner (`maxConcurrentSessions`, [./03-controller-and-runners.md](./03-controller-and-runners.md) §5.3), up to the 8 a wing holds. Its plate gives the runner's name and the real count.
+- Each finished step adds the pieces it created. B's camera then moves to a close shot of them, one shot per step, framed as in the prototype.
+- *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The pieces follow the controller's state, as the steps' done states do. So the wing's desks arrive as soon as a login ends, while the providers step still shows, where the book adds them when the user leaves the step. Before sign-in, the runners cannot be read, so the room on the found and account screens has no wing, where the book draws an empty one.
+- Triage is drawn, but no copy names a time it reads GitHub, because Triage is not built yet ([#91](https://github.com/theagenticage/hercule/issues/91)).
+- Hercule's face is the one derived from its name, like any assistant's, until stored looks arrive (see [Post-v1](#post-v1)). The book draws it with a fixed look.
+
+Motion, as the book's Motion table draws it ([Rules](#rules), rule 2):
+
+- the veil's opacity lifts when Hercule answers, and the user can sign in or set it up there. The remote screen keeps the room dark while it waits for a controller's setup URL, as the book does *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*;
+- the camera moves one layer's `transform` over `--dur-3`;
+- after the camera stops, new pieces settle from 14px above, with `transform` and `opacity` over `--dur-3`;
+- a spinner shows only while Hercule starts or a login waits;
+- nothing else moves. With Reduce motion, the room is redrawn in place.
 
 ### Content-Security-Policy
 
@@ -223,6 +353,7 @@ So the released app is signed with one certificate for every build ([Security ba
   - `--user-data-dir=<folder>` gives each test its own folder. It exposes nothing: a program that can write a folder it names can write the app's own.
   - `-ApplePersistenceIgnoreState` followed by `YES` keeps macOS from offering to reopen windows after a test stops the app. The app does not use window restoration.
 - **The refusal applies only while the Node inspector is closed.** An open inspector already gives full control of main, so refusing arguments would add nothing. The release package's fuse keeps the inspector closed, so there the refusal always applies. The test package runs with the inspector open, which lets Playwright pass `--remote-debugging-port` and the tests pass `--use-mock-keychain`.
+- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **`--hercule-binary=<path>` is a test switch like `--use-mock-keychain`.** It names the binary main runs in place of `~/.local/bin/hercule` ([The first run](#the-first-run)). It is not on the allow-list, and main reads it only while the inspector is open. So a released app never lets anyone choose which binary main runs, and the end-to-end tests can run a stand-in.
 
 *(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* **The released app is signed with one self-signed code-signing certificate,** the same for every build, until an Apple Developer ID replaces it together with notarization. The certificate keeps the app's designated requirement the same from build to build, so the Keychain keeps trusting the app after an update ([Auth and the token](#auth-and-the-token)). How the certificate is made and stored is in [docs/signing-certificate.md](../signing-certificate.md).
 
@@ -251,16 +382,25 @@ So the released app is signed with one certificate for every build ([Security ba
 
 The first milestone's channels. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* `goMenu.set` is added, because the Go menu lists the threads the sidebar shows and only the renderer knows them. `waitingThreads.set` replaces `badge.set`, `notification.show` and `notification.close`: the renderer sends every thread waiting on the user, and main decides the badge and which notifications to show or remove. Main then keeps which notifications it has shown, so a reload of the page cannot show them again, and main knows whether the user is signed in before the page sends anything, so a page still leaving the shell after a sign-out cannot bring them back.
 
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run adds the channels from `localController.find` to `firstRunProgress.read` / `firstRunProgress.save` below, and builds `link.open`. Main finds and starts Hercule on this Mac by running the installed binary, `~/.local/bin/hercule`, with no shell, no `HERCULE_*` variable and no `--home`, and decodes its `--json` output with a schema of its own, so the app links no `@hercule/service` (ADR 0037). `controllerUrl.save` also takes a setup URL, the controller's origin followed by `/setup?token=<token>` as `hercule setup-url` prints it. When that controller is not set up, main keeps the token in memory only, for `setupToken.read` to return once. `controllerUrl.save` saves a controller that is not set up, as it saves one that is, and no longer opens the browser for it; its outcome `SetupIncomplete` is gone.
+
 | Channel | Direction | Purpose |
 |---|---|---|
 | `token.read` / `token.write` | renderer → main | the stored token (see [Auth and the token](#auth-and-the-token)) |
-| `controllerUrl.read` / `controllerUrl.save` | renderer → main | the saved controller URL; checking a new one and saving it. Not the public API's `controller.read`, which describes the controller itself |
+| `controllerUrl.read` / `controllerUrl.save` | renderer → main | the saved controller URL; checking a new one, a controller's origin or a setup URL, and saving it. Not the public API's `controller.read`, which describes the controller itself |
+| `localController.find` | renderer → main | at a launch with no controller URL saved: runs `hercule service status --json`~~, and saves the controller's URL when one answers at the address it reports. Answers `Saved`~~ and reports what it found, saving and checking nothing. Answers `Found` (the controller's origin the status printed, which the renderer then saves through `controllerUrl.save`) *(amended 2026-10-03, [#313](https://github.com/theagenticage/hercule/issues/313): a read that saved would be a write behind a read)*, `Runner` or `NotFound` (with the status command's error line, if any). Waits for a `localController.start` that runs |
+| `localController.start` | renderer → main | runs `hercule service install --json` with the `PATH` of the user's login shell, then waits up to 30 seconds for Hercule to answer and saves its URL. Answers `Saved`, `Runner`, `NotInstalled`, `StartFailed` (one line), `NoAnswer` (the origin and the logs folder), or the connect check's refusal as `controllerUrl.save` answers it (`Redirected`, `NotController`, `OriginNotAllowed`, `PreflightRefused`), which stops the wait at once. Installs nothing over a runner or over a Hercule that runs already; waits for a `localController.find` or `localController.start` that runs; stops an install that runs for 90 seconds |
+| `logsFolder.show` | renderer → main | opens in Finder the logs folder the binary last reported. The renderer passes no path |
+| `setupToken.read` | renderer → main | the saved controller's setup token: the one from a pasted setup URL, once, else the one `hercule setup-url` prints on this Mac when it names the saved controller's origin. Answers `Token` or `PasteNeeded` |
+| `macUser.read` | renderer → main | the name of the user's account on this Mac, for the first run's username field |
+| `folder.pick` | renderer → main | the system's folder dialog, and the picked folder as `/usr/bin/git` describes it: `Cancelled`, `Repository` (its `origin` remote and branch), `NoRemote`, `NotGit` or `GitFailed` (git's error line). Main removes the user name and password from an `http:` or `https:` remote before it answers, because an `insteadOf` rule in the user's git config can put a token there, and the remote is saved on the controller |
+| `firstRunProgress.read` / `firstRunProgress.save` | renderer → main | the first-run steps the user put off, kept in the settings file for the saved controller; saving another controller's URL removes them |
 | `runnerIdentity.read` | renderer → main | the local-runner probe |
 | `goMenu.set` | renderer → main | the threads the sidebar shows, top to bottom, for the Go menu |
 | ~~`badge.set`~~ | ~~renderer → main~~ | ~~the dock badge count~~ |
 | ~~`notification.show` / `notification.close`~~ | ~~renderer → main~~ | ~~a thread's notification, keyed by session id~~ |
 | `waitingThreads.set` | renderer → main | every thread waiting on the user, for the dock badge and the threads' notifications |
-| `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser. Not built yet: it arrives with the draft's Log in button, which is its first caller. A link the user clicks already opens in the default browser without it (see [Security baseline](#security-baseline)) |
+| `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser. ~~Not built yet: it arrives with the draft's Log in button, which is its first caller.~~ Built with the first run *(2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. A link the user clicks already opens in the default browser without it (see [Security baseline](#security-baseline)) |
 | `firstScreen.report` | renderer → main | the frame that draws the first screen, fonts included, has reached the window, so main can show the window (see [Native behaviour](#native-behaviour)) |
 | `thread.open` | main → renderer | a notification click or a Go menu item asks for a thread |
 | `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread or Send |
@@ -298,6 +438,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - The menus, in order: the app menu, File, Edit, Go, Thread, Window. The development build adds View, with Reload and Toggle Developer Tools, after Edit.
   - File › New Thread `⌘N`.
   - Thread › Send `⌘↵`. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It is always enabled. It sends what the open thread's composer or the draft holds, as ⏎ in the message field does, and does nothing when there is nothing to send.
+  - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Go › Office `⌘⇧O`, the first item of Go, opens [the Office](#the-office).
   - Go › the first nine threads of the sidebar, `⌘1` to `⌘9`, in sidebar order. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* Each thread is listed once, by its title: a waiting thread is listed where "Waiting on you" shows it, and a thread a "more" row hides is not listed. With no thread, and while signed out, Go holds one dimmed "No Threads".
   - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says. Choosing a thread in Go with the mouse closes the picker.
   - Sign Out, in the app menu.
@@ -327,6 +468,14 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 ## Design system
 
 **The pixel reference.** The pixel reference is the Crew Bureau book and its desktop pages, in [`docs/design/crew-bureau/`](../design/crew-bureau/). The folder is a copy of `prototype/design-systems-2/c1-bureau/` at commit a130074e on the `prototype/design-systems` branch, kept byte for byte and never edited. Its pages link to two sibling folders, copied the same way beside it: `docs/design/shared/` (the book's frame scripts and the brief) and `docs/design/c0-crew/` (the original Crew, for the book's before-and-after frames). Open `docs/design/crew-bureau/index.html` in a browser to read the book.
+
+*(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **The pixel reference is now the book's second edition,** in [`docs/design/crew-bureau-2/`](../design/crew-bureau-2/). Open `docs/design/crew-bureau-2/index.html` to read it. The second edition started as a copy of the first, and #313 changed it in three ways:
+
+- The Office's scene styles moved to `office.css`, and `office.js` shares its drawing code, so the first run furnishes the same room. The Office page draws the same pixels as before.
+- It adds the First run chapter and its page, `desktop/first-run.html` ([The first run](#the-first-run)).
+- `crew.js` and `desktop/session-empty.html` gain the fresh install: Hercule's look, and the draft's starter threads and intake note (**A new thread**, below).
+
+The first edition stays in `docs/design/crew-bureau/`, byte for byte as above, as the record of what #275 was built from. Everything below that names "the book" means the second edition, and `pnpm compare:bureau` compares the app with it.
 
 - Where this text and the pages disagree, the pages decide a measurement and this text decides a behaviour. This is spec 14's rule for its prototypes.
 - Behaviour comes from [./14-web-app.md](./14-web-app.md): §App shell (the Threads face), §The thread surface, and §The composer is the thread's configuration.
@@ -386,6 +535,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - Asleep and away threads are not counted, so a fleet with hundreds of old threads reads "3 working · 2 waiting · 4 idle", not "470 idle".
   - The book's "paused" count is left out, because no thread is paused yet.
   - Every count shows at 0. The waiting count takes `--you-ink` only above 0, because the attention hue means something needs the user.
+- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **New thread, Search and Office share one row** at the sidebar's top. The book draws New thread and Search as two rows, and puts the office's row in the Hercule face's Work section. The desktop has only the Threads face, and the Office belongs to both faces, so its way in sits in the part of the sidebar both faces share. New thread keeps its label and `⌘N`. Search (`⌘K`, still inert) and Office (`⌘⇧O`) are icon buttons, each with a tooltip that gives its name and shortcut. The Office button shows as pressed while the Office is open.
 - **Search `⌘K`, the hide-sidebar button and Settings are drawn and inert** until their slices build them, like the composer's `+` and voice buttons: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered.
 - **The thread list reads every page** of `session.query`, so no thread is left out. The web app reads the first 500.
 
@@ -423,14 +573,14 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 
 **A new thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread creation and the book's `session-empty.html`, with these differences:
 
-- **New thread opens the project picker,** from File › New Thread `⌘N` and the sidebar's New thread row. It is a glass `<dialog>` over a scrim, 520px wide and 18vh from the top. Spec 14 draws it `--raised` with a border; Bureau draws every surface that floats as glass. ↑↓ move and wrap, ⏎ picks, Esc closes, and `⌘1` to `⌘9` pick directly. There is no "New project" row, because the desktop cannot create projects. With no projects there is nothing to pick, so New thread opens the draft with no project at once.
+- **New thread opens the project picker,** from File › New Thread `⌘N` and the sidebar's New thread row. It is a glass `<dialog>` over a scrim, 520px wide and 18vh from the top. Spec 14 draws it `--raised` with a border; Bureau draws every surface that floats as glass. ↑↓ move and wrap, ⏎ picks, Esc closes, and `⌘1` to `⌘9` pick directly. ~~There is no "New project" row, because the desktop cannot create projects. With no projects there is nothing to pick, so New thread opens the draft with no project at once.~~ *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The last row is New project, as in spec 14. It opens the first run's project form ([The first run](#the-first-run), step 4) as a glass dialog, and a project it adds opens the draft in that project. With no projects, the picker has two rows: No project, which opens the draft with no project, and New project. That way a user with no projects can still start a thread, as before. The dialog has no Connect GitHub button, because the desktop app connects GitHub only in its first run: without a GitHub Connection, the form says to connect GitHub in the web app, and adds the project without its repository. ~~The dialog reads the Connections as it opens, and a failed read shows in the dialog, with the screen behind it left as it was.~~ *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell reads the Connections as it opens, with the sidebar's records, so the dialog never waits for them.
 - **A draft can have no project.** The new-thread screen with no project is a draft with no project, and the thread it starts has none. The "No project" header's `+` opens it. Its heading is "What should the agent do?", and it has no start cards.
 - **The lip uses [CONTEXT.md](../../CONTEXT.md)'s words, in the UI face.** The book's lip says "New worktree" and sets the branch in monospace. The desktop says "New workspace" or "Main workspace", as the web's workspace menu does, and sets the branch in the UI face (item 2 above). There is no rule between the workspace and the branch, where the web draws one, because the book draws none.
 - **The machine menu has no "Add machine →" foot,** because the desktop has no machine screen to open. The foot keeps its sentence: "The thread runs where you say; nothing moves it later."
 - **The machine menu leaves out retired runners,** where spec 14 lists every machine. A retired runner can never host a thread again, and runners are never deleted, so the menu would fill up with machines that are gone. A started thread still shows the retired runner it ran on. The web app does the same, because both read `buildRunnerMenu` in `@hercule/client-core`.
-- **A draft that cannot start** shows "Can't start yet." and the reason in place of the sentence, and Send is off. Spec 14's Log in button is not drawn yet.
+- **A draft that cannot start** shows "Can't start yet." and the reason in place of the sentence, and Send is off. ~~Spec 14's Log in button is not drawn yet.~~ When the reason is a provider instance that is not logged in, spec 14's Log in button follows the reason. It opens the same login as the first run's providers step ([The first run](#the-first-run), step 2), in a glass dialog, and the draft can start once the login ends *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
 - **A new thread joins only a ready workspace.** A workspace label's `+` and the thread header's `+` show only while the workspace is ready, because the controller refuses to start a thread in a workspace that is still being set up, failed, was deleted or was lost. A draft whose workspace stops being ready while it is open cannot start, and says why: "The workspace it joins could not be set up". Neither can a draft whose machine is retired after the user picked it: the reason is "moss is retired", and the lip's machine reads "moss · retired". The web app does the same, because both read `@hercule/client-core`.
-- **The start cards** are the book's "Start from Intake" section under the lip, which spec 14 does not have. They are up to three open Tasks of the draft's project, the most urgent first. Each card shows:
+- **The start cards** are the book's "Start from Intake" section under the lip, which spec 14 does not have. ~~They are up to three open Tasks of the draft's project, the most urgent first.~~ *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* They are up to three open Tasks of the draft's project, the most urgent first and newest first within one priority. Each card shows:
   - the GitHub mark when the Task came from GitHub, else the tasks glyph;
   - "Proposal" when the Task has the `proposed` label, else "Task";
   - its priority as bars at the right: 4 for urgent, drawn in `--fail` as the book does, 3 for high, 2 for normal, 1 for low;
@@ -442,6 +592,13 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - "Start working on task <id>: <title>" otherwise.
 
   The thread's agent reads the rest itself, with `gh` or `hercule task read`. The message stays short, and text written outside Hercule, such as an issue's body, is never sent as the user's own words. The line goes after a blank line when the field already holds text, and the click focuses the field. The section shows only when the project has open Tasks. The book's "2 new events" is not drawn, because nothing counts new events.
+- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **Starter threads take the start cards' place while Intake is empty,** as the book's `session-empty.html?state=first` and `?state=first-no-repo` draw them. A new user then still has something to start from.
+  - Three starters sit under "Or start from one of these", each with the book's glyph and title, such as "Get to know it" or "Something to plan". `@hercule/client-core` picks the set:
+    - a project with a repository gets starters about code, such as "Walk me through how webshop is put together";
+    - a project without one gets starters about knowledge work: "Make me a short presentation about …", "Research … and summarise what you find, with sources" and "Write a one-page plan for …". Hercule is for work that is not code too, and a thread in such a project runs without a checkout.
+  - Picking a starter fills the composer and focuses it. It does not send, so the user can finish the sentence.
+  - Under the starters, one line says what fills Intake: Triage brings what needs work from GitHub, or, without a GitHub Connection, the line says to connect GitHub. The line names no time of day, because Triage is not built yet ([#91](https://github.com/theagenticage/hercule/issues/91)).
+  - Once Intake holds anything, the draft shows the start cards as above.
 - **The open draft is a row in the sidebar,** as the book draws it: "New thread", with its workspace and machine on the second line, and "draft" at its end. It is the last row of the workspace it joins, as its tab is the header's last. A draft that starts a new workspace has a group of its own under the project's header, and a draft with no project is the last row of "No project".
 - **The draft's text and picks are kept while the app runs,** like a thread's Message Draft, one draft per project and workspace.
 
@@ -450,10 +607,96 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 - **Kept as they are:** `tokens.css` and the font files. They are the design system's source. Token names match the web app's (`--bg`, `--surface`, `--raised`, `--ink`, `--muted`, `--faint`, `--line`, `--line-soft`), except that `--attn` becomes `--you` / `--you-ink`.
 - **Rebuilt one component at a time:** `system.css` is never copied whole. Each React component takes the rules it needs, so no CSS ships that no component uses.
 - **Rewritten as typed modules:** `crew.js` becomes typed modules for faces, poses, icons and marks. Components render their SVG as React elements, never through `innerHTML`.
+- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **A button that cannot act yet is drawn at half opacity,** in its own colours, as the book's first-run page draws it, and takes no hover or press. Before the second edition the book drew no disabled button, and the app followed macOS: the button lost its accent and its label turned faint. This changes Sign in and the dock's buttons too.
 - **Self-hosted fonts:** fonts are served from the app bundle, and nothing is fetched from a third party.
   - Bricolage Grotesque is the UI face.
   - Limelight is used only for the wordmark and numerals.
   - Recursive is used only for code.
+
+## The Office
+
+*(Added 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The Office draws the user's threads as colleagues at work in a 3D Bureau office. Each thread has a desk in its project's room. It walks to the user's desk when it waits on them, and to the Lounge when it is idle. One look shows what the fleet is doing, and the Office stays quiet enough that no fan spins ([Performance](#performance)).
+
+- **The pixel reference** is option A, the Bureau floor, of the 3D office prototype on the branch `prototype/office-3d`, in `apps/desktop/src/renderer/specimens/office-prototype/`. Its README lists what it does, what it costs and its rough parts. The prototype stays on its branch. v1 moves the code it keeps to `apps/desktop/src/renderer/office/`, not to `screens/office/`, which holds the first run's room.
+- **The first run's room stays the still 2D drawing** it is ([The first run](#the-first-run)). The two are drawings of one Office. A later change can draw the first run's room as a still view of the 3D Office.
+- **The words** are [CONTEXT.md](../../CONTEXT.md)'s: the Office, and the Office Map it is built from.
+
+**The way in.**
+
+- The sidebar's Office button, in the top row beside New thread and Search (see **The sidebar** in [Design system](#design-system)), and Go › Office `⌘⇧O`, the first item of the Go menu.
+- The Office is the route `/office`, drawn in the main pane beside the sidebar. ~~The selected colleague is in the URL, `/office?session=<id>`, so a reload keeps it.~~ The thread open in the drawer is in the URL, `/office?session=<id>`: a sidebar row, the Go menu and a notification open a thread in the drawer by going there (next point), and the sidebar marks the row of the thread the drawer shows *(amended 2026-10-04, [#332](https://github.com/theagenticage/hercule/issues/332): the router uses memory history, so nothing in the URL outlives a reload, and the window reloads only in the development build or when the user signs out or changes controller, where the selection should go)*.
+- While the Office is open, a thread clicked in the sidebar, chosen in the Go menu, or opened from a notification selects its colleague and opens its thread in the drawer, without leaving the Office. A thread with no colleague (see below) opens its thread screen, as it does from any other screen.
+
+**Who is in the Office.** `decideOfficeSeating` in `@hercule/client-core` decides it, from the records the sidebar already reads: threads, projects, workspaces and runners. The Office reads nothing else, and adds no operation to the API.
+
+- The Office seats the threads the sidebar's foot counts: those whose pose is working, waiting or idle. Asleep and away threads have no colleague, so hundreds of old threads never fill the Office. The sidebar still lists them.
+- Each project with a seated thread has a room. Rooms keep the order in which the controller lists the projects, and are not sorted by latest activity as the sidebar's projects are: a room is a place, and a place that moves whenever a thread works cannot be found again. The threads with no project share one room, "No project", which comes last.
+- Inside a room, desks are grouped by workspace, in the sidebar's workspace order, so threads that share a working copy sit side by side. Inside a workspace the oldest thread sits first, so a desk keeps its place when a new thread starts.
+- A thread with an open Request stands in the queue at the user's desk, longest waiting first. An idle thread sits in the Lounge. Both keep their desk, to walk back to.
+- A colleague wears its thread's look: `buildLook` seeds it with the session id, as for the sidebar's faces, so a thread's face and its colleague match.
+
+**The Office Map.** The Office is built from a plain, typed `OfficeMap` value in the renderer, not from code that knows the Bureau. v1 has one map, the Bureau. The value holds:
+
+- its id and its name;
+- the name of its growth strategy: `"gallery-wings"`, wings of rooms along the Gallery, the main corridor;
+- what a wing and a room stand for. In v1 a wing stands for nothing (`wing: "none"`) and a room for a project (`room: "project"`). A map of a code base would set `wing: "project"` and `room: "module"`;
+- the furniture at each desk;
+- the fixed rooms, each with its furniture and the spots that furniture offers: a seat, a place to stand, a place in the queue.
+
+The growth strategy, the furniture's geometry and the animations stay in code. The value has no schema, and nothing imports or stores a map: both arrive with the Office Map system ([Seed: the Office Map system (#336)](https://github.com/theagenticage/hercule/issues/336)).
+
+**The fixed rooms:**
+
+| Room | What happens there |
+|---|---|
+| Your Office | The user's desk, and the queue in front of it |
+| The Lounge | Idle colleagues sit there |
+| The Triage room | Triage's desk and the case board. The desk stays empty until Triage exists ([#91](https://github.com/theagenticage/hercule/issues/91)), and Triage's sessions then sit there. The first run's room draws Triage at that desk, so Triage shows in the first run and not yet in the Office |
+| The Lobby | The front door, from the street |
+
+The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room are left out, because nothing happens in them yet.
+
+**Room names and plaques are set in the UI face.** The prototype set them in Limelight, which is used only for the wordmark and numerals ([Design system](#design-system)), and room names in it are hard to read.
+
+**Selecting a colleague:**
+
+- Hovering over a colleague makes it perk up and shows its name tag.
+- Clicking a colleague glides the camera to it and follows it, and opens its card. The card shows the colleague's face, its thread's title and pose, its open Request with the Requests dock's answers, and its room, machine and model. The card's words are `@hercule/client-core`'s, as the dock's are.
+- Answering from the card answers the Request as the dock does. The colleague lowers its hand and walks back to its desk.
+- Open thread on the card, or ⏎, opens the thread screen as a drawer from the right, over the Office. The drawer is the thread screen itself, with its transcript, Requests dock and composer.
+- The top bar holds the overview, the Rooms directory and one count per pose. Each count selects the next colleague in that pose.
+
+**Keys:**
+
+| Key | What it does |
+|---|---|
+| Esc | Steps back one level: the drawer, then the card and the selection, then the room |
+| Tab / ⇧Tab | Selects the next or previous colleague waiting on the user, longest waiting first. Only while the focus is on the Office itself: in the top bar, the card, the drawer and the menus, Tab moves the focus as everywhere else |
+| ⏎ | Opens the selected colleague's thread in the drawer |
+| Q / E | Turns the building 45 degrees |
+| `=` / `-` | Zooms in and out |
+| F | Finds the followed colleague again |
+
+**The pointer,** a Mac trackpad first and a mouse second: two-finger scroll pans; a pinch zooms toward the pointer, as a mouse wheel does; a left drag grabs the floor; a right or ⌥ drag orbits; a double click on the floor glides there. Walls between the camera and the room in view drop to the dado rail, so the room can always be seen.
+
+**Fixed settings.** v1 has no controls. The theme follows the app's theme, and the light follows the theme: day in a light theme, evening in a dark one. Name tags are the prototype's Smart setting, and its characters are Bean. Its quality is sharp on a Retina display, with the sun's shadows drawn once and redrawn only when the building changes, and no ambient occlusion, which draws the whole Office a second time in every frame. Its liveliness is Calm, and Still when the Office stands still ([Performance](#performance)). While the Office is open, the window draws no blur, and its glass surfaces draw solid ([Rules](#rules), rule 5).
+
+**Printer rage** is the Office's one activity. At random, and at most once every 5 minutes for the whole Office, a working colleague walks to the printer, kicks it and walks back. A colleague that waits on the user never goes. The printer is furniture in the Office Map that offers a spot and an animation, the pattern later activities follow. It never happens while the Office stands still. A trigger on a thread's failed tool calls is left to the Office Map system, because it could fire too often.
+
+**The colleagues' looks:**
+
+- Hats sit on the head, not painted on it.
+- Two more of the eight sets of accessories in `WARDROBE` (`apps/desktop/src/renderer/faces/look.ts`) gain a tache, so four of eight wear one. The sidebar's faces wear the same looks, so the book's ACCESSORIES table in `crew.js` changes with it, and `pnpm compare:bureau` keeps comparing equal looks.
+- The Office draws details the sidebar's faces have no room for: waistcoat buttons, a watch chain, a pocket square, a flower in the buttonhole, spats. They never contradict the face: a detail is chosen from the look, as an accessory is.
+
+**What v1 leaves out:**
+
+- the prototype's controls panel and Simulate;
+- the performance readout, which only a development build shows;
+- the Tower and the Campus, whose code stays on the prototype branch;
+- event flow and the pneumatic tubes ([Revisit event flow and the tubes in the Office (#331)](https://github.com/theagenticage/hercule/issues/331));
+- the book's "Office: List | Floor" switch, because the List is All sessions, which is post-v1;
+- assistants and the sessions of workflow runs, because the app lists only threads.
 
 ## Performance
 
@@ -465,6 +708,8 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 - **Budgets:**
   - Raising a budget is a deliberate change, recorded here with its reason.
   - A budget is lowered once measurements show room to spare.
+
+*(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* **The Office's budgets gate the Office.** A change to the Office that misses one of [its budgets](#the-offices-budgets) does not merge. A 3D view that draws frames all the time is the one part of the app that can spin a fan and drain a battery, so its cost is held from its first merge, not by a later pass. The rest of the app keeps the rule above.
 
 ### Baseline
 
@@ -493,7 +738,7 @@ The physical footprint of an empty app, measured later with a visible 1440 by 90
 What the numbers show:
 
 - **Idle faces are not free.** Bureau starts each face's blink at a different time, so with 40 faces on screen one of them is almost always blinking. That keeps the GPU process awake about 16 times as often as a still page, and wakes the renderer about 30 times a second while nothing happens.
-- **Glass costs almost nothing on this machine.** Composer glass while streaming measured within noise of no glass.
+- **Glass costs almost nothing on this machine.** Composer glass while streaming measured within noise of no glass. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* That holds over a page that changes little. Over the Office's canvas, which changes with every frame, glass costs much more (see [Rules](#rules), rule 5).
 
 ### Budgets
 
@@ -509,15 +754,45 @@ These are starting budgets. The first performance pass measures the real thread 
 | Budget | Limit |
 |---|---|
 | Launch | The window shows within 500 ms of spawn (warm), and the last open thread's transcript paints within 800 ms |
-| Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one |
+| Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* [The first run](#the-first-run) starts short-lived commands: the `hercule` binary, the login shell once and `git` once per folder. Each exits or is stopped before the step that started it ends, and none stays running. The controller and runner it starts are Hercule's own processes, under the Service Unit, not the app's |
 | Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): with a text field focused and with none, because a focused field costs the GPU process 400 MB more while the glass blur is on screen; see [Measured](#measured))* |
 | Idle, window visible, no thread working *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): and no text field focused)* | Renderer: no wakeups from the app except the live connection's 30-second keepalive *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): and the change of a time label on screen, which rule 4 allows)*. GPU: at most 12 wakeups a second, the still-page level |
 | Idle, window visible, a text field focused | *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* No wakeups from the app beyond what a focused field costs an empty Electron window: at most 63 a second for the GPU and 4 for the renderer on the reference machine. The field's blinking caret keeps Chromium drawing frames, about 60 a second, however still the rest of the page is |
 | Idle, window hidden or minimized | Renderer: no wakeups from the app *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): except the live connection's 30-second keepalive, because rule 3 keeps the `session` topic subscribed while hidden)* |
 | Streaming | No task on the renderer's main thread longer than 50 ms while a turn streams at full speed. The paragraph being written is painted at most once per frame |
 | The thread list's live updates | *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* At most 16 ms of the renderer's main thread for each `session` nudge, with 500 threads in the list: one frame at 60 Hz. Past it, the list stops reading every thread again on a nudge and updates only the threads the nudge names, and [./14-web-app.md](./14-web-app.md) §Live model is amended in the same change |
-| Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts` |
-| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI |
+| Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts`. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run and its room are one chunk, loaded only on a first run, and are not on the check's list of first-screen routes. The first screen grows only by the bridge calls the first run adds, and by New thread's Log in button, the one part of the first run the app keeps on the draft itself *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. The project picker, the provider login and New project dialogs, and the draft's starter threads and Intake note are each loaded the first time they show, so they are not part of it |
+| Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Main imports the modules that run the Hercule binary, git and the folder dialog, which the first run and the New project dialog use, the first time they are used, so those modules add nothing to the startup file. The first run's IPC channels, their handlers and its progress in the settings file stay in the startup file, because main checks every IPC call against its channel's schema from launch. The 160 kB counts the startup file and every chunk it imports statically, because the bundler can move code the startup file shares with a lazy module into a chunk of its own. Main's build puts everything main imports statically into `index.js`, so today that is one file |
+
+#### The Office's budgets
+
+*(Added 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The reference Office is the reference machine above, with the Office open in a 1440 × 900 window at 2x, the Bureau map, 16 colleagues on 3 runners, and its light on Theme.
+
+| Budget | Limit |
+|---|---|
+| Frames | The colleagues' ambient life draws at most 30 frames a second, never 60 or 120. While the camera moves, and while the user drags or zooms, the Office draws at most 60, so a glide stays smooth |
+| Window hidden, minimized or covered | No frames, and no wakeups from the Office |
+| Standing still: on battery, or with Reduce motion | No frames while nothing happens, so the idle row above applies. A thread whose pose changes walks where its new pose takes it, and frames stop once it arrives |
+| CPU, window visible, on mains power | Averaged over 30 seconds, with the camera at rest: the renderer at most 17.9% of one core, the GPU process at most 12.3% of one core: the first measurement's highest readings plus 10% ([Measured](#measured)) |
+| Leaving the Office | Within 5 seconds, the app is back within the idle row: the Office releases its WebGL context and everything it built |
+| The first screen's JavaScript | The Office and three.js are a chunk of their own, loaded the first time the Office opens. The first screen grows only by the sidebar's Office button, the Go menu item and the route |
+| Memory with the Office open | Summed physical footprint at most 1,602 MB, and the renderer at most 181 MB: the first measurement's highest readings plus 10% ([Measured](#measured)) |
+| The Office's chunk | At most 241.5 kB gzipped: the first measurement plus 10% |
+
+- **The idle row and the Office.** The idle row allows the renderer no wakeups from the app and the GPU at most 12 a second. An Office drawing 30 frames a second wakes the renderer about 65 times a second, and the GPU process about 300 with the glass and about 430 without it, though its CPU then falls from 31% to 12% of one core. A living Office can never meet the idle row. The idle row is the limit for the app while nothing happens. On mains power, a visible Office is something happening: its colleagues live, and the CPU row above holds its cost instead. When the Office stands still, the idle row applies to it again.
+- **An unfocused window keeps its 30 frames a second** while it is visible. A living Office on a second screen is what the Office is for. Whether the Office should stand still in more cases is decided after the first measurement.
+- **Why the CPU limits are what they are.** The research for #332 ([#333](https://github.com/theagenticage/hercule/issues/333)) measured the prototype with the reference fleet, in % of one core for the renderer and the GPU process:
+  - as it was, with no cap: 88 frames a second, 45 and 85;
+  - capped at 30 frames a second: 16 and 31;
+  - capped, and without the glass: 14 and 12, so the glass costs the GPU process about 19;
+  - capped, without the glass, and at the prototype's Medium quality (no ambient occlusion, a pixel ratio of 1.5, shadows drawn every frame): 9 to 10 and 7 to 8;
+  - standing still: 0 and 0, with no wakeups;
+  - hidden, and covered by another of the app's windows: 0 frames. A minimized window was not measured, because the research's harness could not minimize its window; Chromium's source treats it as hidden.
+
+  The settings v1 ships (a pixel ratio of 2, shadows drawn once, no ambient occlusion), capped and without the glass, measured 9.1 and 7.7, the mean of two runs (from 7.6 to 10.6, and from 6.5 to 8.9).
+
+  The limits started above the capped reading, at 20% and 35%, so v1 could ship with the cap alone. The Office's first measurement in the app brought them down to its highest readings plus 10%, as every budget comes down ([Measured](#measured)).
+- **Memory and the chunk took their limits from the Office's first measurement** ([Measured](#measured)), because before it no measurement of the Office inside the packaged app existed, and a limit would have been a guess. The memory limits come from the highest of eight launches, so the swing between launches, about 7%, does not fail the next change. With the Office open, the app holds several times the app's own Memory row: almost all of it is the GPU process's, and bringing it down is [#370](https://github.com/theagenticage/hercule/issues/370). The first run's room already reads above the app's memory budget ([#330](https://github.com/theagenticage/hercule/issues/330)).
 
 ### Rules
 
@@ -533,25 +808,40 @@ These rules keep the budgets:
 2. **Nothing animates unless something is happening:**
    - Faces are drawn still in their pose everywhere. Bureau's idle blink is left out of the first milestone, because of the measurement above. It comes back once research finds a way to draw it within the idle budget (see [Post-v1](#post-v1)).
    - Only one continuous animation is allowed: the working pose of the face beside the open thread's running turn, while that turn runs. The sidebar and every other list show still poses and still marks.
+     - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The one other is a spinner, and only while Hercule starts or a login waits in [the first run](#the-first-run) or the draft's Log in. Each is a wait the user started, and each ends: the start after at most 90 seconds for the command and 30 for the answer, a login when it ends or its code expires.
+     - The first run's room moves only when a step finishes: the camera moves one layer's `transform`, and new pieces settle with `transform` and `opacity`, each over `--dur-3`, by the rules below.
+     - *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office's colleagues live: they walk, type, sip tea and sleep, at most 30 frames a second, while the Office is on screen and does not stand still ([The Office's budgets](#the-offices-budgets)). The Office draws them into one WebGL canvas, and the rules below for CSS animations do not apply inside it. The Office's panels and its drawer follow those rules.
    - Animations change only `transform` and `opacity`, and only of an HTML element. Chromium runs such an animation on the compositor thread alone. When the animated element is an SVG element, even an outer `<svg>`, the renderer's main thread also runs style, layout and paint on every frame: 120 times a second on a 120 Hz display. So the working pose's paws are each drawn in an `<svg>` of their own, inside a `<span>` that moves.
    - Transitions answer a user action, last at most `--dur-3`, and change only paint properties: color, background, border-color, box-shadow, opacity and transform. A transition of a layout property, such as `width`, `padding` or `grid-template-rows`, runs layout on every frame. Bureau's composer transitions some of these; slice 6 ports the composer without them, and uses a transform if its growth animates.
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
-   - Reduce motion turns every animation off.
+   - Reduce motion turns every animation off. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
    - The renderer drops the open thread's `session:<id>:tap` subscription. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
    - `backgroundThrottling` stays on.
+   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats.
 4. **No polling, and no timers while idle:**
-   - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)*
+   - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)* *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell also subscribes to the `connection` topic, so a GitHub Connection made in the web app while the desktop app runs reaches the New project form and the starters' line without a reload.
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
-5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0, and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
+   - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Two waits in [the first run](#the-first-run) poll, because nothing else can tell the app their outcome. Both are bounded waits the user started, and neither runs while the app is idle:
+     - GitHub's device flow: the protocol requires the client to ask, so the renderer calls `connection.pollDeviceFlow` at the interval GitHub gives, until the flow is done, expires or is denied.
+     - The connect check after `hercule service install`: main checks every half second for at most 30 seconds, because the controller announces nothing while it starts.
+     - A provider's login does not poll: its end arrives on the `provider` live topic.
+5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0 (the Office, below, also sets it while it is open), and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
+   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Glass over the Office costs far more than glass over a still page. On the reference machine, the Office's glass (its top bar, room labels and panels) costs the GPU process about 19 points of one core at 30 frames a second. Two causes add up:
+     - the page under a blur changes with every frame the Office draws, so the blur is drawn again each time;
+     - by Chromium's source, one `backdrop-filter` anywhere in the window turns off macOS's own compositing of the window's layers (Core Animation), so the GPU process composites every layer of the window for each frame the Office draws. This cause was read from the source. A later measurement found the GPU process woke as often with glass on the top bar alone as with all of the glass, so the compositing does change. But the cost follows how much is blurred: glass on the top bar alone cost the GPU process about 4 points, a quarter of what all of the glass cost with v1's settings (14). That was one session, with the camera at rest.
+   - So the window draws no blur while the Office is open *(decided 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*. The Office sets the glass level to 0 for the whole window, through the same tokens as Reduce transparency. Its top bar, card, name tags and room labels, and the thread drawer's composer and Requests dock, draw as solid Bureau surfaces, with the glass's rim and shadow. Leaving the Office brings the glass back. [Research: frosted glass over the Office at close to no cost (#341)](https://github.com/theagenticage/hercule/issues/341) looks for a way to bring it back over the Office.
 6. **The first paint is cheap:**
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
+   - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Everything the first screen imports statically is built into one chunk, the first-screen chunk. Split into files, the first screen costs more bytes: each file is compressed apart, and the files import and export names from each other, which the minifier cannot shorten across a file boundary. One chunk measured 7.4 kB smaller gzipped (see [Measured](#measured)). The app's files are read from the local disk, so splitting buys no caching in return.
+   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads.
+   - App code imports each icon from its own module, never from the icons folder's list of every icon, and eslint enforces it. The bundler places a module by what imports it, so an icon only a lazy screen draws then loads with that screen.
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
-7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds.
+7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
 
-**Verify at build time:** that a macOS window fully covered by other windows stops animation frames, as a minimized one does. Rule 3 then also covers a covered window.
+**Verify at build time:** that a macOS window fully covered by other windows stops animation frames, as a minimized one does. Rule 3 then also covers a covered window. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The research for the Office found the reverse gap: a window covered by another of the app's windows stopped its frames, and a minimized one could not be measured. The Office's first measurement checks a minimized window, and a window covered by another app's window.
 
 **Verify at build time:** the cost of glass on the slowest Mac the app supports, before the first release. The M4 Max measurement cannot show that cost.
 
@@ -570,6 +860,8 @@ These rules keep the budgets:
   - **The script counts up to 2 renderer wakeups a second as none.** Chromium wakes an idle renderer 0 to 2 times a second on its own, with no app code running ([Baseline](#baseline)), so that is the most the budget's "no wakeups from the app" can read as.
   - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* **The script does not yet control whether a text field is focused,** and a focused field changes both memory and wakeups ([Measured](#measured)). The new-thread composer takes focus when its screen opens, but its caret blinks only while macOS has made the app active, and whether macOS does that at a plain launch varies from launch to launch. Measuring both states on purpose, one with nothing focused and one with the composer focused through DevTools focus emulation, is part of [#301](https://github.com/theagenticage/hercule/issues/301).
   - ~~**Long tasks** come from a `PerformanceObserver` in the renderer.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* **Long tasks** come from a Chromium trace of a turn streaming into the fixture thread, recorded over the page's DevTools connection. A long task is a task on the renderer's main thread that runs over 50 ms: the page cannot react to input until it ends. The trace needs no measuring code in the app. Tracing costs the renderer a little time of its own, so the tasks err long.
+- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **The Office is measured with the Office's own fleet,** because a scratch controller has no 16 working threads to seat. Its measurement opens the Office with the reference fleet in the repository's Electron, and reads each process's CPU and wakeups from `app.getAppMetrics()`, frames from the page, and draw calls from three.js.
+  - **CPU is a share of one core:** the growth of `cumulativeCPUUsage`, in seconds, divided by the seconds sampled. `percentCPUUsage` cannot be used for this: on macOS, Electron divides it by the number of logical CPUs, so on the reference machine's 16 it reads one sixteenth of a share of one core.
 - **CI checks what does not depend on the machine:**
   - the renderer bundle budget and main's startup file. While the budgets are guides, a build over one prints a warning and passes.
   - ~~the process count. A new process fails the test, because it changes the process model, which a slice must justify.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* The process count is checked by the end-to-end suite, which runs on a developer's Mac, not in CI (see [Testing](#testing)). A new process fails that test, because it changes the process model, which a slice must justify.
@@ -758,9 +1050,182 @@ These rules keep the budgets:
 
 The first screen was already over its guide budget, and [#295](https://github.com/theagenticage/hercule/issues/295) holds that overrun. This change adds 1.6 kB to it. 1.2 kB is the question form in the thread's route, which loads after first paint. The other 0.4 kB at first paint, and the 1.1 kB in main, are the contract's new operation and the schema of its answers, which main and the renderer both link. That is accepted: the question form has to ship with the thread, and nothing smaller answers a question.
 
+**Main's part of the first run,** measured 2026-10-02 with `pnpm build:desktop`'s size checks, on the branch base 50ca5fb7 (Before) and on this change (After), for [#313](https://github.com/theagenticage/hercule/issues/313). Main starts no process and does no work until the first run asks: each `localController.*`, `setupToken.read` and `folder.pick` call runs short-lived programs (the installed `hercule`, the user's login shell before an install, or `git`) and waits for them, and `localController.start` polls the controller twice a second for at most 30 seconds. Nothing runs while idle or per streamed token, and no memory is held beyond the remembered logs folder and a pasted setup token, until the first run takes it.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Main's startup, minified: the startup file and the chunks it imports statically | 160 kB | ~~154.9 kB, one file~~ 151.3 kB, one file *(corrected 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313): 154.9 was the same file counted in thousands of bytes; see "The first run, measured on the app" below)* | 156.9 kB: `index.js` 40.9 kB and a shared Effect Schema chunk of 116.0 kB |
+| Main's first-run modules, loaded the first time the first run asks | - | - | 7.7 kB |
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | - | 302.7 kB |
+
+- **The startup file now imports a chunk.** The first-run modules are imported lazily, and the bundler moves the code they share with the startup file, the Effect Schema runtime, into its own chunk, which the startup file imports statically. The size check counted only `index.js`, so it read 40.9 kB. It now follows the startup file's static imports and counts them too. Since the code-splitting group in `vite.main.config.ts` (see "The first run, measured on the app" below), everything main imports statically is built into `index.js` again, and the startup is one file.
+- **The renderer's first screen** was not measured on the base. This change touches the renderer only in the connect screen's line for a controller that is not set up; the 0.2 kB over [#309](https://github.com/theagenticage/hercule/issues/309)'s After is that and the contract's new schemas.
+
+**The screens the first run shares with the app,** measured 2026-10-02 with `pnpm build:desktop`'s size checks, on the branch base b50ee76d (Before) and on this change (After), for [#313](https://github.com/theagenticage/hercule/issues/313): the project picker, the provider login dialog, the New project dialog, and the draft's starter threads and Intake note, together with the entry guard that sends a fresh Mac to the first run. They start no process. They do no work while idle and none per streamed token. The dialogs hold memory only while they are open. The starters are a fixed list, chosen from what the draft already reads and from the user's Connections, which the draft reads once and the live connection keeps current.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | 302.5 kB in 6 chunks: 241.8 kB at first paint, 60.7 kB for the thread's route | **295.6 kB** in 5 chunks: 234.6 kB at first paint, 60.9 kB for the thread's route |
+| The same, with the Before built into one first-screen chunk, as the After is | 250 kB | 295.1 kB in 5 chunks: 234.4 kB at first paint, 60.7 kB for the thread's route | 295.6 kB |
+| The project picker, the dialogs and the starters, each loaded the first time it shows | - | - | 14.8 kB in 7 chunks |
+
+- **The first screen is one chunk now** (rule 6). On the Before alone, building everything the first screen imports statically into one chunk saves 7.4 kB, from 302.5 to 295.1 kB. Without it, the bundler gave each set of modules that the first screen shares with a lazy chunk a chunk of its own. Each file was compressed apart, and the files imported and exported names from each other, which the minifier cannot shorten across a file boundary. This change's lazy chunks made that worse: before the first-screen chunk, they put the first screen in 19 chunks, at 309.9 kB.
+- **The change itself adds 0.5 kB** against the Before built the same way: 0.2 kB at first paint, 0.2 kB in the thread's route, and 0.1 kB of rounding. Only those totals can be measured. The sizes below are each module's size before minifying and compressing, from the bundler's report, and show where the bytes went:
+  - The entry guard and the first run's route: `controller-url-outcome.ts` +1.0 kB, the first-run route's definition +0.6 kB (its screen is a chunk of its own), `entry-guard.ts` +0.6 kB, the first run's bridge reads in `queries.ts` +0.5 kB, and the route tree +0.1 kB. The connect screen lost 1.1 kB.
+  - The draft: the starters' lazy import and their own Suspense boundary in `start-cards.tsx` +1.6 kB, and New thread's Log in button in `draft-screen.tsx` +0.9 kB.
+  - The shell's lazy project picker and New project dialog, in `_shell.tsx`: +0.4 kB.
+  - `readValidationIssues` in client-core's `errors.ts`: +0.3 kB. The provider login dialog uses it to tell a rejected code, and the rest of `errors.ts` is already on the first screen, so the bundler keeps the module whole there.
+  - The icons: +1.1 kB, because a module per icon repeats the imports each icon needs. The stop and clock icons, which only the thread screen draws, moved from first paint into the thread's route.
+  - The project picker left the first screen: -6.3 kB, with the project list it alone reads.
+- **The first round of this change put 7.9 kB at first paint,** at 249.7 kB, 310.4 kB in 13 chunks. The bundler's report named what did it:
+  - the icons the dialogs and the starters draw, 4.6 kB before compressing, because the app imported every icon through the icons folder's list;
+  - the starters, 4.4 kB;
+  - client-core's `buildProviderRows`, 2.1 kB, which only the provider login dialog draws, but whose module also held the model count the composer's model menu shows;
+  - the glass dialog and the project picker, 2.8 kB;
+  - and about 1 kB from compressing 13 files apart.
+- **The project picker and the starters show a moment later the first time,** after one read of a file from the local disk. Until then the draft shows nothing in the starters' place, as it does until its tasks are read. The launch time was not measured for this change.
+- **The Before is 0.2 kB under the entry above's After,** on the commit that recorded it. Two builds of b50ee76d both read 302.5 kB, with the thread's route at 60.7 kB. The entry above may have measured a working tree before its last commit.
+- The first screen was already over its guide budget, and [#295](https://github.com/theagenticage/hercule/issues/295) holds that overrun. This change brings it 6.9 kB closer, all of it from the first-screen chunk.
+
+**The first run, measured on the app,** 2026-10-02 on the reference machine, on the branch base f962cc91 (Before) and on 332a0f6f (After), for [#313](https://github.com/theagenticage/hercule/issues/313). *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Sizes come from `pnpm build:desktop`'s size checks, 1,024 bytes to a kB. Everything else comes from the end-to-end suite's test package, run against the stand-in `hercule` binary and a scratch Hercule Home, with provider logins and GitHub's device flow answered by the test. The real `hercule service` was not run.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Renderer JavaScript for the first screen, the thread's route included, gzipped | 250 kB | 302.7 kB in 6 chunks: 242.0 kB at first paint, 60.7 kB for the thread's route | **296.4 kB** in 6 chunks: 235.1 kB at first paint, 61.2 kB for the thread's route |
+| The first run's chunk, gzipped | - | - | 23.9 kB, and 2.7 kB of CSS |
+| Everything a first run loads, gzipped | - | - | 36.7 kB in 7 chunks: the first run's chunk, the provider login and New project chunks, and four small chunks they share with the app |
+| The project picker, the dialogs and the starters, each loaded the first time it shows | - | - | 15.9 kB in 9 chunks: New project 4.9 kB, the provider login 4.5 kB, the picker 1.8 kB, the steps' frame 1.7 kB, the starters 1.6 kB, the Connections helpers 0.7 kB, the glass dialog 0.5 kB, and two 0.1 kB files that only pass on New project and the provider login |
+| Main's startup, minified: the startup file and the chunks it imports statically | 160 kB | 151.3 kB, one file | **157.0 kB**: `index.js` 40.9 kB and a shared Effect Schema chunk of 116.0 kB |
+| Main's first-run modules, loaded the first time the first run asks | - | - | 7.7 kB |
+| Processes after the first run | 4 | 4 | 4: the browser, GPU, utility and renderer processes, and nothing else |
+| Launch after the first run: spawn to window shown, warm | 500 ms | 372, 341 and 449 ms | 358, 328 and 346 ms |
+
+- **The first screen is 0.8 kB over the entry above's After,** 295.6 kB. The clock icon is now a 0.5 kB chunk of its own in the thread's route, because since 2ef96b67 the first run's account and GitHub steps import it as well as the thread screen's queued inputs. The other 0.3 kB was not traced to a module.
+- **The picker, the dialogs and the starters read 15.9 kB in 9 chunks,** against 14.8 kB in 7 in the entry above. The first run's chunk imports New project and the provider login directly, and the rest of the app loads them lazily. So the bundler gives the code they share with the first run, the steps' frame and the Connections helpers, chunks of their own, and points the app's lazy imports at the two 0.1 kB files, which only pass the dialogs on. Which two of these four chunks the entry above did not have, and where its other 1.1 kB went, was not traced: its build was not kept.
+- **Main's startup grew by 5.7 kB, against the budget's "add nothing to the startup file".** The first-run modules themselves stay out of it. The growth comes from the split the entry above describes: the bundler moved the Effect Schema runtime, which the startup file shares with the lazy first-run modules, into a chunk the startup file imports statically, and the two files together read 5.7 kB more than the one file did. The startup is still 3.0 kB under 160 kB. The entry above recorded the Before as 154.9 kB: that is the same 151.3 kB file counted in thousands of bytes, so the growth it implied, 2.0 kB, was too small. Its After of 156.9 kB is this table's 157.0 kB, rounded part by part.
+- **Main's startup is now 156.0 kB, 4.7 kB over the Before,** measured after the review's fixes with the same size check. Two of those fixes took it down:
+  - Waiting for a started controller with a loop of `Effect.sleep`, rather than `Effect.repeat` with a `Schedule`: -1.7 kB. The bundler keeps the code `Effect.repeat` needs in the `Effect` module, which is in the startup file, so the `Schedule` module loaded at every launch.
+  - Building everything main imports statically into `index.js`, with one code-splitting group in `vite.main.config.ts`: -1.2 kB. The split cost more in the names the two files exported to each other than the group costs in the few Effect helpers only the lazy connect check uses, which the group puts in `index.js` because their modules are among its static imports.
+- **The 4.7 kB that remains is the first run's part of the startup path.** By the source map, before minifying across modules: the IPC channels' schemas 0.9 kB, parsing a setup address when a controller URL is saved 0.5 kB, the IPC handlers 0.5 kB, main's entry 0.4 kB, the `ThisMac` service, which imports the rest of the first run's main code when first called, 0.4 kB, the first run's progress in the settings file 0.3 kB, Effect's `Redacted` and `Record` code 0.6 kB, which the base's startup file did not have and which the lazy connect check uses (without the group, the `Redacted` code sits in the connect check's chunk), the check that a device login code lasts at most a day, which the protocol's `LoginUrl` adds and main links through the contract 0.4 kB, and 0.6 kB in smaller parts. None of it can move without changing how main works: main checks every IPC call against its channel's schema from launch, and saving a controller URL is on the startup path. The budget row now states this cost instead of "nothing".
+- **No first-run code loads after the first run.** A launch after it parsed only the first-screen chunk, the bundler's runtime and `theme-init.js`, read from the page's DevTools connection. The Before parsed its three first-screen chunks and `theme-init.js`.
+- **Processes during the first run.** Open the office ran `service status --json` twice, once when the welcome looked for Hercule and once when the start began, then the login shell, then `service install --json`. At most two of these programs ran at once, beside the app's three helper processes. All had exited before the account step showed. Picking a folder ran `git`, which exited before a process list sampled about every 40 ms could see it. After the app quit, no process it started was left. A launch with a controller saved ran no `hercule` command.
+- **On a runner Mac and on another machine's controller,** nothing was installed or started. A runner Mac ran `service status --json` once. Connecting to a controller elsewhere that is not set up ran `service status --json` and `setup-url`, which reads the token for a controller on this Mac, and no `service install`. A controller set up elsewhere ran `service status --json` once, and the app showed sign-in.
+- **`hercule service status` was not timed,** because it reads launchd, and no test may run the real binary. It is left for the walk-through on a fresh Mac. Take it with `/usr/bin/time -l hercule service status --json`, which prints the wall time and the peak memory.
+- **Reduce motion keeps the room still.** With Reduce motion emulated through Playwright's `emulateMedia`, which sets the same `prefers-reduced-motion` media query the macOS setting does, and in light and in dark, no animation ran after Create account or after Do this later, and two screenshots 1.2 seconds apart, starting the moment the providers step showed, were identical. Without it, Create account ran the room's `room-settle` and `room-label-settle` animations, two of each.
+
+Idle at each step of the first run, with the window visible, read from a plain launch with nothing attached. Each launch opens on the step and settles for 4 seconds, and then `app.getAppMetrics()` is read over 10 seconds. That is sooner than [Measuring](#measuring)'s 30 seconds, so a timer that fires once after a page loads would show here; none did. The renderer's 0 to 2 wakeups a second count as none, as there.
+
+| Step | GPU wakeups a second | Renderer wakeups a second | Notes |
+|---|---|---|---|
+| Welcome | 6 to 15 | 1 to 2 | |
+| Hercule starting | 309 to 320 | 64 to 73 | the spinner, 0.8% of a core in the GPU process and 0.15% in the renderer. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* These were likely read from `percentCPUUsage`, a share of the whole machine (see [Measuring](#measuring)), so about 13% and 2.4% of one core; [#339](https://github.com/theagenticage/hercule/issues/339) checks them |
+| Account | 62 to 65 | 4 | the password field is focused; three of four launches, sampled again on 8754b1dd |
+| Providers | 4 | 1 | |
+| A provider login waiting | 301 | 36 | the spinner; read with Playwright attached |
+| GitHub | 3 | 1 | |
+| GitHub's code waiting | 327 | 64 | the spinner; read with Playwright attached |
+| Project | 4 | 1 | |
+| All set | 6 | 1 | |
+| After the first run: the draft, its composer focused | 60 to 65 | 4 to 5 | the Before reads 51 to 65 and 4 to 5 on the same screen |
+
+- **The waiting steps cost what rule 2's spinner costs,** about 300 GPU wakeups a second, for as long as the wait lasts. That is a 120 Hz display drawing every frame while something turns. Each wait ends by itself, as rule 2 requires. Between waits, every step is at the still-page level.
+- **The two focused screens read at the focused-field budget** of 63 GPU and 4 renderer wakeups a second, and at most 2 GPU and 1 renderer wakeups over it. A focused field costs an empty window 62 to 63 and 4, and the app adds about 3 and 1 to that, as the first milestone's finish found on the new-thread screen.
+  - The account step was sampled again on 2026-10-03, on 8754b1dd after the review's fixes, in four plain launches, with a load average of 5 to 13. Three read 62, 63 and 65 GPU wakeups and 4 in the renderer.
+  - The first of the four, the launch that installed Hercule and reloaded the window, read 4 and 1, the still-page level. Its caret was most likely not blinking: whether macOS makes the app active at a plain launch varies ([Measuring](#measuring)).
+  - The first sample, 71 and 6 on 332a0f6f, was not repeated. Its load average was not recorded.
+  - The draft read up to 65 and 5, and the Before reads the same on the draft, so that reading is not this change's.
+- **The launch was measured as [Measuring](#measuring) describes,** with two differences: one launch under Playwright warms the code cache, and three plain launches follow, 3 seconds apart. The Before's third launch, 449 ms, was slow from main's first step. The load average was not recorded, and other end-to-end suites ran on the machine during the session, each with its own app and controllers, so a busy machine is the likely cause of the 449 ms. A second set of launches 10 minutes earlier read 355 to 379 ms for the After and 365 to 381 ms for the Before.
+
+Memory at each step of the first run, and after it, read as [Measuring](#measuring) describes, 2026-10-03 on the reference machine, on 24b95a9f (After) and on main's 83446e6b (Before), in one session with no other suite running. Each screen was read in two plain launches, each the third launch or later on its user data directory. In every launch the window was active; the second column names the field that had the focus. Sizes are in MB; the processes are the browser, GPU, network utility and renderer, in that order.
+
+| Screen | Focused | Summed physical footprint (budget 220) | Footprint by process (renderer's budget 100) | Working set, summed; renderer |
+|---|---|---|---|---|
+| Welcome | nothing | **270 to 271** | 49 to 50, 178, 7, 37 | 380 to 381; 113 |
+| Account | the password field | **701** | 53, 588, 7, 53 | 411; 136 |
+| Providers | nothing | **295 to 296** | 54 to 55, 189, 7, 44 to 45 | 397; 121 |
+| GitHub | nothing | **280** | 54, 176, 7, 42 | 392; 118 |
+| Project | nothing | **289** | 54, 185, 7 to 8, 42 | 393 to 394; 118 to 119 |
+| All set | nothing | **290 to 293** | 54, 185 to 186, 7 to 8, 44 to 45 | 395; 120 to 121 |
+| After the first run: the draft | the composer | **667** | 54, 565, 7, 41 | 387 to 388; 117 to 118 |
+| Before: the connect screen | the address field | 161 to 164 | 49 to 50, 74, 7, 31 to 34 | 354 to 362; 107 |
+| Before: sign-in | the username field | 158 to 166 | 50, 68 to 76, 7, 33 | 369; 109 |
+| Before: the draft, after sign-in | the composer | **658** | 49 to 50, 560 to 561, 7, 41 | 388; 119 |
+
+- **Every first-run screen is over the summed budget,** by 50 to 76 MB with nothing focused. The excess is in the GPU process, which holds 176 to 189 MB. On main's connect and sign-in screens it holds 68 to 76 MB, and in an empty window 54 MB ([Baseline](#baseline)). The first run draws the office room behind every card. What in the first run's screens holds the extra memory was not traced. The renderer stays under its own budget, at 37 to 53 MB. All six first-run readings are under the 306 MB the first milestone's finish entry above recorded for the new-thread screen with nothing focused.
+  - **The overage is accepted for #313,** because the first run happens once and leaves nothing behind (the bullet on what stays after it, below). [#330](https://github.com/theagenticage/hercule/issues/330) traces what holds the memory and brings the first run's screens under the budget, or records why it cannot.
+- **The account step reads 701 MB, 535 MB over main's sign-in screen,** although both open with a field focused. The GPU process holds 588 MB on the account step. That is the cost the first milestone's finish entry above describes for a caret blinking over the glass blur, which was accepted for the first prototype until [#301](https://github.com/theagenticage/hercule/issues/301) decides. Main's connect and sign-in screens, each with a field focused, read 158 to 166 MB, with 68 to 76 MB in the GPU process. That is about the empty window's 54 MB plus the up to 20 MB a focused field costs it ([Baseline](#baseline)). So a focused field alone does not cost the 400 MB: of the screens in this table, the 400 MB shows on the account step and on the draft, on both sides, and not on main's connect and sign-in screens.
+- **Nothing of the first run stays after it.** A plain launch after the first run parsed only the first-screen chunk, the bundler's runtime and `theme-init.js`, read from the page's DevTools connection after memory was read. Idle from 30 seconds for 10 seconds, it read 63 GPU and 5 renderer wakeups a second, and the Before read 63 and 4 to 5. So no first-run timer is left.
+- **The draft reads 9 MB over the Before,** 667 MB against 658 MB, both with the composer focused, and both over the budget as the first milestone's finish found. The browser process holds 4 to 5 MB more, the GPU process 4 to 5 MB more, and the renderer the same 41 MB. Where the browser process's extra comes from was not traced.
+- **How each screen was reached:**
+  - The welcome: no controller saved, and a stand-in `hercule` binary that reports nothing installed.
+  - The steps after the account: a set-up scratch controller on loopback, signed in once, with the first run's put-off list in the settings file set to the steps before the one measured. The controller ran with a `PATH` that holds no coding agent, so the providers step was not done.
+  - The draft: the same controller, with the first run's progress removed from the settings file, as leaving All set does.
+  - The Before: no controller saved for the connect screen, and a set-up scratch controller saved for sign-in and, after one sign-in, the draft.
+- **The account step is read after a reload, not straight after a plain launch,** because a plain launch cannot open on it. With a controller on this Mac that is not set up, the app opens on the welcome, which greets Hercule as found. So each launch set the mark Open the office leaves in the page's session storage, through the page's DevTools connection, and then main reloaded the window with `webContents.reload()`, as it does once Hercule answers. Memory was read 13 seconds after the reload. The install did not run, because Hercule was already running.
+- **The one-minute load average was 4.0 to 6.1** at each launch, and 4.7 at the start of the session.
+
+**The Office, v1,** measured 2026-10-03 and 2026-10-04 on the reference machine, for [#332](https://github.com/theagenticage/hercule/issues/332). *(Added 2026-10-04, [#332](https://github.com/theagenticage/hercule/issues/332).)* This is the Office's first measurement, so it sets the Office's memory and chunk limits ([The Office's budgets](#the-offices-budgets)).
+
+In the app: the packaged test app, launched plainly as [Measuring](#measuring) describes, its third launch or later, against a scratch controller. The fleet is the reference Office: 16 colleagues, 4 working, 4 waiting on the user and 8 idle, on 3 runners and in 3 projects of 6, 5 and 5 threads. The controller also held its own runner, retired, and one exited thread, which has no colleague; the leave row leaves the Office for that thread's screen. The window is 1440 × 900 at 2x, so the Office's canvas is 1168 × 900 beside the sidebar, 2336 × 1800 pixels. Light theme, nothing focused, the camera at rest.
+
+- **CPU** is a share of one core: the growth of `cumulativeCPUUsage` over 30-second windows, starting 45 seconds after the Office opened. `ps` agreed within 0.1.
+- **Memory** is the physical footprint of the four processes, read with `footprint` 13 seconds after the screen opened.
+- **Sizes** come from `pnpm build:desktop`'s size checks, 1,024 bytes to a kB.
+- **The one-minute load average** was 4 to 6, and 11 in one window, from other programs on the machine.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Frames, camera at rest | at most 30 a second | 30.1, out of 120 animation frames a second |
+| CPU, camera at rest | renderer 20%, GPU process 35% | renderer 6.2 to 16.3%, GPU process 5.1 to 11.2%, over 15 windows in 3 launches |
+| Wakeups, camera at rest | - | renderer 45 to 64 a second, GPU process 267 to 273 |
+| Leaving the Office | the idle row within 5 seconds | renderer 1 to 3 wakeups a second from 5 to 15 seconds after leaving, in 5 launches; from 15 seconds on, 0 to 2, the level of a thread screen the Office never opened. GPU process 0 to 5 |
+| Memory with the Office open | the first reading plus 10% | **1,359 to 1,457 MB** summed, in 8 launches; the renderer 146 to 165 MB. On the thread screen just before: 325 to 331 MB, and 56 to 60 MB |
+| The Office's chunk, gzipped | the first reading plus 10% | 219.6 kB, 786.1 kB before gzip |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, a guide | 297.8 kB in 7 chunks. Before the Office, 296.7 kB in 6 |
+
+- **The limits this sets** are the highest readings plus 10%: with the camera at rest, 17.9% of one core for the renderer and 12.3% for the GPU process; with the Office open, 1,602 MB summed and 181 MB for the renderer; and 241.5 kB for the chunk. The table in [The Office's budgets](#the-offices-budgets) states them.
+- **The Office adds 1.1 kB to the first screen.** The first-screen chunk grew by 1.0 kB, for the Office's part of the shell: the sidebar's Office button, the route and the Go menu's item. The thread screen became a chunk of its own, because the Office's drawer loads it too. The first screen was over the 250 kB guide before the Office. Main's startup file is 156.1 kB, against 156.0 kB before.
+- **Almost all of the Office's memory is in the GPU process:** 1,154 to 1,236 MB, against 210 MB on the thread screen. The page's own WebGL allocations are 404 MB:
+  - the composer's target, 241 MB: 4× multisampled half-float colour and depth, and their resolved copies;
+  - the 4096 × 4096 shadow map, 128 MB: its depth texture, and a colour texture three.js adds that nothing reads;
+  - geometry, 20 MB; the environment map, 9 MB; the name tags' and labels' textures, 7 MB.
+
+  The graphics driver's memory in the GPU process grows by 876 MB when the Office opens. So about 450 MB is held by the driver beyond those allocations and the canvas, and was not traced. Bringing the Office's memory down is [#370](https://github.com/theagenticage/hercule/issues/370).
+- **The composer allocated two targets before the review,** and the summed footprint read 1,505 MB in two launches with 4 colleagues. With one target, the same setup read 1,260 and 1,271 MB.
+- **CPU at rest reads at different levels for the same work.** In some windows the renderer read 6 to 7%, in others 13 to 16%, with the same frames, wakeups and JavaScript per frame. The likely cause is which kind of core macOS runs the processes on, efficiency or performance, but reading that needs root, so it was not proven. The highest window is under the limits.
+- **A profile of the renderer at the lower level** puts the Office's frame at 3.2% of its wall time: three.js 2.5%, the simulation 0.2% and the name tags 0.1%. React ran in no sample, and no frame forced a layout. The rest of the renderer's CPU is Chromium's own work for each frame. The profile was taken with 4 colleagues, before the composer change.
+- **The stage asks for 120 animation frames a second and draws one in four.** The skipped ones cost the renderer about 1% of a core. Asking for 30 a second is [#367](https://github.com/theagenticage/hercule/issues/367).
+- **The renderer is back within the idle row 15 seconds after leaving, not 5.** A trace of the 45 seconds after leaving shows no call into the Office's chunk. The extra wakeups are Chromium's and V8's clean-up of what the Office released:
+  - from 0 to 5 seconds, the compositor frees the canvas's resources, about 28 times a second;
+  - around 5 seconds, V8's memory reducer runs two major garbage collections that return the Office's memory, 15 ms of the main thread in all;
+  - until about 15 seconds, the tail of that clean-up, background sweeping and the compositor freeing tiles, wakes the renderer 1 to 3 times a second. When it ends varies from launch to launch.
+
+  From 15 seconds on, the renderer reads like a thread screen the Office never opened: 0 to 2 wakeups a second. That screen's own renderer reads 2 a second from 45 seconds after it opens, from Chromium's periodic purge of its memory allocator, with no Office involved.
+
+  **The miss is accepted for #332,** so the Office can ship. No code of the Office's runs after it leaves, and the renderer is back within the idle row 10 seconds late. The budget stays at 5 seconds. [#379](https://github.com/theagenticage/hercule/issues/379) brings the app within it, or records why it cannot.
+- **Leaving frees what the Office built.** 5 to 15 seconds after leaving, the four processes summed 321.5 MB and the page held no canvas. Over 10 visits, the page held 0 WebGL contexts and 0 canvases after each one, and its listeners stayed at 205. Before the review's fix, each visit left one WebGL context behind, because three.js keeps the last renderer in a lookup table; the Office now clears it when it leaves. The JavaScript heap grew from 14.1 to 16.2 MB over the 10 visits, all of it V8's compiled code: the three.js objects counted the same after each visit.
+
+The rows below were read on the prototype's page, not in the app, because the measuring page inside the app is [#339](https://github.com/theagenticage/hercule/issues/339). The Before is the prototype at 6fcb3634 on `prototype/office-3d`. The After is the Office's engine before the review's fixes and the composer change. Both ran from a Vite dev server in the repository's Electron, with the glass turned off by a style rule, the reference fleet of 16, and 30-second samples after 25 seconds.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| CPU, camera at rest | renderer 20%, GPU process 35% | 51.9%, 43.8% | 7.8%, 6.3% |
+| Frames and CPU, camera moving | at most 60 a second | 97 frames; with the glass on, 56.7%, 93.2% | 60 frames; 21.3%, 14.7% |
+| Window visible, not focused | 30 a second | - | 30.2 frames; 8.9%, 7.0% |
+| Standing still | the idle row | - | 0 frames; 0.3%, 0%; no wakeups |
+| Window hidden or covered | no frames | 0 frames | 0 frames, no wakeups |
+| Draw calls | - | 1,801 | 591 |
+
+- **While the camera moves, the sun's shadows are drawn again 17 to 19 times a second,** because the walls that drop to the dado rail change height. That is most of the camera's cost ([#358](https://github.com/theagenticage/hercule/issues/358)). The CPU limits apply with the camera at rest.
+- **With the glass on, the After read 8.8% and 23.9% at rest, and 19.1% and 55.9% while the camera moved.** That is why the window draws no blur while the Office is open (rule 5).
+- **At ten times the fleet,** 160 colleagues, #333 read 21.4% and 14.9% in one run: over the renderer's limit, which is set for the reference fleet. The building drawn into a texture ([#340](https://github.com/theagenticage/hercule/issues/340)) and merging more meshes are the levers before fleets grow.
+- **A minimized window was not measured:** the measuring script's call to minimize its window had no effect. Chromium treats a minimized window as hidden, and the hidden row read no frames and no wakeups.
+- **Standing still was read with the battery reported as discharging** by an override in the measuring script, not on a Mac running on battery.
+- **`apps/desktop/scripts/perf.ts` read CPU from `percentCPUUsage`** until this change, a share of the whole machine. It now reports a share of one core ([Measuring](#measuring)).
+
 ## Slices
 
-Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)).
+Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
 
 1. **Shell and safety.**
    - the `apps/desktop` package
@@ -798,6 +1263,16 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
    - the pickers, with the local-runner probe through main
    - starting the thread
 8. **Menu and notifications.** The menu, shortcuts, dock badge and notifications.
+9. **The Office.** *(Added 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* [The Office](#the-office), on the user's real threads:
+   - the prototype's code moved to `apps/desktop/src/renderer/office/`, without the Tower, the Campus, the controls and Simulate
+   - the route, the sidebar's top row and Go › Office
+   - `decideOfficeSeating` in `@hercule/client-core`, with its tests, and the Bureau's `OfficeMap` value
+   - the card, answering from it, and the drawer
+   - the performance work: the 30-frame cap, standing still on battery and with Reduce motion, no ambient occlusion, shadows drawn once, and the static furniture merged by material
+   - the bug fixes: colleagues walking through walls, legs inside chairs and sofas, poor paths, and hats painted on
+   - room names and plaques in the UI face
+   - the first measurement, recorded in [Measured](#measured)
+10. **The Office's life.** *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Printer rage, the tache on four of eight looks, and the Office's own details on the colleagues.
 
 ## Testing
 
@@ -811,10 +1286,11 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - Each launch passes `--user-data-dir=<scratch dir>`, so the settings file, the token and the single-instance lock never touch the real app's.
   - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
+  - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Each launch that opens main's inspector passes `--hercule-binary=<path in the user data dir>`, so main runs that path in place of `~/.local/bin/hercule` and no test runs this Mac's own `hercule service`: even `status` reads this Mac's launchd, and `install` writes `~/Library/LaunchAgents/` whatever the Home is. With no file there, main finds no binary. A first-run test writes a stand-in there with `e2e/desktop/stand-in-binary.ts`: a script with a scratch Home that answers `service status --json`, `service install --json` and `setup-url`. Its `serve` kind starts the compiled `hercule serve` in that Home on install, in a session of its own as launchd would, with a `PATH` of only `/usr/bin` and `/bin`, so its runner finds no coding agent and the providers step is never done whatever the Mac has installed *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*; the others fail the install with one line (`start-error`), report a runner (`runner`), or report no Service Unit with nothing answering (`fresh`). Main accepts the switch only where it accepts every argument: in a development run, or with the inspector open. A release package refuses it.
 - **Screenshots.** Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* `pnpm --filter @hercule/desktop capture:sidebar-states` captures the sidebar states the book never draws, in both themes, for a check by eye: workspace labels, offline, queued, asleep and away threads, long names, the caps and their "more" rows, and "No project". It writes them to `apps/desktop/out/sidebar-states/`.
 - **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it.
-  - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from `docs/design/crew-bureau/`, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
+  - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from ~~`docs/design/crew-bureau/`~~ `docs/design/crew-bureau-2/` *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's sidebar with the sidebar of the book's `session-active.html`, item by item, with the app fed the book's threads at the book's time.
   - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's thread screen with the main pane of the book's `session-active.html`, item by item, twice: once at rest, and once with the transcript scrolled away from its bottom and the composer shrunk. The book's page is edited where the app draws other words or marks (see **The thread** in [Design system](#design-system)).
   - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It also compares the app's draft screen with the main pane of the book's `session-empty.html`, item by item, with the book's page edited where the app draws other words or marks (see **A new thread** in [Design system](#design-system)).
@@ -826,6 +1302,9 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - a hidden window still draws and presents its page's frames;
   - an Element Timing entry's `renderTime` is when its frame was presented, or failed to present;
   - `show()` shows the frame the window holds, not an empty one.
+- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **The Office's tests:**
+  - `decideOfficeSeating` has unit tests for the rooms and their order, the desks inside a room, the queue and the Lounge, and the threads left out;
+  - an end-to-end test opens the Office from the sidebar's button and from `⌘⇧O`, and checks that a hidden window draws no frames.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.
 
 ## Post-v1
@@ -835,7 +1314,8 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
 - **The Hercule face and its screens:** Intake, Check-in, Tasks, Runs, Workflows, Fleet, Connections and Notifications. Bureau adds the office to them.
 - **Assistants,** with the book's stored look (Spec change 3) and a run that wears its workflow's face (Spec change 4).
 - **All sessions and Settings,** including Appearance: Bureau's five themes, System, and the glass level.
-- **The desktop app as installer:** it runs and upgrades a local controller ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §Post-v1).
+- **The desktop app as installer:** it ~~runs and~~ installs and upgrades ~~a local controller~~ Hercule's binary ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §Post-v1). Starting a local controller with the binary already there is in v1, as part of [the first run](#the-first-run) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
+- ~~*(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **The live Office.** The first run's still room grows into the Office: live updates, the other wings, filing cabinets and capsules in Triage's tube.~~ *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332): the live Office is slice 9.)* **The Office Map system:** growth by wings built as the fleet grows, more maps, importing a map, maps of a code base, colleagues that go where their work takes them, and more activities ([#336](https://github.com/theagenticage/hercule/issues/336)). Event flow and the tubes ([#331](https://github.com/theagenticage/hercule/issues/331)). The first run's room drawn as a still view of the 3D Office.
 - **The idle blink, back.** Bureau's idle blink returns once research shows how to draw it within the idle budget. Bureau draws it as an animation that repeats every 7.2 seconds on the SVG group of each face's eyes. The eyes move for only about 0.2 seconds of that, but Chromium draws frames for the whole 7.2 seconds. And because an SVG group is animated on the renderer's main thread, the renderer wakes for every frame. Techniques to measure:
   - one shared timer that starts a single 0.2-second blink on one face at a time, so frames are drawn only while an eye is actually closing
   - eyes drawn in their own compositor layer, so a blink never wakes the renderer's main thread
@@ -850,6 +1330,8 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
 Tickets:
 
 - [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275)
+- [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313)
+- [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332), with its research ([#333](https://github.com/theagenticage/hercule/issues/333)) and scope ([#334](https://github.com/theagenticage/hercule/issues/334))
 - [Web app architecture: observability-first, desktop-shell-ready (#19)](https://github.com/theagenticage/hercule/issues/19)
 
 ADRs:
@@ -859,4 +1341,4 @@ ADRs:
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 - [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
 
-Prototype: the Crew Bureau book, [`docs/design/crew-bureau/index.html`](../design/crew-bureau/index.html).
+Prototype: the Crew Bureau book, ~~[`docs/design/crew-bureau/index.html`](../design/crew-bureau/index.html)~~ its second edition, [`docs/design/crew-bureau-2/index.html`](../design/crew-bureau-2/index.html) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.

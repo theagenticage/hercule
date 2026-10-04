@@ -336,7 +336,7 @@ export const CLI = {
   },
   "secret.set": {
     command: "secret set",
-    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here.",
+    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials must be checked to belong to the same account, so replace them with `hercule connection set-credentials` or a reconnect.",
     examples: [{ args: ["plugin", "github", "client_secret"], stdin: "ghp_the_secret_value" }],
     fields: {
       ownerKind: {
@@ -345,7 +345,7 @@ export const CLI = {
       },
       ownerId: {
         positional: true,
-        help: "The owner's own id in full - a plugin's name, a connection's or runner's id - never a tail and never containing `|`.",
+        help: "The owner's own id in full - a plugin's name, a runner's id - never a tail and never containing `|`.",
       },
       name: {
         positional: true,
@@ -357,7 +357,7 @@ export const CLI = {
   },
   "secret.delete": {
     command: "secret delete",
-    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here.",
+    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here. Neither is `connection`: a Connection's credentials go when the Connection does, with `hercule connection delete`.",
     examples: [{ args: ["plugin", "github", "client_secret"] }],
     fields: {
       ownerKind: {
@@ -378,11 +378,23 @@ export const CLI = {
 
   "task.query": {
     command: "task list",
-    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. Use it to find the id that `hercule task read` and `hercule task update` take.",
+    help: "Lists tasks. Repeating a filter flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. Use it to find the id that `hercule task read` and `hercule task update` take.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--status", "open", "--status", "in-progress", "--label", "triage"] },
       { args: ["--text", "flaky login"] },
+      {
+        args: [
+          "--status",
+          "open",
+          "--sort",
+          "priority:desc",
+          "--sort",
+          "createdAt:desc",
+          "--limit",
+          "3",
+        ],
+      },
     ],
     fields: {
       refs: {
@@ -1782,7 +1794,7 @@ export const CLI = {
   },
   "provider.login": {
     command: "provider login",
-    help: "Starts the vendor login for a Provider Instance on one machine. Returns the URL to open, and the code the harness printed if there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hercule provider submit-login-code`.",
+    help: "Starts the vendor login for a Provider Instance on one machine. Returns the URL to open. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. When the harness prints a code to type in the browser, the reply also holds that code and when it expires (expiresAt), and the login finishes by itself once you have typed it: `hercule provider read` then shows the machine logged in. Otherwise, paste the code the browser shows into `hercule provider submit-login-code`.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       id: {
@@ -1840,8 +1852,12 @@ export const CLI = {
   },
   "connection.create": {
     command: "connection create",
-    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` instead.",
+    help: "Creates a Connection from credentials you already hold. The credentials are a JSON object keyed by the field names the type declares, and are never readable again. For an account reached through a browser, use `hercule connection start-oauth` or `hercule connection start-device-flow` instead.",
     examples: [
+      {
+        args: ["--type", "github/github"],
+        stdin: '{"pat":"ghp_xxx"}',
+      },
       {
         args: ["--type", "github/github", "--label", "work", "--topic", "engineering"],
         stdin: '{"pat":"ghp_xxx"}',
@@ -1852,10 +1868,13 @@ export const CLI = {
         flag: "type",
         help: "The connection type as a Qualified Id, such as github/github; take it from the plugin catalog and never parse it.",
       },
-      label: { flag: "label", help: "What to call this account: work, personal." },
+      label: {
+        flag: "label",
+        help: "What to call this account: work, personal. Leave it off to use the account name.",
+      },
       labels: {
         flag: "topic",
-        help: "A Topic this connection's events file into. The first one given is its default, and at least one is required.",
+        help: "A Topic this connection's events file into. Leave it off for none; `hercule connection update` adds one later.",
       },
       config: {
         flag: "config",
@@ -1881,7 +1900,7 @@ export const CLI = {
       label: { flag: "label", help: "A new name for this account." },
       labels: {
         flag: "topic",
-        help: "A Topic to file its events into. The list is replaced whole, so send every topic it is to keep.",
+        help: "A Topic to file its events into. The list is replaced whole, so send every topic it is to keep. The CLI cannot clear every topic, because a flag given zero times sends nothing; clear them in the web app or through the API.",
       },
       config: { flag: "config", help: "A replacement config as inline JSON." },
     },
@@ -1900,8 +1919,8 @@ export const CLI = {
   },
   "connection.setCredentials": {
     command: "connection set-credentials",
-    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hercule connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names.",
-    examples: [{ args: ["1f3a9c2e"], stdin: '{"token":"ghp_yyy"}' }],
+    help: "Rotates a Connection's credentials in place, leaving everything else about it alone. Reach for it when `hercule connection list` shows the account needs reauth. The new values are a JSON object keyed by the type's field names. Credentials for another account are refused and change nothing; to use that account, create a new connection for it.",
+    examples: [{ args: ["1f3a9c2e"], stdin: '{"pat":"ghp_yyy"}' }],
     fields: {
       id: {
         positional: true,
@@ -1920,16 +1939,7 @@ export const CLI = {
     help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it must match the one registered with the provider byte for byte. Give --connection to reconnect an existing account instead of creating a second one.",
     examples: [
       {
-        args: [
-          "--type",
-          "gmail/gmail",
-          "--origin",
-          "https://hercule.example",
-          "--label",
-          "work",
-          "--topic",
-          "inbox",
-        ],
+        args: ["--type", "gmail/gmail", "--origin", "https://hercule.example"],
       },
       {
         args: [
@@ -1948,12 +1958,18 @@ export const CLI = {
         flag: "origin",
         help: "Where the browser is: scheme and host with no path, like https://hercule.example.",
       },
-      label: { flag: "label", help: "What to call the new account; a reconnect already has one." },
+      label: {
+        flag: "label",
+        help: "What to call the new account. Leave it off to use the account name. A reconnect keeps its own and refuses this.",
+      },
       labels: {
         flag: "topic",
-        help: "A Topic the new account's events file into. A reconnect already has its own and needs none.",
+        help: "A Topic the new account's events file into. Leave it off for none. A reconnect keeps its own and refuses this.",
       },
-      config: { flag: "config", help: "The new account's config as inline JSON." },
+      config: {
+        flag: "config",
+        help: "The new account's config as inline JSON. A reconnect keeps its own and refuses this.",
+      },
       connectionId: {
         flag: "connection",
         help: "The Connection whose tokens this flow replaces; leave it off to create one.",
@@ -1962,6 +1978,45 @@ export const CLI = {
     errors: {
       invalid_state:
         "the plugin that owns this type has no OAuth client credentials; set them in settings first",
+    },
+  },
+  "connection.startDeviceFlow": {
+    command: "connection start-device-flow",
+    help: "Starts a device flow and returns a code to enter at the provider. Enter it at the page the reply names, such as github.com/login/device. The connection exists only once you approve there and `hercule connection poll-device-flow` sees it. Give --connection to reconnect an existing account instead of creating a second one.",
+    examples: [
+      { args: ["--type", "github/github"] },
+      { args: ["--type", "github/github", "--connection", "1f3a9c2e"] },
+    ],
+    fields: {
+      type: { flag: "type", help: "The connection type as a Qualified Id, such as github/github." },
+      label: {
+        flag: "label",
+        help: "What to call the new account. Leave it off to use the account name. A reconnect keeps its own and refuses this.",
+      },
+      labels: {
+        flag: "topic",
+        help: "A Topic the new account's events file into. Leave it off for none. A reconnect keeps its own and refuses this.",
+      },
+      config: {
+        flag: "config",
+        help: "The new account's config as inline JSON. A reconnect keeps its own and refuses this.",
+      },
+      connectionId: {
+        flag: "connection",
+        help: "The Connection whose credentials this flow replaces; leave it off to create one.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the provider refused to start a device flow, or could not be reached; the message says which",
+    },
+  },
+  "connection.pollDeviceFlow": {
+    command: "connection poll-device-flow",
+    help: "Asks the provider once whether you have approved a device flow. Start one with `hercule connection start-device-flow`. Prints the connection when it is done; otherwise run it again after the interval it prints. It never asks the provider more often than the provider allows.",
+    examples: [{ args: ["--setup", "q2Zt8sKx"] }],
+    fields: {
+      setupId: { flag: "setup", help: "The setupId that start-device-flow printed." },
     },
   },
 
@@ -2050,7 +2105,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. If the provider enforces none of them, the reply shows that.",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch. If the provider enforces none of them, the reply shows that.",
       },
     },
   },
@@ -2099,7 +2154,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "The tool families to take away, replacing the ones set now; repeatable.",
+        help: "The tool families to take away, replacing the ones set now.",
       },
     },
   },
@@ -2193,7 +2248,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. Leave it off to take away edit only.",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch. Leave it off to take away edit only.",
       },
       heartbeat: {
         flag: "heartbeat",
@@ -2257,7 +2312,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "The tool families to take away, replacing the ones set now; repeatable.",
+        help: "The tool families to take away, replacing the ones set now.",
       },
       heartbeat: {
         flag: "heartbeat",
@@ -2352,7 +2407,10 @@ export const CLI = {
       { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
     ],
     fields: {
-      status: { flag: "status", help: "queued, starting, idle, busy or exited; repeatable." },
+      status: {
+        flag: "status",
+        help: "The session's status; repeat the flag to list busy and idle sessions together.",
+      },
       runnerId: {
         flag: "runner",
         help: "Only sessions on this Runner, by its id or a tail of eight or more characters.",
@@ -2639,7 +2697,7 @@ export const CLI = {
     },
     errors: {
       forbidden:
-        "you lack session.spawn, which a Permission Request can get you. Or a session token asked to fork a session on another Permission Profile, which no grant allows: a session may fork only sessions on its own profile, so ask the user to fork this one",
+        "you lack session.spawn, which a Permission Request can get you. Or a session token asked to fork a Thread, or a session on another Permission Profile, which no grant allows: only the user may fork a Thread, and a session may fork only an Agent's sessions on its own profile, so ask the user to fork this one",
       invalid_state:
         "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
     },
@@ -2744,7 +2802,7 @@ export const CLI = {
 
   "controller.read": {
     command: "controller read",
-    help: "Reads the controller's own identity: its id, its version and the public key runners verify against. The Runner a placement falls back to comes with it.",
+    help: "Reads the controller's own identity: its id, its version and the public key runners verify against. The Runner a placement falls back to comes with it, and so does the Runner the controller started on its own machine, which is empty until that runner has joined.",
     examples: [{ args: [] }],
     fields: {},
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -2846,7 +2904,7 @@ export const NOUNS = {
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",
-    flow: "hercule connection create for a pasted credential or hercule connection start-oauth for a browser flow, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
+    flow: "hercule connection create for a pasted credential, hercule connection start-oauth for a browser flow, or hercule connection start-device-flow and then hercule connection poll-device-flow for a code entered at the provider, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
   },
   agent: {
     summary: "Agents: the named configurations sessions are spawned from, to work unattended.",

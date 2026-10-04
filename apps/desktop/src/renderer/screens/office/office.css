@@ -1,0 +1,372 @@
+/* The Office's scene, ported from the Bureau book's office.css: how the room's
+   floor, walls, furniture and the labels over it are drawn, plus the first
+   run's camera, the veil over a closed office, and pieces settling into the
+   room (from the book's desktop/first-run.html).
+
+   Every rule is scoped to .office-room, so the scene's short class names
+   (.field, .tag, .window) touch nothing else in the app. Scoping adds the same
+   weight to every rule, so they win over each other exactly as in the book. */
+
+.office-room {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* The camera. Moving to another shot, the room is drawn at once at the new
+   framing, and the camera starts from a transform that shows the old framing
+   and lets it go. Only an HTML element's transform moves; the SVG never
+   redraws during the move. */
+.office-room .room-camera {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+.office-room .room-camera.is-moving {
+  transition: transform var(--dur-3) var(--ease-out);
+}
+
+/* Before a controller answers, the office is closed: the room shows, dimmed.
+   The lights come on with the controller. */
+.office-room .room-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+.office-room[data-lights="off"] .room-veil {
+  opacity: 0.64;
+}
+
+/* What a change adds settles into the room from 14px above, on a layer of its
+   own; then the room is drawn again as one still picture. A colleague settles
+   with a spring, furniture without one. While the camera moves, what arrives
+   waits for it to stop. */
+.office-room .room-arrival {
+  position: absolute;
+  inset: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .office-room .room-arrival {
+    animation: room-settle var(--dur-3) var(--ease-out) both;
+  }
+  .office-room .room-arrival--character {
+    animation-timing-function: var(--ease-spring);
+  }
+  .office-room .tag.is-new {
+    animation: room-label-settle var(--dur-3) var(--ease-out) both;
+  }
+  .office-room .room-arrival.is-late,
+  .office-room .is-late .tag.is-new {
+    animation-delay: var(--dur-3);
+  }
+}
+@keyframes room-settle {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+}
+/* A label keeps its own offset, from .tag, and starts 10px above it. */
+@keyframes room-label-settle {
+  from {
+    opacity: 0;
+    transform: translate(-38%, calc(-100% - 10px));
+  }
+}
+
+.office-room .floor {
+  position: absolute;
+  inset: 0;
+  /* the green glass of a lit banker's lamp */
+  --lamp-on: color-mix(in oklab, var(--room-lamp) 70%, oklch(0.86 0.13 150));
+}
+/* Furniture: every box shades its sides toward the room's shade color. */
+.office-room .bx .t {
+  fill: var(--c);
+}
+.office-room .bx .l {
+  fill: color-mix(in oklab, var(--c) 84%, var(--room-shade));
+}
+.office-room .bx .r {
+  fill: color-mix(in oklab, var(--c) 68%, var(--room-shade));
+}
+.office-room .bx polygon {
+  stroke: color-mix(in oklab, var(--c) 78%, var(--room-shade));
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+.office-room .brass .t {
+  fill: color-mix(in oklab, var(--c) 80%, white);
+}
+.office-room .shade .t {
+  fill: color-mix(in oklab, var(--c) 82%, white);
+}
+.office-room .slab polygon {
+  stroke: none;
+}
+.office-room .slab .l {
+  fill: color-mix(in oklab, var(--room-floor) 74%, var(--room-shade));
+}
+.office-room .slab .r {
+  fill: color-mix(in oklab, var(--room-floor) 60%, var(--room-shade));
+}
+
+/* the floor: a two-tone parquet, a field of inlay per runner, a sunburst in the lobby */
+.office-room .floor > g > rect {
+  fill: var(--room-floor);
+}
+.office-room .pq {
+  fill: color-mix(in oklab, var(--room-floor) 93%, var(--room-inlay));
+}
+.office-room .field {
+  fill: color-mix(in oklab, var(--room-floor) 78%, var(--room-inlay));
+}
+.office-room .field-line {
+  fill: none;
+  stroke: var(--room-inlay-2);
+  stroke-opacity: 0.34;
+  stroke-width: 1.4;
+}
+.office-room .field-line--thin {
+  stroke-width: 0.8;
+  stroke-opacity: 0.24;
+}
+.office-room .field-corner {
+  fill: var(--room-inlay-2);
+  fill-opacity: 0.3;
+}
+.office-room .engrave {
+  font-family: var(--font-ui);
+  font-weight: var(--w-medium);
+  /* mixed from a text colour so the engraving reads on a pale floor and a dark one alike */
+  fill: color-mix(in oklab, var(--muted) 78%, var(--room-inlay-2));
+  white-space: pre;
+}
+.office-room .engrave-name {
+  font-weight: var(--w-bold);
+}
+.office-room .med {
+  fill: color-mix(in oklab, var(--room-floor) 70%, var(--room-inlay));
+}
+.office-room .med-line {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 1.4;
+}
+.office-room .med-ray {
+  fill: var(--room-inlay-2);
+  fill-opacity: 0.32;
+}
+.office-room .med-core {
+  fill: var(--brass);
+}
+.office-room .shadow {
+  fill: var(--room-shade);
+  opacity: 0.13;
+}
+.office-room .ao {
+  fill: var(--room-shade);
+  opacity: 0.05;
+}
+
+/* the walls: plaster above a wood wainscot and a brass rail */
+.office-room .wall-in--b {
+  fill: var(--room-wall);
+}
+.office-room .wall-in--s {
+  fill: color-mix(in oklab, var(--room-wall) 93%, var(--room-shade));
+}
+.office-room .wall-top {
+  fill: color-mix(in oklab, var(--room-wall) 72%, var(--room-shade));
+}
+.office-room .wall-end {
+  fill: color-mix(in oklab, var(--room-wall) 82%, var(--room-shade));
+}
+.office-room .wainscot {
+  fill: var(--room-panel);
+}
+.office-room .wainscot--s {
+  fill: color-mix(in oklab, var(--room-panel) 90%, var(--room-shade));
+}
+.office-room .rail {
+  fill: var(--brass);
+}
+.office-room .rail--s {
+  fill: color-mix(in oklab, var(--brass) 88%, var(--room-shade));
+}
+.office-room .seams {
+  stroke: color-mix(in oklab, var(--room-panel) 76%, var(--room-shade));
+  stroke-width: 1;
+}
+.office-room .window {
+  fill: color-mix(in oklab, var(--room-lamp) 14%, var(--room-sun));
+}
+.office-room .window-frame {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 3;
+}
+.office-room .mullion {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 1.6;
+}
+.office-room .sill {
+  fill: var(--room-panel);
+}
+.office-room .sun {
+  fill: var(--room-sun);
+  opacity: 0.5;
+}
+.office-room .wall-word {
+  font-family: var(--font-deco);
+  letter-spacing: 0.04em;
+  fill: color-mix(in oklab, var(--ink) 50%, var(--room-inlay-2));
+}
+.office-room .brass-rule {
+  stroke: var(--brass);
+  stroke-width: 1.4;
+}
+.office-room .clock {
+  fill: var(--room-paper);
+  stroke: var(--brass);
+  stroke-width: 2.5;
+}
+.office-room .clock-rays {
+  stroke: var(--brass);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.office-room .hand {
+  stroke: var(--room-inlay-2);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.office-room .hand--h {
+  stroke-width: 2.4;
+}
+.office-room .hand-dot {
+  fill: var(--brass);
+}
+
+/* desks, lamps and things on desks */
+.office-room .desk-top {
+  fill: var(--room-wood);
+}
+.office-room .desk-top--you {
+  fill: var(--room-inlay-2);
+}
+.office-room .blotter {
+  fill: color-mix(in oklab, var(--room-desk) 70%, var(--room-inlay));
+}
+.office-room .lamp-foot {
+  fill: color-mix(in oklab, var(--brass) 80%, var(--room-shade));
+}
+.office-room .saucer {
+  fill: var(--room-paper);
+  stroke: color-mix(in oklab, var(--room-paper) 70%, var(--room-shade));
+  stroke-width: 0.5;
+}
+.office-room .cushion {
+  fill: var(--room-fabric);
+}
+.office-room .cushion--side {
+  fill: color-mix(in oklab, var(--room-fabric) 70%, var(--room-shade));
+}
+.office-room .leaf {
+  fill: var(--room-plant);
+}
+.office-room .leaf--1 {
+  fill: color-mix(in oklab, var(--room-plant) 80%, var(--room-shade));
+}
+.office-room .leaf--2 {
+  fill: color-mix(in oklab, var(--room-plant) 84%, white);
+}
+.office-room .hat {
+  fill: var(--room-inlay-2);
+}
+.office-room .hat--crown {
+  fill: color-mix(in oklab, var(--room-inlay-2) 86%, white);
+}
+.office-room .hat-band {
+  stroke: var(--brass);
+  stroke-width: 1.6;
+}
+.office-room .table-side {
+  fill: color-mix(in oklab, var(--brass) 70%, var(--room-shade));
+}
+.office-room .table-top {
+  fill: var(--room-inlay-2);
+}
+
+/* the event flow: thin brass tubes and a mouth per Connection */
+.office-room .plaque-rail {
+  fill: color-mix(in oklab, var(--room-wall) 80%, var(--room-panel));
+  stroke: var(--brass);
+  stroke-width: 1;
+}
+.office-room .mouth {
+  fill: var(--brass);
+}
+.office-room .mouth-in {
+  fill: color-mix(in oklab, var(--brass) 40%, var(--room-shade));
+}
+.office-room .plaque-mark {
+  color: color-mix(in oklab, var(--room-inlay-2) 76%, transparent);
+}
+.office-room .tube {
+  fill: none;
+  stroke: color-mix(in oklab, var(--brass) 88%, var(--room-shade));
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-opacity: 0.85;
+}
+.office-room .tube--main {
+  stroke-width: 4;
+}
+.office-room .collar {
+  fill: var(--brass);
+}
+/* ---------- labels over the floor ---------- */
+.office-room .tags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.office-room .tag {
+  position: absolute;
+  /* Off-centre to the right: the colleague up and to the left sits closer than the one
+     down and to the right, so a centred label would clip the neighbour's face. */
+  transform: translate(-38%, -100%);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 8px 3px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 90%, transparent);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-11);
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.office-room .tag b {
+  font-weight: var(--w-bold);
+}
+.office-room .tag span {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.office-room .tag--quiet {
+  background: color-mix(in oklab, var(--raised) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.office-room .tag--you {
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 50%, transparent);
+}

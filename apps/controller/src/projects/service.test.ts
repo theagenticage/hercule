@@ -351,7 +351,7 @@ describe("project.query", () => {
         yield* five;
         return {
           byDefault: (yield* projects.query({})).items.map((project) => project.name),
-          byCreated: (yield* projects.query({ sort: { field: "createdAt" } })).items.map(
+          byCreated: (yield* projects.query({ sort: [{ field: "createdAt" }] })).items.map(
             (project) => project.name,
           ),
         };
@@ -367,9 +367,9 @@ describe("project.query", () => {
         yield* five;
         return {
           nameAscending: yield* walkPages({}, 2),
-          nameDescending: yield* walkPages({ sort: { field: "name", direction: "desc" } }, 2),
+          nameDescending: yield* walkPages({ sort: [{ field: "name", direction: "desc" }] }, 2),
           updatedDescending: yield* walkPages(
-            { sort: { field: "updatedAt", direction: "desc" } },
+            { sort: [{ field: "updatedAt", direction: "desc" }] },
             1,
           ),
         };
@@ -386,19 +386,62 @@ describe("project.query", () => {
       Effect.gen(function* () {
         const projects = yield* ProjectService;
         yield* five;
-        const page = yield* projects.query({ limit: 2, sort: { field: "name" } });
+        const page = yield* projects.query({ limit: 2, sort: [{ field: "name" }] });
         const cursor = page.nextCursor ?? "";
         return [
-          yield* Effect.flip(projects.query(castMalformedInput({ sort: { field: "size" } }))),
+          yield* Effect.flip(projects.query(castMalformedInput({ sort: [{ field: "size" }] }))),
           yield* Effect.flip(
-            projects.query({ cursor, sort: { field: "name", direction: "desc" } }),
+            projects.query({ cursor, sort: [{ field: "name", direction: "desc" }] }),
           ),
-          yield* Effect.flip(projects.query({ cursor, sort: { field: "createdAt" } })),
+          yield* Effect.flip(projects.query({ cursor, sort: [{ field: "createdAt" }] })),
           yield* Effect.flip(projects.query({ cursor: `${cursor}x` })),
         ];
       }),
     );
     for (const error of errors) expect(error).toMatchObject({ error: { code: "validation" } });
+  });
+
+  it("orders rows equal on the first key by the second, across pages of one row", async () => {
+    const { walk, otherKeys } = await run(
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        // Projects created without moving the clock share their timestamps.
+        for (const name of ["Docs", "Atlas"]) yield* projects.create({ name });
+        yield* TestClock.adjust(A_MINUTE);
+        for (const name of ["Web", "Hercule", "Runner"]) yield* projects.create({ name });
+        const sort = [
+          { field: "updatedAt", direction: "desc" },
+          { field: "name", direction: "asc" },
+        ] as const;
+        const page = yield* projects.query({ limit: 1, sort });
+        return {
+          walk: yield* walkPages({ sort }, 1),
+          otherKeys: yield* Effect.flip(
+            projects.query({
+              cursor: page.nextCursor ?? "",
+              sort: [{ field: "updatedAt", direction: "desc" }],
+            }),
+          ),
+        };
+      }),
+    );
+    expect(walk).toEqual(["Hercule", "Runner", "Web", "Atlas", "Docs"]);
+    expect(otherKeys).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["cursor"] }] } },
+    });
+  });
+
+  it("refuses a sort that names a field twice, and names the field", async () => {
+    const error = await runError(
+      Effect.flatMap(ProjectService, (projects) =>
+        projects.query({ sort: [{ field: "name" }, { field: "name", direction: "desc" }] }),
+      ),
+    );
+    expect(error).toMatchObject({ error: { code: "validation" } });
+    const messages = (
+      error as { error: { details: { issues: ReadonlyArray<{ message: string }> } } }
+    ).error.details.issues.map((issue) => issue.message);
+    expect(messages).toContainEqual(expect.stringContaining("name appears more than once"));
   });
 });
 

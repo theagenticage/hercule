@@ -34,6 +34,7 @@ import {
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
   RunnerToController,
+  LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -55,12 +56,11 @@ import {
   findAdapter,
   describeMissingAdapter,
   buildFailedProbe,
-  providerLogins,
   type InstallOutcome,
   type ProviderAdapter,
   type ProviderRunnerContext,
 } from "./providers";
-import type { LoginAnswer } from "./providers/login";
+import type { LoginAnswer, Logins } from "./providers/login";
 import { sessions } from "./sessions";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS, type WorkspaceSteps } from "./workspace-actions";
@@ -71,13 +71,16 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 const NONCE_BYTES = 16;
 
 /**
- * The capabilities this runner offers at hello: one for each workspace action
- * its build implements. The controller pins a run only to a runner that lists
- * every workspace action in the run's plan.
+ * The capabilities this runner offers at hello:
+ *
+ * - one for each workspace action its build implements. The controller pins a
+ *   run only to a runner that lists every workspace action in the run's plan.
+ * - `LOGIN_ENDED_CAPABILITY`: this runner reports the end of a device login.
  */
-const CAPABILITIES: ReadonlyArray<string> = WORKSPACE_ACTION_IDS.map(
-  buildWorkspaceActionCapability,
-);
+const CAPABILITIES: ReadonlyArray<string> = [
+  ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
+  LOGIN_ENDED_CAPABILITY,
+];
 
 const ED25519 = { name: "Ed25519" } as const;
 
@@ -127,6 +130,8 @@ export interface ConnectOptions {
   readonly socketPath: string;
   /** Forwards a credential helper's request to the controller, and the response back. */
   readonly credentials: CredentialRelay;
+  /** The provider logins on this machine. They outlive this connection. */
+  readonly providerLogins: Logins;
   /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
   /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
@@ -341,7 +346,7 @@ export const connect = (
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,
         baseEnv: process.env,
-        binaryOf: findBinaryPath,
+        findBinary: findBinaryPath,
         workspaces: options.workspaces,
         socketPath: options.socketPath,
       },
@@ -350,7 +355,7 @@ export const connect = (
     // Credential requests go out on this connection while it is up. With no
     // connection there is no credential, which git treats as "try the next
     // helper", not as a failure.
-    yield* options.credentials.attached((frame) => write(encodeFrameText(frame)));
+    yield* options.credentials.attachConnection((frame) => write(encodeFrameText(frame)));
 
     /**
      * Runs a workspace operation and sends its report. Provisioning takes as
@@ -481,7 +486,8 @@ export const connect = (
               _tag: "loginFailed",
               message: describeMissingAdapter(request.providerId),
             })
-          : providerLogins.start(
+          : options.providerLogins.start(
+              request.requestId,
               request.instanceId,
               adapter,
               // A login is the harness writing its own credential on this
@@ -525,8 +531,16 @@ export const connect = (
           // started on an earlier connection can finish at any moment, and a
           // peer that has not proved its identity must not learn of it.
           yield* options.workspaceSteps
-            .attached((frame) => write(encodeFrameText(frame)))
+            .attachConnection((frame) => write(encodeFrameText(frame)))
             .pipe(Scope.provide(connection));
+          // An older controller closes the connection on a frame it cannot
+          // read, so the end of a device login is reported only to a
+          // controller that lists the frame.
+          if (message.capabilities.includes(LOGIN_ENDED_CAPABILITY)) {
+            yield* options.providerLogins
+              .attachConnection((frame) => write(encodeFrameText(frame)))
+              .pipe(Scope.provide(connection));
+          }
           proven.openUnsafe();
           return;
         }
@@ -556,7 +570,7 @@ export const connect = (
               Effect.forkIn(
                 answerLogin(
                   message.requestId,
-                  providerLogins.submit(message.instanceId, message.code),
+                  options.providerLogins.submit(message.instanceId, message.code),
                 ),
                 connection,
               ),

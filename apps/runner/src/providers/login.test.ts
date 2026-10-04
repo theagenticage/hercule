@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber } from "effect";
+import { Duration, Effect, Fiber, Queue } from "effect";
 import { TestClock } from "effect/testing";
 import { claudeCode } from "./claude-code";
 import { codex } from "./codex/adapter";
@@ -23,6 +23,9 @@ import {
 import type { ProviderRunnerContext } from "./index";
 
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
+
+/** The request id of the `loginStart` that starts a test's login. */
+const REQUEST = "0199e0e7-0000-7000-8000-0000000000a1";
 
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
@@ -132,7 +135,9 @@ describe("starting a login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           children[0]!.says(`Opening browser to sign in…\n${URL_ONE}\n`);
@@ -158,7 +163,9 @@ describe("starting a login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           children[0]!.says(`${URL_ONE}\n${URL_TWO}\nPaste code here if prompted > `);
@@ -176,7 +183,9 @@ describe("starting a login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           // OSC 8 hyperlink: the target URL is inside the escape sequence, next to a visible copy.
@@ -195,12 +204,12 @@ describe("starting a login", () => {
 
     const second = await run(
       Effect.gen(function* () {
-        const first = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const first = yield* Effect.forkChild(driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
         yield* Fiber.join(first);
 
-        const next = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const next = yield* Effect.forkChild(driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[1]!.says(`${URL_TWO}\n`));
         return yield* Fiber.join(next);
@@ -219,7 +228,9 @@ describe("starting a login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           children[0]!.complains("claude: could not reach platform.claude.com\n");
@@ -237,7 +248,9 @@ describe("starting a login", () => {
 describe("submitting a login code", () => {
   const startLogin = (driver: ReturnType<typeof makeLogins>, children: ReadonlyArray<Fake>) =>
     Effect.gen(function* () {
-      const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+      const starting = yield* Effect.forkChild(
+        driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+      );
       yield* TestClock.adjust(Duration.zero);
       yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\nPaste code here if prompted > `));
       yield* Fiber.join(starting);
@@ -332,9 +345,9 @@ describe("more than one login at a time", () => {
     // start is still waiting for a URL when the second arrives.
     const [first, second] = await run(
       Effect.gen(function* () {
-        const one = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const one = yield* Effect.forkChild(driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT));
         yield* TestClock.adjust(Duration.zero);
-        const two = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const two = yield* Effect.forkChild(driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[1]!.says(`${URL_TWO}\n`));
         return [yield* Fiber.join(one), yield* Fiber.join(two)] as const;
@@ -363,7 +376,9 @@ describe("more than one login at a time", () => {
 
     await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
         yield* Fiber.join(starting);
@@ -382,7 +397,9 @@ describe("more than one login at a time", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
         yield* Fiber.join(starting);
@@ -402,7 +419,9 @@ describe("more than one login at a time", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
         yield* Fiber.join(starting);
@@ -424,12 +443,12 @@ describe("more than one login at a time", () => {
 });
 
 /**
- * A device-code login uses only the first of the two calls. The vendor prints
+ * A device login uses only the first of the two calls. The vendor prints
  * a URL *and* a one-time code, reads nothing, and the browser completes the
  * login with the vendor. Nothing is submitted to it; its child runs until its
  * own timer ends it, and is then forgotten.
  */
-describe("a device-code login", () => {
+describe("a device login", () => {
   // A real directory, because the adapter creates the instance's Codex home and
   // neutral home when it builds the command, just as it does for a session.
   const CODEX_CONTEXT: ProviderRunnerContext = {
@@ -450,6 +469,17 @@ describe("a device-code login", () => {
   const DEVICE_URL = "https://auth.openai.com/codex/device";
   const USER_CODE = "CH61-0FI2N";
 
+  /**
+   * The answer to a device login started with the test clock at zero: the
+   * code's whole lifetime is still ahead of it.
+   */
+  const DEVICE_ANSWER: LoginAnswer = {
+    _tag: "loginUrl",
+    url: DEVICE_URL,
+    userCode: USER_CODE,
+    expiresInSeconds: Duration.toSeconds(LOGIN_CODE_LIFETIME),
+  };
+
   /** The lines `codex login --device-auth` printed, taken from a recording. */
   const RECORDED = ((): ReadonlyArray<string> => {
     const lines = readFileSync(
@@ -468,13 +498,21 @@ describe("a device-code login", () => {
    * really receive, not a cleaned-up one.
    */
   const printRecordedLogin = (children: ReadonlyArray<Fake>): void => {
-    // If the driver spawned nothing, the test should fail on its assertion, not here.
-    for (const line of RECORDED) children[0]?.says(`\u001b[36m${line}\u001b[0m\n`);
+    // The newest child is the login being started. If the driver spawned
+    // nothing, the test should fail on its assertion, not here.
+    for (const line of RECORDED) children.at(-1)?.says(`\u001b[36m${line}\u001b[0m\n`);
   };
 
-  const startLogin = (driver: ReturnType<typeof makeLogins>, children: ReadonlyArray<Fake>) =>
+  const startLogin = (
+    driver: ReturnType<typeof makeLogins>,
+    children: ReadonlyArray<Fake>,
+    instanceId = INSTANCE,
+    requestId = REQUEST,
+  ) =>
     Effect.gen(function* () {
-      const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+      const starting = yield* Effect.forkChild(
+        driver.start(requestId, instanceId, codex, CODEX_CONTEXT),
+      );
       yield* TestClock.adjust(Duration.zero);
       yield* Effect.sync(() => printRecordedLogin(children));
       return yield* Fiber.join(starting);
@@ -486,7 +524,7 @@ describe("a device-code login", () => {
 
     const answer = await run(startLogin(driver, children));
 
-    expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
+    expect(answer).toStrictEqual(DEVICE_ANSWER);
   });
 
   it("returns the URL only once the code has been read too", async () => {
@@ -497,7 +535,7 @@ describe("a device-code login", () => {
     const [pending, answer] = await run(
       Effect.gen(function* () {
         const starting = yield* Effect.forkChild(
-          Effect.tap(driver.start(INSTANCE, codex, CODEX_CONTEXT), (given) =>
+          Effect.tap(driver.start(REQUEST, INSTANCE, codex, CODEX_CONTEXT), (given) =>
             Effect.sync(() => {
               early = given;
             }),
@@ -514,7 +552,7 @@ describe("a device-code login", () => {
     );
 
     expect(pending).toBeUndefined();
-    expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
+    expect(answer).toStrictEqual(DEVICE_ANSWER);
   });
 
   it("returns the URL and code when the output ends right after the code", async () => {
@@ -523,7 +561,9 @@ describe("a device-code login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, codex, CODEX_CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           printRecordedLogin(children);
@@ -534,7 +574,7 @@ describe("a device-code login", () => {
       }),
     );
 
-    expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
+    expect(answer).toStrictEqual(DEVICE_ANSWER);
   });
 
   it("fails with the child's stderr output when it prints a URL but no code", async () => {
@@ -543,7 +583,9 @@ describe("a device-code login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, codex, CODEX_CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           children[0]?.says(`Open this link to sign in\n${DEVICE_URL}\n`);
@@ -567,7 +609,9 @@ describe("a device-code login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, codex, CODEX_CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           children[0]?.says(`Open this link to sign in\n${DEVICE_URL}\n`);
@@ -591,7 +635,9 @@ describe("a device-code login", () => {
 
     const answer = await run(
       Effect.gen(function* () {
-        const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+        );
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
         return yield* Fiber.join(starting);
@@ -643,5 +689,224 @@ describe("a device-code login", () => {
     expect(children[0]!.killed()).toBe(true);
     // The login was killed and forgotten, so no login is held for the instance.
     expect(answer).toMatchObject({ _tag: "loginFailed", message: "no login in progress" });
+  });
+
+  it("counts the code's lifetime from when it was printed", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, INSTANCE, codex, CODEX_CONTEXT),
+        );
+        yield* TestClock.adjust(Duration.seconds(5));
+        yield* Effect.sync(() => printRecordedLogin(children));
+        return yield* Fiber.join(starting);
+      }),
+    );
+
+    // The clock started at the spawn, and the vendor took five seconds to print.
+    expect(answer).toMatchObject({ expiresInSeconds: Duration.toSeconds(LOGIN_CODE_LIFETIME) - 5 });
+  });
+
+  describe("reporting the end of a device login", () => {
+    /** An instance whose device login ends last, after the one a test checks. */
+    const SENTINEL = "0199e0e7-0000-7000-8000-00000000000b";
+
+    /** The request id of the sentinel's login. */
+    const SENTINEL_REQUEST = "0199e0e7-0000-7000-8000-0000000000b1";
+
+    /** Attaches a connection the way a runner's socket does, and returns the queue it reports into. */
+    const attachQueue = (driver: ReturnType<typeof makeLogins>) =>
+      Effect.gen(function* () {
+        const reports = yield* Queue.unbounded<string>();
+        yield* driver.attachConnection((frame) => Queue.offer(reports, frame.requestId));
+        return reports;
+      });
+
+    /**
+     * Ends a device login on the sentinel instance, waits for its report, and
+     * returns every report that came before it. Child exits are handled in
+     * the order they happen, so a report caused earlier in the test has
+     * arrived by then.
+     */
+    const listReportsBeforeSentinel = (
+      driver: ReturnType<typeof makeLogins>,
+      children: ReadonlyArray<Fake>,
+      reports: Queue.Queue<string>,
+    ) =>
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, SENTINEL, SENTINEL_REQUEST);
+        yield* Effect.sync(() => children.at(-1)!.exit(0));
+        const before: Array<string> = [];
+        for (;;) {
+          const requestId = yield* Queue.take(reports);
+          if (requestId === SENTINEL_REQUEST) return before;
+          before.push(requestId);
+        }
+      });
+
+    /**
+     * Runs `body` with a connection attached, then the sentinel login, and
+     * returns the request ids reported before the sentinel's.
+     */
+    const collectReports = (
+      driver: ReturnType<typeof makeLogins>,
+      children: ReadonlyArray<Fake>,
+      body: Effect.Effect<void>,
+    ): Promise<ReadonlyArray<string>> =>
+      run(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const reports = yield* attachQueue(driver);
+            yield* body;
+            return yield* listReportsBeforeSentinel(driver, children, reports);
+          }),
+        ),
+      );
+
+    it("reports a device login whose vendor exits on its own", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        children,
+        Effect.gen(function* () {
+          yield* startLogin(driver, children);
+          // The user typed the code in the browser, so the vendor exits.
+          yield* Effect.sync(() => children[0]!.exit(0));
+        }),
+      );
+
+      expect(reported).toEqual([REQUEST]);
+    });
+
+    it("reports a device login whose code expired", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        children,
+        Effect.gen(function* () {
+          yield* startLogin(driver, children);
+          yield* TestClock.adjust(LOGIN_CODE_LIFETIME);
+        }),
+      );
+
+      expect(children[0]!.killed()).toBe(true);
+      // Reported once: the kill that ends the child must not report it again.
+      expect(reported).toEqual([REQUEST]);
+    });
+
+    it("does not report a login that was replaced or stopped with the runner", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        children,
+        Effect.gen(function* () {
+          yield* startLogin(driver, children);
+          // The second login replaces the first, whose end means nothing now.
+          const second = yield* Effect.forkChild(
+            driver.start(REQUEST, INSTANCE, codex, CODEX_CONTEXT),
+          );
+          yield* TestClock.adjust(Duration.zero);
+          yield* Effect.sync(() => {
+            for (const line of RECORDED) children[1]?.says(`${line}\n`);
+            children[0]!.exit(1);
+          });
+          yield* Fiber.join(second);
+          yield* driver.stopAll;
+          yield* Effect.sync(() => children[1]!.exit(1));
+        }),
+      );
+
+      expect(reported).toEqual([]);
+    });
+
+    it("reports a login that replaced another under its own request id", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+      const replacing = "0199e0e7-0000-7000-8000-0000000000a2";
+
+      const reported = await collectReports(
+        driver,
+        children,
+        Effect.gen(function* () {
+          yield* startLogin(driver, children);
+          yield* startLogin(driver, children, INSTANCE, replacing);
+          yield* Effect.sync(() => {
+            children[0]!.exit(1);
+            children[1]!.exit(0);
+          });
+        }),
+      );
+
+      expect(reported).toEqual([replacing]);
+    });
+
+    it("does not report a paste login, whose submit already waits for its end", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const reported = await collectReports(
+        driver,
+        children,
+        Effect.gen(function* () {
+          const starting = yield* Effect.forkChild(
+            driver.start(REQUEST, INSTANCE, claudeCode, CONTEXT),
+          );
+          yield* TestClock.adjust(Duration.zero);
+          yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+          yield* Fiber.join(starting);
+          yield* Effect.sync(() => children[0]!.exit(0));
+        }),
+      );
+
+      expect(reported).toEqual([]);
+    });
+
+    it("stops reporting once the connection that attached it closes", async () => {
+      const { spawn, children } = createMachine();
+      const driver = makeLogins(spawn);
+
+      const [whileOpen, afterClose, nextConnection] = await run(
+        Effect.gen(function* () {
+          const { reports, whileOpen } = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const reports = yield* attachQueue(driver);
+              yield* startLogin(driver, children);
+              yield* Effect.sync(() => children[0]!.exit(0));
+              return { reports, whileOpen: yield* Queue.take(reports) };
+            }),
+          );
+          // This login ends while no connection is attached.
+          yield* startLogin(driver, children);
+          yield* Effect.sync(() => children[1]!.exit(0));
+          // Started before the next connection attaches, which gives the
+          // exit above time to be handled first.
+          yield* startLogin(driver, children, SENTINEL, SENTINEL_REQUEST);
+          const next = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const reports = yield* attachQueue(driver);
+              yield* Effect.sync(() => children[2]!.exit(0));
+              return yield* Queue.take(reports);
+            }),
+          );
+          return [whileOpen, yield* Queue.size(reports), next] as const;
+        }),
+      );
+
+      expect(whileOpen).toBe(REQUEST);
+      // The closed connection received nothing more. The next connection
+      // probes every instance when it arrives, which makes up for the report
+      // nobody could receive.
+      expect(afterClose).toBe(0);
+      expect(nextConnection).toBe(SENTINEL_REQUEST);
+    });
   });
 });

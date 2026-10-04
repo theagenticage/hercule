@@ -12,14 +12,16 @@
  * record holds only references to it. So a row has no value to leak, and the
  * assertions below check what was sent, not what came back.
  */
-import { describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  buildErrorBody,
   expectInDocumentOrder,
   readPageText,
   renderApp,
   stubApi,
+  type Answer,
   type Handler,
 } from "../../app/testing";
 
@@ -96,10 +98,30 @@ const CHATTER_TYPE = {
   setup: [{ kind: "pairing" }],
 };
 
+/**
+ * A type with two flows: a device flow first, which it prefers, and a pasted
+ * token as the alternative.
+ */
+const GLASS_TYPE = {
+  type: "glasshouse/glass",
+  displayName: "Glasshouse",
+  setup: [
+    { kind: "device" },
+    { kind: "credentials", fields: [{ name: "token", label: "Personal access token" }] },
+  ],
+  device: {
+    clientId: "glass-client",
+    deviceCodeUrl: "https://glasshouse.test/login/device/code",
+    tokenUrl: "https://glasshouse.test/login/oauth/access_token",
+    scopes: ["repo"],
+  },
+};
+
 const buildPlugin = (id: string, definition: { type: string; displayName: string }): Plugin => ({
   id,
-  // The plugin's name differs from its type's name, because a row shows both:
-  // the type's display name, and the plugin under it.
+  // The plugin's name differs from its type's name, so a row shows both: the
+  // type's display name, and the plugin under it. A plugin named like its type
+  // is left out, which one test below checks.
   displayName: `${id} plugin`,
   hostApi: 1,
   capabilities: ["connections"],
@@ -125,6 +147,7 @@ const CATALOG: readonly Plugin[] = [
   buildPlugin("paper-trail", PAPER_TYPE),
   buildPlugin("skyline", SKY_TYPE),
   buildPlugin("chatterbox", CHATTER_TYPE),
+  buildPlugin("glasshouse", GLASS_TYPE),
   BYSTANDER,
 ];
 
@@ -153,6 +176,33 @@ const SKY: Connection = {
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-09-02T09:30:00.000Z",
   updatedAt: "2026-09-12T07:05:00.000Z",
+};
+
+const GLASS: Connection = {
+  id: "0199c0ff-dddd-7000-8000-000000000004",
+  type: "glasshouse/glass",
+  label: "work",
+  displayName: "octo-glass",
+  status: "connected",
+  labels: ["Code"],
+  config: {},
+  credentials: [{ name: "oauth.tokens" }],
+  createdAt: "2026-10-02T08:15:00.000Z",
+  updatedAt: "2026-10-02T08:15:00.000Z",
+};
+
+/** A connection the user never named or gave a topic, so it is named after its account. */
+const UNNAMED: Connection = {
+  id: "0199c0ff-eeee-7000-8000-000000000005",
+  type: "glasshouse/glass",
+  label: "octo-glass",
+  displayName: "octo-glass",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [{ name: "oauth.tokens" }],
+  createdAt: "2026-10-02T08:15:00.000Z",
+  updatedAt: "2026-10-02T08:15:00.000Z",
 };
 
 /** Builds a stub controller that returns `connections` and the catalog above. */
@@ -215,9 +265,16 @@ const findGroupOffering = (inner: HTMLElement, name: string): HTMLElement => {
   return group;
 };
 
-/** Finds the row of one connection, starting from its account name. */
-const findConnectionRow = async (connection: Connection): Promise<HTMLElement> =>
-  findGroupOffering(await screen.findByText(connection.displayName), "Delete");
+/**
+ * Finds the row of one connection, starting from its account name. The
+ * account is on the line under the name, or is the name itself when the
+ * connection is named after it, so the row is found as the list item around it.
+ */
+const findConnectionRow = async (connection: Connection): Promise<HTMLElement> => {
+  const row = (await screen.findByText(connection.displayName)).closest("li");
+  if (row === null) throw new Error(`${connection.displayName} is in no row`);
+  return row;
+};
 
 /** Finds the offer row of one catalogued type. */
 const findTypeOffer = async (displayName: string): Promise<HTMLElement> =>
@@ -237,6 +294,12 @@ const readSuggestions = (label: string): readonly string[] => {
   const list = id === null ? null : document.getElementById(id);
   if (list === null) throw new Error(`${label} offers no suggestions`);
   return [...list.querySelectorAll("option")].map((option) => option.value);
+};
+
+/** Checks that the open setup form asks for neither a name nor a topic. */
+const expectNoNameOrTopic = (): void => {
+  expect(screen.queryByLabelText("Name")).toBeNull();
+  expect(screen.queryByLabelText("Topic")).toBeNull();
 };
 
 /**
@@ -268,7 +331,7 @@ describe("Connections", () => {
 
     expect(readPageText()).toContain("Nothing connected yet.");
 
-    for (const displayName of ["Paper Trail", "Skyline", "Chatterbox"]) {
+    for (const displayName of ["Paper Trail", "Skyline", "Chatterbox", "Glasshouse"]) {
       const offer = await findTypeOffer(displayName);
       expect(within(offer).getByRole("button", { name: "Connect" }).hasAttribute("disabled")).toBe(
         false,
@@ -283,7 +346,7 @@ describe("Connections", () => {
       .map((connect) =>
         readPageText(findGroupOffering(connect, "Connect").querySelector<HTMLElement>("b")),
       );
-    expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox"]);
+    expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox", "Glasshouse"]);
     // Each name has the plugin that declares the type under it, because two
     // plugins may declare the same type name.
     expect(readPageText(await findTypeOffer("Paper Trail"))).toContain("paper-trail plugin");
@@ -342,11 +405,60 @@ describe("Connections", () => {
     expect(sky).toContain("Business");
   });
 
+  it("shows the account once when the connection is named after it, and no topic when it has none", async () => {
+    await openApp([UNNAMED]);
+
+    const row = await findConnectionRow(UNNAMED);
+    expect(within(row).getAllByText(UNNAMED.displayName)).toHaveLength(1);
+    // The line under the name holds only the plugin: no account, no topic, no separator.
+    expect(readPageText(row)).toContain("glasshouse plugin");
+    expect(readPageText(row)).not.toContain("·");
+  });
+
+  it("shows no account for an account with no name, which the type's name stands in for", async () => {
+    await openApp([{ ...UNNAMED, label: "Glasshouse", displayName: "" }]);
+
+    // The row has no account text to find it by, and it is the only row.
+    const row = (await screen.findByRole("button", { name: "Configure" })).closest("li");
+    if (row === null) throw new Error("Configure is in no row");
+    // The line under the name holds only the plugin: no empty account after a separator.
+    expect(readPageText(row)).toContain("glasshouse plugin");
+    expect(readPageText(row)).not.toContain("·");
+  });
+
+  it("leaves out a plugin named like its type, on its row and on its offer", async () => {
+    const api = stubApi({
+      ...buildController(() => [UNNAMED]),
+      "GET /api/v1/plugins": {
+        body: [{ ...buildPlugin("glasshouse", GLASS_TYPE), displayName: "Glasshouse" }],
+      },
+    });
+    await renderApp({ path: "/connections", api: api.fetch, token: "held" });
+
+    // The row shows the type's name once, and has no line under it.
+    const row = await findConnectionRow(UNNAMED);
+    expect(within(row).getAllByText("Glasshouse")).toHaveLength(1);
+    expect(readPageText(row)).not.toContain("·");
+    // The offer's line under the name holds only what setting the type up takes.
+    const offer = findGroupOffering(screen.getByRole("button", { name: "Connect" }), "Connect");
+    expect(readPageText(offer.querySelector<HTMLElement>("small"))).toBe(
+      "sign in with Glasshouse or paste a token",
+    );
+  });
+
+  it("shows both the name and the account once the connection is renamed", async () => {
+    await openApp([{ ...UNNAMED, label: "personal" }]);
+
+    const row = readPageText(await findConnectionRow(UNNAMED));
+    expect(row).toContain("personal");
+    expect(row).toContain("octo-glass");
+  });
+
   it("still offers every type once something is connected", async () => {
     await openApp([PAPER, SKY]);
 
     await findTypeOffer("Chatterbox");
-    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(4);
   });
 
   it("fetches the list again when a connection changes elsewhere", async () => {
@@ -369,13 +481,7 @@ describe("Connections", () => {
 describe("Connections > setting up a connection", () => {
   const created: Connection = { ...PAPER, id: "0199c0ff-cccc-7000-8000-000000000003" };
 
-  const fill = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
-    await user.type(screen.getByLabelText("Access token"), "pt-secret-9931");
-    await user.type(screen.getByLabelText("Label"), "work");
-    await user.type(screen.getByLabelText("Default topic"), "Code");
-  };
-
-  it("shows the fields the type asks for, as password inputs", async () => {
+  it("shows the fields the type asks for, as password inputs, and nothing else", async () => {
     const user = userEvent.setup();
     await openApp([]);
 
@@ -387,13 +493,12 @@ describe("Connections > setting up a connection", () => {
     expect(readPageText()).toContain("Connect Paper Trail");
     expect(readPageText()).toContain(CHECKLIST);
     expect(screen.getByLabelText<HTMLInputElement>("Access token").type).toBe("password");
-    expect(screen.getByLabelText("Label")).toBeDefined();
-    expect(readSuggestions("Default topic")).toEqual(
-      expect.arrayContaining(["Code", "Business", "Personal", "Ops"]),
-    );
+    // The new connection is named after its account and has no topic, so
+    // setup asks for neither.
+    expectNoNameOrTopic();
   });
 
-  it("sends the filled-in values, and shows the new connection", async () => {
+  it("sends only the credential, and shows the new connection", async () => {
     const user = userEvent.setup();
     const { api, hold } = await openApp([], {
       "POST /api/v1/connections": { status: 201, body: created },
@@ -402,14 +507,12 @@ describe("Connections > setting up a connection", () => {
     await user.click(
       within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
-    await fill(user);
+    await user.type(screen.getByLabelText("Access token"), "pt-secret-9931");
     hold([created]);
     // Cancel comes before Connect.
-    const connect = within(getFormWithField("Label")).getByRole("button", { name: "Connect" });
-    expectInDocumentOrder([
-      within(getFormWithField("Label")).getByRole("button", { name: "Cancel" }),
-      connect,
-    ]);
+    const form = getFormWithField("Access token");
+    const connect = within(form).getByRole("button", { name: "Connect" });
+    expectInDocumentOrder([within(form).getByRole("button", { name: "Cancel" }), connect]);
     await user.click(connect);
 
     await waitFor(() => {
@@ -418,9 +521,6 @@ describe("Connections > setting up a connection", () => {
     expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
     expect(listWrites(api)[0]?.body).toEqual({
       type: "paper-trail/paper",
-      label: "work",
-      labels: ["Code"],
-      config: {},
       credentials: { token: "pt-secret-9931" },
     });
 
@@ -443,14 +543,16 @@ describe("Connections > setting up a connection", () => {
     await user.click(
       within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
-    await fill(user);
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+    await user.type(screen.getByLabelText("Access token"), "pt-secret-9931");
+    await user.click(
+      within(getFormWithField("Access token")).getByRole("button", { name: "Connect" }),
+    );
 
     await screen.findByText(new RegExp(complaint));
     expectMessageAtField(
       complaint,
       screen.getByLabelText("Access token"),
-      screen.getByLabelText("Label"),
+      screen.getByRole("button", { name: "Connect" }),
     );
   });
 
@@ -492,10 +594,10 @@ describe("Connections > a redirect flow", () => {
     );
 
     expect(readPageText()).toContain(`${window.location.origin}/oauth/callback`);
+    expectNoNameOrTopic();
 
-    await user.type(screen.getByLabelText("Label"), "personal");
-    await user.type(screen.getByLabelText("Default topic"), "Business");
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+    // The offers are gone while the form is open, so its button is the only Connect.
+    await user.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
       expect(listWrites(api)).toHaveLength(1);
@@ -504,8 +606,6 @@ describe("Connections > a redirect flow", () => {
     expect(listWrites(api)[0]?.body).toEqual({
       type: "skyline/mail",
       origin: window.location.origin,
-      label: "personal",
-      labels: ["Business"],
     });
     await waitFor(() => {
       expect(assign.mock.calls).toEqual([[AUTHORIZATION_URL]]);
@@ -523,6 +623,14 @@ describe("Connections > a redirect flow", () => {
     await openApp([PAPER], {}, "/connections?oauth=denied");
 
     expect(readPageText(await screen.findByRole("alert"))).toContain("denied");
+  });
+
+  it("says a reconnect that signed in to another account changed nothing", async () => {
+    await openApp([PAPER], {}, "/connections?oauth=other-account");
+
+    expect(readPageText(await screen.findByRole("alert"))).toBe(
+      "That sign-in was for a different account than the connection you reconnected, so nothing changed. To add that account, create a new connection for it.",
+    );
   });
 
   it("does not show an unknown outcome value from the address", async () => {
@@ -547,6 +655,7 @@ describe("Connections > reconnecting and removing", () => {
       within(await findConnectionRow(STALE)).getByRole("button", { name: "Reconnect" }),
     );
     expect(readPageText()).toContain("Reconnect Paper Trail");
+    expectNoNameOrTopic();
     await user.type(await screen.findByLabelText("Access token"), "pt-secret-fresh");
     await user.click(
       within(getFormWithField("Access token")).getByRole("button", { name: "Connect" }),
@@ -575,17 +684,19 @@ describe("Connections > reconnecting and removing", () => {
       "POST /api/v1/oauth/start": { body: { authorizationUrl: "https://skyline.test/again" } },
     });
 
-    await user.click(
-      within(await findConnectionRow(SKY)).getByRole("button", { name: "Reconnect" }),
-    );
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
+    const row = await findConnectionRow(SKY);
+    await user.click(within(row).getByRole("button", { name: "Reconnect" }));
+    // The connection keeps its name and topic, so a reconnect does not ask for them.
+    expectNoNameOrTopic();
+    await user.click(within(row).getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
       expect(listWrites(api)).toHaveLength(1);
     });
     expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
-    expect(listWrites(api)[0]?.body).toMatchObject({
+    expect(listWrites(api)[0]?.body).toEqual({
       type: "skyline/mail",
+      origin: window.location.origin,
       connectionId: SKY.id,
     });
     vi.unstubAllGlobals();
@@ -601,6 +712,10 @@ describe("Connections > reconnecting and removing", () => {
     await user.click(within(row).getByRole("button", { name: "Delete" }));
 
     expect(listWrites(api)).toEqual([]);
+    // Hercule cannot take back a credential it was given, so the user is told.
+    expect(readPageText(row)).toContain(
+      "Hercule forgets its credentials but does not revoke them at Skyline.",
+    );
     // Cancel comes before Confirm.
     const confirm = within(row).getByRole("button", { name: "Confirm" });
     expectInDocumentOrder([within(row).getByRole("button", { name: "Cancel" }), confirm]);
@@ -621,7 +736,7 @@ describe("Connections > reconnecting and removing", () => {
 });
 
 describe("Connections > configuring a connection", () => {
-  it("shows the type's own settings beside the label and the topic", async () => {
+  it("shows the type's own settings beside the name and the topic", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([PAPER], {
       [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
@@ -632,16 +747,17 @@ describe("Connections > configuring a connection", () => {
     );
 
     expect(screen.getByLabelText<HTMLInputElement>(/folder/i).value).toBe("inbox");
-    expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("work");
-    expect(screen.getByLabelText<HTMLInputElement>("Default topic").value).toBe("Code");
+    expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("work");
+    expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("Code");
+    expect(readSuggestions("Topic")).toEqual(
+      expect.arrayContaining(["Code", "Business", "Personal", "Ops"]),
+    );
 
     await user.clear(screen.getByLabelText(/folder/i));
     await user.type(screen.getByLabelText(/folder/i), "archive");
-    const save = within(getFormWithField("Label")).getByRole("button", { name: "Save" });
-    expectInDocumentOrder([
-      within(getFormWithField("Label")).getByRole("button", { name: "Cancel" }),
-      save,
-    ]);
+    const form = getFormWithField("Name");
+    const save = within(form).getByRole("button", { name: "Save" });
+    expectInDocumentOrder([within(form).getByRole("button", { name: "Cancel" }), save]);
     await user.click(save);
 
     await waitFor(() => {
@@ -651,10 +767,84 @@ describe("Connections > configuring a connection", () => {
       method: "PATCH",
       path: `/api/v1/connections/${PAPER.id}`,
     });
+    // The topic was not touched, so no topics are sent, and the connection
+    // keeps both `Code` and `Ops`.
     expect(api.calls.find((call) => call.method === "PATCH")?.body).toEqual({
       label: "work",
-      labels: ["Code"],
       config: { folder: "archive" },
+    });
+  });
+
+  it("renames a connection named after its account and gives it a topic", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([UNNAMED], {
+      [`PATCH /api/v1/connections/${UNNAMED.id}`]: { body: UNNAMED },
+    });
+
+    await user.click(
+      within(await findConnectionRow(UNNAMED)).getByRole("button", { name: "Configure" }),
+    );
+    expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("octo-glass");
+    expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("");
+
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "personal");
+    await user.type(screen.getByLabelText("Topic"), "Code");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({
+      label: "personal",
+      labels: ["Code"],
+      config: {},
+    });
+  });
+
+  it("keeps the other topics when the first one changes", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([PAPER], {
+      [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
+    });
+
+    await user.click(
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
+    );
+    await user.clear(screen.getByLabelText("Topic"));
+    await user.type(screen.getByLabelText("Topic"), "Business");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    // The form shows only `Code`; `Ops` was set elsewhere and stays.
+    expect(listWrites(api)[0]?.body).toEqual({
+      label: "work",
+      labels: ["Business", "Ops"],
+      config: { folder: "inbox" },
+    });
+  });
+
+  it("removes only the first topic once the user clears it", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([PAPER], {
+      [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
+    });
+
+    await user.click(
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
+    );
+    await user.clear(screen.getByLabelText("Topic"));
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({
+      label: "work",
+      labels: ["Ops"],
+      config: { folder: "inbox" },
     });
   });
 
@@ -670,17 +860,17 @@ describe("Connections > configuring a connection", () => {
     await user.click(
       within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
     );
-    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Save" }));
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
 
     await screen.findByText(new RegExp(complaint));
     expectMessageAtField(
       complaint,
       screen.getByLabelText(/folder/i),
-      screen.getByLabelText("Label"),
+      screen.getByLabelText("Name"),
     );
   });
 
-  it("shows only the label and the topic for a type with no settings of its own", async () => {
+  it("shows only the name and the topic for a type with no settings of its own", async () => {
     const user = userEvent.setup();
     await openApp([SKY]);
 
@@ -688,8 +878,391 @@ describe("Connections > configuring a connection", () => {
       within(await findConnectionRow(SKY)).getByRole("button", { name: "Configure" }),
     );
 
-    expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("personal");
-    expect(screen.getByLabelText<HTMLInputElement>("Default topic").value).toBe("Business");
+    expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("personal");
+    expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("Business");
     expect(screen.queryByLabelText(/folder/i)).toBeNull();
+  });
+});
+
+describe("Connections > a device flow", () => {
+  const START = {
+    setupId: "setup-1",
+    userCode: "WDJB-MJHT",
+    verificationUri: "https://glasshouse.test/login/device",
+    // Far off, so no test runs into the code's expiry by accident.
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    interval: 5,
+  };
+  const START_PATH = "/api/v1/oauth/device/start";
+  const POLL_PATH = "/api/v1/oauth/device/poll";
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Returns a handler that answers each poll with the next outcome, then repeats the last. */
+  const answerPolls = (...outcomes: readonly unknown[]): Handler => {
+    let index = 0;
+    return () => ({ body: outcomes[Math.min(index++, outcomes.length - 1)] });
+  };
+
+  const countPolls = (api: { readonly calls: readonly { path: string }[] }) =>
+    api.calls.filter((call) => call.path === POLL_PATH).length;
+
+  /** Advances the fake clock, and lets React and the promises it resolves catch up. */
+  const advanceClock = (milliseconds: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(milliseconds);
+    });
+
+  /**
+   * Advances the fake clock a millisecond at a time until `predicate` returns
+   * true. A response reaches the screen through a few promises and a timer or
+   * two, and `findBy*` never fires while the clock is fake.
+   */
+  const pumpUntil = async (predicate: () => boolean): Promise<void> => {
+    for (let step = 0; step < 50; step++) {
+      if (predicate()) return;
+      await advanceClock(1);
+    }
+    throw new Error("the condition never became true");
+  };
+
+  const isCodeShown = (code: string) => () => screen.queryByText(code) !== null;
+
+  /**
+   * Opens the Glasshouse setup and starts the device flow under a fake clock.
+   * The clock is faked only now, because user-event waits on timers that a
+   * fake clock never fires.
+   */
+  const startSignIn = async (extra: Readonly<Record<string, Handler>>) => {
+    const user = userEvent.setup();
+    const app = await openApp([], { [`POST ${START_PATH}`]: { body: START }, ...extra });
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+    // `Date` is faked too, so the code's expiry comes with the fake time.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+    await pumpUntil(isCodeShown(START.userCode));
+    return app;
+  };
+
+  it("offers the device flow first, and pasting a token as the alternative", async () => {
+    const user = userEvent.setup();
+    await openApp([]);
+
+    expect(readPageText(await findTypeOffer("Glasshouse"))).toContain(
+      "sign in with Glasshouse or paste a token",
+    );
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+
+    const signIn = screen.getByRole("button", { name: "Sign in with Glasshouse" });
+    const paste = screen.getByRole("button", { name: "Paste a token instead" });
+    expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), signIn, paste]);
+    expect(screen.queryByLabelText("Personal access token")).toBeNull();
+    // The sign-in is the whole setup: no name, no topic.
+    expectNoNameOrTopic();
+  });
+
+  it("does not offer a choice for a type with one flow", async () => {
+    const user = userEvent.setup();
+    await openApp([]);
+
+    await user.click(
+      within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
+    );
+
+    expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
+  });
+
+  it("shows the code, waits for the approval, and then shows the new connection", async () => {
+    const { api, hold } = await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls(
+        { status: "pending", interval: 5 },
+        { status: "unreachable", interval: 5 },
+        { status: "done", connection: GLASS },
+      ),
+    });
+
+    expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: START_PATH });
+    expect(listWrites(api)[0]?.body).toEqual({ type: "glasshouse/glass" });
+    expect(readPageText()).toContain("Connect Glasshouse");
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
+    const open = screen.getByRole("link", { name: "Open Glasshouse" });
+    expect(open.getAttribute("href")).toBe(START.verificationUri);
+    expect(open.getAttribute("target")).toBe("_blank");
+    expect(open.getAttribute("rel")).toBe("noopener noreferrer");
+    expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), open]);
+    expect(readPageText(screen.getByRole("status"))).toContain(
+      "Waiting for you to approve Hercule on Glasshouse.",
+    );
+
+    // The first poll waits for the interval the start returned.
+    await advanceClock(4000);
+    expect(countPolls(api)).toBe(0);
+    await advanceClock(1500);
+    expect(countPolls(api)).toBe(1);
+
+    // A provider that cannot be reached leaves the flow open.
+    await advanceClock(6000);
+    expect(countPolls(api)).toBe(2);
+    expect(readPageText(screen.getByRole("status"))).toContain("Cannot reach Glasshouse");
+
+    hold([GLASS]);
+    await advanceClock(6000);
+    expect(countPolls(api)).toBe(3);
+    await pumpUntil(() => screen.queryByText(START.userCode) === null);
+
+    vi.useRealTimers();
+    expect(readPageText(await findConnectionRow(GLASS))).toContain("octo-glass");
+  });
+
+  it("polls more slowly once the provider asks it to", async () => {
+    const { api } = await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "slow-down", interval: 10 }),
+    });
+
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+    await advanceClock(8000);
+    expect(countPolls(api)).toBe(1);
+    await advanceClock(3000);
+    expect(countPolls(api)).toBe(2);
+  });
+
+  it("says why the flow ended, stops polling, and starts again with a new code", async () => {
+    // The controller's own words when the provider answers `expired_token`.
+    const message = "the code expired before it was approved";
+    let starts = 0;
+    const { api } = await startSignIn({
+      [`POST ${START_PATH}`]: () => {
+        starts++;
+        return {
+          body: starts === 1 ? START : { ...START, setupId: "setup-2", userCode: "KQRT-ZXPV" },
+        };
+      },
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "expired", message }),
+    });
+
+    await advanceClock(5500);
+    const alert = readPageText(screen.getByRole("alert"));
+    expect(alert).toContain("The sign-in expired before it was approved.");
+    expect(alert).toContain(message);
+    expect(screen.queryByText(START.userCode)).toBeNull();
+    await advanceClock(30_000);
+    expect(countPolls(api)).toBe(1);
+
+    const again = screen.getByRole("button", { name: "Start again" });
+    expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), again]);
+    fireEvent.click(again);
+    await pumpUntil(isCodeShown("KQRT-ZXPV"));
+
+    expect(starts).toBe(2);
+    expect(listWrites(api).filter((call) => call.path === START_PATH)[1]?.body).toEqual({
+      type: "glasshouse/glass",
+    });
+  });
+
+  it("ends the flow when the code expires, and polls no more", async () => {
+    const { api } = await startSignIn({
+      // The code works for 12 seconds from the start, so polls go out at 5 and 10.
+      [`POST ${START_PATH}`]: () => ({
+        body: { ...START, expiresAt: new Date(Date.now() + 12_000).toISOString() },
+      }),
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "pending", interval: 5 }),
+    });
+
+    await advanceClock(10_500);
+    expect(countPolls(api)).toBe(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    await advanceClock(1500);
+
+    expect(readPageText(screen.getByRole("alert"))).toContain(
+      "The sign-in expired before it was approved.",
+    );
+    expect(screen.queryByText(START.userCode)).toBeNull();
+    expect(screen.getByRole("button", { name: "Start again" })).toBeDefined();
+    await advanceClock(60_000);
+    expect(countPolls(api)).toBe(2);
+  });
+
+  // The controller's own words for each ending, beside the line the screen shows.
+  it.each([
+    {
+      status: "denied",
+      message: "the request was declined at the provider",
+      line: "The sign-in was declined, so nothing changed.",
+    },
+    {
+      status: "failed",
+      message: "the provider refused the device flow with the error device_flow_disabled",
+      line: "The sign-in did not finish, so nothing changed.",
+    },
+  ])("shows a short line and the controller's reason when the flow is $status", async (ending) => {
+    await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls({ status: ending.status, message: ending.message }),
+    });
+
+    await advanceClock(5500);
+    const alert = readPageText(screen.getByRole("alert"));
+    expect(alert).toContain(ending.line);
+    expect(alert).toContain(ending.message);
+  });
+
+  it("keeps polling at the last interval after a poll request fails", async () => {
+    let polls = 0;
+    const { api, hold } = await startSignIn({
+      [`POST ${POLL_PATH}`]: () => {
+        polls++;
+        if (polls === 1) return { body: { status: "slow-down", interval: 10 } };
+        if (polls === 2) {
+          return { status: 500, body: buildErrorBody("internal", "the database is locked") };
+        }
+        return { body: { status: "done", connection: GLASS } };
+      },
+    });
+
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+    await advanceClock(10_000);
+    expect(countPolls(api)).toBe(2);
+
+    // The flow is still open, so the code stays on screen with a note under it.
+    expect(screen.getByText(START.userCode)).toBeDefined();
+    const status = readPageText(screen.getByRole("status"));
+    expect(status).toContain("The last check did not go through. Still trying.");
+    expect(status).toContain("the database is locked");
+
+    // The next poll follows at the interval the last reply named, not the start's.
+    hold([GLASS]);
+    await advanceClock(9000);
+    expect(countPolls(api)).toBe(2);
+    await advanceClock(1500);
+    expect(countPolls(api)).toBe(3);
+    await pumpUntil(() => screen.queryByText(START.userCode) === null);
+
+    vi.useRealTimers();
+    expect(readPageText(await findConnectionRow(GLASS))).toContain("octo-glass");
+  });
+
+  it("shows why the code could not be fetched, and lets the user try again", async () => {
+    const user = userEvent.setup();
+    let starts = 0;
+    const { api } = await openApp([], {
+      [`POST ${START_PATH}`]: () => {
+        starts++;
+        return starts === 1
+          ? { status: 500, body: buildErrorBody("internal", "the database is locked") }
+          : { body: START };
+      },
+    });
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+
+    expect(readPageText(await screen.findByRole("alert"))).toContain("the database is locked");
+
+    await user.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+
+    expect(await screen.findByText(START.userCode)).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(listWrites(api).filter((call) => call.path === START_PATH)).toHaveLength(2);
+  });
+
+  it("does not let a reply that arrives after Cancel close the next setup", async () => {
+    let answerPoll: (answer: Answer) => void = () => undefined;
+    const { api, hold } = await startSignIn({
+      [`POST ${POLL_PATH}`]: () =>
+        new Promise<Answer>((resolve) => {
+          answerPoll = resolve;
+        }),
+    });
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // `findBy*` never fires while the clock is fake, and the offers are back at once.
+    const offer = findGroupOffering(screen.getByText("Paper Trail"), "Connect");
+    fireEvent.click(within(offer).getByRole("button", { name: "Connect" }));
+    expect(screen.getByLabelText("Access token")).toBeDefined();
+
+    // The user approved just before cancelling, so the controller wrote the connection.
+    hold([GLASS]);
+    answerPoll({ body: { status: "done", connection: GLASS } });
+    await pumpUntil(() => screen.queryByText(GLASS.displayName) !== null);
+
+    expect(screen.getByLabelText("Access token")).toBeDefined();
+  });
+
+  it("stops polling once the user cancels", async () => {
+    const { api } = await startSignIn({
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "pending", interval: 5 }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await advanceClock(30_000);
+
+    expect(screen.queryByText(START.userCode)).toBeNull();
+    expect(countPolls(api)).toBe(0);
+  });
+
+  it("still lets the user paste a token instead", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([], {
+      "POST /api/v1/connections": { status: 201, body: GLASS },
+    });
+
+    await user.click(
+      within(await findTypeOffer("Glasshouse")).getByRole("button", { name: "Connect" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Paste a token instead" }));
+
+    // The way back to the preferred flow stays on offer.
+    expect(screen.getByRole("button", { name: "Sign in with Glasshouse instead" })).toBeDefined();
+    expectNoNameOrTopic();
+    await user.type(screen.getByLabelText("Personal access token"), "ghp-glass-1");
+    await user.click(
+      within(getFormWithField("Personal access token")).getByRole("button", { name: "Connect" }),
+    );
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
+    expect(listWrites(api)[0]?.body).toEqual({
+      type: "glasshouse/glass",
+      credentials: { token: "ghp-glass-1" },
+    });
+  });
+
+  it("reconnects an existing connection through the device flow", async () => {
+    const user = userEvent.setup();
+    const stale: Connection = { ...GLASS, status: "needs-reauth" };
+    const { api } = await openApp([stale], {
+      [`POST ${START_PATH}`]: { body: START },
+      [`POST ${POLL_PATH}`]: answerPolls({ status: "done", connection: GLASS }),
+    });
+
+    await user.click(
+      within(await findConnectionRow(stale)).getByRole("button", { name: "Reconnect" }),
+    );
+    expect(readPageText()).toContain("Reconnect Glasshouse");
+    // The connection keeps its name and topic, so a reconnect does not ask for them.
+    expectNoNameOrTopic();
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Glasshouse" }));
+    await pumpUntil(isCodeShown(START.userCode));
+
+    expect(listWrites(api)[0]?.body).toEqual({ type: "glasshouse/glass", connectionId: GLASS.id });
+
+    await advanceClock(5500);
+    expect(countPolls(api)).toBe(1);
+    await pumpUntil(() => screen.queryByText(START.userCode) === null);
   });
 });

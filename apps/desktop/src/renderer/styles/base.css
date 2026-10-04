@@ -66,19 +66,26 @@ button {
   padding: 0;
 }
 
-/* Three of the book's element rules, copied from its system.css with their
+/* Four of the book's element rules, copied from its system.css with their
    selectors. An element rule reaches every screen, whichever file holds it,
    so they sit here rather than with the first screen that uses them.
    - A link takes the text around it: the book draws rows and buttons as
      links, not as underlined text.
+   - Bold text takes the type scale's bold, not the browser's heavier 700.
    - Monospace is for code only: code, commands and diffs. Branches and
-     workspace labels are set in the UI face.
+     workspace labels are set in the UI face. `.mono` sets code inside a
+     sentence, such as a command or an address.
    - A key cap names a shortcut in the UI face, never in monospace. */
 a {
   color: inherit;
   text-decoration: none;
 }
-code {
+b,
+strong {
+  font-weight: var(--w-bold);
+}
+code,
+.mono {
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
   font-size: 0.92em;
@@ -93,15 +100,23 @@ kbd {
   line-height: 1.6;
 }
 
-/* Two of the book's helper classes, which any screen may use:
+/* Three of the book's helper classes, which any screen may use:
    - `.faint` draws secondary text in faint ink;
    - `.spacer` takes the free space of a flex row, pushing what follows it to
-     the row's far end. */
+     the row's far end;
+   - `.wordmark` sets the product's name in the Deco face, as the book spells
+     it. The Deco face sets the wordmark and a few large headline numerals,
+     never words in the interface. */
 .faint {
   color: var(--faint);
 }
 .spacer {
   flex: 1;
+}
+.wordmark {
+  font-family: var(--font-deco);
+  font-weight: 400;
+  letter-spacing: 0.02em;
 }
 
 html {
@@ -173,4 +188,17 @@ html[data-theme-changing] *::after {
   [data-theme] {
     --glass-filter: none;
   }
+}
+
+/* While the Office is open, nothing in the window is see-through, by the same
+   mechanism as Reduce transparency: the glass level is 0, so every glass fill
+   is the solid surface under it, and the filter is none, so no backdrop
+   filter is drawn. The rim and the shadow stay. A backdrop filter anywhere
+   in the window makes the GPU process composite the whole window again for
+   every frame the Office draws (spec 17, Performance, Rules, rule 5). The Office
+   screen sets data-office on the root element while it is mounted. */
+:root[data-office],
+:root[data-office] [data-theme] {
+  --glass-level: 0;
+  --glass-filter: none;
 }

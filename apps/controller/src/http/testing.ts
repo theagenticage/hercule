@@ -66,7 +66,7 @@ import { NotifierLayer } from "../notifications";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
-import { masterKeyLayer, secretsLayer } from "../secrets";
+import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import { createPluginFixture } from "../plugins/testing";
@@ -88,6 +88,7 @@ import { WorkspaceServiceLayer } from "../workspaces";
 import {
   JoinTokens,
   JoinTokensLayer,
+  LocalRunnerId,
   RunnerFactsDeadline,
   RunnerPingSchedule,
   RunnerConnectionsLayer,
@@ -278,6 +279,11 @@ export interface ServerHarness {
   readonly reboot: RebootArranger;
   readonly runWithLiveSessions: LiveSessionsRunner;
   /**
+   * The controller's secrets repository. A test uses it to arrange a secret
+   * the public API refuses to write, such as a connection's credentials.
+   */
+  readonly secrets: Secrets["Service"];
+  /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
    * step does after the cancel waits for this to turn false first.
@@ -326,6 +332,13 @@ export interface ServerOptions {
    * own. A provider plugin is added when none of these offers providers.
    */
   readonly plugins?: ReadonlyArray<Plugin>;
+  /**
+   * Returns the id the local runner reported, or `undefined` while it has
+   * reported none. The harness starts no local runner, so without this the
+   * controller has none. The controller calls it each time it needs the id,
+   * so a test can name a runner that joins after the server is up.
+   */
+  readonly readLocalRunnerId?: () => string | undefined;
 }
 
 /**
@@ -423,6 +436,7 @@ export const withServer = (
               TEST_USER,
             ),
           );
+        const secrets = yield* Secrets;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -441,6 +455,7 @@ export const withServer = (
             joinToken,
             reboot,
             runWithLiveSessions,
+            secrets,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );
@@ -457,6 +472,9 @@ export const withServer = (
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
+      Effect.provideService(LocalRunnerId, {
+        read: options.readLocalRunnerId ?? (() => undefined),
+      }),
       provideTimings(options),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));

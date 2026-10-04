@@ -188,15 +188,23 @@ describe("check-bundle-budget --route", () => {
 
 /**
  * Writes main's build the way Vite lays one out, and returns the path of its
- * startup file: `index.js` of `startupBytes` bytes, beside a 400 kB chunk in
- * `assets/` that main imports lazily.
+ * startup file: `index.js` of `startupBytes` bytes, which imports a 400 kB
+ * chunk in `assets/` lazily. With `sharedBytes`, `index.js` also imports
+ * `assets/shared.js` statically, a chunk of that many bytes, as the build
+ * writes code that the startup file shares with a lazy chunk.
  */
-const createMainBuild = async (startupBytes: number): Promise<string> => {
+const createMainBuild = async (startupBytes: number, sharedBytes?: number): Promise<string> => {
   const folder = await mkdtemp(join(tmpdir(), "hercule-main-budget-"));
   folders.push(folder);
   await mkdir(join(folder, "assets"));
-  await writeFile(join(folder, "index.js"), "x".repeat(startupBytes));
+  const imports =
+    (sharedBytes === undefined ? "" : 'import{s as a}from"./assets/shared.js";') +
+    'const b=()=>import("./assets/controller-check.js");';
+  await writeFile(join(folder, "index.js"), imports + "x".repeat(startupBytes - imports.length));
   await writeFile(join(folder, "assets/controller-check.js"), "x".repeat(400 * 1024));
+  if (sharedBytes !== undefined) {
+    await writeFile(join(folder, "assets/shared.js"), "x".repeat(sharedBytes));
+  }
   return join(folder, "index.js");
 };
 
@@ -233,6 +241,16 @@ describe("check-bundle-budget --main-startup", () => {
       `${relative(root, file)} is 170.0 kB minified, over main's startup budget of 160.0 kB`,
     );
     expect(stderr).toContain(`Spec 17 §Performance owns the number, in the "Main's startup" row`);
+  });
+
+  it("counts the chunks the startup file imports statically", async () => {
+    const file = await createMainBuild(100 * 1024, 70 * 1024);
+
+    const stderr = await readMainStartupFailure(file);
+
+    expect(stderr).toContain(
+      `${relative(root, file)}, with the chunk it imports statically, is 170.0 kB minified, over main's startup budget of 160.0 kB`,
+    );
   });
 
   it("with --guide, warns about a startup file over the budget and passes it", async () => {

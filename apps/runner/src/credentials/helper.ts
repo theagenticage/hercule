@@ -23,7 +23,8 @@ const TOKEN = "HERCULE_TOKEN";
  */
 export const RUNNER_WORKSPACE_VARIABLE = "HERCULE_RUNNER_WORKSPACE";
 
-const SOCKET = "HERCULE_RUNNER_SOCKET";
+/** The environment variable that holds the path of the runner daemon's credential socket. */
+export const RUNNER_SOCKET_VARIABLE = "HERCULE_RUNNER_SOCKET";
 
 /** Parses git's credential request, which is `key=value` lines ending with a blank line. */
 const parseHelperQuestion = (input: string): Record<string, string> => {
@@ -59,7 +60,7 @@ export const answerCredentialQuestion = async (
   input: string,
   env: Record<string, string | undefined>,
 ): Promise<string> => {
-  const path = env[SOCKET];
+  const path = env[RUNNER_SOCKET_VARIABLE];
   if (path === undefined || path.length === 0) return "";
   const token = env[TOKEN];
   const workspaceId = env[RUNNER_WORKSPACE_VARIABLE];

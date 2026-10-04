@@ -13,12 +13,14 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  API_KEY_SORT_FIELDS,
   DEFAULT_PAGE_LIMIT,
+  createDecodeValidationError,
   createNotFoundError,
-  createValidationError,
   type ApiKey,
   type Forbidden,
   type NotFound,
@@ -27,17 +29,17 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
-import { withTransaction } from "../db";
+import { buildPageInputFields, refuseCursor, resolveSortDirection, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Credentials, type ApiKeyRecord } from "./repository";
 import { hashToken, mintToken } from "./token";
 
 /** The input of `apiKey.query`. An absent field takes its default. */
-export interface QueryInput {
-  readonly limit?: number;
-  readonly cursor?: string;
-  readonly sort?: { readonly field: "createdAt"; readonly direction?: SortDirection };
-}
+const QueryInput = Schema.Struct(buildPageInputFields(API_KEY_SORT_FIELDS));
+
+export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
+
+const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 
 /** One page of keys, in the contract's shape. */
 export interface ApiKeyPage {
@@ -116,17 +118,17 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<ApiKeyPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         const actor = yield* requireUserActor("apiKey.query");
-        const page = yield* credentials
-          .listApiKeys(actor.userId, {
-            limit: input.limit ?? DEFAULT_PAGE_LIMIT,
-            cursor: input.cursor,
-            direction: input.sort?.direction ?? DEFAULT_DIRECTION,
-          })
-          .pipe(
-            Effect.catchTag("CursorError", (error) =>
-              Effect.fail(createValidationError([{ path: ["cursor"], message: error.message }])),
-            ),
-          );
+        const { limit, cursor, sort } = yield* Effect.mapError(
+          decodeQuery(input),
+          createDecodeValidationError,
+        );
+        const page = yield* refuseCursor(
+          credentials.listApiKeys(actor.userId, {
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
+          }),
+        );
         return {
           items: page.items.map(toApiKey),
           ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),

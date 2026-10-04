@@ -45,6 +45,10 @@ import workspaceLeases from "./0034-workspace-leases";
 import originalRunId from "./0035-original-run-id";
 import notifications from "./0036-notifications";
 import triggerEffects from "./0037-trigger-effects";
+import deviceSetups from "./0038-device-setups";
+import setupTargetsByKind from "./0039-setup-targets-by-kind";
+import connectionAccountId from "./0040-connection-account-id";
+import taskSortRanks from "./0041-task-sort-ranks";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -84,6 +88,10 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [35, "original-run-id", Effect.succeed(originalRunId)],
   [36, "notifications", Effect.succeed(notifications)],
   [37, "trigger-effects", Effect.succeed(triggerEffects)],
+  [38, "device-setups", Effect.succeed(deviceSetups)],
+  [39, "setup-targets-by-kind", Effect.succeed(setupTargetsByKind)],
+  [40, "connection-account-id", Effect.succeed(connectionAccountId)],
+  [41, "task-sort-ranks", Effect.succeed(taskSortRanks)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
