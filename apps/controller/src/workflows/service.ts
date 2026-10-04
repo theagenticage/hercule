@@ -69,7 +69,7 @@ import {
   type WorkflowSaveResult,
   type WorkflowSummary,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../actor";
+import { checkActorHoldsGrant, currentStamp, requireGrant, type Actor } from "../actor";
 import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";
 import {
@@ -85,6 +85,7 @@ import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import { WorkflowRuns } from "./runs";
 import {
+  listConnectionParams,
   listReferencedAgentIds,
   listReferencedConnectionIds,
   validateDefinition,
@@ -261,6 +262,10 @@ type CallError = Unauthenticated | Forbidden | Validation | SqlError;
  */
 type ChangeByIdError = Exclude<CallError, Validation> | NotFound | InvalidState;
 
+/** The message of the `Forbidden` error for a save of a workflow with a step that acts through a Connection. */
+const SAVE_CONNECTION_USE_REFUSAL =
+  "This workflow has a step that acts through a Connection, and choosing that Connection needs the connection.use grant, which this session lacks. Ask the user to save the workflow, or to grant connection.use.";
+
 /** Fails with a `Validation` error that lists every error in `problems`, if there are any. */
 const failOnErrors = (problems: WorkflowIssues): Effect.Effect<void, Validation> =>
   problems.errors.length === 0 ? Effect.void : Effect.fail(createValidationError(problems.errors));
@@ -323,6 +328,24 @@ const make = Effect.gen(function* () {
     Effect.flatMap(readReferences(definition), (references) =>
       validateDefinition(definition, references),
     );
+
+  /**
+   * Checks that `actor` may save `definition`. Fails with `Forbidden` when a
+   * step acts through a Connection and the actor lacks the `connection.use`
+   * grant. The step's `connection` param chooses the Connection, as an id or
+   * as the input a run fills in, and every run of the workflow acts through
+   * it, whoever starts the run.
+   */
+  const requireConnectionUseToSave = (
+    definition: WorkflowDefinition,
+    actor: Actor,
+  ): Effect.Effect<void, Forbidden> =>
+    Effect.gen(function* () {
+      const actions = yield* host.listActiveWorkflowActions();
+      if (listConnectionParams(definition, actions).length === 0) return;
+      const refused = checkActorHoldsGrant("connection.use", actor, SAVE_CONNECTION_USE_REFUSAL);
+      if (refused !== undefined) return yield* Effect.fail(refused);
+    });
 
   /**
    * Sets a start trigger's status for `trigger.pause` or `trigger.resume`, and
@@ -493,10 +516,14 @@ const make = Effect.gen(function* () {
         return yield* failIfWorkflowNotFound(workflows.read(id));
       }),
 
-    /** Stores a new workflow, disabled, from YAML source or from a definition object. */
+    /**
+     * Stores a new workflow, disabled, from YAML source or from a definition
+     * object. Fails with `Forbidden` when a step acts through a Connection and
+     * the caller lacks the `connection.use` grant.
+     */
     create: (input: WorkflowCreateInput): Effect.Effect<WorkflowSaveResult, CallError> =>
       Effect.gen(function* () {
-        yield* requireGrant("workflow.create");
+        const actor = yield* requireGrant("workflow.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const parsedSource = yield* parseContentOrFail(yield* chooseRequiredContent(decoded));
         return yield* withTransaction(
@@ -504,6 +531,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const problems = yield* readReferencesAndValidate(parsedSource.definition);
             yield* failOnErrors(problems);
+            yield* requireConnectionUseToSave(parsedSource.definition, actor);
             // Read the clock once, inside the transaction, so the workflow,
             // its triggers and the audit event all get the same timestamp.
             const savedAt = yield* nowIso;
@@ -531,11 +559,13 @@ const make = Effect.gen(function* () {
     /**
      * Replaces a workflow's source, enables or disables it, or both. A new
      * source replaces the old one completely, and the trigger rows are updated
-     * to match it.
+     * to match it. Fails with `Forbidden` when the new source has a step that
+     * acts through a Connection and the caller lacks the `connection.use`
+     * grant.
      */
     update: (input: UpdateInput): Effect.Effect<WorkflowSaveResult, CallError | NotFound> =>
       Effect.gen(function* () {
-        yield* requireGrant("workflow.update");
+        const actor = yield* requireGrant("workflow.update");
         const decoded = yield* Effect.mapError(decodeUpdate(input), createDecodeValidationError);
         const content = yield* chooseContent(decoded);
         if (content === undefined && decoded.enabled === undefined) {
@@ -552,6 +582,9 @@ const make = Effect.gen(function* () {
                 ? undefined
                 : yield* readReferencesAndValidate(parsedSource.definition);
             if (problems !== undefined) yield* failOnErrors(problems);
+            if (parsedSource !== undefined) {
+              yield* requireConnectionUseToSave(parsedSource.definition, actor);
+            }
             const savedAt = yield* nowIso;
             const { workflow: stored, changed } = yield* failIfWorkflowNotFound(
               workflows.update(

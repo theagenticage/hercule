@@ -587,6 +587,28 @@ export const readConnectionInputName = (connection: unknown): string | undefined
   typeof connection === "string" ? SINGLE_INPUT_TEMPLATE.exec(connection)?.[1] : undefined;
 
 /**
+ * Returns the `connection` param of each step of `definition` whose action
+ * acts through a Connection, in step order, as written: a Connection id or a
+ * template that is exactly one input. `actions` is the catalog of workflow
+ * actions. A step whose action is not in the catalog is skipped, because
+ * validation reports it as unknown.
+ *
+ * The controller uses the list to decide who chose the Connection a step acts
+ * through: the author of the definition for an id, or the caller who fills in
+ * the input for a template. Choosing it needs the `connection.use` grant.
+ */
+export const listConnectionParams = (
+  definition: WorkflowDefinition,
+  actions: ReadonlyArray<RegisteredWorkflowAction>,
+): ReadonlyArray<unknown> =>
+  definition.steps.flatMap((step) =>
+    step.kind === "action" &&
+    actions.some((action) => action.id === step.action && action.connection !== undefined)
+      ? [step.params?.[CONNECTION_PARAM]]
+      : [],
+  );
+
+/**
  * Describes the two forms the `connection` param takes, for an action that
  * acts through a Connection of type `type`. Every message about the param
  * ends with it, so the author always learns what to write instead.
