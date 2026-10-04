@@ -59,7 +59,11 @@ import {
   type RegisteredConnectionType,
 } from "../connections";
 import { toPluginError, describeFieldIssues, truncateMessage } from "./errors";
-import { registerEventSourceContribution, type RegisteredEventKind } from "./event-sources";
+import {
+  registerEventSourceContribution,
+  type RegisteredEventKind,
+  type RegisteredEventSource,
+} from "./event-sources";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
   CORE_CONTRIBUTION_OWNER,
@@ -323,6 +327,7 @@ const buildRegistrationHost = (
   live: Array<ProviderDefinition>,
   types: Array<RegisteredConnectionType>,
   kinds: Map<string, RegisteredEventKind>,
+  sources: Array<RegisteredEventSource>,
   actions: Map<string, RegisteredWorkflowAction>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("providers")
@@ -450,8 +455,8 @@ const buildRegistrationHost = (
   ...(manifest.capabilities.includes("event-sources")
     ? {
         eventSources: {
-          register: (definition) =>
-            registerEventSourceContribution(manifest.id, definition, declared, kinds),
+          register: (contribution) =>
+            registerEventSourceContribution(manifest, contribution, declared, kinds, sources),
         },
       }
     : {}),
@@ -478,6 +483,8 @@ const make = Effect.gen(function* () {
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
   /** Every event kind this boot registered, by name. Set at boot, like the providers. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
+  /** Every event source this boot registered, in registry order. Set at boot, like the providers. */
+  const eventSources = yield* Ref.make<ReadonlyArray<RegisteredEventSource>>([]);
   /**
    * Every workflow action this boot registered, built-in ones included, keyed
    * by the qualified id a step uses. Set at boot, like the providers.
@@ -628,10 +635,13 @@ const make = Effect.gen(function* () {
     live: Array<ProviderDefinition>,
     types: Array<RegisteredConnectionType>,
     kinds: Map<string, RegisteredEventKind>,
+    sources: Array<RegisteredEventSource>,
     actions: Map<string, RegisteredWorkflowAction>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
-      plugin.register(buildRegistrationHost(manifest, declared, live, types, kinds, actions)),
+      plugin.register(
+        buildRegistrationHost(manifest, declared, live, types, kinds, sources, actions),
+      ),
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
@@ -720,6 +730,7 @@ const make = Effect.gen(function* () {
         const registeredProviders: Array<ProviderDefinition> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
+        const registeredSources: Array<RegisteredEventSource> = [];
         const registeredActions = new Map<string, RegisteredWorkflowAction>();
         // The built-in actions go into the same catalog as the plugins'
         // actions, so every reader finds all actions in one list.
@@ -769,6 +780,7 @@ const make = Effect.gen(function* () {
           const live: Array<ProviderDefinition> = [];
           const types: Array<RegisteredConnectionType> = [];
           const kinds = new Map<string, RegisteredEventKind>();
+          const sources: Array<RegisteredEventSource> = [];
           const actions = new Map<string, RegisteredWorkflowAction>();
           const status = yield* registerPass(
             plugin,
@@ -777,6 +789,7 @@ const make = Effect.gen(function* () {
             live,
             types,
             kinds,
+            sources,
             actions,
           );
           const registered = status._tag !== "errored";
@@ -785,6 +798,7 @@ const make = Effect.gen(function* () {
             registeredProviders.push(...live);
             registeredTypes.push(...types);
             for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
+            registeredSources.push(...sources);
             for (const [id, action] of actions) registeredActions.set(id, action);
           }
           booted.set(manifest.id, {
@@ -806,6 +820,7 @@ const make = Effect.gen(function* () {
         yield* Ref.set(entries, booted);
         yield* Ref.set(providers, registeredProviders);
         yield* Ref.set(eventKinds, registeredKinds);
+        yield* Ref.set(eventSources, registeredSources);
         yield* Ref.set(workflowActions, registeredActions);
         yield* connectionTypes.replace(registeredTypes);
 
@@ -843,6 +858,16 @@ const make = Effect.gen(function* () {
     listActiveEventKinds: (): Effect.Effect<ReadonlyArray<RegisteredEventKind>> =>
       Effect.map(Effect.zip(Ref.get(eventKinds), listActivePluginIds), ([kinds, active]) =>
         [...kinds.values()].filter((kind) => active.has(kind.pluginId)),
+      ),
+
+    /**
+     * Returns the event sources of every active plugin, in registry order. The
+     * ingest loops open these sources only: a plugin that is disabled, or that
+     * failed to start, ingests nothing.
+     */
+    listActiveEventSources: (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
+      Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
+        sources.filter((source) => active.has(source.pluginId)),
       ),
 
     /**
