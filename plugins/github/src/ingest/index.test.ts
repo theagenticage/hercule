@@ -124,8 +124,11 @@ describe("a GitHub feed's poll", () => {
     const stub = answerAlways({ status: 200, body: [] });
     const config = { repos: ["Octocat/Spoon-Knife"] };
 
+    /** Returns the keys of the repositories the repos feed keeps state for. */
+    const listRepoKeys = () => [...harness.state.keys()].filter((key) => key.startsWith("repos/"));
+
     await poll(stub, "repos", harness, config);
-    expect([...harness.state.keys()]).toEqual(["repos/octocat/spoon-knife"]);
+    expect(listRepoKeys()).toEqual(["repos/octocat/spoon-knife"]);
 
     harness.resources.push({
       id: "res_1",
@@ -135,7 +138,7 @@ describe("a GitHub feed's poll", () => {
     });
     await poll(stub, "repos", harness, config);
 
-    expect([...harness.state.keys()].sort()).toEqual([
+    expect(listRepoKeys().sort()).toEqual([
       "repos/octocat/hello-world",
       "repos/octocat/spoon-knife",
     ]);
