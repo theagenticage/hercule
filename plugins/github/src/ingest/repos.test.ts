@@ -15,6 +15,7 @@ import {
   type IngestHarness,
   type StubResponse,
 } from "../testing";
+import { computeDigest } from "./digest";
 import { pollRepos } from "./repos";
 
 const REPO = "octocat/hello-world";
@@ -31,7 +32,17 @@ interface StubIssue {
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+  state_reason?: string | null;
   pull_request?: { merged_at: string | null };
+}
+
+/** One comment in the stub repository, in the shape GitHub lists it. */
+interface StubComment {
+  id: number;
+  html_url: string;
+  issue_url: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /** The stub repository: its items, the pull requests' head commits, reviews and comments. */
@@ -42,13 +53,9 @@ interface StubRepository {
     number,
     Array<{ id: number; user: { login: string }; state: string; submitted_at: string | null }>
   >;
-  comments: Array<{
-    id: number;
-    html_url: string;
-    issue_url: string;
-    created_at: string;
-    updated_at: string;
-  }>;
+  comments: Array<StubComment>;
+  /** How many comments one page of the comment listing holds; GitHub's is 100. */
+  commentsPerPage: number;
   /** The ETag of the issue listing; a test changes it whenever it changes the repository. */
   etag: string;
 }
@@ -81,17 +88,39 @@ const buildRepository = (): StubRepository => ({
   heads: { 2: "sha-a" },
   reviews: {},
   comments: [],
+  commentsPerPage: 100,
   etag: '"v1"',
 });
 
-/** Answers a request the way GitHub would for `repository`. */
+/** Builds a comment on item `number`, created and updated at `time`. */
+const buildComment = (
+  id: number,
+  number: number,
+  time: string,
+  kind: "issues" | "pull" = "issues",
+): StubComment => ({
+  id,
+  html_url: `https://github.com/${REPO}/${kind}/${String(number)}#issuecomment-${String(id)}`,
+  issue_url: `https://api.github.com/repos/${REPO}/issues/${String(number)}`,
+  created_at: time,
+  updated_at: time,
+});
+
+/** Answers a request the way GitHub would for `repository`, named `repo`. */
 const answerFrom =
-  (repository: StubRepository) =>
+  (repository: StubRepository, repo: string = REPO) =>
   (request: HttpClientRequest.HttpClientRequest): StubResponse => {
     const { path, query } = readStubRequestTarget(request);
-    const base = `/repos/${REPO}`;
+    const base = `/repos/${repo}`;
     const byUpdate = (left: { updated_at: string }, right: { updated_at: string }) =>
       Date.parse(left.updated_at) - Date.parse(right.updated_at);
+    if (path === `${base}/issues` && query["state"] === "closed") {
+      const since = Date.parse(query["since"]!);
+      const closed = repository.issues.filter(
+        (issue) => issue.state === "closed" && Date.parse(issue.updated_at) >= since,
+      );
+      return { status: 200, body: closed.sort(byUpdate).reverse() };
+    }
     if (path === `${base}/issues` && query["direction"] === "desc") {
       return { status: 200, body: [...repository.issues].sort(byUpdate).reverse().slice(0, 1) };
     }
@@ -119,9 +148,18 @@ const answerFrom =
     }
     if (path === `${base}/issues/comments`) {
       const since = Date.parse(query["since"] ?? "1970-01-01T00:00:00Z");
+      const listed = repository.comments
+        .filter((comment) => Date.parse(comment.updated_at) >= since)
+        .sort(byUpdate);
+      const page = Number(query["page"] ?? "1");
+      const size = repository.commentsPerPage;
+      const next = new URL(`https://api.github.com${path}`);
+      for (const [name, value] of Object.entries(query)) next.searchParams.set(name, value);
+      next.searchParams.set("page", String(page + 1));
       return {
         status: 200,
-        body: repository.comments.filter((comment) => Date.parse(comment.updated_at) >= since),
+        body: listed.slice((page - 1) * size, page * size),
+        headers: listed.length > page * size ? { link: `<${next.href}>; rel="next"` } : {},
       };
     }
     return { status: 404, body: { message: "Not Found" } };
@@ -169,6 +207,7 @@ describe("the repos feed", () => {
     expect(Result.isSuccess(result)).toBe(true);
     expect(harness.events).toEqual([]);
     expect(requests.map((request) => request.path)).toEqual([
+      `/repos/${REPO}/issues`,
       `/repos/${REPO}/issues`,
       `/repos/${REPO}/issues`,
       `/repos/${REPO}/pulls`,
@@ -222,8 +261,8 @@ describe("the repos feed", () => {
 
     expect(listEvents(harness)).toEqual([
       `github.issue.opened issue.opened:${REPO}#3`,
-      `github.issue.labeled issue.labeled:${REPO}#3:+triage:-:2026-10-01T10:00:00Z`,
-      `github.issue.assigned issue.assigned:${REPO}#3:hubot:2026-10-01T10:00:00Z`,
+      `github.issue.labeled issue.labeled:${REPO}#3:2026-10-01T10:00:00Z:${computeDigest(["+triage"])}`,
+      `github.issue.assigned issue.assigned:${REPO}#3:2026-10-01T10:00:00Z:${computeDigest(["hubot"])}`,
     ]);
     const [opened, labeled] = harness.events;
     expect(opened!.occurredAt).toBe("2026-10-01T10:00:00Z");
@@ -249,7 +288,7 @@ describe("the repos feed", () => {
     expect(Result.isSuccess(result)).toBe(true);
     expect(listEvents(harness)).toEqual([
       `github.pr.opened pr.opened:${REPO}#3`,
-      `github.pr.labeled pr.labeled:${REPO}#3:+feature:-:2026-10-01T10:00:00Z`,
+      `github.pr.labeled pr.labeled:${REPO}#3:2026-10-01T10:00:00Z:${computeDigest(["+feature"])}`,
     ]);
     expect(harness.events[0]!.url).toBe(`https://github.com/${REPO}/pull/3`);
     expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
@@ -273,8 +312,8 @@ describe("the repos feed", () => {
     await poll(harness, answerFrom(repository));
 
     expect(listEvents(harness)).toEqual([
-      `github.issue.labeled issue.labeled:${REPO}#1:+wontfix:-bug:2026-10-01T11:00:00Z`,
-      `github.issue.assigned issue.assigned:${REPO}#1:hubot:2026-10-01T11:00:00Z`,
+      `github.issue.labeled issue.labeled:${REPO}#1:2026-10-01T09:00:00Z:${computeDigest(["+wontfix", "-bug"])}`,
+      `github.issue.assigned issue.assigned:${REPO}#1:2026-10-01T09:00:00Z:${computeDigest(["hubot"])}`,
       `github.issue.closed issue.closed:${REPO}#1:2026-10-01T11:00:00Z`,
     ]);
     expect(harness.events[0]!.payload).toMatchObject({ added: ["wontfix"], removed: ["bug"] });
@@ -302,7 +341,7 @@ describe("the repos feed", () => {
     await poll(harness, answerFrom(repository));
 
     expect(listEvents(harness).at(-1)).toBe(
-      `github.issue.reopened issue.reopened:${REPO}#1:2026-10-01T12:00:00Z`,
+      `github.issue.reopened issue.reopened:${REPO}#1:2026-10-01T11:00:00Z`,
     );
   });
 
@@ -491,5 +530,183 @@ describe("the repos feed", () => {
 
     const state = harness.state.get(`repos/${REPO}`) as { items: Record<string, unknown> };
     expect(Object.keys(state.items)).toEqual(["2"]);
+  });
+
+  it("keeps every dedup key within the host's limit, for the longest names GitHub allows", async () => {
+    // GitHub allows 39 characters for an owner and 100 for a repository.
+    const repo = `${"o".repeat(39)}/${"r".repeat(100)}`;
+    const repository = buildRepository();
+    repository.issues = [
+      buildIssue(99999998, "2026-10-01T09:00:00Z"),
+      buildPull(99999999, "2026-10-01T09:30:00Z"),
+    ];
+    repository.heads = { 99999999: "a".repeat(40) };
+    const harness = buildIngestHarness();
+    await poll(harness, answerFrom(repository, repo), [repo]);
+    const labels = Array.from({ length: 20 }, (_, index) => ({
+      name: `${"l".repeat(48)}${String(index).padStart(2, "0")}`,
+    }));
+    const assignees = Array.from({ length: 10 }, (_, index) => ({
+      login: `${"u".repeat(37)}${String(index).padStart(2, "0")}`,
+    }));
+    repository.issues[0] = {
+      ...repository.issues[0]!,
+      labels,
+      assignees,
+      state: "closed",
+      updated_at: "2026-10-01T11:00:00Z",
+      closed_at: "2026-10-01T11:00:00Z",
+    };
+    repository.issues[1] = { ...repository.issues[1]!, labels, updated_at: "2026-10-01T11:01:00Z" };
+    repository.heads[99999999] = "b".repeat(40);
+    repository.etag = '"v2"';
+
+    // The harness refuses a key longer than 200 characters, as the host does.
+    const { result } = await poll(harness, answerFrom(repository, repo), [repo]);
+
+    expect(Result.isSuccess(result)).toBe(true);
+    expect(harness.events.map((event) => event.kind)).toEqual([
+      "github.issue.labeled",
+      "github.issue.assigned",
+      "github.issue.closed",
+      "github.pr.labeled",
+      "github.pr.synchronized",
+    ]);
+  });
+
+  it("builds the same keys again after a poll that emitted its events but could not save them", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    repository.issues[0] = {
+      ...repository.issues[0]!,
+      assignees: [{ login: "hubot" }],
+      updated_at: "2026-10-01T11:00:00Z",
+    };
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T11:01:00Z" };
+    repository.etag = '"v2"';
+    // The issue's events are emitted, then the pull request fails the poll, so nothing is saved.
+    const failing = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
+      readStubRequestTarget(request).path === `/repos/${REPO}/pulls/2`
+        ? { status: 500, body: { message: "Server Error" } }
+        : answerFrom(repository)(request);
+    const first = await poll(harness, failing);
+    expect(Result.isFailure(first.result)).toBe(true);
+    // The issue changes again before the next poll.
+    repository.issues[0] = {
+      ...repository.issues[0],
+      title: "Renamed",
+      updated_at: "2026-10-01T11:30:00Z",
+    };
+    repository.etag = '"v3"';
+
+    await poll(harness, answerFrom(repository));
+
+    const assigned = harness.events
+      .filter((event) => event.kind === "github.issue.assigned")
+      .map((event) => event.dedupKey);
+    expect(assigned).toHaveLength(2);
+    expect(assigned[1]).toBe(assigned[0]);
+  });
+
+  it("emits no comment or review that was there before the first poll", async () => {
+    const repository = buildRepository();
+    // The newest update is a comment on a pull request closed just before the
+    // first poll, with a review in the same second.
+    repository.issues[1] = {
+      ...repository.issues[1]!,
+      state: "closed",
+      comments: 1,
+      closed_at: "2026-10-01T09:45:00Z",
+      updated_at: "2026-10-01T10:00:00Z",
+    };
+    repository.comments.push(buildComment(500, 2, "2026-10-01T10:00:00Z", "pull"));
+    repository.reviews[2] = [
+      {
+        id: 100,
+        user: { login: "hubot" },
+        state: "APPROVED",
+        submitted_at: "2026-10-01T10:00:00Z",
+      },
+    ];
+    const harness = await baseline(repository);
+
+    const { result } = await poll(harness, answerFrom(repository));
+
+    expect(Result.isSuccess(result)).toBe(true);
+    expect(harness.events).toEqual([]);
+
+    // A label added after the close is diffed, because the closed item is in the snapshot.
+    repository.issues[1] = {
+      ...repository.issues[1],
+      labels: [{ name: "late" }],
+      updated_at: "2026-10-01T10:30:00Z",
+    };
+    repository.etag = '"v2"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual([
+      `github.pr.labeled pr.labeled:${REPO}#2:2026-10-01T10:00:00Z:${computeDigest(["+late"])}`,
+    ]);
+  });
+
+  it("emits reopened for an old issue missing from the snapshot only when GitHub says it was reopened", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    // Two old open issues the snapshot does not hold, as after a close more
+    // than seven days ago, or a transfer from another repository.
+    repository.issues.push(
+      buildIssue(7, "2026-09-01T09:00:00Z", {
+        state_reason: "reopened",
+        updated_at: "2026-10-01T11:00:00Z",
+      }),
+      buildIssue(8, "2026-09-01T09:00:00Z", {
+        state_reason: null,
+        updated_at: "2026-10-01T11:05:00Z",
+      }),
+    );
+    repository.etag = '"v2"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual([
+      `github.issue.reopened issue.reopened:${REPO}#7:2026-10-01T11:00:00Z`,
+    ]);
+  });
+
+  it("reads the rest of a comment listing that stopped at its page limit on the next poll", async () => {
+    const repository = buildRepository();
+    repository.commentsPerPage = 1;
+    const harness = await baseline(repository);
+    await poll(harness, answerFrom(repository));
+    repository.issues[0] = {
+      ...repository.issues[0]!,
+      comments: 11,
+      updated_at: "2026-10-01T11:10:00Z",
+    };
+    for (let minute = 0; minute <= 10; minute += 1) {
+      const time = `2026-10-01T11:${String(minute).padStart(2, "0")}:00Z`;
+      repository.comments.push(buildComment(600 + minute, 1, time));
+    }
+    repository.etag = '"v2"';
+
+    // Ten pages of one comment each is the limit.
+    await poll(harness, answerFrom(repository));
+
+    expect(harness.events).toHaveLength(10);
+    expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
+      pendingComments: { since: "2026-10-01T11:09:00Z", createdAfter: "2026-10-01T09:30:00Z" },
+    });
+
+    // The issue listing answers 304 now, and the comments are still read.
+    const { requests } = await poll(harness, answerFrom(repository));
+
+    expect(requests[0]!.path).toBe(`/repos/${REPO}/issues`);
+    expect(requests[1]!.query).toMatchObject({ since: "2026-10-01T11:09:00Z" });
+    // The last comment read is read again; the host writes its event once.
+    const keys = new Set(harness.events.map((event) => event.dedupKey));
+    expect(keys.size).toBe(11);
+    expect(keys.has("issue.commented:610")).toBe(true);
+    expect(harness.state.get(`repos/${REPO}`)).not.toHaveProperty("pendingComments");
   });
 });

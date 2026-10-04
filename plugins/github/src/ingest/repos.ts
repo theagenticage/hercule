@@ -7,28 +7,42 @@
  *
  * 1. `GET /repos/{o}/{r}/issues?state=all&sort=updated&direction=asc&since=<cursor>`,
  *    with the last ETag. It lists issues and pull requests updated since the
- *    last poll. A repository where nothing changed answers 304, which costs
- *    no quota, and the poll stops there.
+ *    last poll. `since` includes the cursor's own second, so the listing
+ *    repeats the items updated in that second; an item whose `updated_at`
+ *    equals its snapshot's is skipped. A repository where nothing changed
+ *    answers 304, which costs no quota.
  * 2. For each pull request in that list: `GET .../pulls/{n}/reviews`, for new
  *    reviews, and, when it is open, `GET .../pulls/{n}`, for its head commit.
- * 3. When an item's comment count went up: one
+ * 3. When an item's comment count went up, or the last poll's comment
+ *    listing stopped at its page limit: one
  *    `GET /repos/{o}/{r}/issues/comments?since=<cursor>` for the whole
  *    repository.
  *
- * The snapshot holds every open item and every item closed in the last seven
- * days, so its size follows the repository's open work, not its history.
- * Because every open item is in it, an item missing from the snapshot that
- * existed before the last poll was closed: when it shows up open, it was
- * reopened.
+ * The snapshot holds every open item and every item updated in the seven
+ * days before the cursor, so its size follows the repository's recent work,
+ * not its history. An item missing from the snapshot that existed before
+ * the last poll was closed then, so when it shows up open it may have been
+ * reopened; its `state_reason` tells.
  *
- * Every dedup key is built from GitHub's own ids and timestamps, so a poll
- * that emitted its events but failed before saving the snapshot emits the
- * same keys again on the next poll, and the host writes each event once.
+ * A comment or a review is new when it was created after the item's
+ * snapshot, or after the cursor for an item with no snapshot. Comparing with
+ * the item's own snapshot, rather than the cursor, keeps a comment that was
+ * created in the cursor's second on another item.
+ *
+ * The keys of the events a diff finds hold the snapshot's `updatedAt`: the
+ * state the diff started from. A poll that emitted its events but failed
+ * before saving the snapshot diffs from the same snapshot next time and
+ * builds the same keys, so the host writes each event once. When the item
+ * changed again in between, a label or assignee change that grew holds a
+ * different digest and is emitted again with the newer change in it, so
+ * nothing is lost. The one key without a snapshot is `reopened` for an item
+ * missing from it, which holds the item's own `updated_at`.
  */
 import { Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, type GithubItem } from "../subject";
+import { computeDigest } from "./digest";
 import { ListedComment, ListedIssue, ListedPull, ListedReview } from "./feed-objects";
 import {
   decodeGithubValue,
@@ -54,6 +68,19 @@ const ItemSnapshot = Schema.Struct({
 
 type ItemSnapshot = Schema.Schema.Type<typeof ItemSnapshot>;
 
+/**
+ * Where the next poll resumes reading comments, after a comment listing
+ * stopped at its page limit.
+ */
+const PendingComments = Schema.Struct({
+  /** The `updated_at` of the last comment read; the listing is sorted by it. */
+  since: Schema.String,
+  /** The cursor of the poll that stopped. A comment created after it is new. */
+  createdAfter: Schema.optionalKey(Schema.String),
+});
+
+type PendingComments = Schema.Schema.Type<typeof PendingComments>;
+
 /** What the feed keeps between polls for one repository. */
 const RepoState = Schema.Struct({
   /**
@@ -65,6 +92,8 @@ const RepoState = Schema.Struct({
   etag: Schema.optionalKey(Schema.String),
   /** The snapshot, keyed by issue or pull request number. */
   items: Schema.Record(Schema.String, ItemSnapshot),
+  /** Present while comments are left to read from a listing that stopped at its page limit. */
+  pendingComments: Schema.optionalKey(PendingComments),
 });
 
 type RepoState = Schema.Schema.Type<typeof RepoState>;
@@ -77,13 +106,16 @@ type RepoState = Schema.Schema.Type<typeof RepoState>;
 const MAX_LISTING_PAGES = 10;
 
 /**
- * The most pages a first poll reads of a repository's open issues and open
- * pull requests, 100 each. An item beyond that is not in the snapshot, so its
- * first change is not diffed: it is recorded, and only later changes emit.
+ * The most pages a first poll reads of each baseline listing, 100 items
+ * each. An item beyond that is not in the snapshot, so its first change is
+ * not diffed: it is recorded, and only later changes emit.
  */
 const MAX_BASELINE_PAGES = 50;
 
-/** The most pages of reviews or comments one poll reads for one item or repository. */
+/**
+ * The most pages of reviews or comments one poll reads for one item or
+ * repository. A comment listing that has more is resumed by the next poll.
+ */
 const MAX_DETAIL_PAGES = 10;
 
 /** How long a closed item stays in the snapshot, so a label added just after closing is still seen. */
@@ -103,9 +135,13 @@ const listMissingFrom = (
   reference: ReadonlyArray<string>,
 ): Array<string> => values.filter((value) => !reference.includes(value)).sort();
 
-/** Checks whether ISO 8601 timestamp `time` is at or after `cursor`. An absent cursor is before everything. */
-const isAtOrAfter = (time: string, cursor: string | undefined): boolean =>
-  cursor === undefined || Date.parse(time) >= Date.parse(cursor);
+/** Checks whether ISO 8601 timestamp `time` is at or after `start`. An absent start is before everything. */
+const isAtOrAfter = (time: string, start: string | undefined): boolean =>
+  start === undefined || Date.parse(time) >= Date.parse(start);
+
+/** Checks whether ISO 8601 timestamp `time` is strictly after `start`. An absent start is before everything. */
+const isAfter = (time: string, start: string | undefined): boolean =>
+  start === undefined || Date.parse(time) > Date.parse(start);
 
 /** Returns the label names of an issue. */
 const readLabels = (issue: ListedIssue): Array<string> => issue.labels.map((label) => label.name);
@@ -125,6 +161,28 @@ const buildIssueItem = (repo: string, issue: ListedIssue): GithubItem => ({
 });
 
 /**
+ * Checks whether an item missing from the snapshot was created since the
+ * cursor, which makes it new rather than an old item the snapshot let go of.
+ */
+const isNewItem = (
+  issue: ListedIssue,
+  previous: ItemSnapshot | undefined,
+  cursor: string | undefined,
+): boolean => previous === undefined && isAtOrAfter(issue.created_at, cursor);
+
+/**
+ * Returns the time after which a comment or review on an item is new: the
+ * item's snapshot, or the cursor for an old item with no snapshot. Returns
+ * undefined for a new item, whose every comment and review is new.
+ */
+const computeNewActivityStart = (
+  issue: ListedIssue,
+  previous: ItemSnapshot | undefined,
+  cursor: string | undefined,
+): string | undefined =>
+  previous?.updatedAt ?? (isNewItem(issue, previous, cursor) ? undefined : cursor);
+
+/**
  * Lists the events one issue or pull request produces, by comparing it with
  * its snapshot from the last poll. `cursor` is where the last poll's listing
  * ended.
@@ -132,9 +190,11 @@ const buildIssueItem = (repo: string, issue: ListedIssue): GithubItem => ({
  * - Not in the snapshot and created since the cursor: it is new. It is
  *   `opened`, and compared with an empty open item, so labels, assignees and
  *   a close that came with it emit too.
- * - Not in the snapshot and older: it was closed at the last poll, because
- *   every open item is in the snapshot. When it is open now, an issue is
- *   `reopened`; nothing else is known about how it was before.
+ * - Not in the snapshot and older: it was closed at some point and the
+ *   snapshot let go of it, or it lay beyond the first poll's page limit, or
+ *   it was moved here from another repository. An open issue whose
+ *   `state_reason` is `reopened` is `reopened`; anything else emits nothing,
+ *   because its labels and assignees before are not known.
  * - In the snapshot: a close is `closed`, or `merged` for a pull request with
  *   a merge time; a reopen is `reopened` for an issue; labels added or
  *   removed are one `labeled`; new assignees of an issue are one `assigned`.
@@ -150,11 +210,32 @@ const listItemChanges = (
 ): ReadonlyArray<ItemChange> => {
   const kind = issue.pull_request === undefined ? "issue" : "pr";
   const item = `${repo}#${String(issue.number)}`;
-  const isNew = previous === undefined && isAtOrAfter(issue.created_at, cursor);
-  const stateBefore = previous?.state ?? (isNew ? "open" : "closed");
-  // An old item outside the snapshot has no known labels or assignees to compare.
-  const known: Pick<ItemSnapshot, "labels" | "assignees"> | undefined =
-    previous ?? (isNew ? { labels: [], assignees: [] } : undefined);
+  const isNew = isNewItem(issue, previous, cursor);
+  if (previous === undefined && !isNew) {
+    // `state_reason` stays `reopened` for as long as the issue is open, so an
+    // issue reopened long ago and missing from the snapshot for another
+    // reason emits a late `reopened` too. That is rarer than the reopen of an
+    // issue closed more than seven days ago, which this catches.
+    const reopened =
+      kind === "issue" && issue.state === "open" && issue.state_reason === "reopened";
+    return reopened
+      ? [
+          {
+            kind: "github.issue.reopened",
+            dedupKey: `issue.reopened:${item}:${issue.updated_at}`,
+            occurredAt: issue.updated_at,
+          },
+        ]
+      : [];
+  }
+  const before: Pick<ItemSnapshot, "state" | "labels" | "assignees" | "updatedAt"> = previous ?? {
+    state: "open",
+    labels: [],
+    assignees: [],
+    updatedAt: issue.created_at,
+  };
+  // Every key of a diff holds the state it started from; see the header comment.
+  const diffed = `${item}:${before.updatedAt}`;
   const changes: Array<ItemChange> = [];
 
   if (isNew) {
@@ -164,35 +245,39 @@ const listItemChanges = (
       occurredAt: issue.created_at,
     });
   }
-  if (kind === "issue" && stateBefore === "closed" && issue.state === "open") {
+  if (kind === "issue" && before.state === "closed" && issue.state === "open") {
     changes.push({
       kind: "github.issue.reopened",
-      dedupKey: `issue.reopened:${item}:${issue.updated_at}`,
+      dedupKey: `issue.reopened:${diffed}`,
       occurredAt: issue.updated_at,
     });
   }
-  if (known !== undefined) {
-    const labels = readLabels(issue);
-    const added = listMissingFrom(labels, known.labels);
-    const removed = listMissingFrom(known.labels, labels);
-    if (added.length > 0 || removed.length > 0) {
-      changes.push({
-        kind: `github.${kind}.labeled`,
-        dedupKey: `${kind}.labeled:${item}:+${added.join(",")}:-${removed.join(",")}:${issue.updated_at}`,
-        occurredAt: issue.updated_at,
-        fields: { added, removed },
-      });
-    }
-    const assigned = listMissingFrom(readAssignees(issue), known.assignees);
-    if (kind === "issue" && assigned.length > 0) {
-      changes.push({
-        kind: "github.issue.assigned",
-        dedupKey: `issue.assigned:${item}:${assigned.join(",")}:${issue.updated_at}`,
-        occurredAt: issue.updated_at,
-      });
-    }
+  const labels = readLabels(issue);
+  const added = listMissingFrom(labels, before.labels);
+  const removed = listMissingFrom(before.labels, labels);
+  if (added.length > 0 || removed.length > 0) {
+    // A key holds a digest of the names, not the names: twenty long label
+    // names would not fit the host's 200 characters.
+    const change = computeDigest([
+      ...added.map((name) => `+${name}`),
+      ...removed.map((name) => `-${name}`),
+    ]);
+    changes.push({
+      kind: `github.${kind}.labeled`,
+      dedupKey: `${kind}.labeled:${diffed}:${change}`,
+      occurredAt: issue.updated_at,
+      fields: { added, removed },
+    });
   }
-  if (stateBefore === "open" && issue.state === "closed") {
+  const assigned = listMissingFrom(readAssignees(issue), before.assignees);
+  if (kind === "issue" && assigned.length > 0) {
+    changes.push({
+      kind: "github.issue.assigned",
+      dedupKey: `issue.assigned:${diffed}:${computeDigest(assigned)}`,
+      occurredAt: issue.updated_at,
+    });
+  }
+  if (before.state === "open" && issue.state === "closed") {
     const closedAt = issue.closed_at ?? issue.updated_at;
     const mergedAt = issue.pull_request?.merged_at ?? null;
     changes.push(
@@ -226,9 +311,11 @@ const readVerdict = (state: string): "approved" | "changes-requested" | "comment
 };
 
 /**
- * Records where a newly watched repository stands and emits nothing: the
- * newest update as the cursor, and every open issue and pull request, with
- * the head commit of each pull request, as the snapshot.
+ * Records where a newly watched repository stands and emits nothing. The
+ * cursor is the newest update. The snapshot holds every open item, every
+ * item updated in the seven days before the cursor, and the newest item,
+ * with the head commit of each open pull request: the same items a later
+ * poll keeps, so the first poll after this one diffs like any other.
  */
 const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
@@ -244,12 +331,31 @@ const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpC
       newest.body,
       "the newest issue",
     );
+    if (latest === undefined) return { items: {} };
+    const retainedSince = new Date(
+      Date.parse(latest.updated_at) - CLOSED_RETENTION_MS,
+    ).toISOString();
     const open = yield* fetchListing(
       {
         method: "GET",
         path: `${path}/issues`,
         token: poll.token,
         query: { state: "open", per_page: "100" },
+      },
+      MAX_BASELINE_PAGES,
+    );
+    const closed = yield* fetchListing(
+      {
+        method: "GET",
+        path: `${path}/issues`,
+        token: poll.token,
+        query: {
+          state: "closed",
+          sort: "updated",
+          direction: "desc",
+          since: retainedSince,
+          per_page: "100",
+        },
       },
       MAX_BASELINE_PAGES,
     );
@@ -262,7 +368,11 @@ const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpC
       },
       MAX_BASELINE_PAGES,
     );
-    const issues = yield* decodeGithubValue(Schema.Array(ListedIssue), open.items, "open issues");
+    const issues = yield* decodeGithubValue(
+      Schema.Array(ListedIssue),
+      [...closed.items, ...open.items],
+      "issues",
+    );
     const heads = yield* decodeGithubValue(
       Schema.Array(ListedPull),
       pulls.items,
@@ -270,9 +380,9 @@ const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpC
     );
     const headSha = new Map(heads.map((pull) => [pull.number, pull.head.sha]));
     const items: Record<string, ItemSnapshot> = {};
-    for (const issue of issues)
+    for (const issue of [...issues, latest])
       items[String(issue.number)] = buildItemSnapshot(issue, headSha.get(issue.number));
-    return { ...(latest === undefined ? {} : { cursor: latest.updated_at }), items };
+    return { cursor: latest.updated_at, items };
   });
 
 /** Builds an item's snapshot from the listing, with its head commit when it has one. */
@@ -288,13 +398,13 @@ const buildItemSnapshot = (issue: ListedIssue, headSha: string | undefined): Ite
 
 /**
  * Fetches a pull request's reviews and emits one `github.pr.review-submitted`
- * per review submitted since the cursor. A pending review is not submitted
+ * per review submitted after `start`. A pending review is not submitted
  * yet, and a dismissed one is no longer a verdict, so neither emits.
  */
 const emitNewReviews = (
   poll: RepoPoll,
   item: GithubItem,
-  cursor: string | undefined,
+  start: string | undefined,
 ): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const listing = yield* fetchListing(
@@ -310,7 +420,7 @@ const emitNewReviews = (
       const review = yield* decodeGithubValue(ListedReview, raw, "a review");
       const verdict = readVerdict(review.state);
       const submittedAt = review.submitted_at ?? null;
-      if (verdict === undefined || submittedAt === null || !isAtOrAfter(submittedAt, cursor)) {
+      if (verdict === undefined || submittedAt === null || !isAfter(submittedAt, start)) {
         continue;
       }
       yield* poll.emit(
@@ -347,7 +457,9 @@ const emitNewHead = (
       yield* poll.emit(
         buildItemEvent(item, {
           kind: "github.pr.synchronized",
-          dedupKey: `pr.synchronized:${poll.repo}#${String(item.number)}:${pull.head.sha}`,
+          // Twelve characters of a commit SHA name it within one pull request,
+          // and keep the key under the host's 200 characters.
+          dedupKey: `pr.synchronized:${poll.repo}#${String(item.number)}:${pull.head.sha.slice(0, 12)}`,
           occurredAt: pull.updated_at,
           raw: truncateRaw(body),
         }),
@@ -356,20 +468,40 @@ const emitNewHead = (
     return pull.head.sha;
   });
 
+/** Where one comment listing starts, and from when a comment counts as new. */
+interface CommentQuery {
+  /** The `since` of the listing, or undefined to list every comment. */
+  readonly since: string | undefined;
+  /** The comment listing to resume, which overrides `since` and the per-item starts. */
+  readonly pending: PendingComments | undefined;
+  /**
+   * The time after which a comment on an item is new, by item number, as
+   * `computeNewActivityStart` returns it. An item not in the map uses `since`.
+   */
+  readonly starts: ReadonlyMap<number, string | undefined>;
+}
+
 /**
- * Fetches the repository's comments updated since the cursor, and emits
+ * Fetches the repository's comments updated since `query.since`, and emits
  * `github.issue.commented` or `github.pr.commented` for each one created
- * since the cursor; an edited old comment emits nothing. These are the
+ * after its item's start; an edited old comment emits nothing. These are the
  * comments on an issue or on a pull request's conversation. A comment on a
  * pull request's diff belongs to a review and arrives as
  * `github.pr.review-submitted`.
+ *
+ * Returns where the next poll resumes when the listing stopped at its page
+ * limit, or undefined when every comment was read. A resumed listing counts
+ * a comment as new when it was created after the cursor of the poll that
+ * stopped, because that poll saved snapshots newer than the comments it did
+ * not read.
  */
 const emitNewComments = (
   poll: RepoPoll,
-  cursor: string | undefined,
+  query: CommentQuery,
   listed: ReadonlyMap<number, GithubItem>,
-): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
+): Effect.Effect<PendingComments | undefined, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
+    const since = query.pending?.since ?? query.since;
     const listing = yield* fetchListing(
       {
         method: "GET",
@@ -379,32 +511,48 @@ const emitNewComments = (
           sort: "updated",
           direction: "asc",
           per_page: "100",
-          ...(cursor === undefined ? {} : { since: cursor }),
+          ...(since === undefined ? {} : { since }),
         },
       },
       MAX_DETAIL_PAGES,
     );
-    for (const raw of listing.items) {
-      const comment = yield* decodeGithubValue(ListedComment, raw, "a comment");
+    const comments = yield* decodeGithubValue(
+      Schema.Array(ListedComment),
+      listing.items,
+      "comments",
+    );
+    for (const [index, comment] of comments.entries()) {
       const number = Number(/\/issues\/(\d+)$/.exec(comment.issue_url)?.[1]);
-      if (!Number.isInteger(number) || !isAtOrAfter(comment.created_at, cursor)) continue;
-      const kind = comment.html_url.includes("/pull/") ? "pr" : "issue";
+      if (!Number.isInteger(number)) continue;
+      const start =
+        query.pending !== undefined
+          ? query.pending.createdAfter
+          : query.starts.has(number)
+            ? query.starts.get(number)
+            : query.since;
+      if (!isAfter(comment.created_at, start)) continue;
+      const kind = /\/pull\/\d+#/.test(comment.html_url) ? "pr" : "issue";
       const item = listed.get(number) ?? { repo: poll.repo, kind, number };
       yield* poll.emit(
         buildItemEvent(item, {
           kind: `github.${kind}.commented`,
           dedupKey: `${kind}.commented:${String(comment.id)}`,
           occurredAt: comment.created_at,
-          raw: truncateRaw(raw),
+          raw: truncateRaw(listing.items[index]!),
         }),
       );
     }
+    const last = comments.at(-1);
+    if (!listing.truncated || last === undefined) return undefined;
+    const createdAfter = query.pending === undefined ? query.since : query.pending.createdAfter;
+    return { since: last.updated_at, ...(createdAfter === undefined ? {} : { createdAfter }) };
   });
 
 /**
  * Polls one watched repository: lists what changed since the last poll,
- * emits an event for each change, and returns the new state. Returns the
- * stored state as it was when GitHub answers 304.
+ * emits an event for each change, and returns the new state. When GitHub
+ * answers 304, only a comment listing left unfinished by the last poll is
+ * read.
  */
 const pollRepo = (
   poll: RepoPoll,
@@ -427,12 +575,10 @@ const pollRepo = (
       },
       MAX_LISTING_PAGES,
     );
-    if (listing.unchanged) return stored;
 
     const issues = yield* Effect.forEach(listing.items, (raw) =>
       Effect.map(decodeGithubValue(ListedIssue, raw, "an issue"), (issue) => ({ issue, raw })),
     );
-    // The listing repeats the item at the cursor, because `since` includes it.
     const changed = issues.filter(
       ({ issue }) => stored.items[String(issue.number)]?.updatedAt !== issue.updated_at,
     );
@@ -440,39 +586,49 @@ const pollRepo = (
       issues.map(({ issue }) => [issue.number, buildIssueItem(poll.repo, issue)] as const),
     );
     const items: Record<string, ItemSnapshot> = { ...stored.items };
-    let needsComments = false;
+    const commentStarts = new Map<number, string | undefined>();
 
     for (const { issue, raw } of changed) {
       const previous = stored.items[String(issue.number)];
       const item = buildIssueItem(poll.repo, issue);
+      const start = computeNewActivityStart(issue, previous, stored.cursor);
       for (const change of listItemChanges(poll.repo, issue, previous, stored.cursor)) {
         yield* poll.emit(buildItemEvent(item, { ...change, raw: truncateRaw(raw) }));
       }
       let headSha = previous?.headSha;
       if (item.kind === "pr") {
         if (issue.state === "open") headSha = yield* emitNewHead(poll, item, previous?.headSha);
-        yield* emitNewReviews(poll, item, stored.cursor);
+        yield* emitNewReviews(poll, item, start);
       }
-      if (issue.comments > (previous?.comments ?? 0)) needsComments = true;
+      if (issue.comments > (previous?.comments ?? 0)) commentStarts.set(issue.number, start);
       items[String(issue.number)] = buildItemSnapshot(issue, headSha);
     }
-    if (needsComments) yield* emitNewComments(poll, stored.cursor, listed);
+    const pendingComments =
+      commentStarts.size > 0 || stored.pendingComments !== undefined
+        ? yield* emitNewComments(
+            poll,
+            { since: stored.cursor, pending: stored.pendingComments, starts: commentStarts },
+            listed,
+          )
+        : undefined;
 
     const cursor = issues.reduce<string | undefined>(
       (latest, { issue }) => (isAtOrAfter(issue.updated_at, latest) ? issue.updated_at : latest),
       stored.cursor,
     );
+    const etag = listing.unchanged ? stored.etag : listing.firstPage.etag;
     return {
       ...(cursor === undefined ? {} : { cursor }),
-      ...(listing.firstPage.etag === undefined ? {} : { etag: listing.firstPage.etag }),
+      ...(etag === undefined ? {} : { etag }),
       items: evictClosedItems(items, cursor),
+      ...(pendingComments === undefined ? {} : { pendingComments }),
     };
   });
 
 /**
- * Returns the snapshot without the items closed for more than seven days
- * before the cursor. Measured from the cursor, GitHub's own clock, rather
- * than from this machine's.
+ * Returns the snapshot without the closed items last updated more than seven
+ * days before the cursor. Measured from the cursor, GitHub's own clock,
+ * rather than from this machine's.
  */
 const evictClosedItems = (
   items: Readonly<Record<string, ItemSnapshot>>,

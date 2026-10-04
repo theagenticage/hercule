@@ -28,6 +28,8 @@ export const ListedIssue = Schema.Struct({
   created_at: Schema.String,
   updated_at: Schema.String,
   closed_at: Schema.NullOr(Schema.String),
+  /** Why the issue is in its state, such as `reopened` for an open issue that was closed before. */
+  state_reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   pull_request: Schema.optionalKey(
     Schema.Struct({ merged_at: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
   ),
@@ -60,13 +62,15 @@ export type ListedReview = Schema.Schema.Type<typeof ListedReview>;
 /**
  * A comment on an issue or on a pull request's conversation, as
  * `GET /repos/{owner}/{repo}/issues/comments` returns it. `issue_url` ends in
- * the item's number, and `html_url` has `/pull/` in it for a pull request.
+ * the item's number, and `html_url` has `/pull/<number>#` in it for a pull
+ * request.
  */
 export const ListedComment = Schema.Struct({
   id: Schema.Int,
   html_url: Schema.String,
   issue_url: Schema.String,
   created_at: Schema.String,
+  updated_at: Schema.String,
 });
 
 export type ListedComment = Schema.Schema.Type<typeof ListedComment>;
