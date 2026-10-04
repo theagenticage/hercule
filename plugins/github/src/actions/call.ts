@@ -19,7 +19,7 @@
  * The codes are spelled like the public API's error codes, which a step
  * record stores for a built-in action.
  */
-import { Effect, Option, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import {
@@ -29,14 +29,13 @@ import {
 } from "@hercule/plugin-host";
 import {
   isRateLimited,
+  readGithubExplanation,
   readToken,
   requestGithub,
   type GithubRequest,
   type GithubResponse,
 } from "../api";
-
-/** The qualified Connection type every GitHub action acts through. */
-const GITHUB_CONNECTION_TYPE = "github/github";
+import { GITHUB_CONNECTION_TYPE } from "../connection-type";
 
 /**
  * A GitHub workflow action as this plugin writes it: the contribution the
@@ -100,44 +99,6 @@ export const readConnectionToken = (context: ActionContext): Effect.Effect<strin
     : Effect.succeed(token);
 };
 
-/** The part of GitHub's error body the plugin reads. */
-const GithubErrorBody = Schema.Struct({
-  message: Schema.optionalKey(Schema.String),
-  /** On a 422, what was wrong with each field. An entry is a string or an object. */
-  errors: Schema.optionalKey(
-    Schema.Array(
-      Schema.Union([
-        Schema.String,
-        Schema.Struct({
-          message: Schema.optionalKey(Schema.String),
-          field: Schema.optionalKey(Schema.String),
-          code: Schema.optionalKey(Schema.String),
-        }),
-      ]),
-    ),
-  ),
-});
-
-const decodeGithubErrorBody = Schema.decodeUnknownOption(GithubErrorBody);
-
-/**
- * Returns GitHub's own explanation in an error body: its message, followed by
- * what was wrong with each field when GitHub lists that. Returns an empty
- * string when the body holds neither.
- */
-const readGithubExplanation = (body: Schema.Json): string => {
-  const decoded = Option.getOrUndefined(decodeGithubErrorBody(body));
-  if (decoded === undefined) return "";
-  const details = (decoded.errors ?? []).map((entry) =>
-    typeof entry === "string"
-      ? entry
-      : (entry.message ?? [entry.field, entry.code].filter((part) => part !== undefined).join(" ")),
-  );
-  return [decoded.message, ...details]
-    .filter((part) => part !== undefined && part.length > 0)
-    .join(": ");
-};
-
 /** Appends GitHub's explanation to a sentence, when there is one. */
 const appendExplanation = (sentence: string, explanation: string): string =>
   explanation.length === 0 ? sentence : `${sentence} GitHub said: ${explanation}`;
@@ -147,12 +108,12 @@ const appendExplanation = (sentence: string, explanation: string): string =>
  * `ActionError` the step fails with. `subject` names what the request was
  * about, such as "The issue octocat/hello-world#42", for the message of a 404.
  */
-export const describeGithubFailure = (response: GithubResponse, subject: string): ActionError => {
+const convertGithubFailure = (response: GithubResponse, subject: string): ActionError => {
   const explanation = readGithubExplanation(response.body);
-  const fail = (code: string, message: string) => new ActionError({ code, message });
+  const buildError = (code: string, message: string) => new ActionError({ code, message });
   const { status } = response;
   if (status === 401) {
-    return fail(
+    return buildError(
       "unauthenticated",
       "GitHub rejected the Connection's token. Reconnect it under Connections.",
     );
@@ -162,13 +123,13 @@ export const describeGithubFailure = (response: GithubResponse, subject: string)
       response.retryAfterSeconds === undefined
         ? "Try again later."
         : `Try again in ${String(response.retryAfterSeconds)} seconds.`;
-    return fail(
+    return buildError(
       "rate_limited",
       `GitHub's rate limit for the Connection's account is used up. ${wait}`,
     );
   }
   if (status === 403) {
-    return fail(
+    return buildError(
       "forbidden",
       appendExplanation(
         "The Connection's account is not allowed to do this on GitHub.",
@@ -177,24 +138,27 @@ export const describeGithubFailure = (response: GithubResponse, subject: string)
     );
   }
   if (status === 404) {
-    return fail(
+    return buildError(
       "not_found",
       `${subject} does not exist, or the Connection's account cannot see it.`,
     );
   }
   if (status === 405 || status === 409) {
-    return fail("conflict", appendExplanation("GitHub refused the change.", explanation));
+    return buildError("conflict", appendExplanation("GitHub refused the change.", explanation));
   }
   if (status === 422) {
-    return fail(
+    return buildError(
       "validation",
       appendExplanation("GitHub refused the request as invalid.", explanation),
     );
   }
   if (status >= 500) {
-    return fail("unavailable", `GitHub failed with status ${String(status)}. Try again later.`);
+    return buildError(
+      "unavailable",
+      `GitHub failed with status ${String(status)}. Try again later.`,
+    );
   }
-  return fail(
+  return buildError(
     "unexpected",
     appendExplanation(`GitHub answered with status ${String(status)}.`, explanation),
   );
@@ -202,7 +166,7 @@ export const describeGithubFailure = (response: GithubResponse, subject: string)
 
 /**
  * Sends one request to GitHub and returns the body of a 2xx response. Fails
- * with the `ActionError` from `describeGithubFailure` for any other status,
+ * with the `ActionError` from `convertGithubFailure` for any other status,
  * and with `unavailable` when GitHub could not be reached.
  */
 export const callGithub = (
@@ -214,7 +178,7 @@ export const callGithub = (
     Effect.flatMap((response) =>
       response.status >= 200 && response.status < 300
         ? Effect.succeed(response.body)
-        : Effect.fail(describeGithubFailure(response, subject)),
+        : Effect.fail(convertGithubFailure(response, subject)),
     ),
   );
 

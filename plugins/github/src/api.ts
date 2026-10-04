@@ -4,7 +4,7 @@
  * and returns what the response held, so every caller reads the same headers
  * the same way.
  */
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
@@ -158,6 +158,44 @@ export const isRateLimited = (response: GithubResponse): boolean =>
   response.status === 429 ||
   (response.status === 403 &&
     (response.retryAfterSeconds !== undefined || response.rateLimitRemaining === 0));
+
+/** The part of GitHub's error body the plugin reads. */
+const GithubErrorBody = Schema.Struct({
+  message: Schema.optionalKey(Schema.String),
+  /** On a 422, what was wrong with each field. An entry is a string or an object. */
+  errors: Schema.optionalKey(
+    Schema.Array(
+      Schema.Union([
+        Schema.String,
+        Schema.Struct({
+          message: Schema.optionalKey(Schema.String),
+          field: Schema.optionalKey(Schema.String),
+          code: Schema.optionalKey(Schema.String),
+        }),
+      ]),
+    ),
+  ),
+});
+
+const decodeGithubErrorBody = Schema.decodeUnknownOption(GithubErrorBody);
+
+/**
+ * Returns GitHub's own explanation in an error body: its message, followed by
+ * what was wrong with each field when GitHub lists that. Returns an empty
+ * string when the body holds neither.
+ */
+export const readGithubExplanation = (body: Schema.Json): string => {
+  const decoded = Option.getOrUndefined(decodeGithubErrorBody(body));
+  if (decoded === undefined) return "";
+  const details = (decoded.errors ?? []).map((entry) =>
+    typeof entry === "string"
+      ? entry
+      : (entry.message ?? [entry.field, entry.code].filter((part) => part !== undefined).join(" ")),
+  );
+  return [decoded.message, ...details]
+    .filter((part) => part !== undefined && part.length > 0)
+    .join(": ");
+};
 
 /**
  * Returns the token in a GitHub Connection's credentials: the pasted `pat`

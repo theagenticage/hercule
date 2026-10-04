@@ -14,8 +14,14 @@
  * same function, so `issue.read` and `issue.update` return the same shape.
  */
 import { Effect, Schema } from "effect";
-import type { ActionError } from "@hercule/plugin-host";
-import { GithubAccount, GithubAccounts, GithubLabel } from "../github-objects";
+import { ActionError } from "@hercule/plugin-host";
+import {
+  GithubAccount,
+  GithubAccounts,
+  GithubLabel,
+  readReviewVerdict,
+  ReviewVerdict,
+} from "../github-objects";
 import { decodeGithubBody } from "./call";
 
 /** The number of an issue or a pull request in its repository. */
@@ -45,6 +51,8 @@ const GithubIssue = Schema.Struct({
   user: Schema.NullOr(GithubAccount),
   html_url: Schema.String,
 });
+
+type GithubIssue = Schema.Schema.Type<typeof GithubIssue>;
 
 /** The fields an issue and a pull request share, as an action returns them. */
 const ISSUE_FIELDS = {
@@ -132,26 +140,19 @@ export const Comment = Schema.Struct({
 export type Comment = Schema.Schema.Type<typeof Comment>;
 
 /**
- * GitHub's word for a review's verdict, and the word the plugin uses for it.
- * The plugin's words are the ones the `github.pr.review-submitted` event uses.
+ * A review, as GitHub's REST API returns it. `state` is GitHub's word for the
+ * verdict, such as `CHANGES_REQUESTED`; `readReviewVerdict` converts it.
  */
-const REVIEW_VERDICTS = {
-  APPROVED: "approved",
-  CHANGES_REQUESTED: "changes-requested",
-  COMMENTED: "commented",
-} as const;
-
-/** A review, as GitHub's REST API returns it once it is submitted. */
 const GithubReview = Schema.Struct({
   id: Schema.Int,
-  state: Schema.Literals(["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]),
+  state: Schema.String,
   html_url: Schema.String,
 });
 
 /** A submitted review, as an action returns it. */
 export const Review = Schema.Struct({
   id: Schema.Int.annotate({ description: "GitHub's id of the review." }),
-  state: Schema.Literals(["approved", "changes-requested", "commented"]),
+  state: ReviewVerdict,
   url: Schema.String.annotate({ description: "Where a person opens the review on GitHub." }),
 });
 
@@ -164,13 +165,14 @@ const GithubMerge = Schema.Struct({
   message: Schema.String,
 });
 
+type GithubMerge = Schema.Schema.Type<typeof GithubMerge>;
+
 /** Converts GitHub's list of accounts into their logins. */
-const listLogins = (
-  accounts: Schema.Schema.Type<typeof GithubAccounts> | undefined,
-): ReadonlyArray<string> => (accounts ?? []).map((account) => account.login);
+const listLogins = (accounts: GithubAccounts | undefined): ReadonlyArray<string> =>
+  (accounts ?? []).map((account) => account.login);
 
 /** Converts an issue as GitHub returns it into the issue an action returns. */
-const buildIssue = (issue: Schema.Schema.Type<typeof GithubIssue>): Issue => ({
+const buildIssue = (issue: GithubIssue): Issue => ({
   number: issue.number,
   title: issue.title,
   body: issue.body,
@@ -223,14 +225,20 @@ export const decodeComment = (body: Schema.Json): Effect.Effect<Comment, ActionE
 
 /** Decodes a submitted review from GitHub's response and converts it into the review an action returns. */
 export const decodeReview = (body: Schema.Json): Effect.Effect<Review, ActionError> =>
-  Effect.map(decodeGithubBody(GithubReview, body), (review) => ({
-    id: review.id,
-    state: REVIEW_VERDICTS[review.state],
-    url: review.html_url,
-  }));
+  Effect.flatMap(decodeGithubBody(GithubReview, body), (review) => {
+    const verdict = readReviewVerdict(review.state);
+    // A review GitHub has just submitted always has a verdict; a pending or
+    // dismissed one here means GitHub's API changed.
+    return verdict === undefined
+      ? Effect.fail(
+          new ActionError({
+            code: "unexpected",
+            message: `GitHub returned the submitted review in the state ${review.state}, which is not a verdict.`,
+          }),
+        )
+      : Effect.succeed({ id: review.id, state: verdict, url: review.html_url });
+  });
 
 /** Decodes the answer to a merge from GitHub's response. */
-export const decodeMerge = (
-  body: Schema.Json,
-): Effect.Effect<Schema.Schema.Type<typeof GithubMerge>, ActionError> =>
+export const decodeMerge = (body: Schema.Json): Effect.Effect<GithubMerge, ActionError> =>
   decodeGithubBody(GithubMerge, body);
