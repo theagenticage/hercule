@@ -179,9 +179,16 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
-    // The three harnesses are providers; github is the connection type and
-    // the event source that declares the GitHub event kinds.
-    expect(plugins.at(-1)?.capabilities).toEqual(["connections", "event-sources"]);
+    // The three harnesses are providers. github is the connection type, the
+    // event source with the GitHub event kinds it emits, the reader of the
+    // linked repo Resources it watches, and the GitHub workflow actions.
+    expect(plugins.at(-1)?.capabilities).toEqual([
+      "connections",
+      "event-sources",
+      "events",
+      "resources",
+      "workflow-actions",
+    ]);
   }, 30_000);
 
   it("lists the five task verbs in help, each with its grant and a line of its own", async () => {
