@@ -23,3 +23,4 @@ export {
   type QueryInput,
   type UpdateInput,
 } from "./service";
+export { connectionStateRepository } from "./state";
