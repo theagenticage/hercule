@@ -5,6 +5,7 @@
  *
  * - Tab on the Office selects the colleague who has waited longest;
  * - Tab on one of the card's controls moves the focus and keeps the selection;
+ * - selecting a colleague reads its thread, so the drawer opens on it at once;
  * - Enter and Open thread open the drawer, and the param follows;
  * - the param opens the drawer, and Escape steps back from the drawer to the
  *   card, then from the card to nothing.
@@ -16,6 +17,7 @@ import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Session } from "@hercule/contract";
+import { queryKeys } from "@hercule/client-core";
 import {
   buildSidebarHandlers,
   buildThreadHandlers,
@@ -108,6 +110,20 @@ describe("Tab on the Office", () => {
 });
 
 describe("the thread drawer", () => {
+  it("has the selected colleague's thread read before it opens", async () => {
+    const { user, context } = await openOffice();
+
+    await user.tab();
+
+    await waitFor(() => {
+      expect(context.queryClient.getQueryData(queryKeys.transcript(runbook.id))).toEqual(
+        THREAD_FIXTURES.waiting.transcript,
+      );
+    });
+    expect(context.queryClient.getQueryData(queryKeys.session(runbook.id))).toBeDefined();
+    expect(context.queryClient.getQueryData(queryKeys.inputs(runbook.id))).toBeDefined();
+  });
+
   it("opens on Enter, and the session param names its thread", async () => {
     const { user, router } = await openOffice();
     await user.tab();

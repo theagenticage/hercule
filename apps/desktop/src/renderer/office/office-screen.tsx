@@ -10,9 +10,10 @@
  * link can open the Office on a thread.
  */
 import { useEffect, useMemo, useRef, type JSX } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
+  ensureThreadData,
   localRunnerQuery,
   projectsQuery,
   runnersQuery,
@@ -37,6 +38,7 @@ export function OfficeScreen({
 }): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
+  const queryClient = useQueryClient();
   const sessions = useSuspenseQuery(threadsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
@@ -60,6 +62,20 @@ export function OfficeScreen({
     if (openSessionId === null) setOffice({ drawer: false });
     else setOffice({ selectedId: openSessionId, drawer: true, roomId: null });
   }, [openSessionId]);
+
+  // Reads the selected colleague's thread while its card shows, so Open
+  // thread finds it cached and the drawer slides in with the transcript
+  // rather than an empty panel. A read that fails here is left to the
+  // route's loader, which reads the thread again when the drawer opens.
+  useEffect(() => {
+    let readId: string | null = null;
+    return subscribeOffice(() => {
+      const { selectedId } = readOffice();
+      if (selectedId === null || selectedId === readId) return;
+      readId = selectedId;
+      ensureThreadData(queryClient, client, selectedId).catch(() => undefined);
+    });
+  }, [queryClient, client]);
 
   // Nothing in the window is see-through while the Office is open: see the
   // data-office rule in base.css for why.
