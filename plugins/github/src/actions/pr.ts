@@ -3,10 +3,19 @@
  * review it, change it, merge it, and open one from a branch that is already
  * pushed.
  */
-import { Effect, Schema } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { ActionError } from "@hercule/plugin-host";
-import { callGithub, decodeGithubBody, defineGithubAction, readConnectionToken } from "./call";
+import { readGithubExplanation, type GithubResponse } from "../api";
+import {
+  callGithub,
+  convertGithubFailure,
+  decodeGithubBody,
+  defineGithubAction,
+  isSuccessful,
+  readConnectionToken,
+  sendGithubRequest,
+} from "./call";
 import {
   buildPullRequest,
   Comment,
@@ -193,6 +202,8 @@ const GraphqlErrors = Schema.Struct({
 /** The step error code for each GraphQL error type the plugin tells apart. */
 const GRAPHQL_ERROR_CODES: Readonly<Record<string, string>> = {
   FORBIDDEN: "forbidden",
+  // The token was not granted a scope the mutation needs.
+  INSUFFICIENT_SCOPES: "forbidden",
   NOT_FOUND: "not_found",
   RATE_LIMITED: "rate_limited",
 };
@@ -234,11 +245,43 @@ const changeDraftState = (
     );
   });
 
+/** One request of a `pr.update` step, and the input fields it changes. */
+interface PullRequestChange {
+  /** The input fields the request changes, such as "title, base" or "labels". */
+  readonly fields: string;
+  readonly apply: Effect.Effect<unknown, ActionError, HttpClient.HttpClient>;
+}
+
+/**
+ * Converts the error of one change of a `pr.update` step into the step's
+ * error. Keeps the code, and says which change failed, which changes were
+ * already made and stay made, and which were not tried.
+ */
+const explainPartialUpdate = (
+  error: ActionError,
+  failed: PullRequestChange,
+  made: ReadonlyArray<PullRequestChange>,
+  notTried: ReadonlyArray<PullRequestChange>,
+): ActionError => {
+  const listFields = (changes: ReadonlyArray<PullRequestChange>): string =>
+    changes.map((change) => change.fields).join(", ");
+  const madeSentence =
+    made.length === 0
+      ? "Nothing was changed before it."
+      : `Already changed, and not undone: ${listFields(made)}.`;
+  const notTriedSentence = notTried.length === 0 ? "" : ` Not tried: ${listFields(notTried)}.`;
+  // GitHub's message goes last, because it does not always end a sentence.
+  return new ActionError({
+    code: error.code,
+    message: `Could not change ${failed.fields}. ${madeSentence}${notTriedSentence} ${error.message}`,
+  });
+};
+
 export const prUpdate = defineGithubAction({
   id: "pr.update",
   displayName: "Update a GitHub pull request",
   description:
-    "Changes a pull request's title, body, state, base branch, labels or draft state, and asks reviewers for a review. Fields left out of the params are not changed. The output is the pull request as it is afterwards.",
+    "Changes a pull request's title, body, state, base branch, labels or draft state, and asks reviewers for a review. Fields left out of the params are not changed. GitHub takes some changes in separate requests: when one fails, the changes before it stay made, and the error lists them. The output is the pull request as it is afterwards.",
   input: Schema.Struct({ ...PULL_REQUEST_ADDRESS, ...PULL_REQUEST_CHANGES }).check(
     refuseEmptyUpdate(
       PULL_REQUEST_CHANGES,
@@ -248,53 +291,85 @@ export const prUpdate = defineGithubAction({
   output: PullRequest,
   // GitHub has a separate endpoint for the labels, for the reviewers and for
   // the draft state, so one update can take up to four requests. They are
-  // sent in order, and a failure stops the rest: the step's error says which
-  // change GitHub refused, and the changes before it stay made.
+  // sent in order, and a failure stops the rest. The changes before it stay
+  // made, so the step's error names the change GitHub refused, the changes
+  // already made, and the ones not tried.
   perform: (input, context) =>
     Effect.gen(function* () {
       const token = yield* readConnectionToken(context);
       const subject = describePullRequest(input);
-      const { title, body, state, base } = input;
-      if (title !== undefined || body !== undefined || state !== undefined || base !== undefined) {
-        yield* callGithub(
-          {
-            method: "PATCH",
-            path: buildPullRequestPath(input),
-            token,
-            body: { title, body, state, base },
-          },
-          subject,
-        );
+      const { title, body, state, base, draft } = input;
+      const changes: Array<PullRequestChange> = [];
+      const pullFields = Object.entries({ title, body, state, base })
+        .filter(([, value]) => value !== undefined)
+        .map(([field]) => field);
+      if (pullFields.length > 0) {
+        changes.push({
+          fields: pullFields.join(", "),
+          apply: callGithub(
+            {
+              method: "PATCH",
+              path: buildPullRequestPath(input),
+              token,
+              body: { title, body, state, base },
+            },
+            subject,
+          ),
+        });
       }
       if (input.labels !== undefined) {
-        yield* callGithub(
-          {
-            method: "PATCH",
-            path: `/repos/${input.repo}/issues/${String(input.number)}`,
-            token,
-            body: { labels: input.labels },
-          },
-          subject,
-        );
+        changes.push({
+          fields: "labels",
+          apply: callGithub(
+            {
+              method: "PATCH",
+              path: `/repos/${input.repo}/issues/${String(input.number)}`,
+              token,
+              body: { labels: input.labels },
+            },
+            subject,
+          ),
+        });
       }
       if (input.reviewers !== undefined) {
-        yield* callGithub(
-          {
-            method: "POST",
-            path: `${buildPullRequestPath(input)}/requested_reviewers`,
-            token,
-            body: { reviewers: input.reviewers },
-          },
-          subject,
+        changes.push({
+          fields: "reviewers",
+          apply: callGithub(
+            {
+              method: "POST",
+              path: `${buildPullRequestPath(input)}/requested_reviewers`,
+              token,
+              body: { reviewers: input.reviewers },
+            },
+            subject,
+          ),
+        });
+      }
+      if (draft !== undefined) {
+        changes.push({
+          fields: "draft",
+          apply: Effect.gen(function* () {
+            const pull = yield* fetchPullRequest(input, token);
+            if ((pull.draft ?? false) !== draft) {
+              yield* changeDraftState(pull, draft, token, subject);
+            }
+          }),
+        });
+      }
+      for (const [index, change] of changes.entries()) {
+        yield* Effect.mapError(change.apply, (error) =>
+          explainPartialUpdate(error, change, changes.slice(0, index), changes.slice(index + 1)),
         );
       }
-      if (input.draft !== undefined) {
-        const pull = yield* fetchPullRequest(input, token);
-        if ((pull.draft ?? false) !== input.draft) {
-          yield* changeDraftState(pull, input.draft, token, subject);
-        }
-      }
-      return buildPullRequest(yield* fetchPullRequest(input, token));
+      const pull = yield* Effect.mapError(
+        fetchPullRequest(input, token),
+        (error) =>
+          new ActionError({
+            code: error.code,
+            message: `Every change was made, but the pull request could not be read afterwards. ${error.message}`,
+          }),
+      );
+      return buildPullRequest(pull);
     }),
 });
 
@@ -304,7 +379,8 @@ const MergeResult = Schema.Struct({
   sha: Schema.String.annotate({ description: "The commit the merge made on the base branch." }),
   message: Schema.String.annotate({ description: "GitHub's message about the merge." }),
   branchDeleted: Schema.Boolean.annotate({
-    description: "Whether the pull request's branch was deleted after the merge.",
+    description:
+      "Whether the pull request's branch is gone after the merge: deleted by this step, or already deleted, for example by the repository's own setting.",
   }),
 });
 
@@ -313,10 +389,20 @@ const buildBranchRefPath = (repo: string, branch: string): string =>
   `/repos/${repo}/git/refs/heads/${branch.split("/").map(encodeURIComponent).join("/")}`;
 
 /**
- * Deletes the branch of a merged pull request. Succeeds when GitHub answers
- * 422, which it does when the branch is already gone, for example because the
- * repository deletes merged branches by itself. Fails with GitHub's error
- * otherwise, with a message that says the merge itself succeeded.
+ * Checks whether GitHub refused to delete a branch because the branch does
+ * not exist, which is the 422 "Reference does not exist". Any other 422, such
+ * as "Cannot delete the default branch", is a real refusal.
+ */
+const isBranchAlreadyDeleted = (response: GithubResponse): boolean =>
+  response.status === 422 &&
+  /^Reference does not exist/i.test(readGithubExplanation(response.body));
+
+/**
+ * Deletes the branch of a merged pull request, in the repository the branch
+ * is in, which for a pull request from a fork is the fork. Succeeds when the
+ * branch is already gone, for example because the repository deletes merged
+ * branches by itself. Fails with GitHub's error otherwise, with a message
+ * that says the merge itself succeeded.
  */
 const deleteMergedBranch = (
   headRepo: string,
@@ -324,29 +410,29 @@ const deleteMergedBranch = (
   mergeSha: string,
   token: string,
 ): Effect.Effect<void, ActionError, HttpClient.HttpClient> =>
-  callGithub(
-    { method: "DELETE", path: buildBranchRefPath(headRepo, headRef), token },
-    `The branch ${headRef} of ${headRepo}`,
-  ).pipe(
-    Effect.asVoid,
-    Effect.catchIf(
-      (error) => error.code === "validation",
-      () => Effect.void,
-    ),
-    Effect.mapError(
-      (error) =>
-        new ActionError({
-          code: error.code,
-          message: `The pull request was merged as ${mergeSha}, but its branch ${headRef} was not deleted. ${error.message}`,
-        }),
-    ),
-  );
+  Effect.gen(function* () {
+    const response = yield* sendGithubRequest({
+      method: "DELETE",
+      path: buildBranchRefPath(headRepo, headRef),
+      token,
+    });
+    if (isSuccessful(response) || isBranchAlreadyDeleted(response)) return;
+    const error = convertGithubFailure(
+      response,
+      `The branch ${headRef} of ${headRepo}`,
+      yield* Clock.currentTimeMillis,
+    );
+    return yield* new ActionError({
+      code: error.code,
+      message: `The pull request was merged as ${mergeSha}, but its branch ${headRef} of ${headRepo} was not deleted. ${error.message}`,
+    });
+  });
 
 export const prMerge = defineGithubAction({
   id: "pr.merge",
   displayName: "Merge a GitHub pull request",
   description:
-    "Merges a pull request, and deletes its branch afterwards when deleteBranch is true. With sha, the merge happens only if the branch still points at that commit. The output holds the merge commit.",
+    "Merges a pull request, and deletes its branch afterwards when deleteBranch is true. The branch is deleted in the repository it is in, which for a pull request from a fork is the fork. With sha, or with deleteBranch, the merge happens only if the branch still points at the expected commit. The output holds the merge commit.",
   input: Schema.Struct({
     ...PULL_REQUEST_ADDRESS,
     method: Schema.optionalKey(
@@ -373,7 +459,8 @@ export const prMerge = defineGithubAction({
     ),
     deleteBranch: Schema.optionalKey(
       Schema.Boolean.annotate({
-        description: "true deletes the pull request's branch after the merge.",
+        description:
+          "true deletes the pull request's branch after the merge, in the repository the branch is in: for a pull request from a fork, that is the fork. Without sha, the merge is then held to the commit the branch pointed at when the step read the pull request, so a commit pushed in between is refused with the code conflict, not merged and deleted.",
       }),
     ),
   }),
@@ -383,8 +470,10 @@ export const prMerge = defineGithubAction({
       const token = yield* readConnectionToken(context);
       const subject = describePullRequest(input);
       // The branch to delete is read before the merge, so that a branch that
-      // cannot be deleted refuses the step before anything changes.
-      let head: { readonly repo: string; readonly ref: string } | undefined;
+      // cannot be deleted refuses the step before anything changes. The merge
+      // is then held to the head commit read here, so that a commit pushed in
+      // between is refused, not merged unseen and its branch deleted.
+      let head: { readonly repo: string; readonly ref: string; readonly sha: string } | undefined;
       if (input.deleteBranch === true) {
         const pull = yield* fetchPullRequest(input, token);
         if (pull.head.repo === null) {
@@ -396,7 +485,7 @@ export const prMerge = defineGithubAction({
             }),
           );
         }
-        head = { repo: pull.head.repo.full_name, ref: pull.head.ref };
+        head = { repo: pull.head.repo.full_name, ref: pull.head.ref, sha: pull.head.sha };
       }
       const merge = yield* Effect.flatMap(
         callGithub(
@@ -408,7 +497,7 @@ export const prMerge = defineGithubAction({
               merge_method: input.method,
               commit_title: input.commitTitle,
               commit_message: input.commitMessage,
-              sha: input.sha,
+              sha: input.sha ?? head?.sha,
             },
           },
           subject,
