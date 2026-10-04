@@ -100,15 +100,41 @@ export const readGithubObject = (
       );
 
 /**
+ * Returns the items of one page of a listing: the body itself when it is a
+ * JSON array of objects, or, when `itemsField` is set, the array of objects
+ * under that field of the body. Returns `undefined` when the body has
+ * neither shape.
+ */
+const readPageItems = (
+  body: Schema.Json,
+  itemsField: string | undefined,
+): ReadonlyArray<Schema.JsonObject> | undefined => {
+  const items = itemsField === undefined ? body : isJsonObject(body) ? body[itemsField] : undefined;
+  return Array.isArray(items) && items.every(isJsonObject) ? items : undefined;
+};
+
+/** How `fetchListing` reads a listing whose pages are not plain arrays. */
+interface ListingOptions {
+  /**
+   * The field of each page's body that holds the page's items, for a listing
+   * GitHub sends as an object, such as `check_suites` in
+   * `{ total_count, check_suites }`. Absent when each page is an array.
+   */
+  readonly itemsField?: string;
+}
+
+/**
  * Fetches a listing and follows its `Link` header for up to `maxPages`
  * pages. Only the first request carries the ETag or `Last-Modified`: a 304
  * on it means the whole listing is unchanged. Fails as `fetchFeedResponse` fails,
  * and with a `PluginError` when a page's body is not a JSON array of objects
- * or the `Link` header points outside GitHub's API.
+ * (or, with `itemsField`, an object holding one under that field) or the
+ * `Link` header points outside GitHub's API.
  */
 export const fetchListing = (
   request: GithubRequest,
   maxPages: number,
+  options: ListingOptions = {},
 ): Effect.Effect<GithubListing, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const firstPage = yield* fetchFeedResponse(request);
@@ -119,12 +145,17 @@ export const fetchListing = (
     let page = firstPage;
     let pages = 1;
     for (;;) {
-      if (!Array.isArray(page.body) || !page.body.every(isJsonObject)) {
+      const pageItems = readPageItems(page.body, options.itemsField);
+      if (pageItems === undefined) {
+        const expected =
+          options.itemsField === undefined
+            ? "a list of objects"
+            : `an object with a list of objects under \`${options.itemsField}\``;
         return yield* new PluginError({
-          message: `GitHub returned something other than a list of objects for ${describeRequest(request)}.`,
+          message: `GitHub returned something other than ${expected} for ${describeRequest(request)}.`,
         });
       }
-      items.push(...page.body);
+      items.push(...pageItems);
       if (page.nextPageUrl === undefined) break;
       if (pages === maxPages) return { unchanged: false, items, firstPage, truncated: true };
       // The next page's URL comes from GitHub's `Link` header. The request

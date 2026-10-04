@@ -1,6 +1,6 @@
 /**
  * Parses a whole number from text the user typed into a form field, such as
- * a feed's poll interval or an integer setting.
+ * a feed's poll interval.
  *
  * Returns the number when the text, with spaces around it removed, is only
  * digits. Returns `undefined` for anything else: empty text, "abc", "1.5",

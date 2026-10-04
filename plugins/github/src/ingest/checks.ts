@@ -12,22 +12,23 @@
  *    from the last poll. A repository with more open pull requests than that
  *    has only the most recently updated thousand followed.
  * 2. For each open pull request updated in the last `checksWindowDays`:
- *    `GET /repos/{o}/{r}/commits/{sha}/check-suites`, with that commit's last
- *    ETag. A commit whose checks finished is still asked, because a check
- *    can be run again.
+ *    `GET /repos/{o}/{r}/commits/{sha}/check-suites`, up to three pages of
+ *    100. A commit whose checks finished is still asked, because a check can
+ *    be run again. The commit's ETag is kept, and sent with the next request,
+ *    only when its suites fit on one page: GitHub's ETag covers one page, so
+ *    a 304 on the first page says nothing about a suite on the second.
  *
  * So a quiet repository costs one free 304 plus one free 304 per pull
- * request in the window.
+ * request in the window, as long as no commit has more than 100 suites.
  */
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, type GithubItem } from "../subject";
 import { computeDigest } from "./digest";
-import { GithubCheckSuites, ListedPull, type GithubCheckSuite } from "./feed-objects";
+import { GithubCheckSuite, ListedPull } from "./feed-objects";
 import {
   decodeGithubValue,
-  fetchFeedResponse,
   fetchListing,
   readGithubObject,
   truncateRaw,
@@ -48,7 +49,10 @@ type PullRequestSnapshot = Schema.Schema.Type<typeof PullRequestSnapshot>;
 
 /** What the feed keeps of one head commit. */
 const HeadState = Schema.Struct({
-  /** The ETag of the last check-suites answer, sent back as `If-None-Match`. */
+  /**
+   * The ETag of the last check-suites answer, sent back as `If-None-Match`.
+   * Absent when the suites took more than one page.
+   */
   etag: Schema.optionalKey(Schema.String),
   /**
    * The digest of the last verdict seen, as `computeVerdictDigest` returns
@@ -81,6 +85,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The most pages of open pull requests one poll reads, 100 each. */
 const MAX_PULL_PAGES = 10;
+
+/**
+ * The most pages of check suites one poll reads for one commit, 100 each. A
+ * commit with more suites never gets a verdict, because one suite left
+ * unread could still be running; the feed logs a warning on each poll
+ * instead of reporting from part of the list.
+ */
+const MAX_SUITE_PAGES = 3;
 
 /** The conclusions that do not make a commit's checks fail. */
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
@@ -196,19 +208,38 @@ const checkHead = (
   watchedSince: string,
 ): Effect.Effect<HeadState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const response = yield* fetchFeedResponse({
-      method: "GET",
-      path: `/repos/${poll.repo}/commits/${pullRequest.headSha}/check-suites`,
-      token: poll.token,
-      query: { per_page: "100" },
-      ...(head?.etag === undefined ? {} : { etag: head.etag }),
-    });
-    if (response.status === 304 && head !== undefined) return head;
-    const etag = response.etag === undefined ? {} : { etag: response.etag };
+    const listing = yield* fetchListing(
+      {
+        method: "GET",
+        path: `/repos/${poll.repo}/commits/${pullRequest.headSha}/check-suites`,
+        token: poll.token,
+        query: { per_page: "100" },
+        ...(head?.etag === undefined ? {} : { etag: head.etag }),
+      },
+      MAX_SUITE_PAGES,
+      { itemsField: "check_suites" },
+    );
+    if (listing.unchanged) return head ?? {};
+    // The first page's ETag stays the same while a suite on a later page
+    // finishes, so it is kept only when there is no later page.
+    const etag =
+      listing.firstPage.etag === undefined || listing.firstPage.nextPageUrl !== undefined
+        ? {}
+        : { etag: listing.firstPage.etag };
     const lastVerdict = head?.verdict === undefined ? {} : { verdict: head.verdict };
-    const body = yield* readGithubObject(response.body, "check suites");
-    const { check_suites } = yield* decodeGithubValue(GithubCheckSuites, body, "check suites");
-    const suites = listCountedSuites(check_suites);
+    if (listing.truncated) {
+      yield* Effect.logWarning(
+        `The GitHub checks feed cannot report the checks of ${poll.repo}#${String(pullRequest.number)} at ${pullRequest.headSha}: the commit has more than ${String(MAX_SUITE_PAGES * 100)} check suites, and a verdict needs all of them.`,
+      );
+      return lastVerdict;
+    }
+    const body = yield* readGithubObject(listing.firstPage.body, "check suites");
+    const checkSuites = yield* decodeGithubValue(
+      Schema.Array(GithubCheckSuite),
+      listing.items,
+      "check suites",
+    );
+    const suites = listCountedSuites(checkSuites);
     if (suites.length === 0 || suites.some((suite) => suite.status !== "completed")) {
       return { ...etag, ...lastVerdict };
     }

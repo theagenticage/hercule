@@ -92,20 +92,16 @@ export const GithubNotification = Schema.Struct({
 export type GithubNotification = Schema.Schema.Type<typeof GithubNotification>;
 
 /**
- * The check suites on one commit, as
- * `GET /repos/{owner}/{repo}/commits/{sha}/check-suites` returns them.
+ * One check suite on a commit, as an entry of the `check_suites` list that
+ * `GET /repos/{owner}/{repo}/commits/{sha}/check-suites` returns.
  */
-export const GithubCheckSuites = Schema.Struct({
-  check_suites: Schema.Array(
-    Schema.Struct({
-      id: Schema.Int,
-      status: Schema.NullOr(Schema.String),
-      conclusion: Schema.NullOr(Schema.String),
-      updated_at: Schema.NullOr(Schema.String),
-      latest_check_runs_count: Schema.Int,
-      app: Schema.NullOr(Schema.Struct({ name: Schema.String })),
-    }),
-  ),
+export const GithubCheckSuite = Schema.Struct({
+  id: Schema.Int,
+  status: Schema.NullOr(Schema.String),
+  conclusion: Schema.NullOr(Schema.String),
+  updated_at: Schema.NullOr(Schema.String),
+  latest_check_runs_count: Schema.Int,
+  app: Schema.NullOr(Schema.Struct({ name: Schema.String })),
 });
 
-export type GithubCheckSuite = Schema.Schema.Type<typeof GithubCheckSuites>["check_suites"][number];
+export type GithubCheckSuite = Schema.Schema.Type<typeof GithubCheckSuite>;

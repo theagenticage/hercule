@@ -11,7 +11,6 @@
 import type { Issue, PluginConfigureInput } from "@hercule/contract";
 import { readValidationIssues } from "./errors";
 import { readJsonObject, readStringList } from "./json-shape";
-import { parseWholeNumber } from "./whole-number";
 
 /** The type of a setting, which decides the widget that renders it. */
 export type ConfigFieldKind = "string" | "number" | "integer" | "boolean" | "enum" | "stringList";
@@ -134,11 +133,21 @@ const isUnfilled = (
   atRest: boolean,
 ): boolean => atRest && !field.required && stored[field.name] === undefined;
 
-/** The message under an integer field whose text is not a whole number. */
-export const CONFIG_WHOLE_NUMBER_UNREADABLE = "Enter a whole number.";
+/** The message under an integer field whose text is not an integer. */
+export const CONFIG_INTEGER_UNREADABLE = "Enter an integer.";
 
 /** The message under a number field whose text is not a number. */
 export const CONFIG_NUMBER_UNREADABLE = "Enter a number.";
+
+/**
+ * Parses an integer, such as "7" or "-5", from typed text. Returns
+ * `undefined` for anything else, including "1.5", "1e3" and "0x10", which
+ * `Number` alone would read as numbers the user did not type.
+ */
+const parseInteger = (text: string): number | undefined => {
+  const trimmed = text.trim();
+  return /^-?\d+$/.test(trimmed) ? Number(trimmed) : undefined;
+};
 
 /**
  * Parses a decimal number, such as "1.5" or "-2", from typed text. Returns
@@ -165,8 +174,8 @@ export type ConfigReading =
  * A number field whose text cannot be read as a number is an error on that
  * field, and nothing is sent:
  *
- * - an integer field takes only digits, as `parseWholeNumber` describes, so
- *   "abc", "1.5" and "-5" are refused;
+ * - an integer field takes digits with an optional minus, so "abc", "1.5"
+ *   and "1e3" are refused;
  * - a number field takes digits with an optional minus and decimal part, so
  *   "abc" and "1e3" are refused.
  *
@@ -192,11 +201,11 @@ export const buildConfigPayload = (
     } else if (field.kind === "string" || field.kind === "enum") {
       if (typeof value === "string" && value !== "") payload[field.name] = value;
     } else if (typeof value === "string" && value.trim() !== "") {
-      const number = field.kind === "integer" ? parseWholeNumber(value) : parseDecimal(value);
+      const number = field.kind === "integer" ? parseInteger(value) : parseDecimal(value);
       if (number !== undefined) payload[field.name] = number;
       else
         errors[field.name] =
-          field.kind === "integer" ? CONFIG_WHOLE_NUMBER_UNREADABLE : CONFIG_NUMBER_UNREADABLE;
+          field.kind === "integer" ? CONFIG_INTEGER_UNREADABLE : CONFIG_NUMBER_UNREADABLE;
     }
   }
   return Object.keys(errors).length === 0 ? { config: payload } : { errors };
