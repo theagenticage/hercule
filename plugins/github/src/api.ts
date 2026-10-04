@@ -43,6 +43,10 @@ export interface GithubResponse {
   readonly pollIntervalSeconds?: number;
   /** `Retry-After`, in seconds, sent with a rate limit or a server error. */
   readonly retryAfterSeconds?: number;
+  /** `X-RateLimit-Remaining`: how many requests the token has left in the current window. */
+  readonly rateLimitRemaining?: number;
+  /** `X-RateLimit-Reset`: when the current rate-limit window ends, in seconds since the epoch. */
+  readonly rateLimitResetAt?: number;
   /** `Link: <...>; rel="next"`: the URL of the next page, when there is one. */
   readonly nextPageUrl?: string;
 }
@@ -53,8 +57,11 @@ export class GithubUnreachable extends Schema.TaggedError<GithubUnreachable>()(
   { message: Schema.String },
 ) {}
 
-/** Parses a header that holds a whole number of seconds. Returns undefined for anything else. */
-const parseSeconds = (value: string | undefined): number | undefined => {
+/**
+ * Parses a header that holds a whole number, such as a count of seconds.
+ * Returns undefined for anything else.
+ */
+const parseWholeNumber = (value: string | undefined): number | undefined => {
   if (value === undefined || !/^\d+$/.test(value.trim())) return undefined;
   return Number(value.trim());
 };
@@ -123,8 +130,10 @@ export const requestGithub = (
     const header = (name: string): string | undefined => response.headers[name];
     const etag = header("etag");
     const lastModified = header("last-modified");
-    const pollIntervalSeconds = parseSeconds(header("x-poll-interval"));
-    const retryAfterSeconds = parseSeconds(header("retry-after"));
+    const pollIntervalSeconds = parseWholeNumber(header("x-poll-interval"));
+    const retryAfterSeconds = parseWholeNumber(header("retry-after"));
+    const rateLimitRemaining = parseWholeNumber(header("x-ratelimit-remaining"));
+    const rateLimitResetAt = parseWholeNumber(header("x-ratelimit-reset"));
     const nextPageUrl = parseNextPageUrl(header("link"));
     return {
       status: response.status,
@@ -133,6 +142,8 @@ export const requestGithub = (
       ...(lastModified === undefined ? {} : { lastModified }),
       ...(pollIntervalSeconds === undefined ? {} : { pollIntervalSeconds }),
       ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+      ...(rateLimitRemaining === undefined ? {} : { rateLimitRemaining }),
+      ...(rateLimitResetAt === undefined ? {} : { rateLimitResetAt }),
       ...(nextPageUrl === undefined ? {} : { nextPageUrl }),
     };
   });
