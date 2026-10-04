@@ -123,8 +123,10 @@ type RepoState = Schema.Schema.Type<typeof RepoState>;
 const MAX_LISTING_PAGES = 10;
 
 /**
- * The most issues and pull requests one poll diffs, across the whole watch
- * list; each repository gets an equal share. The host stops a poll after 300
+ * How many issues and pull requests one poll diffs, across the whole watch
+ * list; each repository gets an equal share. A repository diffs its share
+ * and then finishes the second it is in, so it can diff a few more. Exported
+ * for the tests. The host stops a poll after 300
  * seconds, and a GitHub request takes about half a second. A diffed pull
  * request costs up to two requests, its head commit and its reviews, so 100
  * items cost at most 200 requests, about 100 seconds. That leaves room for
