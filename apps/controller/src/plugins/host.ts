@@ -909,10 +909,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the workflow actions a step can call, sorted by id: the built-in
-     * actions and the actions of every active plugin. The actions of a plugin
-     * that is disabled, or that failed to start, are left out, because the
-     * plugin is not running to execute them.
+     * Returns the workflow actions that new work may use, sorted by id: the
+     * built-in actions and the actions of every active plugin. Saving a
+     * workflow and starting a run read this list, so the actions of a plugin
+     * that is disabled, or that failed to start, are left out.
+     *
+     * A run that has already started looks up its actions with
+     * `findWorkflowAction` instead, because it finishes its frozen plan.
      */
     listActiveWorkflowActions: (): Effect.Effect<ReadonlyArray<RegisteredWorkflowAction>> =>
       Effect.map(Effect.zip(Ref.get(workflowActions), listActivePluginIds), ([actions, active]) =>
@@ -920,6 +923,17 @@ const make = Effect.gen(function* () {
           .filter((action) => action.owner === CORE_CONTRIBUTION_OWNER || active.has(action.owner))
           .sort((left, right) => left.id.localeCompare(right.id)),
       ),
+
+    /**
+     * Returns the workflow action with this id, whatever the status of its
+     * plugin, or `None` when no plugin this boot loaded registered it.
+     *
+     * A run that has already started executes its steps with this lookup. Its
+     * plan was frozen when it started, so it finishes even when a plugin it
+     * uses is disabled, or failed to start, in the meantime.
+     */
+    findWorkflowAction: (id: string): Effect.Effect<Option.Option<RegisteredWorkflowAction>> =>
+      Effect.map(Ref.get(workflowActions), (actions) => Option.fromUndefinedOr(actions.get(id))),
 
     /**
      * Returns the qualified names of the Connection types of every active

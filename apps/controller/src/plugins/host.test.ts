@@ -14,6 +14,7 @@ import { Cause, Effect, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   HOST_API,
+  PluginError,
   registerConnectionType,
   registerEventSource,
   secret,
@@ -695,6 +696,42 @@ describe("the workflow action catalog", () => {
       "task.query",
       "task.update",
       "wait",
+    ]);
+  });
+
+  it("lists the actions of active plugins only, and finds the action of a stopped or failed plugin by id", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          notesPlugin,
+          {
+            ...buildActionPlugin("broken", NOTE_APPEND_ACTION),
+            activate: () => Effect.fail(new PluginError({ message: "broken on purpose" })),
+          },
+          buildActionPlugin("slashed", { ...NOTE_APPEND_ACTION, id: "note/append" }),
+        ]);
+        yield* host.stop("notes");
+        const listed = (yield* host.listActiveWorkflowActions()).map((action) => action.id);
+        const lookups = yield* Effect.forEach(
+          ["notes/note.append", "broken/note.append", "slashed/note/append", "absent/note.append"],
+          (id) =>
+            Effect.map(
+              host.findWorkflowAction(id),
+              Option.map((action) => action.owner),
+            ),
+        );
+        return { listed, lookups, broken: yield* host.status("broken") };
+      }),
+    );
+
+    expect(readErroredMessage(found.broken)).toContain("broken on purpose");
+    expect(found.listed.filter((id) => id.includes("/"))).toEqual([]);
+    expect(found.lookups).toEqual([
+      Option.some("notes"),
+      Option.some("broken"),
+      Option.none(),
+      Option.none(),
     ]);
   });
 

@@ -46,11 +46,13 @@ import {
   NOTE_APPEND_ACTION,
   NOTE_APPEND_ACTION_ID,
 } from "../plugins/testing";
-import { WAIT_DEADLINE_MS } from "../sessions/testing";
+import { WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
 import {
   ABSENT_ID,
   createConnection,
   createWorkflowOrFail,
+  disablePlugin,
+  readIssues,
   setConnectionStatus,
   withSetUpController,
 } from "../workflows/testing";
@@ -62,6 +64,7 @@ import {
   findStepRecords,
   listTasks,
   readTask,
+  requestRun,
   startRun,
   waitForHeldExecutions,
   waitForRunToFinish,
@@ -445,8 +448,8 @@ describe("a run whose step acts through a Connection", () => {
   });
 
   describe("with an OAuth token set", () => {
-    /** The token endpoint's response to a refresh, which a test can replace. */
-    type RefreshAnswer = () => Response;
+    /** The token endpoint's response to a refresh, which a test can replace or hold back. */
+    type RefreshAnswer = () => Response | Promise<Response>;
 
     /**
      * Starts a token endpoint that answers every refresh with `answer()`,
@@ -561,6 +564,39 @@ describe("a run whose step acts through a Connection", () => {
       );
     });
 
+    it("executes the action when its plugin is disabled while the refresh waits, because a run that has started finishes its plan", async () => {
+      let answerRefresh: (response: Response) => void = () => {};
+      const answered = new Promise<Response>((resolve) => {
+        answerRefresh = resolve;
+      });
+      await withExpiredToken(
+        () => answered,
+        async ({ forge, requests, base, token, workflowId }) => {
+          const runId = await startRun(base, token, workflowId);
+          await waitUntil("the refresh request", () => (requests.length === 1 ? true : undefined));
+
+          await disablePlugin(base, token, "forge");
+          answerRefresh(
+            Response.json({
+              access_token: "refreshed-access-token",
+              refresh_token: "refresh-2",
+              token_type: "bearer",
+              expires_in: 3600,
+            }),
+          );
+          const run = await waitForRunToFinish(base, token, runId);
+
+          expect(run.status, JSON.stringify(run)).toBe("completed");
+          expect(forge.contexts.map((context) => context.connection?.credentials)).toEqual([
+            { accessToken: "refreshed-access-token" },
+          ]);
+          // New work still cannot use the disabled plugin's action.
+          const issues = await readIssues(await requestRun(base, token, workflowId));
+          expect(issues.map((issue) => issue.path.slice(0, 2))).toEqual([["steps", "0"]]);
+        },
+      );
+    });
+
     it("fails the step with connection_unavailable, and marks the Connection needs-reauth, when the provider refuses the refresh", async () => {
       await withExpiredToken(
         () => Response.json({ error: "invalid_grant" }, { status: 400 }),
@@ -585,6 +621,40 @@ describe("a run whose step acts through a Connection", () => {
         },
       );
     });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Disabling a plugin while a run uses it.                                   */
+/* ------------------------------------------------------------------------ */
+
+describe("a run whose plugin is disabled while it runs", () => {
+  it("executes the plugin's later steps too and completes, while a new run of the workflow is refused", async () => {
+    const held = buildHeldAction();
+    await withSetUpController(
+      async ({ base, token }) => {
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: {
+            name: "Wait twice",
+            steps: [buildHeldStep(held, "first"), buildHeldStep(held, "second")],
+            edges: [{ from: "first", to: "second" }],
+          },
+        });
+        const runId = await startRun(base, token, workflow.id);
+        await waitForHeldExecutions(held, 1);
+
+        await disablePlugin(base, token, "hold");
+        held.release();
+        const run = await waitForRunToFinish(base, token, runId);
+
+        expect(run.status, JSON.stringify(run)).toBe("completed");
+        expect(held.contexts.map((context) => context.run.stepId)).toEqual(["first", "second"]);
+        const issues = await readIssues(await requestRun(base, token, workflow.id));
+        expect(issues.length).toBeGreaterThan(0);
+        for (const issue of issues) expect(issue.path[0]).toBe("steps");
+      },
+      [held.plugin],
+    );
   });
 });
 
@@ -721,6 +791,7 @@ const REPEATED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a003";
 const BROKEN_RUN_ID = "0199f0b7-0000-7000-8000-00000000a004";
 const WAITING_RUN_ID = "0199f0b7-0000-7000-8000-00000000a005";
 const STRANDED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a009";
+const DISABLED_PLUGIN_RUN_ID = "0199f0b7-0000-7000-8000-00000000a00a";
 
 /** Inserts a run row with the status `running`, as the engine leaves one between two steps. */
 const insertRunningRun = (
@@ -994,6 +1065,43 @@ describe("a run interrupted by a restart", () => {
         expect(executions).toBe(0);
       },
       [countingNotesPlugin],
+    );
+  });
+
+  it("executes a plugin step that was waiting, after a restart with the plugin disabled", async () => {
+    const held = buildHeldAction();
+    held.release();
+    await withSetUpController(
+      async ({ harness, base, token }) => {
+        const definition = { name: "Wait", steps: [buildHeldStep(held, "first")] };
+        const workflow = await createWorkflowOrFail(base, token, { definition });
+
+        // The rows a run has when the controller stopped before its plugin
+        // step started: the step's record is waiting.
+        const at = new Date().toISOString();
+        await insertRunningRun(harness, {
+          id: DISABLED_PLUGIN_RUN_ID,
+          workflowId: workflow.id,
+          plan: definition,
+          inputs: {},
+          at,
+        });
+        await runEffect(
+          harness.sql`
+            INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
+            VALUES (unhex(replace(${DISABLED_PLUGIN_RUN_ID}, '-', '')), 'first', 1, 'pending', ${at})`,
+        );
+        await disablePlugin(base, token, "hold");
+
+        await harness.reboot();
+        const run = await waitForRunToFinish(base, token, DISABLED_PLUGIN_RUN_ID);
+
+        expect(run.status, JSON.stringify(run)).toBe("completed");
+        expect(held.contexts.map((context) => context.run)).toEqual([
+          { runId: DISABLED_PLUGIN_RUN_ID, stepId: "first" },
+        ]);
+      },
+      [held.plugin],
     );
   });
 });
