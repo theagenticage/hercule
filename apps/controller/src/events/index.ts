@@ -30,5 +30,5 @@ export {
   type PlatformEvent,
   type PlatformEventKind,
 } from "./platform-events";
-export { EventService, EventServiceLayer } from "./service";
+export { decodeAgainstKind, EventService, EventServiceLayer } from "./service";
 export { CRON_TICK_SOURCE } from "./sources";

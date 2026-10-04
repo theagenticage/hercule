@@ -307,6 +307,22 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns every resource that acts through the connection, oldest first.
+     * An ingest handle reads this list to learn which repos to watch.
+     */
+    listLinkedToConnection: (
+      connectionId: string,
+    ): Effect.Effect<ReadonlyArray<StoredResource>, SqlError> =>
+      Effect.map(
+        sql<ResourceRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM resources
+          WHERE connection_id = ${uuidFromString(connectionId)}
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map(toResource),
+      ),
+
+    /**
      * Returns every resource that acts through the connection, with its name:
      * a repo's remote, or a folder's or mailbox's label, which may be `null`.
      * Sorted by name, then by id. The list decides whether the connection may
