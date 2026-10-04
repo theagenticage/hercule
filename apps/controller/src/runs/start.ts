@@ -22,6 +22,7 @@ import {
   createNotFoundError,
   createValidationError,
   formatIssue,
+  isId,
   listEntrySteps,
   RunRerunInput,
   RunStartInput,
@@ -39,8 +40,9 @@ import {
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, type Actor } from "../actor";
+import { connectionRepository } from "../connections";
 import { afterCommit, nowIso, withTransaction } from "../db";
-import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
+import { CONNECTION_PARAM, PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 import { workflowRepository, WorkflowService, type PendingTriggerEffect } from "../workflows";
@@ -131,10 +133,7 @@ const REPLAY_REFUSALS: RefusalMessages = {
  * it is refused: a run that ignored a step or a trigger it cannot execute
  * would do something the author did not write.
  */
-const listUnsupportedElements = (
-  definition: WorkflowDefinition,
-  actions: ReadonlyArray<RegisteredWorkflowAction>,
-): ReadonlyArray<Issue> => {
+const listUnsupportedElements = (definition: WorkflowDefinition): ReadonlyArray<Issue> => {
   const triggerIssues = (definition.triggers ?? []).flatMap((trigger, index) =>
     trigger.kind === "signal"
       ? [
@@ -147,28 +146,13 @@ const listUnsupportedElements = (
       : [],
   );
   const stepIssues = definition.steps.flatMap((step: PlanStep, index): ReadonlyArray<Issue> => {
-    const path = ["steps", String(index)];
-    if (step.kind === "agent") {
-      return [
-        {
-          path: [...path, "kind"],
-          message: "Runs cannot run agent steps yet. Only action steps can run.",
-        },
-      ];
-    }
-    const action = actions.find((candidate) => candidate.id === step.action);
-    // Which of a step's params names the Connection is not settled yet, and
-    // an action called without its Connection would fail in ways its author
-    // never planned for.
-    return action?.connection === undefined
-      ? []
-      : [
-          {
-            path: [...path, "action"],
-            message:
-              "Runs cannot call an action that acts through a Connection yet. Remove this step to run this workflow.",
-          },
-        ];
+    if (step.kind !== "agent") return [];
+    return [
+      {
+        path: ["steps", String(index), "kind"],
+        message: "Runs cannot run agent steps yet. Only action steps can run.",
+      },
+    ];
   });
   return [...triggerIssues, ...stepIssues];
 };
@@ -230,6 +214,7 @@ export const makeRunStart = (
     const host = yield* PluginHost;
     const settings = yield* Settings;
     const runners = yield* runnerRepository;
+    const connections = yield* connectionRepository;
 
     /**
      * Checks that a run started by a step of another run is not nested
@@ -254,11 +239,44 @@ export const makeRunStart = (
       });
 
     /**
+     * Returns an issue for each step of a valid `plan` that names a disabled
+     * Connection as a literal id in its `connection` param, at the param's
+     * path. Only steps whose action acts through a Connection are checked.
+     *
+     * Saving the workflow checked that the Connection exists and is of the
+     * right type, but not that it is enabled: it can be enabled again before
+     * a run starts, in the same way as the default of a Connection input. A
+     * template is rendered only when the step runs, so the run engine checks
+     * the Connection it names then.
+     */
+    const listDisabledConnectionIssues = (
+      plan: WorkflowDefinition,
+    ): Effect.Effect<ReadonlyArray<Issue>, SqlError> =>
+      Effect.gen(function* () {
+        const actions = yield* host.listActiveWorkflowActions();
+        const issues: Array<Issue> = [];
+        for (const [index, step] of plan.steps.entries()) {
+          if (step.kind !== "action") continue;
+          const action = actions.find((candidate) => candidate.id === step.action);
+          const connectionId = step.params?.[CONNECTION_PARAM];
+          if (action?.connection === undefined || !isId(connectionId)) continue;
+          const found = yield* connections.one(connectionId);
+          if (Option.isSome(found) && found.value.status === "disabled") {
+            issues.push({
+              path: ["steps", String(index), "params", CONNECTION_PARAM],
+              message: `This Connection is disabled. Enable it, or name another Connection of type ${action.connection.type}.`,
+            });
+          }
+        }
+        return issues;
+      });
+
+    /**
      * Checks that `plan` can run with `unresolvedInputs`, and returns the
      * inputs with their defaults applied. It validates the plan again,
-     * refuses what runs cannot execute yet, and resolves the inputs. Fails
-     * with `Validation` when any check fails, with the message from
-     * `refusals` where it has one.
+     * refuses what runs cannot execute yet and steps that name a disabled
+     * Connection, and resolves the inputs. Fails with `Validation` when any
+     * check fails, with the message from `refusals` where it has one.
      */
     const checkRunnable = (
       plan: WorkflowDefinition,
@@ -272,7 +290,7 @@ export const makeRunStart = (
         const problems =
           invalid.length > 0
             ? invalid
-            : listUnsupportedElements(plan, yield* host.listActiveWorkflowActions());
+            : [...listUnsupportedElements(plan), ...(yield* listDisabledConnectionIssues(plan))];
         if (problems.length > 0) {
           return yield* Effect.fail(createValidationError(problems, refusals.unrunnablePlan));
         }

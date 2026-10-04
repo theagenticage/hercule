@@ -17,7 +17,7 @@
  * No runner is connected: action steps run on the controller.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import type { Task } from "@hercule/contract";
 import {
@@ -34,12 +34,10 @@ import { WAIT_DEADLINE_MS } from "../sessions/testing";
 import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 import {
   buildCreateStep,
-  expectRefusedAt,
   FILE_AND_START_DEFINITION,
   findStepRecords,
   listTasks,
   readTask,
-  requestRun,
   startRun,
   waitForRunToFinish,
   expectStatus,
@@ -232,31 +230,6 @@ describe("a run of a plugin's action", () => {
         expect(await listTasks(base, token)).toEqual([]);
       });
     }
-  });
-
-  it("is refused at start when the action acts through a Connection", async () => {
-    const connectionAction = buildActionPlugin("notes", {
-      ...NOTE_APPEND_ACTION,
-      connection: { type: "notes/notes" },
-      input: Schema.Struct({ text: Schema.String }),
-    });
-    await withSetUpController(
-      async ({ harness, base, token }) => {
-        const workflow = await createWorkflowOrFail(base, token, {
-          definition: {
-            name: "Append a note",
-            steps: [
-              { id: "note", kind: "action", action: NOTE_APPEND_ACTION_ID, params: { text: "hi" } },
-            ],
-          },
-        });
-
-        await expectRefusedAt(harness, await requestRun(base, token, workflow.id), [
-          ["steps", "0", "action"],
-        ]);
-      },
-      [connectionAction],
-    );
   });
 });
 
