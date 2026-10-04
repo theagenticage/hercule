@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Fiber, PubSub, Stream } from "effect";
+import { Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
@@ -22,15 +22,22 @@ import type {
   SessionSpec,
   SessionStart,
   TurnInput,
+  WorkspaceStepKey,
+  WorkspaceStepResult,
 } from "@hercule/protocol";
+import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
 import { makeWorkspaces } from "../workspaces";
+import { makeWorkspaceSteps } from "../workspace-steps";
 import { makeSupervising } from "./supervisor";
 
 const roots: Array<string> = [];
+/** Scopes that attach each test's workspace steps to its list of sent frames. */
+const attachments: Array<Scope.Closeable> = [];
 
-afterAll(() => {
+afterAll(async () => {
+  for (const scope of attachments.splice(0)) await Effect.runPromise(Scope.close(scope, Exit.void));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -217,15 +224,25 @@ const buildConnection = (fake: Fake) => {
     workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
   };
+  const send = (frame: RunnerToController) => Effect.sync(() => void sent.push(frame));
+  // The real workspace steps, sending on the same list as the supervisor, so
+  // a test sees an agent step's result and the session's events in the order
+  // they would reach the controller.
+  const steps = makeWorkspaceSteps({
+    storageDir: join(under, "storage"),
+    workspaces: machine.workspaces,
+    socketPath: machine.socketPath,
+    baseEnv: machine.baseEnv,
+  });
+  const scope = Effect.runSync(Scope.make());
+  attachments.push(scope);
+  Effect.runSync(steps.attachConnection(send).pipe(Scope.provide(scope)));
   // `makeSupervising` returns the process-wide value, and each connection's
   // supervisor is built from it with `forConnection`. Sessions outlive the
   // socket that started them, and so does the shutdown that stops them all.
   const runner = makeSupervising([fake.adapter]);
-  const supervisor = runner.forConnection({
-    machine,
-    send: (frame) => Effect.sync(() => sent.push(frame)),
-  });
-  return { supervisor, runner, sent, machine, under };
+  const supervisor = runner.forConnection({ machine, send, workspaceSteps: steps });
+  return { supervisor, runner, sent, machine, under, steps };
 };
 
 /**
@@ -1626,5 +1643,378 @@ describe("the secrets a start frame carries", () => {
     );
 
     expect(fake.contexts[0]?.secrets).toEqual({});
+  });
+});
+
+/** The agent step the tests' step input carries. */
+const STEP: WorkspaceStepKey = {
+  runId: "0199e0e7-0000-7000-8000-0000000000e1",
+  stepId: "review",
+  iteration: 1,
+};
+
+/** The input that starts the step's turn. The fake adapter opens turn `TURN` for it. */
+const STEP_INPUT = {
+  _tag: "sessionInput",
+  requestId: REQUEST,
+  sessionId: SESSION,
+  input: { text: "Review the change.", step: STEP },
+} as const;
+
+/** The start the controller sends again for the step, to ask for its result. */
+const STEP_START = {
+  _tag: "workspaceStepStart",
+  kind: "agent",
+  ...STEP,
+  sessionId: SESSION,
+  workspaceId: null,
+} as const;
+
+const SCHEMA_START: SessionStart = { ...START, spec: { ...SPEC, outputSchema: FIXTURE_SCHEMA } };
+
+const listStepResults = (
+  sent: ReadonlyArray<RunnerToController>,
+): ReadonlyArray<WorkspaceStepResult> =>
+  sent.filter((frame): frame is WorkspaceStepResult => frame._tag === "workspaceStepResult");
+
+/** Returns the position in `sent` of the first session event with the given tag, or -1. */
+const findEventIndex = (
+  sent: ReadonlyArray<RunnerToController>,
+  tag: ProviderEvent["_tag"],
+): number => sent.findIndex((frame) => frame._tag === "sessionEvent" && frame.event._tag === tag);
+
+/** Emits the end of turn `TURN`, with the fields that say how it ended. */
+const emitStepTurnEnd = (
+  fake: Fake,
+  fields: Pick<
+    Extract<ProviderEvent, { _tag: "turn.completed" }>,
+    "state" | "error" | "structuredResult"
+  >,
+): void =>
+  fake.emit({
+    _tag: "turn.completed",
+    eventId: "e-step-turn-done",
+    sessionId: SESSION,
+    at,
+    turnId: TURN,
+    ...fields,
+  });
+
+const emitText = (fake: Fake, itemId: string, delta: string): void =>
+  fake.emit({
+    _tag: "content.delta",
+    eventId: `e-${itemId}-${delta}`,
+    sessionId: SESSION,
+    at,
+    turnId: TURN,
+    itemId,
+    streamKind: "assistant_text",
+    delta,
+  });
+
+describe("an agent step's turn", () => {
+  it("completes the step with the structured result, sent before the turn's end", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+    const verdict = { verdict: "accept", confidence: 0.9, summary: "A typo fix." };
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(SCHEMA_START);
+        yield* supervisor.input(STEP_INPUT);
+        expect(steps.listInFlight()).toEqual([STEP]);
+        yield* Effect.sync(() =>
+          emitStepTurnEnd(fake, {
+            state: "completed",
+            structuredResult: { outcome: "ok", value: verdict },
+          }),
+        );
+        yield* waitUntil("sent the turn's end", () => findEventIndex(sent, "turn.completed") >= 0);
+        // A start sent again after the turn ended is answered from the result file.
+        yield* steps.start(STEP_START);
+      }),
+    );
+
+    const results = listStepResults(sent);
+    expect(results.map((frame) => frame.outcome)).toEqual([
+      { status: "completed", output: verdict },
+      { status: "completed", output: verdict },
+    ]);
+    expect(results[0]).toMatchObject(STEP);
+    // The controller has the step's result before it sees the turn end.
+    expect(sent.indexOf(results[0] as RunnerToController)).toBeLessThan(
+      findEventIndex(sent, "turn.completed"),
+    );
+    expect(steps.listInFlight()).toEqual([]);
+  });
+
+  it("completes the step with the turn's final message when the session has no output schema", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => {
+          emitText(fake, "i-1", "Reading the diff.");
+          fake.emit({
+            _tag: "content.delta",
+            eventId: "e-reasoning",
+            sessionId: SESSION,
+            at,
+            turnId: TURN,
+            itemId: "i-2",
+            streamKind: "reasoning_text",
+            delta: "Thinking about it.",
+          });
+          emitText(fake, "i-3", "All tests ");
+          emitText(fake, "i-3", "pass.");
+          emitStepTurnEnd(fake, { state: "completed" });
+        });
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+      }),
+    );
+
+    // Only the last assistant message counts, and reasoning is not a message.
+    expect(listStepResults(sent)[0]?.outcome).toEqual({
+      status: "completed",
+      output: { text: "All tests pass.", exitStatus: "completed" },
+    });
+  });
+
+  it("fails the step with schema_failure when the result does not match the schema", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(SCHEMA_START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() =>
+          emitStepTurnEnd(fake, {
+            state: "completed",
+            structuredResult: { outcome: "schema-failure", reason: "missing property verdict" },
+          }),
+        );
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+      }),
+    );
+
+    expect(listStepResults(sent)[0]?.outcome).toEqual({
+      status: "failed",
+      code: "schema_failure",
+      message: "The turn's result did not match the step's output schema: missing property verdict",
+    });
+  });
+
+  it("fails the step with session_failed when its turn fails", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "failed", error: "rate limited" }));
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+      }),
+    );
+
+    expect(listStepResults(sent)[0]?.outcome).toEqual({
+      status: "failed",
+      code: "session_failed",
+      message: "The step's turn failed: rate limited",
+    });
+  });
+
+  it("fails the step with session_failed when the session is stopped mid-turn, before the exit is sent", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    const results = listStepResults(sent);
+    expect(results.map((frame) => frame.outcome)).toEqual([
+      {
+        status: "failed",
+        code: "session_failed",
+        message: "The session ended before the step's turn finished, because it was stopped.",
+      },
+    ]);
+    // The controller ignores the exit of a step's session, because the step's
+    // result always arrives first.
+    expect(sent.indexOf(results[0] as RunnerToController)).toBeLessThan(
+      findEventIndex(sent, "session.exited"),
+    );
+  });
+
+  it("fails the step when the session hits its inactivity timeout, before the exit is sent", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => emitTurnStarted(fake, TURN));
+        yield* awaitForwarded(sent, 2);
+        yield* TestClock.adjust(INACTIVITY_MS);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(listExitReasons(sent)).toEqual(["inactivity_timeout"]);
+    const results = listStepResults(sent);
+    expect(results.map((frame) => frame.outcome)).toEqual([
+      {
+        status: "failed",
+        code: "session_failed",
+        message:
+          "The session ended before the step's turn finished, because it reported nothing for longer than its inactivity timeout.",
+      },
+    ]);
+    expect(sent.indexOf(results[0] as RunnerToController)).toBeLessThan(
+      findEventIndex(sent, "session.exited"),
+    );
+  });
+
+  it("sends no step result for a turn that no step input opened", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input({ ...STEP_INPUT, input: { text: "hi" } });
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the turn's end", () => findEventIndex(sent, "turn.completed") >= 0);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(listStepResults(sent)).toEqual([]);
+    expect(steps.listInFlight()).toEqual([]);
+  });
+
+  it("sends no step result when the harness refuses the step's input, because the input is delivered again", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
+        fake.fails = "the harness is busy";
+        yield* supervisor.input(STEP_INPUT);
+        expect(steps.listInFlight()).toEqual([]);
+        // A turn that ends now is not the step's: the step's turn never opened.
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the turn's end", () => findEventIndex(sent, "turn.completed") >= 0);
+      }),
+    );
+
+    expect(listInputResults(sent)).toMatchObject([{ ok: false }]);
+    expect(listStepResults(sent)).toEqual([]);
+  });
+
+  it("holds a start sent again while the turn runs, and answers it once at the turn's end", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* steps.start(STEP_START);
+        expect(listStepResults(sent)).toEqual([]);
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+        // Read past the turn's end, so a second result would already be sent.
+        yield* awaitMarker(fake);
+      }),
+    );
+
+    expect(listStepResults(sent)).toHaveLength(1);
+  });
+
+  it("is not ended by the exit of an earlier run under the same session id", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        // The adapter still holds the session, so this exit belongs to an
+        // earlier run that was still on its way through the relay.
+        yield* Effect.sync(() =>
+          fake.emit({
+            _tag: "session.exited",
+            eventId: "e-old",
+            sessionId: SESSION,
+            at,
+            reason: "process_exit",
+          }),
+        );
+        yield* waitUntil("sent the stale exit", () => listExitReasons(sent).length === 1);
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+      }),
+    );
+
+    expect(listStepResults(sent)[0]?.outcome).toMatchObject({ status: "completed" });
+  });
+
+  it("answers a start sent again with interrupted when the session ended while no relay ran", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+      }),
+    );
+    // No relay runs, as while the runner is disconnected, so nothing reads the
+    // harness's exit and the supervisor still holds the session. Only the
+    // adapter knows the session is gone.
+    await Effect.runPromise(fake.adapter.stopSession(SESSION, "process_exit"));
+    await Effect.runPromise(steps.start(STEP_START));
+
+    expect(listStepResults(sent).map((frame) => frame.outcome)).toMatchObject([
+      { status: "failed", code: "interrupted" },
+    ]);
+    expect(steps.listInFlight()).toEqual([]);
   });
 });

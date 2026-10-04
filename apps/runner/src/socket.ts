@@ -28,6 +28,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
 import { VERSION } from "@hercule/home/version";
 import {
+  AGENT_STEPS_CAPABILITY,
   ControllerToRunner,
   PeerVersion,
   PROTOCOL_VERSION,
@@ -77,10 +78,13 @@ const NONCE_BYTES = 16;
  * - one for each workspace action its build implements. The controller pins a
  *   run only to a runner that lists every workspace action in the run's plan.
  * - `LOGIN_ENDED_CAPABILITY`: this runner reports the end of a device login.
+ * - `AGENT_STEPS_CAPABILITY`: this runner runs an agent step's turn, sends
+ *   how it ended, and answers a start sent again for the step.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
+  AGENT_STEPS_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -335,11 +339,12 @@ export const connect = (
       };
     };
 
-    // The connection gives the supervisor a way to send frames and the paths
-    // this machine resolved. The sessions themselves belong to the process,
-    // not to this connection.
+    // The connection gives the supervisor a way to send frames, the paths
+    // this machine resolved and the workspace steps. The sessions themselves
+    // belong to the process, not to this connection.
     const supervisor = sessions.forConnection({
       send: (frame) => write(encodeFrameText(frame)),
+      workspaceSteps: options.workspaceSteps,
       machine: {
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
