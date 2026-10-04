@@ -20,8 +20,7 @@ import {
   MAX_EVENT_URL_LENGTH,
 } from "@hercule/contract";
 import {
-  MAX_EMITTED_PAYLOAD_BYTES,
-  MAX_EMITTED_RAW_BYTES,
+  MAX_EMITTED_FIELD_BYTES,
   PluginError,
   type IngestConnection,
   type EmittedEvent,
@@ -157,9 +156,9 @@ const make = Effect.gen(function* () {
             ),
           }),
       );
-      yield* assertJsonSizeWithin(event.kind, "payload", event.payload, MAX_EMITTED_PAYLOAD_BYTES);
+      yield* assertJsonSizeWithin(event.kind, "payload", event.payload, MAX_EMITTED_FIELD_BYTES);
       if (envelope.raw !== undefined) {
-        yield* assertJsonSizeWithin(event.kind, "raw", envelope.raw, MAX_EMITTED_RAW_BYTES);
+        yield* assertJsonSizeWithin(event.kind, "raw", envelope.raw, MAX_EMITTED_FIELD_BYTES);
       }
       const occurredAt = yield* normalizeOccurredAt(event.kind, envelope.occurredAt);
       const receivedAt = yield* nowIso;

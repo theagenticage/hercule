@@ -7,8 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
-  MAX_EMITTED_PAYLOAD_BYTES,
-  MAX_EMITTED_RAW_BYTES,
+  MAX_EMITTED_FIELD_BYTES,
   type EmittedEvent,
   type IngestContext,
   type PluginCapability,
@@ -184,8 +183,8 @@ describe("IngestContext.emit", () => {
   });
 
   it.each([
-    ["a payload", { payload: { title: "x".repeat(MAX_EMITTED_PAYLOAD_BYTES) } }, "payload"],
-    ["a raw body", { raw: { body: "x".repeat(MAX_EMITTED_RAW_BYTES) } }, "raw"],
+    ["a payload", { payload: { title: "x".repeat(MAX_EMITTED_FIELD_BYTES) } }, "payload"],
+    ["a raw body", { raw: { body: "x".repeat(MAX_EMITTED_FIELD_BYTES) } }, "raw"],
   ] as const)("refuses %s larger than its limit, and writes nothing", async (_, change, field) => {
     const { message, rows } = await runWithContext((context) =>
       Effect.gen(function* () {

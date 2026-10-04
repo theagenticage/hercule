@@ -154,8 +154,8 @@ export interface IngestConnection {
  * - `raw` is the external system's own body, as a JSON object. It is stored,
  *   and no expression can read it.
  *
- * The host refuses a `payload` larger than `MAX_EMITTED_PAYLOAD_BYTES` and a
- * `raw` larger than `MAX_EMITTED_RAW_BYTES`, each measured as UTF-8 JSON.
+ * The host refuses a `payload` or a `raw` larger than `MAX_EMITTED_FIELD_BYTES`,
+ * each measured on its own as UTF-8 JSON.
  */
 export interface EmittedEvent {
   readonly kind: string;
@@ -169,18 +169,14 @@ export interface EmittedEvent {
 }
 
 /**
- * The largest `payload` an emitted event may carry, as UTF-8 JSON: 256 KiB.
- * It leaves room for a long text field, such as a GitHub issue body of 65,536
- * characters, while keeping one event from bloating the log.
+ * The largest `payload`, and the largest `raw`, an emitted event may carry,
+ * each as UTF-8 JSON: 256 KiB. It leaves room for a long text field, such as
+ * a GitHub issue body of 65,536 characters, or for a whole object from an
+ * external API with the repositories and labels nested in it, while keeping
+ * one event from bloating the log. An emit over the limit fails, and so does
+ * the poll that made it, so the limit is generous on purpose.
  */
-export const MAX_EMITTED_PAYLOAD_BYTES = 256 * 1024;
-
-/**
- * The largest `raw` an emitted event may carry, as UTF-8 JSON: 64 KiB. Nothing
- * reads `raw` but a person debugging a plugin, so a plugin should trim it to
- * the fields that help with that.
- */
-export const MAX_EMITTED_RAW_BYTES = 64 * 1024;
+export const MAX_EMITTED_FIELD_BYTES = 256 * 1024;
 
 /** The Resources linked to the Connection an ingest handle is opened for. */
 export interface ConnectionResources {
