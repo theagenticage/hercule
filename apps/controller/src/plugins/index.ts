@@ -11,6 +11,7 @@ export {
   IngestLoopsLayer,
   type RunningIngest,
 } from "./ingest";
+export { IngestExecutor } from "./ingest-executor";
 export type { RegisteredEventSource } from "./event-sources";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";

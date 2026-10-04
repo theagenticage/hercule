@@ -37,6 +37,7 @@ import { AuditLogLayer } from "../events";
 import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
+import { IngestExecutorLayer } from "../daemon/ingest";
 import { nowIso } from "../db";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 
@@ -85,7 +86,7 @@ export const buildPluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
-    Layer.provideMerge(PluginHostLayer),
+    Layer.provideMerge(PluginHostLayer.pipe(Layer.provide(IngestExecutorLayer))),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),

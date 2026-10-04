@@ -2,7 +2,8 @@
  * Tests the ingest loops on a `TestClock`: when each feed is polled, how
  * failures back off and set the Connection's status, and how a handle is
  * closed. The plugin is the scripted fixture from `./testing`; the host, the
- * database and the notifier are real.
+ * database, the notifier and the controller daemon's Ingest Executor are
+ * real.
  */
 import { describe, expect, it } from "vitest";
 import { Clock, Deferred, Duration, Effect, Fiber, Option, Redacted } from "effect";

@@ -65,6 +65,7 @@ import {
   type RegisteredEventSource,
 } from "./event-sources";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
+import type { IngestExecutor } from "./ingest-executor";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
   CORE_CONTRIBUTION_OWNER,
@@ -723,9 +724,10 @@ const make = Effect.gen(function* () {
     });
 
   // At shutdown, stop every running plugin, so its ingest handles close and
-  // its `deactivate` releases what `activate` acquired. The ingest loops are
-  // released after the host, so the handles are still there to close. A
-  // failure is logged, so one plugin cannot keep the others from stopping.
+  // its `deactivate` releases what `activate` acquired. The Ingest Executor
+  // is provided below the host, so it is released after the host and the
+  // ingests are still running for this to close. A failure is logged, so one
+  // plugin cannot keep the others from stopping.
   yield* Effect.addFinalizer(() =>
     gate.withPermits(1)(
       Effect.flatMap(Ref.get(entries), (all) =>
@@ -962,11 +964,15 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
   "hercule/controller/plugins/PluginHost",
 ) {}
 
-/** Provides the plugin host and the ingest loops it closes when a plugin stops. */
+/**
+ * Provides the plugin host and the ingest loops it closes when a plugin stops.
+ * The ingest loops need an Ingest Executor, which the controller daemon
+ * provides.
+ */
 export const PluginHostLayer: Layer.Layer<
   PluginHost | IngestLoops,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | Notifier | ConnectionTypes
+  SqlClient.SqlClient | Secrets | AuditLog | Notifier | ConnectionTypes | IngestExecutor
 > = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
 
 /**

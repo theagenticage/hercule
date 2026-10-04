@@ -22,6 +22,7 @@ import { TestClock } from "effect/testing";
 import { ConnectionValidationFailed, type SetupStep } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
+import { IngestExecutorLayer } from "../daemon/ingest";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
@@ -49,7 +50,7 @@ const buildStack = () => {
   homes.push(home);
   return ConnectionServiceLayer.pipe(
     Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
-    Layer.provideMerge(PluginHostLayer),
+    Layer.provideMerge(PluginHostLayer.pipe(Layer.provide(IngestExecutorLayer))),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),

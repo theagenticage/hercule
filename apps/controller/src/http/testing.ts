@@ -45,6 +45,7 @@ import {
   cancelStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   EventRoutingInterval,
+  IngestExecutorLayer,
   IngestReconcileInterval,
   Live,
   LostRunnerSweepInterval,
@@ -150,6 +151,7 @@ const buildServices = (home: string) =>
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(
+            Layer.provide(IngestExecutorLayer),
             Layer.provideMerge(ConnectionTypesLayer),
             Layer.provideMerge(PluginConfigsLayer),
           ),

@@ -5,7 +5,9 @@
  * the fetching; this module decides when to poll, retries failures with
  * backoff, and sets the Connection's status.
  *
- * For each Connection a supervisor fiber:
+ * Each Connection's ingest is one supervising effect, which the controller
+ * daemon runs through the Ingest Executor port, apart from the request that
+ * opened it. The supervisor:
  *
  * - opens the handle, retrying with backoff while `open` fails;
  * - polls every feed right after the open, then once per interval, and never
@@ -22,14 +24,14 @@
  * Closing a Connection interrupts its feed timers, waits for them to finish,
  * then calls the handle's `close` once, giving it 10 seconds. The controller
  * daemon decides which Connections are open; this module only opens and
- * closes what it is told.
+ * closes what it is told. The feed timers are scoped children of their
+ * Connection's supervisor, so they end with it.
  */
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -55,6 +57,7 @@ import { Notifier } from "../notifications";
 import { summarizeCause, toPluginError } from "./errors";
 import type { RegisteredEventSource } from "./event-sources";
 import { ingestContexts } from "./ingest-context";
+import { IngestExecutor } from "./ingest-executor";
 
 /** After this many failures in a row, of one feed or of the open, the Connection is set to `error`. */
 export const FAILURES_BEFORE_ERROR = 5;
@@ -133,10 +136,12 @@ const make = Effect.gen(function* () {
   const connectionTypes = yield* ConnectionTypes;
   const notifier = yield* Notifier;
   const contexts = yield* ingestContexts;
-  const supervisors = yield* FiberMap.make<string>();
-  // What each supervisor was opened with: the FiberMap holds only the fibers.
-  // A supervisor removes its entry when it ends, and `close` removes it too,
-  // in case the fiber was interrupted before it started.
+  const executor = yield* IngestExecutor;
+  // The Connections whose supervisor is running, and what each was opened
+  // with. A supervisor removes its entry as it ends, before it finishes, so a
+  // Connection without an entry has no supervisor left that could still
+  // write. `close` removes the entry too, in case the supervisor was stopped
+  // before it started.
   const runningIngests = yield* Ref.make(new Map<string, RunningIngest>());
 
   /** Removes the entry of a Connection whose supervisor has ended or is being closed. */
@@ -482,7 +487,7 @@ const make = Effect.gen(function* () {
     );
 
   const close = (connectionId: string): Effect.Effect<void> =>
-    Effect.andThen(FiberMap.remove(supervisors, connectionId), forgetRunningIngest(connectionId));
+    Effect.andThen(executor.stop(connectionId), forgetRunningIngest(connectionId));
 
   return {
     /**
@@ -493,15 +498,22 @@ const make = Effect.gen(function* () {
      */
     open: (source: RegisteredEventSource, connection: StoredConnection): Effect.Effect<void> =>
       Effect.gen(function* () {
-        if (yield* FiberMap.has(supervisors, connection.id)) return;
-        yield* Ref.update(runningIngests, (all) =>
-          new Map(all).set(connection.id, {
-            connectionId: connection.id,
-            pluginId: source.pluginId,
-            fingerprint: computeIngestFingerprint(connection),
-          }),
+        // The check and the new entry are one update, so two opens of one
+        // Connection at the same time start one supervisor, not two.
+        const added = yield* Ref.modify(runningIngests, (all) =>
+          all.has(connection.id)
+            ? [false, all]
+            : [
+                true,
+                new Map(all).set(connection.id, {
+                  connectionId: connection.id,
+                  pluginId: source.pluginId,
+                  fingerprint: computeIngestFingerprint(connection),
+                }),
+              ],
         );
-        yield* FiberMap.run(supervisors, connection.id, superviseConnection(source, connection));
+        if (!added) return;
+        yield* executor.execute(connection.id, superviseConnection(source, connection));
       }),
 
     /**
@@ -539,5 +551,5 @@ export class IngestLoops extends Context.Service<IngestLoops, Effect.Success<typ
 export const IngestLoopsLayer: Layer.Layer<
   IngestLoops,
   never,
-  SqlClient.SqlClient | ConnectionTypes | Notifier
+  SqlClient.SqlClient | ConnectionTypes | Notifier | IngestExecutor
 > = Layer.effect(IngestLoops)(make);

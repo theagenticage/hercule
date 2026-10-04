@@ -253,7 +253,8 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.forkScoped(runScheduler);
     // The Ingest Reconciler opens an ingest handle for each Connection that
     // should ingest. It starts after the event pipeline, so the events the
-    // plugins emit reach it.
+    // plugins emit reach it. Each ingest runs on a fiber of the Ingest
+    // Executor, apart from the reconciler's pass that opened it.
     yield* Effect.forkScoped(runIngestReconciler);
     // Runs a restart cut off continue from their rows. Each run executes on
     // a fiber of the Run Executor, so this returns once they are all started.
