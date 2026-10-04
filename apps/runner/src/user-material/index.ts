@@ -49,28 +49,54 @@ const NO_PATHS: UserMaterial = {
 const CLAUDE_ENTRIES = ["skills", "agents", "commands", "rules", "CLAUDE.md"] as const;
 
 /**
- * Checks that `path` is a regular file, following symlinks. Returns false when
- * nothing is there or the path cannot be checked.
+ * The user's material for one Thread, and a warning for each part of it the
+ * runner found but could not use.
  */
-const isRegularFile = (path: string): boolean => {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
+interface FoundMaterial {
+  readonly material: UserMaterial;
+  readonly warnings: ReadonlyArray<string>;
+}
+
+/** Checks that a filesystem error means nothing is at the path. */
+const isMissingPath = (error: unknown): boolean => {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
 };
 
 /**
- * Checks that `path` is a regular file with more than white space in it. This
- * is the test Codex applies to each of its instructions files before it uses
- * one. Returns false when the file cannot be read.
+ * Picks the user's instructions file: the first of `candidates` that is a
+ * regular file (following symlinks), can be read, and has text `isUsable`
+ * accepts. Returns that file, or undefined when no candidate qualifies, and a
+ * warning for each candidate that exists but could not be read.
+ *
+ * A candidate that is missing, is not a regular file, has text `isUsable`
+ * refuses, or is a file already tried under another name is skipped quietly. That is how Codex and pi themselves
+ * pick the file. A read error is skipped too, as both harnesses skip it, but
+ * the user is told: otherwise their instructions would disappear without a
+ * trace.
  */
-const hasCodexInstructions = (path: string): boolean => {
-  try {
-    return isRegularFile(path) && readFileSync(path, "utf8").trim() !== "";
-  } catch {
-    return false;
+const findInstructionsFile = (
+  candidates: ReadonlyArray<string>,
+  isUsable: (text: string) => boolean,
+): { readonly path: string | undefined; readonly warnings: ReadonlyArray<string> } => {
+  const warnings: Array<string> = [];
+  const tried = new Set<string>();
+  for (const path of candidates) {
+    try {
+      const stats = statSync(path);
+      // On a filesystem that ignores case, such as macOS's by default,
+      // `AGENTS.md` and `AGENTS.MD` are one file, and one warning is enough.
+      const identity = `${String(stats.dev)}:${String(stats.ino)}`;
+      if (tried.has(identity)) continue;
+      tried.add(identity);
+      if (stats.isFile() && isUsable(readFileSync(path, "utf8"))) return { path, warnings };
+    } catch (error) {
+      if (isMissingPath(error)) continue;
+      const reason = error instanceof Error ? error.message : String(error);
+      warnings.push(`Did not read ${path} into the Thread's instructions: ${reason}`);
+    }
   }
+  return { path: undefined, warnings };
 };
 
 /**
@@ -139,13 +165,15 @@ const linkClaudeMaterial = (home: string, instanceHome: string): ReadonlyArray<s
 
 /**
  * Returns the User Material of a Codex Thread, which holds only the user's
- * instructions file, or no paths when the user has none.
+ * instructions file, or no paths when the user has none. Also returns a
+ * warning for each instructions file that exists but could not be read.
  *
  * The Codex home is `CODEX_HOME` when the runner has it set to a non-empty
  * value, as Codex itself reads it, and otherwise the `.codex` directory under
  * the user's home. The instructions file is the first of `AGENTS.override.md`
- * and `AGENTS.md` there that has more than white space in it. That is Codex's
- * own rule: an empty override falls through to `AGENTS.md`.
+ * and `AGENTS.md` there that can be read and has more than white space in it.
+ * That is Codex's own rule: an empty or unreadable override falls through to
+ * `AGENTS.md`.
  *
  * Skills need no path. A Codex Thread keeps the real `HOME`, so Codex finds
  * the user's skills there by itself (see `prepareEnv` in
@@ -154,23 +182,25 @@ const linkClaudeMaterial = (home: string, instanceHome: string): ReadonlyArray<s
 const findCodexMaterial = (
   home: string,
   env: Readonly<Record<string, string | undefined>>,
-): UserMaterial => {
+): FoundMaterial => {
   const codexHome =
     env["CODEX_HOME"] === undefined || env["CODEX_HOME"] === ""
       ? join(home, ".codex")
       : env["CODEX_HOME"];
+  const instructions = findInstructionsFile(
+    [join(codexHome, "AGENTS.override.md"), join(codexHome, "AGENTS.md")],
+    (text) => text.trim() !== "",
+  );
   return {
-    ...NO_PATHS,
-    instructionsFile: [join(codexHome, "AGENTS.override.md"), join(codexHome, "AGENTS.md")].find(
-      hasCodexInstructions,
-    ),
+    material: { ...NO_PATHS, instructionsFile: instructions.path },
+    warnings: instructions.warnings,
   };
 };
 
 /**
  * The names pi looks for in its agent directory when it picks the user's
- * instructions file, in pi's order. The first regular file wins. pi 0.85.1
- * and 1.0.0 both use this list.
+ * instructions file, in pi's order. The first regular file pi can read wins,
+ * even an empty one. pi 0.85.1 and 1.0.0 both use this list.
  */
 const PI_INSTRUCTIONS_NAMES = [
   "AGENTS.override.md",
@@ -183,16 +213,29 @@ const PI_INSTRUCTIONS_NAMES = [
 /**
  * Returns the User Material of a pi Thread: the shared skills directory and
  * pi's own, pi's prompt templates directory, and the instructions file pi
- * itself would pick. Each directory is included only when it exists.
+ * itself would pick. Each directory is included only when it exists. Also
+ * returns a warning for each instructions file that exists but could not be
+ * read.
+ *
+ * An unreadable file must never reach pi: pi takes the value of
+ * `--append-system-prompt` as text when it cannot read it as a file, so the
+ * Thread would get the file's path as its instructions.
  */
-const findPiMaterial = (home: string): UserMaterial => {
+const findPiMaterial = (home: string): FoundMaterial => {
   const agentDir = join(home, ".pi", "agent");
+  const instructions = findInstructionsFile(
+    PI_INSTRUCTIONS_NAMES.map((name) => join(agentDir, name)),
+    () => true,
+  );
   return {
-    skillDirs: [join(home, ".agents", "skills"), join(agentDir, "skills")].filter((path) =>
-      existsSync(path),
-    ),
-    promptTemplateDirs: [join(agentDir, "prompts")].filter((path) => existsSync(path)),
-    instructionsFile: PI_INSTRUCTIONS_NAMES.map((name) => join(agentDir, name)).find(isRegularFile),
+    material: {
+      skillDirs: [join(home, ".agents", "skills"), join(agentDir, "skills")].filter((path) =>
+        existsSync(path),
+      ),
+      promptTemplateDirs: [join(agentDir, "prompts")].filter((path) => existsSync(path)),
+      instructionsFile: instructions.path,
+    },
+    warnings: instructions.warnings,
   };
 };
 
@@ -216,17 +259,18 @@ export const provisionUserMaterial = (
   Effect.gen(function* () {
     const home = env["HOME"];
     if (home === undefined || home === "") return NO_PATHS;
-    switch (providerId) {
-      case CLAUDE_CODE: {
-        const warnings = yield* Effect.sync(() => linkClaudeMaterial(home, instanceHome));
-        for (const warning of warnings) yield* Effect.logWarning(warning);
-        return NO_PATHS;
+    const found = yield* Effect.sync((): FoundMaterial => {
+      switch (providerId) {
+        case CLAUDE_CODE:
+          return { material: NO_PATHS, warnings: linkClaudeMaterial(home, instanceHome) };
+        case CODEX:
+          return findCodexMaterial(home, env);
+        case PI:
+          return findPiMaterial(home);
+        default:
+          return { material: NO_PATHS, warnings: [] };
       }
-      case CODEX:
-        return yield* Effect.sync(() => findCodexMaterial(home, env));
-      case PI:
-        return yield* Effect.sync(() => findPiMaterial(home));
-      default:
-        return NO_PATHS;
-    }
+    });
+    for (const warning of found.warnings) yield* Effect.logWarning(warning);
+    return found.material;
   });

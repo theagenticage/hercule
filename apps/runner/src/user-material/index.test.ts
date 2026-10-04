@@ -8,6 +8,7 @@
  * - Claude Code's links never destroy a real file, and never dangle.
  */
 import {
+  chmodSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -32,6 +33,18 @@ const writeFile = (path: string, content = "content"): string => {
   writeFileSync(path, content);
   return path;
 };
+
+/**
+ * Writes a file nobody but root may read, and returns its path. Root reads it
+ * anyway, so a test that needs a read to fail is skipped when run as root.
+ */
+const writeUnreadableFile = (path: string): string => {
+  writeFile(path, "instructions nobody may read");
+  chmodSync(path, 0o000);
+  return path;
+};
+
+const RUNS_AS_ROOT = process.getuid?.() === 0;
 
 /** Creates an empty fake user home and an empty instance home. */
 const createHomes = (): { readonly home: string; readonly instanceHome: string } => ({
@@ -194,7 +207,11 @@ describe("Codex's material", () => {
 
   it("reads AGENTS.md when there is no override, and nothing when there is neither", () => {
     const { home, instanceHome } = createHomes();
-    expect(provision(CODEX, instanceHome, { HOME: home })).toEqual(NO_USER_MATERIAL_PATHS);
+    // A missing file is the normal case, not worth a warning.
+    expect(provisionCapturingWarnings(CODEX, instanceHome, { HOME: home })).toEqual({
+      material: NO_USER_MATERIAL_PATHS,
+      warnings: [],
+    });
 
     const agents = writeFile(join(home, ".codex", "AGENTS.md"));
 
@@ -235,6 +252,33 @@ describe("Codex's material", () => {
     mkdirSync(override);
     expect(provision(CODEX, instanceHome, { HOME: home }).instructionsFile).toBe(agents);
   });
+
+  it.skipIf(RUNS_AS_ROOT)(
+    "falls through a file it cannot read, as Codex does, and logs a warning for it",
+    () => {
+      const { home, instanceHome } = createHomes();
+      const agents = writeFile(join(home, ".codex", "AGENTS.md"), "be terse");
+      const override = writeUnreadableFile(join(home, ".codex", "AGENTS.override.md"));
+
+      const fellThrough = provisionCapturingWarnings(CODEX, instanceHome, { HOME: home });
+
+      expect(fellThrough.material.instructionsFile).toBe(agents);
+      expect(fellThrough.warnings).toHaveLength(1);
+      expect(fellThrough.warnings[0]).toContain(
+        `Did not read ${override} into the Thread's instructions: `,
+      );
+      expect(fellThrough.warnings[0]).toContain("EACCES");
+
+      chmodSync(agents, 0o000);
+      const neither = provisionCapturingWarnings(CODEX, instanceHome, { HOME: home });
+
+      expect(neither.material).toEqual(NO_USER_MATERIAL_PATHS);
+      expect(neither.warnings).toHaveLength(2);
+      expect(neither.warnings[1]).toContain(
+        `Did not read ${agents} into the Thread's instructions: `,
+      );
+    },
+  );
 });
 
 describe("pi's material", () => {
@@ -268,7 +312,11 @@ describe("pi's material", () => {
     const { home, instanceHome } = createHomes();
     const agentDir = join(home, ".pi", "agent");
     const claude = writeFile(join(agentDir, "CLAUDE.md"));
-    expect(provision(PI, instanceHome, { HOME: home }).instructionsFile).toBe(claude);
+    // The four names before it are missing, which is not worth a warning.
+    expect(provisionCapturingWarnings(PI, instanceHome, { HOME: home })).toEqual({
+      material: { ...NO_USER_MATERIAL_PATHS, instructionsFile: claude },
+      warnings: [],
+    });
 
     const agents = writeFile(join(agentDir, "AGENTS.md"));
     expect(provision(PI, instanceHome, { HOME: home }).instructionsFile).toBe(agents);
@@ -282,6 +330,34 @@ describe("pi's material", () => {
     const agentDir = join(home, ".pi", "agent");
     mkdirSync(join(agentDir, "AGENTS.override.md"), { recursive: true });
     const agents = writeFile(join(agentDir, "AGENTS.md"));
+
+    expect(provision(PI, instanceHome, { HOME: home }).instructionsFile).toBe(agents);
+  });
+
+  it.skipIf(RUNS_AS_ROOT)(
+    "falls through a file it cannot read, as pi does, and logs a warning for it",
+    () => {
+      // pi would take the path of a file it cannot read as the instructions
+      // text, so such a file must never be passed to it.
+      const { home, instanceHome } = createHomes();
+      const agentDir = join(home, ".pi", "agent");
+      const agents = writeUnreadableFile(join(agentDir, "AGENTS.md"));
+      const claude = writeFile(join(agentDir, "CLAUDE.md"), "be terse");
+
+      const { material, warnings } = provisionCapturingWarnings(PI, instanceHome, { HOME: home });
+
+      expect(material.instructionsFile).toBe(claude);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(`Did not read ${agents} into the Thread's instructions: `);
+      expect(warnings[0]).toContain("EACCES");
+    },
+  );
+
+  it("picks an empty file, as pi does", () => {
+    const { home, instanceHome } = createHomes();
+    const agentDir = join(home, ".pi", "agent");
+    const agents = writeFile(join(agentDir, "AGENTS.md"), "");
+    writeFile(join(agentDir, "CLAUDE.md"), "be terse");
 
     expect(provision(PI, instanceHome, { HOME: home }).instructionsFile).toBe(agents);
   });
