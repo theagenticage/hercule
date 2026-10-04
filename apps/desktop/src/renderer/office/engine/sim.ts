@@ -670,6 +670,21 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     setCup(actor, action === "sip");
   };
 
+  /**
+   * Sends a colleague to its own seat to do what its pose does there. A
+   * colleague already sitting there only changes what it does, without
+   * getting up.
+   */
+  const sendHome = (actor: Actor): void => {
+    if (actor.place === "home" && actor.errand === null) {
+      const action = decideHomeAction(actor.pose, actor.home.kind);
+      setAction(actor, action);
+      setCup(actor, action === "sip");
+      return;
+    }
+    run(actor, "home", () => walkHome(actor));
+  };
+
   // -- Frames --------------------------------------------------------------
 
   /**
@@ -933,10 +948,9 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
         floor: host.home.floor,
       });
       const hostAtHome = isSettled(host) && host.place === "home";
-      const hostAction = host.action;
       if (hostAtHome) {
         host.hosting = true;
-        if (SEATED.has(hostAction)) setAction(host, "sit");
+        if (SEATED.has(host.action)) setAction(host, "sit");
       }
       try {
         visitor.rig.lookAt(findEyePoint(host));
@@ -952,7 +966,9 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
         if (hostAtHome) {
           host.hosting = false;
           host.rig.lookAt(null);
-          if (host.errand === null && host.place === "home") setAction(host, hostAction);
+          // The host's pose may have changed during the visit, so it goes
+          // back to what its pose does now, not to what it did before.
+          if (host.errand === null && host.place === "home") sendHome(host);
           stage.requestRender();
         }
       }
@@ -1167,21 +1183,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       setAction(actor, "stand");
       await walkHome(actor);
     });
-  };
-
-  /**
-   * Sends a colleague to its own seat to do what its pose does there. A
-   * colleague already sitting there only changes what it does, without
-   * getting up.
-   */
-  const sendHome = (actor: Actor): void => {
-    if (actor.place === "home" && actor.errand === null) {
-      const action = decideHomeAction(actor.pose, actor.home.kind);
-      setAction(actor, action);
-      setCup(actor, action === "sip");
-      return;
-    }
-    run(actor, "home", () => walkHome(actor));
   };
 
   const setColleagueState = (colleagueId: string, state: ColleagueState, inLounge: boolean) => {
