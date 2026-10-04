@@ -6,15 +6,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { Result, Schema } from "effect";
-import { stubAnswer } from "../testing";
+import { runAgainstStub, stubAnswer } from "../testing";
 import { issueComment, issueRead, issueUpdate } from "./issue";
-import {
-  buildActionContext,
-  readJsonBody,
-  readSuccess,
-  runAgainstStub,
-  TEST_TOKEN,
-} from "./testing";
+import { buildActionContext, readJsonBody, readSuccess, TEST_TOKEN } from "./testing";
 
 /** An issue, as GitHub's REST API returns it. */
 const GITHUB_ISSUE = {

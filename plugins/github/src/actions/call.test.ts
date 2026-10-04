@@ -8,9 +8,15 @@ import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type { ActionError } from "@hercule/plugin-host";
-import { stubAnswer, stubGithub, stubHttpClient, type GithubStub } from "../testing";
+import {
+  runAgainstStub,
+  stubAnswer,
+  stubGithub,
+  stubHttpClient,
+  type GithubStub,
+} from "../testing";
 import { issueRead } from "./issue";
-import { buildActionContext, runAgainstStub, TEST_TOKEN } from "./testing";
+import { buildActionContext, TEST_TOKEN } from "./testing";
 
 const ADDRESS = { repo: "octocat/hello-world", number: 1347 };
 

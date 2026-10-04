@@ -19,7 +19,7 @@ import type {
   WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import { github } from "./index";
-import { stubAnswer, stubHttpClient, type GithubStub } from "./testing";
+import { runAgainstStub, stubAnswer, stubHttpClient, type GithubStub } from "./testing";
 
 /** Runs `register` and returns everything the plugin contributed. */
 const collectContributions = async (
@@ -74,9 +74,7 @@ const runValidate = async (
   credentials: Readonly<Record<string, string>> = { pat: PAT },
 ): Promise<Result.Result<ExternalAccount, { readonly message: string }>> => {
   const type = await readConnectionType();
-  return Effect.runPromise(
-    Effect.result(type.validate(credentials)).pipe(Effect.provide(stub.layer)),
-  );
+  return runAgainstStub(type.validate(credentials), stub);
 };
 
 /** Returns the message of a failed validation. */

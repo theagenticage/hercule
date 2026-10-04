@@ -10,6 +10,7 @@ import { PluginError } from "@hercule/plugin-host";
 import {
   buildIngestHarness,
   readStubRequestTarget,
+  runAgainstStub,
   stubGithub,
   type IngestHarness,
   type StubResponse,
@@ -143,9 +144,7 @@ const poll = async (
   watchList: ReadonlyArray<string> = [REPO],
 ) => {
   const stub = stubGithub(route);
-  const result = await Effect.runPromise(
-    Effect.result(pollRepos("token", harness.context, watchList).pipe(Effect.provide(stub.layer))),
-  );
+  const result = await runAgainstStub(pollRepos("token", harness.context, watchList), stub);
   return { result, requests: stub.requests.map(readStubRequestTarget) };
 };
 
