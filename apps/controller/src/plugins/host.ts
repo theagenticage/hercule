@@ -8,6 +8,7 @@
  * tries again.
  */
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
 import * as Layer from "effect/Layer";
@@ -88,6 +89,13 @@ const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "resources",
   "workflow-actions",
 ];
+
+/**
+ * How long a plugin's `deactivate` may run, in seconds. A `deactivate` that
+ * hangs would otherwise hold the host's gate and keep the controller from
+ * shutting down. A timeout counts as a failed deactivate.
+ */
+export const DEACTIVATE_TIMEOUT_SECONDS = 10;
 
 /** The body of a `core.plugin-error` notification. */
 const PLUGIN_ERROR_BODY = "The error is shown on the plugin's card under Settings > Plugins.";
@@ -690,7 +698,18 @@ const make = Effect.gen(function* () {
         if (entry.startable) yield* patchEntry(id, { status: { _tag: "inactive" } });
         return entry.startable;
       }
-      return yield* entry.deactivate.pipe(
+      // `deactivate` is made interruptible so the timeout can stop it even
+      // inside the shutdown finalizer, which runs uninterruptibly.
+      return yield* Effect.interruptible(entry.deactivate).pipe(
+        Effect.timeoutOrElse({
+          duration: Duration.seconds(DEACTIVATE_TIMEOUT_SECONDS),
+          orElse: () =>
+            Effect.fail(
+              new PluginError({
+                message: `deactivate did not return within ${DEACTIVATE_TIMEOUT_SECONDS} seconds`,
+              }),
+            ),
+        }),
         Effect.matchCauseEffect({
           onSuccess: () =>
             Effect.as(

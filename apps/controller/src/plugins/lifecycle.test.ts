@@ -4,7 +4,8 @@
  * than in two files that would each see half of every outcome.
  */
 import { describe, expect, it } from "vitest";
-import { Cause, Deferred, Effect, Option, Redacted, Schema } from "effect";
+import { Cause, Deferred, Duration, Effect, Fiber, Option, Redacted, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   HOST_API,
@@ -20,6 +21,7 @@ import { readEventsOfKind } from "../events/testing";
 import { NotificationService } from "../notifications";
 import { Secret, Secrets } from "../secrets";
 import { connectionStateRepository } from "../connections";
+import { DEACTIVATE_TIMEOUT_SECONDS } from "./host";
 import { IngestLoops, PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
 import {
@@ -413,6 +415,26 @@ describe("a plugin whose deactivate fails", () => {
       pluginId: "stuck",
       phase: "deactivate",
       message: "the poll loop would not stop",
+    });
+  });
+
+  it("is errored when its deactivate does not return in time, so the host is not held up", async () => {
+    const hung = createPluginFixture({ id: "hung", deactivateHangs: true });
+
+    const detail = await run(
+      Effect.gen(function* () {
+        yield* Effect.flatMap(PluginHost, (host) => host.boot([hung.plugin]));
+        const disabling = yield* Effect.forkChild(
+          Effect.flatMap(Plugins, (plugins) => plugins.disable("hung")),
+        );
+        yield* TestClock.adjust(Duration.seconds(DEACTIVATE_TIMEOUT_SECONDS));
+        return yield* Fiber.join(disabling);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(detail.status).toEqual({
+      _tag: "errored",
+      message: `deactivate did not return within ${DEACTIVATE_TIMEOUT_SECONDS} seconds`,
     });
   });
 
