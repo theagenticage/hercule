@@ -7,7 +7,6 @@
  * kept in memory only: `errored` is about this process, and the next boot
  * tries again.
  */
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
@@ -58,12 +57,13 @@ import {
   PluginConfigs,
   type RegisteredConnectionType,
 } from "../connections";
-import { toPluginError, describeFieldIssues, truncateMessage } from "./errors";
+import { toPluginError, describeFieldIssues, readCauseMessage, truncateMessage } from "./errors";
 import {
   registerEventSourceContribution,
   type RegisteredEventKind,
   type RegisteredEventSource,
 } from "./event-sources";
+import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
   CORE_CONTRIBUTION_OWNER,
@@ -172,22 +172,6 @@ const refuseEmptyAccountId = (
         : Effect.succeed(account),
     );
 };
-
-/**
- * Returns a one-line message for a failed plugin call: the `PluginError`'s
- * message, or the defect's message. Settings shows this line to the user, and
- * a whole stack trace would tell them less than its first sentence.
- */
-const readCauseMessage = (cause: Cause.Cause<PluginError>): string =>
-  truncateMessage(
-    Option.match(Cause.findErrorOption(cause), {
-      onSome: (error) => error.message,
-      onNone: () => {
-        const defect = Cause.squash(cause);
-        return defect instanceof Error ? defect.message : String(defect);
-      },
-    }),
-  );
 
 /**
  * Dies when `value` is empty. A defect, not a failure: the API a plugin
@@ -477,6 +461,7 @@ const make = Effect.gen(function* () {
   const connectionTypes = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
+  const ingest = yield* IngestLoops;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
@@ -690,9 +675,13 @@ const make = Effect.gen(function* () {
    * Stops one plugin. Returns whether it is cleanly stopped: a failed
    * deactivate leaves running parts that only a restart clears, and the
    * caller must not start the plugin again on top of them.
+   *
+   * The plugin's ingest handles are closed first, so no poll runs into a
+   * plugin that has already stopped.
    */
   const stop = (id: string): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
+      yield* ingest.closePlugin(id);
       const entry = (yield* Ref.get(entries)).get(id);
       if (entry === undefined) return true;
       if (entry.deactivate === undefined) {
@@ -926,11 +915,12 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
   "hercule/controller/plugins/PluginHost",
 ) {}
 
+/** Provides the plugin host and the ingest loops it closes when a plugin stops. */
 export const PluginHostLayer: Layer.Layer<
-  PluginHost,
+  PluginHost | IngestLoops,
   never,
   SqlClient.SqlClient | Secrets | AuditLog | Notifier | ConnectionTypes
-> = Layer.effect(PluginHost)(make);
+> = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
 
 /**
  * Provides the connections domain's `PluginConfigs` service, which reads a

@@ -5,6 +5,8 @@
  */
 export { EventKindCatalogLayer } from "./event-kinds";
 export { PluginConfigsLayer, PluginHost, PluginHostLayer } from "./host";
+export { computeIngestFingerprint, IngestLoops, IngestLoopsLayer, type OpenIngest } from "./ingest";
+export type { RegisteredEventSource } from "./event-sources";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
 export {
