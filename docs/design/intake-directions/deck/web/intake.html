@@ -1,0 +1,116 @@
+<!doctype html>
+<!-- PROTOTYPE - Intake as a deck of complete decisions, in the web app.
+     States: default, ?state=evidence, ?state=swarm, ?state=clear.
+     ?d=<card id> puts a card in focus: the web app's /intake/d/<id>. -->
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../intake.css" />
+    <meta charset="utf-8" />
+    <title>(9) Intake · Hercule</title>
+  </head>
+  <body>
+    <div class="web">
+      <header data-webbar="intake"></header>
+      <div class="deck-web">
+        <header class="bar">
+          <h1 class="title">Intake</h1>
+          <nav class="tabs deck-topics" data-deck-tabs>
+            <a class="tab" data-topic="all">All</a>
+            <a class="tab" data-topic="checkout">Checkout <small></small></a>
+            <a class="tab" data-topic="infrastructure">Infrastructure <small></small></a>
+            <a class="tab" data-topic="customers">Customers <small></small></a>
+            <a class="tab" data-topic="releases">Releases <small></small></a>
+            <a class="icon-btn" href="#" title="Manage topics"><i data-i="sliders"></i></a>
+          </nav>
+          <span class="spacer"></span>
+          <a class="btn btn--quiet btn--sm" href="?since=2026-09-28T18:20" title="Shows what came in since you last looked"><i data-i="clock" data-size="14"></i>Since yesterday 18:20</a>
+        </header>
+
+        <div class="deck">
+          <section class="deck-stage">
+            <div class="deck-strip" data-deck-strip></div>
+            <div class="deck-table deal-only" data-deck-table></div>
+
+            <section class="deck-clear clear-only">
+              <i data-face="Triage" data-pose="idle" data-size="64"></i>
+              <h2>No decisions wait on you.</h2>
+              <p class="deck-clear-next">Next triage at 11:00.</p>
+              <div class="deck-clear-sum">
+                <div><span class="deco-num">5</span>runs started</div>
+                <div><span class="deco-num">4</span>pull requests merging</div>
+                <div><span class="deco-num">1</span>trigger resumed</div>
+                <div><span class="deco-num">2</span>Tasks kept</div>
+              </div>
+              <section class="shipped">
+                <h3 class="section-h">Shipped since yesterday 18:20 <span class="count">3</span></h3>
+                <ul class="shipped-list">
+                  <li class="shipped-row">
+                    <i data-mark="done" data-size="16"></i>
+                    <span><b>Reply sent to Pieter at Bakkerij Smit</b><span>Draft reply · refund approved by you · 1h 05m from email to sent</span></span>
+                    <time>18:44</time>
+                  </li>
+                  <li class="shipped-row">
+                    <i data-mark="done" data-size="16"></i>
+                    <span><b>Discount codes ignore letter case</b><span>Fix bug · #1287 merged in rogier/webshop · 4h 50m from first event to merge</span></span>
+                    <time>19:12</time>
+                  </li>
+                  <li class="shipped-row">
+                    <i data-mark="done" data-size="16"></i>
+                    <span><b>payments-api v2.14.0 published</b><span>Ship release · 9 min</span></span>
+                    <time>19:40</time>
+                  </li>
+                </ul>
+              </section>
+            </section>
+
+            <div class="deck-keys deal-only">
+              <span><kbd>J</kbd><kbd>K</kbd> next, previous</span>
+              <span><kbd>Space</kbd> evidence</span>
+              <span><kbd>U</kbd> undo</span>
+              <span><kbd>?</kbd> all keys</span>
+            </div>
+            <div class="deck-help pop" role="dialog" aria-label="Keys">
+              <dl>
+                <dt><kbd>↩</kbd></dt><dd>the accent answer</dd>
+                <dt><kbd>1</kbd>-<kbd>9</kbd></dt><dd>the answer with that number</dd>
+                <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>next, previous card</dd>
+                <dt><kbd>Space</kbd></dt><dd>evidence</dd>
+                <dt><kbd>S</kbd></dt><dd>split a batch</dd>
+                <dt><kbd>U</kbd></dt><dd>undo, for 5 seconds</dd>
+                              </dl>
+            </div>
+          </section>
+
+          <aside class="deck-rail">
+            <section class="rail-section">
+              <h2 class="section-h">Moving <span class="count" data-deck-moving-count></span></h2>
+              <div class="moving-list" data-deck-moving></div>
+            </section>
+            <section class="rail-section">
+              <h2 class="section-h">Handled quietly</h2>
+              <div class="shelf" data-deck-shelf></div>
+            </section>
+            <footer class="rail-foot">
+              <p class="receipt today-only">
+                <a href="#">212 events</a> since&nbsp;18:20 → <a href="#">5</a>&nbsp;proposals&nbsp;· <a href="#">2</a>&nbsp;offers&nbsp;· <a href="#">1</a>&nbsp;unsure&nbsp;·&nbsp;<a href="#">34</a>&nbsp;held
+              </p>
+              <p class="receipt swarm-only">
+                <a href="#">2,120 events</a> since&nbsp;18:20 → <a href="#">60</a>&nbsp;proposals&nbsp;· <a href="#">28</a>&nbsp;offers&nbsp;· <a href="#">1</a>&nbsp;unsure&nbsp;·&nbsp;<a href="#">34</a>&nbsp;held
+              </p>
+              <p>Events are kept 90 days.</p>
+              <p><span class="dot dot--fail"></span>Phone copies go to Slack; Discord is reconnecting since&nbsp;09:12</p>
+            </footer>
+          </aside>
+          <aside class="deck-evidence" data-deck-evidence></aside>
+        </div>
+      </div>
+    </div>
+
+    <script src="../../../crew-bureau-2/brands.js"></script>
+    <script src="../../../crew-bureau-2/crew.js"></script>
+    <script src="../deck.js"></script>
+  </body>
+</html>

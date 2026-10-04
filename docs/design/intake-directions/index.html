@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/frames.css" />
+    <script src="../shared/book.js" defer></script>
+    <title>Intake, rethought · three directions · Hercule</title>
+    <style>
+      /* The book scrolls; the screen pages do not. */
+      html,
+      body {
+        height: auto;
+        overflow: visible;
+      }
+      body {
+        font-size: var(--t-14);
+        line-height: 1.55;
+      }
+      .bk {
+        width: min(1200px, 100% - 64px);
+        margin: 0 auto;
+        padding-bottom: 120px;
+        --book-ink: var(--ink);
+        --book-muted: var(--muted);
+      }
+      .bk p {
+        margin: 0;
+      }
+
+      /* ---------- Toolbar ---------- */
+      .bk-top {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 58px;
+        padding: 0 24px;
+        background: var(--glass-fill);
+        -webkit-backdrop-filter: var(--glass-filter);
+        backdrop-filter: var(--glass-filter);
+        box-shadow: inset 0 -1px 0 var(--glass-rim);
+      }
+      .bk-brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        flex: none;
+        font-weight: var(--w-bold);
+      }
+      .bk-brand small {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-regular);
+      }
+      .bk-links {
+        display: flex;
+        gap: 2px;
+        margin-left: 10px;
+      }
+      .bk-links a {
+        padding: 5px 8px;
+        white-space: nowrap;
+        border-radius: var(--r-sm);
+        color: var(--muted);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .bk-links a:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      @media (max-width: 1380px) {
+        .bk-links {
+          display: none;
+        }
+      }
+      .bk-switch {
+        display: flex;
+        gap: 2px;
+        margin-left: auto;
+        padding: 3px;
+        border-radius: var(--r-sm);
+        background: color-mix(in oklab, var(--ink) 6%, transparent);
+      }
+      .bk-switch button {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 28px;
+        padding: 0 5px;
+        border-radius: var(--r-btn);
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .bk-switch button span {
+        display: none;
+      }
+      .bk-switch button[aria-pressed="true"] {
+        padding-right: 11px;
+        background: var(--raised);
+        color: var(--ink);
+        box-shadow: var(--shadow-1);
+      }
+      .bk-switch button[aria-pressed="true"] span {
+        display: inline;
+      }
+      .bk-sw {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--bg);
+        box-shadow: inset -9px 0 0 var(--accent), inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+      }
+      .bk-glassctl {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: none;
+        padding-left: 14px;
+        box-shadow: inset 1px 0 0 var(--line);
+      }
+      .bk-glassctl label {
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .bk-glassctl .range {
+        width: 112px;
+      }
+
+      /* ---------- Sections ---------- */
+      .bk-sec {
+        padding: 88px 0 8px;
+        scroll-margin-top: 58px;
+      }
+      .bk-h {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 32px;
+        max-width: 860px;
+      }
+      .bk-kick {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .bk-h h2 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.2;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.02em;
+        text-wrap: balance;
+      }
+      .bk-lede {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: var(--t-16);
+        line-height: 1.5;
+      }
+      .bk :where(h3) {
+        margin: 0;
+        font-size: var(--t-16);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.01em;
+      }
+      .bk-sub {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin: 56px 0 20px;
+      }
+      .bk-sub p {
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+
+      /* ---------- Hero ---------- */
+      .bk-hero {
+        padding: 72px 0 16px;
+        display: grid;
+        gap: 18px;
+        max-width: 880px;
+      }
+      .bk-hero h1 {
+        margin: 0;
+        font-size: 44px;
+        line-height: 1.05;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.03em;
+      }
+      .bk-q {
+        font-size: var(--t-20);
+        font-weight: var(--w-medium);
+        line-height: 1.4;
+        letter-spacing: -0.01em;
+        text-wrap: balance;
+      }
+      .bk-body {
+        max-width: 720px;
+        font-size: 15px;
+        line-height: 1.62;
+        color: var(--muted);
+      }
+      .bk-body b {
+        color: var(--ink);
+      }
+      .bk-levers {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 40px;
+      }
+      .bk-lever {
+        display: grid;
+        gap: 6px;
+        padding: 20px 22px 22px;
+        color: inherit;
+      }
+      .bk-lever:hover {
+        box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+      }
+      .bk-lever .deco-num {
+        color: var(--faint);
+        font-size: 22px;
+      }
+      .bk-lever b {
+        font-size: var(--t-18);
+      }
+      .bk-lever span {
+        color: var(--muted);
+        font-size: var(--t-13);
+        line-height: 1.45;
+      }
+
+      /* ---------- Numbers ---------- */
+      .bk-stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0;
+        margin: 8px 0 0;
+      }
+      .bk-stat {
+        display: grid;
+        gap: 4px;
+        padding: 4px 24px 4px 0;
+      }
+      .bk-stat + .bk-stat {
+        padding-left: 24px;
+        box-shadow: inset 1px 0 0 var(--line-soft);
+      }
+      .bk-stat .deco-num {
+        font-size: 34px;
+      }
+      .bk-stat span {
+        color: var(--muted);
+        font-size: var(--t-13);
+        line-height: 1.4;
+      }
+      .bk-flaws {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px 48px;
+        margin: 40px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-flaws li {
+        display: grid;
+        gap: 2px;
+        color: var(--muted);
+        font-size: var(--t-14);
+        line-height: 1.5;
+      }
+      .bk-flaws b {
+        color: var(--ink);
+      }
+
+      /* ---------- Frames ---------- */
+      .bk .f-caption {
+        color: var(--book-ink);
+        font-weight: var(--w-bold);
+      }
+      .bk .f-caption small {
+        font-weight: var(--w-regular);
+        color: var(--book-muted);
+        opacity: 1;
+        font-size: var(--t-13);
+      }
+      .bk-grid {
+        display: grid;
+        gap: 44px 32px;
+        align-items: start;
+      }
+      .bk-grid--2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .bk-grid--3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      /* Web and phone side by side: the phone keeps its 0.8 scale, the browser takes the rest. */
+      .bk-grid--wm {
+        grid-template-columns: minmax(0, 1fr) 340px;
+      }
+      .bk-grid--phones {
+        grid-template-columns: repeat(3, 312px);
+        justify-content: space-between;
+      }
+      .bk-frames {
+        margin-top: 40px;
+      }
+
+      /* ---------- Tables ---------- */
+      .bk-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--t-13);
+      }
+      .bk-table th {
+        padding: 0 16px 10px 0;
+        text-align: left;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      .bk-table td {
+        padding: 12px 16px 12px 0;
+        border-bottom: 1px solid var(--line-soft);
+        vertical-align: top;
+        line-height: 1.5;
+      }
+      .bk-table td:first-child {
+        font-weight: var(--w-medium);
+      }
+      .bk-table td.m {
+        color: var(--muted);
+      }
+      .bk-table code {
+        font-size: var(--t-12);
+      }
+      .bk-table .ans {
+        min-width: 560px;
+      }
+
+      /* ---------- Prose blocks ---------- */
+      .bk-cols {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 40px 56px;
+        margin-top: 48px;
+      }
+      .bk-block {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+      .bk-block p,
+      .bk-block li {
+        color: var(--muted);
+        font-size: var(--t-14);
+        line-height: 1.6;
+      }
+      .bk-block b {
+        color: var(--ink);
+      }
+      .bk-block ul,
+      .bk-block ol {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding-left: 18px;
+      }
+      .bk-elements {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 22px 32px;
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .bk-elements li {
+        display: grid;
+        align-content: start;
+        gap: 3px;
+        color: var(--muted);
+        font-size: var(--t-13);
+        line-height: 1.5;
+      }
+      .bk-elements b {
+        color: var(--ink);
+        font-size: var(--t-14);
+      }
+      .bk-brief {
+        max-width: 760px;
+        font-size: var(--t-16);
+        line-height: 1.6;
+      }
+      .bk-brief b {
+        font-weight: var(--w-bold);
+      }
+      /* A source chip inside a sentence takes the text's baseline, not the mark's bottom edge. */
+      .bk-table .src {
+        align-items: baseline;
+      }
+      .bk-table .src > :first-child {
+        align-self: center;
+      }
+      .bk-cmp th:first-child {
+        width: 150px;
+      }
+      .bk-cmp th:nth-child(2) {
+        width: 15%;
+      }
+      .bk-cmp th:nth-child(n + 3) {
+        color: var(--ink);
+        font-size: var(--t-13);
+      }
+      .bk-pick {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 56px;
+        align-items: start;
+      }
+      .bk-pick-card {
+        display: grid;
+        gap: 12px;
+        padding: 24px 26px 26px;
+      }
+      .bk-pick-card p {
+        color: var(--muted);
+        font-size: var(--t-13);
+        line-height: 1.55;
+      }
+      .bk-pick-card b {
+        color: var(--ink);
+      }
+      /* The fallback mark for a system no brand file knows (the same markup the three directions use). */
+      .src-x {
+        display: inline-grid;
+        place-items: center;
+        width: 14px;
+        height: 14px;
+        border: 1.5px solid currentColor;
+        border-radius: 4px;
+        font: var(--w-bold) 9px/1 var(--font-ui);
+        text-transform: lowercase;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="#top"><i data-logo="24"></i>Intake, rethought<small>three directions in Crew Bureau</small></a>
+      <nav class="bk-links">
+        <a href="#today">Today</a><a href="#holds">What it holds</a><a href="#deck">Deck</a><a href="#line">The Line</a><a href="#orders">Standing Orders</a><a href="#compare">Compare</a><a href="#pick">Pick</a>
+      </nav>
+      <div class="bk-switch" role="group" aria-label="Theme">
+        <button data-theme-option="whitehaven" title="Whitehaven, light"><i class="bk-sw" data-theme="whitehaven"></i><span>Whitehaven</span></button>
+        <button data-theme-option="styles" title="Styles, light"><i class="bk-sw" data-theme="styles"></i><span>Styles</span></button>
+        <button data-theme-option="orient-express" title="Orient Express, dark"><i class="bk-sw" data-theme="orient-express"></i><span>Orient Express</span></button>
+        <button data-theme-option="nile" title="Nile, dark"><i class="bk-sw" data-theme="nile"></i><span>Nile</span></button>
+        <button data-theme-option="end-house" title="End House, dark"><i class="bk-sw" data-theme="end-house"></i><span>End House</span></button>
+      </div>
+      <div class="bk-glassctl">
+        <label for="bk-glass">Glass</label>
+        <input id="bk-glass" class="range" type="range" min="0" max="100" value="40" data-glass-control />
+        <output class="range-out" for="bk-glass" data-glass-value>40%</output>
+        <button class="icon-btn icon-btn--sm" data-glass-reset title="Back to the default, 40%"><i data-i="undo" data-size="14"></i></button>
+      </div>
+    </header>
+
+    <main class="bk">
+      <!-- HERO -->
+      <section class="bk-hero" id="top">
+        <span class="bk-kick">Intake · three directions · prototype</span>
+        <h1>Intake, rethought</h1>
+        <p class="bk-q">How does Intake turn 212 signals into shipped work while costing you the least attention?</p>
+        <p class="bk-body">
+          Agents are cheap and come in swarms. What runs out first is <b>your attention</b>, and your ability to make the calls that matter, fast. Today's Intake shows what came in, and shows it well. It does not get work <b>moving</b>. Below are three answers. Each one pulls a different lever, and each is drawn in Crew Bureau 2 for the desktop, the web and the phone, on the same morning: Tuesday 29 September 2026, 09:41.
+        </p>
+      </section>
+      <div class="bk-levers">
+        <a class="card bk-lever" href="#deck"><span class="deco-num">1</span><b>Deck</b><span>Speed per decision. One complete decision at a time, answered with one key or one swipe.</span></a>
+        <a class="card bk-lever" href="#line"><span class="deco-num">2</span><b>The Line</b><span>Visible consequence. Intake is the head of a production line, and every answer moves work down it.</span></a>
+        <a class="card bk-lever" href="#orders"><span class="deco-num">3</span><b>Standing Orders</b><span>Fewer decisions. Any answer can become a standing order, so Intake shrinks to the exceptions.</span></a>
+      </div>
+
+      <!-- TODAY -->
+      <section class="bk-sec" id="today">
+        <div class="bk-h">
+          <span class="bk-kick">The baseline</span>
+          <h2>Today: a good page to read, a slow page to act on</h2>
+          <p class="bk-lede">The current Crew Bureau Intake, measured at its real size on the desktop (1440 by 900). Nine decisions are open this morning: five Proposals, two Offers and two calls.</p>
+        </div>
+        <div class="bk-stats">
+          <div class="bk-stat"><span class="deco-num">3<small> of 9</small></span><span>decisions you can answer without scrolling</span></div>
+          <div class="bk-stat"><span class="deco-num">348</span><span>words in view before the first scroll, 507 on the page</span></div>
+          <div class="bk-stat"><span class="deco-num">72</span><span>numbers in view: counts, bars, times, events</span></div>
+          <div class="bk-stat"><span class="deco-num">0</span><span>places that show what your answers started or shipped</span></div>
+        </div>
+        <div class="bk-grid bk-grid--wm bk-frames">
+          <figure data-frame="desktop" data-src="../crew-bureau-2/desktop/intake.html" data-caption="Desktop, today" data-note="A morning brief: headline counts, one lead card, then four tiers of rows."></figure>
+          <figure data-frame="mobile" data-src="../crew-bureau-2/mobile/intake.html" data-caption="Phone, today" data-note="The desktop page, narrowed. Three buttons in view."></figure>
+        </div>
+        <ul class="bk-flaws">
+          <li><b>You read before you act.</b>The lead card spends a gist and four made-from cells before its first answer. Every row below it asks you to read a title, a reason and three buttons.</li>
+          <li><b>Six of nine decisions are below the fold.</b>Today, When you can and FYI sit under the lead card and the calls, so the page is a scroll, then a decision, then a scroll.</li>
+          <li><b>An answer disappears into silence.</b>Click Start "Fix bug" and the row goes away. Nothing on the page shows what started, what shipped, or that answering was worth it.</li>
+          <li><b>At ten times the load, decisions get bigger, not fewer.</b>The swarm state piles proposals by topic behind buttons like "Merge all 23" and "Draft 12 replies". The same work, at a higher stake per click.</li>
+          <li><b>Plugins are a list at the side.</b>"What came in" counts events per Connection, but a new Connection, a source with no mark, or a broken one has no place on the page.</li>
+          <li><b>The breaker answers are not the spec's.</b>"Keep held", "Release all 34" and "Raise bound to 50/h" are not operations. The spec offers Resume, and Resume and discard. All three directions correct this.</li>
+        </ul>
+      </section>
+
+      <!-- HOLDS -->
+      <section class="bk-sec" id="holds">
+        <div class="bk-h">
+          <span class="bk-kick">Shared by all three</span>
+          <h2>What any Intake must hold, this year and next</h2>
+          <p class="bk-lede">These parts come from the spec, not from a direction. Whichever direction wins, they behave the same. The directions differ in how they arrange them and in what they add.</p>
+        </div>
+
+        <div class="bk-sub" id="answer"><h3>The answer, in its four states</h3><p>One answer is one Bound Action. The label is the producer's; the describe line under it is always the core's.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th>State</th><th>Looks like</th><th>When</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Bound to a core operation</td>
+              <td><div class="ans"><span class="btn btn--accent btn--sm">Start "Fix bug"</span><span class="ans-desc">Starts <b>Fix bug</b> on <b>webshop</b> with task <b>Checkout fails for EU cards with 3-D Secure</b></span><kbd>↩</kbd></div></td>
+              <td class="m"><code>run.start</code>, <code>task.update</code>, <code>session.input</code>, approvals. Soon <code>trigger.resume</code>.</td>
+            </tr>
+            <tr>
+              <td>Bound to a plugin action</td>
+              <td><div class="ans"><span class="btn btn--sm">Merge all 4</span><span class="ans-desc">Merges <b>#1301 #1302 #1304 #1305</b> in <b>rogier/webshop</b> as <b>GitHub · rogier</b></span><kbd>2</kbd></div></td>
+              <td class="m">A plugin contributes <code>github/pr.merge</code>. Same look; the line names the Connection it acts as.</td>
+            </tr>
+            <tr>
+              <td>Navigation only</td>
+              <td><div class="ans"><span class="btn btn--quiet btn--sm">Review first</span><span class="ans-desc">Opens the 4 pull requests</span><kbd>3</kbd></div></td>
+              <td class="m">No operation; it takes you somewhere (#317). Never reads "Does nothing".</td>
+            </tr>
+            <tr>
+              <td>Cannot be taken</td>
+              <td><div class="ans" style="opacity: 0.55"><span class="btn btn--sm" aria-disabled="true">Close all 9</span><span class="ans-desc">Cannot be taken: the GitHub plugin changed this action's inputs at 08:30, after triage proposed it</span><span></span></div></td>
+              <td class="m">The stored operation no longer passes the core's check. The other answers still work.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="bk-body" style="margin-top: 16px">Room is kept for a fourth proposal answer, <b>Park</b>, after v1. A decision has at most one suggested (lacquer) answer. Every answer must also render as one line of a chat message, "label · describe line", because in v1 the phone surface is Slack or Discord.</p>
+
+        <div class="bk-sub" id="plugins"><h3>What a plugin brings in</h3><p>Plugins add Connections, event kinds and actions. They add no icons and no colors, so Intake has to cope with what it has never seen.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th>What arrives</th><th>How Intake shows it</th><th>On this morning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>A known system</td><td class="m">Its monochrome mark, keyed by the event's system, with the Connection as a suffix.</td><td class="m"><span class="src"><i data-brand="sentry"></i>Sentry · webshop-prod</span>, and a Sentry alert through Gmail reads "via Gmail".</td></tr>
+            <tr><td>An unknown system</td><td class="m">The fallback mark: the system's initial in a small outlined square.</td><td class="m"><span class="src"><span class="src-x" role="img" aria-label="hetzner">h</span>Hetzner · invoice for September</span>, via a Gmail sender rule, stamped no action.</td></tr>
+            <tr><td>A new Connection</td><td class="m">It appears on its own, listening, before its first event. Never an empty silence.</td><td class="m"><span class="src"><i data-brand="linear"></i>Linear · product</span>, connected Monday 17:55, nothing yet.</td></tr>
+            <tr><td>A broken Connection</td><td class="m">Said where it matters. A silent source looks like a calm one.</td><td class="m">Discord · community, reconnecting since 09:12. Phone copies go to Slack.</td></tr>
+            <tr><td>A plugin action</td><td class="m">An answer like any other; the describe line is still the core's.</td><td class="m">Merge all 4, bound to <code>github/pr.merge</code>.</td></tr>
+          </tbody>
+        </table>
+
+        <div class="bk-cols">
+          <div class="bk-block">
+            <h3>Kept from the spec</h3>
+            <ul>
+              <li><b>Proposing is not doing.</b> Triage never starts, merges or replies. Your click authorises the operation, and anything that acts without a click is a start trigger you wrote, with a Spawn Bound.</li>
+              <li><b>Since you last checked.</b> The page is framed on the marker (yesterday 18:20), pinned in the URL, and the receipt adds up to 212.</li>
+              <li><b>Needs a call</b> is verdict-based, never priority-based.</li>
+              <li><b>Made from</b> is on every proposal. Detail opens in a drawer or a sheet, never a page.</li>
+              <li><b>Retention</b> is stated: events are kept 90 days, and no list is cut short in silence.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>Room kept for what comes after v1</h3>
+            <ul>
+              <li><b>Fast lane:</b> proposals arrive between batches, so Intake updates live instead of every two hours.</li>
+              <li><b>Park</b> as a fourth answer; <b>feedback</b> that teaches triage ("stop proposing PostHog dips under 5%").</li>
+              <li><b>"Work on task"</b> as a shipped workflow, and a human gate inside a run.</li>
+              <li><b>One spine</b> for Intake and Check-in, still an open question.</li>
+              <li><b>Presence routing</b>, webhook sources, finer muting, an archive, and more than one user.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+      <!-- DECK -->
+      <section class="bk-sec" id="deck">
+        <div class="bk-h">
+          <span class="bk-kick">Direction 1 · the lever is speed per decision</span>
+          <h2>Deck</h2>
+          <p class="bk-lede">Intake deals one complete decision at a time. You answer with one key or one swipe, the next card moves up, and a strip shows how many are left and about how long they take. When the last one is answered, the page says so and shows what your answers started.</p>
+        </div>
+        <p class="bk-brief"><b>Brief.</b> Today you read a page, then hunt for the buttons. Deck turns the morning into a short task with an end: 9 decisions, about 2 minutes, 9 keys. Every answer on the card carries its describe line, so you never answer blind, and Undo holds each answer for 5 seconds. Everything that needs no answer waits on a quiet shelf at the side.</p>
+
+        <div class="bk-stats" style="margin-top: 32px">
+          <div class="bk-stat"><span class="deco-num">9</span><span>keys clear this morning, about 2 minutes. Today each decision is a scroll, a read and a click</span></div>
+          <div class="bk-stat"><span class="deco-num">13</span><span>keys clear 90 decisions at ten times the load: similar decisions share one card, and S splits it</span></div>
+          <div class="bk-stat"><span class="deco-num">6</span><span>buttons in view on the desktop (today 13), every one with its describe line and its key</span></div>
+          <div class="bk-stat"><span class="deco-num">1<small> of 9</small></span><span>decisions answerable without scrolling (today 3 of 9). The other 8 are one key away</span></div>
+        </div>
+
+        <figure class="bk-frames" data-frame="desktop" data-src="deck/desktop/intake.html" data-caption="Desktop, 09:41" data-note="One card in focus with every answer and its key. The next two peek underneath; the rest are pips in the strip."></figure>
+        <div class="bk-grid bk-grid--wm bk-frames">
+          <figure data-frame="web" data-src="deck/web/intake.html" data-url="hercule.home.arpa/intake/d/lead" data-caption="Web" data-note="Each card has its own address, so a chat message or a colleague can open one decision."></figure>
+          <figure data-frame="mobile" data-src="deck/mobile/intake.html" data-caption="Phone" data-note="Swipe right for the suggested answer, left for the quiet one, up for the evidence. Every answer sits in the thumb zone."></figure>
+        </div>
+
+        <div class="bk-sub"><h3>Main elements</h3></div>
+        <ul class="bk-elements">
+          <li><b>Strip</b>The count, an estimate, and one pip per card, grouped Now, Needs a call, Today, When you can. Now is one red pip; nothing pulses.</li>
+          <li><b>Decision card</b>Kind, topic, priority and project, the title, the gist and made from. Then the answers as a ledger: button, describe line, fine print, key.</li>
+          <li><b>Keys</b>Return takes the suggested answer, 1 to 9 the others. J and K move, Space opens the evidence, S splits a batch, U undoes.</li>
+          <li><b>Batch</b>Similar decisions on one card, every member named. "Accept all 22" or Split, which deals each member with its own describe line.</li>
+          <li><b>Moving and Undo</b>What your earlier answers started, at the side. The latest answer is held for 5 seconds before it is sent.</li>
+          <li><b>Quiet shelf</b>FYI, attached to Tasks, no action, and a new Connection still listening. Each is a fold with the marks of its systems.</li>
+          <li><b>Panel and Live Activity</b>⌥Space deals the deck over any app on the Mac. On the phone, the next decision waits on the lock screen.</li>
+        </ul>
+
+        <div class="bk-sub"><h3>Away from the page, and in detail</h3><p>The deck comes to you; the evidence opens beside the card; the end of the deck is a real state.</p></div>
+        <div class="bk-grid bk-grid--2">
+          <figure data-frame="desktop" data-src="deck/desktop/intake.html" data-state="panel" data-caption="Over any app, 09:44" data-note="⌥Space opens the deck over your notes. Four decisions left, Marta's reply held for Undo."></figure>
+          <figure data-frame="desktop" data-src="deck/desktop/intake.html" data-state="evidence" data-caption="Evidence" data-note="Space puts the dossier in place of the rail: why triage made it one Task, one excerpt per source, each with Open in ..."></figure>
+          <figure data-frame="desktop" data-src="deck/desktop/intake.html" data-state="clear" data-caption="Done" data-note="No decisions wait on you. What your nine answers started, and what shipped since the marker."></figure>
+          <figure data-frame="desktop" data-src="deck/desktop/intake.html?d=s-low22" data-state="swarm" data-caption="Swarm, one batch" data-note="90 decisions on 13 cards. The 22 low-priority proposals share one card, every member named."></figure>
+        </div>
+        <div class="bk-grid bk-grid--phones bk-frames">
+          <figure data-frame="mobile" data-src="deck/mobile/intake.html" data-state="swipe" data-caption="Phone, mid-swipe" data-note="The card dragged right uncovers the answer it will take. A tick at the threshold."></figure>
+          <figure data-frame="mobile" data-src="deck/mobile/intake.html" data-state="lock" data-caption="Lock screen" data-note="The Live Activity holds the next decision and its two main answers."></figure>
+          <figure data-frame="mobile" data-src="deck/mobile/intake.html" data-state="chat" data-caption="In Slack" data-note="One card is one message. Answered elsewhere, the message is edited to say so."></figure>
+        </div>
+
+        <div class="bk-cols">
+          <div class="bk-block">
+            <h3>Why it beats The Line and Standing Orders</h3>
+            <p>Both others put several things in front of you at once: The Line the whole line, Standing Orders the tiers and the orders beside them. Deck asks the least of you at the moment you decide: one card, what each answer does, one key. It is also the closest fit for where v1 reaches you away from the desk, which is chat and the phone. A card is one message and a swipe is one button, so the same decision reads the same everywhere. And apart from batches, it needs no new record and no new kind of trigger. It changes how today's decisions are dealt, not what they are.</p>
+          </div>
+          <div class="bk-block">
+            <h3>Why it is 1000x better than today</h3>
+            <p>Today a decision costs a scroll, a read and a hunt: 348 words in view, 13 buttons, and 6 of 9 decisions below the fold. Deck gives the morning an end you can see: 9 decisions, about 2 minutes, then "No decisions wait on you". At ten times the load today's page grows ten times longer; Deck deals the 90 decisions in 13 keys and about 4 minutes. And because the panel and the lock screen bring the next card to you, a decision waits for your next free minute, not for your next visit to the page.</p>
+          </div>
+          <div class="bk-block">
+            <h3>At ten times the load</h3>
+            <ul>
+              <li>90 decisions on 13 cards, about 4 minutes. The count says both.</li>
+              <li>Batches carry the volume: "Accept all 22", "Close all 9", "Reply to all 6". Each lists every member, and S splits it.</li>
+              <li>Now stays one red pip, and the burning proposal still comes first.</li>
+              <li>Moving shows the 4 newest runs and "60 more in Runs".</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>What it pulls from after v1</h3>
+            <ul>
+              <li><b>Fast lane:</b> a proposal that arrives between batches adds a pip; the card in focus never moves under your hand.</li>
+              <li><b>Park:</b> a fourth ledger row and a fourth thumb-zone row. Both fit.</li>
+              <li><b>Presence routing:</b> the panel on the Mac, the lock screen on the phone, whichever you are at.</li>
+              <li><b>"Work on task":</b> one more answer on the card.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>What it contradicts</h3>
+            <ul>
+              <li><b>Pinned semantics, "lead card and condensed rows":</b> only one card has detail, so 1 of 9 is answerable without scrolling.</li>
+              <li><b>Spec 10 §7.4 for batches:</b> "Accept all 22" is 22 operations, and its describe line is written by the client, not the core. Who writes it, and how a partial failure shows, must be decided. In chat, triage must mark the group before delivery, or the batch is 22 messages.</li>
+              <li><b>Spec 17, one window:</b> the panel is a second window, about 18 MB while open. The alternative keeps one window: ⌥Space raises the main window in a compact deck. The menu bar item is not in spec 17 either.</li>
+              <li><b>Spec 10 §2.4</b> marks Accept as the main answer. Deck makes triage's suggestion the main answer.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>How to adopt it</h3>
+            <ol>
+              <li>Ship the card's answer ledger and the keys (↩, 1 to 9, J, K, U) in today's Intake. No spec change.</li>
+              <li>Add the strip and the clear state.</li>
+              <li>Add the phone deck and the chat message (spec 12 §11.6).</li>
+              <li>Decide batches with triage marking the groups. Measure the panel against spec 17 last.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Its system</h3><p>All of it in <code>deck/intake.css</code> and <code>deck/deck.js</code>, built on Crew Bureau 2 parts. The full list is in <code>deck/NOTES.md</code>.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th>Part</th><th>What it is</th><th>Rule</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Strip</td><td class="m">The count, an estimate, and one pip per card grouped by tier, with the last triage and Triage now.</td><td class="m">The only display numeral on the page. Now is red; nothing pulses.</td></tr>
+            <tr><td>Decision card</td><td class="m">Kind, topic, priority, project, title, gist, made from, the answers, a note from triage, Evidence.</td><td class="m">One card in focus. At most one lacquer answer.</td></tr>
+            <tr><td>Bound action</td><td class="m">One ledger row per answer: button, describe line, fine print, key.</td><td class="m">All four answer states. The key follows the row: ↩ for the lacquer answer, then 1, 2, 3.</td></tr>
+            <tr><td>Batch members</td><td class="m">The Tasks a batch card answers, listed small inside it, with their sources counted below.</td><td class="m">Every member is named. S deals each member as its own card.</td></tr>
+            <tr><td>Peek</td><td class="m">The next two cards tucked under the one in focus.</td><td class="m">Kind and title only, one line each. J brings the first up.</td></tr>
+            <tr><td>Moving and Undo</td><td class="m">The runs your answers started, and the latest answer held with its seconds left.</td><td class="m">An answer is sent after 5 seconds. A closed tab or a quit sends it, never drops it.</td></tr>
+            <tr><td>Quiet shelf</td><td class="m">FYI, attached, no action and new Connections, each a fold; the events total below.</td><td class="m">Each count is said once and opens its events. An unknown system uses the fallback mark.</td></tr>
+            <tr><td>Evidence</td><td class="m">A dossier in place of the rail, or a sheet on the phone: why, then one excerpt per source.</td><td class="m">Every source has "Open in ...". Never a new page.</td></tr>
+            <tr><td>Clear state</td><td class="m">The answered count, what the answers started, and what shipped since the marker.</td><td class="m">Reads "No decisions wait on you", because threads may still wait.</td></tr>
+            <tr><td>Panel</td><td class="m">The deck over any app on ⌥Space, with the menu bar count.</td><td class="m">Created on the hotkey, destroyed on Esc, never kept warm. Native vibrancy, not CSS glass.</td></tr>
+            <tr><td>Phone deck</td><td class="m">The card above, every answer below in the thumb zone; the swipe uncovers its answer.</td><td class="m">Right takes the lacquer answer, left the quiet one, up opens the evidence. No answer, no swipe that way.</td></tr>
+            <tr><td>Live Activity and chat message</td><td class="m">The next decision on the lock screen; one decision as one Slack message.</td><td class="m">One card is one message. Answered elsewhere, the message is edited, buttons gone.</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <!-- LINE -->
+      <section class="bk-sec" id="line">
+        <div class="bk-h">
+          <span class="bk-kick">Direction 2 · the lever is visible consequence</span>
+          <h2>The Line</h2>
+          <p class="bk-lede">Intake is the head of a production line. Four stages read from left to right: what came in, your call, what is moving, and what shipped. Every answer visibly moves work one stage down, and every shipped thing traces back to the events it was made from.</p>
+        </div>
+        <p class="bk-brief"><b>Brief.</b> Today an answer disappears into silence. The Line keeps it in view. You see 212 events become 9 calls, 4 runs and 3 shipped things on one screen, and you see how long each step took. That turns attention into something you can measure: on #1287, your call took 3h 21m of a 4h 50m lead time.</p>
+
+        <div class="bk-stats" style="margin-top: 32px">
+          <div class="bk-stat"><span class="deco-num">4</span><span>stages on one screen, from the first event to the merged pull request (today: 1)</span></div>
+          <div class="bk-stat"><span class="deco-num">69%</span><span>of the lead time of #1287 was your call. Today nothing on the page shows it</span></div>
+          <div class="bk-stat"><span class="deco-num">9</span><span>buttons in view on the desktop (today 13), every one with its describe line</span></div>
+          <div class="bk-stat"><span class="deco-num">2<small> of 10</small></span><span>decisions answerable without scrolling (today 3 of 9). The Line spends that room on consequence</span></div>
+        </div>
+
+        <figure class="bk-frames" data-frame="desktop" data-src="line/desktop/intake.html" data-caption="Desktop, 09:41" data-note="Came in, your call, moving, shipped. The lead decision is the only card; the approval comes back from the line with a marigold rule."></figure>
+        <div class="bk-grid bk-grid--wm bk-frames">
+          <figure data-frame="web" data-src="line/web/intake.html" data-url="hercule.home.arpa/intake?since=2026-09-28T18:20" data-caption="Web" data-note="The same line under the web bar. The stage heads are links, so a stage can be shared."></figure>
+          <figure data-frame="mobile" data-src="line/mobile/intake.html" data-caption="Phone" data-note="The line turns vertical. The flow meter on top; the run you started follows you as a Live Activity."></figure>
+        </div>
+
+        <div class="bk-sub"><h3>Main elements</h3></div>
+        <ul class="bk-elements">
+          <li><b>Flow meter</b>Four counts with arrows between them: 212 in, 9 for you, 4 moving, 3 shipped. Each count opens its stage.</li>
+          <li><b>Taps</b>One tap per Connection, with its count. A new Connection shows a dashed pipe and "listening". A tripped breaker is a closed valve with the paused mark.</li>
+          <li><b>Your call</b>Tiers Now, Back from the line, Needs a call, Today, When you can. Every answer sits in place, as a ledger row: button, describe line, fine print.</li>
+          <li><b>Back from the line</b>A running session that asks you something comes back up the line: "Publish payments-api 2.15.0 to npm?" sits beside the proposals, not on another page.</li>
+          <li><b>Moving</b>The runs your earlier answers started, with their faces, workflow and time. On the desktop you can drop a decision on a workflow to start it.</li>
+          <li><b>Shipped and its trace</b>What reached the world, each with its sources and lead time. The trace splits the lead time into came in, your call, moving, and review.</li>
+        </ul>
+
+        <div class="bk-sub"><h3>At ten times the load, and in detail</h3><p>2,120 events, 90 calls. The line splits into topic lanes; the trace opens in a drawer or a sheet.</p></div>
+        <div class="bk-grid bk-grid--2">
+          <figure data-frame="desktop" data-src="line/desktop/intake.html" data-state="swarm" data-caption="Swarm" data-note="One lane per topic. Each lane's calls become counts by tier at fixed places, and Open all 27."></figure>
+          <figure data-frame="desktop" data-src="line/desktop/intake.html" data-state="trace" data-caption="Trace of #1287" data-note="4h 50m from the first Intercom message to the merge. The marigold segment is the wait for your call."></figure>
+        </div>
+        <div class="bk-grid bk-grid--phones bk-frames">
+          <figure data-frame="mobile" data-src="line/mobile/intake.html" data-state="swarm" data-caption="Phone, swarm" data-note="The lead first, then the topic piles."></figure>
+          <figure data-frame="mobile" data-src="line/mobile/intake.html" data-state="trace" data-caption="Phone, trace" data-note="A sheet at the large detent."></figure>
+          <figure data-frame="mobile" data-src="line/mobile/intake.html" data-theme="orient-express" data-caption="Phone, Orient Express" data-note="The dark theme."></figure>
+        </div>
+
+        <div class="bk-cols">
+          <div class="bk-block">
+            <h3>Why it beats Deck and Standing Orders</h3>
+            <p>Deck makes each decision faster, but you still answer into silence, and fast answers with no feedback drift into rubber stamping. Standing Orders removes decisions, but you can only hand a choice to a trigger once you trust what that choice produces. The Line is where that trust comes from: it shows what every answer started and what it shipped. It is also the only direction that answers the open question of one spine for Intake and Check-in.</p>
+          </div>
+          <div class="bk-block">
+            <h3>Why it is 1000x better than today</h3>
+            <p>Today the page ends where the work begins. There are <b>0</b> places that show what an answer did. The Line closes that loop for every item: 212 events, 9 calls, 4 runs, 3 shipped, each traceable to its sources. The multiplier is not in clicks. It is in learning: once you see that your call was 69% of a lead time, you answer the Now tier first, you turn your repeat answers into standing orders, and you stop opening things that never ship.</p>
+          </div>
+          <div class="bk-block">
+            <h3>At ten times the load</h3>
+            <ul>
+              <li>The shape stays; the grain changes. Each topic becomes a lane under the same four columns.</li>
+              <li>A lane's calls become counts by tier at fixed places, so the eye finds "now" in the same spot in every lane.</li>
+              <li>Moving shows stacked faces with "+11"; Shipped shows a median, not a list.</li>
+              <li>The one burning decision stays a full card above the lanes on the phone.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>What it pulls from after v1</h3>
+            <ul>
+              <li><b>One spine</b> for Intake and Check-in: The Line is that spine.</li>
+              <li><b>Fast lane:</b> a tap shows a dot as an event arrives, at most one per tap every 2 seconds.</li>
+              <li><b>"Work on task"</b> and human gates inside a run: they arrive as Back from the line.</li>
+              <li><b>Presence routing:</b> the run you started follows you to the phone as a Live Activity.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>What it contradicts</h3>
+            <ul>
+              <li><b>Separate views.</b> It merges Intake and Check-in (pinned semantics, spec 10 §Post-v1). Approvals enter Intake, and the two since markers become one.</li>
+              <li><b>Spec 10 §8:</b> "Intake reads Tasks, Notifications and Events, never run outputs". Moving, Shipped and the trace read runs and pull requests. No record holds a trace today.</li>
+              <li>It shows only the 4 runs that came through Intake. The other 12 live sessions still need a home.</li>
+              <li>Came in sits first, on the left, not at the foot of the page.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>How to adopt it</h3>
+            <ol>
+              <li>Ship the answer ledger and the taps in today's Intake. Neither departs from the spec.</li>
+              <li>Add Shipped with its trace: a new controller read that joins Events, the Task, the answer, the run and the pull request.</li>
+              <li>Add Moving: the runs a Task's answers started.</li>
+              <li>Write the ADR for one spine, then move approvals in.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Its system</h3><p>All of it in <code>line/intake.css</code>, built on Crew Bureau 2 parts. The full list is in <code>line/NOTES.md</code>.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th>Part</th><th>What it is</th><th>Rule</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Flow meter</td><td class="m">One head per stage: a display numeral, a word and a fact, with an arrow on the rule between stages.</td><td class="m">The only display numerals on the page. Each opens its stage.</td></tr>
+            <tr><td>Tap</td><td class="m">A Connection's mark, name and count, and a pipe into the line.</td><td class="m">Three states: flowing, listening (dashed pipe), held (closed valve and the paused mark). An unknown system uses the fallback mark.</td></tr>
+            <tr><td>Receipt rows</td><td class="m">What triage made of the events, read down the Came in stage.</td><td class="m">They add up to the 212. Every count opens its events.</td></tr>
+            <tr><td>Decision</td><td class="m">Head, meta, made from, answers. The lead is the only card on the page.</td><td class="m">One pulsing dot, on the Now label. A request back from the line has a marigold left rule.</td></tr>
+            <tr><td>Bound action</td><td class="m">One ledger row per answer: the button in a 176px column, then the describe line, then fine print.</td><td class="m">All four answer states. At most one lacquer answer per decision. Navigation-only answers carry the external icon and read "Opens ...".</td></tr>
+            <tr><td>Line run</td><td class="m">A run in Moving: face, name, workflow, time, and the events attached since.</td><td class="m">"Waiting on you" is marigold; nothing else in Moving is colored.</td></tr>
+            <tr><td>Shipped item</td><td class="m">What shipped, its source marks with counts, then an arrow and the lead time.</td><td class="m">Opens the trace.</td></tr>
+            <tr><td>Trace</td><td class="m">The lead time split into four segments, then one row per step.</td><td class="m">The your-call segment is marigold, the color of what waits on you. States how long source events are kept.</td></tr>
+            <tr><td>Topic lane and pile</td><td class="m">Swarm: one row per topic under the same columns; its calls as counts by tier.</td><td class="m">Counts sit at fixed places so lanes scan as a table. "Open all N" matches its tab.</td></tr>
+            <tr><td>Live Activity</td><td class="m">Phone: one run followed along the four stages, compact in the Dynamic Island.</td><td class="m">Only for a run you started with an answer.</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <!-- ORDERS -->
+      <section class="bk-sec" id="orders">
+        <div class="bk-h">
+          <span class="bk-kick">Direction 3 · the lever is fewer decisions</span>
+          <h2>Standing Orders</h2>
+          <p class="bk-lede">Any answer can become a standing order: a start trigger you write, with a bound. The next time the same kind of thing comes in, it is done for you and reported afterwards. Intake shrinks to the exceptions, and beside them you see what each order did while you were away.</p>
+        </div>
+        <p class="bk-brief"><b>Brief.</b> Today every decision reaches you every time, and the page has no way to say "and do that again next time". Standing Orders adds that sentence. "Always do this" shows you what the order would have matched last week before you make it, and every order after that shows its runs, its bound, Review, and Undo where the work can be undone. The decisions you give again and again stop reaching you.</p>
+
+        <div class="bk-stats" style="margin-top: 32px">
+          <div class="bk-stat"><span class="deco-num">7</span><span>decisions reach you at ten times the load. In the other two directions, 90 still do</span></div>
+          <div class="bk-stat"><span class="deco-num">38</span><span>things handled for you this week, against 9 answered by you. The lever is on the page</span></div>
+          <div class="bk-stat"><span class="deco-num">5<small> of 10</small></span><span>decisions answerable without scrolling on the desktop (today 3 of 9), each answer with its short describe line</span></div>
+          <div class="bk-stat"><span class="deco-num">31</span><span>past events previewed before an order is made, with the 6 it should not have matched flagged</span></div>
+        </div>
+
+        <figure class="bk-frames" data-frame="desktop" data-src="orders/desktop/intake.html" data-caption="Desktop, 09:41" data-note="The exceptions by tier on the left, answers in the same columns on every row. On the right, what each order did while you were away."></figure>
+        <div class="bk-grid bk-grid--wm bk-frames">
+          <figure data-frame="web" data-src="orders/web/intake.html" data-url="hercule.home.arpa/intake?since=2026-09-28T18:20" data-caption="Web" data-note="The same page under the web bar."></figure>
+          <figure data-frame="mobile" data-src="orders/mobile/intake.html" data-caption="Phone" data-note="The digest first: one line per order. Then the exceptions, the urgent one as the only card."></figure>
+        </div>
+
+        <div class="bk-sub"><h3>Main elements</h3></div>
+        <ul class="bk-elements">
+          <li><b>Tiers</b>Now, Needs a call, Waiting on you, Today, When you can, then Also. The tier sits in a gutter, so every row's answers line up in the same three columns.</li>
+          <li><b>Short describe line</b>Under each answer on a row: the core's full line minus the names the row already shows. "Removes label proposed".</li>
+          <li><b>Lead card</b>The one card: full describe lines with fine print, and "Always do this..." in its foot.</li>
+          <li><b>Lever</b>Handled for you against answered by you, this week, as two numbers and a split bar.</li>
+          <li><b>Order</b>What it did since the marker, one line per run. Its Spawn Bound as a meter, Review, and Undo where the work can be undone.</li>
+          <li><b>Always do this</b>The editor: the event in words, the workflow it starts, the bound, and a preview of last week's matches with the unwanted ones flagged.</li>
+          <li><b>Starter orders</b>A new Connection comes with suggested orders. None is active until you make it.</li>
+        </ul>
+
+        <div class="bk-sub"><h3>Making an order, and at ten times the load</h3><p>2,120 events, and still 7 decisions. The orders list grows instead.</p></div>
+        <div class="bk-grid bk-grid--2">
+          <figure data-frame="desktop" data-src="orders/desktop/intake.html" data-state="make" data-caption="Always do this: Merge all 4" data-note="The event, the source and the conditions in words, then the workflow, the bound and 31 matches from last week. Answer and make standing in one click, or answer only."></figure>
+          <figure data-frame="desktop" data-src="orders/desktop/intake.html" data-state="swarm" data-caption="Swarm" data-note="7 decisions, one answer that cannot be taken. 1,186 handled for you against 41 by you this week."></figure>
+        </div>
+        <div class="bk-grid bk-grid--phones bk-frames">
+          <figure data-frame="mobile" data-src="orders/mobile/intake.html" data-state="swarm" data-caption="Phone, swarm" data-note="Six orders and nine more in the digest, then 7 decisions."></figure>
+          <figure data-frame="mobile" data-src="orders/mobile/intake.html" data-state="make" data-caption="Phone, making an order" data-note="The editor as a sheet, with two preview rows."></figure>
+          <figure data-frame="mobile" data-src="orders/mobile/intake.html" data-theme="orient-express" data-caption="Phone, Orient Express" data-note="The dark theme."></figure>
+        </div>
+
+        <div class="bk-cols">
+          <div class="bk-block">
+            <h3>Why it beats Deck and The Line</h3>
+            <p>Deck makes each answer faster and The Line makes each answer visible, but in both you still give every answer yourself. At ten times the load they still hold 90 decisions. Standing Orders is the only direction where the number of decisions falls as the load grows, because the answers you repeat stop reaching you. And the handover stays explicit: every order is a start trigger you wrote, with a bound you chose and a preview you saw. Nothing acts on a guess.</p>
+          </div>
+          <div class="bk-block">
+            <h3>Why it is 1000x better than today</h3>
+            <p>Today the ninth dependency bump costs you the same click as the first, and the page cannot learn from your answers. Standing Orders turns a repeated answer into a trigger in one step, after it shows proof: 31 matches from last week, 6 of them flagged. Then the lever shows the return, 38 handled for you against 9 by you this week, and 1,186 against 41 at ten times the load. The multiplier is not in answering faster. It is in answering once.</p>
+          </div>
+          <div class="bk-block">
+            <h3>At ten times the load</h3>
+            <ul>
+              <li>7 decisions, not 90. Add to backlog takes the low-priority proposals; Merge dependency bumps takes the patches; Draft reply answers Intercom.</li>
+              <li>The orders list grows instead: 6 orders, then "9 more orders · 466 runs, none paused".</li>
+              <li>"Handled 57" says which order took which proposals.</li>
+              <li>A plugin action that changed shows "Cannot be taken" in place; the other answers still work.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>What it pulls from after v1</h3>
+            <ul>
+              <li><b>Feedback that teaches triage:</b> "Stop proposing PostHog dips under 5%" sits under Also, marked later.</li>
+              <li><b>Fast lane:</b> orders act between batches, and the lever counts as they do.</li>
+              <li><b>Park:</b> a fourth answer column on a row, a fourth line on the lead card.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>What it contradicts</h3>
+            <ul>
+              <li><b>CONTEXT.md:</b> "standing order" is not a word there. It is a start Trigger with a Spawn Bound, as ADR 0022 asks. Either CONTEXT.md gets the word, or the UI says "start trigger".</li>
+              <li><b>Spec 10 §2.5:</b> an order acts without a click, which is its point. An order made from a Start answer listens on <code>task.created</code>, which §2.4 rules out for work workflows.</li>
+              <li><b>Spec 10 §7.7</b> needs a line: a Proposal resolves when its Task stops being proposed, whoever changed it.</li>
+              <li><b>Spec 10 §7.4 and spec 12 §11.6:</b> rows and chat buttons show a short describe line, derived by a rule, not the full line.</li>
+              <li><b>Spec 10 §8:</b> the npm approval sits in Intake under Waiting on you. Approvals belong to Check-in, and v1 keeps the two views separate.</li>
+              <li><b>Not built:</b> Spawn Bounds, the breaker, held events, <code>trigger.resume</code> (#87), and plugin actions as answers. The bound meters depend on them.</li>
+            </ul>
+          </div>
+          <div class="bk-block">
+            <h3>How to adopt it</h3>
+            <ol>
+              <li>Ship the tiers with answers in fixed columns, and propose the short describe line rule for spec 10 §7.4.</li>
+              <li>Build Spawn Bounds, the breaker and held events (#87). Every order's "At most" depends on them, and today nothing enforces a bound.</li>
+              <li>Offer "Always do this" on Accept and Dismiss first: one-step <code>task.update</code> workflows that can be undone, with the match preview and the orders list beside the tiers.</li>
+              <li>Open orders to Start answers and plugin actions, then add the lever and starter orders for new Connections.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="bk-sub"><h3>Its system</h3><p>All of it in <code>orders/intake.css</code>, built on Crew Bureau 2 parts. The full list, and the short describe line rule with every example, are in <code>orders/NOTES.md</code>.</p></div>
+        <table class="bk-table">
+          <thead>
+            <tr><th>Part</th><th>What it is</th><th>Rule</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Tier</td><td class="m">The tier's name and count in a 92px gutter, its decisions beside it.</td><td class="m">Now in fail ink; the tiers that wait on you in marigold.</td></tr>
+            <tr><td>Decision row</td><td class="m">Source marks, title and priority, kind and context, then the answers in three fixed columns.</td><td class="m">Suggested, neutral, quiet: the same column on every row. A call (Unsure, breaker) suggests nothing.</td></tr>
+            <tr><td>Short describe line</td><td class="m">The core's line for the answer, minus the names the row shows.</td><td class="m">Never the producer's words. Wraps to two lines, never cut. If it cannot fit, the answers take a ledger.</td></tr>
+            <tr><td>Lead card</td><td class="m">The one card: chips, title, gist, made from, the answer ledger with full lines and fine print.</td><td class="m">One per page. "Always do this..." in its foot.</td></tr>
+            <tr><td>Lever</td><td class="m">Handled for you and by you, as two display numerals and a split bar.</td><td class="m">One time frame for both numbers, this week, said on each.</td></tr>
+            <tr><td>Order</td><td class="m">Face, name, scope, runs, overrides, then one line per run.</td><td class="m">Shown by what it did. Its settings live only in the editor.</td></tr>
+            <tr><td>Bound meter</td><td class="m">The Spawn Bound as a meter and "2 of 10 a day", then Review and Undo.</td><td class="m">Red and paused when tripped. Undo only where the work can be undone: labels and Task status.</td></tr>
+            <tr><td>Always do this</td><td class="m">The editor: When (event, source, conditions in words, the CEL beneath), Do, At most.</td><td class="m">A floating panel on desktop, a wide panel on web, a sheet on the phone. Not offered on approvals, breakers, Unsure, or an answer that cannot be taken.</td></tr>
+            <tr><td>Match preview</td><td class="m">How many events last week would have matched, the newest listed.</td><td class="m">Flags the matches the order should not take, and says why a filter cannot tell them apart.</td></tr>
+            <tr><td>Starter order</td><td class="m">A suggested order for a new Connection, with Make...</td><td class="m">Never active until you make it.</td></tr>
+            <tr><td>Phone digest</td><td class="m">One line per order: what it did and its latest state.</td><td class="m">Comes before the decisions, so the phone opens on what was done.</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <!-- COMPARE -->
+      <section class="bk-sec" id="compare">
+        <div class="bk-h">
+          <span class="bk-kick">Side by side</span>
+          <h2>Three levers, one morning</h2>
+          <p class="bk-lede">The same 212 events, measured on each page at its real size: 1440 by 900 on the desktop, 1280 by 800 on the web, 390 by 844 on the phone.</p>
+        </div>
+        <table class="bk-table bk-cmp">
+          <thead>
+            <tr><th></th><th>Today</th><th>Deck</th><th>The Line</th><th>Standing Orders</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lever</td><td class="m">None. A page to read</td><td class="m">Speed per decision</td><td class="m">Visible consequence</td><td class="m">Fewer decisions</td></tr>
+            <tr><td>What you see first</td><td class="m">Headline counts, then the lead card</td><td class="m">One decision, and a strip of how many are left</td><td class="m">212 in → 9 for you → 4 moving → 3 shipped</td><td class="m">The exceptions by tier, and what each order did while you were away</td></tr>
+            <tr><td>Desktop, in view</td><td class="m">13 buttons, 348 words</td><td class="m">6 buttons, 422 words</td><td class="m">9 buttons, 407 words</td><td class="m">26 buttons, 490 words</td></tr>
+            <tr><td>Answerable without scrolling</td><td class="m">3 of 9</td><td class="m">1 of 9. The rest are one key away</td><td class="m">2 of 10*</td><td class="m">5 of 10*</td></tr>
+            <tr><td>Clearing this morning</td><td class="m">A click each. 6 need a scroll first</td><td class="m">9 keys, about 2 minutes</td><td class="m">A click each. 8 need a scroll first</td><td class="m">A click each. 5 need a scroll first</td></tr>
+            <tr><td>At ten times the load</td><td class="m">90 decisions, piled by topic behind bigger buttons</td><td class="m">90 decisions on 13 cards: 13 keys, about 4 minutes</td><td class="m">90 calls in topic lanes, counted by tier</td><td class="m">7 decisions. Orders took 1,186 things this week</td></tr>
+            <tr><td>Web, in view</td><td class="m">6 buttons, 339 words. 1 of 9 answerable: a list, and one decision open</td><td class="m">6 buttons, 419 words. 1 of 9 answerable. Each card has its own address, for a chat message or a colleague</td><td class="m">8 buttons, 362 words. 2 of 10 answerable. The stage heads are links</td><td class="m">18 buttons, 421 words. 3 of 10 answerable. The same page under the web bar</td></tr>
+            <tr><td>Phone</td><td class="m">3 buttons, 133 words</td><td class="m">5 buttons, 131 words. Swipe, and the next decision on the lock screen</td><td class="m">4 buttons, 135 words. The line turns vertical; the run you started is a Live Activity</td><td class="m">3 buttons, 140 words. What orders did first, then the exceptions</td></tr>
+            <tr><td>Chat</td><td class="m">One message per decision (spec 12 §11.6)</td><td class="m">One card is one message. A batch is one message only if triage marks the group</td><td class="m">One message per decision, edited to "now Moving" once answered</td><td class="m">The label and the short describe line on each button. "Always do this" as a link</td></tr>
+            <tr><td>Not built yet</td><td class="m">-</td><td class="m">Batch answers, and the panel window</td><td class="m">A trace read that joins Events, Task, answer, run and pull request</td><td class="m">Spawn Bounds, the breaker and held events (#87)</td></tr>
+            <tr><td>Biggest departure</td><td class="m">-</td><td class="m">Batches: one describe line for 22 operations (spec 10 §7.4)</td><td class="m">Merges Intake and Check-in, and reads runs (spec 10 §8)</td><td class="m">Acts without a click (spec 10 §2.5), and approvals in Intake (spec 10 §8)</td></tr>
+            <tr><td>Biggest risk</td><td class="m">-</td><td class="m">Fast answers with no feedback drift into rubber stamping</td><td class="m">Watching replaces deciding: four stages compete for the eye with the one call that matters</td><td class="m">A loose filter acts many times before you look. The preview and the bound carry that weight</td></tr>
+            <tr><td>First step with no spec change</td><td class="m">-</td><td class="m">The answer ledger and the keys, in today's Intake</td><td class="m">The answer ledger and the taps, in today's Intake</td><td class="m">None. Its rows need the short describe line, which is a spec change</td></tr>
+          </tbody>
+        </table>
+        <p class="bk-body" style="margin-top: 16px">* The Line and Standing Orders count 10 decisions because the npm approval joins Intake. Today and Deck count 9: there the approval stays a Check-in decision, as v1 has it.</p>
+      </section>
+
+      <!-- PICK -->
+      <section class="bk-sec" id="pick">
+        <div class="bk-h">
+          <span class="bk-kick">The pick</span>
+          <h2>Deck, then what it lacks from the other two</h2>
+          <p class="bk-lede">Start from Deck, unless bending the number of decisions this year matters more to you than making each one fast.</p>
+        </div>
+        <div class="bk-pick">
+          <div class="bk-block">
+            <h3>Why Deck</h3>
+            <ul>
+              <li><b>It costs the least attention at the moment you decide.</b> One card, every answer with its describe line, one key.</li>
+              <li><b>It ships in steps on today's records.</b> The card's answer ledger and the keys need no spec change.</li>
+              <li><b>It reads the same everywhere.</b> A card is one chat message and a swipe is one button, and in v1 the phone surface is Slack or Discord.</li>
+              <li><b>Its catch is batches.</b> The 13 keys at ten times the load rest on them, and they are its biggest departure. Until triage marks the groups and the core writes one describe line for a batch, 90 decisions are 90 keys.</li>
+            </ul>
+            <h3 style="margin-top: 20px">What it takes from the other two, and where it goes</h3>
+            <ol>
+              <li><b>Now:</b> Deck's card, ledger and keys in today's Intake.</li>
+              <li><b>Next, from The Line:</b> Shipped, with its lead time, under Moving in the side column. Its trace opens in the evidence drawer. This closes the gap from an answer to shipped work, and it needs the new trace read.</li>
+              <li><b>Then, from Standing Orders, once #87 is built:</b> "Always do this..." in the card's foot, next to Evidence. The orders join the side column under Moving, and the clear state shows the lever: 38 handled for you, 9 by you.</li>
+              <li><b>Before the load grows:</b> decide batches.</li>
+            </ol>
+          </div>
+          <aside class="card bk-pick-card">
+            <h3>Pick another if</h3>
+            <p><b>Standing Orders</b>, if you would rather the number of decisions fall this year, and you build #87 first. It is the only direction where ten times the load is not ten times the decisions. It also has the most still to build.</p>
+            <p><b>The Line</b>, if one spine for Intake and Check-in is the question to settle this year. It is the only direction that answers it, and its trace is what tells you an order is safe to make.</p>
+          </aside>
+        </div>
+
+        <div class="bk-sub"><h3>Open in all three</h3><p>These come from the shared data or the spec, not from a direction. They need a decision whichever direction is picked.</p></div>
+        <ul class="bk-elements">
+          <li><b>The 3-D Secure thread</b>The sidebar shows "Fix 3-D Secure checkout" waiting on "Run git push?" while Intake still proposes starting that fix. It comes from Crew Bureau 2's shared data; the story needs one or the other.</li>
+          <li><b>"Decided on the desktop"</b>Spec 10 §7.3 writes the outcome line from the answer's origin, and there is no desktop origin. Either the desktop app gets one, or the line reads "decided in the web app".</li>
+          <li><b>Chat buttons</b>Deck and The Line put the label on the button and "label · describe line" in the body, as spec 12 §11.6 does. Standing Orders puts the short line on the button too. One way should win.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

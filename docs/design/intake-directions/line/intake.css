@@ -1,0 +1,1268 @@
+/* PROTOTYPE - Intake, direction B: The Line.
+
+   Intake is drawn as the head of a production line. Events come in on the left, the calls that
+   wait on Rogier sit in the middle, the work those calls set moving runs to the right, and what
+   reached the world ends the line. The three pages (desktop, web, mobile) share every rule here.
+   Nothing in this file restyles a system.css class: each component has its own name and only
+   places system parts (.btn, .card, .section-h, .deco-num, marks, faces) inside itself. */
+
+/* ---------- States: ?state=swarm and ?state=trace (page.js sets html[data-state]) ---------- */
+html:not([data-state="swarm"]) .swarm-only,
+html[data-state="swarm"] .today-only,
+html:not([data-state="trace"]) .trace-only {
+  display: none !important;
+}
+
+/* ---------- The fallback mark: a system with no brand mark (brief §5, verbatim) ---------- */
+.src-x {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  font: var(--w-bold) 9px/1 var(--font-ui);
+  text-transform: lowercase;
+}
+
+/* ---------- Bar extras ---------- */
+/* The last triage: when it ran, how long it took, when it runs next. Opens the triage's summary. */
+.triage-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px 0 4px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.triage-status:hover {
+  background: var(--hover);
+}
+.triage-status b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+/* The triage's one-paragraph summary: a small floating glass panel under the bar, opened from
+   .triage-status. It is reachable by URL (#triage-summary), so it needs no script. */
+.triage-summary {
+  position: absolute;
+  z-index: 12;
+  top: 52px;
+  right: 16px;
+  width: 360px;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.triage-summary:not(:target) {
+  display: none;
+}
+.triage-summary p {
+  margin: 8px 0 0;
+}
+.triage-summary-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* ---------- The web page: the bar and the line under the web bar ---------- */
+/* The web frame has no .main; this column holds the bar, the line and the floating layers. */
+.line-page {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- The line: four stages side by side ---------- */
+/* One grid holds the stage heads (row 1) and the stage bodies (row 2), so a hairline drawn on a
+   head and on its body reads as one rule from top to bottom. Every body scrolls on its own. */
+.line {
+  --line-cols: 200px minmax(0, 1fr) 188px 188px;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--line-cols);
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 0 12px;
+}
+/* The web frame has no sidebar, so every stage gets more room. */
+.line--wide {
+  --line-cols: 224px minmax(0, 1fr) 200px 200px;
+}
+.flow-stage + .flow-stage,
+.line-stage + .line-stage,
+.lane-cell + .lane-cell {
+  box-shadow: inset 1px 0 0 var(--line-soft);
+}
+
+/* The flow meter: each stage head is a count and a word, with an arrow on the rule between
+   stages. Read left to right it is the meter: 212 in, 9 for you, 4 moving, 3 shipped. */
+.flow-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.flow-stage .deco-num {
+  flex: none;
+}
+.flow-label {
+  display: grid;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.flow-label b {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.flow-stage--you .deco-num {
+  color: var(--you-ink);
+}
+.flow-arrow {
+  position: absolute;
+  left: -8px;
+  top: 17px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  background: var(--surface);
+  color: var(--faint);
+}
+
+.line-stage {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 12px 12px 24px;
+}
+
+/* ---------- Came in: one tap per Connection ---------- */
+/* A tap is one Connection: its mark, its system, the events since the marker, and a short brass
+   pipe into the manifold on the stage's right edge. Brass is the office's tube colour: ornament,
+   never a state. */
+.taps {
+  position: relative;
+  display: grid;
+  margin-right: -12px;
+}
+/* The manifold: where every pipe joins before triage sorts the events. */
+.taps::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 13px;
+  bottom: 13px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--brass) 70%, transparent);
+}
+.tap {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto 28px;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 26px;
+  border-radius: var(--r-xs);
+}
+.tap > .br,
+.tap > .ic,
+.tap > .src-x {
+  justify-self: center;
+  color: var(--ink);
+  opacity: 0.8;
+}
+.tap-name {
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.tap-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--w-bold);
+  text-align: right;
+}
+.tap-pipe {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 2px;
+  margin-left: 4px;
+  background: color-mix(in oklab, var(--brass) 70%, transparent);
+}
+/* A line under the tap, aligned with its name: "34 held", "listening since Mon 17:55". */
+.tap-note {
+  grid-column: 2 / 4;
+  margin: -4px 0 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+/* A new Connection with no events yet: a dashed pipe, so it reads as connected and quiet. */
+.tap--listening .tap-count {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+.tap--listening .tap-pipe {
+  background: repeating-linear-gradient(90deg, color-mix(in oklab, var(--brass) 70%, transparent) 0 4px, transparent 4px 7px);
+}
+/* The valve: a tripped Spawn Bound closes the tap. The paused mark sits on the pipe, and past it
+   the pipe is empty, because nothing flows until Rogier answers. */
+.valve {
+  position: absolute;
+  left: 4px;
+  top: -7px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.tap--held .tap-pipe {
+  background: linear-gradient(90deg, color-mix(in oklab, var(--brass) 70%, transparent) 0 6px, var(--line-soft) 6px);
+}
+.tap--held .tap-note {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+/* One event arriving: one dot runs along the tap's pipe once. Nothing is drawn while the tap is
+   quiet, and the dot animates transform and opacity only. */
+.tap-dot {
+  position: absolute;
+  left: 0;
+  top: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brass);
+  opacity: 0;
+}
+html:not([data-motion="off"]) .tap.is-receiving .tap-dot {
+  animation: tap-dot 320ms var(--ease-out) 1;
+}
+@keyframes tap-dot {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+
+/* The receipt, read down the stage: what triage made of the events, every count opening the
+   events behind it. The counts add up to the number at the head of the stage. */
+.receipt-rows {
+  display: grid;
+  margin-top: 20px;
+}
+.receipt-rows .section-h {
+  margin-bottom: 4px;
+}
+.receipt-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: baseline;
+  min-height: 22px;
+  padding: 2px 0;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+}
+.receipt-row:hover {
+  color: var(--ink);
+}
+.receipt-row > b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+/* An example under a count: one of the events that needed nothing, from a system with no brand mark. */
+.receipt-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  margin: 0 0 4px 24px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.receipt-item > .br,
+.receipt-item > .ic,
+.receipt-item > .src-x {
+  margin-top: 1px;
+  color: var(--ink);
+  opacity: 0.8;
+}
+.receipt-item b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- Your call: decisions, tiered ---------- */
+.tier-h {
+  margin: 20px 0 4px;
+}
+.tier-h:first-child {
+  margin-top: 0;
+}
+.tier-h--you {
+  color: var(--you-ink);
+}
+/* The one pulsing dot on the page, on the Now tier's label. It fades in place; it never grows a
+   ring. On desktop it is drawn still (html[data-motion="off"]). */
+html:not([data-motion="off"]) .attention-pulse {
+  animation: attention-pulse 2.4s ease-in-out infinite;
+}
+@keyframes attention-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .attention-pulse,
+  .tap.is-receiving .tap-dot {
+    animation: none !important;
+  }
+}
+
+/* One decision: a head (what it is, where it came from) and its Bound Actions. Decisions are
+   separated by hairlines; only the lead is a card. Every decision keeps 16px side padding, the
+   card's padding, so every answer column starts at the same x down the stage. */
+.decision {
+  padding: 12px 16px;
+}
+.decision + .decision {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.decision--lead {
+  padding: 16px;
+}
+/* A run that needs Rogier comes back up the line: a marigold rule on its left edge. */
+.decision--back {
+  box-shadow: inset 2px 0 0 var(--you);
+}
+.decision-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+.decision-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.decision-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  color: var(--muted);
+}
+.decision-marks .br,
+.decision-marks .ic,
+.decision-marks .src-x {
+  color: var(--ink);
+  opacity: 0.8;
+}
+.decision-meta {
+  margin: 2px 0 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.decision-meta .proj {
+  font-size: var(--t-12);
+  /* The project chip's rug is a pseudo-element; top alignment keeps the chip on the text line. */
+  vertical-align: top;
+}
+/* The lead decision: the burning Proposal, one card. */
+.decision-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The handle for the drag gesture: a decision dropped on a workflow in Moving starts it. */
+.drag-handle {
+  display: inline-grid;
+  place-items: center;
+  color: var(--faint);
+  cursor: grab;
+}
+.decision-lead-title {
+  margin: 8px 0 4px;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.decision-gist {
+  margin: 0 0 12px;
+  font-size: var(--t-13);
+  line-height: 20px;
+}
+/* Made from: one entry per source system, its mark, the fact, and the Connection that carried it. */
+.made-from {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+  margin: 0 0 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+.made-from-entry {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.made-from-entry > .br,
+.made-from-entry > .ic,
+.made-from-entry > .src-x {
+  margin-top: 1px;
+  color: var(--ink);
+  opacity: 0.8;
+}
+.made-from-entry span {
+  color: var(--faint);
+}
+
+/* ---------- Bound Actions: a decision's answers ---------- */
+/* One row per answer, and the row is the button: the label in a fixed column, then the core's
+   Describe Line with live names in ink, then the producer's description as fine print. The label
+   column is 176px on every decision of the page, wide enough for the longest label ("Resume and
+   discard the 34"), so labels line up from the first decision to the last.
+   Unlike .ans in system.css it has a fine-print row and draws the four answer states:
+   - a <button>: bound to a core operation or a plugin action (the Describe Line names the Connection),
+   - .bound-action--opens, an <a>: navigation only, "Opens ...",
+   - a disabled <button>: cannot be taken, "Cannot be taken: <why>". */
+.bound-actions {
+  display: grid;
+  gap: 2px;
+  margin: 0 -8px;
+}
+.bound-action {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+  min-height: 30px;
+  padding: 2px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.bound-action:hover {
+  background: var(--hover);
+}
+.bound-action > .btn {
+  grid-row: 1 / span 2;
+  width: 100%;
+}
+.describe-line {
+  padding: 5px 0 5px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.describe-line b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.describe-line code {
+  color: var(--ink);
+}
+/* The producer's own description of what the answer means. */
+.producer-description {
+  grid-column: 2;
+  margin: -5px 0 5px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 16px;
+}
+.bound-action--opens .btn .ic {
+  margin-right: -2px;
+  color: var(--muted);
+}
+.bound-action:disabled {
+  cursor: not-allowed;
+}
+.bound-action:disabled:hover {
+  background: none;
+}
+.bound-action:disabled > .btn {
+  opacity: 0.45;
+}
+/* Said once under a decision's answers when not answering has an effect of its own. */
+.unanswered-note {
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+/* Where a decision's copies go when Rogier is away from the app. */
+.delivery-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 24px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.delivery-note .br {
+  opacity: 0.8;
+}
+
+/* ---------- Moving: the runs earlier answers started ---------- */
+.line-run {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  margin: 0 -6px;
+  padding: 6px;
+  border-radius: var(--r-md);
+}
+.line-run:hover {
+  background: var(--hover);
+}
+.line-run + .line-run {
+  margin-top: 4px;
+}
+.line-run-text {
+  display: grid;
+  min-width: 0;
+  font-size: var(--t-12);
+  line-height: 16px;
+  color: var(--muted);
+}
+.line-run-text b {
+  margin-bottom: 2px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 18px;
+}
+.line-run-text .you-ink {
+  font-weight: var(--w-medium);
+}
+/* An event triage attached to the run's Task at the last batch. */
+.line-run-attached {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--ink);
+}
+.line-run-attached .br {
+  opacity: 0.8;
+}
+
+/* The drop targets for the drag gesture: the workflows a decision can start, at the foot of
+   Moving. Dragging is beside the answers, never instead of them. */
+.line-stage--moving {
+  display: flex;
+  flex-direction: column;
+}
+.workflow-dock {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 16px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+
+/* ---------- Shipped: what reached the world, each with the trace back to its events ---------- */
+.shipped-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  margin: 0 -6px;
+  padding: 8px 6px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.shipped-item:hover {
+  background: var(--hover);
+}
+html[data-state="trace"] .shipped-item--traced {
+  background: var(--selected);
+}
+.shipped-item > .mark {
+  margin-top: 2px;
+}
+.shipped-item-text {
+  display: grid;
+  min-width: 0;
+}
+.shipped-item-text b {
+  margin-bottom: 2px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 18px;
+}
+/* The trace in one line: the source marks with their counts, an arrow, the lead time. */
+.trace-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 4px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.trace-line .br,
+.trace-line .ic {
+  opacity: 0.8;
+}
+.trace-line .ic[aria-hidden] {
+  color: var(--faint);
+  opacity: 1;
+}
+.trace-line b {
+  font-weight: var(--w-bold);
+}
+
+/* ---------- The trace drawer: one shipped item, from its first event to the world ---------- */
+.trace-drawer {
+  position: absolute;
+  z-index: 10;
+  top: 60px;
+  right: 12px;
+  bottom: 12px;
+  width: 440px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.trace-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+  padding: 16px 12px 12px 20px;
+}
+.trace-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.trace-title {
+  margin: 4px 0 2px;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.trace-sub {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* On the web the trace is a page state with its own URL: the address bar shows this path. */
+.trace-url {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  overflow-wrap: anywhere;
+}
+.trace-close {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  align-self: start;
+}
+.trace-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 0 20px 16px;
+}
+/* Lead time, split by where the work waited: four segments that add up to the total. */
+.lead-time {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lead-time b {
+  color: var(--ink);
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.lead-time-split {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+}
+.lead-time-split i {
+  border-radius: 2px;
+  background: var(--line);
+}
+.lead-time-split .is-you {
+  background: var(--you);
+}
+.lead-time-split .is-run {
+  background: var(--who);
+}
+.lead-time-split .is-review {
+  background: var(--muted);
+}
+/* The trace itself: one row per step, grouped by the stage the work was in. */
+.trace-steps {
+  margin: 16px 0 0;
+}
+.trace-span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.trace-span:first-child {
+  margin-top: 0;
+}
+.trace-span i {
+  width: 10px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.trace-span .is-you {
+  background: var(--you);
+}
+.trace-span .is-run {
+  background: var(--who);
+}
+.trace-span .is-review {
+  background: var(--muted);
+}
+.trace-span span {
+  margin-left: auto;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.trace-step {
+  display: grid;
+  grid-template-columns: 40px 20px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  padding: 4px 0;
+  font-size: var(--t-12);
+  line-height: 16px;
+  color: var(--muted);
+}
+.trace-step time {
+  padding-top: 2px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.trace-step > .br,
+.trace-step > .ic,
+.trace-step > .mark,
+.trace-step > .cr,
+.trace-step > .cr-you {
+  justify-self: center;
+  margin-top: 1px;
+}
+.trace-step > .br {
+  color: var(--ink);
+  opacity: 0.8;
+}
+.trace-step b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.trace-step p {
+  margin: 0;
+}
+.trace-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* ---------- Topic lanes (?state=swarm): the line split into one row per topic ---------- */
+/* The lanes use the line's columns, so each lane cell sits under its stage head. */
+.topic-lanes {
+  grid-column: 1 / -1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding-bottom: 24px;
+}
+.topic-lane {
+  display: grid;
+  grid-template-columns: var(--line-cols);
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.lane-cell {
+  min-width: 0;
+  padding: 12px;
+}
+.lane-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.lane-name small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+/* Taps of one topic, side by side: a mark and a count each. */
+.lane-taps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.lane-taps > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lane-taps .br,
+.lane-taps .ic {
+  opacity: 0.8;
+}
+.lane-taps .is-quiet {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+.lane-taps .is-held {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+/* A pile: one topic's open decisions, as counts by tier, and the way in to them. */
+.pile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+  margin: 0 0 12px;
+}
+.pile .btn {
+  margin-left: auto;
+}
+/* Fixed columns, so each tier's count sits at the same x in every lane. */
+.pile-counts {
+  display: grid;
+  grid-template-columns: 52px 60px 112px 64px 52px 52px;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.pile-counts .is-zero,
+.pile-counts .is-zero b {
+  color: var(--faint);
+}
+.pile-counts b {
+  margin-right: 4px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-variant-numeric: tabular-nums;
+}
+.pile-counts .is-burning b {
+  color: var(--fail-ink);
+}
+.pile-counts .you-ink b {
+  color: var(--you-ink);
+}
+/* A decision shown under its pile, because it cannot wait for the pile to be opened. */
+.decision--pile {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.lane-note {
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.lane-note.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.lane-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lane-count .deco-num {
+  color: var(--ink);
+  font-size: 20px;
+}
+.lane-count + .lane-count,
+.lane-count + .stack {
+  margin-top: 8px;
+}
+
+/* ---------- Mobile: the line, top to bottom ---------- */
+/* The meter on a phone: four counts in a row, each a stage further down the page. */
+.flow-meter {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+.flow-meter a {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 14px;
+  text-align: center;
+}
+.flow-meter a + a::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 9px;
+  width: 8px;
+  height: 8px;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: 0.7;
+}
+.flow-meter .deco-num {
+  color: var(--ink);
+}
+.flow-meter .is-you .deco-num {
+  color: var(--you-ink);
+}
+/* A stage on the phone: a heading row, then its content. Collapsed stages are one row of counts. */
+.vstage {
+  padding: 16px 16px 4px;
+}
+.vstage + .vstage {
+  border-top: 1px solid var(--line-soft);
+}
+.vstage-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.vstage-h small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.vstage-h .ic:last-child {
+  margin-left: auto;
+  color: var(--faint);
+}
+/* Taps on the phone: a mark and a count each, wrapped. */
+.taps--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.taps--inline::after {
+  content: none;
+}
+.taps--inline > * {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+}
+.taps--inline .br,
+.taps--inline .ic {
+  opacity: 0.8;
+}
+.taps--inline .is-quiet {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+.taps--inline .is-held {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+/* A decision on the phone: head, then big answers (.m-ans). */
+.vdecision {
+  padding: 8px 0 16px;
+}
+.vdecision + .vdecision {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 16px;
+}
+.vdecision .decision-meta {
+  margin-bottom: 12px;
+}
+.vdecision--back {
+  margin: 0 -16px;
+  padding-left: 16px;
+  padding-right: 16px;
+  box-shadow: inset 3px 0 0 var(--you);
+}
+/* .m-ans in system.css has no disabled state; this adds one for an answer that cannot be taken. */
+.m-ans:disabled {
+  cursor: not-allowed;
+}
+.m-ans:disabled > b,
+.m-ans:disabled > .m-ans-icon {
+  opacity: 0.45;
+}
+/* Names in a Describe Line keep the line's size; they stand out by weight and ink only. */
+.m-ans span b,
+.m-ans span code {
+  font-size: inherit;
+}
+.m-ans:not(.m-ans--accent) span b,
+.m-ans:not(.m-ans--accent) span code {
+  color: var(--ink);
+}
+.m-ans .producer-description {
+  grid-column: 2;
+  margin: 2px 0 0;
+}
+
+/* The Live Activity of one run: where the run is on the line, as the Lock Screen and the Dynamic
+   Island show it. Inside the app it is the run you follow, at the top of Moving. */
+.live-activity {
+  display: grid;
+  gap: 12px;
+  padding: 12px 16px 16px;
+}
+.live-activity-top {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: center;
+}
+.live-activity-top b {
+  display: block;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+.live-activity-top small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.live-activity-time {
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+/* Four segments, one per stage: done stages solid, the current one in the run's colour. */
+.live-activity-track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 14px;
+}
+.live-activity-track span {
+  display: grid;
+  gap: 6px;
+}
+.live-activity-track span::before {
+  content: "";
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-soft);
+}
+.live-activity-track .is-done::before {
+  background: var(--muted);
+}
+.live-activity-track .is-now {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.live-activity-track .is-now::before {
+  background: var(--who);
+}
+/* The compact Live Activity in the Dynamic Island: the face on the left, the time on the right. */
+.island-activity {
+  position: absolute;
+  z-index: 21;
+  left: 50%;
+  top: 11px;
+  width: 176px;
+  height: 36px;
+  margin-left: -88px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px 0 8px;
+  border-radius: 20px;
+  background: #000;
+  color: #fff;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.face-stack {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* On the phone the triage's summary drops from the title row at full width. */
+.triage-summary--phone {
+  top: 104px;
+  right: 16px;
+  left: 16px;
+  width: auto;
+}
+/* Made from on the phone: one wrapped line of marks and facts; the decision view names the Connections. */
+.made-from--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.vstage-h + .tier-h {
+  margin-top: 4px;
+}
+.tier-h small {
+  margin-left: auto;
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+/* An answer's icon in a 32px box, the width of a face, so every label on the page starts at the
+   same x whether its answer leads with a face, an icon, a brand mark or a project swatch. */
+.m-ans-icon {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  width: 32px;
+}
+/* A decision as one row on the phone (Today, When you can, and the piles of a swarm): a tap opens
+   it with its answers, so the row carries no answer of its own. */
+.vdecision-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto 14px;
+  column-gap: 12px;
+  align-items: center;
+  min-height: 52px;
+  padding: 8px 0;
+  color: var(--faint);
+}
+.vdecision-row + .vdecision-row {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.vdecision-row > .br {
+  color: var(--ink);
+  opacity: 0.8;
+}
+.vdecision-row > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+.vdecision-row b {
+  color: var(--ink);
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+  line-height: 18px;
+}
+.vdecision-row small {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.pile-total {
+  color: var(--ink);
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.live-activity-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 14px;
+}
+.vstage .face-stack {
+  margin: 12px 0 8px;
+}
+/* The trace on the phone: a sheet at the large detent over a dimmed page. */
+.trace-sheet {
+  max-height: calc(100% - 64px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.trace-sheet .trace-foot {
+  padding-bottom: 34px;
+}
+.sheet-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  background: oklch(0 0 0 / 0.32);
+}

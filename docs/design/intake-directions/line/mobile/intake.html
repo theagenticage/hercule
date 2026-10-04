@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../intake.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Intake · Hercule</title>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <!-- The Live Activity of the run Rogier follows, compact in the Dynamic Island. -->
+      <a class="island-activity" href="#live-activity" aria-label="Cart total rounding on discounts, Fix bug, working 14 minutes"><i data-face="Cart total rounding on discounts" data-pose="working" data-size="24"></i><span>14m</span></a>
+
+      <div class="m-title">
+        <h1>Intake</h1>
+        <span class="spacer"></span>
+        <a class="triage-status" href="#triage-summary" title="Triage sorted at 09:00 in 42s; next at 11:00"><i data-face="Triage" data-pose="idle" data-size="24"></i><span><b>09:00</b> · next <b>11:00</b></span></a>
+        <button class="btn btn--sm">Triage now</button>
+      </div>
+      <div class="glass triage-summary triage-summary--phone" id="triage-summary">
+        <div class="triage-summary-h"><i data-face="Triage" data-pose="idle" data-size="20"></i>Triage · 09:00 · 42s</div>
+        <p>One fire: EU cards with 3&#8209;D Secure fail at checkout since deploy #1289. A bot opened 34 issues, so Label new issues hit its bound; the 34 wait for you. Two offers, one Android report I could not place, and 166 events that needed nothing.</p>
+      </div>
+
+      <div class="m-body">
+        <!-- The line, top to bottom: each count jumps to its stage further down. -->
+        <nav class="flow-meter" aria-label="The line">
+          <a href="#came-in"><span class="deco-num"><span class="today-only">212</span><span class="swarm-only">2,120</span></span>came in</a>
+          <a class="is-you" href="#your-call"><span class="deco-num"><span class="today-only">9</span><span class="swarm-only">90</span></span>for you</a>
+          <a href="#moving"><span class="deco-num"><span class="today-only">4</span><span class="swarm-only">40</span></span>moving</a>
+          <a href="#shipped"><span class="deco-num"><span class="today-only">3</span><span class="swarm-only">30</span></span>shipped</a>
+        </nav>
+
+        <!-- ============ Came in: collapsed to what changed at the taps ============ -->
+        <section class="vstage" id="came-in">
+          <h2 class="vstage-h">Came in <small>since yesterday 18:20</small><i data-i="chev-d" data-size="16"></i></h2>
+          <div class="taps--inline today-only">
+            <span><i data-brand="sentry" data-size="14"></i>130</span>
+            <span><i data-brand="github" data-size="14"></i>38</span>
+            <span><i data-brand="gmail" data-size="14"></i>17</span>
+            <span><i data-brand="stripe" data-size="14"></i>12</span>
+            <span><i data-brand="intercom" data-size="14"></i>9</span>
+            <span class="is-quiet">+3 taps</span>
+          </div>
+          <div class="taps--inline swarm-only">
+            <span><i data-brand="sentry" data-size="14"></i>1,300</span>
+            <span><i data-brand="github" data-size="14"></i>380</span>
+            <span><i data-brand="gmail" data-size="14"></i>170</span>
+            <span><i data-brand="stripe" data-size="14"></i>120</span>
+            <span><i data-brand="intercom" data-size="14"></i>90</span>
+            <span class="is-quiet">+3 taps</span>
+          </div>
+          <div class="taps--inline">
+            <a class="is-held" href="#breaker"><i data-mark="paused" data-size="14"></i>GitHub: 34 held</a>
+            <span class="is-quiet"><i data-brand="linear" data-size="14"></i>Linear: new, listening</span>
+          </div>
+        </section>
+
+        <!-- ============ Your call ============ -->
+        <section class="vstage" id="your-call">
+          <h2 class="vstage-h">Your call <b class="count count--you"><span class="today-only">9</span><span class="swarm-only">90</span></b><small class="you-ink"><span class="today-only">+1</span><span class="swarm-only">+4</span> back from the line</small></h2>
+
+          <h3 class="section-h tier-h"><span class="dot dot--fail attention-pulse"></span>Now<small class="swarm-only">1 of 3 burning</small></h3>
+          <article class="vdecision">
+            <div class="decision-top">
+              <span class="chip chip--fail">Urgent</span>
+              <span class="bars" data-p="4" title="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+              <span class="proj proj--webshop">webshop</span>
+              <span>·</span><span>Checkout</span><span>·</span><span>first seen 08:52</span>
+            </div>
+            <h3 class="decision-lead-title">Checkout fails for EU cards with 3&#8209;D Secure</h3>
+            <p class="made-from made-from--inline" aria-label="Made from">
+              <span class="made-from-entry"><i data-brand="sentry" data-size="14"></i><span><b>412 errors</b></span></span>
+              <span class="made-from-entry"><i data-brand="gmail" data-size="14"></i><span><b>3 emails</b></span></span>
+              <span class="made-from-entry"><i data-brand="posthog" data-size="14"></i><span><b>-18%</b> EU</span></span>
+              <span class="made-from-entry"><i data-brand="github" data-size="14"></i><span><b>#1289</b></span></span>
+            </p>
+            <div class="m-answers">
+              <button class="m-ans m-ans--accent"><i data-face="Fix bug" data-pose="idle" data-size="32"></i><b>Start Fix bug</b><span>Starts <b>Fix bug</b> on <b>webshop</b> with task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span><span class="producer-description">Claude Code · Opus 5.5 · studio&#8209;mac</span></button>
+              <button class="m-ans"><i class="m-ans-icon"><i data-i="tasks" data-size="20"></i></i><b>Accept</b><span>Removes label <b>proposed</b> from Task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span><span class="producer-description">This is work; it stays in the backlog.</span></button>
+              <button class="m-ans m-ans--quiet"><i class="m-ans-icon"><i data-i="close" data-size="20"></i></i><b>Dismiss</b><span>Sets status to <b>cancelled</b> on Task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span></button>
+            </div>
+          </article>
+
+          <div class="today-only">
+            <h3 class="section-h tier-h tier-h--you"><i data-mark="waiting" data-size="14"></i>Back from the line <b class="count count--you">1</b></h3>
+            <article class="vdecision vdecision--back">
+              <div class="decision-head">
+                <h3 class="decision-title">Publish payments&#8209;api 2.15.0 to npm?</h3>
+                <span class="decision-marks"><i data-face="Ship release v2.15" data-pose="waiting" data-size="20"></i></span>
+              </div>
+              <p class="decision-meta">Approval · Ship release v2.15 · <span class="proj proj--payments">payments-api</span></p>
+              <div class="m-answers">
+                <button class="m-ans"><i class="m-ans-icon"><i data-i="check" data-size="20"></i></i><b>Allow once</b><span>Allows <code>npm publish</code> once in session <b>Ship release v2.15</b></span><span class="producer-description">Runs the command this once; the agent asks again next time.</span></button>
+                <button class="m-ans m-ans--quiet"><i class="m-ans-icon"><i data-i="close" data-size="20"></i></i><b>Deny</b><span>Denies <code>npm publish</code> in session <b>Ship release v2.15</b>; the agent is told and continues</span></button>
+              </div>
+            </article>
+
+            <h3 class="section-h tier-h">Needs a call <b class="count">2</b></h3>
+            <article class="vdecision">
+              <div class="decision-head">
+                <h3 class="decision-title">App is slow on Android</h3>
+                <span class="decision-marks"><i data-brand="intercom" data-size="14"></i></span>
+              </div>
+              <p class="decision-meta">Unsure · 7 conversations since Sunday · “I can't tell which project this belongs to.”</p>
+              <div class="m-answers">
+                <button class="m-ans"><i class="m-ans-icon"><i class="proj proj--webshop" aria-hidden="true"></i></i><b>webshop</b><span>Sets project to <b>webshop</b> on Task <b>App is slow on Android</b></span></button>
+                <button class="m-ans"><i class="m-ans-icon"><i class="proj proj--payments" aria-hidden="true"></i></i><b>payments-api</b><span>Sets project to <b>payments-api</b> on Task <b>App is slow on Android</b></span></button>
+                <button class="m-ans m-ans--quiet"><i class="m-ans-icon"><i data-i="close" data-size="20"></i></i><b>Not work</b><span>Sets status to <b>cancelled</b> on Task <b>App is slow on Android</b></span></button>
+              </div>
+            </article>
+            <article class="vdecision" id="breaker">
+              <div class="decision-head">
+                <h3 class="decision-title">Label new issues held 34 events</h3>
+                <span class="decision-marks"><i data-brand="github" data-size="14"></i><i data-face="Label new issues" data-pose="paused" data-size="20"></i></span>
+              </div>
+              <p class="decision-meta">Breaker tripped at 08:14 · a bot opened 34 issues; the bound is 20 per hour</p>
+              <div class="m-answers">
+                <button class="m-ans"><i class="m-ans-icon"><i data-i="play" data-size="20"></i></i><b>Resume</b><span>Resumes <b>Label new issues</b>: the <b>34</b> held events start runs at <b>20 per hour</b>, the rest as the window frees up</span></button>
+                <button class="m-ans"><i class="m-ans-icon"><i data-i="undo" data-size="20"></i></i><b>Resume and discard the 34</b><span>Resumes <b>Label new issues</b> and discards the <b>34</b> held events</span></button>
+                <a class="m-ans m-ans--quiet" href="#"><i class="m-ans-icon"><i data-i="arrow" data-size="20"></i></i><b>Edit the trigger</b><span>Opens the trigger of <b>Label new issues</b>, where its Spawn Bound lives</span></a>
+              </div>
+              <p class="unanswered-note">Until you answer, the 34 events stay held.</p>
+            </article>
+
+            <!-- Today and When you can are rows on the phone: a tap opens the decision with its answers. -->
+            <h3 class="section-h tier-h">Today <b class="count">4</b></h3>
+            <a class="vdecision-row" href="#"><i data-brand="grafana" data-size="16"></i><span><b>Nightly backup job timing out on ops-db</b><small>Proposal · ops · 3 nights in a row</small></span><span class="bars" data-p="3"><i></i><i></i><i></i><i></i></span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-brand="gmail" data-size="16"></i><span><b>Draft a reply to Marta at Brightline</b><small>Offer · invoice INV-2291 in the company name</small></span><span></span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-brand="stripe" data-size="16"></i><span><b>Stripe webhook retries rising</b><small>Proposal · payments-api · up 4x since Sunday</small></span><span class="bars" data-p="2"><i></i><i></i><i></i><i></i></span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-brand="github" data-size="16"></i><span><b>Merge 4 dependency bumps</b><small>Offer from the GitHub plugin · all green</small></span><span></span><i data-i="chev-r" data-size="14"></i></a>
+
+            <h3 class="section-h tier-h">When you can <b class="count">2</b></h3>
+            <a class="vdecision-row" href="#"><i data-i="clock" data-size="16"></i><span><b>SSL certificate for status.acme.dev expires in 12 days</b><small>Proposal · ops</small></span><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-brand="intercom" data-size="16"></i><span><b>Add iDEAL as a payment method</b><small>Proposal · webshop · 5 requests</small></span><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span><i data-i="chev-r" data-size="14"></i></a>
+          </div>
+
+          <!-- ?state=swarm: the rest of Your call as one pile per topic, then the one offer that cannot be taken. -->
+          <div class="swarm-only" id="piles">
+            <h3 class="section-h tier-h">By topic <b class="count">93</b></h3>
+            <a class="vdecision-row" href="#"><i data-i="hash" data-size="16"></i><span><b>Checkout</b><small><span class="fail-ink">2&nbsp;more&nbsp;burning</span> · 7&nbsp;today · 9&nbsp;when&nbsp;you&nbsp;can · 4&nbsp;offers · 3&nbsp;calls · <span class="you-ink">1&nbsp;back</span></small></span><span class="pile-total">26</span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-i="hash" data-size="16"></i><span><b>Infrastructure</b><small>5&nbsp;today · 9&nbsp;when&nbsp;you&nbsp;can · 3&nbsp;offers · 2&nbsp;calls</small></span><span class="pile-total">19</span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-i="hash" data-size="16"></i><span><b>Customers</b><small>6&nbsp;today · 11&nbsp;when&nbsp;you&nbsp;can · 8&nbsp;offers · 2&nbsp;calls · <span class="you-ink">1&nbsp;back</span></small></span><span class="pile-total">28</span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-i="hash" data-size="16"></i><span><b>Releases</b><small>2&nbsp;today · 5&nbsp;when&nbsp;you&nbsp;can · 5&nbsp;offers · 1&nbsp;call · <span class="you-ink">2&nbsp;back</span></small></span><span class="pile-total">15</span><i data-i="chev-r" data-size="14"></i></a>
+            <a class="vdecision-row" href="#"><i data-i="hash" data-size="16"></i><span><b>No topic</b><small>1&nbsp;today · 2&nbsp;when&nbsp;you&nbsp;can · 1&nbsp;offer · 1&nbsp;call</small></span><span class="pile-total">5</span><i data-i="chev-r" data-size="14"></i></a>
+
+            <h3 class="section-h tier-h">Releases · an offer</h3>
+            <article class="vdecision">
+              <div class="decision-head">
+                <h3 class="decision-title">Close 9 duplicate issues</h3>
+                <span class="decision-marks"><i data-brand="github" data-size="14"></i></span>
+              </div>
+              <p class="decision-meta">Offer from the GitHub plugin · 9 open issues repeat older ones</p>
+              <div class="m-answers">
+                <button class="m-ans" disabled><i class="m-ans-icon"><i data-brand="github" data-size="20"></i></i><b>Close all 9</b><span><b>Cannot be taken:</b> the GitHub plugin changed this action's inputs at 08:30, after triage proposed it</span></button>
+                <button class="m-ans m-ans--quiet"><i class="m-ans-icon"><i data-i="close" data-size="20"></i></i><b>Dismiss</b><span>Does nothing</span></button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ============ Moving: the run Rogier follows, then the rest as faces ============ -->
+        <section class="vstage" id="moving">
+          <h2 class="vstage-h">Moving <b class="count"><span class="today-only">4</span><span class="swarm-only">40</span></b><small><span class="today-only">1 paused</span><span class="swarm-only">3 paused</span></small><i data-i="chev-d" data-size="16"></i></h2>
+          <div class="live-activity card" id="live-activity" style="--hue: var(--hue-mint)">
+            <div class="live-activity-top">
+              <i data-face="Cart total rounding on discounts" data-pose="working" data-size="36"></i>
+              <span><b>Cart total rounding on discounts</b><small>Fix bug · webshop · studio-mac</small></span>
+              <span class="live-activity-time">14m</span>
+            </div>
+            <div class="live-activity-track" aria-label="Where this run is on the line">
+              <span class="is-done">Came in</span><span class="is-done">Your call</span><span class="is-now">Moving</span><span>Shipped</span>
+            </div>
+            <p class="live-activity-note"><i data-i="lock" data-size="12"></i>Followed on your Lock Screen and in the Dynamic Island</p>
+          </div>
+          <div class="face-stack today-only">
+            <span class="stack"><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="24"></i><i data-face="Ship release v2.15" data-pose="waiting" data-size="24"></i><i data-face="Label new issues run" data-pose="paused" data-size="24"></i></span>
+            <span>1 more working · <a class="you-ink" href="#your-call">1 waits on you</a> · <a href="#breaker">1 paused</a></span>
+          </div>
+          <div class="face-stack swarm-only">
+            <span class="stack"><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="24"></i><i data-face="Ship release v2.15" data-pose="waiting" data-size="24"></i><i data-face="Label new issues run" data-pose="paused" data-size="24"></i></span>
+            <span>32 more working · <span class="you-ink">4 wait on you</span> · 3 paused</span>
+          </div>
+        </section>
+
+        <!-- ============ Shipped ============ -->
+        <section class="vstage" id="shipped">
+          <h2 class="vstage-h">Shipped <b class="count"><span class="today-only">3</span><span class="swarm-only">30</span></b><small>median <span class="today-only">1h 05m</span><span class="swarm-only">1h 10m</span></small></h2>
+          <a class="shipped-item shipped-item--traced" href="?state=trace"><i data-mark="done" data-size="14"></i><span class="shipped-item-text"><b>Discount codes ignore letter case</b>#1287 merged at 19:12<span class="trace-line"><i data-brand="intercom" data-size="12"></i>2 <i data-brand="sentry" data-size="12"></i>1 <i data-i="arrow" data-size="12"></i><b>4h 50m</b></span></span></a>
+          <a class="shipped-item" href="#"><i data-mark="done" data-size="14"></i><span class="shipped-item-text"><b>payments-api v2.14.0</b>published at 19:40<span class="trace-line"><i data-brand="github" data-size="12"></i>1 <i data-i="arrow" data-size="12"></i><b>9m</b></span></span></a>
+          <a class="shipped-item" href="#"><i data-mark="done" data-size="14"></i><span class="shipped-item-text"><b>Reply sent to Pieter at Bakkerij Smit</b>sent at 18:44<span class="trace-line"><i data-brand="gmail" data-size="12"></i>1 <i data-i="arrow" data-size="12"></i><b>1h 05m</b></span></span></a>
+        </section>
+      </div>
+
+      <nav data-tabbar="intake"></nav>
+
+      <!-- ============ ?state=trace: one shipped item, back to the events it came from ============ -->
+      <a class="sheet-scrim trace-only" href="?" aria-label="Close the trace"></a>
+      <section class="sheet trace-sheet trace-only" aria-label="Trace of Discount codes ignore letter case">
+        <div class="trace-head">
+          <div>
+            <span class="trace-kicker"><i data-mark="done" data-size="14"></i>Shipped · trace</span>
+            <h2 class="trace-title">Discount codes ignore letter case</h2>
+          </div>
+          <span class="trace-close"><a class="icon-btn" href="?" title="Close"><i data-i="close" data-size="16"></i></a></span>
+          <p class="trace-sub">#1287 merged in rogier/webshop at 19:12 yesterday</p>
+        </div>
+        <div class="trace-body">
+          <p class="lead-time"><b>4h 50m</b>from the first event to the merge</p>
+          <div class="lead-time-split" aria-label="Lead time by stage">
+            <i style="flex: 38"></i><i class="is-you" style="flex: 201"></i><i class="is-run" style="--hue: var(--hue-iris); flex: 22"></i><i class="is-review" style="flex: 29"></i>
+          </div>
+          <div class="trace-steps">
+            <h3 class="trace-span"><i></i>Came in<span>38m</span></h3>
+            <div class="trace-step"><time>14:22</time><i data-brand="intercom" data-size="14"></i><p><b>“My code SUMMER20 doesn't work”</b><br />Intercom · support</p></div>
+            <div class="trace-step"><time>14:40</time><i data-brand="sentry" data-size="14"></i><p><b>CouponNotFound</b> for <b>summer20</b> in checkout<br />Sentry · webshop-prod</p></div>
+            <div class="trace-step"><time>14:51</time><i data-brand="intercom" data-size="14"></i><p><b>“Code only works in capitals?”</b><br />Intercom · support</p></div>
+
+            <h3 class="trace-span"><i class="is-you"></i>Your call<span>3h 21m</span></h3>
+            <div class="trace-step"><time>15:00</time><i data-face="Triage" data-pose="idle" data-size="20"></i><p>Triage proposed it for <b>Today</b>, with <b>Start Fix bug</b></p></div>
+            <div class="trace-step"><time>18:21</time><i data-you="20"></i><p>You answered <b>Start Fix bug</b>, on the desktop</p></div>
+
+            <h3 class="trace-span"><i class="is-run" style="--hue: var(--hue-iris)"></i>Moving<span>22m</span></h3>
+            <div class="trace-step"><time>18:21</time><i data-face="Fix bug" data-pose="idle" data-size="20"></i><p><b>Fix bug</b> started on <b>webshop</b><br />Claude Code · Sonnet 5 · build-box-1</p></div>
+            <div class="trace-step"><time>18:43</time><i data-face="Fix bug" data-pose="done" data-size="20"></i><p>Opened pull request <b>#1287</b>, 2 files +31 -4</p></div>
+
+            <h3 class="trace-span"><i class="is-review"></i>Review and merge<span>29m</span></h3>
+            <div class="trace-step"><time>19:12</time><i data-brand="github" data-size="14"></i><p><b>#1287</b> merged by <b>rogier</b><br />GitHub · rogier</p></div>
+          </div>
+        </div>
+        <div class="trace-foot">
+          <i data-i="clock" data-size="14"></i><span>Source events kept until 27 Dec</span>
+          <span class="spacer"></span>
+          <a class="btn btn--sm" href="#">Open #1287 <i data-i="external" data-size="12"></i></a>
+        </div>
+      </section>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../../../crew-bureau-2/brands.js"></script>
+    <script src="../../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

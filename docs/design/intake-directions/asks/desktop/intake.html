@@ -1,0 +1,53 @@
+<!doctype html>
+<!-- PROTOTYPE - Intake as a running list of what people ask of you, with triage's findings below.
+     Four views over the same records: To do, Later (snoozed), Done, and Everything (every event).
+     ?user=rogier (default) or ?user=noor shows the same screen under a different set of plugins.
+     ?mode=todo|later|done|everything picks the view, ?filter=<source>|triage the tab,
+     ?stamp=<stamp> narrows Everything, ?ask=<id> selects an ask or event, ?pane=closed gives the
+     list the full width, ?list=empty shows inbox zero, ?state=xray labels who provided each part,
+     ?bar=off hides the prototype switcher.
+     Keys: J and K move, Enter opens the item and then takes the suggested answer, Esc closes it,
+     R replies, E marks done, H snoozes (then 1 to 5 picks when), U unsnoozes, M stops asking,
+     X selects, O opens, Shift+X toggles the labels. -->
+<html lang="en" data-theme="whitehaven" data-motion="off">
+  <head>
+    <script src="../../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../asks.css" />
+    <meta charset="utf-8" />
+    <title>Intake · Hercule</title>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="intake"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Intake</h1>
+          <nav class="tabs" data-asks-tabs></nav>
+          <span class="spacer"></span>
+          <span class="asks-triage" data-asks-triage></span>
+          <button class="icon-btn asks-pane-btn" data-pane-toggle aria-label="Open item"><i data-i="sidebar" data-size="16"></i></button>
+        </header>
+        <div class="asks" data-asks>
+          <section class="asks-list" aria-label="Asks">
+            <div class="asks-head" data-asks-head></div>
+            <div class="asks-ghosts" data-asks-ghosts aria-hidden="true"></div>
+            <div class="asks-scroll" data-asks-list></div>
+          </section>
+          <section class="asks-detail" data-asks-detail aria-live="polite"></section>
+        </div>
+      </main>
+    </div>
+
+    <nav class="proto-bar" data-proto-bar aria-label="Prototype">
+      <span class="seg"><button data-user="rogier">Rogier</button><button data-user="noor">Noor</button></span>
+      <span class="proto-legend"><i data-x-from="plugin"></i><span>Plugin</span><i data-x-from="core"></i><span>Core</span></span>
+      <button class="proto-x" data-xray-toggle><kbd>⇧X</kbd> X-ray</button>
+    </nav>
+
+    <script src="../../../crew-bureau-2/brands.js"></script>
+    <script src="../../../crew-bureau-2/crew.js"></script>
+    <script src="../asks.js"></script>
+  </body>
+</html>

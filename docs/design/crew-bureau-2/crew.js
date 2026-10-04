@@ -477,6 +477,14 @@
   }
 
   /**
+   * Returns the Intake count the shell shows: the page's data-intake-count when it sets one, else
+   * today's 9 or the swarm's 90. A design that changes how many decisions reach Intake sets its own.
+   */
+  function intakeCount() {
+    return document.documentElement.dataset.intakeCount || (isSwarm() ? "90" : "9");
+  }
+
+  /**
    * Checks for the fresh install: one project, no threads, nothing waiting. ?state=first has a
    * project with its repository; ?state=first-no-repo has one whose repository waits for GitHub.
    */
@@ -587,7 +595,7 @@
       '<div class="side-pane" data-pane="hercule">' +
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' +
       navRow("office", "The office", "office", selected, first ? "" : swarm ? "140" : "16") +
-      navRow("intake", "Intake", "intake", selected, first ? "" : swarm ? "90" : "9") +
+      navRow("intake", "Intake", "intake", selected, first ? "" : intakeCount()) +
       navRow("checkin", "Check-in", "checkin", selected) +
       navRow("tasks", "Tasks", "tasks", selected, first ? "" : swarm ? "118" : "14") +
       navRow("runs", "Runs", "runs", selected, first ? "" : swarm ? "64" : "6") +
@@ -678,11 +686,14 @@
         (count ? ' <b class="count' + (key === "intake" ? " count--you" : "") + '">' + count + "</b>" : "") + "</a>"
       );
     }
+    // The counts follow the sidebar's: ten times today's load in ?state=swarm.
+    var swarm = isSwarm();
+    var waiting = swarm ? "30" : "3";
     el.innerHTML =
       '<a class="wb-mark" href="session-active.html">' + logo(24) + '<span class="wordmark">Hercule</span></a>' +
-      '<nav class="wtabs">' + tab("threads", "Threads") + tab("intake", "Intake", "9") + tab("checkin", "Check-in") + tab("runs", "Runs", "6") + tab("assistants", "Assistants") + tab("fleet", "Fleet") + tab("settings", "Settings") + "</nav>" +
+      '<nav class="wtabs">' + tab("threads", "Threads") + tab("intake", "Intake", intakeCount()) + tab("checkin", "Check-in") + tab("runs", "Runs", swarm ? "64" : "6") + tab("assistants", "Assistants") + tab("fleet", "Fleet") + tab("settings", "Settings") + "</nav>" +
       '<div class="wb-right">' +
-      '<a class="wb-waiting" href="intake.html" title="3 things are waiting on you">' + mark("waiting") + "<span><b>3</b> waiting on you</span></a>" +
+      '<a class="wb-waiting" href="intake.html" title="' + waiting + ' things are waiting on you">' + mark("waiting") + "<span><b>" + waiting + "</b> waiting on you</span></a>" +
       '<button class="side-search side-search--web">' + icon("search", 14) + "<span>Search</span><kbd>⌘K</kbd></button>" +
       you(28) +
       "</div>";
@@ -711,9 +722,10 @@
         '<span class="tb-ic">' + icon(ic, 22) + (badge ? '<b class="tb-badge">' + badge + "</b>" : "") + "</span><span>" + label + "</span></a>"
       );
     }
+    var swarm = isSwarm();
     el.innerHTML =
-      t("threads", "Threads", "threads", "3") +
-      t("intake", "Intake", "intake", "9") +
+      t("threads", "Threads", "threads", swarm ? "30" : "3") +
+      t("intake", "Intake", "intake", intakeCount()) +
       '<a class="tb-new" href="session-empty.html" aria-label="New thread">' + icon("plus", 22) + "</a>" +
       t("office", "Office", "office") +
       t("settings", "You", "user");
