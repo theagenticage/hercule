@@ -567,7 +567,7 @@ export const run = HttpApiGroup.make("run")
     /**
      * Starts a run and returns its id at once, without waiting for any step.
      * Fails with `validation`, starting no run, when the workflow does not
-     * validate, has an element runs cannot execute yet, or the inputs do not
+     * validate, a step names a disabled Connection, or the inputs do not
      * match its declarations; with `not_found` for an unknown `workflowId`;
      * and with `cap_exceeded` when the run would be nested deeper than the
      * controller's `run.nestingLimit`.

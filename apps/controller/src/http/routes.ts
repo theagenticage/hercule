@@ -602,16 +602,23 @@ const WorkflowDomainLayer = Layer.mergeAll(
  *   apart from any request, so the live topics' listener is provided to the
  *   service as well.
  * - A run's workspace steps reach their runners through the controller
- *   daemon's Workspace Steps.
+ *   daemon's Workspace Steps, which opens and stops the sessions of agent
+ *   steps through placement and `Live`.
  *
  * Several groups below are provided this one layer. A layer is built once
- * however many times it is provided, so they all share one run service.
+ * however many times it is provided, so they all share one run service, and
+ * Workspace Steps shares placement, `Live` and dispatch with the group that
+ * serves sessions.
  */
 const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(WorkflowDomainLayer),
   Layer.provideMerge(TaskServiceLayer),
   Layer.provideMerge(RunExecutorLayer),
-  Layer.provideMerge(WorkspaceStepsLayer),
+  Layer.provideMerge(
+    WorkspaceStepsLayer.pipe(
+      Layer.provide(Layer.mergeAll(PlacementLayer, LiveLayer).pipe(Layer.provide(DispatchLayer))),
+    ),
+  ),
   Layer.provide(LiveTopicsLayer),
 );
 

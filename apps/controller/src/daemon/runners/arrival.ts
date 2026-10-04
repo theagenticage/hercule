@@ -5,8 +5,10 @@
  *
  * 1. the provision of every workspace on it that is still provisioning and
  *    has no step running in it;
- * 2. every workspace step still running on it, each after the provision of
- *    its workspace when that workspace is still provisioning;
+ * 2. every workspace step still running on it: a workspace action again,
+ *    after the provision of its workspace when that workspace is still
+ *    provisioning, and for an agent step whose prompt the runner already
+ *    took, a request for the step's result;
  * 3. then the runs waiting for a runner are woken, because this one may be
  *    able to take them.
  *
@@ -33,9 +35,12 @@ const make = Effect.gen(function* () {
   const sendOwedWork = (runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       const steps = yield* runs.listOwedWorkspaceSteps(runnerId);
-      // Starting a step sends its workspace's provision first, so those
-      // workspaces are left out here rather than provisioned twice.
-      const startedWorkspaceIds = new Set(steps.map((step) => step.workspaceId));
+      // Starting an action step sends its workspace's provision first, so
+      // those workspaces are left out here rather than provisioned twice. A
+      // request for an agent step's result sends no provision.
+      const startedWorkspaceIds = new Set(
+        steps.flatMap((step) => (step.kind === "action" ? [step.workspaceId] : [])),
+      );
       for (const frame of yield* workspaces.listOwedProvisioning(runnerId)) {
         if (!startedWorkspaceIds.has(frame.workspaceId)) yield* connections.tell(runnerId, frame);
       }

@@ -84,6 +84,7 @@ const insertSession = (title: string, openRequest: OpenRequest | null = null) =>
       permissionProfileId: mintId(),
       agentId: undefined,
       conversationId: undefined,
+      step: undefined,
       instanceId: mintId(),
       runnerId: mintId(),
       requestedAccessMode: "approval-required",

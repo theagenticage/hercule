@@ -14,13 +14,16 @@
  * - `sessionExited` by the one cleanup step every path to `exited` goes
  *   through, so an exit path added later reaches the port without anyone
  *   remembering to call it;
- * - `inputsDropped` by the one step that gives up on waiting input.
+ * - `inputsDropped` by the steps that give up on waiting input: the one
+ *   that drops the input of a session that cannot be resumed, and the one
+ *   that cancels the prompt of an agent step whose session exited before
+ *   the runner took it.
  *
  * So a failure in the implementation rolls the change back, and the
  * implementation must not wait on anything outside the database.
  */
 import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ExitReason, ProviderEvent } from "@hercule/protocol";
 import type { StoredSession } from "./repository";
@@ -79,3 +82,21 @@ export class SessionObserver extends Context.Service<
     readonly inputsDropped: (dropped: DroppedInputs) => Effect.Effect<void, SqlError>;
   }
 >()("hercule/controller/sessions/SessionObserver") {}
+
+/**
+ * Returns one observer that passes every call to each of `observers` in turn,
+ * so more than one domain can watch the sessions through the one port. The
+ * calls run in the order given, and the first failure stops the rest, which
+ * rolls back the change being reported.
+ */
+export const combineSessionObservers = (
+  observers: ReadonlyArray<SessionObserver["Service"]>,
+): SessionObserver["Service"] =>
+  SessionObserver.of({
+    sessionReported: (session, event) =>
+      Effect.forEach(observers, (one) => one.sessionReported(session, event), { discard: true }),
+    sessionExited: (exit) =>
+      Effect.forEach(observers, (one) => one.sessionExited(exit), { discard: true }),
+    inputsDropped: (dropped) =>
+      Effect.forEach(observers, (one) => one.inputsDropped(dropped), { discard: true }),
+  });

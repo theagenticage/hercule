@@ -131,6 +131,8 @@ export interface NewSession {
   readonly agentId: string | undefined;
   /** The assistant's conversation the session answers; `undefined` for any other session. */
   readonly conversationId: string | undefined;
+  /** The run and agent step that started the session; `undefined` for any other session. */
+  readonly step: { readonly runId: string; readonly stepId: string } | undefined;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -409,15 +411,17 @@ const make = Effect.gen(function* () {
         const agent = session.agentId === undefined ? null : uuidFromString(session.agentId);
         const conversation =
           session.conversationId === undefined ? null : uuidFromString(session.conversationId);
+        const run = session.step === undefined ? null : uuidFromString(session.step.runId);
         yield* sql`
           INSERT INTO sessions (id, title, permission_profile_id, agent_id, conversation_id,
-                                instance_id, runner_id,
+                                run_id, step_id, instance_id, runner_id,
                                 workspace_id, project_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_at, last_activity_at)
           VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)}, ${agent},
-                  ${conversation}, ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
+                  ${conversation}, ${run}, ${session.step?.stepId ?? null},
+                  ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
                   ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
@@ -445,6 +449,17 @@ const make = Effect.gen(function* () {
         sql<SessionRow>`
           SELECT ${sql.literal(COLUMNS)} FROM sessions
           WHERE conversation_id = ${uuidFromString(conversationId)} AND status <> 'exited'
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map(toSession),
+      ),
+
+    /** Returns every session of one workflow run's agent steps that has not exited, oldest first. */
+    listLiveInRun: (runId: string): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      Effect.map(
+        sql<SessionRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM sessions
+          WHERE run_id = ${uuidFromString(runId)} AND status <> 'exited'
           ORDER BY created_at, id
         `,
         (rows) => rows.map(toSession),

@@ -38,6 +38,7 @@ import {
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
+  type WorkspaceStepKey,
 } from "@hercule/protocol";
 import {
   createDecodeValidationError,
@@ -161,6 +162,12 @@ export interface CreateRequest {
   readonly agentId: string | undefined;
   /** The assistant's conversation the session answers; `undefined` for any other session. */
   readonly conversationId: string | undefined;
+  /**
+   * The run, agent step and iteration whose prompt the session opens with;
+   * `undefined` for any other session. The run and step are stored on the
+   * session, and the iteration on its first input.
+   */
+  readonly step: WorkspaceStepKey | undefined;
   readonly runnerId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
@@ -233,6 +240,8 @@ export interface TakeInputRequest<E> {
    * input is sent as soon as it exists, so nothing else may claim it.
    */
   readonly claimed: boolean;
+  /** The agent step iteration this input is the prompt for; `undefined` for any other input. */
+  readonly stepIteration?: number;
 }
 
 /**
@@ -307,6 +316,21 @@ const WAIT_ENDED =
 const CONVERSATION_INPUT_FIXED =
   "this input is the owner's message in an assistant's conversation, so it cannot be changed or cancelled; " +
   "to correct or withdraw it, send a follow-up message with conversation.send";
+
+/**
+ * The refusal of `input.update`, `input.cancel` and `input.steer` on the
+ * prompt of an agent step. The workflow run waits for the turn that prompt
+ * starts:
+ *
+ * - a changed text would run a step the workflow never defined;
+ * - a cancelled prompt would leave the run waiting for a turn that never
+ *   comes;
+ * - a prompt steered into a running turn would end the step with that
+ *   turn's answer.
+ */
+const STEP_INPUT_FIXED =
+  "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
+  "it is sent when the session is next idle; to stop the step, cancel the run with run.cancel";
 
 /** Why an input was cancelled on a session that `endOnLostRunners` ended. */
 const RUNNER_LOST =
@@ -440,13 +464,14 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns an input that a caller can still edit or cancel. Fails when:
+   * Returns an input that a caller can still edit, cancel or steer. Fails when:
    *
    * - the session has no input with that id (`NotFound`);
    * - the input was already delivered or cancelled (`InvalidState`);
    * - the input was already sent to the runner (`InvalidState`). The runner
    *   already has its text and it cannot be taken back, so reporting it as
-   *   edited or cancelled would be wrong.
+   *   edited or cancelled would be wrong;
+   * - the input is the prompt of an agent step (`InvalidState`).
    */
   const queuedInput = (
     sessionId: string,
@@ -462,6 +487,8 @@ const make = Effect.gen(function* () {
       }
       if (found.value.sentAt !== null)
         return yield* Effect.fail(createInvalidStateError(ALREADY_SENT));
+      if (found.value.stepIteration !== null)
+        return yield* Effect.fail(createInvalidStateError(STEP_INPUT_FIXED));
       return found.value;
     });
 
@@ -780,6 +807,7 @@ const make = Effect.gen(function* () {
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
+          step: open.step,
           instanceId: open.spec.instanceId,
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
@@ -804,6 +832,7 @@ const make = Effect.gen(function* () {
           actor,
           text: open.prompt,
           at: open.at,
+          ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
         });
         yield* audit.append({
           kind: open.kind,
@@ -938,12 +967,26 @@ const make = Effect.gen(function* () {
      * with the session's current model selection. The selection goes with
      * every input because only the adapter knows whether the input starts a
      * turn, and a harness accepts a model change only at the start of a turn.
+     *
+     * The prompt of an agent step carries the step's key, so the runner knows
+     * the turn it starts is the step's and reports its result.
      */
-    inputFrame: (row: StoredInput, modelSelection: ModelSelection): SessionInput => ({
+    inputFrame: (
+      session: Pick<StoredSession, "runId" | "stepId" | "modelSelection">,
+      row: StoredInput,
+    ): SessionInput => ({
       _tag: "sessionInput",
       requestId: row.id,
       sessionId: row.sessionId,
-      input: { text: row.text, modelSelection },
+      input: {
+        text: row.text,
+        modelSelection: session.modelSelection,
+        ...(row.stepIteration === null || session.runId === null || session.stepId === null
+          ? {}
+          : {
+              step: { runId: session.runId, stepId: session.stepId, iteration: row.stepIteration },
+            }),
+      },
     }),
 
     /**
@@ -1199,6 +1242,7 @@ const make = Effect.gen(function* () {
           text: taking.text,
           at: taking.at,
           ...(taking.claimed ? { sentAt: taking.at } : {}),
+          ...(taking.stepIteration === undefined ? {} : { stepIteration: taking.stepIteration }),
         });
         // Someone is asking again, so the session may be resumed for every
         // input that waits.
@@ -1268,6 +1312,9 @@ const make = Effect.gen(function* () {
      *   cancelled, and `SessionObserver` is told. Nobody reads that session's
      *   inputs: the owner reads the conversation, so input left queued there
      *   would never be answered and never be explained.
+     * - A session started by an agent step is treated the same way. Its run
+     *   waits for the step's prompt to be answered, and is told through
+     *   `SessionObserver` so the step fails instead of waiting forever.
      *
      * Runs in its own transaction, and reads the session again inside it, so
      * input that a resume by another caller has just made deliverable is
@@ -1281,7 +1328,8 @@ const make = Effect.gen(function* () {
           const found = yield* sessions.one(sessionId);
           if (Option.isNone(found)) return;
           const session = found.value;
-          if (session.status !== "exited" || session.conversationId === null) return;
+          if (session.status !== "exited") return;
+          if (session.conversationId === null && session.runId === null) return;
           const cancelled = yield* inputs.cancelQueued(
             sessionId,
             `the session could not be resumed: ${refusal}`,
@@ -1444,6 +1492,10 @@ const make = Effect.gen(function* () {
      * keep its input (`keepsInputsOnExit`): then it is cancelled. The session
      * is read inside this transaction, so the check cannot race the write
      * that exits the session.
+     *
+     * When the cancelled input is the prompt of an agent step,
+     * `SessionObserver` is told, so the step's run does not wait for a turn
+     * that never comes.
      */
     undelivered: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
       withTransaction(
@@ -1454,6 +1506,9 @@ const make = Effect.gen(function* () {
             Option.isSome(now) && now.value.status === "exited" && !keepsInputsOnExit(now.value);
           if (dropped) {
             yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+            if (row.stepIteration !== null) {
+              yield* observer.inputsDropped({ session: now.value, refusal: reason });
+            }
           } else {
             yield* inputs.requeue(row.id, row.sentAt, reason);
           }

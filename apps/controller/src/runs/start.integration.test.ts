@@ -31,7 +31,6 @@ import {
 import {
   ABSENT_ID,
   ACCEPTED_GITHUB_TOKEN,
-  createAgent,
   createConnection,
   createWorkflowOrFail,
   disablePlugin,
@@ -372,65 +371,6 @@ describe("run.start of a stored workflow", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("the graphs a run accepts", () => {
-  it("refuses each element runs cannot execute yet with one plain-worded issue at its path", async () => {
-    await withSetUpController(async ({ harness, base, token }) => {
-      const agentId = await createAgent(base, token);
-      const fixtures: ReadonlyArray<{
-        readonly element: string;
-        readonly definition: unknown;
-        readonly path: ReadonlyArray<string>;
-      }> = [
-        {
-          element: "an agent step",
-          definition: {
-            name: "Agent step",
-            steps: [
-              buildCreateStep("create"),
-              { id: "review", kind: "agent", agent: agentId, prompt: "Review the task." },
-            ],
-            edges: [{ from: "create", to: "review" }],
-          },
-          path: ["steps", "1"],
-        },
-      ];
-
-      for (const { element, definition, path } of fixtures) {
-        const workflow = await createWorkflowOrFail(base, token, { definition });
-        const response = await requestRun(base, token, workflow.id);
-        const issues = await expectRefusedAt(harness, response, [path], element);
-        // A sentence for a person, not a schema library's dump.
-        expect(issues[0]!.message, element).toMatch(/^[A-Z][^{}]*\.$/s);
-      }
-    });
-  });
-
-  it("reports one issue per unsupported element when a plan has several", async () => {
-    await withSetUpController(async ({ harness, base, token }) => {
-      const agentId = await createAgent(base, token);
-      const workflow = await createWorkflowOrFail(base, token, {
-        definition: {
-          name: "Two unsupported elements",
-          steps: [
-            buildCreateStep("first"),
-            { id: "review", kind: "agent", agent: agentId, prompt: "Review the task." },
-            { id: "approve", kind: "agent", agent: agentId, prompt: "Approve the task." },
-          ],
-          edges: [
-            { from: "first", to: "review" },
-            { from: "review", to: "approve" },
-          ],
-        },
-      });
-
-      const response = await requestRun(base, token, workflow.id);
-
-      await expectRefusedAt(harness, response, [
-        ["steps", "1"],
-        ["steps", "2"],
-      ]);
-    });
-  });
-
   it("runs each routing element to completion: conditions, join, maxTraversals, several incoming edges, an entry step an edge leads into and terminal", async () => {
     await withSetUpController(async ({ base, token }) => {
       const fixtures: ReadonlyArray<{

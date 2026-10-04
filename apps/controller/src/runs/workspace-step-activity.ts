@@ -4,6 +4,9 @@
  * step is running is a fact about step records, which belong to this domain,
  * so the question is answered here rather than by SQL over `runs` in the
  * workspaces domain.
+ *
+ * Both kinds of workspace step count: a workspace action, and an agent step,
+ * whose session works in the run's workspace while the step runs.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,7 +26,9 @@ export const RunWorkspaceStepActivityLayer: Layer.Layer<
       isStepRunning: (workspaceId, runnerId) =>
         Effect.map(runs.listRunningStepsPinnedTo(runnerId), (records) =>
           records.some(
-            (record) => record.workspaceId === workspaceId && runsInWorkspace(record.action),
+            (record) =>
+              record.workspaceId === workspaceId &&
+              (record.kind === "agent" || runsInWorkspace(record.action)),
           ),
         ),
     };

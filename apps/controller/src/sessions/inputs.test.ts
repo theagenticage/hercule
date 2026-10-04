@@ -41,6 +41,7 @@ const insertSessionWithInput = Effect.gen(function* () {
     permissionProfileId: mintId(),
     agentId: undefined,
     conversationId: undefined,
+    step: undefined,
     instanceId: mintId(),
     runnerId: mintId(),
     requestedAccessMode: "approval-required",

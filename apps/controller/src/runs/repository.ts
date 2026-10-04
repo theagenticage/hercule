@@ -118,22 +118,39 @@ export interface StepRecordId {
 }
 
 /**
- * A step record that is running in a run pinned to a runner, with what a
- * runner needs to run it again.
+ * A step record that is running in a run pinned to a runner, with what the
+ * runner needs to run it again, or to report how it ended:
+ *
+ * - `action`: an action step, with its action, its stored input and the
+ *   run's workspace policy;
+ * - `agent`: an agent step, with the session it drives, and whether the
+ *   step's prompt is still waiting in that session, not sent to the runner
+ *   yet.
  */
-export interface PinnedRunningStep {
+export type PinnedRunningStep = {
   readonly runId: string;
   readonly stepId: string;
   readonly iteration: number;
-  /** The run's workspace. */
-  readonly workspaceId: string;
-  /** The id of the step's action in the run's plan. */
-  readonly action: string;
-  /** The step's input as stored when the record started. Every action step's record stores one. */
-  readonly input?: Schema.Json;
-  /** The run's workspace policy, from its plan. */
-  readonly workspacePolicy: WorkspacePolicy;
-}
+  /** The run's workspace, or null for a run that has none. */
+  readonly workspaceId: string | null;
+} & (
+  | {
+      readonly kind: "action";
+      /** The id of the step's action in the run's plan. */
+      readonly action: string;
+      /** The step's input as stored when the record started. Every action step's record stores one. */
+      readonly input?: Schema.Json;
+      /** The run's workspace policy, from its plan, or undefined for a run with no workspace. */
+      readonly workspacePolicy: WorkspacePolicy | undefined;
+    }
+  | {
+      readonly kind: "agent";
+      /** The session the record drives. Every agent step's record stores one when it starts. */
+      readonly sessionId: string;
+      /** Whether the step's prompt for this iteration is a queued input not yet sent to the runner. */
+      readonly promptWaiting: boolean;
+    }
+);
 
 /**
  * A step record was asked to start or to end, but it had already ended, for
@@ -693,27 +710,33 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Moves a pending step record to running, and stores the step's input:
-     * its params rendered and checked against the action's input schema.
+     * Moves a pending step record to running, and stores what it started
+     * with:
+     *
+     * - for an action step, its input: the params rendered and checked
+     *   against the action's input schema;
+     * - for an agent step, the session that runs it.
+     *
      * Fails with `StepRecordEnded` if the record is not pending any more, so
-     * the caller does not call the step's action for a run that has been
-     * cancelled.
+     * the caller does not start the step for a run that has been cancelled.
      */
     startStep: (
       runId: string,
       step: StepRecordId,
-      input: Schema.Json,
+      started: { readonly input: Schema.Json } | { readonly sessionId: string },
       at: string,
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
-        const started = yield* sql`
+        const input = "input" in started ? JSON.stringify(started.input) : null;
+        const session = "sessionId" in started ? uuidFromString(started.sessionId) : null;
+        const updated = yield* sql`
           UPDATE run_steps SET status = 'running', started_at = ${at},
-                               input = ${JSON.stringify(input)}
+                               input = ${input}, session_id = ${session}
           WHERE run_id = ${uuidFromString(runId)} AND step_id = ${step.stepId}
             AND iteration = ${step.iteration} AND status = 'pending'
           RETURNING step_id
         `;
-        if (started.length === 0) {
+        if (updated.length === 0) {
           return yield* Effect.fail(new StepRecordEnded({ runId, stepId: step.stepId }));
         }
         yield* announceChange(runId, "updated");
@@ -820,18 +843,19 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Pins a running run to a runner and to its workspace there. Every later
-     * step of the run that works in a workspace runs in this one. Does nothing
-     * to a run that is not running or is already pinned.
+     * Pins a running run to a runner, and to its workspace there when it has
+     * one. Every later step of the run that runs on a runner runs on this
+     * one, in this workspace. Does nothing to a run that is not running or is
+     * already pinned.
      */
     pin: (
       runId: string,
-      pinned: { readonly runnerId: string; readonly workspaceId: string },
+      pinned: { readonly runnerId: string; readonly workspaceId: string | null },
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
+        const workspace = pinned.workspaceId === null ? null : uuidFromString(pinned.workspaceId);
         yield* sql`
-          UPDATE runs SET runner_id = ${uuidFromString(pinned.runnerId)},
-                          workspace_id = ${uuidFromString(pinned.workspaceId)}
+          UPDATE runs SET runner_id = ${uuidFromString(pinned.runnerId)}, workspace_id = ${workspace}
           WHERE id = ${uuidFromString(runId)} AND status = 'running' AND runner_id IS NULL
         `;
         yield* announceChange(runId, "updated");
@@ -870,16 +894,18 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the ids of the runs that may be waiting for a runner: running
-     * runs whose plan has a workspace and that are not pinned to a runner
-     * yet. Their first workspace step either waits for a runner to place it
-     * on, or has not been reached.
+     * runs that are not pinned to a runner yet, whose plan has a workspace or
+     * an agent step. Their first step that runs on a runner either waits for
+     * a runner to place it on, or has not been reached.
      */
     listRunsWaitingForRunner: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runs
           WHERE runner_id IS NULL AND runs.status = 'running'
-            AND json_extract(plan, '$.workspace') IS NOT NULL
+            AND (json_extract(plan, '$.workspace') IS NOT NULL
+                 OR EXISTS (SELECT 1 FROM json_each(plan, '$.steps') AS step
+                            WHERE json_extract(step.value, '$.kind') = 'agent'))
           ORDER BY created_at, id
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),
@@ -887,8 +913,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns every running step record in the running runs pinned to a
-     * runner, with the action its step calls and its stored input. The caller
-     * picks out the records of workspace steps.
+     * runner, with what its step is (see `PinnedRunningStep`). A step that is
+     * neither an action step nor an agent step is left out. The caller picks
+     * out the records of the steps that run on a runner.
      */
     listRunningStepsPinnedTo: (
       runnerId: string,
@@ -896,39 +923,65 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{
           readonly run_id: Uint8Array;
-          readonly workspace_id: Uint8Array;
+          readonly workspace_id: Uint8Array | null;
           readonly step_id: string;
           readonly iteration: number;
+          readonly kind: string | null;
           readonly action: string | null;
           readonly input: string | null;
-          readonly workspace_policy: string;
+          readonly session_id: Uint8Array | null;
+          readonly prompt_waiting: number;
+          readonly workspace_policy: string | null;
         }>`
-          SELECT s.run_id, r.workspace_id, s.step_id, s.iteration, s.input,
+          SELECT s.run_id, r.workspace_id, s.step_id, s.iteration, s.input, s.session_id,
                  json_extract(r.plan, '$.workspace') AS workspace_policy,
-                 (SELECT json_extract(step.value, '$.action')
-                  FROM json_each(r.plan, '$.steps') AS step
-                  WHERE json_extract(step.value, '$.id') = s.step_id) AS action
-          FROM runs r JOIN run_steps s ON s.run_id = r.id
+                 json_extract(step.value, '$.kind') AS kind,
+                 json_extract(step.value, '$.action') AS action,
+                 EXISTS (SELECT 1 FROM session_inputs AS prompt
+                         WHERE prompt.session_id = s.session_id
+                           AND prompt.step_iteration = s.iteration
+                           AND prompt.status = 'queued' AND prompt.sent_at IS NULL)
+                   AS prompt_waiting
+          FROM runs r
+            JOIN run_steps s ON s.run_id = r.id
+            JOIN json_each(r.plan, '$.steps') AS step
+              ON json_extract(step.value, '$.id') = s.step_id
           WHERE r.runner_id = ${uuidFromString(runnerId)} AND r.status = 'running'
-            AND r.workspace_id IS NOT NULL AND s.status = 'running'
+            AND s.status = 'running'
           ORDER BY r.created_at, s.rowid
         `,
         (rows) =>
-          rows.flatMap((row) =>
-            row.action === null
-              ? []
-              : [
-                  {
-                    runId: uuidToString(row.run_id),
-                    stepId: row.step_id,
-                    iteration: row.iteration,
-                    workspaceId: uuidToString(row.workspace_id),
-                    action: row.action,
-                    ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
-                    workspacePolicy: JSON.parse(row.workspace_policy) as WorkspacePolicy,
-                  },
-                ],
-          ),
+          rows.flatMap((row): ReadonlyArray<PinnedRunningStep> => {
+            const record = {
+              runId: uuidToString(row.run_id),
+              stepId: row.step_id,
+              iteration: row.iteration,
+              workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
+            };
+            if (row.kind === "agent" && row.session_id !== null) {
+              return [
+                {
+                  ...record,
+                  kind: "agent",
+                  sessionId: uuidToString(row.session_id),
+                  promptWaiting: row.prompt_waiting === 1,
+                },
+              ];
+            }
+            if (row.kind !== "action" || row.action === null) return [];
+            return [
+              {
+                ...record,
+                kind: "action",
+                action: row.action,
+                ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
+                workspacePolicy:
+                  row.workspace_policy === null
+                    ? undefined
+                    : (JSON.parse(row.workspace_policy) as WorkspacePolicy),
+              },
+            ];
+          }),
       ),
 
     /** Ends a pending or running run. Does nothing to a run that has already ended. */

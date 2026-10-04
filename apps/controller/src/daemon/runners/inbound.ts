@@ -89,7 +89,7 @@ const make = Effect.gen(function* () {
       case "workspaceStepReported":
         return Effect.gen(function* () {
           const { runnerId, result } = traffic;
-          yield* runs.recordStepResult(runnerId, result);
+          yield* runs.completeStep(runnerId, result);
           // The step's end is recorded now, or was already, or the result
           // was ignored because the runner has no business with the step.
           // Either way the controller never asks for this result again, so

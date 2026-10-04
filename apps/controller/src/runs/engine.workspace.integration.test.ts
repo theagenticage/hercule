@@ -5,7 +5,7 @@
  *
  * No runner is connected. Workspace Steps is a fake that records what the
  * run engine hands to runners and settles with them, and the test plays the
- * runner by calling `recordStepResult` with a step's result, as the controller
+ * runner by calling `completeStep` with a step's result, as the controller
  * daemon does when a result arrives. The fake also notes every call made
  * inside a database transaction, and each test fails if there is one: a
  * transaction must never wait on a runner.
@@ -30,6 +30,7 @@ import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { RunExecutorLayer } from "../daemon/runs";
 import { RunService, RunServiceLayer } from "./service";
+import { StepSessionFailuresLayer } from "./session-observer";
 import {
   WorkspaceSteps,
   type WorkspaceStepToStart,
@@ -105,6 +106,8 @@ const runTest = <A, E>(
           noteIfInTransaction("settle");
           recorded.settles.push(...steps);
         },
+        openSession: () => Effect.die("these tests run no agent step"),
+        stopSessions: () => Effect.void,
       };
     }),
   );
@@ -132,6 +135,7 @@ const runTest = <A, E>(
     Layer.provideMerge(RunExecutorLayer),
     Layer.provideMerge(PlatformEventsLayer),
     Layer.provideMerge(workspaceSteps),
+    Layer.provideMerge(StepSessionFailuresLayer),
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
     Layer.provideMerge(buildPluginStack()),
   );
@@ -264,7 +268,10 @@ const startCommitRun = (recorded: Recorded) =>
     const runs = yield* RunService;
     const { runId } = yield* runs.start({ definition: buildCommitDefinition(repoId) });
     const [start] = yield* waitForStarts(recorded, 1);
-    return { runnerId, repoId, runId, start: start! };
+    if (start?.kind !== "action") {
+      return yield* Effect.die("the commit step was not handed on as an action step");
+    }
+    return { runnerId, repoId, runId, start };
   });
 
 describe("a workspace step", () => {
@@ -277,6 +284,7 @@ describe("a workspace step", () => {
 
         // The workspace id is checked against the run below.
         expect(start).toEqual({
+          kind: "action",
           runId,
           stepId: "commit",
           iteration: 1,
@@ -318,10 +326,10 @@ describe("a workspace step", () => {
           outcome: { status: "completed" as const, output: COMMITTED },
         };
         // A result from a runner the run is not pinned to is ignored.
-        yield* runs.recordStepResult(yield* insertRunner(), result);
+        yield* runs.completeStep(yield* insertRunner(), result);
         expect(findRecord(yield* readRun(runId), "commit")?.status).toBe("running");
 
-        yield* runs.recordStepResult(runnerId, result);
+        yield* runs.completeStep(runnerId, result);
         const ended = yield* waitForRunToEnd(runId);
         expect(ended.status).toBe("completed");
         expect(findRecord(ended, "commit")).toMatchObject({
@@ -334,7 +342,7 @@ describe("a workspace step", () => {
         });
 
         // The same result again finds the record ended, and changes nothing.
-        yield* runs.recordStepResult(runnerId, result);
+        yield* runs.completeStep(runnerId, result);
         expect(yield* readRun(runId)).toEqual(ended);
       }),
     );
@@ -345,7 +353,7 @@ describe("a workspace step", () => {
       Effect.gen(function* () {
         const { runnerId, runId } = yield* startCommitRun(recorded);
         const runs = yield* RunService;
-        yield* runs.recordStepResult(runnerId, {
+        yield* runs.completeStep(runnerId, {
           runId,
           stepId: "commit",
           iteration: 1,
@@ -457,7 +465,7 @@ describe("a workspace step", () => {
         });
         yield* waitForStarts(recorded, 2);
 
-        yield* runs.recordStepResult(runnerId, {
+        yield* runs.completeStep(runnerId, {
           runId,
           stepId: "first",
           iteration: 1,

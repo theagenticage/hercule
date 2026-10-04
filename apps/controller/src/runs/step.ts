@@ -70,9 +70,9 @@ import type { RunStartError } from "./start";
  *
  * - `not_found`: the step's action is not in the catalog, or has nothing to
  *   call.
- * - `expression_error`: the step's condition, or a template in its params,
- *   could not be evaluated, or the condition gave something other than true
- *   or false.
+ * - `expression_error`: the step's condition, a template in its params, or
+ *   an agent step's prompt could not be evaluated, or the condition gave
+ *   something other than true or false.
  * - `validation`: the rendered params do not match the action's input schema,
  *   or the step names a Connection of another type than its action acts
  *   through.
@@ -86,6 +86,9 @@ import type { RunStartError } from "./start";
  *   running.
  * - `workspace_failed`: the run's workspace could not be set up, or the
  *   runner that holds it is gone, while the step was running in it.
+ * - `session_failed`: an agent step's session could not be opened, or it
+ *   ended while the step's turn was owed, with no runner left to report how
+ *   the turn ended.
  */
 type EngineStepErrorCode =
   | "not_found"
@@ -94,7 +97,8 @@ type EngineStepErrorCode =
   | "connection_unavailable"
   | "unexpected"
   | "interrupted"
-  | "workspace_failed";
+  | "workspace_failed"
+  | "session_failed";
 
 /** A step error the engine writes itself. */
 export interface EngineStepError extends StepError {

@@ -212,7 +212,7 @@ const make = Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
       const answer = yield* connections.asked(
         session.runnerId,
-        sessions.inputFrame(row, session.modelSelection),
+        sessions.inputFrame(session, row),
         deadline,
       );
       return Option.filter(
@@ -681,6 +681,38 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Delivers the prompt of an agent step that `queueStepInput` stored, once
+   * it is committed, by the session's status at that moment:
+   *
+   * - a session put back on the queue, by this prompt's resume or earlier,
+   *   is dispatched;
+   * - an idle or exited session gets `deliverQueuedInput`;
+   * - a starting or busy session is left alone: the prompt is sent when the
+   *   session is next idle.
+   *
+   * A step's prompt is never steered into a running turn. The runner takes
+   * the next turn that completes after the prompt as the step's turn, so a
+   * prompt folded into someone else's turn would end the step with that
+   * turn's answer.
+   */
+  const deliverStepInput = (
+    sessionId: string,
+  ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const session = yield* readSession(sessionId);
+      switch (session.status) {
+        case "queued":
+          return yield* dispatch(session.runnerId);
+        case "starting":
+        case "busy":
+          return;
+        case "idle":
+        case "exited":
+          return yield* deliverQueuedInput(sessionId);
+      }
+    });
+
+  /**
    * Stops a session that has not exited, as the actor behind the current
    * request, and writes the `session.stopped` audit entry. Also withdraws the
    * approval notification about the request the session waits on, if any.
@@ -799,6 +831,48 @@ const make = Effect.gen(function* () {
           claimed: false,
         });
         return Option.some(deliverConversationInput(sessionId, stored.id));
+      }),
+
+    /**
+     * Queues `text` as the prompt of one iteration of an agent step, on the
+     * session an earlier iteration of the step ran in, inside the caller's
+     * transaction. Returns the delivery, which the caller runs after its
+     * commit (`deliverStepInput`). The input is stamped with the current
+     * actor, which is the step's run.
+     *
+     * - A session that has exited but can be resumed goes back on the queue
+     *   in place, with a resume spec, in the same transaction.
+     * - Any other session gets the prompt when it is next idle.
+     *
+     * Fails with `InvalidState`, and stores nothing, when the session has
+     * exited and cannot be resumed. It checks no grant: the caller is the
+     * run's execution, which the workflow already allows.
+     */
+    queueStepInput: (
+      sessionId: string,
+      text: string,
+      iteration: number,
+    ): Effect.Effect<
+      Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError>,
+      InvalidState | NotFound | SqlError | SettingError | Schema.SchemaError
+    > =>
+      Effect.gen(function* () {
+        const session = yield* readSession(sessionId);
+        const nativeSessionId =
+          session.status === "exited" ? yield* resumableNativeSession(session) : undefined;
+        yield* sessions.takeInput({
+          sessionId,
+          modelSelection: session.modelSelection,
+          buildResumeSpec:
+            nativeSessionId === undefined
+              ? undefined
+              : (now: StoredSession) => buildResumeSpec(now, now.modelSelection, nativeSessionId),
+          text,
+          at: yield* nowIso,
+          claimed: false,
+          stepIteration: iteration,
+        });
+        return deliverStepInput(sessionId);
       }),
 
     /**
@@ -1065,13 +1139,15 @@ const make = Effect.gen(function* () {
  *   route handler calls it directly. `queueInput` checks its grant and
  *   decodes its input too, but it stores the input in the caller's
  *   transaction, so it is for a caller inside the controller, not a route.
- * - `sendClaimed`, `deliverQueuedInput`, `queueConversationInput` and
- *   `stopSession` check no grant. The first two send a row that is already
- *   stored: `sendClaimed` the row claimed when a session goes idle,
- *   `deliverQueuedInput` when something else has just stored a row. The grant was checked when the row
- *   was stored. The other two are the shared work of an operation that
- *   checks its own grant. Putting any of them on a route would let anyone who
- *   can reach the API call it.
+ * - `sendClaimed`, `deliverQueuedInput`, `queueConversationInput`,
+ *   `queueStepInput` and `stopSession` check no grant. The first two send a
+ *   row that is already stored: `sendClaimed` the row claimed when a session
+ *   goes idle, `deliverQueuedInput` when something else has just stored a
+ *   row. The grant was checked when the row was stored. `queueStepInput` is
+ *   called by a workflow run, which the workflow already allows. The other
+ *   two are the shared work of an operation that checks its own grant.
+ *   Putting any of them on a route would let anyone who can reach the API
+ *   call it.
  */
 export class Live extends Context.Service<Live, Effect.Success<typeof make>>()(
   "hercule/controller/daemon/Live",

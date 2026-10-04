@@ -85,6 +85,7 @@ export {
   Placement,
   PlacementLayer,
   SessionInputDeadline,
+  SessionObserverLayer,
   sweepSessionsOnLostRunners,
 } from "./sessions";
 export {

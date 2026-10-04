@@ -38,6 +38,12 @@ export interface StoredInput {
   readonly sentAt: string | null;
   /** Why a delivery failed, on a row still queued or cancelled because of it; null otherwise. */
   readonly reason: string | null;
+  /**
+   * The iteration of the agent step this input is the prompt for; null for
+   * any input that is not a step's prompt. The step's run and step id are on
+   * the session.
+   */
+  readonly stepIteration: number | null;
 }
 
 export interface NewInput {
@@ -52,6 +58,8 @@ export interface NewInput {
    * the row before this transaction commits.
    */
   readonly sentAt?: string;
+  /** Set for the prompt of an agent step's iteration; see `StoredInput.stepIteration`. */
+  readonly stepIteration?: number;
 }
 
 /** A wake-up that was sent, never acknowledged, and cannot be stored again. */
@@ -90,10 +98,12 @@ interface InputRow {
   readonly delivered_at: string | null;
   readonly sent_at: string | null;
   readonly reason: string | null;
+  readonly step_iteration: number | null;
 }
 
 const COLUMNS =
-  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason";
+  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
+  "step_iteration";
 
 const toInput = (row: InputRow): StoredInput => ({
   id: uuidToString(row.id),
@@ -107,6 +117,7 @@ const toInput = (row: InputRow): StoredInput => ({
   deliveredAt: row.delivered_at,
   sentAt: row.sent_at,
   reason: row.reason,
+  stepIteration: row.step_iteration,
 });
 
 /**
@@ -127,10 +138,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         const sentAt = input.sentAt ?? null;
+        const stepIteration = input.stepIteration ?? null;
         yield* sql`
-          INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at, sent_at)
+          INSERT INTO session_inputs
+            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, 'queued', ${input.at}, ${sentAt})
+                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration})
         `;
         return {
           id: uuidToString(id),
@@ -144,6 +157,7 @@ const make = Effect.gen(function* () {
           deliveredAt: null,
           sentAt,
           reason: null,
+          stepIteration,
         };
       }),
 
@@ -183,6 +197,7 @@ const make = Effect.gen(function* () {
           deliveredAt: null,
           sentAt: null,
           reason: null,
+          stepIteration: null,
         });
       }),
 
@@ -300,6 +315,22 @@ const make = Effect.gen(function* () {
           (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
+
+    /**
+     * Returns the prompt of one iteration of an agent step on its session, or
+     * `none` when the session holds no prompt for that iteration.
+     */
+    readStepInput: (
+      sessionId: string,
+      iteration: number,
+    ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.map(
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND step_iteration = ${iteration}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+      ),
 
     /** Returns the oldest input still waiting to be sent, which is the next one a flush sends. */
     oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>

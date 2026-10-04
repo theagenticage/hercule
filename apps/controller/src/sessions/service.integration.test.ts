@@ -172,6 +172,7 @@ const insertQueuedSession = (
       permissionProfileId: options.permissionProfileId ?? mintId(),
       agentId: options.agentId,
       conversationId: undefined,
+      step: undefined,
       instanceId: options.instanceId,
       runnerId,
       workspaceId: null,
@@ -710,12 +711,13 @@ describe("the frame builders on SessionService", () => {
       deliveredAt: null,
       sentAt: null,
       reason: null,
+      stepIteration: null,
     };
     const modelSelection: ModelSelection = { model: "fast", options: { verbose: true } };
     const frame = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
-        return sessions.inputFrame(row, modelSelection);
+        return sessions.inputFrame({ runId: null, stepId: null, modelSelection }, row);
       }),
     );
 
@@ -724,6 +726,37 @@ describe("the frame builders on SessionService", () => {
       requestId: row.id,
       sessionId: row.sessionId,
       input: { text: row.text, modelSelection: modelSelection },
+    });
+  });
+
+  it("inputFrame puts the step key on the prompt of an agent step", async () => {
+    const row: StoredInput = {
+      id: mintId(),
+      sessionId: mintId(),
+      source: "user",
+      actor: "run:0199e0e7-0000-7000-8000-000000000001",
+      text: "implement the change",
+      status: "queued",
+      delivery: null,
+      createdAt: at,
+      deliveredAt: null,
+      sentAt: null,
+      reason: null,
+      stepIteration: 2,
+    };
+    const runId = mintId();
+    const modelSelection: ModelSelection = { model: "fast", options: {} };
+    const frame = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        return sessions.inputFrame({ runId, stepId: "implement", modelSelection }, row);
+      }),
+    );
+
+    expect(frame.input).toStrictEqual({
+      text: row.text,
+      modelSelection,
+      step: { runId, stepId: "implement", iteration: 2 },
     });
   });
 

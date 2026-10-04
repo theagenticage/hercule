@@ -27,7 +27,6 @@ import { buildControllerOrigin, type HomePaths } from "@hercule/home";
 import { makeProcessLogLayer } from "@hercule/process-log";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
-import { AssistantSessionObserverLayer } from "./assistants";
 import { ConversationMessagesLayer } from "./conversations";
 import {
   createDatabaseError,
@@ -42,6 +41,7 @@ import {
   cancelStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
+  SessionObserverLayer,
 } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
@@ -93,7 +93,11 @@ import {
 import { seed } from "./seed";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
-import { RunWorkspaceStepActivityLayer } from "./runs";
+import {
+  RunWorkspaceStepActivityLayer,
+  StepSessionFailuresLayer,
+  type StepSessionFailures,
+} from "./runs";
 import { WorkspaceService, WorkspaceServiceLayer, type WorkspaceStepActivity } from "./workspaces";
 
 /** Setup tokens are created and stored like every other Hercule token. */
@@ -239,6 +243,7 @@ export type ControllerServices =
   | SessionService
   | WorkspaceService
   | WorkspaceStepActivity
+  | StepSessionFailures
   | ConnectionService
   | LocalRunnerId
   | HerculeHome
@@ -324,14 +329,15 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * The session service tells the assistants domain, through the sessions
-     * domain's `SessionObserver` port, about every report and every exit, and
-     * about inputs it drops, so an assistant's replies and notices reach its
-     * conversation. The sessions domain cannot import the assistants domain,
-     * so the two are joined here.
+     * The session service tells the assistants and runs domains, through the
+     * sessions domain's `SessionObserver` port, about every report and every
+     * exit, and about inputs it drops: an assistant's replies and notices
+     * reach its conversation, and an agent step whose turn no runner will
+     * report fails. The sessions domain cannot import either domain, so they
+     * are joined here.
      */
     const sessionService = SessionServiceLayer.pipe(
-      Layer.provide(AssistantSessionObserverLayer),
+      Layer.provide(SessionObserverLayer),
       Layer.provide(ConversationMessagesLayer),
     );
 
@@ -344,7 +350,10 @@ export const bootWith = <A, E>(
      * import the runs domain, so the two are joined here. The connection
      * service asks the resources and workflows domains, through the
      * `ConnectionReferences` port, what still names a Connection before it
-     * deletes one, and is joined to them here for the same reason.
+     * deletes one, and is joined to them here for the same reason. The run
+     * engine registers how it fails an agent step in `StepSessionFailures`,
+     * which the session service's observer calls, so the one instance is
+     * merged here for both.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
@@ -354,6 +363,7 @@ export const bootWith = <A, E>(
     ).pipe(
       Layer.provideMerge(WorkspaceServiceLayer),
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
+      Layer.provideMerge(StepSessionFailuresLayer),
       Layer.provideMerge(withFleet),
     );
 

@@ -28,9 +28,13 @@ import { Authenticated } from "../security";
 import { Prompt, SessionInputOutcome } from "./session";
 
 /**
- * Where an input came from. Only `user` is written in this build. The other
- * values are already in the schema, so the subscription and scheduled-wake
- * features need no migration.
+ * Where an input came from:
+ *
+ * - `user`: an input someone sent. That is a person, a session, or a workflow
+ *   run sending an agent step's prompt; the input's actor names which one.
+ * - `subscription`: an input a subscription match created.
+ * - `heartbeat` and `reminder`: not written yet. They are already in the
+ *   schema, so the scheduled-wake feature needs no migration.
  */
 export const INPUT_SOURCES = ["user", "subscription", "heartbeat", "reminder"] as const;
 

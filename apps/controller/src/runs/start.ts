@@ -53,7 +53,7 @@ import {
   type PendingTriggerEffect,
 } from "../workflows";
 import { runRepository, type RunOutcome } from "./repository";
-import { describeMissingCapableRunner, listWorkspaceActionIds } from "./runner-capabilities";
+import { describeMissingCapableRunner, listRequiredCapabilities } from "./runner-capabilities";
 import { isUnfinished } from "./step-records";
 
 /**
@@ -65,8 +65,6 @@ const DEFAULT_RUN_NESTING_LIMIT = 5;
 
 const decodeStartInput = Schema.decodeUnknownEffect(RunStartInput);
 const decodeRerunInput = Schema.decodeUnknownEffect(RunRerunInput);
-
-type PlanStep = WorkflowDefinition["steps"][number];
 
 /** The refusal of a `run.start` that names no workflow, or more than one. */
 const ONE_WORKFLOW =
@@ -90,7 +88,7 @@ const REPLAY_HINT = "Replay the original run's plan instead.";
  * with where the run's plan and inputs came from.
  */
 interface RefusalMessages {
-  /** The message when the plan does not validate or has an element runs cannot execute yet. */
+  /** The message when the plan does not validate or a step names a disabled Connection. */
   readonly unrunnablePlan: string;
   /** The message when the inputs do not match the plan's declarations. */
   readonly invalidInputs: string;
@@ -132,23 +130,6 @@ const REPLAY_REFUSALS: RefusalMessages = {
   unrunnablePlan: "the original run's plan cannot run any more",
   invalidInputs: "the original run's inputs no longer match its plan",
 };
-
-/**
- * Returns an issue for each element of a definition that runs cannot execute
- * yet, each at its path. Such a workflow can be saved, but starting a run of
- * it is refused: a run that ignored a step it cannot execute would do
- * something the author did not write.
- */
-const listUnsupportedElements = (definition: WorkflowDefinition): ReadonlyArray<Issue> =>
-  definition.steps.flatMap((step: PlanStep, index): ReadonlyArray<Issue> => {
-    if (step.kind !== "agent") return [];
-    return [
-      {
-        path: ["steps", String(index), "kind"],
-        message: "Runs cannot run agent steps yet. Only action steps can run.",
-      },
-    ];
-  });
 
 /**
  * A run about to be written: the plan it runs, the stored workflow the plan
@@ -312,8 +293,8 @@ export const makeRunStart = (
     /**
      * Checks that `plan` can run with `unresolvedInputs`, and returns the
      * inputs with their defaults applied. It validates the plan again,
-     * refuses what runs cannot execute yet and steps that name a disabled
-     * Connection, and resolves the inputs. Fails with `Validation` when any
+     * refuses steps that name a disabled Connection, and resolves the
+     * inputs. Fails with `Validation` when any
      * check fails, with the message from `refusals` where it has one.
      */
     const checkRunnable = (
@@ -322,13 +303,10 @@ export const makeRunStart = (
       refusals: RefusalMessages,
     ): Effect.Effect<Record<string, unknown>, Validation | SqlError> =>
       Effect.gen(function* () {
-        // What runs cannot do yet is checked only on a valid definition:
-        // an action that does not exist is reported once, as unknown.
+        // Disabled Connections are checked only on a valid definition: an
+        // action that does not exist is reported once, as unknown.
         const invalid = (yield* workflows.validateDefinition(plan)).errors;
-        const problems =
-          invalid.length > 0
-            ? invalid
-            : [...listUnsupportedElements(plan), ...(yield* listDisabledConnectionIssues(plan))];
+        const problems = invalid.length > 0 ? invalid : yield* listDisabledConnectionIssues(plan);
         if (problems.length > 0) {
           return yield* Effect.fail(createValidationError(problems, refusals.unrunnablePlan));
         }
@@ -350,7 +328,7 @@ export const makeRunStart = (
     ): Effect.Effect<void, Validation | SqlError> =>
       Effect.gen(function* () {
         const missingRunner = describeMissingCapableRunner(
-          listWorkspaceActionIds(plan),
+          listRequiredCapabilities(plan),
           yield* runners.listPlacementCandidates(),
         );
         if (missingRunner === undefined) return;
@@ -435,8 +413,8 @@ export const makeRunStart = (
      * Fails with:
      *
      * - `Validation`, starting no run, when the request names no workflow or
-     *   more than one, the workflow does not validate or has an element runs
-     *   cannot execute yet, no runner that is not retired offers every
+     *   more than one, the workflow does not validate or a step names a
+     *   disabled Connection, no runner that is not retired offers every
      *   workspace action the workflow uses, or the inputs do not match its
      *   declarations;
      * - `NotFound` for an unknown `workflowId`;
