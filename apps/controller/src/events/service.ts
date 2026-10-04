@@ -326,7 +326,9 @@ const make = Effect.gen(function* () {
               receivedAt: at,
               dedupKey,
               refs,
+              url: null,
               payload: decoded.payload,
+              raw: null,
               actor,
             });
             if (appended !== undefined) return { eventId: appended };
