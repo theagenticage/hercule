@@ -14,6 +14,9 @@ import type { Id } from "@hercule/contract";
  *   events from the Connection. Without the Connection no event could match
  *   the trigger again, and nothing would tell the user why their workflow
  *   went quiet.
+ * - `step`: a workflow's action step acts through the Connection, because
+ *   its `connection` param is the Connection's id. Without the Connection
+ *   every run of the workflow would fail at that step.
  */
 export type ConnectionReference =
   | {
@@ -25,6 +28,12 @@ export type ConnectionReference =
       readonly kind: "trigger";
       readonly workflowId: string;
       readonly triggerId: string;
+      readonly workflowName: string;
+    }
+  | {
+      readonly kind: "step";
+      readonly workflowId: string;
+      readonly stepId: string;
       readonly workflowName: string;
     };
 
@@ -48,7 +57,7 @@ export class ConnectionReferences extends Context.Service<
   {
     /**
      * Returns every record that names the Connection: the resources first,
-     * then the triggers, each sorted by name. Runs in the caller's
+     * then the triggers, then the steps, each sorted by name. Runs in the caller's
      * transaction, so a delete that checks first sees the same rows as the
      * delete itself.
      */

@@ -9,11 +9,17 @@
  * the trigger would never match again and the workflow would go quiet without
  * telling anyone, so the delete is refused while such a trigger exists, even
  * a paused one. The same holds for a resource that
- * acts through the Connection. Clearing a resource's Connection is tested in
+ * acts through the Connection, and for a workflow step whose `connection`
+ * param is the Connection's id. Clearing a resource's Connection is tested in
  * the resources suite.
  */
 import { describe, expect, it } from "vitest";
 import { del, get, post, readErrorBody } from "../http/testing";
+import {
+  buildForgePlugin,
+  FORGE_CONNECTION_TYPE,
+  FORGE_REVIEW_ACTION_ID,
+} from "../plugins/testing";
 import {
   ACCEPTED_GITHUB_TOKEN,
   createConnection,
@@ -151,5 +157,71 @@ describe("connection.delete while a resource and a trigger both name the Connect
       );
       expect(await readConnectionStatus(base, token, connectionId)).toBe(200);
     });
+  });
+});
+
+describe("connection.delete while a workflow step acts through the Connection", () => {
+  /** Builds a workflow named `name` whose step `review` names the Connection `connection` in its params. */
+  const buildReviewDefinition = (name: string, connection: string) => ({
+    name,
+    inputs: [{ name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: false }],
+    steps: [
+      {
+        id: "review",
+        kind: "action",
+        action: FORGE_REVIEW_ACTION_ID,
+        params: { connection, verdict: "approve" },
+      },
+    ],
+  });
+
+  it("refuses while a step names the Connection by its id, and deletes it once that workflow is gone", async () => {
+    await withSetUpController(
+      async ({ base, token }) => {
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: buildReviewDefinition("Review", connectionId),
+        });
+
+        const refused = await deleteConnection(base, token, connectionId);
+
+        const refusal = await readErrorBody(refused);
+        expect(refused.status, refusal.text).toBe(409);
+        expect(refusal.code).toBe("invalid_state");
+        expect(refusal.message).toBe(
+          "workflow steps act through this connection: review in the workflow Review; " +
+            "point those steps at another connection, or delete them, before deleting this one",
+        );
+        expect(await readConnectionStatus(base, token, connectionId)).toBe(200);
+
+        const workflowDeleted = await del(base, `/api/v1/workflows/${workflow.id}`, token);
+        expect(workflowDeleted.status, await workflowDeleted.clone().text()).toBe(200);
+        const deleted = await deleteConnection(base, token, connectionId);
+        expect(deleted.status, await deleted.clone().text()).toBe(200);
+        expect(await readConnectionStatus(base, token, connectionId)).toBe(404);
+      },
+      [buildForgePlugin().plugin],
+    );
+  });
+
+  it("deletes the Connection when a step names it only through a template", async () => {
+    await withSetUpController(
+      async ({ base, token }) => {
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        await createWorkflowOrFail(base, token, {
+          definition: buildReviewDefinition("Review", "{{ inputs.account }}"),
+        });
+
+        const response = await deleteConnection(base, token, connectionId);
+
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await readConnectionStatus(base, token, connectionId)).toBe(404);
+      },
+      [buildForgePlugin().plugin],
+    );
   });
 });

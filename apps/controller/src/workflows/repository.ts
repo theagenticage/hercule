@@ -141,6 +141,13 @@ export interface TriggerNamingConnection extends TriggerKey {
   readonly workflowName: string;
 }
 
+/** An action step that names a Connection in its `connection` param, with its workflow's name for a message. */
+export interface StepNamingConnection {
+  readonly workflowId: string;
+  readonly workflowName: string;
+  readonly stepId: string;
+}
+
 export interface WorkflowPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
@@ -801,6 +808,39 @@ const make = Effect.gen(function* () {
             workflowId: uuidToString(row.workflow_id),
             workflowName: row.workflow_name,
             triggerId: row.trigger_id,
+          })),
+      ),
+
+    /**
+     * Returns every action step whose `connection` param is the Connection's
+     * id, written as a literal, sorted by workflow name and step id. A step
+     * whose param is a template names no Connection until a run renders it,
+     * so it is not returned.
+     *
+     * Steps are not stored in a table of their own, so this reads each
+     * stored definition's `steps` array.
+     */
+    listStepsNamingConnection: (
+      connectionId: string,
+    ): Effect.Effect<ReadonlyArray<StepNamingConnection>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly workflow_id: Uint8Array;
+          readonly workflow_name: string;
+          readonly step_id: string;
+        }>`
+          SELECT workflows.id AS workflow_id, ${sql.literal(NAME_FROM_DEFINITION)} AS workflow_name,
+                 json_extract(step.value, '$.id') AS step_id
+          FROM workflows, json_each(workflows.definition, '$.steps') AS step
+          WHERE json_extract(step.value, '$.kind') = 'action'
+            AND json_extract(step.value, '$.params.connection') = ${connectionId}
+          ORDER BY workflow_name, step_id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            workflowId: uuidToString(row.workflow_id),
+            workflowName: row.workflow_name,
+            stepId: row.step_id,
           })),
       ),
 

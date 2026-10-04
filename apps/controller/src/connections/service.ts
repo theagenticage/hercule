@@ -172,6 +172,9 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
   const triggers = named.flatMap((each) =>
     each.kind === "trigger" ? [`${each.triggerId} in the workflow ${each.workflowName}`] : [],
   );
+  const steps = named.flatMap((each) =>
+    each.kind === "step" ? [`${each.stepId} in the workflow ${each.workflowName}`] : [],
+  );
   const parts: Array<string> = [];
   if (resources.length > 0) {
     parts.push(
@@ -183,6 +186,12 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
     parts.push(
       `workflow triggers match only events from this connection: ${triggers.join(", ")}; ` +
         "point those triggers at another connection, or delete them, before deleting this one",
+    );
+  }
+  if (steps.length > 0) {
+    parts.push(
+      `workflow steps act through this connection: ${steps.join(", ")}; ` +
+        "point those steps at another connection, or delete them, before deleting this one",
     );
   }
   return parts.join("; ");
@@ -1211,9 +1220,9 @@ const make = Effect.gen(function* () {
     /**
      * Deletes the connection and every secret it owns, in one transaction,
      * and records the deletion in the audit log. Fails with `NotFound` when
-     * no connection has the id, and with `InvalidState` while a resource or a
-     * trigger still names the connection, because deleting it would break
-     * that record.
+     * no connection has the id, and with `InvalidState` while a resource, a
+     * trigger or a workflow step still names the connection, because
+     * deleting it would break that record.
      *
      * The check runs in the delete's transaction. Otherwise a resource or a
      * workflow saved between the check and the delete would name a
