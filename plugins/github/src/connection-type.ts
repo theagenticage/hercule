@@ -2,7 +2,8 @@
  * GitHub, as a connection type. The user signs in through Hercule's own
  * OAuth App with a device flow, or pastes a personal access token instead.
  * Either way the token is checked by asking GitHub which account it belongs
- * to.
+ * to. A Connection's config holds the settings of its feeds: the extra
+ * repositories it watches and how far back the checks feed looks.
  */
 import { Effect, Schema } from "effect";
 import { ConnectionValidationFailed, type ConnectionTypeContribution } from "@hercule/plugin-host";
@@ -20,6 +21,45 @@ const OAUTH_APP_CLIENT_ID = "Ov23liAQFrHlllNX9ld6";
  * workflows), the organizations it belongs to, and its notifications.
  */
 const SCOPES = ["repo", "read:org", "notifications", "workflow"];
+
+/**
+ * How many days back the checks feed looks for open pull requests when a
+ * Connection does not set its own window (spec 08 section 5.1).
+ */
+export const DEFAULT_CHECKS_WINDOW_DAYS = 7;
+
+/**
+ * A repository as `owner/repo`. Owner names allow letters, digits and
+ * hyphens; repository names also allow dots and underscores.
+ */
+const RepoName = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, {
+    message: "Write a repository as owner/repo, such as octocat/hello-world.",
+  }),
+);
+
+/**
+ * A GitHub Connection's own settings, shown as a form on the Connection. Every
+ * field is optional, so a Connection created before a field existed, with an
+ * empty config, stays valid.
+ */
+export const GithubConnectionConfig = Schema.Struct({
+  repos: Schema.optionalKey(
+    Schema.Array(RepoName).annotate({
+      title: "Extra repositories",
+      description:
+        "Repositories to watch, as owner/repo, in addition to the repo Resources linked to this Connection.",
+    }),
+  ),
+  checksWindowDays: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })).annotate({
+      title: "Checks window (days)",
+      description: `How many days back to look for open pull requests whose checks are followed, from 1 to 30. Defaults to ${String(DEFAULT_CHECKS_WINDOW_DAYS)}.`,
+    }),
+  ),
+});
+
+export type GithubConnectionConfig = Schema.Schema.Type<typeof GithubConnectionConfig>;
 
 const failValidation = (message: string) =>
   Effect.fail(new ConnectionValidationFailed({ message }));
@@ -83,5 +123,6 @@ export const connectionType: ConnectionTypeContribution = {
     tokenUrl: "https://github.com/login/oauth/access_token",
     scopes: SCOPES,
   },
+  configSchema: GithubConnectionConfig,
   validate,
 };
