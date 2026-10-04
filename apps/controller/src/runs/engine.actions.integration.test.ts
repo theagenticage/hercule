@@ -48,7 +48,10 @@ const createTask = async (base: string, token: string, title: string): Promise<T
 /**
  * A parent workflow with one step that starts a run of the workflow whose id
  * is the `child` input, passing `childInputs` as that run's inputs. The id is
- * a template, so saving the parent checks nothing about the child.
+ * a template, so saving the parent cannot check `childInputs` against the
+ * child's inputs. Each value then counts as one that may choose a
+ * Connection: it must be a literal or exactly one input, and choosing it
+ * needs `connection.use`, which the user who saves these parents holds.
  */
 const buildParentDefinition = (childInputs: Record<string, unknown>) => ({
   name: "Start a child run",

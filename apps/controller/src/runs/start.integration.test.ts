@@ -832,19 +832,23 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
     "The input acc chooses the Connection a step acts through, or one a step gives to a run it starts, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.";
 
   /**
-   * Builds a workflow with one step that starts the workflow `targetId` and
-   * gives `account` to its input `account`. It declares an optional
-   * Connection input `acc` of the forge's type, which `account` can read.
+   * Builds a workflow with one step that starts the workflow `workflowId`
+   * and gives `account` to its input `account`. It declares an optional
+   * Connection input `acc` of the forge's type, which `account` can read,
+   * and an optional string input `child`, which `workflowId` can read.
    */
-  const buildWrapperDefinition = (targetId: string, account: string) => ({
+  const buildWrapperDefinition = (workflowId: string, account: string) => ({
     name: "Start a review",
-    inputs: [{ name: "acc", connection: { type: FORGE_CONNECTION_TYPE }, required: false }],
+    inputs: [
+      { name: "acc", connection: { type: FORGE_CONNECTION_TYPE }, required: false },
+      { name: "child", schema: { type: "string" }, required: false },
+    ],
     steps: [
       {
         id: "start",
         kind: "action",
         action: "run.start",
-        params: { workflowId: targetId, inputs: { account } },
+        params: { workflowId, inputs: { account } },
       },
     ],
   });
@@ -866,7 +870,7 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
       },
     });
 
-  it("refuses an assistant session that sends the wrapper, and no run starts", async () => {
+  it("refuses an assistant session that sends the wrapper, whether it names the workflow to start by its id or by a template, and no run starts", async () => {
     const forge = buildForgePlugin();
     await withAgentFleet(
       async (arranged) => {
@@ -882,17 +886,20 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
           await readProfileNamed(arranged, "assistant"),
         );
 
-        const response = await requestStart(base, agent.token, {
-          definition: buildWrapperDefinition(target.id, connectionId),
-        });
+        for (const workflowId of [target.id, "{{ inputs.child }}"]) {
+          const response = await requestStart(base, agent.token, {
+            definition: buildWrapperDefinition(workflowId, connectionId),
+            inputs: { child: target.id },
+          });
 
-        const refusal = await readErrorBody(response);
-        expect(response.status, refusal.text).toBe(403);
-        expect(refusal).toMatchObject({
-          code: "forbidden",
-          grant: "connection.use",
-          message: SENT_WORKFLOW_REFUSAL,
-        });
+          const refusal = await readErrorBody(response);
+          expect(response.status, refusal.text).toBe(403);
+          expect(refusal).toMatchObject({
+            code: "forbidden",
+            grant: "connection.use",
+            message: SENT_WORKFLOW_REFUSAL,
+          });
+        }
         expect(await countRuns(harness)).toBe(0);
         expect(forge.contexts).toHaveLength(0);
       },
@@ -932,6 +939,65 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
         expect(await countRuns(harness)).toBe(0);
       },
       { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+
+  it("treats a wrapper's inputs template that is exactly one input as an input that may choose a Connection", async () => {
+    const forge = buildForgePlugin();
+    await withAgentFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createReviewTarget(base, token);
+        const wrapper = await createWorkflowOrFail(base, token, {
+          definition: {
+            name: "Start any workflow",
+            inputs: [
+              { name: "child", schema: { type: "string" }, required: true },
+              { name: "payload", schema: { type: "object" }, required: true },
+            ],
+            steps: [
+              {
+                id: "start",
+                kind: "action",
+                action: "run.start",
+                params: { workflowId: "{{ inputs.child }}", inputs: "{{ inputs.payload }}" },
+              },
+            ],
+          },
+        });
+        const agent = await spawnThreadUnder(
+          arranged,
+          await readProfileNamed(arranged, "assistant"),
+        );
+        const inputs = { child: target.id, payload: { account: connectionId } };
+
+        const response = await requestStart(base, agent.token, { workflowId: wrapper.id, inputs });
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message:
+            "The input payload chooses the Connection a step acts through, or one a step gives to a run it starts, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.",
+        });
+        expect(await countRuns(harness)).toBe(0);
+
+        // The user may fill payload, and the child acts through the Connection.
+        const wrapperRun = await waitForRunToFinish(
+          base,
+          token,
+          await startRun(base, token, wrapper.id, { inputs }),
+        );
+        const output = expectStatus(findStepRecords(wrapperRun, "start")[0], "completed")
+          .output as { readonly runId: string };
+        expect((await waitForRunToFinish(base, token, output.runId)).status).toBe("completed");
+        expect(forge.contexts).toHaveLength(1);
+      },
+      { plugins: [forge.plugin] },
     );
   });
 
