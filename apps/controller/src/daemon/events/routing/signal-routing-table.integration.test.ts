@@ -24,15 +24,18 @@ import {
   buildLabelSignal,
   findStepRecords,
   LABEL_INPUT,
+  queryRuns,
   readRun,
   startSentWorkflow,
   waitForRun,
 } from "../../../runs/testing";
-import { WAIT_DEADLINE_MS } from "../../../sessions/testing";
+import { waitUntil, WAIT_DEADLINE_MS } from "../../../sessions/testing";
 import {
   ACCEPTED_GITHUB_TOKEN,
   createConnection,
+  createWorkflowOrFail,
   emitLabeledEvent,
+  enableWorkflow,
   withSetUpController,
   type SetUpController,
 } from "../../../workflows/testing";
@@ -188,6 +191,51 @@ describe("an event that matches a run's signal trigger", () => {
       },
       [held.plugin],
     );
+  });
+
+  it("fires the signal of a run that a start trigger started", async () => {
+    await withSignalController(async (controller) => {
+      const { base, token } = controller;
+      // An event whose first label is `start` starts a run, with the second
+      // label as the label its signal waits for.
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: {
+          name: "Start, then follow up on a label",
+          inputs: [LABEL_INPUT],
+          triggers: [
+            {
+              id: "started",
+              kind: "start",
+              on: {
+                kind: "github.pr.labeled",
+                connectionId: "any",
+                filter: 'event.payload.added[0] == "start"',
+              },
+              inputs: { label: "event.payload.added[1]" },
+            },
+            buildLabelSignal(),
+          ],
+          steps: [buildCreateStep("open"), buildCreateStep("follow_up")],
+          edges: [{ from: "labeled", to: "follow_up" }],
+        },
+      });
+      await enableWorkflow(base, token, workflow.id);
+
+      await emitLabeledEvent(base, token, { added: ["start", "triage"] });
+      const runId = await waitUntil("the start trigger started a run", async () => {
+        const page = await queryRuns(base, token, `workflowId=${workflow.id}`);
+        return page.items[0]?.id;
+      });
+      const waiting = await waitForRun(base, token, runId, "open completed", (run) =>
+        findStepRecords(run, "open").some((record) => record.status === "completed"),
+      );
+      expect(waiting.subscriptions).toMatchObject([
+        { target: { kind: "signal", triggerId: "labeled" }, holder: { kind: "run", id: runId } },
+      ]);
+
+      await emitLabeledEvent(base, token, { added: ["triage"] });
+      await waitForFirings(controller, runId, 1);
+    });
   });
 });
 
