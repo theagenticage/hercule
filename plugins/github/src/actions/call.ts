@@ -5,21 +5,25 @@
  *
  * - `unauthenticated`: the step has no Connection, the Connection has no
  *   token, or GitHub rejected the token (401).
- * - `rate_limited`: GitHub's rate limit for the account is used up (429, or
- *   403 with `Retry-After` or no requests left; see `isRateLimited`).
- * - `forbidden`: the account may not do this (403).
- * - `not_found`: the thing does not exist, or the account cannot see it (404).
+ * - `rate_limited`: GitHub refused the request because of a rate limit on
+ *   the account (429, or a 403 that `isRateLimited` counts as one). The
+ *   message says when to try again.
+ * - `forbidden`: the account may not do this (403), or the token lacks a
+ *   scope it needs.
+ * - `not_found`: the thing does not exist, the account cannot see it (404),
+ *   or GitHub says it is gone (410).
  * - `conflict`: the thing is not in a state that allows the change, such as
  *   a pull request that cannot be merged (405, 409).
  * - `validation`: GitHub refused the request as invalid (422).
- * - `unavailable`: GitHub could not be reached, or failed (5xx).
+ * - `unavailable`: GitHub could not be reached, did not answer in time, or
+ *   failed (5xx).
  * - `unexpected`: GitHub answered with any other status, or with a body of
  *   an unexpected shape.
  *
  * The codes are spelled like the public API's error codes, which a step
  * record stores for a built-in action.
  */
-import { Effect, Schema } from "effect";
+import { Clock, Effect, Schema } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import {
@@ -28,6 +32,7 @@ import {
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import {
+  computeRateLimitWaitSeconds,
   isRateLimited,
   readGithubExplanation,
   readToken,
@@ -104,11 +109,30 @@ const appendExplanation = (sentence: string, explanation: string): string =>
   explanation.length === 0 ? sentence : `${sentence} GitHub said: ${explanation}`;
 
 /**
+ * Returns the sentence that says when to try again after a rate limit, such
+ * as "Try again in 45 seconds." or "Try again in 12 minutes, at 14:05 UTC."
+ * `nowMillis` is the current time, in milliseconds since the epoch.
+ */
+const describeRateLimitWait = (response: GithubResponse, nowMillis: number): string => {
+  const seconds = computeRateLimitWaitSeconds(response, nowMillis);
+  if (seconds < 120) return `Try again in ${String(seconds)} seconds.`;
+  // Rounded up to the minute, so that the time given is never too early.
+  const at = new Date(Math.ceil((nowMillis + seconds * 1000) / 60_000) * 60_000);
+  return `Try again in ${String(Math.ceil(seconds / 60))} minutes, at ${at.toISOString().slice(11, 16)} UTC.`;
+};
+
+/**
  * Converts a response GitHub answered with a status other than 2xx into the
  * `ActionError` the step fails with. `subject` names what the request was
- * about, such as "The issue octocat/hello-world#42", for the message of a 404.
+ * about, such as "The issue octocat/hello-world#42", for the message of a 404
+ * or a 410. `nowMillis` is the current time, in milliseconds since the epoch,
+ * from which a rate limit's message says when to try again.
  */
-const convertGithubFailure = (response: GithubResponse, subject: string): ActionError => {
+export const convertGithubFailure = (
+  response: GithubResponse,
+  subject: string,
+  nowMillis: number,
+): ActionError => {
   const explanation = readGithubExplanation(response.body);
   const buildError = (code: string, message: string) => new ActionError({ code, message });
   const { status } = response;
@@ -119,13 +143,12 @@ const convertGithubFailure = (response: GithubResponse, subject: string): Action
     );
   }
   if (isRateLimited(response)) {
-    const wait =
-      response.retryAfterSeconds === undefined
-        ? "Try again later."
-        : `Try again in ${String(response.retryAfterSeconds)} seconds.`;
     return buildError(
       "rate_limited",
-      `GitHub's rate limit for the Connection's account is used up. ${wait}`,
+      appendExplanation(
+        `GitHub refused the request because of a rate limit on the Connection's account. ${describeRateLimitWait(response, nowMillis)}`,
+        explanation,
+      ),
     );
   }
   if (status === 403) {
@@ -141,6 +164,12 @@ const convertGithubFailure = (response: GithubResponse, subject: string): Action
     return buildError(
       "not_found",
       `${subject} does not exist, or the Connection's account cannot see it.`,
+    );
+  }
+  if (status === 410) {
+    return buildError(
+      "not_found",
+      appendExplanation(`${subject} is gone from GitHub.`, explanation),
     );
   }
   if (status === 405 || status === 409) {
@@ -165,6 +194,24 @@ const convertGithubFailure = (response: GithubResponse, subject: string): Action
 };
 
 /**
+ * Sends one request to GitHub and returns the response, whatever its status.
+ * Fails with `unavailable` when GitHub could not be reached. Use it instead
+ * of `callGithub` when one failure status means something else for the
+ * action, and convert the others with `convertGithubFailure`.
+ */
+export const sendGithubRequest = (
+  request: GithubRequest,
+): Effect.Effect<GithubResponse, ActionError, HttpClient.HttpClient> =>
+  Effect.mapError(
+    requestGithub(request),
+    (error) => new ActionError({ code: "unavailable", message: error.message }),
+  );
+
+/** Checks whether GitHub's response has a 2xx status. */
+export const isSuccessful = (response: GithubResponse): boolean =>
+  response.status >= 200 && response.status < 300;
+
+/**
  * Sends one request to GitHub and returns the body of a 2xx response. Fails
  * with the `ActionError` from `convertGithubFailure` for any other status,
  * and with `unavailable` when GitHub could not be reached.
@@ -173,14 +220,11 @@ export const callGithub = (
   request: GithubRequest,
   subject: string,
 ): Effect.Effect<Schema.Json, ActionError, HttpClient.HttpClient> =>
-  requestGithub(request).pipe(
-    Effect.mapError((error) => new ActionError({ code: "unavailable", message: error.message })),
-    Effect.flatMap((response) =>
-      response.status >= 200 && response.status < 300
-        ? Effect.succeed(response.body)
-        : Effect.fail(convertGithubFailure(response, subject)),
-    ),
-  );
+  Effect.gen(function* () {
+    const response = yield* sendGithubRequest(request);
+    if (isSuccessful(response)) return response.body;
+    return yield* convertGithubFailure(response, subject, yield* Clock.currentTimeMillis);
+  });
 
 /**
  * Decodes the body of a GitHub response with `schema`. Fails with
