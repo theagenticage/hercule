@@ -36,7 +36,7 @@ import {
 } from "./socket";
 import { makeCredentialRelay } from "./credentials";
 import { makeLogins, type Logins } from "./providers/login";
-import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-actions";
+import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
 
 /** This machine's facts. These tests are not about the probe. */

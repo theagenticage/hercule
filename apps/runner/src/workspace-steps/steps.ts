@@ -27,9 +27,12 @@ import {
 import { buildGitCredentialEnv, RUNNER_WORKSPACE_VARIABLE } from "../credentials";
 import { describeCause } from "../report";
 import { buildSubstrateEnv, type Workspaces } from "../workspaces";
-import type { WorkspaceAction } from "./action";
-import { STOP_GRACE, switchCheckoutBranch } from "./git";
-import { findWorkspaceAction } from "./registry";
+import {
+  STOP_GRACE,
+  findWorkspaceAction,
+  switchCheckoutBranch,
+  type WorkspaceAction,
+} from "../workspace-actions";
 import { buildStepName, deleteStepResult, readStepResult, writeStepResult } from "./results";
 
 /** How long one workspace action may run before it is stopped and its step fails with `timeout`. */

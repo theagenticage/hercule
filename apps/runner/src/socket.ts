@@ -63,7 +63,8 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { sessions } from "./sessions";
 import { reportWatermark } from "./watermark";
-import { WORKSPACE_ACTION_IDS, type WorkspaceSteps } from "./workspace-actions";
+import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
+import type { WorkspaceSteps } from "./workspace-steps";
 import type { Workspaces } from "./workspaces";
 
 const SOCKET_PATH = "/api/v1/runners/socket";

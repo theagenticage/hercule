@@ -25,7 +25,7 @@ import { reconnect, streamReconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile } from "./runner-file";
 import { connect, type RunnerRetired } from "./socket";
 import { readMachineHeadroom } from "./watermark";
-import { makeWorkspaceSteps } from "./workspace-actions";
+import { makeWorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
 
 /** Lists this machine's network addresses, sorted so two readings can be compared. */
