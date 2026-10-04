@@ -54,12 +54,6 @@
   width: 30px;
   height: 30px;
 }
-/* The Office button while the Office is open, drawn as a selected row. */
-.side-actions .icon-btn.is-on {
-  background: var(--selected);
-  color: var(--ink);
-}
-
 /* The list scrolls under a fixed top and foot. Two departures from the book:
    - The book hides the scroll bar (`scrollbar-width: none`). Spec 17 asks for
      the system's overlay scroll bars, unstyled, which macOS draws only while

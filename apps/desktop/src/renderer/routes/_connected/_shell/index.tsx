@@ -1,11 +1,11 @@
 import type { JSX } from "react";
-import type { EnsureQueryDataOptions, QueryClient, QueryKey } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { isId } from "@hercule/contract";
 import { buildDraftKey } from "../../../app/pending-submissions";
 import {
   localRunnerQuery,
   profilesQuery,
+  readOnOpen,
   runnersQuery,
   settingsQuery,
   startTasksQuery,
@@ -69,24 +69,6 @@ export const Route = createFileRoute("/_connected/_shell/")({
   },
   component: NewThreadRoute,
 });
-
-/**
- * Reads `options` once for this opening of the screen, and returns its data.
- *
- * The first time, there is nothing to show, so the screen waits for the
- * read. After that, the data read last is returned at once and the read runs
- * in the background, so opening a draft waits on the controller only the
- * first time. The data never goes stale on its own, so marking it out of
- * date here is what makes it read again. A component that starts reading it
- * while that read runs joins it rather than sending a second one.
- */
-const readOnOpen = <Data,>(
-  queryClient: QueryClient,
-  options: EnsureQueryDataOptions<Data, Error, Data, QueryKey>,
-): Promise<Data> => {
-  void queryClient.invalidateQueries({ queryKey: options.queryKey, refetchType: "none" });
-  return queryClient.ensureQueryData({ ...options, revalidateIfStale: true });
-};
 
 function NewThreadRoute(): JSX.Element {
   const search = Route.useSearch();

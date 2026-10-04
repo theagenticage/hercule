@@ -28,6 +28,7 @@ import {
   buildErrorBody,
   CONTROLLER_URL,
   createFakeBridge,
+  FIXTURE_GITHUB_CONNECTION,
   FIXTURE_INSTANCE,
   renderApp,
   SIDEBAR_FIXTURE,
@@ -46,19 +47,6 @@ const PASSWORD = "p".repeat(MIN_PASSWORD_LENGTH);
 
 const [MOSS] = SIDEBAR_FIXTURE.runners;
 const [WEBSHOP] = SIDEBAR_FIXTURE.projects;
-
-const GITHUB: Connection = {
-  id: "01a06d02-7700-7000-8000-000000000001",
-  type: GITHUB_CONNECTION_TYPE,
-  label: "rogier",
-  displayName: "rogier",
-  status: "connected",
-  labels: [],
-  config: {},
-  credentials: [],
-  createdAt: "2026-09-05T09:00:00.000Z",
-  updatedAt: "2026-09-05T09:00:00.000Z",
-};
 
 /** The project the controller creates on the project step. */
 const SHOP: Project = { ...WEBSHOP!, id: "01a06d02-7000-7000-8000-0000000000aa", name: "shop" };
@@ -507,12 +495,13 @@ describe("the first run's steps", () => {
           "POST /api/v1/oauth/device/start": () => ({ body: buildStart() }),
           [`POST ${POLL_PATH}`]: () => {
             const poll = polls[Math.min(index++, polls.length - 1)];
-            if ((poll as { status: string }).status === "done") connections = [GITHUB];
+            if ((poll as { status: string }).status === "done")
+              connections = [FIXTURE_GITHUB_CONNECTION];
             return { body: poll };
           },
           "POST /api/v1/connections": () => {
-            connections = [GITHUB];
-            return { status: 201, body: GITHUB };
+            connections = [FIXTURE_GITHUB_CONNECTION];
+            return { status: 201, body: FIXTURE_GITHUB_CONNECTION };
           },
           "GET /api/v1/projects": { body: { items: [] } },
         },
@@ -532,7 +521,7 @@ describe("the first run's steps", () => {
     it("shows the code, opens GitHub, and shows the Connection once the user approves", async () => {
       const { fake } = await openGitHub([
         { status: "pending", interval: 5 },
-        { status: "done", connection: GITHUB },
+        { status: "done", connection: FIXTURE_GITHUB_CONNECTION },
       ]);
       await signIn();
       fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
@@ -690,7 +679,7 @@ describe("the first run's steps", () => {
           "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
           "GET /api/v1/runners": { body: { items: [MOSS] } },
           "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
-          "GET /api/v1/connections": { body: { items: [GITHUB] } },
+          "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
       });

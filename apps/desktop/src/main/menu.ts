@@ -25,9 +25,9 @@ import { MainWindow } from "./main-window";
  * Builds the menu bar's template, for `Menu.buildFromTemplate`.
  *
  * - The app menu holds what Electron's own app menu holds: About, Services,
- *   Hide, Hide Others, Show All and Quit. Sign Out sits above Quit, between
- *   separators. It is enabled when `signedIn` is true, and choosing it calls
- *   `signOut`.
+ *   Hide, Hide Others, Show All and Quit. Settings… (⌘,) sits under About,
+ *   between separators, where macOS apps place it, and calls `openSettings`.
+ *   Sign Out sits above Quit, between separators, and calls `signOut`.
  * - File holds New Thread, ⌘N, which calls `newThread`, and Close Window,
  *   ⌘W, where macOS users look for it. Closing the window hides it; the app
  *   keeps running.
@@ -40,6 +40,11 @@ import { MainWindow } from "./main-window";
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
  * - Edit and Window are Electron's own.
+ * - Settings…, Sign Out, New Thread and Office are enabled only when
+ *   `signedIn` is true. Only the shell carries them out, and the shell never
+ *   shows while signed out, so they are dimmed then rather than doing
+ *   nothing. Main knows only whether a login token is stored, so from the
+ *   first run's account step to its end they stay enabled and do nothing.
  * - `development` adds the View menu.
  *
  * The app menu lists its items itself, because Electron's own app menu takes
@@ -57,6 +62,7 @@ const buildMenuTemplate = (options: {
   readonly signOut: () => void;
   readonly newThread: () => void;
   readonly openOffice: () => void;
+  readonly openSettings: () => void;
   readonly openThread: (sessionId: string) => void;
   readonly send: () => void;
 }): Array<MenuItemConstructorOptions> => {
@@ -64,6 +70,13 @@ const buildMenuTemplate = (options: {
     role: "appMenu",
     submenu: [
       { role: "about" },
+      { type: "separator" },
+      {
+        label: "Settings…",
+        accelerator: "CmdOrCtrl+,",
+        enabled: options.signedIn,
+        click: options.openSettings,
+      },
       { type: "separator" },
       { role: "services" },
       { type: "separator" },
@@ -93,6 +106,7 @@ const buildMenuTemplate = (options: {
         {
           label: "New Thread",
           accelerator: "CmdOrCtrl+N",
+          enabled: options.signedIn,
           click: options.newThread,
         },
         { type: "separator" },
@@ -106,7 +120,12 @@ const buildMenuTemplate = (options: {
     {
       label: "Go",
       submenu: [
-        { label: "Office", accelerator: "CmdOrCtrl+Shift+O", click: options.openOffice },
+        {
+          label: "Office",
+          accelerator: "CmdOrCtrl+Shift+O",
+          enabled: options.signedIn,
+          click: options.openOffice,
+        },
         { type: "separator" },
         ...(options.goThreads.length === 0
           ? [{ label: "No Threads", enabled: false }]
@@ -130,8 +149,9 @@ export class MainMenu extends Context.Service<
   MainMenu,
   {
     /**
-     * Enables Sign Out when `signedIn` is true. Otherwise disables it and
-     * removes the Go menu's threads, which the app can no longer open.
+     * Enables Settings…, Sign Out, New Thread and Office when `signedIn` is
+     * true. Otherwise disables them and removes the Go menu's threads, which
+     * the app can no longer open.
      */
     readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
 
@@ -146,12 +166,13 @@ export class MainMenu extends Context.Service<
 
 /**
  * Builds the MainMenu service on Electron's `Menu`: it builds the menu bar and
- * makes it the app's. Sign Out starts enabled when a login token is stored,
- * and Go lists no thread until the page lists the sidebar's threads.
+ * makes it the app's. The items only a signed-in user can choose, such as
+ * Sign Out, start enabled when a login token is stored, and Go lists no
+ * thread until the page lists the sidebar's threads.
  *
- * Choosing Sign Out, New Thread, Office or Send shows the window and sends
- * the page that menu command. Choosing a thread in Go shows the window and
- * asks the page to open it. `development` adds the View menu.
+ * Choosing Settings…, Sign Out, New Thread, Office or Send shows the window
+ * and sends the page that menu command. Choosing a thread in Go shows the
+ * window and asks the page to open it. `development` adds the View menu.
  *
  * Each change builds the menu bar again, because macOS does not show a new
  * label on an item that is already built.
@@ -172,10 +193,11 @@ export const makeMainMenuLayer = (
       const sendMenuCommand = (command: MenuCommand): void => {
         runFork(window.showAndSend("menu.command", command));
       };
-      // Read from the settings file, so that Sign Out is right in the first
-      // menu bar, while the page still loads; the page's first token read
-      // sets it again. The threads' notifications start signed out, for the
-      // reason makeThreadNotificationsLayer gives.
+      // Read from the settings file, so that the items only a signed-in user
+      // can choose are right in the first menu bar, while the page still
+      // loads; the page's first token read sets it again. The threads'
+      // notifications start signed out, for the reason
+      // makeThreadNotificationsLayer gives.
       let signedIn = (yield* settings.readEncryptedToken) !== null;
       let goThreads: ReadonlyArray<GoMenuThread> = [];
 
@@ -190,6 +212,7 @@ export const makeMainMenuLayer = (
               signOut: () => sendMenuCommand("signOut"),
               newThread: () => sendMenuCommand("newThread"),
               openOffice: () => sendMenuCommand("openOffice"),
+              openSettings: () => sendMenuCommand("openSettings"),
               send: () => sendMenuCommand("send"),
               openThread: (sessionId) => runFork(window.showAndSend("thread.open", { sessionId })),
             }),

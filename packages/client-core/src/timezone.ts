@@ -41,6 +41,19 @@ const CANONICAL_ZONES: readonly string[] = (() => {
 /** Returns the zones a screen offers, in the order the runtime lists them. */
 export const listSupportedTimezones = (): readonly string[] => CANONICAL_ZONES;
 
+/**
+ * Returns the zones a time zone select offers when `stored` is the selected
+ * zone: the supported zones, with `stored` added at the front when the list
+ * does not hold it. A zone set from the CLI or another client, or a link name
+ * like `US/Pacific`, is shown as it is, so the select shows the real setting
+ * rather than a different zone. Returns the supported list itself when
+ * nothing is added.
+ */
+export function listTimezoneChoices(stored: string): ReadonlyArray<string> {
+  const zones = listSupportedTimezones();
+  return zones.includes(stored) ? zones : [stored, ...zones];
+}
+
 /** Checks whether this runtime can format times in `timezone`. */
 export const isSupportedTimezone = (timezone: string): boolean => {
   try {

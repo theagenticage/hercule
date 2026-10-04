@@ -402,12 +402,11 @@ describe("the sidebar", () => {
     ]);
   });
 
-  it("draws Hide the sidebar, Search and Settings as buttons that do nothing yet", async () => {
+  it("draws Hide the sidebar and Search as buttons that do nothing yet", async () => {
     const { calls, router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
     const buttons = [
       screen.getByRole("button", { name: "Hide the sidebar" }),
       screen.getByRole("button", { name: "Search ⌘K" }),
-      screen.getByRole("button", { name: "Settings" }),
     ];
     const href = router.state.location.href;
     const sent = calls.length;

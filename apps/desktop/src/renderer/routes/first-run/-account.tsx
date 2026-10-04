@@ -4,7 +4,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import {
   ApiError,
   completeSetup,
-  listSupportedTimezones,
+  listTimezoneChoices,
   ONBOARDING_STEPS,
   readErrorMessage,
   resolveBrowserTimezone,
@@ -109,7 +109,7 @@ export function AccountCard({
   return (
     <AccountStep
       form={form}
-      timezones={listSupportedTimezones()}
+      timezones={listTimezoneChoices(form.timezone)}
       error={error}
       submitting={createAccount.isPending}
       onChange={(next) => {

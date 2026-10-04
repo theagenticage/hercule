@@ -1,6 +1,8 @@
 import { memo, type JSX } from "react";
+import { Link } from "@tanstack/react-router";
 import { UserAvatar } from "../faces";
 import { SlidersIcon } from "../icons/sliders";
+import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 
 /**
  * Renders the sidebar's foot: how many threads are working, waiting on you
@@ -8,9 +10,9 @@ import { SlidersIcon } from "../icons/sliders";
  *
  * Each count shows even at 0, so the line keeps its shape. The waiting count
  * is drawn in the attention hue (`you-ink`) only when it is above 0, because
- * that hue means something needs the user. The Settings button is drawn but
- * does nothing yet: there is no settings screen, and `aria-disabled` tells
- * assistive technology so.
+ * that hue means something needs the user. The Settings button opens
+ * Settings, and shows as pressed while Settings is open, as the Office button
+ * does for the Office.
  */
 export const SidebarFoot = memo(function SidebarFoot({
   working,
@@ -32,14 +34,14 @@ export const SidebarFoot = memo(function SidebarFoot({
       <div className="side-me">
         <UserAvatar name={username} size={24} />
         <span className="side-name">{username}</span>
-        <button
-          type="button"
+        <Link
+          to="/settings"
           className="icon-btn icon-btn--sm"
           title="Settings"
-          aria-disabled="true"
+          activeProps={SELECTED_LINK_PROPS}
         >
           <SlidersIcon size={14} />
-        </button>
+        </Link>
       </div>
     </div>
   );

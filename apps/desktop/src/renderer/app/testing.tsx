@@ -24,6 +24,8 @@ import { buildSession, buildThreadsWorld } from "@hercule/client-core/threads/te
 import {
   buildSessionStreamTopic,
   buildSessionTapTopic,
+  GITHUB_CONNECTION_TYPE,
+  type Connection,
   type Input,
   type ModelOption,
   type MutableLiveTopic,
@@ -529,6 +531,20 @@ export const FIXTURE_INSTANCE: ProviderInstance = {
   ],
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",
+};
+
+/** A connected GitHub Connection, for the user "rogier". */
+export const FIXTURE_GITHUB_CONNECTION: Connection = {
+  id: "01a06d02-7700-7000-8000-000000000001",
+  type: GITHUB_CONNECTION_TYPE,
+  label: "rogier",
+  displayName: "rogier",
+  status: "connected",
+  labels: [],
+  config: {},
+  credentials: [],
+  createdAt: "2026-09-05T09:00:00.000Z",
+  updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
 /** A thread as the stubbed controller holds it: its session, its transcript and its inputs. */
