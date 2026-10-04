@@ -700,8 +700,9 @@ describe("the workflow action catalog", () => {
 /**
  * Builds a plugin that declares one event source, with the id `word`, and one
  * event kind. The source polls nothing unless `options.feeds` declares feeds,
- * and the manifest requests `event-sources` and `events` unless
- * `options.capabilities` replaces them.
+ * the manifest requests `event-sources` and `events` unless
+ * `options.capabilities` replaces them, and the source is for the type
+ * `<id>/<id>` unless `options.connectionType` names another.
  */
 const buildEventSourcePlugin = (
   id: string,
@@ -710,6 +711,7 @@ const buildEventSourcePlugin = (
   options: {
     readonly feeds?: Record<string, FeedDeclaration>;
     readonly capabilities?: ReadonlyArray<PluginCapability>;
+    readonly connectionType?: string;
   } = {},
 ): Plugin => ({
   manifest: {
@@ -722,7 +724,7 @@ const buildEventSourcePlugin = (
   register: (host) =>
     registerEventSource(host, {
       id: word,
-      connectionType: `${id}/${id}`,
+      connectionType: options.connectionType ?? `${id}/${id}`,
       feeds: options.feeds ?? {},
       open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
       kinds: {
@@ -831,6 +833,59 @@ describe("the event source catalog", () => {
     );
 
     expect(readErroredMessage(status)).toContain("The id cannot contain a / character");
+  });
+
+  it("marks a plugin errored if its event source is for another plugin's Connection type", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildEventSourcePlugin("acme", "acme", "acme.thing.done", {
+            connectionType: "bolt/bolt",
+          }),
+        ]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain(
+      "the event source acme is for the Connection type bolt/bolt, which another plugin owns",
+    );
+  });
+
+  it("marks a plugin errored if two of its event sources are for one Connection type", async () => {
+    const twoSources: Plugin = {
+      ...buildEventSourcePlugin("acme", "acme", "acme.thing.done"),
+      register: (host) =>
+        Effect.forEach(
+          ["first", "second"],
+          (word) =>
+            registerEventSource(host, {
+              id: word,
+              connectionType: "acme/acme",
+              feeds: {},
+              open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
+              kinds: {
+                [`acme.${word}.done`]: {
+                  description: `Something happened: ${word}`,
+                  schema: Schema.Struct({ url: Schema.String }),
+                },
+              },
+            }),
+          { discard: true },
+        ),
+    };
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([twoSources]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain(
+      "the event sources acme/first and acme/second are both for the Connection type acme/acme",
+    );
   });
 
   it("marks a plugin errored if it declares a core event kind, and includes the kind in the message", async () => {

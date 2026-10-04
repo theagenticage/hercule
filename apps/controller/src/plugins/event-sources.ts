@@ -142,6 +142,7 @@ const decodeFeeds = (
  *
  * - the manifest did not request the `events` capability;
  * - a name is invalid, or a kind is declared twice;
+ * - the Connection type belongs to another plugin, or already has a source;
  * - a kind has the name of a core kind;
  * - a feed is invalid, as `decodeFeeds` explains.
  *
@@ -174,9 +175,29 @@ export const registerEventSourceContribution = (
         }),
       );
     }
+    // A source ingests with the credentials of its Connections, which only
+    // the plugin that owns their type can read.
+    if (!names.connectionType.startsWith(`${pluginId}/`)) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event source ${names.id} is for the Connection type ${names.connectionType}, which another plugin owns. A source can only ingest for a Connection type of its own plugin, "${pluginId}/<type>".`,
+        }),
+      );
+    }
     // The catalog id, built like a connection type's: the plugin's id and the
     // id the source declared.
     const id = `${pluginId}/${names.id}`;
+    // A Connection has one ingest handle and one set of stored state, so a
+    // second source for the same type would have no handle of its own and
+    // would share the first source's cursors.
+    const claimed = sources.find((source) => source.connectionType === names.connectionType);
+    if (claimed !== undefined) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event sources ${claimed.id} and ${id} are both for the Connection type ${names.connectionType}. A Connection type can have one event source; declare every feed and kind on one source.`,
+        }),
+      );
+    }
     if (declared.some((row) => row.extensionPoint === EVENT_SOURCE && row.id === id)) {
       return yield* Effect.fail(
         new PluginError({ message: `the ${EVENT_SOURCE} contribution ${id} is registered twice` }),
