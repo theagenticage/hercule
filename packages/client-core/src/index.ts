@@ -106,9 +106,12 @@ export {
   findFailedEdge,
   formatElapsed,
   isRunLive,
+  listAwaitedSignals,
   listRerunChoices,
   readTimestamps,
   shouldRunRecede,
+  describeStepSession,
+  type StepSessionReading,
 } from "./run-display";
 export {
   buildRunGraph,
@@ -120,6 +123,7 @@ export {
   type RunGraphNode,
   type StepProgress,
   type StepLine,
+  type StepLineKind,
 } from "./run-graph";
 export { describeRunWorkspace, type RunWorkspaceReading } from "./run-workspace";
 export {
@@ -226,6 +230,7 @@ export {
   formatSince,
   formatStamp,
   formatTimeContext,
+  isSameDay,
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
 export { resolveThreadRowsMode } from "./thread-rows";
@@ -268,7 +273,14 @@ export type {
   ThreadPicks,
 } from "./threads/config";
 export { findNextDurationChange, formatDuration } from "./threads/duration";
-export { buildHeadline, buildLanes, type LaneKind } from "./threads/lanes";
+export {
+  buildHeadline,
+  buildLanes,
+  describeStartingStep,
+  listWorkflowSessions,
+  summarizeWorkflowSessions,
+  type LaneKind,
+} from "./threads/lanes";
 export {
   describeMessageMeta,
   describeWaitingNote,

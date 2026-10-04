@@ -1,11 +1,20 @@
 /**
  * Tests `buildLanes(sessions)`, which groups sessions into the five lanes in
- * their fixed order, and `buildHeadline(sessions, now)`, which summarizes the
- * same groups in one sentence.
+ * their fixed order, `buildHeadline(sessions, now)`, which summarizes the
+ * same groups in one sentence, and the functions that list, sum up and
+ * describe the sessions workflow runs started, which sit in no lane.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
-import { buildHeadline, buildLanes } from "./lanes";
+import {
+  buildHeadline,
+  buildLanes,
+  describeStartingStep,
+  listWorkflowSessions,
+  summarizeWorkflowSessions,
+} from "./lanes";
+
+const RUN_ID = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
 
 const BASE: Session = {
   id: "s0",
@@ -113,6 +122,17 @@ describe("buildLanes", () => {
     expect(byKind.settled).toEqual([]);
     expect(byKind.waiting).toEqual([]);
   });
+
+  it("places a session a workflow run started in no lane, whatever its status", () => {
+    const started = (["busy", "idle", "exited"] as const).map((status) =>
+      buildSession({ id: `step-${status}`, status, agentId: "ada", runId: RUN_ID }),
+    );
+    const thread = buildSession({ id: "thread", status: "busy" });
+
+    const lanes = buildLanes([...started, thread]);
+
+    expect(lanes.flatMap((lane) => lane.sessions.map((s) => s.id))).toEqual(["thread"]);
+  });
 });
 
 describe("buildHeadline", () => {
@@ -192,5 +212,66 @@ describe("buildHeadline", () => {
 
   it("returns No sessions yet only when there are no sessions", () => {
     expect(buildHeadline([], now)).toBe("No sessions yet");
+  });
+
+  it("does not count the sessions a workflow run started", () => {
+    const sessions = [
+      buildSession({ id: "w1", status: "busy", agentId: "ada", runId: RUN_ID }),
+      buildSession({ id: "t1", status: "idle" }),
+    ];
+
+    expect(buildHeadline(sessions, now)).toBe("1 idle");
+    // Sessions exist, so the screen is not empty, but none of them is a thread.
+    expect(buildHeadline(sessions.slice(0, 1), now)).toBe("Nothing active this week");
+  });
+});
+
+describe("the sessions workflow runs started", () => {
+  const now = new Date("2026-09-08T12:00:00.000Z");
+  const ZONE = "Europe/Amsterdam";
+  /** Returns a session that step `implement` of the run started, created at `createdAt`. */
+  const buildStepSession = (id: string, status: Session["status"], createdAt: string): Session =>
+    buildSession({ id, status, createdAt, agentId: "ada", runId: RUN_ID, stepId: "implement" });
+  const STARTED = [
+    buildStepSession("w-busy", "busy", "2026-09-08T11:00:00.000Z"),
+    buildStepSession("w-queued", "queued", "2026-09-07T11:00:00.000Z"),
+    // 22:30 UTC on the 7th is already the 8th in Amsterdam.
+    buildStepSession("w-idle", "idle", "2026-09-07T22:30:00.000Z"),
+    buildStepSession("w-exited", "exited", "2026-09-01T11:00:00.000Z"),
+  ];
+  const THREAD = buildSession({ id: "thread", status: "busy" });
+
+  it("lists only the sessions a workflow run started", () => {
+    expect(listWorkflowSessions([THREAD, ...STARTED]).map((s) => s.id)).toEqual([
+      "w-busy",
+      "w-queued",
+      "w-idle",
+      "w-exited",
+    ]);
+  });
+
+  it("sums them up as how many, how many running, and how many were created today in the user's zone", () => {
+    expect(summarizeWorkflowSessions([THREAD, ...STARTED], now, ZONE)).toBe(
+      "4 · 2 running · 2 today",
+    );
+    expect(summarizeWorkflowSessions([THREAD, ...STARTED], now, "UTC")).toBe(
+      "4 · 2 running · 1 today",
+    );
+  });
+
+  it("leaves out a running or today count of zero", () => {
+    expect(summarizeWorkflowSessions(STARTED.slice(3), now, ZONE)).toBe("1");
+    expect(summarizeWorkflowSessions(STARTED.slice(2), now, ZONE)).toBe("2 · 1 today");
+  });
+
+  it("sums up nothing when no workflow run has started a session", () => {
+    expect(summarizeWorkflowSessions([THREAD], now, ZONE)).toBeUndefined();
+    expect(summarizeWorkflowSessions([], now, ZONE)).toBeUndefined();
+  });
+
+  it("names the step and the run that started a session", () => {
+    expect(describeStartingStep(STARTED[0]!)).toBe("step implement · run 1f3a9c2e");
+    expect(describeStartingStep({ ...STARTED[0]!, stepId: null })).toBe("run 1f3a9c2e");
+    expect(describeStartingStep(THREAD)).toBeUndefined();
   });
 });

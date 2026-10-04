@@ -166,12 +166,21 @@ export const formatPreciseStamp = (
   const day = part("day");
   if (day === "") return undefined;
   const time = `${part("hour")}:${part("minute")}:${part("second")}`;
-  const other =
-    sameDayAs === undefined ? undefined : buildPartReader("precise", sameDayAs, timezone);
-  const isSameDay =
-    other !== undefined &&
-    (["year", "month", "day"] as const).every((type) => other(type) === part(type));
-  return isSameDay ? time : `${day} ${part("month")} ${time}`;
+  return sameDayAs !== undefined && isSameDay(instant, sameDayAs, timezone)
+    ? time
+    : `${day} ${part("month")} ${time}`;
+};
+
+/**
+ * Checks whether two instants fall on the same calendar day in `timezone`.
+ * Returns false when either instant is not a valid date or the zone cannot be
+ * formatted, because then there is no day to compare.
+ */
+export const isSameDay = (a: Date, b: Date, timezone: string): boolean => {
+  const partOfA = buildPartReader("precise", a, timezone);
+  const partOfB = buildPartReader("precise", b, timezone);
+  if (partOfA === undefined || partOfB === undefined || partOfA("day") === "") return false;
+  return (["year", "month", "day"] as const).every((type) => partOfA(type) === partOfB(type));
 };
 
 /** Formats the time context as the moment a screen counts from: "since Sunday 22:10". */

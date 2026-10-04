@@ -1,7 +1,9 @@
 /**
  * How a run and its steps are described on screen: who started the run, the
  * words for its status and its failure, how long it and its steps took, and
- * how it can be re-run and which runs re-ran it.
+ * how it can be re-run and which runs re-ran it. It also lists the signals a
+ * running run with nothing to do waits on, and which session an agent step's
+ * record drove.
  *
  * The rules live here with a test rather than inside a component, so the run
  * list and a run's page use the same words for a run's status and failure.
@@ -16,11 +18,14 @@ import type {
   RunOrigin,
   RunStatus,
   Runner,
+  Session,
+  SessionStatus,
   StepStatus,
   TriggerEvent,
   WorkflowAction,
 } from "@hercule/contract";
 import { describeActor, type ActorReading, type ActorTarget } from "./actor-display";
+import { toIdTail } from "./id-tail";
 import { formatNameList } from "./name-list";
 import { formatDuration } from "./threads/duration";
 import { formatStamp } from "./time-context";
@@ -503,4 +508,63 @@ export const describeRunnerWait = (
   const since =
     runner.lastSeenAt === null ? undefined : formatStamp(new Date(runner.lastSeenAt), timezone);
   return { stepIds, text: since === undefined ? waiting : `${waiting} (offline since ${since})` };
+};
+
+/**
+ * Returns the ids of the signal triggers a run waits on, in the plan's order,
+ * or an empty list when the run waits on none. A run waits on its signals
+ * when all of these hold:
+ *
+ * - it is `running`;
+ * - none of its step records is running or pending;
+ * - its plan has signal triggers.
+ *
+ * A run has no status of its own for this wait: it stays `running` until it
+ * ends, because each signal trigger can fire again while the run lives. A
+ * signal that just fired has a pending record until the run takes it up, so
+ * for that moment the run does not wait. See spec 07 §7.2.
+ */
+export const listAwaitedSignals = (
+  run: Pick<Run, "status" | "plan" | "steps">,
+): ReadonlyArray<string> => {
+  if (run.status !== "running") return [];
+  const isBusy = run.steps.some(
+    (record) => record.status === "running" || record.status === "pending",
+  );
+  if (isBusy) return [];
+  return (run.plan.triggers ?? [])
+    .filter((trigger) => trigger.kind === "signal")
+    .map((trigger) => trigger.id);
+};
+
+/** The session an agent step's record drove, as the line under the record shows it. */
+export interface StepSessionReading {
+  readonly sessionId: string;
+  /** The session's title, or "session 1f3a9c2e" while the session has not been read or has no title. */
+  readonly title: string;
+  /** The session's status, or `undefined` while the session has not been read. */
+  readonly status: SessionStatus | undefined;
+}
+
+/**
+ * Returns how the line under an agent step's record shows the session the
+ * record drove, looked up in `sessions`, the run's sessions by id. A session
+ * missing from `sessions`, such as one that started after they were last
+ * read, shows its id's tail and no status; a session with no title shows its
+ * id's tail and its status. Returns `undefined` when
+ * `sessionId` is `undefined`: the record is an action step's, a signal's, or
+ * an agent step's that has not started a session yet.
+ */
+export const describeStepSession = (
+  sessionId: string | undefined,
+  sessions: ReadonlyMap<string, Session>,
+): StepSessionReading | undefined => {
+  if (sessionId === undefined) return undefined;
+  const session = sessions.get(sessionId);
+  const title = session?.title ?? "";
+  return {
+    sessionId,
+    title: title === "" ? `session ${toIdTail(sessionId)}` : title,
+    status: session?.status,
+  };
 };

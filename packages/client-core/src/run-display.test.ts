@@ -8,15 +8,17 @@ import {
   describeRunnerWait,
   describeRunStatus,
   describeStepDuration,
+  describeStepSession,
   describeStepState,
   describeUnstartedStep,
   formatElapsed,
+  listAwaitedSignals,
   listRerunChoices,
   measureElapsed,
   readTimestamps,
   shouldRunRecede,
 } from "./run-display";
-import { buildRunner } from "./threads/workspaces.testing";
+import { buildRunner, buildSession } from "./threads/workspaces.testing";
 
 const PARENT = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
 const START = "2026-09-24T12:00:00.000Z";
@@ -425,5 +427,98 @@ describe("describeRunnerWait", () => {
     }
     // An action missing from the catalog is not taken to run in the workspace.
     assert.strictEqual(describeRunnerWait(PINNED, OFFLINE, [], "UTC"), undefined);
+  });
+});
+
+describe("listAwaitedSignals", () => {
+  /** Returns a signal trigger with `id`, as a plan declares it. */
+  const buildSignalTrigger = (id: string) =>
+    ({
+      id,
+      kind: "signal",
+      on: { kind: "github.pr.merged", connectionId: "any" },
+      correlation: { event: "event.payload.prNumber", run: "steps.open_pr.output.prNumber" },
+    }) as const;
+  const OPENED: StepRecord = {
+    stepId: "open_pr",
+    iteration: 1,
+    status: "completed",
+    startedAt: START,
+    finishedAt: at(1_000),
+    output: { prNumber: 42 },
+  };
+  /** A running run whose pull request is open, with nothing left to run. */
+  const WAITING: Run = {
+    id: PARENT,
+    workflowId: null,
+    plan: {
+      name: "Open a pull request",
+      triggers: [
+        { id: "weekdays", kind: "start", on: { schedule: "0 9 * * 1-5" } },
+        buildSignalTrigger("pr_merged"),
+        buildSignalTrigger("checks_failed"),
+      ],
+      steps: [{ id: "open_pr", kind: "action", action: "github.pr.open" }],
+    },
+    inputs: {},
+    origin: { kind: "manual", actor: "user" },
+    subscriptions: [],
+    steps: [OPENED],
+    edgeTraversals: [],
+    status: "running",
+    createdAt: START,
+    startedAt: START,
+  };
+
+  it("lists the plan's signal triggers, and no start trigger, while nothing runs", () => {
+    assert.deepStrictEqual(listAwaitedSignals(WAITING), ["pr_merged", "checks_failed"]);
+  });
+
+  it("lists none while a record runs or is pending, as a signal that just fired is", () => {
+    for (const record of [
+      { stepId: "open_pr", iteration: 2, status: "running", startedAt: at(2_000) },
+      { stepId: "pr_merged", iteration: 1, status: "pending" },
+    ] as const) {
+      assert.deepStrictEqual(listAwaitedSignals({ ...WAITING, steps: [OPENED, record] }), []);
+    }
+  });
+
+  it("lists none for a run that is not running, or whose plan has no signal trigger", () => {
+    assert.deepStrictEqual(listAwaitedSignals({ ...WAITING, status: "pending", steps: [] }), []);
+    assert.deepStrictEqual(listAwaitedSignals({ ...WAITING, status: "cancelled" }), []);
+    assert.deepStrictEqual(
+      listAwaitedSignals({ ...WAITING, plan: { ...WAITING.plan, triggers: [] } }),
+      [],
+    );
+  });
+});
+
+describe("describeStepSession", () => {
+  const SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f00005e55";
+
+  it("shows the session's title and status", () => {
+    const session = buildSession({ id: SESSION_ID, title: "Implement the fix", status: "busy" });
+    assert.deepStrictEqual(describeStepSession(SESSION_ID, new Map([[SESSION_ID, session]])), {
+      sessionId: SESSION_ID,
+      title: "Implement the fix",
+      status: "busy",
+    });
+  });
+
+  it("shows the id's tail for a session not read yet, or one with no title", () => {
+    assert.deepStrictEqual(describeStepSession(SESSION_ID, new Map()), {
+      sessionId: SESSION_ID,
+      title: "session 00005e55",
+      status: undefined,
+    });
+    const untitled = buildSession({ id: SESSION_ID, title: "", status: "exited" });
+    assert.strictEqual(
+      describeStepSession(SESSION_ID, new Map([[SESSION_ID, untitled]]))?.title,
+      "session 00005e55",
+    );
+  });
+
+  it("returns nothing for a record that drove no session", () => {
+    assert.strictEqual(describeStepSession(undefined, new Map()), undefined);
   });
 });

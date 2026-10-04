@@ -6,6 +6,7 @@ import {
   formatSince,
   formatStamp,
   formatTimeContext,
+  isSameDay,
 } from "./time-context";
 
 /** Monday 2026-09-07, 07:14 UTC. */
@@ -174,5 +175,23 @@ describe("formatPreciseStamp", () => {
       formatPreciseStamp(new Date("2026-09-07T07:14:09Z"), "UTC", lastYear),
       "7 Sep 07:14:09",
     );
+  });
+});
+
+describe("isSameDay", () => {
+  it("compares the calendar days in the given zone, not in UTC", () => {
+    // 23:30 UTC on the 6th is already the 7th in Amsterdam.
+    const late = new Date("2026-09-06T23:30:00Z");
+    assert.isTrue(isSameDay(late, MONDAY_MORNING, "Europe/Amsterdam"));
+    assert.isFalse(isSameDay(late, MONDAY_MORNING, "UTC"));
+  });
+
+  it("tells the same day of another year apart", () => {
+    assert.isFalse(isSameDay(new Date("2025-09-07T07:14:00Z"), MONDAY_MORNING, "UTC"));
+  });
+
+  it("returns false for an invalid date or a zone this runtime cannot format", () => {
+    assert.isFalse(isSameDay(new Date("not a date"), MONDAY_MORNING, "UTC"));
+    assert.isFalse(isSameDay(MONDAY_MORNING, MONDAY_MORNING, "Not/A_Zone"));
   });
 });
