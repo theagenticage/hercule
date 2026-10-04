@@ -8,6 +8,15 @@
  * `If-Modified-Since`, so a poll with nothing new is a free 304. GitHub's
  * `X-Poll-Interval` is passed back as `nextAfterSeconds`, so the host never
  * polls sooner than GitHub allows.
+ *
+ * Every request asks with `all=true`. Without it GitHub lists only unread
+ * threads, so a thread the user read on GitHub between two polls would
+ * never be emitted.
+ *
+ * GitHub lists the threads updated strictly after `since`. The feed adds no
+ * overlap to it: `If-Modified-Since` compares whole seconds as well, so a
+ * thread updated in the same second as the last one seen would get a 304
+ * anyway.
  */
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
@@ -111,12 +120,14 @@ export const pollNotifications = (
     const stored = yield* readFeedState(context.state, STATE_KEY, NotificationsState);
 
     if (Option.isNone(stored)) {
-      // One thread is enough: only the response's `Last-Modified` is kept.
+      // One thread is enough: only the response's `Last-Modified` is kept. It
+      // is the newest thread's update time, so the next poll lists only
+      // threads updated after the baseline.
       const response = yield* fetchFeedResponse({
         method: "GET",
         path: "/notifications",
         token,
-        query: { per_page: "1" },
+        query: { all: "true", per_page: "1" },
       });
       const lastModified = response.lastModified;
       const since =
@@ -133,7 +144,7 @@ export const pollNotifications = (
         method: "GET",
         path: "/notifications",
         token,
-        query: { since: stored.value.since, per_page: "50" },
+        query: { all: "true", since: stored.value.since, per_page: "50" },
         ...(stored.value.lastModified === undefined
           ? {}
           : { lastModified: stored.value.lastModified }),
