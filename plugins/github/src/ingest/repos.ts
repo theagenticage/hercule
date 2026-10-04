@@ -15,8 +15,8 @@
  *    changed answers 304, which costs no quota.
  * 2. For each pull request in that list: `GET .../pulls/{n}/reviews`, for new
  *    reviews, and, when it is open, `GET .../pulls/{n}`, for its head commit.
- * 3. When an item's comment count went up, or the last poll's comment
- *    listing stopped at its page limit: one
+ * 3. When the listing held any item, or the last poll's comment listing
+ *    stopped at its page limit: one
  *    `GET /repos/{o}/{r}/issues/comments?since=<cursor>` for the whole
  *    repository.
  *
@@ -67,7 +67,6 @@ const ItemSnapshot = Schema.Struct({
   state: Schema.String,
   labels: Schema.Array(Schema.String),
   assignees: Schema.Array(Schema.String),
-  comments: Schema.Int,
   updatedAt: Schema.String,
   /** The head commit of an open pull request, to tell when a new one was pushed. */
   headSha: Schema.optionalKey(Schema.String),
@@ -377,7 +376,6 @@ const buildItemSnapshot = (issue: ListedIssue, headSha: string | undefined): Ite
   state: issue.state,
   labels: readLabels(issue),
   assignees: readAssignees(issue),
-  comments: issue.comments,
   updatedAt: issue.updated_at,
   ...(headSha === undefined ? {} : { headSha }),
 });
@@ -583,7 +581,11 @@ const pollRepo = (
         if (issue.state === "open") headSha = yield* emitNewHead(poll, item, previous?.headSha);
         yield* emitNewReviews(poll, item, start);
       }
-      if (issue.comments > (previous?.comments ?? 0)) commentStarts.set(issue.number, start);
+      // Every listed item arms the comment listing, not only one whose comment
+      // count went up: a comment deleted and another added leave the count
+      // as it was. The listing covers the whole repository, so this costs one
+      // request per poll, not one per item.
+      commentStarts.set(issue.number, start);
       items[String(issue.number)] = buildItemSnapshot(issue, headSha);
     }
     const pendingComments =

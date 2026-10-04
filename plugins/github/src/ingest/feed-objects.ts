@@ -24,7 +24,6 @@ export const ListedIssue = Schema.Struct({
   user: Schema.NullOr(GithubAccount),
   labels: Schema.Array(GithubLabel),
   assignees: Schema.optionalKey(GithubAccounts),
-  comments: Schema.Int,
   created_at: Schema.String,
   updated_at: Schema.String,
   closed_at: Schema.NullOr(Schema.String),

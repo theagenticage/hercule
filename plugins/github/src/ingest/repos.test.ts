@@ -455,11 +455,13 @@ describe("the repos feed", () => {
       reviewer: "hubot",
       verdict: "changes-requested",
     });
-    // The listing, the pull request for its head, and its reviews.
+    // The listing, the pull request for its head, its reviews, and the
+    // repository's comments, which are read whenever an item changed.
     expect(requests.map((request) => request.path)).toEqual([
       `/repos/${REPO}/issues`,
       `/repos/${REPO}/pulls/2`,
       `/repos/${REPO}/pulls/2/reviews`,
+      `/repos/${REPO}/issues/comments`,
     ]);
   });
 
@@ -510,6 +512,45 @@ describe("the repos feed", () => {
     ]);
     expect(harness.events[1]!.payload).toMatchObject({ subject: { number: 2, title: "Item 2" } });
     expect(requests.filter((request) => request.path.endsWith("/issues/comments"))).toHaveLength(1);
+  });
+
+  it("emits a comment that replaced a deleted one, though the comment count stayed the same", async () => {
+    const repository = buildRepository();
+    repository.issues[0] = { ...repository.issues[0]!, comments: 1 };
+    repository.comments.push(buildComment(500, 1, "2026-10-01T09:00:00Z"));
+    const harness = await baseline(repository);
+    repository.comments = [buildComment(501, 1, "2026-10-01T11:00:00Z")];
+    repository.issues[0] = { ...repository.issues[0], updated_at: "2026-10-01T11:00:00Z" };
+    repository.etag = '"v2"';
+
+    const { requests } = await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual(["github.issue.commented issue.commented:501"]);
+    expect(requests.filter((request) => request.path.endsWith("/issues/comments"))).toHaveLength(1);
+  });
+
+  it("reads a snapshot stored with the comment count it no longer keeps", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    // An earlier version of the feed kept each item's comment count.
+    const stored = harness.state.get(`repos/${REPO}`) as {
+      items: Record<string, Record<string, unknown>>;
+    };
+    for (const item of Object.values(stored.items)) item["comments"] = 0;
+    repository.issues[0] = {
+      ...repository.issues[0]!,
+      labels: [],
+      updated_at: "2026-10-01T11:00:00Z",
+    };
+    repository.etag = '"v2"';
+
+    const { result } = await poll(harness, answerFrom(repository));
+
+    expect(Result.isSuccess(result)).toBe(true);
+    expect(listEvents(harness)).toEqual([
+      `github.issue.labeled issue.labeled:${REPO}#1:2026-10-01T09:00:00Z:${computeDigest(["-bug"])}`,
+    ]);
+    expect(harness.state.get(`repos/${REPO}`)).not.toHaveProperty(["items", "1", "comments"]);
   });
 
   it("baselines a repository added to the watch list later, and forgets one that left", async () => {
@@ -708,11 +749,14 @@ describe("the repos feed", () => {
 
     const { result } = await poll(harness, answerFrom(repository));
 
-    // GitHub's times count whole seconds, so the feed cannot tell a review
-    // submitted in the baseline's own second from one submitted just after
-    // it. It emits that review once rather than risk losing a new one.
+    // GitHub's times count whole seconds, so the feed cannot tell a review or
+    // comment made in the baseline's own second from one made just after it.
+    // It emits each once rather than risk losing a new one.
     expect(Result.isSuccess(result)).toBe(true);
-    expect(listEvents(harness)).toEqual(["github.pr.review-submitted pr.review-submitted:100"]);
+    expect(listEvents(harness)).toEqual([
+      "github.pr.review-submitted pr.review-submitted:100",
+      "github.pr.commented pr.commented:500",
+    ]);
 
     // A label added after the close is diffed, because the closed item is in the snapshot.
     repository.issues[1] = {
@@ -726,6 +770,7 @@ describe("the repos feed", () => {
 
     expect(listWrittenEvents(harness)).toEqual([
       "github.pr.review-submitted pr.review-submitted:100",
+      "github.pr.commented pr.commented:500",
       `github.pr.labeled pr.labeled:${REPO}#2:2026-10-01T10:00:00Z:${computeDigest(["+late"])}`,
     ]);
   });
