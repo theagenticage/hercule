@@ -11,6 +11,7 @@ const buildResponse = (
 describe("isRateLimited", () => {
   it("counts a 429 as a rate limit, with or without headers", () => {
     expect(isRateLimited(buildResponse(429))).toBe(true);
+    expect(isRateLimited(buildResponse(429, { rateLimitRemaining: 5 }))).toBe(true);
   });
 
   it("counts a 403 with Retry-After as a rate limit", () => {
