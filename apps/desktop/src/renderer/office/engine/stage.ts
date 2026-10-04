@@ -138,6 +138,26 @@ const CAMERA_FRAME_RATE = 60;
  */
 const FRAME_SLACK_MS = 4;
 
+/**
+ * Decides whether an animation frame that comes at `now` is drawn, at a cap
+ * of `rate` frames a second. Returns the frame's slot when it is drawn, and
+ * null when it is not due yet. `lastSlot` is the slot of the last frame
+ * drawn, or -Infinity before the first. Times are in ms, by the animation
+ * frame clock.
+ *
+ * Slots are `1000 / rate` ms apart. A frame is drawn up to `FRAME_SLACK_MS`
+ * before its slot, because the display's beats rarely line up with the
+ * slots. The frame then takes the slot it came early for, not `now`, so the
+ * early frames do not add up: whatever the display's refresh rate, no more
+ * than `rate` frames are drawn in a second. A frame that comes late takes
+ * `now` as its slot, so after a pause the frames do not catch up in a burst.
+ */
+export function decideFrameSlot(lastSlot: number, now: number, rate: number): number | null {
+  const interval = 1000 / rate;
+  if (now < lastSlot + interval - FRAME_SLACK_MS) return null;
+  return Math.max(lastSlot + interval, now);
+}
+
 /** The stage: one WebGL canvas filling `container`. */
 export class Stage {
   readonly renderer: WebGLRenderer;
@@ -156,8 +176,8 @@ export class Stage {
   private readonly environmentTexture: Texture;
   private readonly bounds = new Box3(new Vector3(-10, 0, -10), new Vector3(10, 4, 10));
   private frameRequest = 0;
-  /** When the last frame was drawn, by the animation frame clock, or -Infinity before the first. */
-  private lastDrawnAt = -Infinity;
+  /** The slot of the last frame drawn (see `decideFrameSlot`), or -Infinity before the first. */
+  private lastFrameSlot = -Infinity;
   /**
    * True when the next frame should come at the camera's rate rather than
    * ambient life's: the camera moved in the last frame, or `requestRender`
@@ -391,19 +411,20 @@ export class Stage {
   }
 
   /**
-   * Draws a frame when enough time has passed since the last one for the
-   * rate the office runs at now, and otherwise waits for the next beat.
-   * Waiting on animation frames rather than a timer keeps the frames evenly
-   * spaced, and the browser stops them by itself while the window is hidden.
+   * Draws a frame when one is due at the rate the office runs at now, and
+   * otherwise waits for the next beat. Waiting on animation frames rather
+   * than a timer keeps the frames evenly spaced, and the browser stops them
+   * by itself while the window is hidden.
    */
   private readonly onAnimationFrame = (now: number): void => {
     this.frameRequest = 0;
     const rate = this.urgent ? CAMERA_FRAME_RATE : AMBIENT_FRAME_RATE;
-    if (now - this.lastDrawnAt < 1000 / rate - FRAME_SLACK_MS) {
+    const slot = decideFrameSlot(this.lastFrameSlot, now, rate);
+    if (slot === null) {
       this.scheduleFrame();
       return;
     }
-    this.lastDrawnAt = now;
+    this.lastFrameSlot = slot;
     this.drawFrame();
   };
 
