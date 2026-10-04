@@ -19,11 +19,21 @@ import { CurrentActor } from "../actor";
 import { readEventsOfKind } from "../events/testing";
 import { NotificationService } from "../notifications";
 import { Secret, Secrets } from "../secrets";
-import { PluginHost, Plugins } from "./index";
+import { connectionStateRepository } from "../connections";
+import { IngestLoops, PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
-import { asUser, createPluginFixture, buildPluginStack, USER, type Fixture } from "./testing";
+import {
+  asUser,
+  buildPluginStack,
+  createEventSourceFixture,
+  createPluginFixture,
+  insertFixtureConnection,
+  USER,
+  type Fixture,
+} from "./testing";
 
-type Services = Plugins | PluginHost | NotificationService | Secret | Secrets | SqlClient.SqlClient;
+type Services =
+  Plugins | PluginHost | IngestLoops | NotificationService | Secret | Secrets | SqlClient.SqlClient;
 
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
@@ -540,6 +550,34 @@ describe("resetting a plugin's state", () => {
 
     expect(keys).toEqual([]);
     expect(alpha.calls).toEqual(["activate", "deactivate"]);
+  });
+
+  it("closes the plugin's ingest handles and deletes its Connections' state", async () => {
+    const acme = createEventSourceFixture();
+
+    const result = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([acme.plugin]);
+        const connection = yield* insertFixtureConnection();
+        const source = (yield* host.listActiveEventSources())[0];
+        if (source === undefined) return yield* Effect.die("the fixture registered no source");
+        const ingest = yield* IngestLoops;
+        yield* ingest.open(source, connection);
+        yield* Effect.yieldNow;
+        yield* acme.opened[0]!.context.state.set("cursor", "2026-09-06");
+        yield* Effect.flatMap(Plugins, (plugins) => plugins.resetState(acme.plugin.manifest.id));
+        const state = yield* connectionStateRepository;
+        return {
+          keys: yield* state.buildStore(connection.id).list(),
+          open: yield* ingest.listOpen(),
+        };
+      }),
+    );
+
+    expect(result.keys).toEqual([]);
+    expect(result.open).toEqual([]);
+    expect(acme.calls).toContain("close");
   });
 });
 

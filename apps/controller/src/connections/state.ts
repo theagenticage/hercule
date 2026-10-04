@@ -3,7 +3,7 @@
  * keeps for one Connection between polls, such as cursors and snapshots.
  *
  * The rows of a Connection are deleted with it, through the table's foreign
- * key. "Reset plugin state" deletes them explicitly, through `wipe`.
+ * key. "Reset plugin state" deletes them explicitly, through `wipePluginState`.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -86,17 +86,15 @@ const make = Effect.gen(function* () {
     },
 
     /**
-     * Deletes all the state of these Connections. "Reset plugin state" calls
-     * it with the plugin's Connections, so their next ingest handles start
-     * from now instead of from a stored cursor.
+     * Deletes the state of every Connection the plugin owns. "Reset plugin
+     * state" calls it, so the plugin's next ingest handles start from now
+     * instead of from a stored cursor.
      */
-    wipe: (connectionIds: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
-      connectionIds.length === 0
-        ? Effect.void
-        : Effect.asVoid(
-            sql`DELETE FROM connection_state
-                WHERE connection_id IN ${sql.in(connectionIds.map(uuidFromString))}`,
-          ),
+    wipePluginState: (pluginId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`DELETE FROM connection_state
+            WHERE connection_id IN (SELECT id FROM connections WHERE plugin_id = ${pluginId})`,
+      ),
   };
 });
 

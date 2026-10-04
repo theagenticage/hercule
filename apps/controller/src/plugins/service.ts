@@ -28,6 +28,7 @@ import {
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
+import { connectionStateRepository } from "../connections";
 import { AuditLog } from "../events";
 import { PluginHost } from "./host";
 import { pluginRepository, readStoredStateOrDie } from "./repository";
@@ -56,6 +57,7 @@ const make = Effect.gen(function* () {
   const repository = yield* pluginRepository;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
+  const connectionState = yield* connectionStateRepository;
 
   const details: Effect.Effect<
     ReadonlyArray<PluginDetail>,
@@ -258,6 +260,10 @@ const make = Effect.gen(function* () {
      * Deletes everything a plugin stored and restarts it. Also allowed while
      * the plugin is inactive or errored, because leftover state is a likely
      * cause of either.
+     *
+     * The state of the plugin's Connections goes too. Stopping the plugin has
+     * closed their ingest handles, and the controller daemon opens them again
+     * once the plugin is active, so each starts from now.
      */
     resetState: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
@@ -266,7 +272,9 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             yield* readRestartablePluginOrFail(id);
             const stopped = yield* host.stop(id);
-            yield* writeMove(id, "plugin.stateReset", () => repository.kvWipe(id));
+            yield* writeMove(id, "plugin.stateReset", () =>
+              Effect.andThen(repository.kvWipe(id), connectionState.wipePluginState(id)),
+            );
             if (stopped) yield* host.refresh(id);
             return yield* readPluginOrFail(id);
           }),

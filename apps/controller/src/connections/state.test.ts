@@ -3,7 +3,7 @@
  *
  * - each Connection reads only its own keys;
  * - deleting a Connection deletes its state, through the foreign key;
- * - `wipe` deletes the state of the Connections it is given, and no others;
+ * - `wipePluginState` deletes the state of one plugin's Connections, and no others;
  * - an empty key is refused with a message for the plugin author.
  */
 import { describe, expect, it } from "vitest";
@@ -18,13 +18,13 @@ import { connectionStateRepository } from "./state";
 
 const at = "2026-09-01T00:00:00.000Z";
 
-/** Inserts a Connection of the GitHub plugin and returns its id. */
-const insertConnection = (label: string) =>
+/** Inserts a Connection of the plugin, GitHub by default, and returns its id. */
+const insertConnection = (label: string, pluginId = "github") =>
   Effect.map(
     Effect.flatMap(connectionRepository, (connections) =>
       connections.insert({
-        pluginId: "github",
-        type: "github/github",
+        pluginId,
+        type: `${pluginId}/${pluginId}`,
         label,
         displayName: label,
         accountId: label,
@@ -80,24 +80,23 @@ describe("the Connection state store", () => {
     expect(keys).toEqual([]);
   });
 
-  it("is wiped for the Connections given, and kept for the others", async () => {
+  it("is wiped for the plugin's Connections, and kept for another plugin's", async () => {
     const read = await run(
       Effect.gen(function* () {
         const state = yield* connectionStateRepository;
         const work = yield* insertConnection("work");
-        const home = yield* insertConnection("home");
+        const other = yield* insertConnection("other", "gitlab");
         yield* state.buildStore(work).set("cursor", 1);
-        yield* state.buildStore(home).set("cursor", 2);
-        yield* state.wipe([work]);
-        yield* state.wipe([]);
+        yield* state.buildStore(other).set("cursor", 2);
+        yield* state.wipePluginState("github");
         return {
           work: yield* state.buildStore(work).list(),
-          home: yield* state.buildStore(home).list(),
+          other: yield* state.buildStore(other).list(),
         };
       }),
     );
 
-    expect(read).toEqual({ work: [], home: ["cursor"] });
+    expect(read).toEqual({ work: [], other: ["cursor"] });
   });
 
   it("refuses an empty key with a message for the plugin author", async () => {
