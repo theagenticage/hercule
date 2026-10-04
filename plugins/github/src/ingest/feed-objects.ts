@@ -98,6 +98,7 @@ export type GithubNotification = Schema.Schema.Type<typeof GithubNotification>;
 export const GithubCheckSuites = Schema.Struct({
   check_suites: Schema.Array(
     Schema.Struct({
+      id: Schema.Int,
       status: Schema.NullOr(Schema.String),
       conclusion: Schema.NullOr(Schema.String),
       updated_at: Schema.NullOr(Schema.String),
