@@ -5,7 +5,7 @@
  * database and the notifier are real.
  */
 import { describe, expect, it } from "vitest";
-import { Clock, Duration, Effect, Fiber, Option, Redacted } from "effect";
+import { Clock, Deferred, Duration, Effect, Fiber, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { AuthError, PluginError, type FeedDeclaration } from "@hercule/plugin-host";
@@ -455,24 +455,31 @@ describe("IngestLoops failures", () => {
 
   it("ignores an AuthError when the credentials were replaced while the poll ran", async () => {
     const fixture = createEventSourceFixture();
+    const started = Deferred.makeUnsafe<void>();
+    const rejected = Deferred.makeUnsafe<void>();
+    let polls = 0;
+    // The first poll is rejected, but the user reconnects with a new token
+    // before the rejection comes back.
+    fixture.poll = () => {
+      polls += 1;
+      if (polls > 1) return Effect.succeed({});
+      return Effect.andThen(
+        Effect.andThen(Deferred.succeed(started, undefined), Deferred.await(rejected)),
+        Effect.fail(new AuthError({ message: "Acme rejected the token" })),
+      );
+    };
 
     const seen = await run(
       Effect.gen(function* () {
-        const secrets = yield* Secrets;
-        let polls = 0;
-        // The first poll is rejected, but the user reconnects with a new token
-        // before the rejection comes back.
-        fixture.poll = () => {
-          polls += 1;
-          const handle = fixture.opened[0];
-          if (polls > 1 || handle === undefined) return Effect.succeed({});
-          const owner = { kind: "connection", id: handle.connection.id } as const;
-          return Effect.andThen(
-            Effect.orDie(secrets.set(owner, "token", Redacted.make("a-new-token"))),
-            Effect.fail(new AuthError({ message: "Acme rejected the token" })),
-          );
-        };
         const { connection, ingest } = yield* openConnection(fixture);
+        yield* Deferred.await(started);
+        // Written from here rather than inside the poll: encrypting a secret
+        // takes real time, which the test clock does not wait for.
+        const owner = { kind: "connection", id: connection.id } as const;
+        yield* Effect.flatMap(Secrets, (secrets) =>
+          secrets.set(owner, "token", Redacted.make("a-new-token")),
+        );
+        yield* Deferred.succeed(rejected, undefined);
         yield* advance(60);
         return {
           status: yield* readStatus(connection),
