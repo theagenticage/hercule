@@ -45,9 +45,10 @@ describe("ConfigForm", () => {
 
     expect(days.placeholder).toBe("7");
     expect(days.value).toBe("");
-    // A text field with a numeric keyboard, like a feed's poll interval.
+    // A text field with the full keyboard, so a negative number can be typed
+    // on a phone too.
     expect(days.type).toBe("text");
-    expect(days.inputMode).toBe("numeric");
+    expect(days.inputMode).toBe("");
     expect(screen.getByLabelText<HTMLInputElement>("Ratio").placeholder).toBe("");
 
     await user.click(screen.getByRole("button", { name: "Save" }));

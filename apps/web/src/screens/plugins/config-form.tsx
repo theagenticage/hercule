@@ -225,10 +225,9 @@ function ConfigWidget({
       // A text field even for a number, like the poll interval fields. For
       // text the browser cannot read as a number, a number field hands over
       // an empty value or blocks the save with a popup of its own, so the
-      // form could not say under the field what is wrong.
-      inputMode={
-        field.kind === "integer" ? "numeric" : field.kind === "number" ? "decimal" : undefined
-      }
+      // form could not say under the field what is wrong. Unlike a poll
+      // interval, a number here may be negative, and the numeric and decimal
+      // keypads on iOS have no minus key, so the field keeps the full keyboard.
       placeholder={field.defaultValue}
       value={typeof value === "string" ? value : ""}
       onChange={(event) => {
