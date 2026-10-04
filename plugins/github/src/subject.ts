@@ -29,13 +29,13 @@ export interface GithubItem {
 }
 
 /** Returns the web URL of a repository. */
-export const buildRepoUrl = (repo: string): string => `${GITHUB_WEB_URL}/${repo.toLowerCase()}`;
+const buildRepoUrl = (repo: string): string => `${GITHUB_WEB_URL}/${repo.toLowerCase()}`;
 
 /**
  * Returns the web URL of an issue or a pull request. GitHub's web paths say
  * `issues` for one and `pull`, singular, for the other.
  */
-export const buildItemUrl = (item: GithubItem): string =>
+const buildItemUrl = (item: GithubItem): string =>
   `${buildRepoUrl(item.repo)}/${item.kind === "pr" ? "pull" : "issues"}/${String(item.number)}`;
 
 /** Returns the External Ref of a repository, such as `github:repo:owner/repo`. */
@@ -46,13 +46,13 @@ export const buildRepoRef = (repo: string): string => `github:repo:${repo.toLowe
  * `github:issue:owner/repo#42` or `github:pr:owner/repo#87`, then its
  * repository's, so a filter can match either.
  */
-export const buildItemRefs = (item: GithubItem): ReadonlyArray<string> => [
+const buildItemRefs = (item: GithubItem): ReadonlyArray<string> => [
   `github:${item.kind}:${item.repo.toLowerCase()}#${String(item.number)}`,
   buildRepoRef(item.repo),
 ];
 
 /** Returns the `subject` block of an event about an issue or a pull request. */
-export const buildItemSubject = (item: GithubItem): GithubSubject => ({
+const buildItemSubject = (item: GithubItem): GithubSubject => ({
   repo: item.repo.toLowerCase(),
   number: item.number,
   ...(item.title === undefined ? {} : { title: item.title }),
@@ -72,7 +72,7 @@ export const buildRepoSubject = (repo: string, title?: string): GithubSubject =>
 });
 
 /** What a feed knows about one event before the subject, refs and URL are added. */
-export interface ItemEventFacts {
+interface EventFacts {
   readonly kind: string;
   readonly dedupKey: string;
   readonly occurredAt: string;
@@ -86,7 +86,7 @@ export interface ItemEventFacts {
  * is the item's subject block plus the kind's own fields, and the refs and
  * URL are the item's.
  */
-export const buildItemEvent = (item: GithubItem, facts: ItemEventFacts): EmittedEvent => {
+export const buildItemEvent = (item: GithubItem, facts: EventFacts): EmittedEvent => {
   const subject = buildItemSubject(item);
   return {
     kind: facts.kind,
@@ -94,6 +94,25 @@ export const buildItemEvent = (item: GithubItem, facts: ItemEventFacts): Emitted
     occurredAt: facts.occurredAt,
     payload: { subject, ...facts.fields },
     refs: buildItemRefs(item),
+    url: subject.url,
+    raw: facts.raw,
+  };
+};
+
+/**
+ * Builds the event a feed emits about a repository as a whole, or about
+ * something inside it this plugin has no ref for, such as a release: the
+ * payload is the repository's subject block, titled `title`, plus the kind's
+ * own fields, and the refs and URL are the repository's.
+ */
+export const buildRepoEvent = (repo: string, title: string, facts: EventFacts): EmittedEvent => {
+  const subject = buildRepoSubject(repo, title);
+  return {
+    kind: facts.kind,
+    dedupKey: facts.dedupKey,
+    occurredAt: facts.occurredAt,
+    payload: { subject, ...facts.fields },
+    refs: [buildRepoRef(repo)],
     url: subject.url,
     raw: facts.raw,
   };

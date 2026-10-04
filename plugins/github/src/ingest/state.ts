@@ -8,7 +8,15 @@
  * is always safe.
  */
 import { Effect, Option, Schema } from "effect";
-import { PluginError, type KeyValueStore } from "@hercule/plugin-host";
+import { PluginError, type IngestContext, type KeyValueStore } from "@hercule/plugin-host";
+
+/** The work of one per-repository feed on one repository in one poll: what it needs and where its events go. */
+export interface RepoPoll {
+  /** The repository, as lowercase `owner/repo`. */
+  readonly repo: string;
+  readonly token: string;
+  readonly emit: IngestContext["emit"];
+}
 
 /**
  * Reads one key and decodes it against the shape the feed writes. Returns
@@ -64,7 +72,7 @@ const deleteDepartedRepoState = (
  * One repository failing with a `PluginError`, such as one the token cannot
  * see, does not stop the others: their events are emitted and their state
  * stored, and then this fails with one `PluginError` naming every repository
- * that failed. Any other error, a rejected token or a rate limit, applies to
+ * that failed and saying how to stop watching one that is gone. Any other error, a rejected token or a rate limit, applies to
  * every repository alike, so it stops the poll at once.
  */
 export const pollWatchedRepos = <A extends Schema.Json, E, R>(
@@ -87,13 +95,20 @@ export const pollWatchedRepos = <A extends Schema.Json, E, R>(
       }).pipe(
         Effect.catchIf(
           (error): error is PluginError => error instanceof PluginError,
-          (error) => Effect.sync(() => failures.push(`${repo}: ${error.message}`)),
+          // The failures are joined into one sentence, so a message's own
+          // closing period is dropped.
+          (error) =>
+            Effect.sync(() => failures.push(`${repo}: ${error.message.replace(/\.$/, "")}`)),
         ),
       );
     }
     if (failures.length > 0) {
       return yield* new PluginError({
-        message: `The ${feed} feed could not poll ${failures.join("; ")}`,
+        message:
+          `The ${feed} feed could not poll ${failures.join("; ")}. ` +
+          "The other repositories on the watch list were polled. " +
+          "If a repository was deleted, renamed or hidden from the Connection's account, " +
+          "unlink its repo Resource or remove it from the Connection's extra repositories.",
       });
     }
   });

@@ -12,6 +12,7 @@
  */
 import { Schema } from "effect";
 import type { EventKindDeclaration } from "@hercule/plugin-host";
+import { ReviewVerdict } from "./github-objects";
 
 /**
  * The thing an event is about: a repository, and the issue or pull request
@@ -74,7 +75,7 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
     schema: Schema.Struct({
       subject: Subject,
       reviewer: Schema.String,
-      verdict: Schema.Literals(["approved", "changes-requested", "commented"]),
+      verdict: ReviewVerdict,
     }),
   },
   "github.pr.commented": declareSubjectKind("A comment was added to a pull request."),

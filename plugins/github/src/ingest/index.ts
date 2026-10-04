@@ -21,6 +21,7 @@ import { readWatchList } from "../watch-list";
 import { pollChecks } from "./checks";
 import { pollNotifications } from "./notifications";
 import { pollRepos } from "./repos";
+import type { FeedError } from "./requests";
 
 /**
  * Reads the Connection's token. Fails with an `AuthError` when the
@@ -43,43 +44,48 @@ const readConnectionToken = (
     return token;
   });
 
+/** Polls one feed once, with the Connection's token and config. */
+type FeedPoll = (
+  token: string,
+  config: GithubConnectionConfig,
+  context: IngestContext,
+) => Effect.Effect<PollResult, FeedError, HttpClient.HttpClient>;
+
+/**
+ * The poll of each feed, by the feed's name. The names are the feeds the
+ * event source declares in `../index.ts`, and the host polls no other.
+ */
+const FEED_POLLS: Record<"notifications" | "repos" | "checks", FeedPoll> = {
+  notifications: (token, _config, context) => pollNotifications(token, context),
+  repos: (token, config, context) =>
+    Effect.flatMap(readWatchList(context.resources, config.repos ?? []), (watchList) =>
+      pollRepos(token, context, watchList),
+    ),
+  checks: (token, config, context) =>
+    Effect.flatMap(readWatchList(context.resources, config.repos ?? []), (watchList) =>
+      pollChecks(token, context, watchList, config.checksWindowDays ?? DEFAULT_CHECKS_WINDOW_DAYS),
+    ),
+};
+
+/** The name of one of the event source's feeds, such as `repos`. */
+export type GithubFeed = keyof typeof FEED_POLLS;
+
 /**
  * Polls one feed once and returns when the host may poll it next. A rate
  * limit is not a failure: the poll stops, and succeeds with
  * `nextAfterSeconds` set to the wait GitHub asked for.
  *
  * Fails with an `AuthError` when GitHub rejects the token, and with a
- * `PluginError` for an unknown feed or any other failure.
+ * `PluginError` for any other failure.
  */
 export const pollGithubFeed = (
-  feed: string,
+  feed: GithubFeed,
   config: GithubConnectionConfig,
   context: IngestContext,
 ): Effect.Effect<PollResult, AuthError | PluginError, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const token = yield* readConnectionToken(context);
-    switch (feed) {
-      case "notifications":
-        return yield* pollNotifications(token, context);
-      case "repos":
-        return yield* pollRepos(
-          token,
-          context,
-          yield* readWatchList(context.resources, config.repos ?? []),
-        );
-      case "checks":
-        return yield* pollChecks(
-          token,
-          context,
-          yield* readWatchList(context.resources, config.repos ?? []),
-          config.checksWindowDays ?? DEFAULT_CHECKS_WINDOW_DAYS,
-        );
-      default:
-        return yield* new PluginError({
-          message: `The GitHub event source has no feed named "${feed}".`,
-        });
-    }
-  }).pipe(
+  Effect.flatMap(readConnectionToken(context), (token) =>
+    FEED_POLLS[feed](token, config, context),
+  ).pipe(
     Effect.catchTag("GithubRateLimited", (limit) =>
       Effect.succeed({ nextAfterSeconds: limit.retryAfterSeconds }),
     ),
@@ -104,8 +110,12 @@ export const openGithubIngest: EventSourceContribution["open"] = (connection, co
       ),
     ),
     (config) => ({
+      // The host polls only the feeds the event source declares, which are
+      // the keys of `FEED_POLLS`.
       poll: (feed) =>
-        pollGithubFeed(feed, config, context).pipe(Effect.provide(FetchHttpClient.layer)),
+        pollGithubFeed(feed as GithubFeed, config, context).pipe(
+          Effect.provide(FetchHttpClient.layer),
+        ),
       close: Effect.void,
     }),
   );

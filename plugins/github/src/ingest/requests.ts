@@ -5,7 +5,7 @@
  * - 200 and 304 are answers. A 304 means nothing changed since the ETag or
  *   `Last-Modified` the request carried, and costs no quota.
  * - 401 is an `AuthError`: the token was rejected, so retrying cannot help.
- * - A rate limit (a 429, or a 403 with `Retry-After` or no requests left) is
+ * - A rate limit (a 429, or a 403 that `isRateLimited` recognises) is
  *   `GithubRateLimited`. The feed stops its tick there, and the poll succeeds
  *   with `nextAfterSeconds` set to the wait GitHub asked for. A rate limit is
  *   GitHub pacing the token, not a fault in the Connection, so it must not
@@ -16,7 +16,14 @@
 import { Clock, Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { AuthError, PluginError } from "@hercule/plugin-host";
-import { isRateLimited, requestGithub, type GithubRequest, type GithubResponse } from "../api";
+import {
+  computeRateLimitWaitSeconds,
+  isRateLimited,
+  readGithubExplanation,
+  requestGithub,
+  type GithubRequest,
+  type GithubResponse,
+} from "../api";
 
 /** GitHub asked the token to wait before its next request. */
 export class GithubRateLimited extends Schema.TaggedError<GithubRateLimited>()(
@@ -27,30 +34,6 @@ export class GithubRateLimited extends Schema.TaggedError<GithubRateLimited>()(
 /** Every way a feed's call to GitHub can fail. */
 export type FeedError = AuthError | PluginError | GithubRateLimited;
 
-/** The wait used when GitHub reports a rate limit without saying for how long. */
-const DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60;
-
-/** Returns GitHub's own error message from a response body, when it has one. */
-const readErrorMessage = (body: Schema.Json): string | undefined => {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
-  const message = (body as Record<string, Schema.Json>)["message"];
-  return typeof message === "string" ? message : undefined;
-};
-
-/**
- * Returns how long a rate-limited token must wait, in seconds: `Retry-After`
- * when GitHub sent it, else the time until `X-RateLimit-Reset`, else one
- * minute.
- */
-const computeRateLimitWait = (response: GithubResponse): Effect.Effect<number> =>
-  Effect.map(Clock.currentTimeMillis, (now) => {
-    if (response.retryAfterSeconds !== undefined) return response.retryAfterSeconds;
-    if (response.rateLimitResetAt !== undefined) {
-      return Math.max(1, response.rateLimitResetAt - Math.floor(now / 1000));
-    }
-    return DEFAULT_RATE_LIMIT_WAIT_SECONDS;
-  });
-
 /** Returns how a request is named in an error message, such as `GET /notifications`. */
 const describeRequest = (request: GithubRequest): string => `${request.method} ${request.path}`;
 
@@ -60,7 +43,7 @@ const describeRequest = (request: GithubRequest): string => `${request.method} $
  * and with a `PluginError` that names the request and GitHub's message for
  * any other status or when GitHub could not be reached.
  */
-export const fetchGithub = (
+export const fetchFeedResponse = (
   request: GithubRequest,
 ): Effect.Effect<GithubResponse, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
@@ -68,29 +51,31 @@ export const fetchGithub = (
       Effect.mapError((error) => new PluginError({ message: error.message })),
     );
     if (response.status === 200 || response.status === 304) return response;
-    const message = readErrorMessage(response.body);
-    const said = message === undefined ? "" : `: ${message}`;
+    const explanation = readGithubExplanation(response.body);
+    const githubDetail = explanation === "" ? "" : `: ${explanation}`;
     if (response.status === 401) {
-      return yield* new AuthError({ message: `GitHub rejected the Connection's token${said}` });
+      return yield* new AuthError({
+        message: `GitHub rejected the Connection's token${githubDetail}`,
+      });
     }
     if (isRateLimited(response)) {
       return yield* new GithubRateLimited({
-        retryAfterSeconds: yield* computeRateLimitWait(response),
+        retryAfterSeconds: computeRateLimitWaitSeconds(response, yield* Clock.currentTimeMillis),
       });
     }
     return yield* new PluginError({
-      message: `GitHub returned status ${String(response.status)} for ${describeRequest(request)}${said}`,
+      message: `GitHub returned status ${String(response.status)} for ${describeRequest(request)}${githubDetail}`,
     });
   });
 
 /** Every page of one listing, or the news that it has not changed. */
-export interface GithubListing {
+interface GithubListing {
   /** True when GitHub answered the first page with 304; `items` is then empty. */
   readonly unchanged: boolean;
   /** The items of every page fetched, in GitHub's order. */
   readonly items: ReadonlyArray<Schema.JsonObject>;
   /** The first page's response, whose `ETag`, `Last-Modified` and `X-Poll-Interval` pace the next request. */
-  readonly first: GithubResponse;
+  readonly firstPage: GithubResponse;
   /** True when the listing had more pages than `maxPages` and the rest were not fetched. */
   readonly truncated: boolean;
 }
@@ -117,18 +102,21 @@ export const readGithubObject = (
 /**
  * Fetches a listing and follows its `Link` header for up to `maxPages`
  * pages. Only the first request carries the ETag or `Last-Modified`: a 304
- * on it means the whole listing is unchanged. Fails as `fetchGithub` fails,
- * and with a `PluginError` when a page's body is not a JSON array of objects.
+ * on it means the whole listing is unchanged. Fails as `fetchFeedResponse` fails,
+ * and with a `PluginError` when a page's body is not a JSON array of objects
+ * or the `Link` header points outside GitHub's API.
  */
 export const fetchListing = (
   request: GithubRequest,
   maxPages: number,
 ): Effect.Effect<GithubListing, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const first = yield* fetchGithub(request);
-    if (first.status === 304) return { unchanged: true, items: [], first, truncated: false };
+    const firstPage = yield* fetchFeedResponse(request);
+    if (firstPage.status === 304) {
+      return { unchanged: true, items: [], firstPage, truncated: false };
+    }
     const items: Array<Schema.JsonObject> = [];
-    let page = first;
+    let page = firstPage;
     let pages = 1;
     for (;;) {
       if (!Array.isArray(page.body) || !page.body.every(isJsonObject)) {
@@ -138,11 +126,26 @@ export const fetchListing = (
       }
       items.push(...page.body);
       if (page.nextPageUrl === undefined) break;
-      if (pages === maxPages) return { unchanged: false, items, first, truncated: true };
-      page = yield* fetchGithub({ method: "GET", path: page.nextPageUrl, token: request.token });
+      if (pages === maxPages) return { unchanged: false, items, firstPage, truncated: true };
+      // The next page's URL comes from GitHub's `Link` header. The request
+      // refuses a URL outside GitHub's API, and the error names the listing,
+      // because the URL alone does not tell the user which one it was.
+      page = yield* fetchFeedResponse({
+        method: "GET",
+        path: page.nextPageUrl,
+        token: request.token,
+      }).pipe(
+        Effect.mapError((error) =>
+          error instanceof PluginError
+            ? new PluginError({
+                message: `Reading the next page of ${describeRequest(request)} failed. ${error.message}`,
+              })
+            : error,
+        ),
+      );
       pages += 1;
     }
-    return { unchanged: false, items, first, truncated: false };
+    return { unchanged: false, items, firstPage, truncated: false };
   });
 
 /**

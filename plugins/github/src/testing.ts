@@ -19,6 +19,14 @@ import {
   type KeyValueStore,
   type LinkedResource,
 } from "@hercule/plugin-host";
+import {
+  bounded,
+  ExternalRef,
+  MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_URL_LENGTH,
+} from "@hercule/contract";
+import { TEST_TOKEN } from "./actions/testing";
 import { GITHUB_EVENT_KINDS } from "./kinds";
 
 /** The stub's layer, and every request it received, in order. */
@@ -52,7 +60,7 @@ export const stubHttpClient = (
 };
 
 /** Converts a `StubResponse` into the response the client returns for `request`. */
-export const buildStubResponse = (
+const buildStubResponse = (
   request: HttpClientRequest.HttpClientRequest,
   response: StubResponse,
 ): HttpClientResponse.HttpClientResponse =>
@@ -118,13 +126,53 @@ export interface IngestHarness {
 }
 
 /**
+ * The fields of an emitted event that are the same for every kind, with the
+ * limits the host enforces. The host decodes the same schema in
+ * `apps/controller/src/plugins/ingest-context.ts`, which a plugin cannot
+ * import, so it is rebuilt here from the limits in `@hercule/contract`.
+ */
+const EventEnvelope = Schema.Struct({
+  dedupKey: bounded(1, MAX_DEDUP_KEY_LENGTH),
+  // The host's own check: an ISO 8601 date and time with an explicit time zone.
+  occurredAt: Schema.String.check(
+    Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/),
+  ),
+  refs: Schema.Array(ExternalRef),
+  url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
+  system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
+  raw: Schema.optionalKey(Schema.JsonObject),
+});
+
+/**
+ * Checks one emitted event the way the host does before it writes it. Fails
+ * with a `PluginError` when the kind is not one the plugin declares, when a
+ * common field breaks the host's limits, such as a dedup key longer than 200
+ * characters, or when the payload does not match the kind's schema exactly.
+ */
+const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError> => {
+  const declaration = GITHUB_EVENT_KINDS[event.kind];
+  if (declaration === undefined) {
+    return Effect.fail(new PluginError({ message: `Undeclared kind ${event.kind}` }));
+  }
+  return Effect.andThen(
+    Schema.decodeUnknownEffect(EventEnvelope)(event),
+    Schema.decodeUnknownEffect(declaration.schema as Schema.Codec<unknown>, {
+      onExcessProperty: "error",
+    })(event.payload),
+  ).pipe(
+    Effect.asVoid,
+    Effect.mapError((error) => new PluginError({ message: `${event.kind}: ${error.message}` })),
+  );
+};
+
+/**
  * Builds an ingest context whose credentials hold `credentials`, whose state
  * lives in a `Map`, and whose `emit` records each event. Like the host's,
- * `emit` fails with a `PluginError` when the kind is not one the plugin
- * declares, or the payload does not match the kind's schema exactly.
+ * `emit` fails with a `PluginError` when the event fails the checks
+ * `checkEmittedEvent` describes.
  */
 export const buildIngestHarness = (
-  credentials: Readonly<Record<string, string>> = { pat: "ghp_test-token" },
+  credentials: Readonly<Record<string, string>> = { pat: TEST_TOKEN },
 ): IngestHarness => {
   const events: Array<EmittedEvent> = [];
   const state = new Map<string, Schema.Json>();
@@ -135,18 +183,11 @@ export const buildIngestHarness = (
     delete: (key) => Effect.sync(() => void state.delete(key)),
     list: () => Effect.sync(() => [...state.keys()]),
   };
-  const emit = (event: EmittedEvent): Effect.Effect<void, PluginError> => {
-    const declaration = GITHUB_EVENT_KINDS[event.kind];
-    if (declaration === undefined) {
-      return Effect.fail(new PluginError({ message: `Undeclared kind ${event.kind}` }));
-    }
-    return Schema.decodeUnknownEffect(declaration.schema as Schema.Codec<unknown>, {
-      onExcessProperty: "error",
-    })(event.payload).pipe(
-      Effect.mapError((error) => new PluginError({ message: `${event.kind}: ${error.message}` })),
-      Effect.andThen(() => Effect.sync(() => void events.push(event))),
+  const emit = (event: EmittedEvent): Effect.Effect<void, PluginError> =>
+    Effect.andThen(
+      checkEmittedEvent(event),
+      Effect.sync(() => void events.push(event)),
     );
-  };
   return {
     context: {
       emit,

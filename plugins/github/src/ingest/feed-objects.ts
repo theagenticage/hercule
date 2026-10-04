@@ -6,7 +6,8 @@
  * A feed reads GitHub's own words, such as an issue's or a review's `state`,
  * as plain strings and passes them on. The workflow actions read a single
  * object right after changing it, and keep their own, stricter schemas in
- * `actions/objects.ts`.
+ * `actions/objects.ts`. The names here start with `Listed`, because a feed
+ * reads these objects from GitHub's listings.
  */
 import { Schema } from "effect";
 import { GithubAccount, GithubAccounts, GithubLabel } from "../github-objects";
@@ -16,7 +17,7 @@ import { GithubAccount, GithubAccounts, GithubLabel } from "../github-objects";
  * holds pull requests too: those have a `pull_request` field, whose
  * `merged_at` tells a merge from a close.
  */
-export const GithubIssue = Schema.Struct({
+export const ListedIssue = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
   state: Schema.String,
@@ -27,15 +28,17 @@ export const GithubIssue = Schema.Struct({
   created_at: Schema.String,
   updated_at: Schema.String,
   closed_at: Schema.NullOr(Schema.String),
+  /** Why the issue is in its state, such as `reopened` for an open issue that was closed before. */
+  state_reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   pull_request: Schema.optionalKey(
     Schema.Struct({ merged_at: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
   ),
 });
 
-export type GithubIssue = Schema.Schema.Type<typeof GithubIssue>;
+export type ListedIssue = Schema.Schema.Type<typeof ListedIssue>;
 
 /** A pull request, as `GET /repos/{owner}/{repo}/pulls` and `.../pulls/{number}` return it. */
-export const GithubPull = Schema.Struct({
+export const ListedPull = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
   state: Schema.String,
@@ -44,31 +47,33 @@ export const GithubPull = Schema.Struct({
   updated_at: Schema.String,
 });
 
-export type GithubPull = Schema.Schema.Type<typeof GithubPull>;
+export type ListedPull = Schema.Schema.Type<typeof ListedPull>;
 
 /** A review, as `GET /repos/{owner}/{repo}/pulls/{number}/reviews` returns it. */
-export const GithubReview = Schema.Struct({
+export const ListedReview = Schema.Struct({
   id: Schema.Int,
   user: Schema.NullOr(GithubAccount),
   state: Schema.String,
   submitted_at: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
-export type GithubReview = Schema.Schema.Type<typeof GithubReview>;
+export type ListedReview = Schema.Schema.Type<typeof ListedReview>;
 
 /**
  * A comment on an issue or on a pull request's conversation, as
  * `GET /repos/{owner}/{repo}/issues/comments` returns it. `issue_url` ends in
- * the item's number, and `html_url` has `/pull/` in it for a pull request.
+ * the item's number, and `html_url` has `/pull/<number>#` in it for a pull
+ * request.
  */
-export const GithubComment = Schema.Struct({
+export const ListedComment = Schema.Struct({
   id: Schema.Int,
   html_url: Schema.String,
   issue_url: Schema.String,
   created_at: Schema.String,
+  updated_at: Schema.String,
 });
 
-export type GithubComment = Schema.Schema.Type<typeof GithubComment>;
+export type ListedComment = Schema.Schema.Type<typeof ListedComment>;
 
 /** One notification thread, as `GET /notifications` returns it. */
 export const GithubNotification = Schema.Struct({
@@ -93,6 +98,7 @@ export type GithubNotification = Schema.Schema.Type<typeof GithubNotification>;
 export const GithubCheckSuites = Schema.Struct({
   check_suites: Schema.Array(
     Schema.Struct({
+      id: Schema.Int,
       status: Schema.NullOr(Schema.String),
       conclusion: Schema.NullOr(Schema.String),
       updated_at: Schema.NullOr(Schema.String),

@@ -50,7 +50,7 @@ describe("the notifications feed", () => {
 
     expect(harness.events).toEqual([]);
     expect(requests).toHaveLength(1);
-    expect(readStubRequestTarget(requests[0]!).query).toEqual({ per_page: "1" });
+    expect(readStubRequestTarget(requests[0]!).query).toEqual({ all: "true", per_page: "1" });
     expect(result).toEqual({ nextAfterSeconds: 60 });
     expect(harness.state.get("notifications")).toEqual({
       lastModified: LAST_MODIFIED,
@@ -69,7 +69,11 @@ describe("the notifications feed", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]!.headers["if-modified-since"]).toBe(LAST_MODIFIED);
-    expect(readStubRequestTarget(requests[0]!).query["since"]).toBe("2026-10-01T10:00:00.000Z");
+    expect(readStubRequestTarget(requests[0]!).query).toMatchObject({
+      since: "2026-10-01T10:00:00.000Z",
+      // Threads the user already read on GitHub are listed too.
+      all: "true",
+    });
     expect(harness.events).toEqual([]);
     expect(result).toEqual({ nextAfterSeconds: 120 });
   });
