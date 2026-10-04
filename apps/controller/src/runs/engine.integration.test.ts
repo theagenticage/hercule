@@ -412,22 +412,29 @@ describe("a run whose step acts through a Connection", () => {
     );
   });
 
-  it("calls the action through a Connection that needs reauth, because its credentials may still work", async () => {
+  it("calls the action through a Connection that needs reauth or reported an error, because its credentials may still work", async () => {
     const forge = buildForgePlugin();
     await withSetUpController(
       async ({ harness, base, token }) => {
-        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
-          token: FORGE_TOKEN,
-        });
-        await setConnectionStatus(harness, connectionId, "needs-reauth");
-        const workflow = await createWorkflowOrFail(base, token, {
-          definition: buildReviewDefinition(connectionId),
-        });
+        for (const status of ["needs-reauth", "error"]) {
+          const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+            token: FORGE_TOKEN,
+          });
+          await setConnectionStatus(harness, connectionId, status);
+          const workflow = await createWorkflowOrFail(base, token, {
+            definition: buildReviewDefinition(connectionId),
+          });
 
-        const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
+          const run = await waitForRunToFinish(
+            base,
+            token,
+            await startRun(base, token, workflow.id),
+          );
 
-        expect(run.status, JSON.stringify(run)).toBe("completed");
+          expect(run.status, `${status}: ${JSON.stringify(run)}`).toBe("completed");
+        }
         expect(forge.contexts.map((context) => context.connection?.credentials)).toEqual([
+          { token: FORGE_TOKEN },
           { token: FORGE_TOKEN },
         ]);
       },
