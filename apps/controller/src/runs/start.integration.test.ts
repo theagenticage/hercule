@@ -667,17 +667,21 @@ describe("the graphs a run accepts", () => {
 /* The connection.use grant.                                                 */
 /* ------------------------------------------------------------------------ */
 
-describe("run.start of a sent workflow that acts through a Connection", () => {
-  /** The message of the refusal for a caller without the connection.use grant. */
-  const CONNECTION_USE_REFUSAL =
-    "This run's definition has a step that acts through a Connection, and this session lacks the connection.use grant. Start a stored workflow that names the Connection instead, or ask the user to grant connection.use.";
+describe("run.start of a workflow that acts through a Connection", () => {
+  /** The message of the refusal of a sent workflow, for a caller without the connection.use grant. */
+  const SENT_WORKFLOW_REFUSAL =
+    "This run's definition has a step that acts through a Connection, and choosing that Connection needs the connection.use grant, which this session lacks. Start a stored workflow and leave its Connection inputs to their defaults, or ask the user to grant connection.use.";
+
+  /** The message of the refusal of a value for the input `account`, for a caller without the connection.use grant. */
+  const ACCOUNT_INPUT_REFUSAL =
+    "The input account chooses the Connection a step acts through, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.";
 
   /**
    * Builds a workflow with one review step. Its `connection` param is
-   * `connection`, and it declares a Connection input `account` of the forge's
-   * type, which a template can read.
+   * `connection`, and it declares an optional Connection input `account` of
+   * the forge's type, which a template can read.
    */
-  const buildReviewDefinition = (connection: string) => ({
+  const buildReviewDefinitionWithAccountInput = (connection: string) => ({
     name: "Review a pull request",
     inputs: [{ name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: false }],
     steps: [
@@ -690,7 +694,7 @@ describe("run.start of a sent workflow that acts through a Connection", () => {
     ],
   });
 
-  it("refuses an assistant session, whether the step names the Connection by its id or through a template, and still starts a stored workflow for it", async () => {
+  it("refuses an assistant session that sends the workflow, whether the step names the Connection by its id or through a template", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { harness, token } = arranged;
@@ -706,7 +710,7 @@ describe("run.start of a sent workflow that acts through a Connection", () => {
 
         for (const connection of [connectionId, "{{ inputs.account }}"]) {
           const response = await requestStart(base, agent.token, {
-            definition: buildReviewDefinition(connection),
+            definition: buildReviewDefinitionWithAccountInput(connection),
             inputs: { account: connectionId },
           });
 
@@ -715,26 +719,71 @@ describe("run.start of a sent workflow that acts through a Connection", () => {
           expect(refusal).toMatchObject({
             code: "forbidden",
             grant: "connection.use",
-            message: CONNECTION_USE_REFUSAL,
+            message: SENT_WORKFLOW_REFUSAL,
           });
         }
         expect(await countRuns(harness)).toBe(0);
-
-        // A stored workflow was authored by the user, so the session may fill
-        // in the Connection input the user declared.
-        const workflow = await createWorkflowOrFail(base, token, {
-          definition: buildReviewDefinition("{{ inputs.account }}"),
-        });
-        const runId = await startRun(base, agent.token, workflow.id, {
-          inputs: { account: connectionId },
-        });
-        expect((await waitForRunToFinish(base, token, runId)).status).toBe("completed");
       },
       { plugins: [buildForgePlugin().plugin] },
     );
   });
 
-  it("starts the sent workflow for the user, and for a session whose profile holds connection.use", async () => {
+  it("refuses an assistant session that gives a value for a stored workflow's Connection input, and starts the run when the Connection was chosen when the workflow was saved", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const agent = await spawnThreadUnder(
+          arranged,
+          await readProfileNamed(arranged, "assistant"),
+        );
+        const fromInput = buildReviewDefinitionWithAccountInput("{{ inputs.account }}");
+        const filled = await createWorkflowOrFail(base, token, { definition: fromInput });
+
+        const response = await requestStart(base, agent.token, {
+          workflowId: filled.id,
+          inputs: { account: connectionId },
+        });
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message: ACCOUNT_INPUT_REFUSAL,
+        });
+        expect(await countRuns(harness)).toBe(0);
+
+        // The user chose the Connection when saving: as the input's default,
+        // or as the step's literal id.
+        const defaulted = await createWorkflowOrFail(base, token, {
+          definition: {
+            ...fromInput,
+            inputs: [
+              {
+                name: "account",
+                connection: { type: FORGE_CONNECTION_TYPE },
+                required: false,
+                default: connectionId,
+              },
+            ],
+          },
+        });
+        const literal = await createWorkflowOrFail(base, token, {
+          definition: buildReviewDefinitionWithAccountInput(connectionId),
+        });
+        for (const workflow of [defaulted, literal]) {
+          const runId = await startRun(base, agent.token, workflow.id);
+          expect((await waitForRunToFinish(base, token, runId)).status).toBe("completed");
+        }
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+
+  it("starts the run for the user, and for a session whose profile holds connection.use, when the caller sends the workflow or fills in its Connection input", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { harness, token } = arranged;
@@ -748,14 +797,22 @@ describe("run.start of a sent workflow that acts through a Connection", () => {
           "connection.use",
         ]);
         const agent = await spawnThreadUnder(arranged, profile);
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: buildReviewDefinitionWithAccountInput("{{ inputs.account }}"),
+        });
 
         for (const caller of [token, agent.token]) {
           const response = await requestStart(base, caller, {
-            definition: buildReviewDefinition(connectionId),
+            definition: buildReviewDefinitionWithAccountInput(connectionId),
           });
           expect(response.status, await response.clone().text()).toBe(200);
           const { runId } = (await response.json()) as { runId: string };
           expect((await waitForRunToFinish(base, token, runId)).status).toBe("completed");
+
+          const storedRunId = await startRun(base, caller, workflow.id, {
+            inputs: { account: connectionId },
+          });
+          expect((await waitForRunToFinish(base, token, storedRunId)).status).toBe("completed");
         }
       },
       { plugins: [buildForgePlugin().plugin] },
