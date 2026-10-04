@@ -488,3 +488,13 @@ _Avoid_: quick fix, shortcut, suggestion
 **Topic**:
 A label that groups Intake: a Connection may carry a topic its events file into, and triage labels a proposal with a topic (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined and ordered; a label, never a domain state.
 _Avoid_: category, area, folder
+
+### Office
+
+**Office**:
+The view that shows the user's sessions as characters at work in one 3D place: each session at a desk in a room, queuing at the user's desk while it has an open Request. One view, whatever its Office Map makes it look like.
+_Avoid_: virtual office, floor view, scene
+
+**Office Map**:
+The description an Office is built from: its fixed rooms and their furniture, what a wing and a room stand for, and the named rule by which the place grows as sessions arrive. A bureau, a tower and a cave are different office maps of the same Office; inside the Office the UI says "map".
+_Avoid_: map (bare, outside the Office), level, floor plan, layout, variant

@@ -39,13 +39,17 @@ export default defineConfig(({ command }) => {
       // Chromium has supported `<link rel="modulepreload">` since version 66,
       // so Vite's polyfill for older browsers would never run.
       modulePreload: { polyfill: false },
-      // Vite warns about any chunk over 500 kB before gzip. The first-screen
-      // chunk (see `rolldownOptions` below) is over that on purpose. The real
-      // limit is the first-paint budget of 250 kB gzipped, which
-      // scripts/check-bundle-budget.ts enforces. This limit sits just above
-      // the chunk's current size (742 kB), so the warning still fires if the
-      // chunk grows a lot.
-      chunkSizeWarningLimit: 780,
+      // Vite warns about any chunk over 500 kB before gzip. Two chunks are
+      // over that on purpose:
+      // - the first-screen chunk (see `rolldownOptions` below), 748 kB, whose
+      //   real limit is the first-paint budget of 250 kB gzipped, which
+      //   scripts/check-bundle-budget.ts checks;
+      // - the Office's chunk, 805 kB, three.js and the Office together, which
+      //   loads only when the Office opens. Its real limit is spec 17's
+      //   limit for the Office's chunk, gzipped.
+      // This limit sits just above the larger of the two, so the warning
+      // still fires if either grows a lot.
+      chunkSizeWarningLimit: 850,
       rolldownOptions: {
         output: {
           // Puts every module the entry imports statically, directly or not,

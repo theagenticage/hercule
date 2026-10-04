@@ -9,13 +9,13 @@ This document covers:
 - the Electron security baseline and the IPC contract
 - the native behaviour the app must have
 - the design system
-- the first milestone's screens
+- the first milestone's screens, the Office among them
 - the performance budgets and rules
 - the slices and the tests
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*.
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office).
 
 ## Scope of the first milestone
 
@@ -36,7 +36,9 @@ Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule
 - logging in to a provider, which the draft's Log in button also opens;
 - creating a project from a folder, which the project picker's New project row also opens.
 
-The live Office stays post-v1, and so does the app installing or updating Hercule's binary. `install.sh` still puts the binary and the app on the Mac ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §1); the app only runs that binary.
+~~The live Office stays post-v1, and so does the app installing or updating Hercule's binary.~~ The app installing or updating Hercule's binary stays post-v1 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332): the live Office no longer does)*. `install.sh` still puts the binary and the app on the Mac ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §1); the app only runs that binary.
+
+*(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The Office moves into v1: the user's threads as colleagues at work in a 3D Bureau office, quiet enough that no fan spins ([The Office](#the-office)). The first run's room stays the still 2D drawing it is.
 
 ## Architecture
 
@@ -436,6 +438,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - The menus, in order: the app menu, File, Edit, Go, Thread, Window. The development build adds View, with Reload and Toggle Developer Tools, after Edit.
   - File › New Thread `⌘N`.
   - Thread › Send `⌘↵`. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It is always enabled. It sends what the open thread's composer or the draft holds, as ⏎ in the message field does, and does nothing when there is nothing to send.
+  - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Go › Office `⌘⇧O`, the first item of Go, opens [the Office](#the-office).
   - Go › the first nine threads of the sidebar, `⌘1` to `⌘9`, in sidebar order. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* Each thread is listed once, by its title: a waiting thread is listed where "Waiting on you" shows it, and a thread a "more" row hides is not listed. With no thread, and while signed out, Go holds one dimmed "No Threads".
   - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says. Choosing a thread in Go with the mouse closes the picker.
   - Sign Out, in the app menu.
@@ -532,6 +535,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - Asleep and away threads are not counted, so a fleet with hundreds of old threads reads "3 working · 2 waiting · 4 idle", not "470 idle".
   - The book's "paused" count is left out, because no thread is paused yet.
   - Every count shows at 0. The waiting count takes `--you-ink` only above 0, because the attention hue means something needs the user.
+- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **New thread, Search and Office share one row** at the sidebar's top. The book draws New thread and Search as two rows, and puts the office's row in the Hercule face's Work section. The desktop has only the Threads face, and the Office belongs to both faces, so its way in sits in the part of the sidebar both faces share. New thread keeps its label and `⌘N`. Search (`⌘K`, still inert) and Office (`⌘⇧O`) are icon buttons, each with a tooltip that gives its name and shortcut. The Office button shows as pressed while the Office is open.
 - **Search `⌘K`, the hide-sidebar button and Settings are drawn and inert** until their slices build them, like the composer's `+` and voice buttons: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered.
 - **The thread list reads every page** of `session.query`, so no thread is left out. The web app reads the first 500.
 
@@ -609,6 +613,91 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - Limelight is used only for the wordmark and numerals.
   - Recursive is used only for code.
 
+## The Office
+
+*(Added 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The Office draws the user's threads as colleagues at work in a 3D Bureau office. Each thread has a desk in its project's room. It walks to the user's desk when it waits on them, and to the Lounge when it is idle. One look shows what the fleet is doing, and the Office stays quiet enough that no fan spins ([Performance](#performance)).
+
+- **The pixel reference** is option A, the Bureau floor, of the 3D office prototype on the branch `prototype/office-3d`, in `apps/desktop/src/renderer/specimens/office-prototype/`. Its README lists what it does, what it costs and its rough parts. The prototype stays on its branch. v1 moves the code it keeps to `apps/desktop/src/renderer/office/`, not to `screens/office/`, which holds the first run's room.
+- **The first run's room stays the still 2D drawing** it is ([The first run](#the-first-run)). The two are drawings of one Office. A later change can draw the first run's room as a still view of the 3D Office.
+- **The words** are [CONTEXT.md](../../CONTEXT.md)'s: the Office, and the Office Map it is built from.
+
+**The way in.**
+
+- The sidebar's Office button, in the top row beside New thread and Search (see **The sidebar** in [Design system](#design-system)), and Go › Office `⌘⇧O`, the first item of the Go menu.
+- The Office is the route `/office`, drawn in the main pane beside the sidebar. The selected colleague is in the URL, `/office?session=<id>`, so a reload keeps it.
+- While the Office is open, a thread clicked in the sidebar, chosen in the Go menu, or opened from a notification selects its colleague and opens its thread in the drawer, without leaving the Office. A thread with no colleague (see below) opens its thread screen, as it does from any other screen.
+
+**Who is in the Office.** `decideOfficeSeating` in `@hercule/client-core` decides it, from the records the sidebar already reads: threads, projects, workspaces and runners. The Office reads nothing else, and adds no operation to the API.
+
+- The Office seats the threads the sidebar's foot counts: those whose pose is working, waiting or idle. Asleep and away threads have no colleague, so hundreds of old threads never fill the Office. The sidebar still lists them.
+- Each project with a seated thread has a room. Rooms keep the order in which the controller lists the projects, and are not sorted by latest activity as the sidebar's projects are: a room is a place, and a place that moves whenever a thread works cannot be found again. The threads with no project share one room, "No project", which comes last.
+- Inside a room, desks are grouped by workspace, in the sidebar's workspace order, so threads that share a working copy sit side by side. Inside a workspace the oldest thread sits first, so a desk keeps its place when a new thread starts.
+- A thread with an open Request stands in the queue at the user's desk, longest waiting first. An idle thread sits in the Lounge. Both keep their desk, to walk back to.
+- A colleague wears its thread's look: `buildLook` seeds it with the session id, as for the sidebar's faces, so a thread's face and its colleague match.
+
+**The Office Map.** The Office is built from a plain, typed `OfficeMap` value in the renderer, not from code that knows the Bureau. v1 has one map, the Bureau. The value holds:
+
+- its id and its name;
+- the name of its growth strategy: `"gallery-wings"`, wings of rooms along the Gallery, the main corridor;
+- what a wing and a room stand for. In v1 a wing stands for nothing (`wing: "none"`) and a room for a project (`room: "project"`). A map of a code base would set `wing: "project"` and `room: "module"`;
+- the furniture at each desk;
+- the fixed rooms, each with its furniture and the spots that furniture offers: a seat, a place to stand, a place in the queue.
+
+The growth strategy, the furniture's geometry and the animations stay in code. The value has no schema, and nothing imports or stores a map: both arrive with the Office Map system ([Seed: the Office Map system (#336)](https://github.com/theagenticage/hercule/issues/336)).
+
+**The fixed rooms:**
+
+| Room | What happens there |
+|---|---|
+| Your Office | The user's desk, and the queue in front of it |
+| The Lounge | Idle colleagues sit there |
+| The Triage room | Triage's desk and the case board. The desk stays empty until Triage exists ([#91](https://github.com/theagenticage/hercule/issues/91)), and Triage's sessions then sit there. The first run's room draws Triage at that desk, so Triage shows in the first run and not yet in the Office |
+| The Lobby | The front door, from the street |
+
+The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room are left out, because nothing happens in them yet.
+
+**Room names and plaques are set in the UI face.** The prototype set them in Limelight, which is used only for the wordmark and numerals ([Design system](#design-system)), and room names in it are hard to read.
+
+**Selecting a colleague:**
+
+- Hovering over a colleague makes it perk up and shows its name tag.
+- Clicking a colleague glides the camera to it and follows it, and opens its card. The card shows the colleague's face, its thread's title and pose, its open Request with the Requests dock's answers, and its room, machine and model. The card's words are `@hercule/client-core`'s, as the dock's are.
+- Answering from the card answers the Request as the dock does. The colleague lowers its hand and walks back to its desk.
+- Open thread on the card, or ⏎, opens the thread screen as a drawer from the right, over the Office. The drawer is the thread screen itself, with its transcript, Requests dock and composer.
+- The top bar holds the overview, the Rooms directory and one count per pose. Each count selects the next colleague in that pose.
+
+**Keys:**
+
+| Key | What it does |
+|---|---|
+| Esc | Steps back one level: the drawer, then the card and the selection, then the room |
+| Tab / ⇧Tab | Selects the next or previous colleague waiting on the user, longest waiting first. Only while the focus is on the Office itself: in the top bar, the card, the drawer and the menus, Tab moves the focus as everywhere else |
+| ⏎ | Opens the selected colleague's thread in the drawer |
+| Q / E | Turns the building 45 degrees |
+| `=` / `-` | Zooms in and out |
+| F | Finds the followed colleague again |
+
+**The pointer,** a Mac trackpad first and a mouse second: two-finger scroll pans; a pinch zooms toward the pointer, as a mouse wheel does; a left drag grabs the floor; a right or ⌥ drag orbits; a double click on the floor glides there. Walls between the camera and the room in view drop to the dado rail, so the room can always be seen.
+
+**Fixed settings.** v1 has no controls. The theme follows the app's theme, and the light follows the theme: day in a light theme, evening in a dark one. Name tags are the prototype's Smart setting, and its characters are Bean. Its quality is sharp on a Retina display, with the sun's shadows drawn once and redrawn only when the building changes, and no ambient occlusion, which draws the whole Office a second time in every frame. Its liveliness is Calm, and Still when the Office stands still ([Performance](#performance)). While the Office is open, the window draws no blur, and its glass surfaces draw solid ([Rules](#rules), rule 5).
+
+**Printer rage** is the Office's one activity. At random, and at most once every 5 minutes for the whole Office, a working colleague walks to the printer, kicks it and walks back. A colleague that waits on the user never goes. The printer is furniture in the Office Map that offers a spot and an animation, the pattern later activities follow. It never happens while the Office stands still. A trigger on a thread's failed tool calls is left to the Office Map system, because it could fire too often.
+
+**The colleagues' looks:**
+
+- Hats sit on the head, not painted on it.
+- Two more of the eight sets of accessories in `WARDROBE` (`apps/desktop/src/renderer/faces/look.ts`) gain a tache, so four of eight wear one. The sidebar's faces wear the same looks, so the book's ACCESSORIES table in `crew.js` changes with it, and `pnpm compare:bureau` keeps comparing equal looks.
+- The Office draws details the sidebar's faces have no room for: waistcoat buttons, a watch chain, a pocket square, a flower in the buttonhole, spats. They never contradict the face: a detail is chosen from the look, as an accessory is.
+
+**What v1 leaves out:**
+
+- the prototype's controls panel and Simulate;
+- the performance readout, which only a development build shows;
+- the Tower and the Campus, whose code stays on the prototype branch;
+- event flow and the pneumatic tubes ([Revisit event flow and the tubes in the Office (#331)](https://github.com/theagenticage/hercule/issues/331));
+- the book's "Office: List | Floor" switch, because the List is All sessions, which is post-v1;
+- assistants and the sessions of workflow runs, because the app lists only threads.
+
 ## Performance
 
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
@@ -619,6 +708,8 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 - **Budgets:**
   - Raising a budget is a deliberate change, recorded here with its reason.
   - A budget is lowered once measurements show room to spare.
+
+*(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* **The Office's budgets gate the Office.** A change to the Office that misses one of [its budgets](#the-offices-budgets) does not merge. A 3D view that draws frames all the time is the one part of the app that can spin a fan and drain a battery, so its cost is held from its first merge, not by a later pass. The rest of the app keeps the rule above.
 
 ### Baseline
 
@@ -647,7 +738,7 @@ The physical footprint of an empty app, measured later with a visible 1440 by 90
 What the numbers show:
 
 - **Idle faces are not free.** Bureau starts each face's blink at a different time, so with 40 faces on screen one of them is almost always blinking. That keeps the GPU process awake about 16 times as often as a still page, and wakes the renderer about 30 times a second while nothing happens.
-- **Glass costs almost nothing on this machine.** Composer glass while streaming measured within noise of no glass.
+- **Glass costs almost nothing on this machine.** Composer glass while streaming measured within noise of no glass. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* That holds over a page that changes little. Over the Office's canvas, which changes with every frame, glass costs much more (see [Rules](#rules), rule 5).
 
 ### Budgets
 
@@ -673,6 +764,36 @@ These are starting budgets. The first performance pass measures the real thread 
 | Renderer JavaScript | The JavaScript the first thread screen needs is at most 250 kB gzipped (the web app's budget), checked in CI like `scripts/check-bundle-budget.ts`. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run and its room are one chunk, loaded only on a first run, and are not on the check's list of first-screen routes. The first screen grows only by the bridge calls the first run adds, and by New thread's Log in button, the one part of the first run the app keeps on the draft itself *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. The project picker, the provider login and New project dialogs, and the draft's starter threads and Intake note are each loaded the first time they show, so they are not part of it |
 | Main's startup | Main loads only what the first window needs, and imports everything else when it is first used. Main's startup file is at most 160 kB minified, checked in CI. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Main imports the modules that run the Hercule binary, git and the folder dialog, which the first run and the New project dialog use, the first time they are used, so those modules add nothing to the startup file. The first run's IPC channels, their handlers and its progress in the settings file stay in the startup file, because main checks every IPC call against its channel's schema from launch. The 160 kB counts the startup file and every chunk it imports statically, because the bundler can move code the startup file shares with a lazy module into a chunk of its own. Main's build puts everything main imports statically into `index.js`, so today that is one file |
 
+#### The Office's budgets
+
+*(Added 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The reference Office is the reference machine above, with the Office open in a 1440 × 900 window at 2x, the Bureau map, 16 colleagues on 3 runners, and its light on Theme.
+
+| Budget | Limit |
+|---|---|
+| Frames | The colleagues' ambient life draws at most 30 frames a second, never 60 or 120. While the camera moves, and while the user drags or zooms, the Office draws at most 60, so a glide stays smooth |
+| Window hidden, minimized or covered | No frames, and no wakeups from the Office |
+| Standing still: on battery, or with Reduce motion | No frames while nothing happens, so the idle row above applies. A thread whose pose changes walks where its new pose takes it, and frames stop once it arrives |
+| CPU, window visible, on mains power | Averaged over 30 seconds, with the camera at rest: the renderer at most 17.9% of one core, the GPU process at most 12.3% of one core: the first measurement's highest readings plus 10% ([Measured](#measured)) |
+| Leaving the Office | Within 5 seconds, the app is back within the idle row: the Office releases its WebGL context and everything it built |
+| The first screen's JavaScript | The Office and three.js are a chunk of their own, loaded the first time the Office opens. The first screen grows only by the sidebar's Office button, the Go menu item and the route |
+| Memory with the Office open | Summed physical footprint at most 1,602 MB, and the renderer at most 181 MB: the first measurement's highest readings plus 10% ([Measured](#measured)) |
+| The Office's chunk | At most 241.5 kB gzipped: the first measurement plus 10% |
+
+- **The idle row and the Office.** The idle row allows the renderer no wakeups from the app and the GPU at most 12 a second. An Office drawing 30 frames a second wakes the renderer about 65 times a second, and the GPU process about 300 with the glass and about 430 without it, though its CPU then falls from 31% to 12% of one core. A living Office can never meet the idle row. The idle row is the limit for the app while nothing happens. On mains power, a visible Office is something happening: its colleagues live, and the CPU row above holds its cost instead. When the Office stands still, the idle row applies to it again.
+- **An unfocused window keeps its 30 frames a second** while it is visible. A living Office on a second screen is what the Office is for. Whether the Office should stand still in more cases is decided after the first measurement.
+- **Why the CPU limits are what they are.** The research for #332 ([#333](https://github.com/theagenticage/hercule/issues/333)) measured the prototype with the reference fleet, in % of one core for the renderer and the GPU process:
+  - as it was, with no cap: 88 frames a second, 45 and 85;
+  - capped at 30 frames a second: 16 and 31;
+  - capped, and without the glass: 14 and 12, so the glass costs the GPU process about 19;
+  - capped, without the glass, and at the prototype's Medium quality (no ambient occlusion, a pixel ratio of 1.5, shadows drawn every frame): 9 to 10 and 7 to 8;
+  - standing still: 0 and 0, with no wakeups;
+  - hidden, and covered by another of the app's windows: 0 frames. A minimized window was not measured, because the research's harness could not minimize its window; Chromium's source treats it as hidden.
+
+  The settings v1 ships (a pixel ratio of 2, shadows drawn once, no ambient occlusion), capped and without the glass, measured 9.1 and 7.7, the mean of two runs (from 7.6 to 10.6, and from 6.5 to 8.9).
+
+  The limits started above the capped reading, at 20% and 35%, so v1 could ship with the cap alone. The Office's first measurement in the app brought them down to its highest readings plus 10%, as every budget comes down ([Measured](#measured)).
+- **Memory and the chunk took their limits from the Office's first measurement** ([Measured](#measured)), because before it no measurement of the Office inside the packaged app existed, and a limit would have been a guess. The memory limits come from the highest of eight launches, so the swing between launches, about 7%, does not fail the next change. With the Office open, the app holds several times the app's own Memory row: almost all of it is the GPU process's, and bringing it down is [#370](https://github.com/theagenticage/hercule/issues/370). The first run's room already reads above the app's memory budget ([#330](https://github.com/theagenticage/hercule/issues/330)).
+
 ### Rules
 
 These rules keep the budgets:
@@ -689,14 +810,16 @@ These rules keep the budgets:
    - Only one continuous animation is allowed: the working pose of the face beside the open thread's running turn, while that turn runs. The sidebar and every other list show still poses and still marks.
      - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The one other is a spinner, and only while Hercule starts or a login waits in [the first run](#the-first-run) or the draft's Log in. Each is a wait the user started, and each ends: the start after at most 90 seconds for the command and 30 for the answer, a login when it ends or its code expires.
      - The first run's room moves only when a step finishes: the camera moves one layer's `transform`, and new pieces settle with `transform` and `opacity`, each over `--dur-3`, by the rules below.
+     - *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office's colleagues live: they walk, type, sip tea and sleep, at most 30 frames a second, while the Office is on screen and does not stand still ([The Office's budgets](#the-offices-budgets)). The Office draws them into one WebGL canvas, and the rules below for CSS animations do not apply inside it. The Office's panels and its drawer follow those rules.
    - Animations change only `transform` and `opacity`, and only of an HTML element. Chromium runs such an animation on the compositor thread alone. When the animated element is an SVG element, even an outer `<svg>`, the renderer's main thread also runs style, layout and paint on every frame: 120 times a second on a 120 Hz display. So the working pose's paws are each drawn in an `<svg>` of their own, inside a `<span>` that moves.
    - Transitions answer a user action, last at most `--dur-3`, and change only paint properties: color, background, border-color, box-shadow, opacity and transform. A transition of a layout property, such as `width`, `padding` or `grid-template-rows`, runs layout on every frame. Bureau's composer transitions some of these; slice 6 ports the composer without them, and uses a transform if its growth animates.
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
-   - Reduce motion turns every animation off.
+   - Reduce motion turns every animation off. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
    - The renderer drops the open thread's `session:<id>:tap` subscription. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
    - `backgroundThrottling` stays on.
+   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats.
 4. **No polling, and no timers while idle:**
    - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)* *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell also subscribes to the `connection` topic, so a GitHub Connection made in the web app while the desktop app runs reaches the New project form and the starters' line without a reload.
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
@@ -704,7 +827,11 @@ These rules keep the budgets:
      - GitHub's device flow: the protocol requires the client to ask, so the renderer calls `connection.pollDeviceFlow` at the interval GitHub gives, until the flow is done, expires or is denied.
      - The connect check after `hercule service install`: main checks every half second for at most 30 seconds, because the controller announces nothing while it starts.
      - A provider's login does not poll: its end arrives on the `provider` live topic.
-5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0, and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
+5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0 (the Office, below, also sets it while it is open), and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
+   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Glass over the Office costs far more than glass over a still page. On the reference machine, the Office's glass (its top bar, room labels and panels) costs the GPU process about 19 points of one core at 30 frames a second. Two causes add up:
+     - the page under a blur changes with every frame the Office draws, so the blur is drawn again each time;
+     - by Chromium's source, one `backdrop-filter` anywhere in the window turns off macOS's own compositing of the window's layers (Core Animation), so the GPU process composites every layer of the window for each frame the Office draws. This cause was read from the source. A later measurement found the GPU process woke as often with glass on the top bar alone as with all of the glass, so the compositing does change. But the cost follows how much is blurred: glass on the top bar alone cost the GPU process about 4 points, a quarter of what all of the glass cost with v1's settings (14). That was one session, with the camera at rest.
+   - So the window draws no blur while the Office is open *(decided 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*. The Office sets the glass level to 0 for the whole window, through the same tokens as Reduce transparency. Its top bar, card, name tags and room labels, and the thread drawer's composer and Requests dock, draw as solid Bureau surfaces, with the glass's rim and shadow. Leaving the Office brings the glass back. [Research: frosted glass over the Office at close to no cost (#341)](https://github.com/theagenticage/hercule/issues/341) looks for a way to bring it back over the Office.
 6. **The first paint is cheap:**
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
@@ -714,7 +841,7 @@ These rules keep the budgets:
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
 7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
 
-**Verify at build time:** that a macOS window fully covered by other windows stops animation frames, as a minimized one does. Rule 3 then also covers a covered window.
+**Verify at build time:** that a macOS window fully covered by other windows stops animation frames, as a minimized one does. Rule 3 then also covers a covered window. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The research for the Office found the reverse gap: a window covered by another of the app's windows stopped its frames, and a minimized one could not be measured. The Office's first measurement checks a minimized window, and a window covered by another app's window.
 
 **Verify at build time:** the cost of glass on the slowest Mac the app supports, before the first release. The M4 Max measurement cannot show that cost.
 
@@ -733,6 +860,8 @@ These rules keep the budgets:
   - **The script counts up to 2 renderer wakeups a second as none.** Chromium wakes an idle renderer 0 to 2 times a second on its own, with no app code running ([Baseline](#baseline)), so that is the most the budget's "no wakeups from the app" can read as.
   - *(Added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* **The script does not yet control whether a text field is focused,** and a focused field changes both memory and wakeups ([Measured](#measured)). The new-thread composer takes focus when its screen opens, but its caret blinks only while macOS has made the app active, and whether macOS does that at a plain launch varies from launch to launch. Measuring both states on purpose, one with nothing focused and one with the composer focused through DevTools focus emulation, is part of [#301](https://github.com/theagenticage/hercule/issues/301).
   - ~~**Long tasks** come from a `PerformanceObserver` in the renderer.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* **Long tasks** come from a Chromium trace of a turn streaming into the fixture thread, recorded over the page's DevTools connection. A long task is a task on the renderer's main thread that runs over 50 ms: the page cannot react to input until it ends. The trace needs no measuring code in the app. Tracing costs the renderer a little time of its own, so the tasks err long.
+- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **The Office is measured with the Office's own fleet,** because a scratch controller has no 16 working threads to seat. Its measurement opens the Office with the reference fleet in the repository's Electron, and reads each process's CPU and wakeups from `app.getAppMetrics()`, frames from the page, and draw calls from three.js.
+  - **CPU is a share of one core:** the growth of `cumulativeCPUUsage`, in seconds, divided by the seconds sampled. `percentCPUUsage` cannot be used for this: on macOS, Electron divides it by the number of logical CPUs, so on the reference machine's 16 it reads one sixteenth of a share of one core.
 - **CI checks what does not depend on the machine:**
   - the renderer bundle budget and main's startup file. While the budgets are guides, a build over one prints a warning and passes.
   - ~~the process count. A new process fails the test, because it changes the process model, which a slice must justify.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* The process count is checked by the end-to-end suite, which runs on a developer's Mac, not in CI (see [Testing](#testing)). A new process fails that test, because it changes the process model, which a slice must justify.
@@ -989,7 +1118,7 @@ Idle at each step of the first run, with the window visible, read from a plain l
 | Step | GPU wakeups a second | Renderer wakeups a second | Notes |
 |---|---|---|---|
 | Welcome | 6 to 15 | 1 to 2 | |
-| Hercule starting | 309 to 320 | 64 to 73 | the spinner, 0.8% of a core in the GPU process and 0.15% in the renderer |
+| Hercule starting | 309 to 320 | 64 to 73 | the spinner, 0.8% of a core in the GPU process and 0.15% in the renderer. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* These were likely read from `percentCPUUsage`, a share of the whole machine (see [Measuring](#measuring)), so about 13% and 2.4% of one core; [#339](https://github.com/theagenticage/hercule/issues/339) checks them |
 | Account | 62 to 65 | 4 | the password field is focused; three of four launches, sampled again on 8754b1dd |
 | Providers | 4 | 1 | |
 | A provider login waiting | 301 | 36 | the spinner; read with Playwright attached |
@@ -1035,9 +1164,66 @@ Memory at each step of the first run, and after it, read as [Measuring](#measuri
 - **The account step is read after a reload, not straight after a plain launch,** because a plain launch cannot open on it. With a controller on this Mac that is not set up, the app opens on the welcome, which greets Hercule as found. So each launch set the mark Open the office leaves in the page's session storage, through the page's DevTools connection, and then main reloaded the window with `webContents.reload()`, as it does once Hercule answers. Memory was read 13 seconds after the reload. The install did not run, because Hercule was already running.
 - **The one-minute load average was 4.0 to 6.1** at each launch, and 4.7 at the start of the session.
 
+**The Office, v1,** measured 2026-10-03 and 2026-10-04 on the reference machine, for [#332](https://github.com/theagenticage/hercule/issues/332). *(Added 2026-10-04, [#332](https://github.com/theagenticage/hercule/issues/332).)* This is the Office's first measurement, so it sets the Office's memory and chunk limits ([The Office's budgets](#the-offices-budgets)).
+
+In the app: the packaged test app, launched plainly as [Measuring](#measuring) describes, its third launch or later, against a scratch controller. The fleet is the reference Office: 16 colleagues, 4 working, 4 waiting on the user and 8 idle, on 3 runners and in 3 projects of 6, 5 and 5 threads. The controller also held its own runner, retired, and one exited thread, which has no colleague; the leave row leaves the Office for that thread's screen. The window is 1440 × 900 at 2x, so the Office's canvas is 1168 × 900 beside the sidebar, 2336 × 1800 pixels. Light theme, nothing focused, the camera at rest.
+
+- **CPU** is a share of one core: the growth of `cumulativeCPUUsage` over 30-second windows, starting 45 seconds after the Office opened. `ps` agreed within 0.1.
+- **Memory** is the physical footprint of the four processes, read with `footprint` 13 seconds after the screen opened.
+- **Sizes** come from `pnpm build:desktop`'s size checks, 1,024 bytes to a kB.
+- **The one-minute load average** was 4 to 6, and 11 in one window, from other programs on the machine.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Frames, camera at rest | at most 30 a second | 30.1, out of 120 animation frames a second |
+| CPU, camera at rest | renderer 20%, GPU process 35% | renderer 6.2 to 16.3%, GPU process 5.1 to 11.2%, over 15 windows in 3 launches |
+| Wakeups, camera at rest | - | renderer 45 to 64 a second, GPU process 267 to 273 |
+| Leaving the Office | the idle row within 5 seconds | renderer 1 to 3 wakeups a second from 5 to 15 seconds after leaving, in 5 launches; from 15 seconds on, 0 to 2, the level of a thread screen the Office never opened. GPU process 0 to 5 |
+| Memory with the Office open | the first reading plus 10% | **1,359 to 1,457 MB** summed, in 8 launches; the renderer 146 to 165 MB. On the thread screen just before: 325 to 331 MB, and 56 to 60 MB |
+| The Office's chunk, gzipped | the first reading plus 10% | 219.6 kB, 786.1 kB before gzip |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, a guide | 297.8 kB in 7 chunks. Before the Office, 296.7 kB in 6 |
+
+- **The limits this sets** are the highest readings plus 10%: with the camera at rest, 17.9% of one core for the renderer and 12.3% for the GPU process; with the Office open, 1,602 MB summed and 181 MB for the renderer; and 241.5 kB for the chunk. The table in [The Office's budgets](#the-offices-budgets) states them.
+- **The Office adds 1.1 kB to the first screen.** The first-screen chunk grew by 1.0 kB, for the Office's part of the shell: the sidebar's Office button, the route and the Go menu's item. The thread screen became a chunk of its own, because the Office's drawer loads it too. The first screen was over the 250 kB guide before the Office. Main's startup file is 156.1 kB, against 156.0 kB before.
+- **Almost all of the Office's memory is in the GPU process:** 1,154 to 1,236 MB, against 210 MB on the thread screen. The page's own WebGL allocations are 404 MB:
+  - the composer's target, 241 MB: 4× multisampled half-float colour and depth, and their resolved copies;
+  - the 4096 × 4096 shadow map, 128 MB: its depth texture, and a colour texture three.js adds that nothing reads;
+  - geometry, 20 MB; the environment map, 9 MB; the name tags' and labels' textures, 7 MB.
+
+  The graphics driver's memory in the GPU process grows by 876 MB when the Office opens. So about 450 MB is held by the driver beyond those allocations and the canvas, and was not traced. Bringing the Office's memory down is [#370](https://github.com/theagenticage/hercule/issues/370).
+- **The composer allocated two targets before the review,** and the summed footprint read 1,505 MB in two launches with 4 colleagues. With one target, the same setup read 1,260 and 1,271 MB.
+- **CPU at rest reads at different levels for the same work.** In some windows the renderer read 6 to 7%, in others 13 to 16%, with the same frames, wakeups and JavaScript per frame. The likely cause is which kind of core macOS runs the processes on, efficiency or performance, but reading that needs root, so it was not proven. The highest window is under the limits.
+- **A profile of the renderer at the lower level** puts the Office's frame at 3.2% of its wall time: three.js 2.5%, the simulation 0.2% and the name tags 0.1%. React ran in no sample, and no frame forced a layout. The rest of the renderer's CPU is Chromium's own work for each frame. The profile was taken with 4 colleagues, before the composer change.
+- **The stage asks for 120 animation frames a second and draws one in four.** The skipped ones cost the renderer about 1% of a core. Asking for 30 a second is [#367](https://github.com/theagenticage/hercule/issues/367).
+- **The renderer is back within the idle row 15 seconds after leaving, not 5.** A trace of the 45 seconds after leaving shows no call into the Office's chunk. The extra wakeups are Chromium's and V8's clean-up of what the Office released:
+  - from 0 to 5 seconds, the compositor frees the canvas's resources, about 28 times a second;
+  - around 5 seconds, V8's memory reducer runs two major garbage collections that return the Office's memory, 15 ms of the main thread in all;
+  - until about 15 seconds, the tail of that clean-up, background sweeping and the compositor freeing tiles, wakes the renderer 1 to 3 times a second. When it ends varies from launch to launch.
+
+  From 15 seconds on, the renderer reads like a thread screen the Office never opened: 0 to 2 wakeups a second. That screen's own renderer reads 2 a second from 45 seconds after it opens, from Chromium's periodic purge of its memory allocator, with no Office involved.
+- **Leaving frees what the Office built.** 5 to 15 seconds after leaving, the four processes summed 321.5 MB and the page held no canvas. Over 10 visits, the page held 0 WebGL contexts and 0 canvases after each one, and its listeners stayed at 205. Before the review's fix, each visit left one WebGL context behind, because three.js keeps the last renderer in a lookup table; the Office now clears it when it leaves. The JavaScript heap grew from 14.1 to 16.2 MB over the 10 visits, all of it V8's compiled code: the three.js objects counted the same after each visit.
+
+The rows below were read on the prototype's page, not in the app, because the measuring page inside the app is [#339](https://github.com/theagenticage/hercule/issues/339). The Before is the prototype at 6fcb3634 on `prototype/office-3d`. The After is the Office's engine before the review's fixes and the composer change. Both ran from a Vite dev server in the repository's Electron, with the glass turned off by a style rule, the reference fleet of 16, and 30-second samples after 25 seconds.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| CPU, camera at rest | renderer 20%, GPU process 35% | 51.9%, 43.8% | 7.8%, 6.3% |
+| Frames and CPU, camera moving | at most 60 a second | 97 frames; with the glass on, 56.7%, 93.2% | 60 frames; 21.3%, 14.7% |
+| Window visible, not focused | 30 a second | - | 30.2 frames; 8.9%, 7.0% |
+| Standing still | the idle row | - | 0 frames; 0.3%, 0%; no wakeups |
+| Window hidden or covered | no frames | 0 frames | 0 frames, no wakeups |
+| Draw calls | - | 1,801 | 591 |
+
+- **While the camera moves, the sun's shadows are drawn again 17 to 19 times a second,** because the walls that drop to the dado rail change height. That is most of the camera's cost ([#358](https://github.com/theagenticage/hercule/issues/358)). The CPU limits apply with the camera at rest.
+- **With the glass on, the After read 8.8% and 23.9% at rest, and 19.1% and 55.9% while the camera moved.** That is why the window draws no blur while the Office is open (rule 5).
+- **At ten times the fleet,** 160 colleagues, #333 read 21.4% and 14.9% in one run: over the renderer's limit, which is set for the reference fleet. The building drawn into a texture ([#340](https://github.com/theagenticage/hercule/issues/340)) and merging more meshes are the levers before fleets grow.
+- **A minimized window was not measured:** the measuring script's call to minimize its window had no effect. Chromium treats a minimized window as hidden, and the hidden row read no frames and no wakeups.
+- **Standing still was read with the battery reported as discharging** by an override in the measuring script, not on a Mac running on battery.
+- **`apps/desktop/scripts/perf.ts` read CPU from `percentCPUUsage`** until this change, a share of the whole machine. It now reports a share of one core ([Measuring](#measuring)).
+
 ## Slices
 
-Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)).
+Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
 
 1. **Shell and safety.**
    - the `apps/desktop` package
@@ -1075,6 +1261,16 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
    - the pickers, with the local-runner probe through main
    - starting the thread
 8. **Menu and notifications.** The menu, shortcuts, dock badge and notifications.
+9. **The Office.** *(Added 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* [The Office](#the-office), on the user's real threads:
+   - the prototype's code moved to `apps/desktop/src/renderer/office/`, without the Tower, the Campus, the controls and Simulate
+   - the route, the sidebar's top row and Go › Office
+   - `decideOfficeSeating` in `@hercule/client-core`, with its tests, and the Bureau's `OfficeMap` value
+   - the card, answering from it, and the drawer
+   - the performance work: the 30-frame cap, standing still on battery and with Reduce motion, no ambient occlusion, shadows drawn once, and the static furniture merged by material
+   - the bug fixes: colleagues walking through walls, legs inside chairs and sofas, poor paths, and hats painted on
+   - room names and plaques in the UI face
+   - the first measurement, recorded in [Measured](#measured)
+10. **The Office's life.** *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Printer rage, the tache on four of eight looks, and the Office's own details on the colleagues.
 
 ## Testing
 
@@ -1104,6 +1300,9 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - a hidden window still draws and presents its page's frames;
   - an Element Timing entry's `renderTime` is when its frame was presented, or failed to present;
   - `show()` shows the frame the window holds, not an empty one.
+- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **The Office's tests:**
+  - `decideOfficeSeating` has unit tests for the rooms and their order, the desks inside a room, the queue and the Lounge, and the threads left out;
+  - an end-to-end test opens the Office from the sidebar's button and from `⌘⇧O`, and checks that a hidden window draws no frames.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.
 
 ## Post-v1
@@ -1114,7 +1313,7 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
 - **Assistants,** with the book's stored look (Spec change 3) and a run that wears its workflow's face (Spec change 4).
 - **All sessions and Settings,** including Appearance: Bureau's five themes, System, and the glass level.
 - **The desktop app as installer:** it ~~runs and~~ installs and upgrades ~~a local controller~~ Hercule's binary ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §Post-v1). Starting a local controller with the binary already there is in v1, as part of [the first run](#the-first-run) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
-- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **The live Office.** The first run's still room grows into the Office: live updates, the other wings, filing cabinets and capsules in Triage's tube.
+- ~~*(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **The live Office.** The first run's still room grows into the Office: live updates, the other wings, filing cabinets and capsules in Triage's tube.~~ *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332): the live Office is slice 9.)* **The Office Map system:** growth by wings built as the fleet grows, more maps, importing a map, maps of a code base, colleagues that go where their work takes them, and more activities ([#336](https://github.com/theagenticage/hercule/issues/336)). Event flow and the tubes ([#331](https://github.com/theagenticage/hercule/issues/331)). The first run's room drawn as a still view of the 3D Office.
 - **The idle blink, back.** Bureau's idle blink returns once research shows how to draw it within the idle budget. Bureau draws it as an animation that repeats every 7.2 seconds on the SVG group of each face's eyes. The eyes move for only about 0.2 seconds of that, but Chromium draws frames for the whole 7.2 seconds. And because an SVG group is animated on the renderer's main thread, the renderer wakes for every frame. Techniques to measure:
   - one shared timer that starts a single 0.2-second blink on one face at a time, so frames are drawn only while an eye is actually closing
   - eyes drawn in their own compositor layer, so a blink never wakes the renderer's main thread
@@ -1130,6 +1329,7 @@ Tickets:
 
 - [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275)
 - [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313)
+- [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332), with its research ([#333](https://github.com/theagenticage/hercule/issues/333)) and scope ([#334](https://github.com/theagenticage/hercule/issues/334))
 - [Web app architecture: observability-first, desktop-shell-ready (#19)](https://github.com/theagenticage/hercule/issues/19)
 
 ADRs:

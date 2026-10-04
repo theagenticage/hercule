@@ -29,6 +29,7 @@ export { LaptopIcon } from "./laptop";
 export { ListIcon } from "./list";
 export { MicIcon } from "./mic";
 export { MoreIcon } from "./more";
+export { OfficeIcon } from "./office";
 export { PauseIcon } from "./pause";
 export { PlusIcon } from "./plus";
 export { QuestionIcon } from "./question";
