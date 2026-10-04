@@ -8,7 +8,7 @@
  *
  * Nothing here polls. Declaring the kinds lets a subscription and a workflow
  * filter refer to them, and gives the schemas emitted payloads are validated
- * against. The ingest loop that emits them will be added by its own ticket.
+ * against. The feeds in `ingest/` emit them.
  */
 import { Schema } from "effect";
 import type { EventKindDeclaration } from "@hercule/plugin-host";
@@ -30,6 +30,8 @@ const Subject = Schema.Struct({
   // the fifteen kinds refers to it instead of repeating it.
   identifier: "GithubSubject",
 });
+
+export type GithubSubject = Schema.Schema.Type<typeof Subject>;
 
 /** Declares a kind whose payload is only the subject: what happened, and to what. */
 const declareSubjectKind = (description: string): EventKindDeclaration => ({
