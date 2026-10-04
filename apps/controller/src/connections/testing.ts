@@ -62,6 +62,17 @@ export const buildAccount = (token: string): ExternalAccount => ({
 export const buildJsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+/** Reads one connection through the API, and fails the test unless the request succeeds. */
+export const readConnection = async (
+  base: string,
+  token: string,
+  id: string,
+): Promise<ConnectionRecord> => {
+  const response = await get(base, `/api/v1/connections/${id}`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ConnectionRecord;
+};
+
 /** Lists the connections through the API, and fails the test unless the request succeeds. */
 export const listConnections = async (
   base: string,

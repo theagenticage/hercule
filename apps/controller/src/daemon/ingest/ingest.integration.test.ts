@@ -1,17 +1,19 @@
 /**
  * Tests ingest end to end on a running controller: the user connects an
  * account of a plugin's Connection type, the Ingest Reconciler opens the
- * plugin's event source for it, the source's first poll emits an event, and
+ * plugin's event source for it, the source's second poll emits an event, and
  * the event pipeline starts a workflow's run from that event.
  *
- * The plugin is a local one whose feed emits one event on its first poll, and
- * whose credentials check accepts one token, so nothing reaches the network.
+ * The plugin is a local one. Its feed records where it stands on its first
+ * poll and emits one event on each later poll, as a real source does so a
+ * new Connection never emits history. Its credentials check accepts one
+ * token, so nothing reaches the network.
  */
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type { Connection } from "@hercule/contract";
 import {
   AuthError,
   HOST_API,
@@ -21,7 +23,7 @@ import {
   type Plugin,
 } from "@hercule/plugin-host";
 import { readEvent } from "../../events/testing";
-import { get } from "../../http/testing";
+import { readConnection } from "../../connections/testing";
 import { queryRuns, waitForRunToFinish } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../sessions/testing";
 import {
@@ -39,9 +41,11 @@ const ACCEPTED_TOKEN = "acme-token";
 
 /**
  * A plugin with the Connection type `acme/acme` and an event source for it.
- * The source's one feed emits `acme.thing.done` on every poll, with the same
- * dedup key each time, so the event log holds it once. A Connection whose
- * token is not `ACCEPTED_TOKEN` has its poll fail with an `AuthError`.
+ * The source's one feed, polled every second, stores a baseline on its first
+ * poll and emits `acme.thing.done` on every later one, with the same dedup
+ * key each time, so the event log holds it once. A Connection whose token is
+ * not `ACCEPTED_TOKEN` has its poll fail with an `AuthError`, before any
+ * baseline.
  */
 const acmePlugin: Plugin = {
   manifest: {
@@ -62,7 +66,7 @@ const acmePlugin: Plugin = {
       registerEventSource(host, {
         id: "acme",
         connectionType: "acme/acme",
-        feeds: { things: { defaultIntervalSeconds: 60 } },
+        feeds: { things: { defaultIntervalSeconds: 1 } },
         kinds: {
           "acme.thing.done": {
             description: "Something was done in Acme.",
@@ -79,6 +83,10 @@ const acmePlugin: Plugin = {
                 );
                 if (credentials["token"] !== ACCEPTED_TOKEN) {
                   return yield* Effect.fail(new AuthError({ message: "Acme rejected the token." }));
+                }
+                if (Option.isNone(yield* context.state.get("baseline"))) {
+                  yield* context.state.set("baseline", true);
+                  return {};
                 }
                 yield* context.emit({
                   kind: "acme.thing.done",
@@ -128,18 +136,8 @@ const withIngestingController = (body: (controller: SetUpController) => Promise<
     ingestReconcileInterval: Duration.millis(10),
   });
 
-/** Reads a Connection through the API. */
-const readConnection = async (
-  { base, token }: SetUpController,
-  id: string,
-): Promise<Connection> => {
-  const response = await get(base, `/api/v1/connections/${id}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Connection;
-};
-
 describe("ingesting events from a plugin's event source", () => {
-  it("emits an event from a new Connection's first poll, and the event starts a run", async () => {
+  it("emits an event from a Connection's feed, and the event starts a run", async () => {
     await withIngestingController(async (controller) => {
       const { base, token } = controller;
       const workflow = await createWorkflowOrFail(base, token, { source: THING_DONE_SOURCE });
@@ -179,7 +177,7 @@ describe("ingesting events from a plugin's event source", () => {
       });
 
       const connection = await waitUntil("the Connection needs reauthorization", async () => {
-        const read = await readConnection(controller, connectionId);
+        const read = await readConnection(controller.base, controller.token, connectionId);
         return read.status === "needs-reauth" ? read : undefined;
       });
 
