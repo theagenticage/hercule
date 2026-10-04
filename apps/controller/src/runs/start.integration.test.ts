@@ -36,6 +36,7 @@ import {
   createWorkflowOrFail,
   disablePlugin,
   localMailPlugin,
+  setConnectionStatus,
   updateWorkflow,
   withSetUpController,
 } from "../workflows/testing";
@@ -51,7 +52,6 @@ import {
   startRun,
   waitForRunToFinish,
 } from "./testing";
-import { runEffect } from "../daemon/testing";
 
 /** Long enough for an agent fleet, a session, and a run that waits its full deadline. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
@@ -276,11 +276,7 @@ describe("run.start of a stored workflow", () => {
         const disabledConnectionId = await createConnection(base, token, "github/github", {
           pat: ACCEPTED_GITHUB_TOKEN,
         });
-        // No operation disables a Connection yet, so the row is changed directly.
-        await runEffect(
-          harness.sql`UPDATE connections SET status = 'disabled'
-                      WHERE id = unhex(replace(${disabledConnectionId}, '-', ''))`,
-        );
+        await setConnectionStatus(harness, disabledConnectionId, "disabled");
 
         for (const [description, repo] of [
           ["a Connection that does not exist", ABSENT_ID],
@@ -327,14 +323,7 @@ describe("run.start of a stored workflow", () => {
             ],
           },
         });
-        const setStatus = (status: string) =>
-          runEffect(
-            harness.sql`UPDATE connections SET status = ${status}
-                        WHERE id = unhex(replace(${connectionId}, '-', ''))`,
-          );
-
-        // No operation disables a Connection yet, so the row is changed directly.
-        await setStatus("disabled");
+        await setConnectionStatus(harness, connectionId, "disabled");
         const [issue] = await expectRefusedAt(harness, await requestRun(base, token, workflow.id), [
           ["steps", "0", "params", "connection"],
         ]);
@@ -344,7 +333,7 @@ describe("run.start of a stored workflow", () => {
 
         // The same workflow starts once the Connection is enabled again, so
         // the refusal was about the Connection and nothing else.
-        await setStatus("connected");
+        await setConnectionStatus(harness, connectionId, "connected");
         const runId = await startRun(base, token, workflow.id);
         await waitForRunToFinish(base, token, runId);
       },

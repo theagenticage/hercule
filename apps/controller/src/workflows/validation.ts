@@ -578,16 +578,39 @@ const listParamIssues = (
 const SINGLE_INPUT_TEMPLATE = /^\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/;
 
 /**
+ * Returns the name of the input a step's `connection` param reads when the
+ * param is a template that is exactly one input, such as
+ * `{{ inputs.account }}`. Returns `undefined` for any other value, such as a
+ * literal Connection id.
+ */
+export const readConnectionInputName = (connection: unknown): string | undefined =>
+  typeof connection === "string" ? SINGLE_INPUT_TEMPLATE.exec(connection)?.[1] : undefined;
+
+/**
+ * Describes the two forms the `connection` param takes, for an action that
+ * acts through a Connection of type `type`. Every message about the param
+ * ends with it, so the author always learns what to write instead.
+ */
+const describeConnectionParamForms = (type: string): string =>
+  `the id of a Connection of type ${type}, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}`;
+
+/**
  * Checks the `connection` param of a step whose action acts through a
  * Connection of type `wanted`. Returns the issues at the param's path, or none
  * when the param is missing: `listActionIssues` reports a missing param
  * together with the action's other missing params.
  *
- * - A literal must be the id of an existing Connection of type `wanted`.
- * - A template that is exactly one input, such as `{{ inputs.account }}`,
- *   must read a Connection input of type `wanted`.
- * - Any other template is accepted, because its value is known only when a
- *   run renders it. The run engine checks the Connection then.
+ * The param takes one of two forms:
+ *
+ * - a literal, which must be the id of an existing Connection of type
+ *   `wanted`;
+ * - a template that is exactly one input, such as `{{ inputs.account }}`,
+ *   which must read a Connection input of type `wanted`.
+ *
+ * Any other template is refused. With only these two forms, the Connection a
+ * step acts through is known before a run starts: it is fixed in the
+ * definition, or it is the value of an input. So the controller can check
+ * who chose the Connection, and whether that actor holds `connection.use`.
  *
  * Whether the Connection is disabled is not checked here, in the same way as
  * the default of a Connection input: a disabled Connection can be enabled
@@ -600,18 +623,25 @@ const listConnectionParamIssues = (
   inputs: ReadonlyArray<Input>,
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
-  const fix = `Write the id of a Connection of type ${wanted}, or a template that reads a Connection input of that type, such as {{ inputs.account }}.`;
+  const fix = `Write ${describeConnectionParamForms(wanted)}.`;
   if (typeof connection !== "string") {
     return [
       {
         path,
-        message: `The param connection names the Connection the action acts through, so it must be the id of a Connection of type ${wanted}, or a template. ${fix}`,
+        message: `The param connection names the Connection the action acts through, so it must be text. ${fix}`,
       },
     ];
   }
   if (isTemplate(connection)) {
-    const name = SINGLE_INPUT_TEMPLATE.exec(connection)?.[1];
-    if (name === undefined) return [];
+    const name = readConnectionInputName(connection);
+    if (name === undefined) {
+      return [
+        {
+          path,
+          message: `The param connection cannot be computed by a template, so that the Connection a step acts through is known before a run starts. ${fix}`,
+        },
+      ];
+    }
     const input = inputs.find((candidate) => candidate.name === name);
     if (input === undefined) {
       return [{ path, message: `The workflow has no input named ${name}. ${fix}` }];
@@ -704,7 +734,7 @@ const listActionIssues = (
     const isSingleParam = missing.length === 1;
     const connectionHint =
       action.connection !== undefined && missing.includes(CONNECTION_PARAM)
-        ? ` The param connection names the Connection the action acts through: the id of a Connection of type ${action.connection.type}, or a template that reads a Connection input of that type, such as {{ inputs.account }}.`
+        ? ` The param connection names the Connection the action acts through: ${describeConnectionParamForms(action.connection.type)}.`
         : "";
     issues.push({
       path: [...path, "params"],

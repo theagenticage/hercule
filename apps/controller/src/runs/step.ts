@@ -331,7 +331,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      * - `not_found` when the action is not in the catalog;
      * - `validation` when the rendered params do not match the action's
      *   input, or when the action acts through a Connection and the
-     *   `connection` param did not render to a non-empty string.
+     *   `connection` param did not render to a Connection id.
      *
      * For an action that acts through a Connection, the `connection` param is
      * left out of the decode and stored beside the encoded input. Whether it
@@ -370,7 +370,11 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             : separateConnectionParam(params);
         let connectionId: string | undefined;
         if (action.connection !== undefined) {
-          if (typeof connection !== "string" || connection.length === 0) {
+          // Validation allows the param only as a Connection id or as a
+          // template that is exactly one Connection input, and a run's inputs
+          // are checked when it starts. This is the same rule, applied to the
+          // rendered value.
+          if (!isId(connection)) {
             return Result.fail({
               error: {
                 code: "validation",

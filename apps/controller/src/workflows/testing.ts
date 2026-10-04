@@ -429,3 +429,22 @@ export const emitLabeledEvent = async (
   expect(response.ok, await response.clone().text()).toBe(true);
   return ((await response.json()) as { readonly eventId: number }).eventId;
 };
+
+/**
+ * Sets a Connection's status by writing its row directly, because no
+ * operation disables a Connection or marks it as needing reauth. Resolves once
+ * the row is written.
+ */
+export const setConnectionStatus = (
+  harness: ServerHarness,
+  id: string,
+  status: string,
+): Promise<void> =>
+  Effect.runPromise(
+    Effect.orDie(
+      Effect.asVoid(
+        harness.sql`UPDATE connections SET status = ${status}
+                    WHERE id = unhex(replace(${id}, '-', ''))`,
+      ),
+    ),
+  );
