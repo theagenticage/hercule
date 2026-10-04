@@ -57,7 +57,7 @@ import {
   PluginConfigs,
   type RegisteredConnectionType,
 } from "../connections";
-import { toPluginError, describeFieldIssues, readCauseMessage, truncateMessage } from "./errors";
+import { toPluginError, describeFieldIssues, summarizeCause, truncateMessage } from "./errors";
 import {
   registerEventSourceContribution,
   type RegisteredEventKind,
@@ -630,7 +630,7 @@ const make = Effect.gen(function* () {
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
-        Effect.succeed<PluginStatus>({ _tag: "errored", message: readCauseMessage(cause) }),
+        Effect.succeed<PluginStatus>({ _tag: "errored", message: summarizeCause(cause) }),
       ),
     );
 
@@ -662,7 +662,7 @@ const make = Effect.gen(function* () {
       ).pipe(
         Effect.matchCauseEffect({
           onSuccess: (deactivate) => patchEntry(id, { status: { _tag: "active" }, deactivate }),
-          onFailure: (cause) => markErrored(id, "activate", readCauseMessage(cause)),
+          onFailure: (cause) => markErrored(id, "activate", summarizeCause(cause)),
         }),
       );
     }).pipe(
@@ -681,7 +681,7 @@ const make = Effect.gen(function* () {
    */
   const stop = (id: string): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
-      yield* ingest.closePlugin(id);
+      yield* ingest.closePluginIngests(id);
       const entry = (yield* Ref.get(entries)).get(id);
       if (entry === undefined) return true;
       if (entry.deactivate === undefined) {
@@ -698,10 +698,29 @@ const make = Effect.gen(function* () {
               true,
             ),
           onFailure: (cause) =>
-            Effect.as(markErrored(id, "deactivate", readCauseMessage(cause)), false),
+            Effect.as(markErrored(id, "deactivate", summarizeCause(cause)), false),
         }),
       );
     });
+
+  // At shutdown, stop every running plugin, so its ingest handles close and
+  // its `deactivate` releases what `activate` acquired. The ingest loops are
+  // released after the host, so the handles are still there to close. A
+  // failure is logged, so one plugin cannot keep the others from stopping.
+  yield* Effect.addFinalizer(() =>
+    gate.withPermits(1)(
+      Effect.flatMap(Ref.get(entries), (all) =>
+        Effect.forEach(
+          [...all.values()].filter((entry) => entry.deactivate !== undefined),
+          (entry) =>
+            Effect.catchCause(stop(entry.id), (cause) =>
+              Effect.logError(`The plugin ${entry.id} failed to stop at shutdown`, cause),
+            ),
+          { discard: true },
+        ),
+      ),
+    ),
+  );
 
   return {
     /**

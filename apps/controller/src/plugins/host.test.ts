@@ -32,6 +32,8 @@ import {
   notesPlugin,
   buildPluginStack,
   buildProviderDefinition,
+  IDLE_FEEDS,
+  IDLE_INGEST_OPEN,
 } from "./testing";
 
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
@@ -761,8 +763,8 @@ const buildEventSourcePlugin = (
     registerEventSource(host, {
       id: word,
       connectionType: options.connectionType ?? `${id}/${id}`,
-      feeds: options.feeds ?? {},
-      open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
+      feeds: options.feeds ?? IDLE_FEEDS,
+      open: IDLE_INGEST_OPEN,
       kinds: {
         [kind]: {
           description: `Something happened: ${kind}`,
@@ -830,6 +832,12 @@ describe("the event source catalog", () => {
       "a minimum longer than the default",
       { repos: { defaultIntervalSeconds: 60, minIntervalSeconds: 120 } },
       "Make the minimum no longer than the default.",
+    ],
+    ["no feeds at all", {}, "declares no feeds, so the host would never poll it"],
+    [
+      "a default longer than one day",
+      { repos: { defaultIntervalSeconds: 86_401 } },
+      "the feed repos has a default interval of 86401 seconds",
     ],
   ])("marks a plugin errored for %s", async (_, feeds, expected) => {
     const status = await run(
@@ -899,8 +907,8 @@ describe("the event source catalog", () => {
             registerEventSource(host, {
               id: word,
               connectionType: "acme/acme",
-              feeds: {},
-              open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
+              feeds: IDLE_FEEDS,
+              open: IDLE_INGEST_OPEN,
               kinds: {
                 [`acme.${word}.done`]: {
                   description: `Something happened: ${word}`,

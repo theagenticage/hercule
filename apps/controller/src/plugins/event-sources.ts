@@ -18,7 +18,11 @@ import {
   type EventSourceContribution,
   type PluginManifest,
 } from "@hercule/plugin-host";
-import { MAX_EVENT_KIND_LENGTH, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
+import {
+  MAX_EVENT_KIND_LENGTH,
+  MAX_FEED_INTERVAL_SECONDS,
+  MAX_PLUGIN_MESSAGE_LENGTH,
+} from "@hercule/contract";
 import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../events";
 import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
@@ -88,19 +92,33 @@ const decodeFeedDeclaration = Schema.decodeUnknownEffect(FeedDeclaration, { erro
 
 /**
  * Decodes a source's feeds, and returns them keyed by name. Fails with a
- * `PluginError` naming the feed when:
+ * `PluginError` when the source declares no feed, and with one naming the
+ * feed when:
  *
  * - its name is empty, longer than a contribution name may be, or holds a `/`;
  * - its intervals are not positive whole numbers of seconds;
- * - its minimum interval is longer than its default.
+ * - its minimum interval is longer than its default;
+ * - its default interval is longer than one day, the longest interval a
+ *   Connection may set.
+ *
+ * A source without feeds would hold a handle open that the host never polls,
+ * so nothing would ever be emitted through it.
  *
  * A feed name is a key of a Connection's `feedIntervals` and is shown in the
  * Connection's form, so it follows the rules of every other contribution name.
  */
 const decodeFeeds = (
+  sourceId: string,
   feeds: Record<string, unknown>,
 ): Effect.Effect<Record<string, FeedDeclaration>, PluginError> =>
   Effect.gen(function* () {
+    if (Object.keys(feeds).length === 0) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event source ${sourceId} declares no feeds, so the host would never poll it. Declare at least one feed in the source's feeds.`,
+        }),
+      );
+    }
     const decoded: Record<string, FeedDeclaration> = {};
     for (const [name, declaration] of Object.entries(feeds)) {
       yield* Effect.mapError(
@@ -126,6 +144,15 @@ const decodeFeeds = (
         return yield* Effect.fail(
           new PluginError({
             message: `the feed ${name} has a minimum interval of ${String(feed.minIntervalSeconds)} seconds, which is longer than its default of ${String(feed.defaultIntervalSeconds)} seconds. Make the minimum no longer than the default.`,
+          }),
+        );
+      }
+      // A minimum above the maximum is refused by the check above, since it
+      // is then also above the default.
+      if (feed.defaultIntervalSeconds > MAX_FEED_INTERVAL_SECONDS) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the feed ${name} has a default interval of ${String(feed.defaultIntervalSeconds)} seconds, which is longer than the longest interval of ${String(MAX_FEED_INTERVAL_SECONDS)} seconds (one day). Make the default no longer than that.`,
           }),
         );
       }
@@ -261,7 +288,7 @@ export const registerEventSourceContribution = (
       kinds.set(kind, registered);
       sourceKinds.set(kind, registered);
     }
-    const feeds = yield* decodeFeeds(contribution.feeds);
+    const feeds = yield* decodeFeeds(names.id, contribution.feeds);
     declared.push({
       owner: pluginId,
       extensionPoint: EVENT_SOURCE,

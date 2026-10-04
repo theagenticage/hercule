@@ -24,7 +24,12 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { registry as shipped } from "./registry";
-import { createPluginFixture, buildProviderDefinition } from "./testing";
+import {
+  buildProviderDefinition,
+  createPluginFixture,
+  IDLE_FEEDS,
+  IDLE_INGEST_OPEN,
+} from "./testing";
 
 /** A plugin as the API returns it. */
 interface PluginDetail {
@@ -618,8 +623,8 @@ const buildEventSourcePlugin = (kinds: ReadonlyArray<string>): Plugin => ({
       id: "acme",
       connectionType: "acme/acme",
       // A source that polls nothing: these tests are about its kinds.
-      feeds: {},
-      open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
+      feeds: IDLE_FEEDS,
+      open: IDLE_INGEST_OPEN,
       kinds: Object.fromEntries(
         kinds.map((kind) => [
           kind,

@@ -19,6 +19,7 @@ import {
   type ActionContext,
   type ActivationContext,
   type AuthError,
+  type EventSourceContribution,
   type IngestConnection,
   type FeedDeclaration,
   type IngestContext,
@@ -301,6 +302,18 @@ export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): 
   return { plugin, contexts, inputs };
 };
 
+/**
+ * An event source's `open` whose handle polls nothing and closes at once, for
+ * a test about anything but ingest.
+ */
+export const IDLE_INGEST_OPEN: EventSourceContribution["open"] = () =>
+  Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void });
+
+/** The one feed of a source whose handle is `IDLE_INGEST_OPEN`'s: a source must declare one. */
+export const IDLE_FEEDS: Record<string, FeedDeclaration> = {
+  idle: { defaultIntervalSeconds: 3600 },
+};
+
 /** The plugin id, Connection type and event kind of `createEventSourceFixture`'s plugin. */
 export const EVENT_SOURCE_FIXTURE = {
   pluginId: "acme",
@@ -324,6 +337,8 @@ export interface EventSourceFixture {
   open: () => Effect.Effect<void, AuthError | PluginError>;
   /** Decides how each poll ends. By default it succeeds with no hint. */
   poll: (feed: string) => Effect.Effect<PollResult, AuthError | PluginError>;
+  /** Decides how each close ends. By default it returns at once. */
+  close: () => Effect.Effect<void>;
   /** Returns the most polls that were running at one time. */
   readonly countMostPollsAtOnce: () => number;
 }
@@ -346,6 +361,7 @@ export const createEventSourceFixture = (
     opened: [],
     open: () => Effect.void,
     poll: () => Effect.succeed({}),
+    close: () => Effect.void,
     countMostPollsAtOnce: () => most,
     plugin: {
       manifest: {
@@ -393,8 +409,9 @@ export const createEventSourceFixture = (
                         }),
                       ),
                     ),
-                  close: Effect.sync(() => {
+                  close: Effect.suspend(() => {
                     fixture.calls.push("close");
+                    return fixture.close();
                   }),
                 });
               }),

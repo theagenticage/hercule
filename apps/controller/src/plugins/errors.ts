@@ -44,7 +44,7 @@ export const toPluginError = (error: Schema.SchemaError): PluginError =>
  * message, or the defect's message. Settings shows this line to the user, and
  * a whole stack trace would tell them less than its first sentence.
  */
-export const readCauseMessage = (cause: Cause.Cause<{ readonly message: string }>): string =>
+export const summarizeCause = (cause: Cause.Cause<{ readonly message: string }>): string =>
   truncateMessage(
     Option.match(Cause.findErrorOption(cause), {
       onSome: (error) => error.message,
