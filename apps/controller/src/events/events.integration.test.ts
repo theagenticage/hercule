@@ -303,6 +303,43 @@ describe("POST /events/emit", () => {
       expect(await listEventsOfKind(base, arranged.token, KIND)).toEqual([]);
     });
   });
+
+  it("rejects a session without the connection.use grant, because the kind is a plugin's, and accepts the user and a session that holds it", async () => {
+    await withFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const withoutGrant = await spawnThreadUnder(
+        arranged,
+        await createProfile(arranged, "emitter", ["event.emit", "event.read"]),
+      );
+      const withGrant = await spawnThreadUnder(
+        arranged,
+        await createProfile(arranged, "connection emitter", [
+          "event.emit",
+          "event.read",
+          "connection.use",
+        ]),
+      );
+
+      const response = await emit(base, withoutGrant.token, { kind: KIND, payload: PAYLOAD });
+
+      const refusal = await readErrorBody(response);
+      expect(response.status, refusal.text).toBe(403);
+      expect(refusal).toMatchObject({
+        code: "forbidden",
+        grant: "connection.use",
+        message: `The event kind ${KIND} is declared by a plugin, and an event of that kind starts the same workflows as one its event source sends through a Connection. Posting it needs the connection.use grant, which this session lacks. Ask the user to post the event, or to grant connection.use.`,
+      });
+      expect(await listEventsOfKind(base, arranged.token, KIND)).toEqual([]);
+
+      for (const token of [arranged.token, withGrant.token]) {
+        await emitEventOrFail(base, token, { kind: KIND, payload: PAYLOAD });
+      }
+      const actors = (await listEventsOfKind(base, arranged.token, KIND)).map(
+        (event) => event.actor,
+      );
+      expect(actors.toSorted()).toEqual(["user", `session:${withGrant.session.id}`].toSorted());
+    });
+  });
 });
 
 describe("POST /events/:id/enrich", () => {

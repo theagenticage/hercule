@@ -56,7 +56,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, type Actor } from "../actor";
+import { checkActorHoldsGrant, currentStamp, requireGrant, type Actor } from "../actor";
 import {
   decodeIntegerKeyCursor,
   encodeIntegerKeyCursor,
@@ -252,9 +252,13 @@ const make = Effect.gen(function* () {
      *
      * If the caller already posted the same `dedupKey` through the same
      * Connection, returns the id of that earlier event and writes nothing.
-     * Fails with `Validation` if no plugin declares the kind or the payload
-     * does not match the kind's schema, and with `NotFound` if the Connection
-     * does not exist.
+     * Fails with:
+     *
+     * - `Validation` if no plugin declares the kind, or the payload does not
+     *   match the kind's schema;
+     * - `Forbidden` if the caller lacks the `connection.use` grant, which
+     *   every kind a plugin declares needs;
+     * - `NotFound` if the Connection does not exist.
      */
     emit: (
       input: EventEmitInput,
@@ -263,7 +267,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | SqlError
     > =>
       Effect.gen(function* () {
-        yield* requireGrant("event.emit");
+        const caller = yield* requireGrant("event.emit");
         const decoded = yield* Effect.mapError(decodeEmit(input), createDecodeValidationError);
 
         // A kind that no plugin declares has no schema to check the payload
@@ -280,6 +284,16 @@ const make = Effect.gen(function* () {
             onSome: Effect.succeed,
           }),
         );
+        // Every kind the catalog knows is declared by a plugin, whose event
+        // source sends events of that kind through a Connection. A manual
+        // event of the kind matches the same triggers, so posting one acts as
+        // that event source and needs the grant to act through a Connection.
+        const refused = checkActorHoldsGrant(
+          "connection.use",
+          caller,
+          `The event kind ${decoded.kind} is declared by a plugin, and an event of that kind starts the same workflows as one its event source sends through a Connection. Posting it needs the connection.use grant, which this session lacks. Ask the user to post the event, or to grant connection.use.`,
+        );
+        if (refused !== undefined) return yield* Effect.fail(refused);
         yield* Effect.mapError(
           decodeAgainstKind(payloadSchema, decoded.payload),
           createPayloadValidationError,
