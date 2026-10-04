@@ -23,6 +23,7 @@ export interface ConnectionRecord {
   readonly statusDetail?: string;
   readonly labels: ReadonlyArray<string>;
   readonly config: Record<string, unknown>;
+  readonly feedIntervals: Readonly<Record<string, number>>;
   readonly credentials: ReadonlyArray<{ readonly name: string; readonly rotatedAt?: string }>;
   readonly createdAt: string;
   readonly updatedAt: string;

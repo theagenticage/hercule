@@ -139,6 +139,7 @@ const GITHUB_CONNECTION: Connection = {
   status: "connected",
   labels: [],
   config: {},
+  feedIntervals: {},
   credentials: [],
   createdAt: new Date(SPECIMEN_NOW - 60 * 60_000).toISOString(),
   updatedAt: new Date(SPECIMEN_NOW - 60 * 60_000).toISOString(),

@@ -51,6 +51,7 @@ interface Connection {
   readonly statusDetail?: string;
   readonly labels: readonly string[];
   readonly config: Record<string, unknown>;
+  readonly feedIntervals: Record<string, number>;
   readonly credentials: readonly { readonly name: string; readonly rotatedAt?: string }[];
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -159,6 +160,7 @@ const PAPER: Connection = {
   status: "connected",
   labels: ["Code", "Ops"],
   config: { folder: "inbox" },
+  feedIntervals: {},
   credentials: [{ name: "token", rotatedAt: "2026-09-11T17:21:00.000Z" }],
   createdAt: "2026-09-01T08:15:00.000Z",
   updatedAt: "2026-09-11T17:21:00.000Z",
@@ -173,6 +175,7 @@ const SKY: Connection = {
   statusDetail: "the refresh token was rejected",
   labels: ["Business"],
   config: {},
+  feedIntervals: {},
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-09-02T09:30:00.000Z",
   updatedAt: "2026-09-12T07:05:00.000Z",
@@ -186,6 +189,7 @@ const GLASS: Connection = {
   status: "connected",
   labels: ["Code"],
   config: {},
+  feedIntervals: {},
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-10-02T08:15:00.000Z",
   updatedAt: "2026-10-02T08:15:00.000Z",
@@ -200,6 +204,7 @@ const UNNAMED: Connection = {
   status: "connected",
   labels: [],
   config: {},
+  feedIntervals: {},
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-10-02T08:15:00.000Z",
   updatedAt: "2026-10-02T08:15:00.000Z",

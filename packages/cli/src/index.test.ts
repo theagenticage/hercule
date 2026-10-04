@@ -558,6 +558,7 @@ describe("running an operation", () => {
       status: "connected",
       labels: [],
       config: {},
+      feedIntervals: {},
       credentials: [{ name: "pat" }],
       createdAt: "2026-09-04T10:00:00.000Z",
       updatedAt: "2026-09-04T10:00:00.000Z",
