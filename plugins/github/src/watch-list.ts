@@ -10,18 +10,23 @@
  * The feeds read it again on every poll, so a Resource linked a minute ago is
  * watched from the next tick on.
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { ConnectionResources, LinkedResource } from "@hercule/plugin-host";
+import { RepoName } from "./repo-name";
 
 /**
  * Returns `owner/repo` for a canonical remote on github.com, such as
  * `github.com/owner/repo`, and undefined for a remote on any other host or of
  * any other shape. A Resource on GitHub Enterprise is not watched: this
  * plugin calls github.com's API only.
+ *
+ * The repository must also be a valid `RepoName`, because the feeds put it
+ * into REST paths as it is: a remote such as `github.com/owner/%2e%2e` or
+ * `github.com/owner/repo?x=1` would otherwise change the path or the query.
  */
 const parseGithubRemote = (remote: string): string | undefined => {
-  const match = /^github\.com\/([^/]+\/[^/]+)$/i.exec(remote);
-  return match?.[1];
+  const repo = /^github\.com\/([^/]+\/[^/]+)$/i.exec(remote)?.[1];
+  return repo !== undefined && Schema.is(RepoName)(repo) ? repo : undefined;
 };
 
 /**

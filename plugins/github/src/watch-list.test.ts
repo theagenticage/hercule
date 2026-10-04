@@ -41,4 +41,19 @@ describe("buildWatchList", () => {
 
     expect(watchList).toEqual([]);
   });
+
+  it("ignores a github.com remote whose repository is not a valid owner/repo", () => {
+    const watchList = buildWatchList(
+      [
+        buildResource("github.com/octocat/%2e%2e"),
+        buildResource("github.com/octocat/.."),
+        buildResource("github.com/octocat/hello?x=1"),
+        buildResource("github.com/octocat/hello#readme"),
+        buildResource("github.com/octocat/hello-world"),
+      ],
+      [],
+    );
+
+    expect(watchList).toEqual(["octocat/hello-world"]);
+  });
 });
