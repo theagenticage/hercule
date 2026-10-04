@@ -773,10 +773,11 @@ These are starting budgets. The first performance pass measures the real thread 
 | Frames | The colleagues' ambient life draws at most 30 frames a second, never 60 or 120. While the camera moves, and while the user drags or zooms, the Office draws at most 60, so a glide stays smooth |
 | Window hidden, minimized or covered | No frames, and no wakeups from the Office |
 | Standing still: on battery, or with Reduce motion | No frames while nothing happens, so the idle row above applies. A thread whose pose changes walks where its new pose takes it, and frames stop once it arrives |
-| CPU, window visible, on mains power | Averaged over 30 seconds, with the camera at rest: the renderer at most 20% of one core, the GPU process at most 35% of one core |
+| CPU, window visible, on mains power | Averaged over 30 seconds, with the camera at rest: the renderer at most 17.9% of one core, the GPU process at most 12.3% of one core: the first measurement's highest readings plus 10% ([Measured](#measured)) |
 | Leaving the Office | Within 5 seconds, the app is back within the idle row: the Office releases its WebGL context and everything it built |
 | The first screen's JavaScript | The Office and three.js are a chunk of their own, loaded the first time the Office opens. The first screen grows only by the sidebar's Office button, the Go menu item and the route |
-| Memory with the Office open, and the Office chunk's size | The first measurement records each. From then on, each limit is that reading plus 10% |
+| Memory with the Office open | Summed physical footprint at most 1,602 MB, and the renderer at most 181 MB: the first measurement's highest readings plus 10% ([Measured](#measured)) |
+| The Office's chunk | At most 241.5 kB gzipped: the first measurement plus 10% |
 
 - **The idle row and the Office.** The idle row allows the renderer no wakeups from the app and the GPU at most 12 a second. An Office drawing 30 frames a second wakes the renderer about 65 times a second, and the GPU process about 300 with the glass and about 430 without it, though its CPU then falls from 31% to 12% of one core. A living Office can never meet the idle row. The idle row is the limit for the app while nothing happens. On mains power, a visible Office is something happening: its colleagues live, and the CPU row above holds its cost instead. When the Office stands still, the idle row applies to it again.
 - **An unfocused window keeps its 30 frames a second** while it is visible. A living Office on a second screen is what the Office is for. Whether the Office should stand still in more cases is decided after the first measurement.
@@ -790,8 +791,8 @@ These are starting budgets. The first performance pass measures the real thread 
 
   The settings v1 ships (a pixel ratio of 2, shadows drawn once, no ambient occlusion), capped and without the glass, measured 9.1 and 7.7, the mean of two runs (from 7.6 to 10.6, and from 6.5 to 8.9).
 
-  The limits sit above the capped reading, so v1 can ship with the cap alone. They come down to the first measurement plus 10%, as every budget does.
-- **Memory and the chunk have no limit for the first merge.** No measurement of the Office inside the packaged app exists yet, so a limit set now would be a guess, and a limit set from the measurement it gates would hold nothing. The first run's room already reads above the app's memory budget ([#330](https://github.com/theagenticage/hercule/issues/330)).
+  The limits started above the capped reading, at 20% and 35%, so v1 could ship with the cap alone. The Office's first measurement in the app brought them down to its highest readings plus 10%, as every budget comes down ([Measured](#measured)).
+- **Memory and the chunk took their limits from the Office's first measurement** ([Measured](#measured)), because before it no measurement of the Office inside the packaged app existed, and a limit would have been a guess. The memory limits come from the highest of eight launches, so the swing between launches, about 7%, does not fail the next change. With the Office open, the app holds several times the app's own Memory row: almost all of it is the GPU process's, and bringing it down is [#370](https://github.com/theagenticage/hercule/issues/370). The first run's room already reads above the app's memory budget ([#330](https://github.com/theagenticage/hercule/issues/330)).
 
 ### Rules
 
@@ -1162,6 +1163,63 @@ Memory at each step of the first run, and after it, read as [Measuring](#measuri
   - The Before: no controller saved for the connect screen, and a set-up scratch controller saved for sign-in and, after one sign-in, the draft.
 - **The account step is read after a reload, not straight after a plain launch,** because a plain launch cannot open on it. With a controller on this Mac that is not set up, the app opens on the welcome, which greets Hercule as found. So each launch set the mark Open the office leaves in the page's session storage, through the page's DevTools connection, and then main reloaded the window with `webContents.reload()`, as it does once Hercule answers. Memory was read 13 seconds after the reload. The install did not run, because Hercule was already running.
 - **The one-minute load average was 4.0 to 6.1** at each launch, and 4.7 at the start of the session.
+
+**The Office, v1,** measured 2026-10-03 and 2026-10-04 on the reference machine, for [#332](https://github.com/theagenticage/hercule/issues/332). *(Added 2026-10-04, [#332](https://github.com/theagenticage/hercule/issues/332).)* This is the Office's first measurement, so it sets the Office's memory and chunk limits ([The Office's budgets](#the-offices-budgets)).
+
+In the app: the packaged test app, launched plainly as [Measuring](#measuring) describes, its third launch or later, against a scratch controller. The fleet is the reference Office: 16 colleagues, 4 working, 4 waiting on the user and 8 idle, on 3 runners and in 3 projects of 6, 5 and 5 threads. The controller also held its own runner, retired, and one exited thread, which has no colleague; the leave row leaves the Office for that thread's screen. The window is 1440 × 900 at 2x, so the Office's canvas is 1168 × 900 beside the sidebar, 2336 × 1800 pixels. Light theme, nothing focused, the camera at rest.
+
+- **CPU** is a share of one core: the growth of `cumulativeCPUUsage` over 30-second windows, starting 45 seconds after the Office opened. `ps` agreed within 0.1.
+- **Memory** is the physical footprint of the four processes, read with `footprint` 13 seconds after the screen opened.
+- **Sizes** come from `pnpm build:desktop`'s size checks, 1,024 bytes to a kB.
+- **The one-minute load average** was 4 to 6, and 11 in one window, from other programs on the machine.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Frames, camera at rest | at most 30 a second | 30.1, out of 120 animation frames a second |
+| CPU, camera at rest | renderer 20%, GPU process 35% | renderer 6.2 to 16.3%, GPU process 5.1 to 11.2%, over 15 windows in 3 launches |
+| Wakeups, camera at rest | - | renderer 45 to 64 a second, GPU process 267 to 273 |
+| Leaving the Office | the idle row within 5 seconds | renderer 1 to 3 wakeups a second from 5 to 15 seconds after leaving, in 5 launches; from 15 seconds on, 0 to 2, the level of a thread screen the Office never opened. GPU process 0 to 5 |
+| Memory with the Office open | the first reading plus 10% | **1,359 to 1,457 MB** summed, in 8 launches; the renderer 146 to 165 MB. On the thread screen just before: 325 to 331 MB, and 56 to 60 MB |
+| The Office's chunk, gzipped | the first reading plus 10% | 219.6 kB, 786.1 kB before gzip |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, a guide | 297.8 kB in 7 chunks. Before the Office, 296.7 kB in 6 |
+
+- **The limits this sets** are the highest readings plus 10%: with the camera at rest, 17.9% of one core for the renderer and 12.3% for the GPU process; with the Office open, 1,602 MB summed and 181 MB for the renderer; and 241.5 kB for the chunk. The table in [The Office's budgets](#the-offices-budgets) states them.
+- **The Office adds 1.1 kB to the first screen.** The first-screen chunk grew by 1.0 kB, for the Office's part of the shell: the sidebar's Office button, the route and the Go menu's item. The thread screen became a chunk of its own, because the Office's drawer loads it too. The first screen was over the 250 kB guide before the Office. Main's startup file is 156.1 kB, against 156.0 kB before.
+- **Almost all of the Office's memory is in the GPU process:** 1,154 to 1,236 MB, against 210 MB on the thread screen. The page's own WebGL allocations are 404 MB:
+  - the composer's target, 241 MB: 4× multisampled half-float colour and depth, and their resolved copies;
+  - the 4096 × 4096 shadow map, 128 MB: its depth texture, and a colour texture three.js adds that nothing reads;
+  - geometry, 20 MB; the environment map, 9 MB; the name tags' and labels' textures, 7 MB.
+
+  The graphics driver's memory in the GPU process grows by 876 MB when the Office opens. So about 450 MB is held by the driver beyond those allocations and the canvas, and was not traced. Bringing the Office's memory down is [#370](https://github.com/theagenticage/hercule/issues/370).
+- **The composer allocated two targets before the review,** and the summed footprint read 1,505 MB in two launches with 4 colleagues. With one target, the same setup read 1,260 and 1,271 MB.
+- **CPU at rest reads at different levels for the same work.** In some windows the renderer read 6 to 7%, in others 13 to 16%, with the same frames, wakeups and JavaScript per frame. The likely cause is which kind of core macOS runs the processes on, efficiency or performance, but reading that needs root, so it was not proven. The highest window is under the limits.
+- **A profile of the renderer at the lower level** puts the Office's frame at 3.2% of its wall time: three.js 2.5%, the simulation 0.2% and the name tags 0.1%. React ran in no sample, and no frame forced a layout. The rest of the renderer's CPU is Chromium's own work for each frame. The profile was taken with 4 colleagues, before the composer change.
+- **The stage asks for 120 animation frames a second and draws one in four.** The skipped ones cost the renderer about 1% of a core. Asking for 30 a second is [#367](https://github.com/theagenticage/hercule/issues/367).
+- **The renderer is back within the idle row 15 seconds after leaving, not 5.** A trace of the 45 seconds after leaving shows no call into the Office's chunk. The extra wakeups are Chromium's and V8's clean-up of what the Office released:
+  - from 0 to 5 seconds, the compositor frees the canvas's resources, about 28 times a second;
+  - around 5 seconds, V8's memory reducer runs two major garbage collections that return the Office's memory, 15 ms of the main thread in all;
+  - until about 15 seconds, the tail of that clean-up, background sweeping and the compositor freeing tiles, wakes the renderer 1 to 3 times a second. When it ends varies from launch to launch.
+
+  From 15 seconds on, the renderer reads like a thread screen the Office never opened: 0 to 2 wakeups a second. That screen's own renderer reads 2 a second from 45 seconds after it opens, from Chromium's periodic purge of its memory allocator, with no Office involved.
+- **Leaving frees what the Office built.** 5 to 15 seconds after leaving, the four processes summed 321.5 MB and the page held no canvas. Over 10 visits, the page held 0 WebGL contexts and 0 canvases after each one, and its listeners stayed at 205. Before the review's fix, each visit left one WebGL context behind, because three.js keeps the last renderer in a lookup table; the Office now clears it when it leaves. The JavaScript heap grew from 14.1 to 16.2 MB over the 10 visits, all of it V8's compiled code: the three.js objects counted the same after each visit.
+
+The rows below were read on the prototype's page, not in the app, because the measuring page inside the app is [#339](https://github.com/theagenticage/hercule/issues/339). The Before is the prototype at 6fcb3634 on `prototype/office-3d`. The After is the Office's engine before the review's fixes and the composer change. Both ran from a Vite dev server in the repository's Electron, with the glass turned off by a style rule, the reference fleet of 16, and 30-second samples after 25 seconds.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| CPU, camera at rest | renderer 20%, GPU process 35% | 51.9%, 43.8% | 7.8%, 6.3% |
+| Frames and CPU, camera moving | at most 60 a second | 97 frames; with the glass on, 56.7%, 93.2% | 60 frames; 21.3%, 14.7% |
+| Window visible, not focused | 30 a second | - | 30.2 frames; 8.9%, 7.0% |
+| Standing still | the idle row | - | 0 frames; 0.3%, 0%; no wakeups |
+| Window hidden or covered | no frames | 0 frames | 0 frames, no wakeups |
+| Draw calls | - | 1,801 | 591 |
+
+- **While the camera moves, the sun's shadows are drawn again 17 to 19 times a second,** because the walls that drop to the dado rail change height. That is most of the camera's cost ([#358](https://github.com/theagenticage/hercule/issues/358)). The CPU limits apply with the camera at rest.
+- **With the glass on, the After read 8.8% and 23.9% at rest, and 19.1% and 55.9% while the camera moved.** That is why the window draws no blur while the Office is open (rule 5).
+- **At ten times the fleet,** 160 colleagues, #333 read 21.4% and 14.9% in one run: over the renderer's limit, which is set for the reference fleet. The building drawn into a texture ([#340](https://github.com/theagenticage/hercule/issues/340)) and merging more meshes are the levers before fleets grow.
+- **A minimized window was not measured:** the measuring script's call to minimize its window had no effect. Chromium treats a minimized window as hidden, and the hidden row read no frames and no wakeups.
+- **Standing still was read with the battery reported as discharging** by an override in the measuring script, not on a Mac running on battery.
+- **`apps/desktop/scripts/perf.ts` read CPU from `percentCPUUsage`** until this change, a share of the whole machine. It now reports a share of one core ([Measuring](#measuring)).
 
 ## Slices
 
