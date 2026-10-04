@@ -1117,7 +1117,7 @@ export const CLI = {
   },
   "workflow.create": {
     command: "workflow create",
-    help: "Creates a workflow from the YAML read from stdin, and stores the YAML byte for byte. An invalid source is rejected with one line per error, each giving its path in the definition, and nothing is stored. A new workflow is disabled: its triggers match no events until you enable it with `hercule workflow update <id> --enabled true`. A workflow with a step that acts through a Connection needs the connection.use grant as well as workflow.write, because the step chooses the Connection every run of the workflow acts through.",
+    help: "Creates a workflow from the YAML read from stdin, and stores the YAML byte for byte. An invalid source is rejected with one line per error, each giving its path in the definition, and nothing is stored. A new workflow is disabled: its triggers match no events until you enable it with `hercule workflow update <id> --enabled true`. A workflow with a step that acts through a Connection, or that gives a Connection to a run it starts, needs the connection.use grant as well as workflow.write, because the step chooses the Connection every run of the workflow acts through.",
     examples: [
       {
         args: [],
@@ -1152,14 +1152,14 @@ export const CLI = {
     },
     errors: {
       forbidden:
-        "you lack workflow.write, or the workflow has a step that acts through a Connection and you lack connection.use; the error names the grant to ask for in a Permission Request, or ask the user to save the workflow; nothing was stored",
+        "you lack workflow.write, or the workflow has a step that acts through a Connection, or gives one to a run it starts, and you lack connection.use; the error names the grant to ask for in a Permission Request, or ask the user to save the workflow; nothing was stored",
       validation:
         "the source is not a valid workflow: each printed line gives a path in the definition and the problem there, and a YAML syntax error gives its line and column; nothing was stored",
     },
   },
   "workflow.update": {
     command: "workflow update",
-    help: "Replaces a workflow's YAML source, or enables or disables the workflow. Enabling or disabling leaves the source unchanged. An invalid new source is rejected and the stored workflow does not change. When the source changes, each trigger that keeps its id also keeps its status. A new source with a step that acts through a Connection needs the connection.use grant as well as workflow.write.",
+    help: "Replaces a workflow's YAML source, or enables or disables the workflow. Enabling or disabling leaves the source unchanged. An invalid new source is rejected and the stored workflow does not change. When the source changes, each trigger that keeps its id also keeps its status. A new source with a step that acts through a Connection, or that gives a Connection to a run it starts, needs the connection.use grant as well as workflow.write.",
     examples: [
       { args: ["1f3a9c2e", "--enabled", "true"] },
       {
@@ -1197,7 +1197,7 @@ export const CLI = {
     },
     errors: {
       forbidden:
-        "you lack workflow.write, or the new source has a step that acts through a Connection and you lack connection.use; the error names the grant to ask for in a Permission Request, or ask the user to save the workflow; the stored workflow did not change",
+        "you lack workflow.write, or the new source has a step that acts through a Connection, or gives one to a run it starts, and you lack connection.use; the error names the grant to ask for in a Permission Request, or ask the user to save the workflow; the stored workflow did not change",
       validation:
         "the new source is not a valid workflow: each printed line gives a path in the definition and the problem there; the stored workflow did not change",
     },
@@ -1343,7 +1343,7 @@ export const CLI = {
 
   "run.start": {
     command: "run start",
-    help: "Starts a run and prints its id at once, without waiting for any step. Name a stored workflow with --workflow, or pipe a workflow's YAML with --source-stdin to run it once without storing it, for example to try it before saving it. The workflow is checked first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Choosing the Connection a step acts through needs the connection.use grant as well as run.start: sending a workflow with such a step does, and so does giving a value for an input that a step's connection param reads. A stored workflow whose Connection inputs keep their defaults needs no such grant. Follow the run with `hercule run read <id>`, or subscribe to it with `hercule subscription create run:<id>` to hear when it ends.",
+    help: "Starts a run and prints its id at once, without waiting for any step. Name a stored workflow with --workflow, or pipe a workflow's YAML with --source-stdin to run it once without storing it, for example to try it before saving it. The workflow is checked first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Choosing the Connection a step acts through needs the connection.use grant as well as run.start: sending a workflow with such a step does, and so does giving a value for an input that a step's connection param reads. A step that gives a Connection to a run it starts counts as such a step. A stored workflow whose Connection inputs keep their defaults needs no such grant. Follow the run with `hercule run read <id>`, or subscribe to it with `hercule subscription create run:<id>` to hear when it ends.",
     examples: [
       { args: ["--workflow", "1f3a9c2e"] },
       { args: ["--workflow", "1f3a9c2e", "--inputs", '{"title":"Fix login"}'] },

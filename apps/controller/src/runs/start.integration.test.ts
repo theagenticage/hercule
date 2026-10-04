@@ -44,6 +44,8 @@ import {
   buildCreateStep,
   countRuns,
   expectRefusedAt,
+  expectStatus,
+  findStepRecords,
   INPUTS_DEFINITION,
   listTasks,
   readRun,
@@ -670,7 +672,7 @@ describe("the graphs a run accepts", () => {
 describe("run.start of a workflow that acts through a Connection", () => {
   /** The message of the refusal of a sent workflow, for a caller without the connection.use grant. */
   const SENT_WORKFLOW_REFUSAL =
-    "This run's definition has a step that acts through a Connection, and choosing that Connection needs the connection.use grant, which this session lacks. Start a stored workflow and leave its Connection inputs to their defaults, or ask the user to grant connection.use.";
+    "This run's definition has a step that acts through a Connection, or that may give a Connection to a run it starts, and choosing that Connection needs the connection.use grant, which this session lacks. Start a stored workflow and leave its Connection inputs to their defaults, or ask the user to grant connection.use.";
 
   /** The message of the refusal of a value for the input `account`, for a caller without the connection.use grant. */
   const ACCOUNT_INPUT_REFUSAL =
@@ -816,6 +818,155 @@ describe("run.start of a workflow that acts through a Connection", () => {
         }
       },
       { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+});
+
+describe("run.start of a workflow whose run.start step gives a Connection to the run it starts", () => {
+  /** The message of the refusal of a sent workflow, for a caller without the connection.use grant. */
+  const SENT_WORKFLOW_REFUSAL =
+    "This run's definition has a step that acts through a Connection, or that may give a Connection to a run it starts, and choosing that Connection needs the connection.use grant, which this session lacks. Start a stored workflow and leave its Connection inputs to their defaults, or ask the user to grant connection.use.";
+
+  /** The message of the refusal of a value for the input `acc`, for a caller without the connection.use grant. */
+  const ACC_INPUT_REFUSAL =
+    "The input acc chooses the Connection a step acts through, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.";
+
+  /**
+   * Builds a workflow with one step that starts the workflow `targetId` and
+   * gives `account` to its input `account`. It declares an optional
+   * Connection input `acc` of the forge's type, which `account` can read.
+   */
+  const buildWrapperDefinition = (targetId: string, account: string) => ({
+    name: "Start a review",
+    inputs: [{ name: "acc", connection: { type: FORGE_CONNECTION_TYPE }, required: false }],
+    steps: [
+      {
+        id: "start",
+        kind: "action",
+        action: "run.start",
+        params: { workflowId: targetId, inputs: { account } },
+      },
+    ],
+  });
+
+  /** Saves, as the user, a workflow whose review step acts through its Connection input `account`. */
+  const createReviewTarget = (base: string, token: string) =>
+    createWorkflowOrFail(base, token, {
+      definition: {
+        name: "Review a pull request",
+        inputs: [{ name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: true }],
+        steps: [
+          {
+            id: "review",
+            kind: "action",
+            action: FORGE_REVIEW_ACTION_ID,
+            params: { connection: "{{ inputs.account }}", verdict: "approve" },
+          },
+        ],
+      },
+    });
+
+  it("refuses an assistant session that sends the wrapper, and no run starts", async () => {
+    const forge = buildForgePlugin();
+    await withAgentFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createReviewTarget(base, token);
+        // The shipped assistant profile holds run.start but not connection.use.
+        const agent = await spawnThreadUnder(
+          arranged,
+          await readProfileNamed(arranged, "assistant"),
+        );
+
+        const response = await requestStart(base, agent.token, {
+          definition: buildWrapperDefinition(target.id, connectionId),
+        });
+
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message: SENT_WORKFLOW_REFUSAL,
+        });
+        expect(await countRuns(harness)).toBe(0);
+        expect(forge.contexts).toHaveLength(0);
+      },
+      { plugins: [forge.plugin] },
+    );
+  });
+
+  it("refuses an assistant session that gives a stored wrapper the Connection it passes on", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createReviewTarget(base, token);
+        const wrapper = await createWorkflowOrFail(base, token, {
+          definition: buildWrapperDefinition(target.id, "{{ inputs.acc }}"),
+        });
+        const agent = await spawnThreadUnder(
+          arranged,
+          await readProfileNamed(arranged, "assistant"),
+        );
+
+        const response = await requestStart(base, agent.token, {
+          workflowId: wrapper.id,
+          inputs: { acc: connectionId },
+        });
+
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message: ACC_INPUT_REFUSAL,
+        });
+        expect(await countRuns(harness)).toBe(0);
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+
+  it("starts the wrapper for the user, and for a session whose profile holds connection.use, and the child acts through the Connection", async () => {
+    const forge = buildForgePlugin();
+    await withAgentFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createReviewTarget(base, token);
+        const profile = await createProfile(arranged, "Acts through Connections", [
+          "run.start",
+          "run.read",
+          "connection.use",
+        ]);
+        const agent = await spawnThreadUnder(arranged, profile);
+
+        for (const caller of [token, agent.token]) {
+          const response = await requestStart(base, caller, {
+            definition: buildWrapperDefinition(target.id, connectionId),
+          });
+          expect(response.status, await response.clone().text()).toBe(200);
+          const { runId } = (await response.json()) as { runId: string };
+          const wrapperRun = await waitForRunToFinish(base, token, runId);
+          expect(wrapperRun.status, JSON.stringify(wrapperRun)).toBe("completed");
+          const output = expectStatus(findStepRecords(wrapperRun, "start")[0], "completed")
+            .output as { readonly runId: string };
+          expect((await waitForRunToFinish(base, token, output.runId)).status).toBe("completed");
+        }
+        expect(forge.contexts).toHaveLength(2);
+      },
+      { plugins: [forge.plugin] },
     );
   });
 });

@@ -371,6 +371,32 @@ const make = Effect.gen(function* () {
           ),
       ),
 
+    /**
+     * Returns the declared inputs of each stored workflow with one of the
+     * ids, by workflow id. A workflow that declares no inputs has an empty
+     * list, and an id no workflow has is not in the map.
+     */
+    readInputs: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, NonNullable<WorkflowDefinition["inputs"]>>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly inputs: string | null }>`
+              SELECT id, json_extract(definition, '$.inputs') AS inputs
+              FROM workflows WHERE id IN ${sql.in(ids.map(uuidFromString))}
+            `,
+            (rows) =>
+              new Map(
+                rows.map((row) => [
+                  uuidToString(row.id),
+                  row.inputs === null
+                    ? []
+                    : (JSON.parse(row.inputs) as NonNullable<WorkflowDefinition["inputs"]>),
+                ]),
+              ),
+          ),
+
     /** Inserts a new workflow, disabled, and returns it. */
     insert: (parsedSource: ParsedSource, savedAt: string): Effect.Effect<Workflow, SqlError> =>
       Effect.gen(function* () {

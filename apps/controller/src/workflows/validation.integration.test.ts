@@ -56,6 +56,7 @@ import {
   createAgent,
   createConnection,
   createWorkflow,
+  createWorkflowOrFail,
   disablePlugin,
   DUPLICATE_STEP_ID_SOURCE,
   expectNothingStored,
@@ -2078,7 +2079,7 @@ describe("an action that acts through a Connection", () => {
           paths: [REVIEW_CONNECTION_PATH],
         });
         expect(issue!.message, description).toBe(
-          `The param connection cannot be computed by a template, so that the Connection a step acts through is known before a run starts. Write the id of a Connection of type ${FORGE_CONNECTION_TYPE}, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}.`,
+          `The param connection cannot be computed by a template: the action acts through a Connection of type ${FORGE_CONNECTION_TYPE}, and that Connection must be known before a run starts. Write the id of a Connection of type ${FORGE_CONNECTION_TYPE}, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}.`,
         );
       }
       await expectNothingStored(controller.base, controller.token);
@@ -2091,6 +2092,128 @@ describe("an action that acts through a Connection", () => {
         controller,
         "a verdict template",
         buildReviewSource(controller.forgeConnectionId, { verdict: '"{{ inputs.verdict }}"' }),
+      );
+    });
+  });
+});
+
+/**
+ * Builds a workflow with one `run.start` step. Its `workflowId` param is
+ * `workflowId` and its `inputs` param is `inputs`, both as YAML values. The
+ * workflow has a Connection input `acc` of the forge's type, and string
+ * inputs `child` and `label`.
+ */
+const buildRunStartSource = (workflowId: string, inputs: string): string => `name: Start a review
+inputs:
+  - name: acc
+    connection:
+      type: ${FORGE_CONNECTION_TYPE}
+    required: false
+  - name: child
+    schema:
+      type: string
+    required: false
+  - name: label
+    schema:
+      type: string
+    required: false
+steps:
+  - id: start
+    kind: action
+    action: run.start
+    params:
+      workflowId: ${workflowId}
+      inputs: ${inputs}
+`;
+
+/** The path of the value the `run.start` step of `buildRunStartSource` gives for the input `account`. */
+const STARTED_ACCOUNT_PATH = ["steps", "0", "params", "inputs", "account"];
+
+describe("a run.start step that gives a value for a Connection input", () => {
+  /** Saves the review workflow, whose Connection input `account` the review step acts through, and returns its id. */
+  const createReviewTarget = async (controller: ArrangedController): Promise<string> =>
+    (
+      await createWorkflowOrFail(controller.base, controller.token, {
+        source: buildReviewSource('"{{ inputs.account }}"'),
+      })
+    ).id;
+
+  it("checks the value against the Connection input of a stored workflow, in the forms of the connection param", async () => {
+    await withArrangedController(async (controller) => {
+      const targetId = await createReviewTarget(controller);
+      const forms = `Write the id of a Connection of type ${FORGE_CONNECTION_TYPE}, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}.`;
+      const need = `the input account of the workflow this step starts takes a Connection of type ${FORGE_CONNECTION_TYPE}`;
+      for (const [description, account, message] of [
+        [
+          "a computed template",
+          '"acct-{{ inputs.acc }}"',
+          `The value for the input account cannot be computed by a template: ${need}, and that Connection must be known before a run starts. ${forms}`,
+        ],
+        ["an id no Connection has", ABSENT_ID, `No Connection has this id. ${forms}`],
+        [
+          "an input that is not a Connection input",
+          '"{{ inputs.label }}"',
+          `The input label is not a Connection input, and ${need}. ${forms}`,
+        ],
+        [
+          "a Connection of another type",
+          controller.githubConnectionId,
+          `This Connection is of type github/github, but ${need}. ${forms}`,
+        ],
+      ] as const) {
+        const [issue] = await expectErrorsAt(controller, {
+          description,
+          build: () => buildRunStartSource(targetId, `{ account: ${account} }`),
+          paths: [STARTED_ACCOUNT_PATH],
+        });
+        expect(issue!.message, description).toBe(message);
+      }
+
+      await expectAccepted(
+        controller,
+        "a literal Connection",
+        buildRunStartSource(targetId, `{ account: ${controller.forgeConnectionId} }`),
+      );
+      await expectAccepted(
+        controller,
+        "a Connection input",
+        buildRunStartSource(targetId, '{ account: "{{ inputs.acc }}" }'),
+      );
+    });
+  });
+
+  it("refuses a computed value, and an inputs template, when the workflow to start is a template", async () => {
+    await withArrangedController(async (controller) => {
+      const [computed] = await expectErrorsAt(controller, {
+        description: "a computed template",
+        build: () =>
+          buildRunStartSource('"{{ inputs.child }}"', '{ account: "x-{{ inputs.acc }}" }'),
+        paths: [STARTED_ACCOUNT_PATH],
+      });
+      expect(computed!.message).toBe(
+        "The value for the input account cannot be computed by a template: the workflow this step starts may take a Connection in its inputs, and that Connection must be known before a run starts. Write the value itself, or a template that is exactly one input, such as {{ inputs.account }}. Or name the workflow to start by its id, so that only its Connection inputs are checked.",
+      );
+
+      const [whole] = await expectErrorsAt(controller, {
+        description: "an inputs template",
+        build: () => buildRunStartSource('"{{ inputs.child }}"', '"{{ inputs.label }}"'),
+        paths: [["steps", "0", "params", "inputs"]],
+      });
+      expect(whole!.message).toBe(
+        "The param inputs cannot be a template here: the workflow this step starts may take a Connection in its inputs, and that Connection must be known before a run starts. Write inputs as an object with a value for each input.",
+      );
+
+      // Any literal, and any single input, may fill an input of a workflow
+      // that is not known before a run.
+      await expectAccepted(
+        controller,
+        "a literal",
+        buildRunStartSource('"{{ inputs.child }}"', "{ account: any-text }"),
+      );
+      await expectAccepted(
+        controller,
+        "a string input",
+        buildRunStartSource('"{{ inputs.child }}"', '{ account: "{{ inputs.label }}" }'),
       );
     });
   });

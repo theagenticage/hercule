@@ -1110,7 +1110,7 @@ describe("the actor stamped on workflow writes", () => {
 describe("saving a workflow whose step acts through a Connection", () => {
   /** The message of the refusal for a caller without the connection.use grant. */
   const SAVE_REFUSAL =
-    "This workflow has a step that acts through a Connection, and choosing that Connection needs the connection.use grant, which this session lacks. Ask the user to save the workflow, or to grant connection.use.";
+    "This workflow has a step that acts through a Connection, or that may give a Connection to a run it starts, and choosing that Connection needs the connection.use grant, which this session lacks. Ask the user to save the workflow, or to grant connection.use.";
 
   /** Builds a workflow whose review step acts through the Connection its `connection` param names. */
   const buildReviewDefinition = (connection: string) => ({
@@ -1164,6 +1164,53 @@ describe("saving a workflow whose step acts through a Connection", () => {
         expect(await readWorkflow(base, arranged.token, stored.id)).toEqual(storedBefore);
         expect((await queryWorkflows(base, arranged.token)).items.map((item) => item.id)).toEqual([
           stored.id,
+        ]);
+        expect(await readWorkflowEntries(base, arranged.token)).toEqual(entriesBefore);
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+
+  it("is refused to a session without connection.use when a run.start step gives a Connection to the workflow it starts", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const base = arranged.harness.base;
+        const connectionId = await createConnection(base, arranged.token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createWorkflowOrFail(base, arranged.token, {
+          definition: buildReviewDefinition("{{ inputs.account }}"),
+        });
+        const profile = await createProfile(arranged, "Writes workflows", [
+          "workflow.write",
+          "workflow.read",
+        ]);
+        const session = await spawnThreadUnder(arranged, profile);
+        const entriesBefore = await readWorkflowEntries(base, arranged.token);
+
+        const response = await createWorkflow(base, session.token, {
+          definition: {
+            name: "Start a review",
+            steps: [
+              {
+                id: "start",
+                kind: "action",
+                action: "run.start",
+                params: { workflowId: target.id, inputs: { account: connectionId } },
+              },
+            ],
+          },
+        });
+
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message: SAVE_REFUSAL,
+        });
+        expect((await queryWorkflows(base, arranged.token)).items.map((item) => item.id)).toEqual([
+          target.id,
         ]);
         expect(await readWorkflowEntries(base, arranged.token)).toEqual(entriesBefore);
       },
