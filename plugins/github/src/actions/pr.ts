@@ -460,7 +460,7 @@ export const prMerge = defineGithubAction({
     deleteBranch: Schema.optionalKey(
       Schema.Boolean.annotate({
         description:
-          "true deletes the pull request's branch after the merge, in the repository the branch is in: for a pull request from a fork, that is the fork. Without sha, the merge is then held to the commit the branch pointed at when the step read the pull request, so a commit pushed in between is refused with the code conflict, not merged and deleted.",
+          "true deletes the pull request's branch after the merge, in the repository the branch is in: for a pull request from a fork, that is the fork. Without sha, the merge is then held to the commit the branch pointed at when the step read the pull request, so a commit pushed in between is refused with the code conflict instead of being merged unseen.",
       }),
     ),
   }),

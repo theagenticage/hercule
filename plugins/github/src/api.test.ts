@@ -13,6 +13,7 @@ import {
   requestGithub,
   type GithubResponse,
 } from "./api";
+import { TEST_TOKEN } from "./actions/testing";
 import { runAgainstStub, stubGithub, stubHttpClient } from "./testing";
 
 /** Builds a response with this status, and these rate-limit headers and body, already parsed. */
@@ -23,27 +24,25 @@ const buildResponse = (
   > = {},
 ): GithubResponse => ({ status, body: null, ...fields });
 
-const TOKEN = "ghp_a-real-looking-token";
-
 describe("requestGithub", () => {
   it("sends a path to GitHub's API with the token", async () => {
     const stub = stubGithub(() => ({ status: 200, body: {} }));
 
     const outcome = await runAgainstStub(
-      requestGithub({ method: "GET", path: "/user", token: TOKEN }),
+      requestGithub({ method: "GET", path: "/user", token: TEST_TOKEN }),
       stub,
     );
 
     expect(Result.isSuccess(outcome)).toBe(true);
     expect(stub.requests.map((request) => request.url)).toEqual(["https://api.github.com/user"]);
-    expect(stub.requests[0]?.headers["authorization"]).toBe(`Bearer ${TOKEN}`);
+    expect(stub.requests[0]?.headers["authorization"]).toBe(`Bearer ${TEST_TOKEN}`);
   });
 
   it("refuses to send the token to a full URL on another origin", async () => {
     const stub = stubGithub(() => ({ status: 200, body: {} }));
 
     const outcome = await runAgainstStub(
-      requestGithub({ method: "GET", path: "https://example.com/user", token: TOKEN }),
+      requestGithub({ method: "GET", path: "https://example.com/user", token: TEST_TOKEN }),
       stub,
     );
 
@@ -57,7 +56,7 @@ describe("requestGithub", () => {
     const stub = stubGithub(() => ({ status: 200, body: {} }));
 
     const outcome = await runAgainstStub(
-      requestGithub({ method: "GET", path: "@example.com/user", token: TOKEN }),
+      requestGithub({ method: "GET", path: "@example.com/user", token: TEST_TOKEN }),
       stub,
     );
 
@@ -74,11 +73,11 @@ describe("requestGithub", () => {
 
     const outcome = await runAgainstStub(
       Effect.gen(function* () {
-        const first = yield* requestGithub({ method: "GET", path: "/repos", token: TOKEN });
+        const first = yield* requestGithub({ method: "GET", path: "/repos", token: TEST_TOKEN });
         return yield* requestGithub({
           method: "GET",
           path: first.nextPageUrl ?? "",
-          token: TOKEN,
+          token: TEST_TOKEN,
         });
       }),
       stub,
@@ -94,7 +93,7 @@ describe("requestGithub", () => {
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
         const running = yield* Effect.forkChild(
-          Effect.result(requestGithub({ method: "GET", path: "/user", token: TOKEN })),
+          Effect.result(requestGithub({ method: "GET", path: "/user", token: TEST_TOKEN })),
         );
         yield* TestClock.adjust(GITHUB_REQUEST_TIMEOUT);
         return yield* Fiber.join(running);
