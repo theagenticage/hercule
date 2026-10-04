@@ -20,7 +20,7 @@ import {
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
 import { SaveStatus } from "../../../screens/save-status";
-import { PollingFields } from "./-polling";
+import { FeedIntervalFields } from "./-feed-intervals";
 
 /**
  * Suggested topics for a connection. They are suggestions, not a closed list:
@@ -160,7 +160,7 @@ export function ConfigureConnection({
 
       {/* A type no longer in the binary polls no feeds, so it has no Polling section. */}
       {type === undefined ? null : (
-        <PollingFields
+        <FeedIntervalFields
           idPrefix={connection.id}
           typeName={type.displayName}
           feeds={feeds}

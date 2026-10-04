@@ -8,7 +8,7 @@ import {
 } from "@hercule/client-core";
 
 /**
- * The poll interval of each feed the connection's type polls, one number
+ * Renders the poll interval of each feed the connection's type polls, one
  * field per feed under a "Polling" heading. An empty field polls the feed at
  * its default, which the placeholder shows. Renders nothing for a type that
  * polls no feeds.
@@ -16,7 +16,7 @@ import {
  * The fields are not limited to each feed's minimum here. The controller
  * checks the minimum, and its errors are shown under the fields.
  */
-export function PollingFields({
+export function FeedIntervalFields({
   idPrefix,
   typeName,
   feeds,
