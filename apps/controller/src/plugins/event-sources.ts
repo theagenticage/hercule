@@ -1,6 +1,7 @@
 /**
- * Registers a plugin's event source: the catalog row for the source, and the
- * schema of every event kind it declares.
+ * Registers a plugin's event source: the catalog row for the source, the
+ * schema of every event kind it declares, and the live source the ingest
+ * loops open for each Connection.
  *
  * This lives next to the host rather than inside it, because the host
  * registers one extension point after another, and everything about one
@@ -10,7 +11,13 @@
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
 import * as Schema from "effect/Schema";
-import { EventSourceNames, PluginError, type EventSourceContribution } from "@hercule/plugin-host";
+import {
+  EventSourceNames,
+  FeedDeclaration,
+  PluginError,
+  type EventSourceContribution,
+  type PluginManifest,
+} from "@hercule/plugin-host";
 import { MAX_EVENT_KIND_LENGTH, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
 import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../events";
 import { toPluginError, describeFieldIssues } from "./errors";
@@ -26,6 +33,29 @@ export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType
   readonly pluginId: string;
   readonly connectionType: string;
   readonly schema: Schema.Top;
+}
+
+/**
+ * An event source a plugin registered at boot: what the ingest loops need to
+ * open it for one Connection and to check what it emits. The catalog row holds
+ * the same facts without `open` and the schemas, which no JSON column can
+ * hold.
+ *
+ * - `id` is the qualified `<pluginId>/<word>` id.
+ * - `connectionType` is the qualified type of the Connections it is opened for.
+ * - `feeds` are the decoded feed declarations, keyed by feed name.
+ * - `kinds` are the kinds it may emit, keyed by name.
+ * - `resources` is whether the manifest requested the `resources` capability,
+ *   which decides whether `open` receives the Connection's Resources.
+ */
+export interface RegisteredEventSource {
+  readonly id: string;
+  readonly pluginId: string;
+  readonly connectionType: string;
+  readonly feeds: Readonly<Record<string, FeedDeclaration>>;
+  readonly kinds: ReadonlyMap<string, RegisteredEventKind>;
+  readonly resources: boolean;
+  readonly open: EventSourceContribution["open"];
 }
 
 /** The name of the extension point this module registers into. */
@@ -50,33 +80,124 @@ const EventKindHeader = Schema.Struct({
 
 const decodeEventKindHeader = Schema.decodeUnknownEffect(EventKindHeader, { errors: "all" });
 
+// A feed name follows the rules of a source's own id: the plugin-host package
+// exports that schema only as a field of `EventSourceNames`.
+const decodeFeedName = Schema.decodeUnknownEffect(EventSourceNames.fields.id, { errors: "all" });
+
+const decodeFeedDeclaration = Schema.decodeUnknownEffect(FeedDeclaration, { errors: "all" });
+
 /**
- * Registers one event source. Adds its catalog row to `declared`, and adds
- * each of its kinds to `kinds`, which is the map used to decode emitted
- * payloads and to look up the kind of a trigger. Fails with a `PluginError` if
- * a name is invalid, a kind is declared twice, or a kind has the name of a
- * core kind.
+ * Decodes a source's feeds, and returns them keyed by name. Fails with a
+ * `PluginError` naming the feed when:
  *
- * Both collections belong to the registration pass, which passes them in for
+ * - its name is empty, longer than a contribution name may be, or holds a `/`;
+ * - its intervals are not positive whole numbers of seconds;
+ * - its minimum interval is longer than its default.
+ *
+ * A feed name is a key of a Connection's `feedIntervals` and is shown in the
+ * Connection's form, so it follows the rules of every other contribution name.
+ */
+const decodeFeeds = (
+  feeds: Record<string, unknown>,
+): Effect.Effect<Record<string, FeedDeclaration>, PluginError> =>
+  Effect.gen(function* () {
+    const decoded: Record<string, FeedDeclaration> = {};
+    for (const [name, declaration] of Object.entries(feeds)) {
+      yield* Effect.mapError(
+        decodeFeedName(name),
+        (error) =>
+          new PluginError({
+            message: `the feed name "${name}" is invalid: ${describeFieldIssues(error)}`,
+          }),
+      );
+      const feed = yield* Effect.mapError(
+        decodeFeedDeclaration(declaration),
+        (error) =>
+          new PluginError({
+            message: `the feed ${name} is invalid: ${describeFieldIssues(error)}`,
+          }),
+      );
+      // The minimum is the floor below which a user's own interval is
+      // refused. A floor above the default would refuse the default itself.
+      if (
+        feed.minIntervalSeconds !== undefined &&
+        feed.minIntervalSeconds > feed.defaultIntervalSeconds
+      ) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the feed ${name} has a minimum interval of ${String(feed.minIntervalSeconds)} seconds, which is longer than its default of ${String(feed.defaultIntervalSeconds)} seconds. Make the minimum no longer than the default.`,
+          }),
+        );
+      }
+      decoded[name] = feed;
+    }
+    return decoded;
+  });
+
+/**
+ * Registers one event source. Adds its catalog row to `declared`, adds each of
+ * its kinds to `kinds`, which is the map used to decode emitted payloads and
+ * to look up the kind of a trigger, and adds the live source to `sources`.
+ * Fails with a `PluginError` if:
+ *
+ * - the manifest did not request the `events` capability;
+ * - a name is invalid, or a kind is declared twice;
+ * - the Connection type belongs to another plugin, or already has a source;
+ * - a kind has the name of a core kind;
+ * - a feed is invalid, as `decodeFeeds` explains.
+ *
+ * The collections belong to the registration pass, which passes them in for
  * this function to append to. A pass registers every plugin before anything
  * is stored, so a duplicate is caught in the array. If it were caught by the
  * primary key instead, the failed insert would also lose every other
  * plugin's rows.
  */
 export const registerEventSourceContribution = (
-  pluginId: string,
-  definition: EventSourceContribution,
+  manifest: PluginManifest,
+  contribution: EventSourceContribution,
   declared: Array<NewContribution>,
   kinds: Map<string, RegisteredEventKind>,
+  sources: Array<RegisteredEventSource>,
 ): Effect.Effect<void, PluginError> =>
   Effect.gen(function* () {
+    const pluginId = manifest.id;
     const names = yield* Effect.mapError(
-      decodeEventSourceNames({ id: definition.id, connectionType: definition.connectionType }),
+      decodeEventSourceNames({ id: contribution.id, connectionType: contribution.connectionType }),
       toPluginError,
     );
+    // A source writes to the event log through `emit`, which is what the
+    // `events` capability grants. Refusing here tells the author at boot,
+    // rather than at the first emit of a running Connection.
+    if (!manifest.capabilities.includes("events")) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event source ${names.id} emits events, but the manifest did not request the events capability. Add "events" to the manifest's capabilities.`,
+        }),
+      );
+    }
+    // A source ingests with the credentials of its Connections, which only
+    // the plugin that owns their type can read.
+    if (!names.connectionType.startsWith(`${pluginId}/`)) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event source ${names.id} is for the Connection type ${names.connectionType}, which another plugin owns. A source can only ingest for a Connection type of its own plugin, "${pluginId}/<type>".`,
+        }),
+      );
+    }
     // The catalog id, built like a connection type's: the plugin's id and the
     // id the source declared.
     const id = `${pluginId}/${names.id}`;
+    // A Connection has one ingest handle and one set of stored state, so a
+    // second source for the same type would have no handle of its own and
+    // would share the first source's cursors.
+    const claimed = sources.find((source) => source.connectionType === names.connectionType);
+    if (claimed !== undefined) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the event sources ${claimed.id} and ${id} are both for the Connection type ${names.connectionType}. A Connection type can have one event source; declare every feed and kind on one source.`,
+        }),
+      );
+    }
     if (declared.some((row) => row.extensionPoint === EVENT_SOURCE && row.id === id)) {
       return yield* Effect.fail(
         new PluginError({ message: `the ${EVENT_SOURCE} contribution ${id} is registered twice` }),
@@ -86,7 +207,8 @@ export const registerEventSourceContribution = (
       string,
       { readonly description: string; readonly schema: JsonSchema.JsonSchema }
     > = {};
-    for (const [kind, declaration] of Object.entries(definition.kinds)) {
+    const sourceKinds = new Map<string, RegisteredEventKind>();
+    for (const [kind, declaration] of Object.entries(contribution.kinds)) {
       // A kind is looked up by name alone, across every plugin, so the name
       // must show its owner, and readers take the part before the first dot
       // as the owner. It is checked here, where the plugin author sees the
@@ -129,18 +251,30 @@ export const registerEventSourceContribution = (
         description: declaration.description,
         schema: deriveCatalogJsonSchema(declaration.schema),
       };
-      kinds.set(kind, {
+      const registered: RegisteredEventKind = {
         kind,
         pluginId,
         connectionType: names.connectionType,
         description: declaration.description,
         schema: declaration.schema,
-      });
+      };
+      kinds.set(kind, registered);
+      sourceKinds.set(kind, registered);
     }
+    const feeds = yield* decodeFeeds(contribution.feeds);
     declared.push({
       owner: pluginId,
       extensionPoint: EVENT_SOURCE,
       id,
-      definition: { connectionType: names.connectionType, kinds: catalogued },
+      definition: { connectionType: names.connectionType, kinds: catalogued, feeds },
+    });
+    sources.push({
+      id,
+      pluginId,
+      connectionType: names.connectionType,
+      feeds,
+      kinds: sourceKinds,
+      resources: manifest.capabilities.includes("resources"),
+      open: contribution.open,
     });
   });

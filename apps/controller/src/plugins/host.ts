@@ -7,7 +7,6 @@
  * kept in memory only: `errored` is about this process, and the next boot
  * tries again.
  */
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
@@ -56,11 +55,15 @@ import {
   ConnectionTypes,
   OAUTH_TOKENS,
   PluginConfigs,
-  type FeedSource,
   type RegisteredConnectionType,
 } from "../connections";
-import { toPluginError, describeFieldIssues, truncateMessage } from "./errors";
-import { registerEventSourceContribution, type RegisteredEventKind } from "./event-sources";
+import { toPluginError, describeFieldIssues, readCauseMessage, truncateMessage } from "./errors";
+import {
+  registerEventSourceContribution,
+  type RegisteredEventKind,
+  type RegisteredEventSource,
+} from "./event-sources";
+import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
   CORE_CONTRIBUTION_OWNER,
@@ -169,22 +172,6 @@ const refuseEmptyAccountId = (
         : Effect.succeed(account),
     );
 };
-
-/**
- * Returns a one-line message for a failed plugin call: the `PluginError`'s
- * message, or the defect's message. Settings shows this line to the user, and
- * a whole stack trace would tell them less than its first sentence.
- */
-const readCauseMessage = (cause: Cause.Cause<PluginError>): string =>
-  truncateMessage(
-    Option.match(Cause.findErrorOption(cause), {
-      onSome: (error) => error.message,
-      onNone: () => {
-        const defect = Cause.squash(cause);
-        return defect instanceof Error ? defect.message : String(defect);
-      },
-    }),
-  );
 
 /**
  * Dies when `value` is empty. A defect, not a failure: the API a plugin
@@ -324,7 +311,7 @@ const buildRegistrationHost = (
   live: Array<ProviderDefinition>,
   types: Array<RegisteredConnectionType>,
   kinds: Map<string, RegisteredEventKind>,
-  feedSources: Array<FeedSource>,
+  sources: Array<RegisteredEventSource>,
   actions: Map<string, RegisteredWorkflowAction>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("providers")
@@ -452,17 +439,8 @@ const buildRegistrationHost = (
   ...(manifest.capabilities.includes("event-sources")
     ? {
         eventSources: {
-          register: (definition) =>
-            Effect.tap(
-              registerEventSourceContribution(manifest.id, definition, declared, kinds),
-              () =>
-                Effect.sync(() => {
-                  feedSources.push({
-                    connectionType: definition.connectionType,
-                    feeds: definition.feeds,
-                  });
-                }),
-            ),
+          register: (contribution) =>
+            registerEventSourceContribution(manifest, contribution, declared, kinds, sources),
         },
       }
     : {}),
@@ -483,12 +461,15 @@ const make = Effect.gen(function* () {
   const connectionTypes = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
+  const ingest = yield* IngestLoops;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
   /** Every event kind this boot registered, by name. Set at boot, like the providers. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
+  /** Every event source this boot registered, in registry order. Set at boot, like the providers. */
+  const eventSources = yield* Ref.make<ReadonlyArray<RegisteredEventSource>>([]);
   /**
    * Every workflow action this boot registered, built-in ones included, keyed
    * by the qualified id a step uses. Set at boot, like the providers.
@@ -639,12 +620,12 @@ const make = Effect.gen(function* () {
     live: Array<ProviderDefinition>,
     types: Array<RegisteredConnectionType>,
     kinds: Map<string, RegisteredEventKind>,
-    feedSources: Array<FeedSource>,
+    sources: Array<RegisteredEventSource>,
     actions: Map<string, RegisteredWorkflowAction>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
       plugin.register(
-        buildRegistrationHost(manifest, declared, live, types, kinds, feedSources, actions),
+        buildRegistrationHost(manifest, declared, live, types, kinds, sources, actions),
       ),
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
@@ -694,9 +675,13 @@ const make = Effect.gen(function* () {
    * Stops one plugin. Returns whether it is cleanly stopped: a failed
    * deactivate leaves running parts that only a restart clears, and the
    * caller must not start the plugin again on top of them.
+   *
+   * The plugin's ingest handles are closed first, so no poll runs into a
+   * plugin that has already stopped.
    */
   const stop = (id: string): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
+      yield* ingest.closePlugin(id);
       const entry = (yield* Ref.get(entries)).get(id);
       if (entry === undefined) return true;
       if (entry.deactivate === undefined) {
@@ -734,7 +719,7 @@ const make = Effect.gen(function* () {
         const registeredProviders: Array<ProviderDefinition> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
-        const registeredFeedSources: Array<FeedSource> = [];
+        const registeredSources: Array<RegisteredEventSource> = [];
         const registeredActions = new Map<string, RegisteredWorkflowAction>();
         // The built-in actions go into the same catalog as the plugins'
         // actions, so every reader finds all actions in one list.
@@ -784,7 +769,7 @@ const make = Effect.gen(function* () {
           const live: Array<ProviderDefinition> = [];
           const types: Array<RegisteredConnectionType> = [];
           const kinds = new Map<string, RegisteredEventKind>();
-          const feedSources: Array<FeedSource> = [];
+          const sources: Array<RegisteredEventSource> = [];
           const actions = new Map<string, RegisteredWorkflowAction>();
           const status = yield* registerPass(
             plugin,
@@ -793,7 +778,7 @@ const make = Effect.gen(function* () {
             live,
             types,
             kinds,
-            feedSources,
+            sources,
             actions,
           );
           const registered = status._tag !== "errored";
@@ -802,7 +787,7 @@ const make = Effect.gen(function* () {
             registeredProviders.push(...live);
             registeredTypes.push(...types);
             for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
-            registeredFeedSources.push(...feedSources);
+            registeredSources.push(...sources);
             for (const [id, action] of actions) registeredActions.set(id, action);
           }
           booted.set(manifest.id, {
@@ -824,9 +809,10 @@ const make = Effect.gen(function* () {
         yield* Ref.set(entries, booted);
         yield* Ref.set(providers, registeredProviders);
         yield* Ref.set(eventKinds, registeredKinds);
+        yield* Ref.set(eventSources, registeredSources);
         yield* Ref.set(workflowActions, registeredActions);
         yield* connectionTypes.replace(registeredTypes);
-        yield* connectionTypes.replaceFeeds(registeredFeedSources);
+        yield* connectionTypes.replaceFeeds(registeredSources);
 
         yield* gate.withPermits(1)(
           Effect.forEach(
@@ -862,6 +848,16 @@ const make = Effect.gen(function* () {
     listActiveEventKinds: (): Effect.Effect<ReadonlyArray<RegisteredEventKind>> =>
       Effect.map(Effect.zip(Ref.get(eventKinds), listActivePluginIds), ([kinds, active]) =>
         [...kinds.values()].filter((kind) => active.has(kind.pluginId)),
+      ),
+
+    /**
+     * Returns the event sources of every active plugin, in registry order. The
+     * ingest loops open these sources only: a plugin that is disabled, or that
+     * failed to start, ingests nothing.
+     */
+    listActiveEventSources: (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
+      Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
+        sources.filter((source) => active.has(source.pluginId)),
       ),
 
     /**
@@ -920,11 +916,12 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
   "hercule/controller/plugins/PluginHost",
 ) {}
 
+/** Provides the plugin host and the ingest loops it closes when a plugin stops. */
 export const PluginHostLayer: Layer.Layer<
-  PluginHost,
+  PluginHost | IngestLoops,
   never,
   SqlClient.SqlClient | Secrets | AuditLog | Notifier | ConnectionTypes
-> = Layer.effect(PluginHost)(make);
+> = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
 
 /**
  * Provides the connections domain's `PluginConfigs` service, which reads a

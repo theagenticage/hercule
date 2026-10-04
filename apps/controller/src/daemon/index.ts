@@ -34,7 +34,9 @@
  * - `workflows/`: what the workflows domain reads from the runs domain, and
  *   the Scheduler, which fires cron triggers;
  * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
- *   Workspace Steps, which hands a workspace step to its runner and stops it.
+ *   Workspace Steps, which hands a workspace step to its runner and stops it;
+ * - `ingest/`: the Ingest Reconciler, which keeps an ingest handle open for
+ *   every Connection that should be ingesting events from its plugin.
  *
  * The top level holds what belongs to no single folder: the steps run once at
  * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
@@ -60,6 +62,7 @@ export {
   PipelineLayer,
 } from "./events";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
+export { IngestReconcileInterval, runIngestReconciler } from "./ingest";
 export { BindableOperationsLayer } from "./notifications";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export {

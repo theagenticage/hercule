@@ -122,13 +122,17 @@ export interface SetUpController {
  * The controller has a provider for Agents and the local GitHub plugin for
  * triggers. `additionalPlugins` are installed too, for tests that need a
  * Connection type or a workflow action that GitHub does not declare.
- * `timings` shortens the event router's and the scheduler's intervals, whose
- * one-second defaults would make a test that waits for several passes slow.
+ * `timings` shortens the intervals of the event router, the scheduler and the
+ * Ingest Reconciler, whose defaults of a second or two would make a test that
+ * waits for several passes slow.
  */
 export const withSetUpController = (
   body: (controller: SetUpController) => Promise<void>,
   additionalPlugins: ReadonlyArray<Plugin> = [],
-  timings: Pick<ServerOptions, "eventRoutingInterval" | "schedulerInterval"> = {},
+  timings: Pick<
+    ServerOptions,
+    "eventRoutingInterval" | "schedulerInterval" | "ingestReconcileInterval"
+  > = {},
 ): Promise<void> =>
   withServer(
     async (harness) => {

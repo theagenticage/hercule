@@ -117,7 +117,7 @@ const shouldHideSecurityEntries = (actor: Actor): boolean =>
  * such a key would make the published schema wrong. A plugin adds a key by
  * widening its schema, and the catalog is rewritten at every boot.
  */
-const decodeAgainstKind = (
+export const decodeAgainstKind = (
   schema: Schema.Top,
   payload: unknown,
 ): Effect.Effect<unknown, Schema.SchemaError> =>
@@ -326,7 +326,9 @@ const make = Effect.gen(function* () {
               receivedAt: at,
               dedupKey,
               refs,
+              url: null,
               payload: decoded.payload,
+              raw: null,
               actor,
             });
             if (appended !== undefined) return { eventId: appended };

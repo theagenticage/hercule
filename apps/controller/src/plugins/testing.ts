@@ -7,14 +7,22 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll } from "vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   HOST_API,
   PluginError,
   registerConnectionType,
+  registerEventSource,
   registerWorkflowAction,
   type ActionContext,
   type ActivationContext,
+  type AuthError,
+  type ConnectionRef,
+  type FeedDeclaration,
+  type IngestContext,
+  type PollResult,
   type Plugin,
   type PluginCapability,
   type ProviderDefinition,
@@ -27,7 +35,8 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
-import { ConnectionTypesLayer } from "../connections";
+import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
+import { nowIso } from "../db";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 
 /** Builds a provider definition that supports everything natively. */
@@ -291,3 +300,134 @@ export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): 
   };
   return { plugin, contexts, inputs };
 };
+
+/** The plugin id, Connection type and event kind of `createEventSourceFixture`'s plugin. */
+export const EVENT_SOURCE_FIXTURE = {
+  pluginId: "acme",
+  connectionType: "acme/acme",
+  kind: "acme.thing.done",
+} as const;
+
+export interface EventSourceFixture {
+  readonly plugin: Plugin;
+  /**
+   * What the source was asked to do, in order: `open`, `poll <feed>` when a
+   * poll starts, `polled <feed>` when it ends, and `close`.
+   */
+  readonly calls: Array<string>;
+  /** The `ConnectionRef` and `IngestContext` of every open, in order. */
+  readonly opened: Array<{ readonly connection: ConnectionRef; readonly context: IngestContext }>;
+  /** Decides how each open ends. By default it succeeds. A test replaces it to make opens fail. */
+  open: () => Effect.Effect<void, AuthError | PluginError>;
+  /** Decides how each poll ends. By default it succeeds with no hint. */
+  poll: (feed: string) => Effect.Effect<PollResult, AuthError | PluginError>;
+  /** Returns the most polls that were running at one time. */
+  readonly countMostPollsAtOnce: () => number;
+}
+
+/**
+ * Creates a plugin with one Connection type, `acme/acme`, and one event source
+ * for it that emits `acme.thing.done`. The source records every call, and a
+ * test decides how each open and poll ends by replacing `open` and `poll`.
+ */
+export const createEventSourceFixture = (
+  options: {
+    readonly feeds?: Record<string, FeedDeclaration>;
+    readonly capabilities?: ReadonlyArray<PluginCapability>;
+  } = {},
+): EventSourceFixture => {
+  let running = 0;
+  let most = 0;
+  const fixture: EventSourceFixture = {
+    calls: [],
+    opened: [],
+    open: () => Effect.void,
+    poll: () => Effect.succeed({}),
+    countMostPollsAtOnce: () => most,
+    plugin: {
+      manifest: {
+        id: EVENT_SOURCE_FIXTURE.pluginId,
+        displayName: "Acme",
+        hostApi: HOST_API,
+        capabilities: options.capabilities ?? ["connections", "event-sources", "events"],
+        configSchema: Schema.Struct({}),
+      },
+      register: (host) =>
+        Effect.andThen(
+          registerConnectionType(host, {
+            type: "acme",
+            displayName: "Acme",
+            setup: [],
+            configSchema: Schema.Struct({ project: Schema.optionalKey(Schema.String) }),
+            validate: () => Effect.succeed({ displayName: "Acme", accountId: "acme-1" }),
+          }),
+          registerEventSource(host, {
+            id: "acme",
+            connectionType: EVENT_SOURCE_FIXTURE.connectionType,
+            feeds: options.feeds ?? { notifications: { defaultIntervalSeconds: 60 } },
+            kinds: {
+              [EVENT_SOURCE_FIXTURE.kind]: {
+                description: "Something was done in Acme.",
+                schema: Schema.Struct({ title: Schema.String }),
+              },
+            },
+            open: (connection, context) =>
+              Effect.suspend(() => {
+                fixture.calls.push("open");
+                fixture.opened.push({ connection, context });
+                return Effect.as(fixture.open(), {
+                  poll: (feed: string) =>
+                    Effect.suspend(() => {
+                      fixture.calls.push(`poll ${feed}`);
+                      running += 1;
+                      most = Math.max(most, running);
+                      return fixture.poll(feed);
+                    }).pipe(
+                      Effect.ensuring(
+                        Effect.sync(() => {
+                          running -= 1;
+                          fixture.calls.push(`polled ${feed}`);
+                        }),
+                      ),
+                    ),
+                  close: Effect.sync(() => {
+                    fixture.calls.push("close");
+                  }),
+                });
+              }),
+          }),
+        ),
+      activate: () => Effect.succeed(Effect.void),
+    },
+  };
+  return fixture;
+};
+
+/**
+ * Inserts a `connected` Connection of the fixture's type, with the label and
+ * feed intervals given, and returns it as the repository reads it back.
+ */
+export const insertFixtureConnection = (
+  options: {
+    readonly label?: string;
+    readonly feedIntervals?: Readonly<Record<string, number>>;
+  } = {},
+): Effect.Effect<StoredConnection, SqlError, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const connections = yield* connectionRepository;
+    const at = yield* nowIso;
+    const inserted = yield* connections.insert({
+      pluginId: EVENT_SOURCE_FIXTURE.pluginId,
+      type: EVENT_SOURCE_FIXTURE.connectionType,
+      label: options.label ?? "work",
+      displayName: "Acme",
+      accountId: "acme-1",
+      labels: [],
+      config: {},
+      at,
+    });
+    if (options.feedIntervals !== undefined) {
+      yield* connections.update(inserted.id, { feedIntervals: options.feedIntervals }, at);
+    }
+    return Option.getOrThrow(yield* connections.one(inserted.id));
+  });

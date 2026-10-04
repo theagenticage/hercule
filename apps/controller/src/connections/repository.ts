@@ -221,6 +221,41 @@ const make = Effect.gen(function* () {
       );
     },
 
+    /**
+     * Sets the status and its detail, and `updated_at`, but only while the
+     * current status is one of `from`. Returns whether the row changed.
+     *
+     * The ingest loops write status from a fiber that runs beside the user's
+     * own changes. The condition stops a loop from overwriting a change it
+     * did not see, such as the user disabling the Connection while a poll
+     * was failing.
+     */
+    changeStatusFrom: (
+      id: string,
+      from: ReadonlyArray<ConnectionStatus>,
+      status: ConnectionStatus,
+      detail: string | null,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE connections SET status = ${status}, status_detail = ${detail}, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)} AND status IN ${sql.in(from)}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /** Lists every connection whose status is one of `statuses`, oldest first. */
+    listByStatus: (
+      statuses: ReadonlyArray<ConnectionStatus>,
+    ): Effect.Effect<ReadonlyArray<StoredConnection>, SqlError> =>
+      Effect.map(
+        sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
+                           WHERE status IN ${sql.in(statuses)} ORDER BY created_at, id`,
+        (rows) => rows.map(toConnection),
+      ),
+
     /** Removes the row. Its secrets are removed by the caller, in the same transaction. */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM connections WHERE id = ${uuidFromString(id)}`),

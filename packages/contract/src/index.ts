@@ -366,7 +366,10 @@ export {
   EVENT_SORT_FIELDS,
   Event,
   EventId,
+  MAX_DEDUP_KEY_LENGTH,
   MAX_EVENT_KIND_LENGTH,
+  MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_URL_LENGTH,
 } from "./groups/event";
 export {
   SUBSCRIPTION_SORT_FIELDS,
