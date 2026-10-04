@@ -1,10 +1,10 @@
 /**
  * Tests the menu bar in the packaged app (spec 17, §Native behaviour):
  *
- * - the menus stand in the order macOS users expect, and Go holds a dimmed
- *   "No Threads" while signed out;
- * - Go lists the sidebar's threads, top to bottom, with ⌘1 and on, and
- *   choosing one opens it;
+ * - the menus stand in the order macOS users expect, and Go holds Office
+ *   and a dimmed "No Threads" while signed out;
+ * - Go lists the sidebar's threads under Office, top to bottom, with ⌘1 and
+ *   on, and choosing one opens it;
  * - Thread > Send sends what the open thread's composer holds.
  *
  * Signed in, the app reaches a real controller whose threads run on a
@@ -32,7 +32,7 @@ function readSidebarTitles(page: Page): Promise<string[]> {
 }
 
 describe("the menu bar", () => {
-  it("has the app menu, File, Edit, Go, Thread and Window, and a dimmed No Threads in Go while signed out", async () => {
+  it("has the app menu, File, Edit, Go, Thread and Window, and Office and a dimmed No Threads in Go while signed out", async () => {
     const { app } = await launchForTest();
 
     expect(await readMenuLabels(app)).toEqual([
@@ -44,11 +44,12 @@ describe("the menu bar", () => {
       "Window",
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([
+      { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: true },
       { label: "No Threads", accelerator: null, enabled: false },
     ]);
   });
 
-  it("lists the sidebar's threads in Go, top to bottom, and opens the one chosen", async () => {
+  it("lists the sidebar's threads in Go under Office, top to bottom, and opens the one chosen", async () => {
     const { url, fleet, waitForStatus } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio");
     const threads = await fleet.spawnThreads(2, { runner });
@@ -59,13 +60,14 @@ describe("the menu bar", () => {
 
     await expect
       .poll(() => readMenuItems(app, "Go"))
-      .toEqual(
-        titles.map((label, index) => ({
+      .toEqual([
+        { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: true },
+        ...titles.map((label, index) => ({
           label,
           accelerator: `CmdOrCtrl+${String(index + 1)}`,
           enabled: true,
         })),
-      );
+      ]);
 
     await chooseMenuItem(app, "Go", titles[1]!);
     await page.locator('section[aria-label="Transcript"]').waitFor();

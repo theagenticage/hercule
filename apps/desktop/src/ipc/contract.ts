@@ -216,8 +216,8 @@ const HttpUrl = Schema.String.check(
   ),
 );
 
-/** A menu item the page carries out: Sign Out, New Thread, or Send. */
-export const MenuCommand = Schema.Literals(["signOut", "newThread", "send"]);
+/** A menu item the page carries out: Sign Out, New Thread, Office, or Send. */
+export const MenuCommand = Schema.Literals(["signOut", "newThread", "openOffice", "send"]);
 export type MenuCommand = typeof MenuCommand.Type;
 
 /** A thread the Go menu lists: the session it opens, and the title its item shows. */

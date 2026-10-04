@@ -137,7 +137,7 @@
  */
 import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { loadavg, tmpdir } from "node:os";
+import { cpus, loadavg, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -268,7 +268,10 @@ async function readProcessUse(inspectorUrl: string): Promise<ProcessUse[]> {
     pid: metric.pid,
     label: metric.name === undefined ? metric.type : `${metric.type} (${metric.name})`,
     type: metric.type,
-    cpuPercent: metric.cpu.percentCPUUsage,
+    // Electron divides a process's CPU use by the number of cores, so its 100
+    // is every core busy. Multiplying by the number of cores gives % of one
+    // core, the unit the budgets use.
+    cpuPercent: metric.cpu.percentCPUUsage * cpus().length,
     wakeupsPerSecond: metric.cpu.idleWakeupsPerSecond,
   }));
 }

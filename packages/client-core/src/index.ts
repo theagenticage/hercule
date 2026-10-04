@@ -195,6 +195,14 @@ export { formatControllerAddress, isLoopbackOrigin } from "./controller-origin";
 export { formatNameList } from "./name-list";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export {
+  decideOfficeSeating,
+  isSeatedPose,
+  type OfficeDesk,
+  type OfficeRoom,
+  type OfficeSeating,
+  type SeatedPose,
+} from "./office/seating";
+export {
   addCompletedStep,
   findNextOnboardingStep,
   ONBOARDING_STEPS,

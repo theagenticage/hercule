@@ -1,5 +1,5 @@
 /**
- * The geometry of the Office: how a point in the room's floor plan lands on
+ * The geometry of the Office: how a point in the room, in plan coordinates, lands on
  * the screen. Ported from the Bureau book's office.js.
  *
  * Plan coordinates: x runs along the right-hand back wall, y along the
@@ -35,7 +35,7 @@ export interface Projection {
   readonly originY: number;
 }
 
-/** A rectangle of the floor plan, in tiles. */
+/** A rectangle of the floor seen from above, in tiles. */
 export interface PlanRegion {
   readonly x0: number;
   readonly x1: number;

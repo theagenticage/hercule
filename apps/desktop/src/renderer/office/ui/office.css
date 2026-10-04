@@ -1,0 +1,330 @@
+/* The Office's styles. */
+
+.office {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.office-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.office-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* ---------- The thread drawer ---------- */
+/* The office's panels share one size for the drawer: 44% of the pane, and
+   never narrower than the thread screen's composer needs. */
+.office {
+  --drawer-width: max(520px, 44%);
+}
+
+/* While the drawer is open, the stage slides left by half the drawer, so
+   the colleague the camera centres stays centred in the office left of it.
+   The canvas keeps its size, so nothing is drawn again for the slide, and
+   picking follows, because it measures the canvas where it is. */
+.office-stage {
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.office[data-drawer="true"] .office-stage {
+  transform: translateX(calc(var(--drawer-width) / -2));
+}
+
+/* The drawer is the app's main pane, slid in from the right: the same
+   surface, with the card's rim and shadow on its left edge, turned to fall
+   leftward, because it floats over the office as the card does. Closed,
+   it waits past the pane's right edge, clear of its own shadow, and its
+   `inert` attribute keeps it out of focus and clicks. */
+.office-drawer {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--drawer-width);
+  background: var(--surface);
+  box-shadow:
+    -1px 0 0 var(--line),
+    -12px 0 32px -12px oklch(0 0 0 / calc(0.1 + 0.14 * var(--glass-level)));
+  transform: translateX(calc(100% + 48px));
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.office-drawer[data-open="true"] {
+  transform: none;
+}
+
+/* The thread screen draws into a pane that places its header and composer
+   over a scrolling transcript, as the shell's `.main` does. */
+.office-drawer-thread {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---------- The deck ---------- */
+/* The layer the panels sit on: the part of the office the user can see,
+   which ends at the drawer's left edge while the drawer is open. It takes
+   no clicks itself, so the canvas under it still does. Its edge moves at
+   once, with no transition: moving `right` lays the deck out again, and
+   the sliding drawer covers the change. */
+.office-deck {
+  container: office-deck / inline-size;
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.office[data-drawer="true"] .office-deck {
+  right: var(--drawer-width);
+}
+.office-deck > :not(.office-top) {
+  pointer-events: auto;
+}
+
+/* ---------- The Bureau book's classes the app does not have yet ---------- */
+/* Each is the book's rule from system.css or office.html, kept inside the
+   office so it cannot reach the app's screens. */
+.office .glass {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+}
+.office .who-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.office .who-name {
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.office .who-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.office .next-of {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+
+/* ---------- The dossier card ---------- */
+/* The book's `.next` card, moved to the top left under the header. It is
+   wider than the book's 364px. The book's card holds two short buttons; this
+   one holds the thread screen's dock, where each answer has a line saying
+   what it does. At 480px each of those lines wraps to two lines at most. */
+.office-card {
+  position: absolute;
+  top: 56px;
+  left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(480px, 100% - 28px);
+  max-height: calc(100% - 56px - 72px);
+  overflow-y: auto;
+  padding: 14px 14px 12px;
+  border-radius: var(--r-xl);
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out);
+}
+.office-card[data-open="true"] {
+  opacity: 1;
+  transform: none;
+}
+.office-card-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.office-card-h > .icon-btn {
+  align-self: flex-start;
+  margin: -4px -4px 0 0;
+}
+
+/* The Request: how long the colleague has waited, then the thread screen's
+   dock, in its own marigold tint and rim. The dock has no composer to tuck
+   under here, so its lower edge is rounded like its upper one. When the
+   window is too short for the whole card, the Request scrolls, so the facts
+   and Open thread stay in view. */
+.office-card-request {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+.office-card-request .dock {
+  --dock-tuck: 0px;
+  padding-bottom: 12px;
+  border-radius: var(--r-lg);
+}
+/* The answers show no key caps. The dock's keys work only while the focus is
+   inside the dock. Elsewhere on the card, ↩ opens the thread and esc closes
+   the card, as the card's footer shows, so a cap of ↩ beside Allow would
+   point to the wrong action. */
+.office-card-request .ans {
+  grid-template-columns: 156px 1fr;
+}
+.office-card-request .ans kbd {
+  display: none;
+}
+.office-card-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.office-card-ask-h {
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+
+/* The facts: a name column in faint ink, then the values. */
+.office-card-facts {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-12);
+}
+.office-card-facts dt {
+  color: var(--faint);
+}
+.office-card-facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+}
+.office-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-12);
+}
+.office-card-foot .btn kbd {
+  margin-right: -4px;
+}
+
+/* ---------- The top bar ---------- */
+/* The thread header's `.top`, with the Bureau book's office header pills in
+   it. Only the pills take clicks; between them the office does. The pills sit
+   inside the shell's drag strip, so each one opts out of it. */
+.office-top {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.office-top > .pill {
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.office .pill-title {
+  padding: 0 8px 0 10px;
+  font-weight: var(--w-bold);
+}
+.office .ptab[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+/* The counts: the book's `.sum`, each count a button that walks through the
+   colleagues it counts. The buttons' padding keeps the book's 14px between
+   two counts and 12px at the pill's ends. */
+.office .sum {
+  gap: 0;
+  padding: 0 5px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.office .sum-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 8px;
+  transition: background var(--dur-1);
+}
+.office .sum-btn:hover {
+  background: var(--hover);
+}
+.office .sum b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.office .sum .sum-you,
+.office .sum .sum-you b {
+  color: var(--you-ink);
+}
+
+/* With the drawer open the bar has about 650px: the counts keep their marks
+   and numbers, and the office's pill drops its title. */
+@container office-deck (width < 900px) {
+  .sum-words,
+  .office-top .pill-title {
+    display: none;
+  }
+}
+
+/* ---------- The top bar's menus ---------- */
+/* The composer's `.pop`, dropping 6px below its trigger instead of rising
+   above it. */
+.office-menu {
+  inset: auto;
+  width: 300px;
+  max-height: calc(100dvh - 124px);
+  margin: 6px 0 0;
+  overflow-y: auto;
+  position-area: block-end span-inline-end;
+}
+.office-menu--end {
+  position-area: block-end span-inline-start;
+}
+.office-menu .line.is-on {
+  background: var(--selected);
+}
+.office-menu .line .count {
+  flex: none;
+}

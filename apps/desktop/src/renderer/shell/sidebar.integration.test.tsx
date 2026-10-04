@@ -16,6 +16,7 @@ import { describePose } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
   buildSidebarHandlers,
+  buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
@@ -24,6 +25,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  THREAD_FIXTURES,
   type Handler,
   type SidebarRecords,
 } from "../app/testing";
@@ -35,6 +37,9 @@ vi.mock("@hercule/client-core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@hercule/client-core")>();
   return { ...actual, describePose: vi.fn(actual.describePose) };
 });
+
+// The Office draws a 3D scene, which jsdom cannot, so a stub stands in for it.
+vi.mock("../office/office-screen", () => ({ OfficeScreen: () => <p>The Office</p> }));
 
 beforeEach(() => {
   stubElementSize(272, 800);
@@ -232,6 +237,89 @@ describe("the sidebar", () => {
       expect(router.state.location.search).toEqual({ project: webshop!.id });
     });
     expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("puts New thread, Search and the Office in one row, each named with its shortcut", async () => {
+    await startSidebar();
+
+    const actions = document.querySelector(".side-actions")!;
+    expect(
+      [...actions.children].map((action) => [
+        action.tagName,
+        action.getAttribute("title") ?? action.textContent,
+      ]),
+    ).toEqual([
+      ["BUTTON", "New thread ⌘N"],
+      ["BUTTON", "Search ⌘K"],
+      ["A", "Office ⌘⇧O"],
+    ]);
+  });
+
+  it("opens the Office from its button, and marks the button as the current page while the Office is open", async () => {
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    const office = screen.getByRole("link", { name: "Office ⌘⇧O" });
+    expect(office.getAttribute("aria-current")).toBeNull();
+
+    await userEvent.click(office);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/office");
+    });
+    expect(office.getAttribute("aria-current")).toBe("page");
+    expect(office.classList.contains("is-on")).toBe(true);
+    expect(await screen.findByText("The Office")).toBeTruthy();
+  });
+
+  it("opens a thread in the Office's drawer while the Office is open, and marks its row as the current page", async () => {
+    const { nav, router } = await startSidebar({
+      path: "/office",
+      handlers: buildThreadHandlers(THREAD_FIXTURES.finished),
+    });
+    const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
+    expect(bunPin.getAttribute("href")).toBe(`/office?session=${FIXTURE_THREAD_IDS.bunPin}`);
+
+    await userEvent.click(bunPin);
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ session: FIXTURE_THREAD_IDS.bunPin });
+    });
+    expect(router.state.location.pathname).toBe("/office");
+    const current = within(nav)
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("aria-current") === "page");
+    expect(current.map((link) => link.getAttribute("aria-label"))).toEqual([
+      "Bump the Bun pin, idle",
+    ]);
+    expect(screen.getByRole("link", { name: "Office ⌘⇧O" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
+  });
+
+  it("opens a thread with no colleague in the Office on its own screen, even while the Office is open", async () => {
+    const { nav } = await startSidebar({ path: "/office" });
+
+    expect(
+      within(nav)
+        .getByRole("link", { name: "Rotate the backups key, can't be reached" })
+        .getAttribute("href"),
+    ).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
+    // A waiting thread always has a colleague, in its row of Waiting on you
+    // and in its project's.
+    expect(
+      within(nav)
+        .getAllByRole("link", { name: "Write the retry runbook, waiting on you" })
+        .map((link) => link.getAttribute("href")),
+    ).toEqual([
+      `/office?session=${FIXTURE_THREAD_IDS.runbook}`,
+      `/office?session=${FIXTURE_THREAD_IDS.runbook}`,
+    ]);
+  });
+
+  it("opens a thread on its own screen again once the Office is closed", async () => {
+    const { nav, router } = await startSidebar({ path: "/office" });
+
+    await act(() => router.navigate({ to: "/" }));
+    expect(
+      within(nav).getByRole("link", { name: "Bump the Bun pin, idle" }).getAttribute("href"),
+    ).toBe(`/threads/${FIXTURE_THREAD_IDS.bunPin}`);
   });
 
   it("opens the project picker from New thread", async () => {

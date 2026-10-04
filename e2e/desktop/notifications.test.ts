@@ -97,7 +97,7 @@ describe("the dock badge and the threads' notifications", () => {
     expect(await readBadgeCount(app)).toBe(1);
     await expect
       .poll(async () => (await readMenuItems(app, "Go")).map((item) => item.label))
-      .toEqual(["Thread 1"]);
+      .toEqual(["Office", "Thread 1"]);
 
     await chooseMenuItem(app, "Hercule", "Sign Out");
 
@@ -107,6 +107,7 @@ describe("the dock badge and the threads' notifications", () => {
       { title: "Thread 1", body: "Run pnpm test?", state: "closed" },
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([
+      { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: true },
       { label: "No Threads", accelerator: null, enabled: false },
     ]);
   });

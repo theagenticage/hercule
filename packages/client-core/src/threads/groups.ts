@@ -214,21 +214,22 @@ const findLatestActivity = (group: ProjectGroup): number =>
  * project when `listed` holds that project's id, and `null`, the threads
  * with no project, otherwise.
  */
-const decideGroupProjectId = (
+export const decideGroupProjectId = (
   projectId: string | null,
   listed: ReadonlySet<string>,
 ): string | null => (projectId !== null && listed.has(projectId) ? projectId : null);
 
 /**
- * Returns the sort rank of a group of threads inside its project: each
- * worktree in catalog order, then the main workspace, then the threads that
- * work without a checkout.
+ * Returns the sort rank of the threads in `workspaceId` inside their project:
+ * each worktree in catalog order, then the main workspace, then the threads
+ * that work without a checkout (`null`). A workspace missing from
+ * `workspaces` ranks with the main workspace.
  */
-const rankLane = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): number => {
-  if (lane.workspaceId === null) return workspaces.length + 2;
-  const workspace = workspaces.find((each) => each.id === lane.workspaceId);
+export const rankLane = (workspaceId: string | null, workspaces: readonly Workspace[]): number => {
+  if (workspaceId === null) return workspaces.length + 2;
+  const workspace = workspaces.find((each) => each.id === workspaceId);
   if (workspace === undefined || workspace.kind === "primary") return workspaces.length + 1;
-  return workspaces.findIndex((each) => each.id === lane.workspaceId);
+  return workspaces.findIndex((each) => each.id === workspaceId);
 };
 
 /**
@@ -345,7 +346,9 @@ export const buildThreadGroups = ({
       // repo's main workspace, then the threads that work without a checkout.
       workspaces: [
         ...draftLanes,
-        ...lanes.sort((a, b) => rankLane(a, workspaces) - rankLane(b, workspaces)),
+        ...lanes.sort(
+          (a, b) => rankLane(a.workspaceId, workspaces) - rankLane(b.workspaceId, workspaces),
+        ),
       ],
     };
   });

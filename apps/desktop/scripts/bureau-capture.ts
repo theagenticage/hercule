@@ -151,6 +151,8 @@ const SIDEBAR_PARTS = [
   ".side-actions > .nav-row > svg",
   ".side-actions > .nav-row > span",
   ".side-actions > .nav-row > kbd",
+  ".side-actions > .icon-btn",
+  ".side-actions > .icon-btn > svg",
   ".side-scroll",
   ".side-h",
   ".side-h > span:first-child",

@@ -189,3 +189,16 @@ html[data-theme-changing] *::after {
     --glass-filter: none;
   }
 }
+
+/* While the Office is open, nothing in the window is see-through, by the same
+   mechanism as Reduce transparency: the glass level is 0, so every glass fill
+   is the solid surface under it, and the filter is none, so no backdrop
+   filter is drawn. The rim and the shadow stay. A backdrop filter anywhere
+   in the window makes the GPU process composite the whole window again for
+   every frame the Office draws (spec 17, Performance, Rules, rule 5). The Office
+   screen sets data-office on the root element while it is mounted. */
+:root[data-office],
+:root[data-office] [data-theme] {
+  --glass-level: 0;
+  --glass-filter: none;
+}

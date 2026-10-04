@@ -1,11 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
-import { listWaitingThreads } from "@hercule/client-core";
+import { createFileRoute, Outlet, redirect, useMatch, useNavigate } from "@tanstack/react-router";
+import { decideThreadPose, isSeatedPose, listWaitingThreads } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
-import { ensureShellData, threadsQuery } from "../../app/queries";
+import { ensureShellData, runnersQuery, threadsQuery } from "../../app/queries";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { Shell } from "../../shell";
 
@@ -32,11 +32,14 @@ const NewProjectDialog = lazy(() =>
  * The shell also owns the project picker, which File > New Thread (⌘N) and
  * the sidebar's New thread open, and the New project dialog that the
  * picker's last row opens. A project added there opens a Draft Thread in it.
+ * Go > Office (⌘⇧O) opens the Office.
  *
  * While the user is signed in, the shell sends main the threads waiting on
  * the user whenever the thread list changes, for the dock badge and the
  * threads' notifications. It opens the thread main names when the user
- * chooses it in the Go menu or clicks its notification.
+ * chooses it in the Go menu or clicks its notification: in the Office's
+ * drawer while the Office is open and the thread has a colleague there, and
+ * on its own screen otherwise.
  */
 export const Route = createFileRoute("/_connected/_shell")({
   loader: async ({ context: { controller, queryClient } }) => {
@@ -97,25 +100,52 @@ function ShellLayout(): JSX.Element {
     "Could not update the dock badge and the threads' notifications:",
   );
 
-  // Only a signed-in user can start a thread, so only the shell listens for
-  // File > New Thread.
+  // Only a signed-in user can start a thread or open the Office, so only the
+  // shell listens for File > New Thread and Go > Office. The Office, like a
+  // thread opened from the menu, replaces whatever the user was doing, the
+  // project picker included.
   useEffect(
     () =>
       bridge.menu.onCommand((command) => {
         if (command === "newThread") openNewThread();
+        if (command === "openOffice") {
+          setDialog(null);
+          void navigate({ to: "/office" });
+        }
       }),
-    [bridge, openNewThread],
+    [bridge, navigate, openNewThread],
   );
 
   // A thread opened from the menu or a notification replaces whatever the
-  // user was doing, the project picker included.
+  // user was doing, the project picker included. While the Office is open, a
+  // thread with a colleague there opens in the Office's drawer, as its
+  // sidebar row does, and any other thread opens on its own screen. The
+  // thread and its runner are read from the cache when the thread is opened,
+  // so the listener is not replaced each time the threads change.
+  const officeOpen =
+    useMatch({ from: "/_connected/_shell/office", shouldThrow: false }) !== undefined;
   useEffect(
     () =>
       bridge.thread.onOpen(({ sessionId }) => {
         setDialog(null);
-        void navigate({ to: "/threads/$sessionId", params: { sessionId } });
+        const { client } = controller;
+        const session = queryClient
+          .getQueryData(threadsQuery(client).queryKey)
+          ?.find((each) => each.id === sessionId);
+        const runner = queryClient
+          .getQueryData(runnersQuery(client).queryKey)
+          ?.find((each) => each.id === session?.runnerId);
+        if (
+          officeOpen &&
+          session !== undefined &&
+          isSeatedPose(decideThreadPose(session, runner))
+        ) {
+          void navigate({ to: "/office", search: { session: sessionId } });
+        } else {
+          void navigate({ to: "/threads/$sessionId", params: { sessionId } });
+        }
       }),
-    [bridge, navigate],
+    [bridge, controller, navigate, officeOpen, queryClient],
   );
 
   return (
