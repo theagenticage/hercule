@@ -678,9 +678,16 @@ describe("describeFeedName", () => {
 });
 
 describe("describeFeedInterval", () => {
-  it("names the default and the shortest interval", () => {
-    expect(describeFeedInterval(REPOS)).toBe(
-      "Every 120 seconds unless you set another. At least 60 seconds.",
+  it("names the default and the shortest interval when the default is above it", () => {
+    expect(describeFeedInterval(REPOS, "GitHub")).toBe(
+      "Every 120 seconds by default. At least 60 seconds.",
+    );
+  });
+
+  it("says the default is the shortest interval when the two are the same", () => {
+    const floor = { ...REPOS, defaultIntervalSeconds: 60, minIntervalSeconds: 60 };
+    expect(describeFeedInterval(floor, "GitHub")).toBe(
+      "Every 60 seconds by default, the shortest GitHub allows.",
     );
   });
 });

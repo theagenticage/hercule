@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { Button, Checkbox, Field, Input, LaneLabel, Select, StringList } from "@hercule/ui";
+import { Button, Checkbox, Field, FormSection, Input, Select, StringList } from "@hercule/ui";
 import {
   buildConfigDraft,
   buildConfigPayload,
@@ -51,24 +51,21 @@ export function ConfigForm({
   return (
     <form className="flex flex-col gap-3 border-t border-line-soft pt-3" onSubmit={submit}>
       {/* The settings get a rule above them inside the plugin's card; without
-          it they look like part of the plugin's contributions. The label's
-          own margin is removed, because the form's gap sets the spacing
-          between every other pair of lines here. */}
-      <div className="-mb-2.5">
-        <LaneLabel>Configuration</LaneLabel>
-      </div>
-      {fields.map((field) => (
-        <ConfigFieldRow
-          key={field.name}
-          inputId={`${id}-${field.name}`}
-          field={field}
-          value={draft[field.name] ?? ""}
-          error={issues[field.name]}
-          onChange={(value) => {
-            setField(field.name, value);
-          }}
-        />
-      ))}
+          it they look like part of the plugin's contributions. */}
+      <FormSection heading="Configuration">
+        {fields.map((field) => (
+          <ConfigFieldRow
+            key={field.name}
+            inputId={`${id}-${field.name}`}
+            field={field}
+            value={draft[field.name] ?? ""}
+            error={issues[field.name]}
+            onChange={(value) => {
+              setField(field.name, value);
+            }}
+          />
+        ))}
+      </FormSection>
       <div>
         <Button type="submit" variant="form" disabled={saving}>
           Save

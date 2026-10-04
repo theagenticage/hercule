@@ -30,25 +30,24 @@ const SCOPES = ["repo", "read:org", "notifications", "workflow"];
 export const DEFAULT_CHECKS_WINDOW_DAYS = 7;
 
 /**
- * A GitHub Connection's own settings, shown as a form on the Connection. Every
- * field is optional, so a Connection created before a field existed, with an
- * empty config, stays valid.
+ * A GitHub Connection's own settings, shown as a form on the Connection under
+ * the schema's title. Every field is optional, so a Connection created before
+ * a field existed, with an empty config, stays valid.
  */
 export const GithubConnectionConfig = Schema.Struct({
   repos: Schema.optionalKey(
     Schema.Array(RepoName).annotate({
       title: "Extra repositories",
-      description:
-        "Repositories to watch, as owner/repo, in addition to the repo Resources linked to this Connection.",
+      description: "Repositories to watch beyond the repo Resources linked here, as owner/repo.",
     }),
   ),
   checksWindowDays: Schema.optionalKey(
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })).annotate({
       title: "Checks window (days)",
-      description: `How many days back to look for open pull requests whose checks are followed, from 1 to 30. Defaults to ${String(DEFAULT_CHECKS_WINDOW_DAYS)}.`,
+      description: `Follows checks on open pull requests updated within this many days. ${String(DEFAULT_CHECKS_WINDOW_DAYS)} by default, from 1 to 30.`,
     }),
   ),
-});
+}).annotate({ title: "Watching" });
 
 export type GithubConnectionConfig = Schema.Schema.Type<typeof GithubConnectionConfig>;
 

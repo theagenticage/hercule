@@ -481,11 +481,17 @@ export const describeFeedName = (feed: ConnectionFeed): string => {
 };
 
 /**
- * Returns the line under a feed's interval field: how often the feed is
+ * Returns the help line of a feed's interval field: how often the feed is
  * polled when the user sets nothing, and the shortest interval allowed.
+ * `typeName` is the connection type's display name, such as "GitHub".
+ *
+ * When the default is already the shortest interval, the line says so in one
+ * sentence, because "Every 60 seconds. At least 60 seconds." repeats itself.
  */
-export const describeFeedInterval = (feed: ConnectionFeed): string =>
-  `Every ${feed.defaultIntervalSeconds} seconds unless you set another. At least ${feed.minIntervalSeconds} seconds.`;
+export const describeFeedInterval = (feed: ConnectionFeed, typeName: string): string =>
+  feed.defaultIntervalSeconds === feed.minIntervalSeconds
+    ? `Every ${feed.defaultIntervalSeconds} seconds by default, the shortest ${typeName} allows.`
+    : `Every ${feed.defaultIntervalSeconds} seconds by default. At least ${feed.minIntervalSeconds} seconds.`;
 
 /**
  * What the user typed into each feed's interval field, keyed by feed name.

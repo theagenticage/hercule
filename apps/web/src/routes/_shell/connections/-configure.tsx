@@ -1,12 +1,13 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Field, Input } from "@hercule/ui";
+import { Button, Field, FormSection, Input } from "@hercule/ui";
 import {
   buildConfigDraft,
   buildConfigFields,
   buildFeedIntervalsDraft,
   buildFeedIntervalsPayload,
   buildTopicsUpdate,
+  readConfigHeading,
   readConnectionIssues,
   buildConfigPayload,
   queryKeys,
@@ -103,73 +104,89 @@ export function ConfigureConnection({
   };
 
   return (
-    <form className="flex flex-col gap-3 border-t border-line-soft pt-3" onSubmit={send}>
-      <Field id={`${connection.id}-label`} label="Name">
-        <Input
-          id={`${connection.id}-label`}
-          // The controller refuses an empty name, so the browser stops the
-          // save before it sends a request that would fail.
-          required
-          placeholder="work"
-          value={label}
-          onChange={(event) => {
-            edit();
-            setLabel(event.target.value);
-          }}
-        />
-      </Field>
-      <Field id={`${connection.id}-topic`} label="Topic">
-        <Input
-          id={`${connection.id}-topic`}
-          list={`${connection.id}-topics`}
-          value={topic}
-          onChange={(event) => {
-            edit();
-            setTopic(event.target.value);
-          }}
-        />
-        <datalist id={`${connection.id}-topics`}>
-          {TOPICS.map((suggestion) => (
-            <option key={suggestion} value={suggestion} />
-          ))}
-        </datalist>
-      </Field>
-      {fields.map((field) => (
-        <ConfigFieldRow
-          key={field.name}
-          inputId={`${connection.id}-${field.name}`}
-          field={field}
-          value={draft[field.name] ?? ""}
-          error={issues.config[field.name]}
-          onChange={(value) => {
-            edit();
-            setDraft((current) => ({ ...current, [field.name]: value }));
-          }}
-        />
-      ))}
-      <PollingFields
-        idPrefix={connection.id}
-        feeds={feeds}
-        draft={intervals}
-        errors={issues.feedIntervals}
-        onChange={(feed, seconds) => {
-          edit();
-          setIntervals((current) => ({ ...current, [feed]: seconds }));
-        }}
-      />
-
-      <div className="flex items-center gap-2">
-        {/* A quiet button's text is pulled back to line up with the fields above it. */}
-        <Button type="button" className="-ml-2" onClick={onDone}>
-          Cancel
-        </Button>
-        <Button type="submit" variant="form" disabled={save.isPending}>
-          Save
-        </Button>
+    // The sections sit twice as far apart as the fields inside them, so each
+    // section heading starts a group instead of ending the one above it.
+    <form className="flex flex-col gap-6 border-t border-line-soft pt-3" onSubmit={send}>
+      <div className="flex flex-col gap-3">
+        <Field id={`${connection.id}-label`} label="Name">
+          <Input
+            id={`${connection.id}-label`}
+            // The controller refuses an empty name, so the browser stops the
+            // save before it sends a request that would fail.
+            required
+            placeholder="work"
+            value={label}
+            onChange={(event) => {
+              edit();
+              setLabel(event.target.value);
+            }}
+          />
+        </Field>
+        <Field id={`${connection.id}-topic`} label="Topic">
+          <Input
+            id={`${connection.id}-topic`}
+            list={`${connection.id}-topics`}
+            value={topic}
+            onChange={(event) => {
+              edit();
+              setTopic(event.target.value);
+            }}
+          />
+          <datalist id={`${connection.id}-topics`}>
+            {TOPICS.map((suggestion) => (
+              <option key={suggestion} value={suggestion} />
+            ))}
+          </datalist>
+        </Field>
       </div>
 
-      {/* The form closes after a successful save, so only a failure is shown here. */}
-      <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
+      {fields.length === 0 ? null : (
+        <FormSection heading={readConfigHeading(type?.configSchema)}>
+          {fields.map((field) => (
+            <ConfigFieldRow
+              key={field.name}
+              inputId={`${connection.id}-${field.name}`}
+              field={field}
+              value={draft[field.name] ?? ""}
+              error={issues.config[field.name]}
+              onChange={(value) => {
+                edit();
+                setDraft((current) => ({ ...current, [field.name]: value }));
+              }}
+            />
+          ))}
+        </FormSection>
+      )}
+
+      {/* A type no longer in the binary polls no feeds, so it has no Polling section. */}
+      {type === undefined ? null : (
+        <PollingFields
+          idPrefix={connection.id}
+          typeName={type.displayName}
+          feeds={feeds}
+          draft={intervals}
+          errors={issues.feedIntervals}
+          onChange={(feed, seconds) => {
+            edit();
+            setIntervals((current) => ({ ...current, [feed]: seconds }));
+          }}
+        />
+      )}
+
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          {/* A quiet button's text is pulled back to line up with the fields above it. */}
+          <Button type="button" className="-ml-2" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="form" disabled={save.isPending}>
+            Save
+          </Button>
+        </div>
+
+        {/* The form closes after a successful save, so only a failure is shown here. */}
+        <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
+      </div>
     </form>
   );
 }

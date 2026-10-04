@@ -772,6 +772,10 @@ describe("Connections > configuring a connection", () => {
     );
 
     expect(screen.getByLabelText<HTMLInputElement>(/folder/i).value).toBe("inbox");
+    // The schema has no title, so its settings sit under the generic heading.
+    expect(
+      within(screen.getByRole("group", { name: "Configuration" })).getByLabelText(/folder/i),
+    ).toBe(screen.getByLabelText(/folder/i));
     expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("work");
     expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("Code");
     expect(readSuggestions("Topic")).toEqual(
@@ -940,12 +944,15 @@ describe("Connections > configuring how often a connection is polled", () => {
     expect(repos.placeholder).toBe("120");
     expect(checks.value).toBe("");
     expect(checks.placeholder).toBe("60");
+    const polling = screen.getByRole("group", { name: "Polling" });
+    expect(within(polling).getByLabelText("Repos")).toBe(repos);
     expectInDocumentOrder([
       screen.getByLabelText("Topic"),
-      screen.getByText("Polling"),
-      screen.getByText("Every 120 seconds unless you set another. At least 60 seconds."),
+      polling,
+      screen.getByText("Every 120 seconds by default. At least 60 seconds."),
       repos,
-      screen.getByText("Every 60 seconds unless you set another. At least 60 seconds."),
+      // The default of this feed is also its minimum, so the line says that once.
+      screen.getByText("Every 60 seconds by default, the shortest Glasshouse allows."),
       checks,
       within(getFormWithField("Name")).getByRole("button", { name: "Save" }),
     ]);
