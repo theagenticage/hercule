@@ -4,18 +4,22 @@ import { Button, Field, Input } from "@hercule/ui";
 import {
   buildConfigDraft,
   buildConfigFields,
+  buildFeedIntervalsDraft,
+  buildFeedIntervalsPayload,
   buildTopicsUpdate,
-  readConfigIssues,
+  readConnectionIssues,
   buildConfigPayload,
   queryKeys,
   type ConfigDraft,
   type ConnectionType,
+  type FeedIntervalsDraft,
   type HerculeClient,
   readErrorMessage,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
 import { SaveStatus } from "../../../screens/save-status";
+import { PollingFields } from "./-polling";
 
 /**
  * Suggested topics for a connection. They are suggestions, not a closed list:
@@ -24,9 +28,10 @@ import { SaveStatus } from "../../../screens/save-status";
 const TOPICS = ["Code", "Business", "Personal", "Ops"];
 
 /**
- * The form that edits an existing connection: its name, its topic, and the
- * settings its type declares. The account and the credential are fixed at
- * setup, so this form does not edit them.
+ * The form that edits an existing connection: its name, its topic, the
+ * settings its type declares, and how often each of its feeds is polled. The
+ * account and the credential are fixed at setup, so this form does not edit
+ * them.
  */
 export function ConfigureConnection({
   client,
@@ -42,9 +47,13 @@ export function ConfigureConnection({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const fields = buildConfigFields(type?.configSchema);
+  const feeds = type?.feeds ?? [];
 
   const [draft, setDraft] = useState<ConfigDraft>(() =>
     buildConfigDraft(fields, connection.config),
+  );
+  const [intervals, setIntervals] = useState<FeedIntervalsDraft>(() =>
+    buildFeedIntervalsDraft(feeds, connection.feedIntervals),
   );
   const [label, setLabel] = useState(connection.label);
   // The form shows only the first topic. Any topics after it, set through the
@@ -64,15 +73,20 @@ export function ConfigureConnection({
           ...(type === undefined
             ? {}
             : { config: buildConfigPayload(fields, draft, connection.config) }),
+          // With no feeds on screen, which includes a type no longer in the
+          // binary, the stored intervals are left exactly as they are.
+          ...(feeds.length === 0
+            ? {}
+            : { feedIntervals: buildFeedIntervalsPayload(feeds, intervals) }),
         },
       });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
   });
 
-  // An error about one setting is shown under that setting; any other error
-  // is shown at the bottom of the form.
-  const issues = readConfigIssues(save.error, fields, "config");
+  // An error about one setting or one feed is shown under its field; any
+  // other error is shown at the bottom of the form.
+  const issues = readConnectionIssues(save.error, fields, feeds);
   const failure = issues.rest ? save.error : null;
 
   // Clears the last save's error on any edit, because that error was about
@@ -126,13 +140,23 @@ export function ConfigureConnection({
           inputId={`${connection.id}-${field.name}`}
           field={field}
           value={draft[field.name] ?? ""}
-          error={issues.perField[field.name]}
+          error={issues.config[field.name]}
           onChange={(value) => {
             edit();
             setDraft((current) => ({ ...current, [field.name]: value }));
           }}
         />
       ))}
+      <PollingFields
+        idPrefix={connection.id}
+        feeds={feeds}
+        draft={intervals}
+        errors={issues.feedIntervals}
+        onChange={(feed, seconds) => {
+          edit();
+          setIntervals((current) => ({ ...current, [feed]: seconds }));
+        }}
+      />
 
       <div className="flex items-center gap-2">
         {/* A quiet button's text is pulled back to line up with the fields above it. */}

@@ -1889,8 +1889,11 @@ export const CLI = {
   },
   "connection.update": {
     command: "connection update",
-    help: "Edits what the user chose about a Connection: its label, its topics, its config. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
-    examples: [{ args: ["1f3a9c2e", "--label", "personal"] }],
+    help: "Edits a Connection's label, topics, config, and how often each of its feeds is polled. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
+    examples: [
+      { args: ["1f3a9c2e", "--label", "personal"] },
+      { args: ["1f3a9c2e", "--feed-intervals", '{"repos":300}'] },
+    ],
     fields: {
       id: {
         positional: true,
@@ -1903,6 +1906,10 @@ export const CLI = {
         help: "A Topic to file its events into. The list is replaced whole, so send every topic it is to keep. The CLI cannot clear every topic, because a flag given zero times sends nothing; clear them in the web app or through the API.",
       },
       config: { flag: "config", help: "A replacement config as inline JSON." },
+      feedIntervals: {
+        flag: "feed-intervals",
+        help: 'Seconds between polls, per feed, as inline JSON such as {"repos":300}. The map is replaced whole, and a feed left out polls at its default, so {} puts every feed back on its default. Each feed has a shortest interval its plugin allows; `hercule plugin read` shows the feeds of the plugin\'s event source.',
+      },
     },
   },
   "connection.delete": {

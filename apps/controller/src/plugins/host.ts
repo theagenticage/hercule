@@ -56,6 +56,7 @@ import {
   ConnectionTypes,
   OAUTH_TOKENS,
   PluginConfigs,
+  type FeedSource,
   type RegisteredConnectionType,
 } from "../connections";
 import { toPluginError, describeFieldIssues, truncateMessage } from "./errors";
@@ -323,6 +324,7 @@ const buildRegistrationHost = (
   live: Array<ProviderDefinition>,
   types: Array<RegisteredConnectionType>,
   kinds: Map<string, RegisteredEventKind>,
+  feedSources: Array<FeedSource>,
   actions: Map<string, RegisteredWorkflowAction>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("providers")
@@ -451,7 +453,16 @@ const buildRegistrationHost = (
     ? {
         eventSources: {
           register: (definition) =>
-            registerEventSourceContribution(manifest.id, definition, declared, kinds),
+            Effect.tap(
+              registerEventSourceContribution(manifest.id, definition, declared, kinds),
+              () =>
+                Effect.sync(() => {
+                  feedSources.push({
+                    connectionType: definition.connectionType,
+                    feeds: definition.feeds,
+                  });
+                }),
+            ),
         },
       }
     : {}),
@@ -628,10 +639,13 @@ const make = Effect.gen(function* () {
     live: Array<ProviderDefinition>,
     types: Array<RegisteredConnectionType>,
     kinds: Map<string, RegisteredEventKind>,
+    feedSources: Array<FeedSource>,
     actions: Map<string, RegisteredWorkflowAction>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
-      plugin.register(buildRegistrationHost(manifest, declared, live, types, kinds, actions)),
+      plugin.register(
+        buildRegistrationHost(manifest, declared, live, types, kinds, feedSources, actions),
+      ),
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
@@ -720,6 +734,7 @@ const make = Effect.gen(function* () {
         const registeredProviders: Array<ProviderDefinition> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
+        const registeredFeedSources: Array<FeedSource> = [];
         const registeredActions = new Map<string, RegisteredWorkflowAction>();
         // The built-in actions go into the same catalog as the plugins'
         // actions, so every reader finds all actions in one list.
@@ -769,6 +784,7 @@ const make = Effect.gen(function* () {
           const live: Array<ProviderDefinition> = [];
           const types: Array<RegisteredConnectionType> = [];
           const kinds = new Map<string, RegisteredEventKind>();
+          const feedSources: Array<FeedSource> = [];
           const actions = new Map<string, RegisteredWorkflowAction>();
           const status = yield* registerPass(
             plugin,
@@ -777,6 +793,7 @@ const make = Effect.gen(function* () {
             live,
             types,
             kinds,
+            feedSources,
             actions,
           );
           const registered = status._tag !== "errored";
@@ -785,6 +802,7 @@ const make = Effect.gen(function* () {
             registeredProviders.push(...live);
             registeredTypes.push(...types);
             for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
+            registeredFeedSources.push(...feedSources);
             for (const [id, action] of actions) registeredActions.set(id, action);
           }
           booted.set(manifest.id, {
@@ -808,6 +826,7 @@ const make = Effect.gen(function* () {
         yield* Ref.set(eventKinds, registeredKinds);
         yield* Ref.set(workflowActions, registeredActions);
         yield* connectionTypes.replace(registeredTypes);
+        yield* connectionTypes.replaceFeeds(registeredFeedSources);
 
         yield* gate.withPermits(1)(
           Effect.forEach(

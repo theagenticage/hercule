@@ -16,10 +16,16 @@ import {
   describeGitHubSignInEnding,
   describeGitHubSignInFailure,
   waitForDeviceFlow,
+  describeFeedName,
+  describeFeedInterval,
+  buildFeedIntervalsDraft,
+  buildFeedIntervalsPayload,
+  readConnectionIssues,
+  type ConnectionFeed,
   type ConnectionType,
   type DeviceFlowStep,
 } from "./connections";
-import { readErrorMessage } from "./errors";
+import { ApiError, readErrorMessage } from "./errors";
 
 describe("showsAccountBesideLabel", () => {
   const connection = {
@@ -30,6 +36,7 @@ describe("showsAccountBesideLabel", () => {
     status: "connected",
     labels: [],
     config: {},
+    feedIntervals: {},
     credentials: [],
     createdAt: "2026-10-02T08:15:00.000Z",
     updatedAt: "2026-10-02T08:15:00.000Z",
@@ -127,8 +134,81 @@ describe("listConnectionTypes", () => {
         pluginName: "Plugin paper-trail",
         setup: PAPER.setup,
         configSchema: PAPER.configSchema,
+        feeds: [],
       },
     ]);
+  });
+
+  it("gives a type the feeds of the event sources that poll for it, from any plugin", () => {
+    const [paper] = listConnectionTypes([
+      buildPlugin("paper-trail", [
+        { extensionPoint: "connection-type", id: "paper-trail/paper", definition: PAPER },
+        {
+          extensionPoint: "event-source",
+          id: "paper-trail/inbox",
+          definition: {
+            connectionType: "paper-trail/paper",
+            kinds: {},
+            feeds: {
+              letters: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
+              parcels: { defaultIntervalSeconds: 300 },
+            },
+          },
+        },
+        // Polls for another type, so its feed is not the paper type's.
+        {
+          extensionPoint: "event-source",
+          id: "paper-trail/fax",
+          definition: { connectionType: "paper-trail/fax", kinds: {}, feeds: { pages: {} } },
+        },
+      ]),
+      buildPlugin("paper-extra", [
+        {
+          extensionPoint: "event-source",
+          id: "paper-extra/stamps",
+          definition: {
+            connectionType: "paper-trail/paper",
+            kinds: {},
+            feeds: { stamps: { defaultIntervalSeconds: 600 } },
+          },
+        },
+      ]),
+    ]);
+
+    expect(paper?.feeds).toEqual([
+      { name: "letters", defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
+      // No minimum declared, so the default is the shortest interval allowed.
+      { name: "parcels", defaultIntervalSeconds: 300, minIntervalSeconds: 300 },
+      { name: "stamps", defaultIntervalSeconds: 600, minIntervalSeconds: 600 },
+    ]);
+  });
+
+  it("leaves out a feed whose declaration it cannot read", () => {
+    const [paper] = listConnectionTypes([
+      buildPlugin("paper-trail", [
+        { extensionPoint: "connection-type", id: "paper-trail/paper", definition: PAPER },
+        {
+          extensionPoint: "event-source",
+          id: "paper-trail/inbox",
+          definition: {
+            connectionType: "paper-trail/paper",
+            feeds: {
+              letters: { defaultIntervalSeconds: 120 },
+              noDefault: { minIntervalSeconds: 60 },
+              textMinimum: { defaultIntervalSeconds: 60, minIntervalSeconds: "30" },
+              notAnObject: 60,
+            },
+          },
+        },
+        {
+          extensionPoint: "event-source",
+          id: "paper-trail/broken",
+          definition: { connectionType: "paper-trail/paper", feeds: ["letters"] },
+        },
+      ]),
+    ]);
+
+    expect(paper?.feeds.map((feed) => feed.name)).toEqual(["letters"]);
   });
 
   it("tells apart two plugins that declare a type with the same name, by type and by plugin", () => {
@@ -163,6 +243,7 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   displayName: "T",
   pluginName: "P",
   setup,
+  feeds: [],
 });
 
 describe("showsPluginName", () => {
@@ -364,6 +445,7 @@ describe("waitForDeviceFlow", () => {
     status: "connected",
     labels: [],
     config: {},
+    feedIntervals: {},
     credentials: [],
     createdAt: "2026-10-02T08:15:00.000Z",
     updatedAt: "2026-10-02T08:15:00.000Z",
@@ -572,6 +654,110 @@ describe("describeGitHubSignInFailure", () => {
       status: "failed",
       line: "The sign-in did not finish, so nothing changed.",
       next: "GitHub could not be reached.",
+    });
+  });
+});
+
+const REPOS: ConnectionFeed = {
+  name: "repos",
+  defaultIntervalSeconds: 120,
+  minIntervalSeconds: 60,
+};
+const CHECKS: ConnectionFeed = {
+  name: "check_runs",
+  defaultIntervalSeconds: 60,
+  minIntervalSeconds: 30,
+};
+
+describe("describeFeedName", () => {
+  it("capitalizes the name and turns dashes and underscores into spaces", () => {
+    expect(describeFeedName(REPOS)).toBe("Repos");
+    expect(describeFeedName(CHECKS)).toBe("Check runs");
+    expect(describeFeedName({ ...REPOS, name: "pull-requests" })).toBe("Pull requests");
+  });
+});
+
+describe("describeFeedInterval", () => {
+  it("names the default and the shortest interval", () => {
+    expect(describeFeedInterval(REPOS)).toBe(
+      "Every 120 seconds unless you set another. At least 60 seconds.",
+    );
+  });
+});
+
+describe("buildFeedIntervalsDraft", () => {
+  it("holds each stored interval as text, and an empty string for a feed on its default", () => {
+    expect(buildFeedIntervalsDraft([REPOS, CHECKS], { repos: 300 })).toEqual({
+      repos: "300",
+      check_runs: "",
+    });
+  });
+
+  it("leaves out an interval stored for a feed the type no longer declares", () => {
+    expect(buildFeedIntervalsDraft([REPOS], { repos: 300, gone: 90 })).toEqual({ repos: "300" });
+  });
+});
+
+describe("buildFeedIntervalsPayload", () => {
+  it("sends each typed interval as a number and leaves out the empty fields", () => {
+    expect(
+      buildFeedIntervalsPayload([REPOS, CHECKS], { repos: " 300 ", check_runs: "  " }),
+    ).toEqual({ repos: 300 });
+  });
+
+  it("sends an empty map when every feed is back on its default", () => {
+    expect(buildFeedIntervalsPayload([REPOS, CHECKS], { repos: "", check_runs: "" })).toEqual({});
+  });
+
+  it("leaves the minimum to the controller, so a value below it is still sent", () => {
+    expect(buildFeedIntervalsPayload([REPOS], { repos: "10" })).toEqual({ repos: 10 });
+  });
+});
+
+describe("readConnectionIssues", () => {
+  const fields = [{ name: "folder" }];
+
+  it("puts each error under the setting or the feed it names", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [
+        { path: ["config", "folder"], message: "must not be empty" },
+        { path: ["feedIntervals", "repos"], message: "Poll repos every 60 seconds or slower" },
+        { path: ["feedIntervals", "repos"], message: "a second error for the same feed" },
+      ],
+    });
+
+    expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
+      config: { folder: "must not be empty" },
+      feedIntervals: { repos: "Poll repos every 60 seconds or slower" },
+      rest: false,
+    });
+  });
+
+  it("sets rest for an error on no rendered field, or a failure that is not a validation error", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [
+        { path: ["feedIntervals", "gone"], message: "no feed named gone" },
+        { path: ["config", "repos"], message: "a setting, not a feed" },
+      ],
+    });
+    expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
+      config: {},
+      feedIntervals: {},
+      rest: true,
+    });
+
+    const whole = new ApiError("validation", "refused", {
+      issues: [{ path: ["feedIntervals"], message: "too many feeds" }],
+    });
+    expect(readConnectionIssues(whole, fields, [REPOS]).rest).toBe(true);
+    expect(readConnectionIssues(new Error("offline"), fields, [REPOS]).rest).toBe(true);
+  });
+
+  it("finds nothing before the first save", () => {
+    expect(readConnectionIssues(null, fields, [REPOS])).toEqual({
+      config: {},
+      feedIntervals: {},
+      rest: false,
     });
   });
 });
