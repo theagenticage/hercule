@@ -4,7 +4,8 @@
  * - each Connection reads only its own keys;
  * - deleting a Connection deletes its state, through the foreign key;
  * - `wipePluginState` deletes the state of one plugin's Connections, and no others;
- * - an empty key is refused with a message for the plugin author.
+ * - an empty key is refused with a message for the plugin author;
+ * - a write to a Connection that is no longer ingesting dies and changes nothing.
  */
 import { describe, expect, it } from "vitest";
 import * as Cause from "effect/Cause";
@@ -14,7 +15,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "../db/testing";
 import { connectionRepository } from "./repository";
-import { connectionStateRepository } from "./state";
+import { ConnectionNotIngesting, connectionStateRepository } from "./state";
 
 const at = "2026-09-01T00:00:00.000Z";
 
@@ -111,5 +112,51 @@ describe("the Connection state store", () => {
     expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain(
       "A Connection state key cannot be empty.",
     );
+  });
+
+  it("refuses a write once the Connection is disabled, and keeps what it held", async () => {
+    const read = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const id = yield* insertConnection("work");
+        const store = state.buildStore(id);
+        yield* store.set("cursor", 1);
+        yield* Effect.flatMap(connectionRepository, (connections) =>
+          connections.update(id, { status: "disabled" }, at),
+        );
+        return {
+          set: yield* Effect.exit(store.set("cursor", 2)),
+          delete: yield* Effect.exit(store.delete("cursor")),
+          cursor: yield* store.get("cursor"),
+        };
+      }),
+    );
+
+    for (const exit of [read.set, read.delete]) {
+      expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBeInstanceOf(
+        ConnectionNotIngesting,
+      );
+    }
+    expect(read.cursor).toEqual(Option.some(1));
+  });
+
+  it("refuses a write once the Connection is deleted, and writes no row", async () => {
+    const read = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const id = yield* insertConnection("work");
+        yield* Effect.flatMap(connectionRepository, (connections) => connections.delete(id));
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          exit: yield* Effect.exit(state.buildStore(id).set("cursor", 1)),
+          rows: yield* sql`SELECT key FROM connection_state`,
+        };
+      }),
+    );
+
+    expect(Exit.isFailure(read.exit) && Cause.squash(read.exit.cause)).toBeInstanceOf(
+      ConnectionNotIngesting,
+    );
+    expect(read.rows).toEqual([]);
   });
 });
