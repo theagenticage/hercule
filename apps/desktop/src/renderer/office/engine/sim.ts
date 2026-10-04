@@ -347,9 +347,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     ]),
   );
   const stateListeners = new Set<() => void>();
-  // The colleagues the world seats in the Lounge. Client-core decides who
-  // they are; the sim only walks them there and keeps them there.
-  const loungeIds = new Set(world.lounge);
   let nextDepartureAt = 0;
   let teaTaken = false;
   const scratch = new Vector3();
@@ -1041,23 +1038,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     });
   };
 
-  /**
-   * Moves a colleague the world seats in the Lounge from its desk to an
-   * armchair that came free. It sat at its desk because the Lounge was full
-   * when it went idle. Returns false when no one can move.
-   */
-  const fillFreeLoungeSeat = (): boolean => {
-    const leaving = pickSettled(
-      (actor) =>
-        loungeIds.has(actor.colleague.id) && actor.place === "home" && actor.pose === "idle",
-    );
-    if (leaving === undefined) return false;
-    const seat = listFreeLoungeSeats(leaving.floor, leaving.rig.object.position)[0];
-    if (seat === undefined) return false;
-    walkToLounge(leaving, seat);
-    return true;
-  };
-
   /** Counts the colleagues out on an errand of their own, not counting the queue. */
   const countErrands = (): number => {
     let count = 0;
@@ -1073,7 +1053,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     const happenings: Array<readonly [() => boolean, number]> = [
       [fetchTea, 3],
       [visitWithinRoom, 3],
-      [fillFreeLoungeSeat, 2],
     ];
     // Tries the happenings in a weighted random order until one can happen.
     const order = happenings
@@ -1128,6 +1107,8 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       .filter((actor) => actor.pose === "waiting")
       .sort((a, b) => findPlace(a) - findPlace(b));
     waiting.forEach((actor) => (actor.ticket = nextTicket++));
+    // Client-core decides who sits in the Lounge; the sim only seats them there.
+    const loungeIds = new Set(world.lounge);
 
     for (const actor of all) {
       const { rig, home } = actor;
@@ -1149,8 +1130,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
         }
         continue;
       }
-      // The colleagues the world seats in the Lounge sit there while it has
-      // armchairs; the rest sit at their desks until one comes free.
       if (loungeIds.has(actor.colleague.id)) {
         const seat = listFreeLoungeSeats(home.floor, home.position)[0];
         if (seat !== undefined) {
@@ -1188,8 +1167,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
   const setColleagueState = (colleagueId: string, state: ColleagueState, inLounge: boolean) => {
     const actor = actors.get(colleagueId);
     if (actor === undefined) return;
-    if (inLounge) loungeIds.add(colleagueId);
-    else loungeIds.delete(colleagueId);
     const from = actor.pose;
     recordState(colleagueId, state);
     if (state.pose === from) return;

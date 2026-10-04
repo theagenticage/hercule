@@ -154,10 +154,10 @@ function planDeskGrid(count: number, maxCols: number, desk: Footprint): DeskGrid
 }
 
 /**
- * Returns how many desks a room puts side by side: three, or more for a big
- * group, so a room with many desks grows wider rather than deeper. Its row of
- * the floor is as deep as its deepest room, so one deep room would leave its
- * neighbours deep and empty.
+ * Returns how many desks, or Lounge seating groups, a room puts side by side:
+ * three, or more for a big group, so a room with many grows wider rather than
+ * deeper. Its row of the floor is as deep as its deepest room, so one deep
+ * room would leave its neighbours deep and empty.
  */
 function decideColumnLimit(count: number): number {
   return Math.max(3, Math.ceil(Math.sqrt(count * 2)));
@@ -216,7 +216,13 @@ function computeFloorInsideWalls(rect: Rect): Rect {
   };
 }
 
-/** Builds a seating group on a rug: two armchairs facing south, one each side facing in. */
+/** How many armchairs a seating group in the Lounge has. */
+const SEATING_GROUP_ARMCHAIRS = 4;
+
+/**
+ * Builds a seating group on a rug: two armchairs facing south, one each side
+ * facing in, `SEATING_GROUP_ARMCHAIRS` in all.
+ */
 function placeSeatingGroup(
   x: number,
   z: number,
@@ -316,8 +322,8 @@ function readFixedRoom(room: FixedRoom): {
  * - one room per thread room of the world, in its order, with a desk for each
  *   of its colleagues in desk order;
  * - the fixed rooms of `map`, in its order, along the street, the last one
- *   holding the front door. The Lounge grows a seating group as the fleet
- *   grows.
+ *   holding the front door. The Lounge has an armchair for every
+ *   colleague.
  *
  * `directory` is the fleet's board, which stands in the Lobby.
  */
@@ -338,13 +344,12 @@ export function designRooms(world: World, map: OfficeMap, directory: Object3D): 
       ),
     ),
   );
-  const loungeGroups = world.colleagues.length <= 24 ? 2 : world.colleagues.length <= 60 ? 3 : 4;
   const front = map.fixedRooms.map((room) => {
     switch (room.kind) {
       case "triage-room":
         return add(designTriageRoom(room, sizes));
       case "lounge":
-        return add(designLounge(room, loungeGroups));
+        return add(designLounge(room, world.colleagues.length));
       case "your-office":
         return add(designYourOffice(room));
       case "lobby":
@@ -428,11 +433,19 @@ function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
   };
 }
 
-/** Designs the Lounge: seating groups on rugs, the tea trolley, plants by the windows. */
-function designLounge(fixed: FixedRoom, groups: number): RoomDesign {
+/**
+ * Designs the Lounge: seating groups on rugs, the tea trolley, plants by the
+ * windows. Every idle colleague sits in the Lounge, and all of them can be
+ * idle at once, so the Lounge has an armchair for each of `colleagueCount`
+ * colleagues, and at least two seating groups.
+ */
+function designLounge(fixed: FixedRoom, colleagueCount: number): RoomDesign {
   const { has, offers } = readFixedRoom(fixed);
-  const cols = Math.min(groups, 2);
-  const rows = Math.ceil(groups / cols);
+  const needed = Math.max(2, Math.ceil(colleagueCount / SEATING_GROUP_ARMCHAIRS));
+  const rows = Math.ceil(needed / decideColumnLimit(needed));
+  const cols = Math.ceil(needed / rows);
+  // Every cell of the grid gets a group, so no corner of the room stands bare.
+  const groups = rows * cols;
   // A seating group is open to the south, so a colleague reaches its
   // armchairs from inside it. The cells leave about 1.2 metres between
   // groups, and between rows, to walk round to that open side.

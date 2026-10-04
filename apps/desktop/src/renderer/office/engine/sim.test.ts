@@ -90,6 +90,8 @@ interface OpenOffice {
    * wait on promises.
    */
   readonly advance: (seconds: number) => Promise<void>;
+  /** Checks whether the colleague with id `id` stands or sits in the Lounge. */
+  readonly isInLounge: (id: string) => boolean;
 }
 
 const opened: Sim[] = [];
@@ -110,6 +112,7 @@ const openOffice = (sessions: ReadonlyArray<Session>): OpenOffice => {
   const stage = { requestRender: () => {} } as unknown as Stage;
   const sim = buildSim({ world, office, rigs, stage });
   opened.push(sim);
+  const lounge = office.rooms.find((room) => room.kind === "lounge")!;
   let time = 0;
   return {
     office,
@@ -122,6 +125,7 @@ const openOffice = (sessions: ReadonlyArray<Session>): OpenOffice => {
         sim.update({ dt: 0.05, time });
       }
     },
+    isInLounge: (id) => lounge.bounds.containsPoint(rigs.get(id)!.object.position),
   };
 };
 
@@ -146,6 +150,32 @@ afterEach(() => {
   for (const sim of opened.splice(0)) sim.dispose();
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("the Lounge", () => {
+  it.each([1, 8, 9, 16, 25, 60])("has an armchair for each of %i colleagues", (count) => {
+    const { office } = openOffice(buildThreads(count, "idle"));
+
+    expect(office.spots.lounge.length).toBeGreaterThanOrEqual(count);
+  });
+
+  it("seats every idle colleague when the office opens", () => {
+    const { rigs, isInLounge } = openOffice(buildThreads(16, "idle"));
+
+    expect([...rigs.keys()].filter(isInLounge)).toHaveLength(16);
+  });
+
+  it("seats a colleague who goes idle while every other colleague sits there", async () => {
+    const threads = buildThreads(16, "idle");
+    threads[0] = buildSession({ id: "t0", title: "t0", runnerId: MOSS.id, status: "busy" });
+    const { sim, advance, isInLounge } = openOffice(threads);
+    expect(isInLounge("t0")).toBe(false);
+
+    sim.setColleagueState("t0", { pose: "idle", request: null, stateLabel: "idle" }, true);
+    await advance(60);
+
+    expect(isInLounge("t0")).toBe(true);
+  });
 });
 
 describe("a visit", () => {

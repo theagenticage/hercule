@@ -215,7 +215,10 @@ interface OfficeSpots {
   readonly yourDesk: Spot;
   /** The queue of colleagues waiting on the user, head of the queue first. */
   readonly queue: ReadonlyArray<Spot>;
-  /** Places to sit when idle away from the desk: the lounge's chairs. */
+  /**
+   * Places to sit when idle away from the desk: the lounge's chairs. There is
+   * one for every colleague, so every idle colleague finds a free one.
+   */
   readonly lounge: ReadonlyArray<Seat>;
   /** Where a colleague fetches tea: in front of the tea trolley, facing it. */
   readonly tea: Spot | null;
