@@ -88,6 +88,18 @@ Versions are still not compared, and section 2.4 is unchanged: the only hard ref
   - a controller that does not know `subagentId` on an event drops it and books a subagent's turn to the session's own agent, so the session's status, its Requests and an assistant's reply follow the wrong agent without any error.
   If [#431](https://github.com/theagenticage/hercule/issues/431) and this change ship in one release, they share one bump.
 
+*(Amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83).)* **Agent steps ride the session frames and the workspace step frames.** An agent step is a Session, and the engine treats it as a workspace step ([./07-workflows.md](./07-workflows.md) section 4.2).
+
+- **`TurnInput` gains `step?: { runId, stepId, iteration }`**, the step key. The controller sets it on the input that carries a step's prompt, the first one and each later iteration. A turn whose input has no step key is an ordinary turn and gives no step result.
+- **The runner decides the step's result when that turn ends**, and sends it as a `WorkspaceStepResult`. It saves the result first, in the same store as a workspace action's. A step whose session has no workspace uses a fixed folder in place of the workspace id. The controller completes the record and settles the step, and the runner deletes the file, as for `git.commit`.
+- **`WorkspaceStepStart` is a union of two variants.** The `action` variant is the frame above; its `kind: "action"` may be left out, so an older controller's frame still decodes. The `agent` variant is `{ kind: "agent", runId, stepId, iteration, sessionId, workspaceId | null }`. The prompt rides the session's input, so the agent variant only asks the runner for the step's result. The controller sends it on connect for each `running` agent step record whose prompt the runner already had. The runner answers:
+  - with the saved result, when the turn has ended;
+  - when the turn ends, when it is still running;
+  - with `interrupted`, when it has no trace of the turn, for example after the runner restarted. The step fails with `session-failed`, and the turn is not run again.
+- **`WorkspaceStepResult`'s failure codes gain two**, for agent steps. `schema_failure`: the step has an `outputSchema` and the turn gave no valid structured result. `session_failed`: the turn failed or was interrupted, or the session exited, crashed, timed out or was stopped during the turn; the message names which.
+- **Agent steps do not wait for the workspace.** The runner runs a workspace's action steps one at a time, but not its agent steps, because parallel sessions may share one workspace.
+- **This amends the capability list above: it also holds `agentSteps`**, `AGENT_STEPS_CAPABILITY` in `@hercule/protocol`. A runner lists it when its build can run an agent step. The controller pins a run with an agent step only to a runner whose negotiated capabilities hold it (section 5.1).
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -201,6 +213,13 @@ No load balancing, no migration, no failover.
 - A plan that some runner offers, but no placeable one, starts, and its step record stays `pending` until a capable runner is placeable, as above.
 - **At pinning time**, if every runner that offered the plan's workspace actions has been retired or reserved since the run started, the run fails with `workspace-failed` at the step about to start, with the same message. Retiring a runner wakes every run waiting for a runner, so such a run fails at once rather than waiting for a runner that will never come.
 - A run that is already pinned is not checked again. If its runner comes back on a build without the action, the runner answers the step with `unsupported_action`.
+
+*(Amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83).)* **Pinning a run with an agent step.** An agent step is a workspace step, so the run is pinned in the transaction that starts its first agent step or workspace action, by the rules above, with two more conditions on the runner:
+
+- it hosts the provider instance of the step's Agent;
+- its negotiated capabilities hold `agentSteps` (section 2.2).
+
+A run with an agent step and no workspace policy is still pinned. Its sessions have no workspace, and all of them run on that runner.
 
 ### 5.2 Pin once landed
 

@@ -15,7 +15,7 @@ One named thing the public API can do (`task.create`, `session.spawn`), the same
 _Avoid_: endpoint, command (bare), method
 
 **Subscription Target**:
-What a session-held subscription waits on: a run, a session, an External Ref, or a Permission Request. The shorthand an agent types (`run:r_3`).
+What a session-held subscription waits on: a run, a session, an External Ref, or a Permission Request. The shorthand an agent types (`run:r_3`). A run-held subscription's target is the signal trigger it serves, which no session can register.
 _Avoid_: filter, topic
 
 ### Work
@@ -372,7 +372,7 @@ The one consumer of the event log. It walks the events past its own durable curs
 _Avoid_: matcher, dispatcher, event bus
 
 **Routing Table**:
-The routes one kind of destination owns: one per live subscription, or one per active start trigger of an enabled workflow. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
+The routes one kind of destination owns: one per live session-held subscription, one per live run-held subscription, or one per active start trigger of an enabled workflow. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
 
 **Delivery**:
 The downstream consumer of one kind of row. It reads its own rows, whoever wrote them, and acts on the ones that can act now; idempotent, so a crash between a write and its delivery loses nothing.
@@ -414,7 +414,7 @@ One entry of a run into a step, numbered 1, 2, 3 in the order the run came to it
 _Avoid_: retry (a run never retries a step), turn (a turn belongs to a session)
 
 **Step Record**:
-What one step, or one signal trigger, did in one iteration of a run: its status, times, output or error. Created `pending`, then `running` and `completed`, `failed` or `cancelled`, or `skipped`. Its status only moves forward: a step that runs again gets a new record.
+What one step, or one signal trigger, did in one iteration of a run: its status, times, output or error. Created `pending`, then `running` and `completed`, `failed` or `cancelled`, or `skipped`. Its status only moves forward: a step that runs again gets a new record. A signal trigger's record is written `pending` by the Event Router when an event matches, and the run marks it `completed` as it fires the trigger's edges.
 _Avoid_: step run, step instance
 
 **Workflow Action**:
@@ -434,7 +434,7 @@ A Workflow Action that runs on the run's runner, in the run's workspace, such as
 _Avoid_: runner action, remote action, exec
 
 **Workspace Step**:
-A step whose work happens in the run's workspace on a runner: in v1, an action step that calls a Workspace Action. The controller sends it to the run's runner and the runner reports how it ended.
+A step whose work happens on the run's runner: an action step that calls a Workspace Action, or an agent step, whose session runs there. The run is pinned to its runner when its first workspace step starts, and the runner reports how each workspace step ended.
 _Avoid_: remote step, runner step
 
 **Step Key**:

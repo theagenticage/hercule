@@ -68,7 +68,7 @@ The matcher is one consumer with one durable cursor over the event log. For each
 3. **Fan out to all matches.** Delivery is non-exclusive: one event may spawn several runs and signal several subscribers.
 4. Insert **effect rows**:
    - a pending run for each matched start trigger, ~~`UNIQUE(triggerId, eventId)`~~ `UNIQUE(workflowId, triggerId, eventId)` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78), below)*;
-   - a signal delivery for each matched run-held subscription, `UNIQUE(subscriptionId, eventId)`;
+   - a signal delivery for each matched run-held subscription, ~~`UNIQUE(subscriptionId, eventId)`~~ which is the signal node's `pending` step record, unique per run, signal node and event *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83), below)*;
    - a queued session input for each matched session-held subscription, `UNIQUE(subscriptionId, eventId)`;
    - a **held event** for a matched start trigger whose spawn bound has tripped (section 4.1), ~~`UNIQUE(triggerId, eventId)`~~ `UNIQUE(workflowId, triggerId, eventId)` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78), below)*.
 5. Advance the cursor.
@@ -92,6 +92,13 @@ The warning is a `health` field on the trigger row (and on the subscription row 
 - The health records which of the three failed: the evaluation, the scheduling or the start. Only the same stage clears it: a clean evaluation clears an evaluation error, the Scheduler clears a scheduling error when it next computes the trigger's fire time, and a run that starts clears a start error. So a trigger whose filter is fine but whose runs cannot start stays in `error`, instead of moving between `ok` and `error` on every event. A failure at another stage than the recorded one counts as a move to `error`, with a notification of its own.
 - A trigger has no live topic of its own, so a change to its health is announced on the live topic `workflow`.
 - Saving the workflow returns to `ok`, without a notification, each start trigger whose definition changed: its `on` (filter, event kind, Connection, schedule or timezone) or its input mapping. A trigger the save leaves as it was keeps its error, because the error is still true of it ([./07-workflows.md](./07-workflows.md) section 2).
+
+*(Amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83).)* **Run-held subscriptions as built.** The event router matches them through a third routing table, beside the ones for session-held subscriptions and start triggers. The session-held table reads only session-held subscriptions.
+
+- **The signal delivery is a step record.** No separate table holds signal deliveries. In the routing transaction, a match whose correlation holds writes a `pending` step record for the signal node, holding the output and the event's id ([./07-workflows.md](./07-workflows.md) section 2.4). This is the same pattern as the other two kinds of match: a session-held match writes a queued session input, and a start trigger writes a trigger effect.
+- **Unique per run, signal node and event.** Routing an event again after enrichment (section 4.2) finds the record already written and writes nothing.
+- **The run consumes it.** There is no separate delivery worker. The run is woken after the routing transaction commits, and its execution marks the record `completed` and fires the node's outgoing edges, in one transaction.
+- **A correlation error on the event side** sets the subscription's health, as for a session-held subscription. A run-side reference that does not resolve yet is a no-match, with no health change.
 
 **Expressions.** All four expression sites (start-trigger filters, signal-trigger correlation keys, step and edge conditions) use CEL, evaluated by `@marcbachmann/cel-js` behind a Hercule-owned wrapper, context variables dyn-typed ([./07-workflows.md](./07-workflows.md); research/expression-language.md (branch `research/expression-language`)). Filters see the whole envelope as `event`; the raw event never leaks into the frozen plan - the trigger's input mapping copies what the run needs.
 
@@ -211,7 +218,7 @@ Two ways an event enters work, both evaluated by the same matcher:
 |---|---|---|
 | Lives on | a workflow, as a stored row | a run (instantiated from a signal trigger) or a session (registered directly) |
 | Condition | static: kind, Connection selection, CEL filter | kind/shape condition plus a correlation |
-| Effect | spawns a new run (or a held event when the bound has tripped) | resumes the holder: signal delivery to the run, queued input to the session |
+| Effect | spawns a new run (or a held event when the bound has tripped) | resumes the holder: signal delivery to the run (a `pending` step record of the signal node, amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83)), queued input to the session |
 | Lifetime | while the workflow is enabled and the trigger is `active` (not `paused`) | while the holder is alive (section 7) |
 
 ## 7. Subscriptions
@@ -223,8 +230,16 @@ A Subscription is a live, correlated claim on future events held by a run or a s
 - **Instantiated at run start**, one per signal trigger in the frozen plan ([./07-workflows.md](./07-workflows.md)). Editing the workflow never affects them.
 - **Correlate lazily.** A signal trigger declares two expressions: an event-side expression over `event` and a holder-side expression over run state (`inputs.*`, `steps.<id>.output.*`). Both evaluate at match time against the run's *current* state; they match when the values are equal. There is no resolvability analysis at run start: an unresolved reference (the step that produces the PR number has not run yet) is simply a no-match for that event.
 - **Alive until the run reaches a terminal state** (completed, failed, cancelled). No timeouts in v1. A run waiting forever is visible in the run view and cancelable by the user. Consequence for workflow authors: design runs to end at the right moment (correlate on PR-merged, not PR-created).
-- Delivery is a signal-delivery effect row; consuming it, the run fires the signal node's outgoing edges and records the firing as a step record ([./07-workflows.md](./07-workflows.md) section 2.4). A subscription may match any number of times over the run's life.
+- Delivery is ~~a signal-delivery effect row; consuming it, the run fires the signal node's outgoing edges and records the firing as a step record~~ the signal node's `pending` step record; consuming it, the run marks the record `completed` and fires the signal node's outgoing edges *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83), below)* ([./07-workflows.md](./07-workflows.md) section 2.4). A subscription may match any number of times over the run's life.
 - **Not held before the key exists.** An event that arrives before the run-side correlation value resolves is a no-match and is never revisited; the matcher does not replay past events against later run state (Post-v1). The window is negligible in practice because the key appears in the same step that creates the thing the event is about.
+
+*(Amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83).)* **Run-held subscriptions as built.**
+
+- **Opened in the transaction that writes the run**, whether a request or a trigger effect started it, and ended in the transaction that ends the run, however it ends.
+- **The holder is `{ kind: "run", id }`**, written `run:<id>` on the CLI. The target is `{ kind: "signal", triggerId }`, naming the signal trigger in the run's plan. `subscription.create` never accepts that target: only a run opens a run-held subscription.
+- **The condition** is the signal trigger's selector written as CEL: its event kind, its Connection selection and its filter. The correlation is checked by the run after the condition matches (section 4).
+- **Only the run ends it.** `subscription.cancel` refuses a run-held subscription with `invalid_state`, saying that it ends when its run ends and that the caller should cancel the run ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2).
+- **`run.read` lists the live ones** as `subscriptions`, and `hercule subscription list --holder run:<id>` lists them too.
 
 ### 7.2 Session-held subscriptions
 
