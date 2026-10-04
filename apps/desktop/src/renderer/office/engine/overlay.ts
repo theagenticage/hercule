@@ -47,7 +47,7 @@ import {
 } from "./contracts";
 import { countColleaguesByRoom, isWaiting } from "./room-counts";
 import { isCameraMoving, isShown, readCameraView } from "./camera-rig";
-import { isColleagueHidden, registerTagHitTest } from "./picking";
+import { isColleagueHidden, registerOverlayHitTest, type OverlayHit } from "./picking";
 import { readColleagueStates, setOffice, type TagMode } from "../office-store";
 import "./overlay.css";
 
@@ -665,9 +665,10 @@ export function createOverlay(
     );
   };
 
-  const findTagAt = (clientX: number, clientY: number): string | null => {
+  const findHitAt = (clientX: number, clientY: number): OverlayHit | null => {
     const found = findShownAt(clientX, clientY);
-    return found?.kind === "tag" ? found.id : null;
+    if (found === null) return null;
+    return found.kind === "tag" ? { kind: "tag", colleagueId: found.id } : { kind: "room" };
   };
 
   const findRoomLabelAt = (clientX: number, clientY: number): RoomLabel | null => {
@@ -681,9 +682,11 @@ export function createOverlay(
     if (next !== null) tagsById.get(next)?.element.classList.add(className);
   };
 
-  registerTagHitTest(rigs, findTagAt);
+  registerOverlayHitTest(rigs, findHitAt);
 
-  // Room labels take clicks themselves; a colleague's tag goes through the picker.
+  // Room labels take clicks themselves. The picker picks no colleague under a
+  // label, so one click never chooses both a colleague and a room. A
+  // colleague's tag goes through the picker.
   let pressedAt: { x: number; y: number } | null = null;
   let hotLabel: RoomLabel | null = null;
   const onPointerDown = (event: PointerEvent): void => {
@@ -746,7 +749,7 @@ export function createOverlay(
     },
     dispose() {
       disposed = true;
-      registerTagHitTest(rigs, null);
+      registerOverlayHitTest(rigs, null);
       resizeObserver.disconnect();
       container.removeEventListener("pointerdown", onPointerDown);
       container.removeEventListener("pointerup", onPointerUp);

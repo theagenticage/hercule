@@ -1,22 +1,26 @@
 /**
- * Tests where the overlay places the colleagues' name tags. The tests check
- * that:
+ * Tests where the overlay places the colleagues' name tags and the room
+ * labels, and what the picker finds under them. The tests check that:
  *
  * - of two waiting colleagues whose tags overlap, the farther one's tag moves
  *   up to make way;
  * - hovering the tag that moved up moves no tag, so the tag under the pointer
- *   stays the one the user points at.
+ *   stays the one the user points at;
+ * - a room label drawn over a colleague takes the pointer, so a click on the
+ *   label picks the room and not the colleague behind it.
  *
  * jsdom lays nothing out, so every tag measures as 160 by 24 CSS pixels and
  * the overlay's box is 1000 by 800.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Object3D, PerspectiveCamera } from "three";
+import { Box3, Object3D, PerspectiveCamera, Vector3 } from "three";
 import type { OpenRequest, Session } from "@hercule/contract";
 import { MOSS, buildSession } from "@hercule/client-core/threads/testing";
 import { buildWorld } from "../world/build-world";
-import type { ColleagueRig } from "./contracts";
+import { placeCamera } from "./camera-rig";
+import type { ColleagueRig, RoomInfo } from "./contracts";
 import { createOverlay } from "./overlay";
+import { createPicker } from "./picking";
 
 const WIDTH = 1000;
 const HEIGHT = 800;
@@ -34,7 +38,11 @@ const buildAsking = (id: string): Session =>
   buildSession({ id, title: id, runnerId: MOSS.id, status: "busy", openRequest: REQUEST });
 
 const WORLD = buildWorld({
-  sessions: [buildAsking("near"), buildAsking("far")],
+  sessions: [
+    buildAsking("near"),
+    buildAsking("far"),
+    buildSession({ id: "idle", title: "idle", runnerId: MOSS.id }),
+  ],
   projects: [],
   workspaces: [],
   runners: [MOSS],
@@ -75,6 +83,10 @@ const readTagPlaces = (container: HTMLElement) =>
 const readY = (transform: string | null): number =>
   Number(/translate3d\([^,]+, ([-\d.]+)px/.exec(transform ?? "")?.[1]);
 
+/** Returns the horizontal position in a `translate3d(x, y, 0)` transform. */
+const readX = (transform: string | null): number =>
+  Number(/translate3d\(([-\d.]+)px/.exec(transform ?? "")?.[1]);
+
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(160);
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(24);
@@ -110,5 +122,44 @@ describe("the name tags", () => {
 
     expect(readTagPlaces(container)).toEqual(before);
     overlay.dispose();
+  });
+});
+
+describe("the room labels", () => {
+  it("take the pointer from a colleague they cover", () => {
+    const container = createContainer();
+    const canvas = document.createElement("canvas");
+    canvas.getBoundingClientRect = () => new DOMRect(0, 0, WIDTH, HEIGHT);
+    const camera = new PerspectiveCamera(45, WIDTH / HEIGHT, 0.1, 100);
+    // Far enough away for the overview, where the room labels show.
+    placeCamera(camera, { target: new Vector3(), distance: 40, azimuth: 0, elevation: 80 });
+    // An idle colleague has no tag in the overview, so only its body can be picked.
+    const rigs = new Map([["idle", buildRig("idle", 0, 0)]]);
+    // The room's label hangs over the room's centre, where the colleague stands.
+    const room: RoomInfo = {
+      id: "webshop",
+      label: "Webshop",
+      kind: "project",
+      floor: 0,
+      bounds: new Box3(new Vector3(-3, 0, -3), new Vector3(3, 3, 3)),
+      view: { target: new Vector3(), distance: 12, azimuth: 0, elevation: 45 },
+      tint: null,
+    };
+    const picker = createPicker(canvas, camera, rigs);
+    const overlay = createOverlay(container, container, camera, rigs, [room], new Map());
+    overlay.update();
+    const label = container.querySelector<HTMLElement>(".office-room-label")!;
+    expect(label.classList.contains("is-shown")).toBe(true);
+    const x = readX(label.style.transform);
+    const y = readY(label.style.transform);
+
+    expect(picker.pick(x, y)).toBeNull();
+    overlay.dispose();
+
+    // With no label in the way, the same point picks the colleague.
+    const bare = createOverlay(container, container, camera, rigs, [], new Map());
+    bare.update();
+    expect(picker.pick(x, y)).toBe("idle");
+    bare.dispose();
   });
 });

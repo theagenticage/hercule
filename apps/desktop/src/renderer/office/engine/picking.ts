@@ -13,9 +13,11 @@
  * the user sees.
  *
  * A name tag sits over its colleague and is part of it: a pointer over a tag
- * picks the tag's colleague first. The tags let pointer events through to
- * the canvas, so the director's hover and click handlers see them; the
- * overlay tells the picker where its tags are with `registerTagHitTest`.
+ * picks the tag's colleague first. A room label hides what it is drawn
+ * over: a pointer over a label picks no colleague, and the label takes the
+ * click itself. The tags and labels let pointer events through to the
+ * canvas, so the director's hover and click handlers see them; the overlay
+ * tells the picker where they are with `registerOverlayHitTest`.
  */
 import { Vector3, type PerspectiveCamera } from "three";
 import { isHiddenByWall, isShown } from "./camera-rig";
@@ -34,23 +36,27 @@ const SLACK_PIXELS = 14;
 /** Half a body's width, in metres, as the picker measures it on screen. */
 const BODY_RADIUS = 0.26;
 
-/** A function that returns the colleague whose name tag lies under a point of the page, or null. */
-type TagHitTest = (clientX: number, clientY: number) => string | null;
+/** What the overlay shows under a point of the page: a colleague's name tag, or a room label. */
+export type OverlayHit =
+  { readonly kind: "tag"; readonly colleagueId: string } | { readonly kind: "room" };
 
-/** The tag hit test of the overlay drawn over each set of rigs. */
-const tagHitTests = new WeakMap<ReadonlyMap<string, ColleagueRig>, TagHitTest>();
+/** A function that returns what the overlay shows under a point of the page, or null for nothing. */
+type OverlayHitTest = (clientX: number, clientY: number) => OverlayHit | null;
+
+/** The hit test of the overlay drawn over each set of rigs. */
+const overlayHitTests = new WeakMap<ReadonlyMap<string, ColleagueRig>, OverlayHitTest>();
 
 /**
- * Registers how to find a name tag under the pointer for the overlay drawn
- * over `rigs`, or removes it with null. A picker over the same `rigs` map
- * asks the test before it looks at the bodies.
+ * Registers how to find what the overlay drawn over `rigs` shows under the
+ * pointer, or removes it with null. A picker over the same `rigs` map asks
+ * the test before it looks at the bodies.
  */
-export function registerTagHitTest(
+export function registerOverlayHitTest(
   rigs: ReadonlyMap<string, ColleagueRig>,
-  test: TagHitTest | null,
+  test: OverlayHitTest | null,
 ): void {
-  if (test === null) tagHitTests.delete(rigs);
-  else tagHitTests.set(rigs, test);
+  if (test === null) overlayHitTests.delete(rigs);
+  else overlayHitTests.set(rigs, test);
 }
 
 const crown = new Vector3();
@@ -103,8 +109,9 @@ export function createPicker(
   const head = new Vector3();
   return {
     pick(clientX, clientY) {
-      const fromTag = tagHitTests.get(rigs)?.(clientX, clientY) ?? null;
-      if (fromTag !== null) return fromTag;
+      // The overlay lies over the canvas, so what it shows comes first.
+      const shown = overlayHitTests.get(rigs)?.(clientX, clientY) ?? null;
+      if (shown !== null) return shown.kind === "tag" ? shown.colleagueId : null;
       const box = canvas.getBoundingClientRect();
       if (box.width === 0 || box.height === 0) return null;
       camera.updateMatrixWorld();
