@@ -88,6 +88,31 @@ describe("how a GitHub failure becomes the step's error", () => {
     expect(error.message).toContain("60 seconds");
   });
 
+  it("reports a 403 with no requests left as rate_limited, even without Retry-After", async () => {
+    const stub = stubGithub(() => ({
+      status: 403,
+      body: { message: "API rate limit exceeded for user ID 1." },
+      headers: { "x-ratelimit-remaining": "0" },
+    }));
+
+    const error = await readFailure(stub);
+
+    expect(error.code).toBe("rate_limited");
+    expect(error.message).toContain("Try again later.");
+  });
+
+  it("reports a 403 as forbidden when requests are left, whatever its message says", async () => {
+    const stub = stubGithub(() => ({
+      status: 403,
+      body: { message: "Mentions the rate limit, but is not one." },
+      headers: { "x-ratelimit-remaining": "4999" },
+    }));
+
+    const error = await readFailure(stub);
+
+    expect(error.code).toBe("forbidden");
+  });
+
   it("reports a 429 as rate_limited", async () => {
     const error = await readFailure(
       stubAnswer(429, { message: "You have exceeded a secondary rate limit." }),

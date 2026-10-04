@@ -149,6 +149,17 @@ export const requestGithub = (
   });
 
 /**
+ * Checks whether a response is GitHub refusing the request because of a rate
+ * limit. That is a 429, or a 403 that carries `Retry-After` or reports no
+ * requests left in the window. Any other 403 means the account may not do
+ * what was asked.
+ */
+export const isRateLimited = (response: GithubResponse): boolean =>
+  response.status === 429 ||
+  (response.status === 403 &&
+    (response.retryAfterSeconds !== undefined || response.rateLimitRemaining === 0));
+
+/**
  * Returns the token in a GitHub Connection's credentials: the pasted `pat`
  * field, or the `accessToken` the device flow obtained. Returns undefined when
  * neither is there.
