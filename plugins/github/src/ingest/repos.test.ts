@@ -751,10 +751,11 @@ describe("the repos feed", () => {
     expect(assigned[1]).toBe(assigned[0]);
   });
 
-  it("emits no comment or review from before the first poll, except once for one in the newest update's second", async () => {
+  it("emits no comment or review from before the first poll, even one in the newest update's second", async () => {
     const repository = buildRepository();
     // The newest update is a pull request closed just before the first poll,
-    // with a review in an earlier second and another in its update's second.
+    // with a review in an earlier second, and a review and a comment in its
+    // update's second.
     repository.issues[1] = {
       ...repository.issues[1]!,
       state: "closed",
@@ -774,16 +775,17 @@ describe("the repos feed", () => {
     ];
     const harness = await baseline(repository);
 
+    // Every listing after the baseline repeats the newest item, so two polls
+    // that GitHub does not answer with 304 both diff it again.
     const { result } = await poll(harness, answerFrom(repository));
+    repository.etag = '"v2"';
+    await poll(harness, answerFrom(repository));
 
-    // GitHub's times count whole seconds, so the feed cannot tell a review or
-    // comment made in the baseline's own second from one made just after it.
-    // It emits each once rather than risk losing a new one.
     expect(Result.isSuccess(result)).toBe(true);
-    expect(listEvents(harness)).toEqual([
-      "github.pr.review-submitted pr.review-submitted:100",
-      "github.pr.commented pr.commented:500",
-    ]);
+    expect(harness.events).toEqual([]);
+    expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
+      items: { "2": { fromBaseline: true } },
+    });
 
     // A label added after the close is diffed, because the closed item is in the snapshot.
     repository.issues[1] = {
@@ -791,15 +793,14 @@ describe("the repos feed", () => {
       labels: [{ name: "late" }],
       updated_at: "2026-10-01T10:30:00Z",
     };
-    repository.etag = '"v2"';
+    repository.etag = '"v3"';
 
     await poll(harness, answerFrom(repository));
 
-    expect(listWrittenEvents(harness)).toEqual([
-      "github.pr.review-submitted pr.review-submitted:100",
-      "github.pr.commented pr.commented:500",
+    expect(listEvents(harness)).toEqual([
       `github.pr.labeled pr.labeled:${REPO}#2:2026-10-01T10:00:00Z:${computeDigest(["+late"])}`,
     ]);
+    expect(harness.state.get(`repos/${REPO}`)).not.toHaveProperty(["items", "2", "fromBaseline"]);
   });
 
   it("emits reopened for an old issue missing from the snapshot only when GitHub says it was reopened", async () => {

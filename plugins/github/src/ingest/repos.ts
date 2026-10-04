@@ -42,9 +42,12 @@
  * Comparing with the item's own snapshot, rather than the cursor, keeps a
  * comment that was created in the cursor's second on another item. "At or
  * after" keeps one created in the snapshot's own second too; its dedup key
- * is its id, so seeing it again in the next poll writes nothing. The price:
- * a comment or review that was already there at the snapshot, in that same
- * second, is emitted once, even when the snapshot is the baseline.
+ * is its id, so seeing it again in the next poll writes nothing. A snapshot
+ * the baseline recorded is the exception: the baseline emitted nothing, so
+ * what is in its second existed before the feed started, and only a comment
+ * or review strictly after it is new. The snapshot keeps that mark until the
+ * item's `updated_at` moves. The price: a comment or review created in the
+ * baseline's own second, just after the baseline ran, is never emitted.
  *
  * The keys of the events a diff finds hold the snapshot's `updatedAt`: the
  * state the diff started from. A poll that emitted its events but failed
@@ -81,6 +84,12 @@ const ItemSnapshot = Schema.Struct({
   updatedAt: Schema.String,
   /** The head commit of an open pull request, to tell when a new one was pushed. */
   headSha: Schema.optionalKey(Schema.String),
+  /**
+   * True when the baseline recorded this item and its `updated_at` has not
+   * moved since. Nothing was emitted for the item's update second then, so
+   * a comment or review from that second is not new.
+   */
+  fromBaseline: Schema.optionalKey(Schema.Boolean),
 });
 
 type ItemSnapshot = Schema.Schema.Type<typeof ItemSnapshot>;
@@ -201,16 +210,26 @@ const isNewItem = (
 ): boolean => previous === undefined && isAtOrAfter(issue.created_at, cursor);
 
 /**
- * Returns the time from which a comment or review on an item is new: the
- * item's snapshot, or the cursor for an old item with no snapshot. Returns
- * undefined for a new item, whose every comment and review is new.
+ * Returns the time from which a comment or review on an item is new:
+ *
+ * - the item's snapshot;
+ * - one second after it, when the baseline recorded the snapshot, because
+ *   whatever was there in that second existed before the feed started;
+ * - the cursor, for an old item with no snapshot;
+ * - undefined for a new item, whose every comment and review is new.
+ *
+ * Adding one second means "strictly after" because GitHub's timestamps count
+ * whole seconds.
  */
 const computeNewActivityStart = (
   issue: ListedIssue,
   previous: ItemSnapshot | undefined,
   cursor: string | undefined,
-): string | undefined =>
-  previous?.updatedAt ?? (isNewItem(issue, previous, cursor) ? undefined : cursor);
+): string | undefined => {
+  if (previous === undefined) return isNewItem(issue, previous, cursor) ? undefined : cursor;
+  if (previous.fromBaseline !== true) return previous.updatedAt;
+  return new Date(Date.parse(previous.updatedAt) + 1000).toISOString();
+};
 
 /**
  * Lists the events one issue or pull request produces, by comparing it with
@@ -393,19 +412,28 @@ const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpC
     );
     const headSha = new Map(heads.map((pull) => [pull.number, pull.head.sha]));
     const items: Record<string, ItemSnapshot> = {};
-    for (const issue of [...issues, latest])
-      items[String(issue.number)] = buildItemSnapshot(issue, headSha.get(issue.number));
+    for (const issue of [...issues, latest]) {
+      items[String(issue.number)] = buildItemSnapshot(issue, headSha.get(issue.number), true);
+    }
     return { cursor: latest.updated_at, items };
   });
 
-/** Builds an item's snapshot from the listing, with its head commit when it has one. */
-const buildItemSnapshot = (issue: ListedIssue, headSha: string | undefined): ItemSnapshot => ({
+/**
+ * Builds an item's snapshot from the listing, with its head commit when it
+ * has one, marked `fromBaseline` when `fromBaseline` is true.
+ */
+const buildItemSnapshot = (
+  issue: ListedIssue,
+  headSha: string | undefined,
+  fromBaseline: boolean,
+): ItemSnapshot => ({
   pullRequest: issue.pull_request !== undefined,
   state: issue.state,
   labels: readLabels(issue),
   assignees: readAssignees(issue),
   updatedAt: issue.updated_at,
   ...(headSha === undefined ? {} : { headSha }),
+  ...(fromBaseline ? { fromBaseline } : {}),
 });
 
 /**
@@ -643,7 +671,13 @@ const pollRepo = (
       // as it was. The listing covers the whole repository, so this costs one
       // request per poll, not one per item.
       commentStarts.set(issue.number, start);
-      items[String(issue.number)] = buildItemSnapshot(issue, headSha);
+      // The newest items are listed again by every poll, because `since`
+      // includes the cursor's second. The baseline mark stays until the
+      // item's update time moves, or the second listing would count the
+      // baseline's comments and reviews as new.
+      const unchangedSinceBaseline =
+        previous?.fromBaseline === true && previous.updatedAt === issue.updated_at;
+      items[String(issue.number)] = buildItemSnapshot(issue, headSha, unchangedSinceBaseline);
     }
     const pendingComments =
       commentStarts.size > 0 || stored.pendingComments !== undefined
