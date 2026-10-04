@@ -35,7 +35,7 @@ import {
   GithubPull,
   GithubReview,
   type GithubIssue as GithubIssueType,
-} from "./github-objects";
+} from "./feed-objects";
 import {
   decodeGithubValue,
   fetchGithub,

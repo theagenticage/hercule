@@ -14,7 +14,7 @@ import {
   type IngestHarness,
   type StubResponse,
 } from "../testing";
-import type { GithubCheckSuite } from "./github-objects";
+import type { GithubCheckSuite } from "./feed-objects";
 import { pollChecks, rollUpConclusion } from "./checks";
 
 const REPO = "octocat/hello-world";
