@@ -141,10 +141,10 @@ const describeIssue = (repo: string, issue: GithubIssueType): GithubItem => ({
  *   `reopened`; nothing else is known about how it was before.
  * - In the snapshot: a close is `closed`, or `merged` for a pull request with
  *   a merge time; a reopen is `reopened` for an issue; labels added or
- *   removed are one `labeled`; new assignees are one `assigned`.
+ *   removed are one `labeled`; new assignees of an issue are one `assigned`.
  *
- * GitHub has no reopened kind for a pull request in this roster, and no
- * unassigned kind, so those changes emit nothing.
+ * The plugin declares no kind for a pull request that was reopened or
+ * assigned, and none for an unassignment, so those changes emit nothing.
  */
 export const listItemChanges = (
   repo: string,
@@ -188,10 +188,10 @@ export const listItemChanges = (
       });
     }
     const assigned = listAdded(known.assignees, readAssignees(issue));
-    if (assigned.length > 0) {
+    if (kind === "issue" && assigned.length > 0) {
       changes.push({
-        kind: `github.${kind}.assigned`,
-        dedupKey: `${kind}.assigned:${item}:${assigned.join(",")}:${issue.updated_at}`,
+        kind: "github.issue.assigned",
+        dedupKey: `issue.assigned:${item}:${assigned.join(",")}:${issue.updated_at}`,
         occurredAt: issue.updated_at,
       });
     }

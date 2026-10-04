@@ -233,6 +233,31 @@ describe("the repos feed", () => {
     expect(labeled!.payload).toMatchObject({ added: ["triage"], removed: [] });
   });
 
+  it("emits a new pull request as opened, then its labels, and nothing for its assignee", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    repository.issues.push(
+      buildPull(3, "2026-10-01T10:00:00Z", {
+        labels: [{ name: "feature" }],
+        assignees: [{ login: "hubot" }],
+      }),
+    );
+    repository.heads[3] = "sha-c";
+    repository.etag = '"v2"';
+
+    const { result } = await poll(harness, answerFrom(repository));
+
+    expect(Result.isSuccess(result)).toBe(true);
+    expect(listEvents(harness)).toEqual([
+      `github.pr.opened pr.opened:${REPO}#3`,
+      `github.pr.labeled pr.labeled:${REPO}#3:+feature:-:2026-10-01T10:00:00Z`,
+    ]);
+    expect(harness.events[0]!.url).toBe(`https://github.com/${REPO}/pull/3`);
+    expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
+      items: { "3": { pullRequest: true, headSha: "sha-c" } },
+    });
+  });
+
   it("emits a closed issue, a label change and a new assignee", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
