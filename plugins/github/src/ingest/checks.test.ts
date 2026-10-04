@@ -4,6 +4,7 @@
  * compares GitHub's times with the clock, so the stub's times are set
  * relative to now.
  */
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -61,13 +62,17 @@ interface StubRepository {
   /** How many pull requests one page of the listing holds; GitHub's is 100. */
   pullsPerPage: number;
   suites: Record<string, Array<GithubCheckSuite>>;
+  /** How many check suites one page holds; GitHub's is 100. */
+  suitesPerPage: number;
   /** The ETag of the pull request listing; a test changes it whenever it changes the pull requests. */
   pullsEtag: string;
 }
 
 /**
- * Answers a request the way GitHub would for `repository`, named `repo`. A
- * commit's suites are tagged by their content.
+ * Answers a request the way GitHub would for `repository`, named `repo`.
+ * Each page of a commit's suites is tagged by its own content, as GitHub
+ * tags each page, so a change on a later page leaves the first page's tag
+ * the same.
  */
 const answerFrom =
   (repository: StubRepository, repo: string = REPO) =>
@@ -97,12 +102,22 @@ const answerFrom =
     const commit = /\/commits\/([^/]+)\/check-suites$/.exec(path);
     if (commit) {
       const suites = repository.suites[commit[1]!] ?? [];
-      const etag = `"${JSON.stringify(suites).length.toString()}-${String(suites.length)}"`;
+      const page = Number(query["page"] ?? "1");
+      const size = repository.suitesPerPage;
+      const body = {
+        total_count: suites.length,
+        check_suites: suites.slice((page - 1) * size, page * size),
+      };
+      const etag = `"${createHash("sha256").update(JSON.stringify(body)).digest("hex")}"`;
       if (request.headers["if-none-match"] === etag) return { status: 304 };
+      const next = `https://api.github.com${path}?page=${String(page + 1)}`;
       return {
         status: 200,
-        headers: { etag },
-        body: { total_count: suites.length, check_suites: suites },
+        headers: {
+          etag,
+          ...(suites.length > page * size ? { link: `<${next}>; rel="next"` } : {}),
+        },
+        body,
       };
     }
     return { status: 404, body: { message: "Not Found" } };
@@ -113,6 +128,7 @@ const buildRepository = (): StubRepository => ({
   pulls: [{ number: 7, title: "Add a feature", sha: "sha-a", updatedAt: fromNow(-3_600_000) }],
   pullsPerPage: 100,
   suites: { "sha-a": [buildSuite("GitHub Actions", "in_progress", null)] },
+  suitesPerPage: 100,
   pullsEtag: '"p1"',
 });
 
@@ -307,6 +323,50 @@ describe("the checks feed", () => {
 
     expect(requests).toContain(`/repos/${REPO}/commits/sha-c/check-suites`);
     expect(listConclusions(harness)).toEqual(["success"]);
+  });
+
+  it("waits for a suite on a later page, and reports once it finishes", async () => {
+    const finished = Array.from({ length: 100 }, (_, index) => ({
+      ...buildSuite(`App ${String(index)}`, "completed", "success"),
+      id: 1000 + index,
+    }));
+    const running = { ...buildSuite("Late app", "in_progress", null), id: 2000 };
+    const repository = buildRepository();
+    repository.suites["sha-a"] = [...finished, running];
+    const harness = await baseline(repository);
+
+    const requests = await poll(harness, repository);
+
+    expect(requests.filter((path) => path.endsWith("/check-suites"))).toHaveLength(2);
+    expect(harness.events).toEqual([]);
+
+    // The first page stays the same, and so does its ETag.
+    repository.suites["sha-a"] = [
+      ...finished,
+      { ...running, status: "completed", conclusion: "success" },
+    ];
+    await poll(harness, repository);
+
+    expect(harness.events).toHaveLength(1);
+    const payload = harness.events[0]!.payload as { suites: Array<{ name: string }> };
+    expect(payload.suites).toHaveLength(101);
+    expect(payload.suites.at(-1)).toEqual({ name: "Late app", conclusion: "success" });
+  });
+
+  it("reports nothing for a commit with more pages of suites than it reads", async () => {
+    const repository = buildRepository();
+    repository.suitesPerPage = 1;
+    repository.suites["sha-a"] = Array.from({ length: 4 }, (_, index) => ({
+      ...buildSuite(`App ${String(index)}`, "completed", "success"),
+      id: 1000 + index,
+    }));
+    const harness = await baseline(repository);
+
+    const requests = await poll(harness, repository);
+
+    expect(requests.filter((path) => path.endsWith("/check-suites"))).toHaveLength(3);
+    expect(harness.events).toEqual([]);
+    expect(harness.state.get(`checks/${REPO}`)).toMatchObject({ heads: { "sha-a": {} } });
   });
 
   it("keeps the dedup key within the host's limit, for the longest names GitHub allows", async () => {
