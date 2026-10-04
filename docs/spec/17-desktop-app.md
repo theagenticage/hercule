@@ -744,7 +744,7 @@ The frame is the book's: the app's sidebar stays, and the main pane holds the Se
 
 ### Appearance
 
-Appearance draws every control on the book's page. Every control is saved on this Mac, in main's settings file, except Density.
+Appearance draws every control on the book's page. Every control is saved on this Mac, in main's settings file.
 
 | Control | Choices | Default | What it changes |
 |---|---|---|---|
@@ -759,10 +759,10 @@ Appearance draws every control on the book's page. Every control is saved on thi
 | Marks | on or off | on | the source marks on rows |
 
 - **The theme cards.** The card of the theme in use is pressed. Picking a card turns Follow the system off and uses that theme. With Follow the system on, the two selects pick the day and the night theme. A day theme is light and a night theme is dark, so the window's frame always matches macOS's.
-- **Density is `ui.threadRows`,** the user setting the controller already holds ([./14-web-app.md](./14-web-app.md) §V1 screen inventory, Settings > Threads): Comfortable is `meta` and Compact is `plain`, which spec 14 draws as "a thread's title and its age". It is not saved on this Mac, because the controller already holds this choice, and two copies of one choice would disagree. It follows the user to the web app, which already reads it.
+- **Density** is saved on this Mac, like every other row. It is a choice about how one client draws its rows, and the desktop and the web draw them differently, so a user may want a different density in each.
   - Compact draws each thread row in the sidebar on one line: its face, its title, its mark and its age. Waiting on you keeps its second line, because the open Request is what the user acts on.
-  - The book's line, "Compact fits 30% more rows in Intake and the roster", names screens the desktop does not have. The desktop's line is "Compact draws each thread on one line, so more fit in the sidebar. Saved for you on every device." The second sentence is there because the header says "Saved on this Mac", which holds for every other row.
-  - The web's Threads › Display row sets the same value, so the desktop's Threads section has no Display row.
+  - The book's line, "Compact fits 30% more rows in Intake and the roster", names screens the desktop does not have. The desktop's line is "Compact draws each thread on one line, so more fit in the sidebar."
+  - The desktop neither reads nor writes `ui.threadRows`, the user setting the web's Threads › Display row saves on the controller ([./14-web-app.md](./14-web-app.md) §V1 screen inventory, Settings > Threads). That setting stays the web's own.
 - **Text size** has four steps. Each step moves the text tokens `--t-11` to `--t-16` by one pixel: the second step is the tokens as they are, the first is one pixel smaller, and the third and fourth are one and two pixels larger. The title tokens, `--t-18`, `--t-20` and `--t-num`, do not change, as the book's line says: "Transcripts follow; titles stay modest." Rows grow with their text; none has a fixed height that clips it.
 - **Glass and Reduce transparency.** The page's `--glass-level` is the Glass level.
   - Reduce transparency, the app's or macOS's, sets the level to 0 and the filter to `none`, as the Office does. A Glass level of 0 sets the filter to `none` too (rule 5).
@@ -793,7 +793,7 @@ Each section lists what it reads and writes through the contract, its live topic
 
 - Reads `settings.read`, `runner.query`, `provider.query` and `profile.query`. Writes `settings.update` (`thread.instanceId`, `thread.model`, `thread.accessMode`, `thread.profileId`, `thread.workspace`). Live topic: `provider`.
 - The defaults a new thread starts with: provider instance and model, access mode and permission profile, and the workspace a thread opens in.
-- Differs from the web screen: no Display row, because Density on Appearance sets `ui.threadRows`.
+- Differs from the web screen: no Display row. The desktop's density is Density on Appearance, saved on this Mac.
 
 **Assistants.** The book's `settings-assistants.html`.
 
@@ -1463,7 +1463,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
     - the five themes' `--bg` in `window-background.ts` and `base.css`, and main's window background for the theme in use
     - the page's Theme cards, Follow the system with its day and night theme, Glass with its demo, and Reduce transparency
 13. **Appearance: density, text size, start and motion, marks.**
-    - Density through `ui.threadRows`, and the sidebar's one-line rows
+    - Density, saved on this Mac, and the sidebar's one-line rows
     - Text size, through the text tokens
     - Open on, Reduce motion, and Marks on the start cards
     - the Bureau comparison of the Appearance page
