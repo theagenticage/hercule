@@ -15,7 +15,7 @@ import type { Event } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
 import { nowIso } from "../../../db";
 import { SessionService, sessionRepository } from "../../../sessions";
-import { Notifier } from "../../../notifications";
+import type { Notifier } from "../../../notifications";
 import {
   buildHolderEndedReason,
   subscriptionRepository,
@@ -23,6 +23,7 @@ import {
 } from "../../../subscriptions";
 import type { Route, RoutingTable } from "../event-router";
 import { renderEventInput } from "./render-event-input";
+import { buildSubscriptionFailureRecorder } from "./subscription-health";
 
 /** One route per live session-held subscription. */
 export const sessionRoutingTable: Effect.Effect<
@@ -33,7 +34,7 @@ export const sessionRoutingTable: Effect.Effect<
   const sessions = yield* SessionService;
   const sessionRows = yield* sessionRepository;
   const subscriptions = yield* subscriptionRepository;
-  const notifier = yield* Notifier;
+  const recordEvaluationFailure = yield* buildSubscriptionFailureRecorder;
 
   /**
    * Ends every subscription whose holder session has ended for good. Returns
@@ -69,34 +70,9 @@ export const sessionRoutingTable: Effect.Effect<
     });
 
   /**
-   * Records a failed evaluation on the subscription's health. A failure that
-   * turns the health from ok to error also raises one notification, in the
-   * same write, so the user hears about a broken condition once and not once
-   * per event.
-   */
-  const recordEvaluationFailure = (
-    subscriptionId: string,
-    message: string,
-  ): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      const began = yield* subscriptions.recordEvaluationFailure(
-        subscriptionId,
-        message,
-        yield* nowIso,
-      );
-      if (!began) return;
-      yield* notifier.createCoreNotification({
-        kind: "core.subscription-condition-error",
-        title: "A subscription's condition could not be evaluated",
-        body: message,
-        subject: [{ kind: "subscription", id: subscriptionId }],
-      });
-    });
-
-  /**
    * Ends the subscriptions whose holder session is gone, then returns the
-   * live session-held subscriptions as routes. A subscription admits every event: its condition
-   * is its only test. The condition is passed on as stored: the router
+   * live session-held subscriptions as routes. A subscription admits every
+   * event: its condition is its only test. The condition is passed on as stored: the router
    * parses it, and a condition that no longer parses is recorded as an error
    * of that one subscription, like one that fails while it runs.
    */
