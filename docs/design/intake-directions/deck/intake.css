@@ -1,0 +1,1501 @@
+/* PROTOTYPE - the Deck direction's components, shared by its desktop, web and mobile pages.
+   Everything here composes system.css parts (.card, .ledger, .ans, .btn, .src, .bars, .proj,
+   .deco-num, .section-h, .m-ans, .sheet); nothing here restyles one of them. */
+
+/* The fallback mark for a system with no brand mark, the same in every direction. */
+.src-x { display: inline-grid; place-items: center; width: 14px; height: 14px;
+  border: 1.5px solid currentColor; border-radius: 4px;
+  font: var(--w-bold) 9px/1 var(--font-ui); text-transform: lowercase; }
+
+/* States the page shows only in one ?state. */
+html:not([data-state="clear"]) .clear-only,
+html[data-state="clear"] .deal-only,
+html:not([data-state="swarm"]) .swarm-only,
+html[data-state="swarm"] .today-only {
+  display: none !important;
+}
+
+/* ---------- The deck: the stage with one card, and the rail beside it ---------- */
+.deck {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--deck-rail, 304px);
+}
+.deck-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 24px 0;
+  overflow: hidden;
+}
+.deck-stage > * {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+  flex: none;
+}
+/* Topic tabs sit in the page's bar; Manage topics is the last, quiet. */
+.deck-topics {
+  margin-left: 8px;
+}
+
+/* ---------- The strip: how many, how long, one segment per card ---------- */
+.deck-strip {
+  display: grid;
+  gap: 14px;
+}
+.deck-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+.deck-strip-head .deco-num {
+  margin-right: 2px;
+}
+.deck-estimate {
+  color: var(--muted);
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+}
+.deck-triage {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.deck-triage b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+/* One segment per card, grouped as the deck deals them: Now, Needs a call, Today, When you can.
+   A segment's width is the number of decisions in its card, so a batch of 22 is a long segment. */
+.deck-pips {
+  display: flex;
+  gap: 12px;
+}
+.deck-pip-group {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: max-content;
+}
+.deck-pip-label {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+}
+.deck-pip-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 10px;
+}
+.deck-pip {
+  flex: 1 1 0;
+  min-width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.deck-pip.is-burning {
+  background: var(--fail);
+}
+.deck-pip.is-answered {
+  background: var(--ok);
+}
+.deck-pip.is-current {
+  height: 10px;
+  border-radius: 4px;
+  background: var(--ink);
+}
+.deck-pip.is-current.is-burning {
+  background: var(--fail);
+}
+
+/* ---------- The decision card ---------- */
+/* The card keeps one top edge from card to card, so the title never jumps when the next one is dealt. */
+.deck-table {
+  position: relative;
+  margin-top: 40px;
+}
+.deck-card {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 20px 24px 12px;
+}
+.deck-kind {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 20px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.deck-kind b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.deck-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.deck-priority.is-urgent {
+  color: var(--fail-ink);
+  font-weight: var(--w-bold);
+}
+.deck-seen {
+  color: var(--faint);
+}
+.deck-title {
+  margin: 8px 0 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.deck-gist {
+  margin: 6px 0 0;
+  max-width: 680px;
+  font-size: var(--t-14);
+  line-height: 1.5;
+}
+/* Made from: one entry per source system, its mark, what it brought, and the Connection that carried it. */
+.made-from {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 24px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.made-from-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.made-from-entry > .br,
+.made-from-entry > .ic,
+.made-from-entry > .pi,
+.made-from-entry > .src-x {
+  flex: none;
+  color: var(--ink);
+  opacity: 0.8;
+}
+.made-from-count {
+  font-size: var(--t-13);
+}
+.made-from-count b {
+  font-weight: var(--w-bold);
+}
+.made-from-conn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* The ledger sits on a hairline; rows start where the card's text starts. */
+.deck-card .ledger {
+  position: relative;
+  margin: 16px -12px 0 -4px;
+  padding-top: 12px;
+}
+.deck-card .ledger::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 4px;
+  right: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+/* The core's describe line: live names and values set apart in ink. */
+.describe-line b,
+.describe-line strong {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.m-ans--accent .describe-line strong {
+  color: var(--accent-fg);
+}
+/* The producer's description, as fine print under the describe line. */
+.answer-fine {
+  display: block;
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.m-ans--accent .answer-fine {
+  color: color-mix(in oklab, var(--accent-fg) 64%, transparent);
+}
+/* An answer whose stored operation no longer passes the core's check: still shown, never clickable. */
+.answer-unavailable > .btn,
+.m-ans.answer-unavailable > b,
+.m-ans.answer-unavailable > .answer-glyph {
+  opacity: 0.45;
+}
+.answer-unavailable > .btn {
+  cursor: not-allowed;
+}
+.answer-unavailable .describe-line {
+  color: var(--fail-ink);
+}
+.deck-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.deck-note > .ic {
+  margin: 0 2px;
+}
+.deck-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 10px -10px 0;
+}
+.deck-card-foot .btn kbd {
+  margin-left: 2px;
+}
+.deck-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.deck-link:hover {
+  color: var(--ink);
+}
+
+/* A batch: alike decisions on one card. Its members are content, listed small, in one or two columns. */
+.batch-members {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px 24px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  counter-reset: member;
+}
+/* Two columns read down, then across, like a printed list. */
+.batch-members--two {
+  display: block;
+  columns: 2;
+  column-gap: 24px;
+}
+.batch-members--two li {
+  margin-bottom: 2px;
+}
+.batch-members li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-more {
+  color: var(--faint);
+}
+.batch-flow {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.batch-flow span {
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+/* Up next: the next two cards tucked under the one in focus, titles only. */
+.deck-peeks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.deck-peek {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  margin: -12px 16px 0;
+  padding: 12px 16px 0;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  z-index: 2;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.deck-peek + .deck-peek {
+  margin-inline: 32px;
+  z-index: 1;
+  opacity: 0.8;
+}
+.deck-peek:hover {
+  color: var(--ink);
+}
+.deck-peek-kind {
+  flex: none;
+  color: var(--faint);
+}
+.deck-peek-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The keys, at the foot of the stage. */
+.deck-keys {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  height: 48px;
+  margin-top: auto !important;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.deck-keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.deck-keys kbd + kbd {
+  margin-left: -2px;
+}
+/* ? opens the full key list over the stage. */
+.deck-help {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  width: 280px !important;
+  margin-left: -140px !important;
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  display: none;
+  z-index: 10;
+}
+html.is-help .deck-help {
+  display: grid;
+}
+.deck-help dl {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: var(--t-12);
+}
+.deck-help dt {
+  text-align: right;
+}
+.deck-help dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* ---------- The rail: what is moving, and the quiet shelf ---------- */
+.deck-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 0;
+  padding: 16px 20px 16px;
+  overflow: auto;
+  background: var(--bg);
+  box-shadow: inset 1px 0 0 var(--line-soft);
+  scrollbar-width: none;
+}
+html.is-evidence .deck-rail {
+  display: none;
+}
+.rail-section {
+  display: grid;
+  gap: 10px;
+}
+.moving-list {
+  display: grid;
+  gap: 12px;
+}
+.moving-row,
+.held-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+}
+.moving-text {
+  display: grid;
+  min-width: 0;
+  line-height: 1.35;
+}
+.moving-text b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+.moving-meta,
+.moving-ask,
+.moving-text > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.moving-ask {
+  color: var(--you-ink);
+}
+.moving-text > .held-when {
+  display: block;
+}
+.moving-meta--link:hover,
+.moving-ask:hover {
+  text-decoration: underline;
+}
+.moving-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The answer the client holds for 5 seconds before sending it: Undo takes it back. */
+.held-row {
+  margin: 0 -8px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.held-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.held-seconds {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The quiet shelf: what needs no answer, folded. Each fold is one line until opened.
+   The shelf uses the Moving rows' grid: a 24px gutter for the Triage face and the Linear mark, then
+   one text edge that every row, count or not, starts on. */
+.shelf {
+  display: grid;
+  gap: 2px;
+}
+.shelf-fold > summary {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  list-style: none;
+  cursor: pointer;
+}
+.shelf-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.shelf-fold > summary:hover {
+  background: var(--hover);
+}
+.shelf-fold > summary > .cr,
+.shelf-connection > .br {
+  justify-self: center;
+}
+.shelf-num {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.shelf-label {
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.shelf-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+.shelf-body {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 10px 34px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.shelf-body p {
+  margin: 0;
+}
+.shelf-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  line-height: 1.45;
+}
+.shelf-line > span {
+  min-width: 0;
+}
+.shelf-line .br,
+.shelf-line .ic,
+.shelf-line .src-x {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+.shelf-connection {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  padding-top: 6px;
+}
+.shelf-connection > .br {
+  margin-top: 2px;
+  opacity: 0.8;
+}
+.shelf-new {
+  margin: 0;
+}
+.shelf-connection span {
+  display: block;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The receipt: the events since the marker and the decisions triage made from them. With the
+   shelf's counts above it, they add up to every event; each count opens its events. */
+.receipt {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.6;
+}
+.receipt a {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.receipt a:hover {
+  text-decoration: underline;
+}
+.rail-foot {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.rail-foot p {
+  margin: 0;
+}
+.rail-foot p:has(.dot) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.rail-foot .dot {
+  margin-top: 5px;
+}
+
+/* ---------- The evidence: the dossier, opened beside the card in place of the rail ---------- */
+.deck-evidence {
+  display: none;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px 24px;
+  background: var(--raised);
+  box-shadow: -1px 0 0 var(--line-soft);
+  scrollbar-width: none;
+}
+html.is-evidence .deck-evidence {
+  display: block;
+}
+html.is-evidence .deck {
+  --deck-rail: 360px;
+}
+.evidence-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+}
+.evidence-title {
+  margin: 8px 0 0;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  line-height: 1.35;
+}
+.evidence-why {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.evidence-why > .cr {
+  flex: none;
+  margin-top: 1px;
+}
+.evidence-list {
+  display: grid;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.evidence-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.evidence-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.evidence-source .br,
+.evidence-source .ic {
+  color: var(--ink);
+  opacity: 0.8;
+}
+.evidence-excerpt {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.evidence-excerpt b {
+  font-weight: var(--w-medium);
+}
+.evidence-excerpt span {
+  color: var(--muted);
+}
+.evidence-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+  color: var(--accent);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.evidence-open:hover {
+  text-decoration: underline;
+}
+.evidence-history {
+  margin: 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* ---------- Clear: the deck is done ---------- */
+.deck-clear {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 0;
+  margin-top: 40px;
+  text-align: center;
+}
+.deck-clear h2 {
+  margin: 14px 0 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.deck-clear-next {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.deck-clear-sum {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  margin: 28px 0 0;
+}
+.deck-clear-sum div {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.shipped {
+  width: 100%;
+  margin-top: 36px;
+  text-align: left;
+}
+.shipped-list {
+  display: grid;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.shipped-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 52px;
+  border-top: 1px solid var(--line-soft);
+}
+.shipped-row b {
+  display: block;
+  font-weight: var(--w-medium);
+}
+.shipped-row span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.shipped-row time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- ?state=panel: the deck in the global hotkey panel, over another app ---------- */
+.deck-desk {
+  display: none;
+}
+html[data-state="panel"] .app {
+  display: none;
+}
+html[data-state="panel"] .deck-desk {
+  position: relative;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--sunken), var(--bg) 70%);
+}
+.deck-menubar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 30px;
+  padding: 0 14px 0 18px;
+  background: color-mix(in oklab, var(--bg) 55%, transparent);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.deck-menubar b {
+  font-weight: var(--w-bold);
+}
+.deck-menubar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+.deck-menubar-extra {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--ink) 14%, transparent);
+}
+/* The app Rogier was in, inactive behind the panel. */
+.deck-other-app {
+  position: absolute;
+  left: 64px;
+  top: 72px;
+  width: 760px;
+  height: 600px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-3);
+}
+.deck-other-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 38px;
+  padding: 0 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.deck-other-top .tl i {
+  background: var(--line) !important;
+}
+.deck-other-body {
+  padding: 24px 40px;
+  color: var(--faint);
+}
+.deck-other-body h3 {
+  margin: 0 0 12px;
+  font-size: var(--t-20);
+}
+.deck-other-body p {
+  margin: 0 0 8px;
+}
+/* The panel itself: a floating layer, so it is glass. One card at a time, no chrome around it. */
+.deck-panel {
+  position: absolute;
+  left: 50%;
+  top: 132px;
+  z-index: 3;
+  width: 720px;
+  margin-left: -360px;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+}
+.deck-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.deck-panel-head > b {
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+}
+.deck-panel-head .deck-strip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: 8px;
+}
+.deck-panel .deck-strip-head .deco-num {
+  font-size: var(--t-20);
+}
+.deck-panel .deck-triage,
+.deck-panel .deck-strip-head .btn,
+.deck-panel .deck-strip-head .spacer,
+.deck-panel .deck-pip-label {
+  display: none;
+}
+.deck-panel .deck-pips {
+  flex: 1;
+}
+.deck-panel .deck-table {
+  margin: 0;
+}
+.deck-card--bare {
+  padding: 18px 24px 8px;
+}
+.deck-panel .deck-peeks {
+  border-top: 1px solid var(--line-soft);
+  padding: 4px 12px;
+}
+.deck-panel .deck-peek,
+.deck-panel .deck-peek + .deck-peek {
+  margin: 0;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  background: none;
+  box-shadow: none;
+  opacity: 1;
+}
+.deck-panel-held:not(:empty) {
+  padding: 8px 20px;
+  border-top: 1px solid var(--line-soft);
+}
+.deck-panel-held .held-row {
+  margin: 0;
+  background: none;
+  box-shadow: none;
+  padding: 0;
+}
+.deck-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 38px;
+  padding: 0 18px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.deck-panel-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.shelf-summary {
+  line-height: 1.5;
+  white-space: normal;
+}
+
+/* ---------- Web: the same deck under the web bar ---------- */
+.deck-web {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.deck-web .deck {
+  --deck-rail: 288px;
+}
+html.is-evidence .deck-web .deck {
+  --deck-rail: 420px;
+}
+.deck-web .deck-table {
+  margin-top: 28px;
+}
+
+/* ---------- Mobile: the deck in the thumb zone ---------- */
+.deck-m-screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.deck-lock,
+.deck-chat,
+.deck-sheet {
+  display: none;
+}
+html[data-state="lock"] .deck-m-app,
+html[data-state="chat"] .deck-m-app {
+  display: none;
+}
+html[data-state="lock"] .deck-lock,
+html[data-state="chat"] .deck-chat {
+  display: flex;
+}
+/* The Triage face in the title opens the last triage: a 44px target around a 28px face. */
+.deck-m-triage {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -8px -8px -8px 0;
+}
+.deck-m {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px 8px;
+  overflow: hidden;
+}
+.phone .deck-strip {
+  gap: 8px;
+}
+.phone .deck-strip-head {
+  min-height: 28px;
+}
+.phone .deck-strip .deck-triage,
+.phone .deck-strip-head .btn {
+  display: none;
+}
+.phone .deck-table {
+  margin-top: 12px;
+}
+.phone .deck-card {
+  padding: 14px 16px 16px;
+}
+.phone .deck-seen {
+  display: none;
+}
+.phone .deck-title {
+  margin-top: 6px;
+  font-size: var(--t-18);
+}
+.phone .made-from {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 12px;
+}
+/* The phone card names the systems; the Connection behind each one is in the evidence. */
+.phone .made-from-conn {
+  display: none;
+}
+.phone .deck-card-foot {
+  margin: 8px -10px -8px;
+}
+.phone .deck-peek {
+  height: 36px;
+  margin-top: -14px;
+  padding-top: 14px;
+}
+/* A swipe uncovers its answer under the card: the accent answer to the right, the decline to the left. */
+.deck-under {
+  position: absolute;
+  inset: 0 0 auto;
+  bottom: 44px;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-radius: var(--r-lg);
+  visibility: hidden;
+}
+.deck-under[data-dir="right"],
+.deck-under[data-dir="left"] {
+  visibility: visible;
+}
+.deck-under[data-dir="right"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.deck-under[data-dir="left"] {
+  justify-content: flex-end;
+  background: var(--sunken);
+  color: var(--muted);
+}
+.deck-under[data-dir="right"] .deck-under-left,
+.deck-under[data-dir="left"] .deck-under-right {
+  display: none;
+}
+.deck-under-right,
+.deck-under-left {
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: var(--w-bold);
+}
+.deck-under-left {
+  justify-items: end;
+}
+.deck-under-right .haptic {
+  border-color: color-mix(in oklab, var(--accent-fg) 45%, transparent);
+  color: var(--accent-fg);
+}
+html[data-state="swipe"] .phone .deck-card {
+  transform: translate(148px, 8px) rotate(5deg);
+  transform-origin: 50% 100%;
+}
+html[data-state="swipe"] .phone .deck-peek {
+  visibility: hidden;
+}
+/* The thumb zone: what each swipe does, the answer held for Undo, and every answer as a big button. */
+.deck-m-thumb {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+}
+.deck-swipe {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.deck-swipe > :last-child {
+  text-align: right;
+}
+/* Evidence is also a tap, for a thumb that would rather not swipe. */
+.deck-swipe-up {
+  margin: -8px -12px;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+/* For the 5 seconds an answer is held, its Undo row takes the swipe line's place, and the peeks step
+   aside to make room: the strip already shows what comes next. */
+.deck-m:has(.held-row) .deck-swipe,
+.deck-m:has(.held-row) .deck-peeks,
+.deck-m-held:empty {
+  display: none;
+}
+.deck-m-held .held-row {
+  min-height: 56px;
+  margin: 0;
+  padding: 8px 10px 8px 14px;
+  border-radius: 16px;
+}
+.answer-glyph {
+  grid-row: 1 / 3;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+}
+.answer-swatch {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: var(--rug);
+  transform: rotate(45deg);
+}
+.deck-dock .describe-line {
+  overflow-wrap: anywhere;
+}
+
+/* The sheets: the evidence pulled up over the deck, and the last triage from the title. */
+html.is-evidence .deck-sheet--evidence,
+html[data-state="triage"] .deck-sheet--triage {
+  display: flex;
+  flex-direction: column;
+}
+html.is-evidence .deck-sheet--evidence {
+  top: 112px;
+}
+/* Behind an open sheet the deck dims, as a phone does behind any sheet. */
+html.is-evidence .deck-m-app::after,
+html[data-state="triage"] .deck-m-app::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  background: oklch(0.2 0.01 60 / 0.24);
+}
+/* What a sheet covers is hidden, so its glass shows the page and not a blur of the accent answer. */
+html.is-evidence .deck-m,
+html[data-state="triage"] .deck-m-thumb {
+  visibility: hidden;
+}
+.deck-sheet .deck-evidence {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 20px 32px;
+  background: none;
+  box-shadow: none;
+}
+.deck-sheet-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 20px 32px;
+}
+.deck-m-last {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The face sits in the shelf's 24px gutter below it, so the time starts on the shelf's text edge. */
+.deck-m-last .deck-triage {
+  gap: 12px;
+}
+.deck-m-last .deck-triage > .cr {
+  margin-left: 2px;
+}
+
+/* ?state=lock: the lock screen at 09:44, the deck as a Live Activity. The wallpaper is the lock page's. */
+.deck-lock {
+  position: relative;
+  color: #fff;
+}
+.deck-lock-wall {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, light-dark(oklch(0.44 0.035 60), oklch(0.2 0.02 60)), light-dark(oklch(0.66 0.045 70), oklch(0.31 0.03 60)));
+}
+.deck-lock > :not(.deck-lock-wall) {
+  position: relative;
+}
+.deck-lock .status-time {
+  visibility: hidden;
+}
+.deck-lock-clock {
+  display: grid;
+  justify-items: center;
+  padding: 0 0 20px;
+}
+.deck-lock-date {
+  margin-top: 2px;
+  font-size: 17px;
+  font-weight: var(--w-bold);
+}
+.deck-lock-time {
+  margin-top: -4px;
+  font-size: 78px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+.deck-la {
+  display: grid;
+  gap: 10px;
+  margin: 0 10px;
+  padding: 14px 14px 12px;
+  border-radius: 24px;
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 1px 0 var(--glass-edge), 0 8px 24px -12px oklch(0.2 0.05 290 / 0.35);
+  color: var(--ink);
+}
+.deck-la-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.deck-la-head b {
+  font-size: 15px;
+  font-weight: var(--w-bold);
+}
+.deck-la-head span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.deck-la .deck-pip-label {
+  display: none;
+}
+.deck-la-kind,
+.deck-la-title {
+  margin: 0;
+}
+.deck-la-kind {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.deck-la-title {
+  margin-top: -8px;
+  font-size: 15px;
+  font-weight: var(--w-bold);
+  line-height: 1.3;
+}
+.deck-la-go {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 2px;
+}
+.deck-la-go button {
+  height: 40px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: var(--w-bold);
+}
+.deck-la-go .is-accent {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.deck-la-go .is-quiet {
+  color: var(--muted);
+}
+.deck-la-note {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 0;
+}
+html[data-state="lock"] .home-ind {
+  background: #fff;
+}
+/* The flashlight and the camera, as on every lock screen. */
+.deck-lock-foot {
+  position: absolute !important;
+  left: 46px;
+  right: 46px;
+  bottom: 34px;
+  display: flex;
+  justify-content: space-between;
+}
+.deck-lock-foot span {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: light-dark(oklch(0.2 0.03 290 / 0.28), oklch(1 0 0 / 0.14));
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+.deck-lock .haptic {
+  border-color: color-mix(in oklab, #fff 55%, transparent);
+  color: #fff;
+}
+
+.phone .deck-clear-sum {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin-top: 24px;
+}
+.phone .shipped {
+  margin-top: 28px;
+}
+
+/* ?state=chat: one decision as one chat message, as v1's phone surface posts it. */
+.deck-chat-list {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 12px 16px 16px;
+}
+.deck-chat-day {
+  justify-self: center;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.deck-chat-msg {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+}
+.deck-chat-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.deck-chat-by {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.deck-chat-by b {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: var(--w-bold);
+}
+.deck-chat-app {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.deck-chat-body p {
+  margin: 0;
+  line-height: 1.4;
+}
+.deck-chat-kind,
+.deck-chat-from {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.deck-chat-from span {
+  color: var(--faint);
+}
+.deck-chat-title {
+  font-weight: var(--w-bold);
+}
+.deck-chat-gist {
+  font-size: var(--t-14);
+}
+.deck-chat-outcome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.deck-chat-outcome .ic {
+  color: var(--ok);
+}
+/* One line per answer: the bold label, then the core's describe line; fine print under it. */
+.deck-chat-answers {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.4;
+}
+.deck-chat-answers b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.deck-chat-answers small {
+  display: block;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.deck-chat-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+/* Chat buttons are the chat app's, not Hercule's: short labels, outlined, the suggested one filled. */
+.deck-chat-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.deck-chat-btn.is-primary {
+  background: var(--accent);
+  box-shadow: none;
+  color: var(--accent-fg);
+}
+.deck-chat-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.deck-chat-compose {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  margin: 0 12px 34px;
+  padding: 0 14px;
+  border-radius: 22px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--faint);
+  font-size: var(--t-14);
+}

@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../intake.css" />
+    <meta charset="utf-8" />
+    <title>(9) Intake · Hercule</title>
+  </head>
+  <body>
+    <div class="web">
+      <header data-webbar="intake"></header>
+      <main class="line-page">
+        <header class="bar">
+          <h1 class="title">Intake</h1>
+          <nav class="tabs">
+            <a class="tab is-on" href="#">All</a>
+            <a class="tab" href="#">Checkout <small class="today-only">3</small><small class="swarm-only">27</small></a>
+            <a class="tab" href="#">Infrastructure <small class="today-only">2</small><small class="swarm-only">19</small></a>
+            <a class="tab" href="#">Customers <small class="today-only">3</small><small class="swarm-only">28</small></a>
+            <a class="tab" href="#">Releases <small class="today-only">1</small><small class="swarm-only">15</small></a>
+            <a class="icon-btn icon-btn--sm" href="#" title="Manage topics"><i data-i="sliders" data-size="14"></i></a>
+          </nav>
+          <span class="spacer"></span>
+          <span class="seg" role="group" aria-label="Layout">
+            <button class="today-only" aria-pressed="true">Line</button><button class="today-only" aria-pressed="false">By topic</button>
+            <button class="swarm-only" aria-pressed="false">Line</button><button class="swarm-only" aria-pressed="true">By topic</button>
+          </span>
+          <a class="triage-status" href="#triage-summary" title="Open the triage's summary"><i data-face="Triage" data-pose="idle" data-size="24"></i><span>Triage sorted at <b>09:00</b> in 42s · next <b>11:00</b></span></a>
+          <button class="btn btn--sm">Triage now</button>
+        </header>
+
+        <div class="glass triage-summary" id="triage-summary">
+          <div class="triage-summary-h"><i data-face="Triage" data-pose="idle" data-size="20"></i>Triage · 09:00 · 42s</div>
+          <p>One fire: EU cards with 3&#8209;D Secure fail at checkout since deploy #1289. A bot opened 34 issues, so Label new issues hit its bound; the 34 wait for you. Two offers, one Android report I could not place, and 166 events that needed nothing.</p>
+        </div>
+
+        <div class="line line--wide">
+          <!-- The flow meter: one head per stage. -->
+          <div class="flow-stage">
+            <span class="deco-num today-only">212</span><span class="deco-num swarm-only">2,120</span>
+            <span class="flow-label"><b>in since</b>yesterday 18:20</span>
+          </div>
+          <div class="flow-stage flow-stage--you">
+            <span class="flow-arrow"><i data-i="chev-r" data-size="12"></i></span>
+            <span class="deco-num today-only">9</span><span class="deco-num swarm-only">90</span>
+            <span class="flow-label"><b>for you</b><span class="you-ink today-only">+1 back from the line</span><span class="you-ink swarm-only">+4 back from the line</span></span>
+          </div>
+          <div class="flow-stage">
+            <span class="flow-arrow"><i data-i="chev-r" data-size="12"></i></span>
+            <span class="deco-num today-only">4</span><span class="deco-num swarm-only">40</span>
+            <span class="flow-label"><b>moving</b><span class="today-only">1 paused</span><span class="swarm-only">3 paused</span></span>
+          </div>
+          <div class="flow-stage">
+            <span class="flow-arrow"><i data-i="chev-r" data-size="12"></i></span>
+            <span class="deco-num today-only">3</span><span class="deco-num swarm-only">30</span>
+            <span class="flow-label"><b>shipped</b><span class="today-only">median 1h 05m</span><span class="swarm-only">median 1h 10m</span></span>
+          </div>
+
+          <!-- ============ Came in ============ -->
+          <section class="line-stage today-only" aria-label="Came in">
+            <div class="taps">
+              <a class="tap" href="#"><i data-brand="sentry" data-size="14"></i><span class="tap-name">Sentry</span><span class="tap-count">130</span><span class="tap-pipe"><span class="tap-dot"></span></span></a>
+              <a class="tap tap--held" href="#breaker"><i data-brand="github" data-size="14"></i><span class="tap-name">GitHub</span><span class="tap-count">38</span><span class="tap-pipe"><span class="valve"><i data-mark="paused" data-size="14"></i></span></span><span class="tap-note">34 held by the bound</span></a>
+              <a class="tap" href="#"><i data-brand="gmail" data-size="14"></i><span class="tap-name">Gmail</span><span class="tap-count">17</span><span class="tap-pipe"></span></a>
+              <a class="tap" href="#"><i data-brand="stripe" data-size="14"></i><span class="tap-name">Stripe</span><span class="tap-count">12</span><span class="tap-pipe"></span></a>
+              <a class="tap" href="#"><i data-brand="intercom" data-size="14"></i><span class="tap-name">Intercom</span><span class="tap-count">9</span><span class="tap-pipe"></span></a>
+              <a class="tap" href="#"><i data-brand="posthog" data-size="14"></i><span class="tap-name">PostHog</span><span class="tap-count">3</span><span class="tap-pipe"></span></a>
+              <a class="tap" href="#"><i data-brand="grafana" data-size="14"></i><span class="tap-name">Grafana</span><span class="tap-count">2</span><span class="tap-pipe"></span></a>
+              <a class="tap" href="#"><i data-brand="cron" data-size="14"></i><span class="tap-name">Cron</span><span class="tap-count">1</span><span class="tap-pipe"></span></a>
+              <a class="tap tap--listening" href="#"><i data-brand="linear" data-size="14"></i><span class="tap-name">Linear</span><span class="tap-count">0</span><span class="tap-pipe"></span><span class="tap-note">new, listening since Mon&nbsp;17:55</span></a>
+            </div>
+
+            <div class="receipt-rows">
+              <h2 class="section-h">Triage made</h2>
+              <a class="receipt-row" href="#"><b>5</b>proposals</a>
+              <a class="receipt-row" href="#"><b>1</b>attached to a Task</a>
+              <a class="receipt-row" href="#"><b>2</b>offers</a>
+              <a class="receipt-row" href="#"><b>3</b>FYI</a>
+              <a class="receipt-row" href="#"><b>1</b>unsure</a>
+              <a class="receipt-row" href="#breaker"><b>34</b>held</a>
+              <a class="receipt-row" href="#"><b>166</b>no action</a>
+              <span class="receipt-item" title="Hetzner · invoice for September, via Gmail"><span class="src-x" role="img" aria-label="hetzner">h</span><span>Hetzner · invoice</span></span>
+            </div>
+          </section>
+
+          <!-- ============ Your call ============ -->
+          <section class="line-stage today-only" aria-label="Your call">
+            <h2 class="section-h tier-h"><span class="dot dot--fail attention-pulse"></span>Now</h2>
+            <article class="decision decision--lead card">
+              <div class="decision-top">
+                <span class="chip chip--fail">Urgent</span>
+                <span class="bars" data-p="4" title="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+                <span class="proj proj--webshop">webshop</span>
+                <span>·</span><span>Checkout</span><span>·</span><span>first seen 08:52</span>
+                
+              </div>
+              <h3 class="decision-lead-title">Checkout fails for EU cards with 3&#8209;D Secure</h3>
+              <p class="decision-gist">Since deploy #1289, card payments that need 3&#8209;D Secure fail at checkout for EU customers. The new Stripe SDK returns <code>requires_action</code>, and <code>handlePaymentResult</code> treats it as a failure.</p>
+              <div class="made-from" aria-label="Made from">
+                <span class="made-from-entry"><i data-brand="sentry" data-size="14"></i><span><b>412 errors</b>, 188 users<br /><span>Sentry · webshop-prod</span></span></span>
+                <span class="made-from-entry"><i data-brand="gmail" data-size="14"></i><span><b>3 customer emails</b><br /><span>Gmail · rogier@personal</span></span></span>
+                <span class="made-from-entry"><i data-brand="posthog" data-size="14"></i><span><b>-18% conversion</b>, EU only<br /><span>PostHog · webshop</span></span></span>
+                <span class="made-from-entry"><i data-brand="github" data-size="14"></i><span><b>Deploy #1289</b> at 14:02<br /><span>GitHub · rogier/webshop</span></span></span>
+              </div>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--accent btn--sm">Start Fix bug</span><span class="describe-line">Starts <b>Fix bug</b> on <b>webshop</b> with task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span><span class="producer-description">Claude Code · Opus 5.5 · studio-mac</span></button>
+                <button class="bound-action"><span class="btn btn--sm">Accept</span><span class="describe-line">Removes label <b>proposed</b> from Task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span><span class="producer-description">This is work; it stays in the backlog.</span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Sets status to <b>cancelled</b> on Task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span></button>
+              </div>
+            </article>
+
+            <h2 class="section-h tier-h tier-h--you"><i data-mark="waiting" data-size="14"></i>Back from the line <b class="count count--you">1</b></h2>
+            <article class="decision decision--back">
+              <div class="decision-head">
+                <h3 class="decision-title">Publish payments-api 2.15.0 to npm?</h3>
+                <span class="decision-marks"><i data-face="Ship release v2.15" data-pose="waiting" data-size="20"></i></span>
+              </div>
+              <p class="decision-meta">Approval · Ship release v2.15 · <span class="proj proj--payments">payments-api</span></p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--sm">Allow once</span><span class="describe-line">Allows <code>npm publish</code> once in session <b>Ship release v2.15</b></span><span class="producer-description">Runs the command this once; the agent asks again next time.</span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Deny</span><span class="describe-line">Denies <code>npm publish</code> in session <b>Ship release v2.15</b>; the agent is told and continues</span></button>
+              </div>
+            </article>
+
+            <h2 class="section-h tier-h">Needs a call <b class="count">2</b></h2>
+            <article class="decision">
+              <div class="decision-head">
+                <h3 class="decision-title">App is slow on Android</h3>
+                <span class="decision-marks"><i data-brand="intercom" data-size="14"></i></span>
+              </div>
+              <p class="decision-meta">Unsure · 7 conversations since Sunday · “I can't tell which project this belongs to.”</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--sm">webshop</span><span class="describe-line">Sets project to <b>webshop</b> on Task <b>App is slow on Android</b></span></button>
+                <button class="bound-action"><span class="btn btn--sm">payments-api</span><span class="describe-line">Sets project to <b>payments-api</b> on Task <b>App is slow on Android</b></span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Not work</span><span class="describe-line">Sets status to <b>cancelled</b> on Task <b>App is slow on Android</b></span></button>
+              </div>
+            </article>
+            <article class="decision" id="breaker">
+              <div class="decision-head">
+                <h3 class="decision-title">Label new issues held 34 events</h3>
+                <span class="decision-marks"><i data-brand="github" data-size="14"></i><i data-face="Label new issues" data-pose="paused" data-size="20"></i></span>
+              </div>
+              <p class="decision-meta">Breaker tripped at 08:14 · a bot opened 34 issues; the bound is 20 per hour</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--sm">Resume</span><span class="describe-line">Resumes <b>Label new issues</b>: the <b>34</b> held events start runs at <b>20 per hour</b>, the rest as the window frees up</span></button>
+                <button class="bound-action"><span class="btn btn--sm">Resume and discard the 34</span><span class="describe-line">Resumes <b>Label new issues</b> and discards the <b>34</b> held events</span></button>
+                <a class="bound-action bound-action--opens" href="#" target="_blank" rel="noopener"><span class="btn btn--quiet btn--sm">Edit the trigger <i data-i="arrow" data-size="12"></i></span><span class="describe-line">Opens the trigger of <b>Label new issues</b>, where its Spawn Bound lives</span></a>
+              </div>
+              <p class="unanswered-note">Until you answer, the 34 events stay held.</p>
+            </article>
+
+            <h2 class="section-h tier-h">Today <b class="count">4</b></h2>
+            <article class="decision">
+              <div class="decision-head">
+                <h3 class="decision-title">Nightly backup job timing out on ops-db</h3>
+                <span class="decision-marks"><i data-brand="grafana" data-size="14"></i><i data-brand="cron" data-size="14"></i><span class="bars" data-p="3" title="Priority high, 3 of 4"><i></i><i></i><i></i><i></i></span></span>
+              </div>
+              <p class="decision-meta">Proposal · <span class="proj proj--ops">ops</span> · 3 nights in a row; the job hits its 2h limit at 04:00</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--accent btn--sm">Start Investigate</span><span class="describe-line">Starts <b>Investigate</b> on <b>ops</b> with task <b>Nightly backup job timing out on ops-db</b></span></button>
+                <button class="bound-action"><span class="btn btn--sm">Accept</span><span class="describe-line">Removes label <b>proposed</b> from Task <b>Nightly backup job timing out on ops-db</b></span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Sets status to <b>cancelled</b> on Task <b>Nightly backup job timing out on ops-db</b></span></button>
+              </div>
+            </article>
+            <article class="decision">
+              <div class="decision-head">
+                <h3 class="decision-title">Draft a reply to Marta at Brightline</h3>
+                <span class="decision-marks"><i data-brand="gmail" data-size="14"></i></span>
+              </div>
+              <p class="decision-meta">Offer · Customers · asks for invoice INV-2291 in the company name, not hers</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--accent btn--sm">Draft reply</span><span class="describe-line">Starts <b>Draft reply</b> with thread <b>Invoice INV-2291</b> from <b>Gmail · rogier@personal</b></span><span class="producer-description">You review the draft before anything is sent.</span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Does nothing</span></button>
+              </div>
+            </article>
+            <article class="decision">
+              <div class="decision-head">
+                <h3 class="decision-title">Stripe webhook retries rising</h3>
+                <span class="decision-marks"><i data-brand="stripe" data-size="14"></i><i data-brand="sentry" data-size="14"></i><span class="bars" data-p="2" title="Priority medium, 2 of 4"><i></i><i></i><i></i><i></i></span></span>
+              </div>
+              <p class="decision-meta">Proposal · <span class="proj proj--payments">payments-api</span> · retries up 4x since Sunday on /webhooks/stripe</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--accent btn--sm">Start Investigate</span><span class="describe-line">Starts <b>Investigate</b> on <b>payments-api</b> with task <b>Stripe webhook retries rising</b></span></button>
+                <button class="bound-action"><span class="btn btn--sm">Accept</span><span class="describe-line">Removes label <b>proposed</b> from Task <b>Stripe webhook retries rising</b></span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Sets status to <b>cancelled</b> on Task <b>Stripe webhook retries rising</b></span></button>
+              </div>
+            </article>
+            <article class="decision">
+              <div class="decision-head">
+                <h3 class="decision-title">Merge 4 dependency bumps</h3>
+                <span class="decision-marks"><i data-brand="github" data-size="14"></i></span>
+              </div>
+              <p class="decision-meta">Offer · <span class="proj proj--webshop">webshop</span> · all green, patch versions only</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--accent btn--sm">Merge all 4</span><span class="describe-line">Merges <b>#1301 #1302 #1304 #1305</b> in <b>rogier/webshop</b> as <b>GitHub · rogier</b></span></button>
+                <a class="bound-action bound-action--opens" href="#" target="_blank" rel="noopener"><span class="btn btn--sm">Review first <i data-i="external" data-size="12"></i></span><span class="describe-line">Opens the 4 pull requests</span></a>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Does nothing</span><span class="producer-description">Triage won't offer these again.</span></button>
+              </div>
+            </article>
+
+            <h2 class="section-h tier-h">When you can <b class="count">2</b></h2>
+            <article class="decision">
+              <div class="decision-head">
+                <h3 class="decision-title">SSL certificate for status.acme.dev expires in 12 days</h3>
+                <span class="decision-marks"><i data-brand="cron" data-size="14"></i><span class="bars" data-p="1" title="Priority low, 1 of 4"><i></i><i></i><i></i><i></i></span></span>
+              </div>
+              <p class="decision-meta">Proposal · <span class="proj proj--ops">ops</span> · from the daily certificate check</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--accent btn--sm">Start Fix bug</span><span class="describe-line">Starts <b>Fix bug</b> on <b>ops</b> with task <b>SSL certificate for status.acme.dev expires in 12 days</b></span></button>
+                <button class="bound-action"><span class="btn btn--sm">Accept</span><span class="describe-line">Removes label <b>proposed</b> from Task <b>SSL certificate for status.acme.dev expires in 12 days</b></span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Sets status to <b>cancelled</b> on Task <b>SSL certificate for status.acme.dev expires in 12 days</b></span></button>
+              </div>
+            </article>
+            <article class="decision">
+              <div class="decision-head">
+                <h3 class="decision-title">Add iDEAL as a payment method</h3>
+                <span class="decision-marks"><i data-brand="intercom" data-size="14"></i><span class="bars" data-p="1" title="Priority low, 1 of 4"><i></i><i></i><i></i><i></i></span></span>
+              </div>
+              <p class="decision-meta">Proposal · <span class="proj proj--webshop">webshop</span> · 5 customers asked for it</p>
+              <div class="bound-actions">
+                <button class="bound-action"><span class="btn btn--accent btn--sm">Accept</span><span class="describe-line">Removes label <b>proposed</b> from Task <b>Add iDEAL as a payment method</b></span></button>
+                <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Sets status to <b>cancelled</b> on Task <b>Add iDEAL as a payment method</b></span></button>
+              </div>
+            </article>
+            <p class="delivery-note"><i data-brand="slack" data-size="14"></i>Phone copies go to Slack · acme-hq. <i data-brand="discord" data-size="14"></i>Discord · community is reconnecting since 09:12.</p>
+          </section>
+
+          <!-- ============ Moving ============ -->
+          <section class="line-stage line-stage--moving today-only" aria-label="Moving">
+            <a class="line-run" href="#"><i data-face="Cart total rounding on discounts" data-pose="working" data-size="24"></i><span class="line-run-text"><b>Cart total rounding on discounts</b><span>Fix bug · working 14m</span><span class="line-run-attached"><i data-brand="sentry" data-size="12"></i>+2 attached 09:00</span></span></a>
+            <a class="line-run" href="#"><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="24"></i><span class="line-run-text"><b>Draft reply to Jonas at Kiteworks</b><span>Draft reply · working 1m</span></span></a>
+            <a class="line-run" href="#"><i data-face="Ship release v2.15" data-pose="waiting" data-size="24"></i><span class="line-run-text"><b>Ship release v2.15</b><span>Ship release</span><span class="you-ink">waiting on you</span></span></a>
+            <a class="line-run" href="#breaker"><i data-face="Label new issues run" data-pose="paused" data-size="24"></i><span class="line-run-text"><b>Label new issues</b><span>paused · bound tripped</span></span></a>
+          </section>
+
+          <!-- ============ Shipped ============ -->
+          <section class="line-stage today-only" aria-label="Shipped">
+            <a class="shipped-item shipped-item--traced" href="?state=trace"><i data-mark="done" data-size="14"></i><span class="shipped-item-text"><b>Discount codes ignore letter case</b>#1287 merged at 19:12<span class="trace-line"><i data-brand="intercom" data-size="12"></i>2 <i data-brand="sentry" data-size="12"></i>1 <i data-i="arrow" data-size="12"></i><b>4h 50m</b></span></span></a>
+            <a class="shipped-item" href="#"><i data-mark="done" data-size="14"></i><span class="shipped-item-text"><b>payments-api v2.14.0</b>published at 19:40<span class="trace-line"><i data-brand="github" data-size="12"></i>1 <i data-i="arrow" data-size="12"></i><b>9m</b></span></span></a>
+            <a class="shipped-item" href="#"><i data-mark="done" data-size="14"></i><span class="shipped-item-text"><b>Reply sent to Pieter at Bakkerij Smit</b>sent at 18:44<span class="trace-line"><i data-brand="gmail" data-size="12"></i>1 <i data-i="arrow" data-size="12"></i><b>1h 05m</b></span></span></a>
+          </section>
+
+          <!-- ============ ?state=swarm: the line split into topic lanes ============ -->
+          <div class="topic-lanes swarm-only">
+            <section class="topic-lane" aria-label="Checkout">
+              <div class="lane-cell">
+                <h2 class="lane-name">Checkout <small>1,450 in</small></h2>
+                <div class="lane-taps"><span><i data-brand="sentry" data-size="14"></i>1,300</span><span><i data-brand="stripe" data-size="14"></i>120</span><span><i data-brand="posthog" data-size="14"></i>30</span></div>
+              </div>
+              <div class="lane-cell">
+                <div class="pile">
+                  <span class="pile-counts"><span class="is-burning"><b>3</b>now</span><span><b>7</b>today</span><span><b>9</b>when you can</span><span><b>4</b>offers</span><span><b>3</b>calls</span><span class="you-ink"><b>1</b>back</span></span>
+                  <a class="btn btn--sm" href="#">Open all 27 <i data-i="arrow" data-size="12"></i></a>
+                </div>
+                <article class="decision decision--lead card">
+                  <div class="decision-top">
+                    <span class="chip chip--fail">Urgent</span>
+                    <span class="bars" data-p="4" title="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+                    <span class="proj proj--webshop">webshop</span>
+                    <span>·</span><span>first seen 08:52</span>
+                    <span class="spacer"></span>
+                    <span>1 of 3 burning</span>
+                  </div>
+                  <h3 class="decision-lead-title">Checkout fails for EU cards with 3&#8209;D Secure</h3>
+                  <div class="made-from" aria-label="Made from">
+                    <span class="made-from-entry"><i data-brand="sentry" data-size="14"></i><span><b>412 errors</b>, 188 users<br /><span>Sentry · webshop-prod</span></span></span>
+                    <span class="made-from-entry"><i data-brand="gmail" data-size="14"></i><span><b>3 customer emails</b><br /><span>Gmail · rogier@personal</span></span></span>
+                    <span class="made-from-entry"><i data-brand="posthog" data-size="14"></i><span><b>-18% conversion</b>, EU only<br /><span>PostHog · webshop</span></span></span>
+                    <span class="made-from-entry"><i data-brand="github" data-size="14"></i><span><b>Deploy #1289</b> at 14:02<br /><span>GitHub · rogier/webshop</span></span></span>
+                  </div>
+                  <div class="bound-actions">
+                    <button class="bound-action"><span class="btn btn--accent btn--sm">Start Fix bug</span><span class="describe-line">Starts <b>Fix bug</b> on <b>webshop</b> with task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span><span class="producer-description">Claude Code · Opus 5.5 · studio-mac</span></button>
+                    <button class="bound-action"><span class="btn btn--sm">Accept</span><span class="describe-line">Removes label <b>proposed</b> from Task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span><span class="producer-description">This is work; it stays in the backlog.</span></button>
+                    <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Sets status to <b>cancelled</b> on Task <b>Checkout fails for EU cards with 3&#8209;D Secure</b></span></button>
+                  </div>
+                </article>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">14</span>moving</div>
+                <span class="stack"><i data-face="Fix bug" data-pose="working" data-size="24"></i><i data-face="Investigate" data-pose="working" data-size="24"></i><i data-face="Cart total rounding on discounts" data-pose="working" data-size="24"></i><span class="stack-more">+11</span></span>
+                <p class="lane-note you-ink">1 waits on you</p>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">11</span>shipped</div>
+                <p class="lane-note">median 1h 20m</p>
+              </div>
+            </section>
+
+            <section class="topic-lane" aria-label="Infrastructure">
+              <div class="lane-cell">
+                <h2 class="lane-name">Infrastructure <small>20 in</small></h2>
+                <div class="lane-taps"><span><i data-brand="grafana" data-size="14"></i>20</span></div>
+              </div>
+              <div class="lane-cell">
+                <div class="pile">
+                  <span class="pile-counts"><span class="is-zero"><b>0</b>now</span><span><b>5</b>today</span><span><b>9</b>when you can</span><span><b>3</b>offers</span><span><b>2</b>calls</span></span>
+                  <a class="btn btn--sm" href="#">Open all 19 <i data-i="arrow" data-size="12"></i></a>
+                </div>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">6</span>moving</div>
+                <span class="stack"><i data-face="Investigate" data-pose="working" data-size="24"></i><i data-face="Fix bug" data-pose="paused" data-size="24"></i><span class="stack-more">+4</span></span>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">4</span>shipped</div>
+                <p class="lane-note">median 2h 05m</p>
+              </div>
+            </section>
+
+            <section class="topic-lane" aria-label="Customers">
+              <div class="lane-cell">
+                <h2 class="lane-name">Customers <small>260 in</small></h2>
+                <div class="lane-taps"><span><i data-brand="gmail" data-size="14"></i>170</span><span><i data-brand="intercom" data-size="14"></i>90</span></div>
+              </div>
+              <div class="lane-cell">
+                <div class="pile">
+                  <span class="pile-counts"><span class="is-zero"><b>0</b>now</span><span><b>6</b>today</span><span><b>11</b>when you can</span><span><b>8</b>offers</span><span><b>2</b>calls</span><span class="you-ink"><b>1</b>back</span></span>
+                  <a class="btn btn--sm" href="#">Open all 28 <i data-i="arrow" data-size="12"></i></a>
+                </div>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">12</span>moving</div>
+                <span class="stack"><i data-face="Draft reply" data-pose="working" data-size="24"></i><i data-face="Draft reply to Jonas at Kiteworks" data-pose="working" data-size="24"></i><span class="stack-more">+10</span></span>
+                <p class="lane-note you-ink">1 waits on you</p>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">9</span>shipped</div>
+                <p class="lane-note">median 45m</p>
+              </div>
+            </section>
+
+            <section class="topic-lane" aria-label="Releases">
+              <div class="lane-cell">
+                <h2 class="lane-name">Releases <small>380 in</small></h2>
+                <div class="lane-taps"><span><i data-brand="github" data-size="14"></i>380</span><span class="is-held"><i data-mark="paused" data-size="14"></i>34 held</span><span class="is-quiet"><i data-brand="linear" data-size="14"></i>0, listening</span></div>
+              </div>
+              <div class="lane-cell">
+                <div class="pile">
+                  <span class="pile-counts"><span class="is-zero"><b>0</b>now</span><span><b>2</b>today</span><span><b>5</b>when you can</span><span><b>5</b>offers</span><span><b>1</b>call</span><span class="you-ink"><b>2</b>back</span></span>
+                  <a class="btn btn--sm" href="#">Open all 15 <i data-i="arrow" data-size="12"></i></a>
+                </div>
+                <article class="decision decision--pile">
+                  <div class="decision-head">
+                    <h3 class="decision-title">Close 9 duplicate issues</h3>
+                    <span class="decision-marks"><i data-brand="github" data-size="14"></i></span>
+                  </div>
+                  <p class="decision-meta">Offer from the GitHub plugin · 9 open issues repeat older ones</p>
+                  <div class="bound-actions">
+                    <button class="bound-action" disabled><span class="btn btn--sm">Close all 9</span><span class="describe-line"><b>Cannot be taken:</b> the GitHub plugin changed this action's inputs at 08:30, after triage proposed it</span></button>
+                    <button class="bound-action"><span class="btn btn--quiet btn--sm">Dismiss</span><span class="describe-line">Does nothing</span></button>
+                  </div>
+                </article>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">7</span>moving</div>
+                <span class="stack"><i data-face="Ship release v2.15" data-pose="waiting" data-size="24"></i><i data-face="Label new issues run" data-pose="paused" data-size="24"></i><span class="stack-more">+5</span></span>
+                <p class="lane-note you-ink">2 wait on you</p>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">5</span>shipped</div>
+                <p class="lane-note">median 30m</p>
+              </div>
+            </section>
+
+            <section class="topic-lane" aria-label="No topic">
+              <div class="lane-cell">
+                <h2 class="lane-name">No topic <small>10 in</small></h2>
+                <div class="lane-taps"><span><i data-brand="cron" data-size="14"></i>10</span></div>
+              </div>
+              <div class="lane-cell">
+                <div class="pile">
+                  <span class="pile-counts"><span class="is-zero"><b>0</b>now</span><span><b>1</b>today</span><span><b>2</b>when you can</span><span><b>1</b>offer</span><span><b>1</b>call</span></span>
+                  <a class="btn btn--sm" href="#">Open all 5 <i data-i="arrow" data-size="12"></i></a>
+                </div>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">1</span>moving</div>
+              </div>
+              <div class="lane-cell">
+                <div class="lane-count"><span class="deco-num">1</span>shipped</div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <!-- ============ ?state=trace: one shipped item, back to the events it came from ============ -->
+        <aside class="glass trace-drawer trace-only" aria-label="Trace of Discount codes ignore letter case">
+          <div class="trace-head">
+            <div>
+              <span class="trace-kicker"><i data-mark="done" data-size="14"></i>Shipped · trace</span>
+              <h2 class="trace-title">Discount codes ignore letter case</h2>
+            </div>
+            <span class="trace-close"><button class="btn btn--sm btn--quiet" title="Copies the link to this trace"><i data-i="link" data-size="14"></i>Copy link</button><a class="icon-btn" href="?" title="Close"><i data-i="close" data-size="16"></i></a></span>
+            <p class="trace-sub">#1287 merged in rogier/webshop at 19:12 yesterday</p>
+            <p class="trace-url">/intake?since=2026-09-28T18:20&amp;trace=task-dc41</p>
+          </div>
+          <div class="trace-body">
+            <p class="lead-time"><b>4h 50m</b>from the first event to the merge</p>
+            <div class="lead-time-split" aria-label="Lead time by stage">
+              <i style="flex: 38"></i><i class="is-you" style="flex: 201"></i><i class="is-run" style="--hue: var(--hue-iris); flex: 22"></i><i class="is-review" style="flex: 29"></i>
+            </div>
+            <div class="trace-steps">
+              <h3 class="trace-span"><i></i>Came in<span>38m</span></h3>
+              <div class="trace-step"><time>14:22</time><i data-brand="intercom" data-size="14"></i><p><b>“My code SUMMER20 doesn't work”</b><br />Intercom · support</p></div>
+              <div class="trace-step"><time>14:40</time><i data-brand="sentry" data-size="14"></i><p><b>CouponNotFound</b> for <b>summer20</b> in checkout<br />Sentry · webshop-prod</p></div>
+              <div class="trace-step"><time>14:51</time><i data-brand="intercom" data-size="14"></i><p><b>“Code only works in capitals?”</b><br />Intercom · support</p></div>
+
+              <h3 class="trace-span"><i class="is-you"></i>Your call<span>3h 21m</span></h3>
+              <div class="trace-step"><time>15:00</time><i data-face="Triage" data-pose="idle" data-size="20"></i><p>Triage proposed it for <b>Today</b>, with <b>Start Fix bug</b></p></div>
+              <div class="trace-step"><time>18:21</time><i data-you="20"></i><p>You answered <b>Start Fix bug</b>, on the desktop</p></div>
+
+              <h3 class="trace-span"><i class="is-run" style="--hue: var(--hue-iris)"></i>Moving<span>22m</span></h3>
+              <div class="trace-step"><time>18:21</time><i data-face="Fix bug" data-pose="idle" data-size="20"></i><p><b>Fix bug</b> started on <b>webshop</b><br />Claude Code · Sonnet 5 · build-box-1</p></div>
+              <div class="trace-step"><time>18:43</time><i data-face="Fix bug" data-pose="done" data-size="20"></i><p>Opened pull request <b>#1287</b>, 2 files +31 -4</p></div>
+
+              <h3 class="trace-span"><i class="is-review"></i>Review and merge<span>29m</span></h3>
+              <div class="trace-step"><time>19:12</time><i data-brand="github" data-size="14"></i><p><b>#1287</b> merged by <b>rogier</b><br />GitHub · rogier</p></div>
+            </div>
+          </div>
+          <div class="trace-foot">
+            <i data-i="clock" data-size="14"></i><span>Source events kept until 27 Dec</span>
+            <span class="spacer"></span>
+            <a class="btn btn--sm" href="#" target="_blank" rel="noopener">Open #1287 in GitHub <i data-i="external" data-size="12"></i></a>
+          </div>
+        </aside>
+      </main>
+    </div>
+    <script src="../../../crew-bureau-2/brands.js"></script>
+    <script src="../../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

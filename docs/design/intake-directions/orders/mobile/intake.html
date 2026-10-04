@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../../shared/page.js"></script>
+    <script>document.documentElement.dataset.intakeCount = document.documentElement.dataset.state === "swarm" ? "7" : "10";</script>
+    <link rel="stylesheet" href="../../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../intake.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Intake · Hercule</title>
+    <style>
+      /* Page layout only; every component is in ../intake.css or system.css. */
+      .triage-at {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .triage-at b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .away {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        padding: 0 20px;
+      }
+      /* On a phone each lever number sits beside its label, to keep the first screen for the lead.
+         When the two do not fit on one line, the second moves to its own line, whole. */
+      .away .lever {
+        display: flex;
+        flex-wrap: wrap;
+      }
+      .away .lever > span:not(.lever-bar) {
+        grid-auto-flow: column;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .away .lever > .lever-bar {
+        flex-basis: 100%;
+      }
+      .list {
+        padding: 0 12px 28px;
+      }
+      .list .m-lane {
+        padding-left: 8px;
+        padding-right: 8px;
+      }
+      .m-lane small {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .m-lane--you {
+        color: var(--you-ink);
+      }
+      .m-lane--now {
+        color: var(--fail-ink);
+      }
+      /* The lead on a phone: no card, so its big answers are the only boxes. */
+      .m-lead {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+        padding: 0 8px;
+      }
+      .m-lead h2 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: var(--w-bold);
+        letter-spacing: -0.01em;
+        line-height: 1.3;
+      }
+      .m-lead .made-line {
+        margin: 0;
+      }
+      .m-lead .m-answers {
+        margin-top: 4px;
+      }
+      .m-lead-foot {
+        display: flex;
+        margin: 0 -10px;
+      }
+      .list .quiet {
+        padding: 4px 8px 0;
+      }
+      .list .quiet-row {
+        align-items: flex-start;
+        padding: 6px 0;
+        line-height: 1.4;
+      }
+      .list .quiet-row > :first-child {
+        margin-top: 2px;
+      }
+      .list .receipt {
+        flex-wrap: nowrap;
+        gap: 10px;
+      }
+      /* "Make it standing" as a sheet over Intake. */
+      .scrim {
+        z-index: 24;
+      }
+      .make-sheet {
+        top: 64px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 0 20px 34px;
+      }
+      .make-sheet .editor-h {
+        margin-top: 8px;
+      }
+      /* The workflow's text starts where the selector's fields and the bound's slider start. */
+      .make-sheet .editor-does {
+        grid-template-columns: 48px minmax(0, 1fr);
+        column-gap: 12px;
+      }
+      .make-sheet .bound-pick {
+        gap: 12px;
+      }
+      .make-sheet .bound-pick > :first-child {
+        width: 48px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <div class="m-title">
+        <h1>Intake</h1>
+        <span class="spacer"></span>
+        <span class="triage-at"><i data-face="Triage" data-pose="idle" data-size="24"></i><span>Triage <b>09:00</b> · next <b>11:00</b></span></span>
+      </div>
+
+      <div class="m-body">
+        <!-- The morning digest: what the standing orders did, first. -->
+        <section class="away" aria-label="While you were away">
+          <h2 class="section-h">While you were away <span class="spacer"></span><span class="faint">since 18:20</span></h2>
+          <div class="lever default-only">
+            <span><b class="deco-num">38</b>handled for you this week</span>
+            <span><b class="deco-num">9</b>by you this week</span>
+            <span class="lever-bar"><i style="flex: 38"></i><i style="flex: 9"></i></span>
+          </div>
+          <div class="lever swarm-only">
+            <span><b class="deco-num">1,186</b>handled for you this week</span>
+            <span><b class="deco-num">41</b>by you this week</span>
+            <span class="lever-bar"><i style="flex: 1186"></i><i style="flex: 41"></i></span>
+          </div>
+          <ul class="digest default-only">
+            <li><i data-face="Fix bug" data-pose="idle" data-size="26"></i><b>Fix bug</b><span>#1287 merged, 1 working</span><span class="mark mark-still" role="img" aria-label="working"><i data-i="m-working" data-size="14"></i></span></li>
+            <li><i data-face="Draft reply" data-pose="idle" data-size="26"></i><b>Draft reply</b><span>Pieter sent, Jonas drafting</span><span class="mark mark-still" role="img" aria-label="working"><i data-i="m-working" data-size="14"></i></span></li>
+            <li><i data-face="Ship release" data-pose="waiting" data-size="26"></i><b>Ship release</b><span>v2.14.0 out, <span class="you-ink">v2.15 asks you</span></span><i data-mark="waiting"></i></li>
+            <li><i data-face="Nightly backup check" data-pose="failed" data-size="26"></i><b>Nightly backup check</b><span>no new backup</span><i data-mark="failed"></i></li>
+            <li><i data-face="Label new issues" data-pose="paused" data-size="26"></i><b>Label new issues</b><span>20 labelled, 34 held</span><i data-mark="paused"></i></li>
+          </ul>
+          <ul class="digest swarm-only">
+            <li><i data-face="Fix bug" data-pose="idle" data-size="26"></i><b>Fix bug</b><span>14 PRs opened, 3 working</span><span class="mark mark-still" role="img" aria-label="working"><i data-i="m-working" data-size="14"></i></span></li>
+            <li><i data-face="Add to backlog" data-pose="idle" data-size="26"></i><b>Add to backlog</b><span>33 kept as Tasks</span><i data-mark="done"></i></li>
+            <li><i data-face="Merge dependency bumps" data-pose="idle" data-size="26"></i><b>Merge dependency bumps</b><span>23 merged</span><i data-mark="done"></i></li>
+            <li><i data-face="Draft reply" data-pose="idle" data-size="26"></i><b>Draft reply</b><span>38 drafts, 31 sent by you</span><i data-mark="done"></i></li>
+            <li><i data-face="Ship release" data-pose="waiting" data-size="26"></i><b>Ship release</b><span>4 out, <span class="you-ink">v2.15 asks you</span></span><i data-mark="waiting"></i></li>
+            <li><i data-face="Label new issues" data-pose="paused" data-size="26"></i><b>Label new issues</b><span>20 labelled, 340 held</span><i data-mark="paused"></i></li>
+            <li><span class="stack"><i data-face="Investigate" data-pose="idle" data-size="20"></i></span><b>9 more</b><span class="digest-more">466 runs, none paused</span><span></span></li>
+          </ul>
+        </section>
+
+        <!-- Needs you: only what no standing order covers. -->
+        <div class="list">
+          <div class="m-lane m-lane--now">Now <small>1</small></div>
+          <article class="m-lead">
+            <div class="decision-top">
+              <span class="chip chip--fail">Urgent</span>
+              <span class="bars" data-p="4" title="Priority urgent, 4 of 4"><i></i><i></i><i></i><i></i></span>
+              <span class="proj proj--webshop">webshop</span>
+              <span>Proposal · 08:52</span>
+            </div>
+            <h2>Checkout fails for EU cards with 3&#8209;D Secure</h2>
+            <div class="made-line made-line--grid" aria-label="Made from">
+              <span><i data-brand="sentry" data-size="13"></i><b>412</b> errors</span>
+              <span><i data-brand="gmail" data-size="13"></i><b>3</b> emails</span>
+              <span><i data-brand="posthog" data-size="13"></i><b>-18%</b> conversion</span>
+              <span><i data-brand="github" data-size="13"></i><b>#1289</b> issue</span>
+            </div>
+            <div class="m-answers">
+              <button class="m-ans m-ans--accent"><i data-face="Fix bug" data-pose="idle" data-size="32"></i><b>Start "Fix bug"</b><span>Starts <span class="live">Fix bug</span> on <span class="live">webshop</span> with Task <span class="live">Checkout fails for EU cards with 3&#8209;D&nbsp;Secure</span><small class="ans-fine">Fix it now; the cause is known.</small></span></button>
+              <button class="m-ans"><i data-i="tasks" data-size="20"></i><b>Accept</b><span>Removes label <span class="live">proposed</span> from Task <span class="live">Checkout fails for EU cards with 3&#8209;D&nbsp;Secure</span><small class="ans-fine">This is work; it stays in the backlog.</small></span></button>
+              <button class="m-ans m-ans--quiet"><i data-i="close" data-size="20"></i><b>Dismiss</b><span>Sets status to <span class="live">cancelled</span> on Task <span class="live">Checkout fails for EU cards with 3&#8209;D&nbsp;Secure</span><small class="ans-fine">Not work, or not worth doing.</small></span></button>
+            </div>
+            <div class="m-lead-foot">
+              <button class="btn btn--quiet btn--sm"><i data-i="bound" data-size="14"></i>Always do this…</button>
+            </div>
+          </article>
+
+          <div class="m-lane m-lane--you">Needs a call <small>2</small></div>
+          <div class="decision decision--stack">
+            <span class="decision-marks"><i data-brand="intercom" data-size="16"></i></span>
+            <span class="decision-what"><b><span>App is slow on Android</span></b><span><span class="decision-kind decision-kind--you">Unsure</span> · which project is it?</span></span>
+            <span class="m-choices">
+              <span class="m-choice"><button class="btn btn--lg">webshop</button><span class="answer-describe">Sets project to <b>webshop</b></span></span>
+              <span class="m-choice"><button class="btn btn--lg">payments-api</button><span class="answer-describe">Sets project to <b>payments-api</b></span></span>
+              <span class="m-choice"><button class="btn btn--quiet btn--lg">Not work</button><span class="answer-describe">Sets status to <b>cancelled</b></span></span>
+            </span>
+          </div>
+          <div class="decision decision--stack">
+            <span class="decision-marks"><i data-face="Label new issues" data-pose="paused" data-size="30"></i></span>
+            <span class="decision-what">
+              <b><span>Label new issues held <span class="default-only">34</span><span class="swarm-only">340</span> events</span></b>
+              <span><span class="decision-kind decision-kind--you">Breaker</span> · 20 an hour, tripped 08:14</span>
+            </span>
+            <div class="m-answers">
+              <button class="m-ans"><i data-i="play" data-size="20"></i><b>Resume</b><span>Resumes, and the <span class="live default-only">34</span><span class="live swarm-only">340</span> held events start runs at <span class="live">20 per hour</span>, the rest as the window frees up</span></button>
+              <button class="m-ans"><i data-i="close" data-size="20"></i><b>Resume, discard</b><span>Resumes and discards the <span class="live default-only">34</span><span class="live swarm-only">340</span> held events</span></button>
+              <button class="m-ans"><i data-i="bound" data-size="20"></i><b>Edit the trigger</b><span>Opens the trigger, where its Spawn Bound lives</span></button>
+            </div>
+          </div>
+
+          <div class="m-lane m-lane--you">Waiting on you <small>1</small></div>
+          <div class="decision decision--stack">
+            <span class="decision-marks"><i data-face="Ship release v2.15" data-pose="waiting" data-size="30"></i></span>
+            <span class="decision-what"><b><span>Publish payments-api 2.15.0 to npm?</span></b><span><span class="decision-kind decision-kind--you">Approval</span> · Ship release v2.15 · 09:31</span></span>
+            <span class="m-strip">
+              <button class="btn btn--accent btn--lg">Allow once</button>
+              <button class="btn btn--quiet btn--lg">Deny</button>
+              <span class="answer-describe">Allows <b>npm publish</b> once</span>
+              <span class="answer-describe answer-describe--3">Denies <b>npm publish</b></span>
+            </span>
+          </div>
+
+          <div class="m-lane">Today <small class="default-only">4</small><small class="swarm-only">3</small></div>
+          <div class="decision decision--stack swarm-only">
+            <span class="decision-marks"><i data-brand="github" data-size="15"></i></span>
+            <span class="decision-what"><b><span>Close 9 duplicate issues</span></b><span><span class="decision-kind">Offer</span> · from the GitHub plugin</span></span>
+            <span class="m-strip">
+              <button class="btn btn--accent btn--lg answer-blocked" disabled>Close all 9</button>
+              <button class="btn btn--quiet btn--lg">Dismiss</button>
+              <span class="answer-describe answer-describe--blocked">Cannot be taken: the GitHub plugin changed this action's inputs at 08:30, after triage proposed it</span>
+              <span class="answer-describe answer-describe--3">Does nothing</span>
+            </span>
+          </div>
+          <div class="decision decision--stack">
+            <span class="decision-marks"><i data-brand="grafana" data-size="14"></i><i data-i="clock" data-size="13"></i></span>
+            <span class="decision-what"><b><span>Nightly backup job timing out</span><span class="bars" data-p="3"><i></i><i></i><i></i><i></i></span></b><span><span class="decision-kind">Proposal</span> · ops · 3 nights in a row</span><button class="btn btn--quiet btn--sm decision-always">Always…</button></span>
+            <span class="m-strip">
+              <button class="btn btn--accent btn--lg"><i data-face="Investigate" data-pose="idle" data-size="18"></i>Investigate</button>
+              <button class="btn btn--lg">Accept</button>
+              <button class="btn btn--quiet btn--lg">Dismiss</button>
+              <span class="answer-describe">Starts on <b>ops</b></span>
+              <span class="answer-describe answer-describe--2">Removes label <b>proposed</b></span>
+              <span class="answer-describe answer-describe--3">Sets status to <b>cancelled</b></span>
+            </span>
+          </div>
+          <div class="decision decision--stack default-only">
+            <span class="decision-marks"><i data-brand="gmail" data-size="15"></i></span>
+            <span class="decision-what"><b><span>Draft a reply to Marta at Brightline</span></b><span><span class="decision-kind">Offer</span> · invoice in the company name</span><button class="btn btn--quiet btn--sm decision-always">Always…</button></span>
+            <span class="m-strip">
+              <button class="btn btn--accent btn--lg"><i data-face="Draft reply" data-pose="idle" data-size="18"></i>Draft reply</button>
+              <button class="btn btn--quiet btn--lg">Dismiss</button>
+              <span class="answer-describe">Starts <b>Draft reply</b> from <b>Gmail&nbsp;·&nbsp;rogier@personal</b></span>
+              <span class="answer-describe answer-describe--3">Does nothing</span>
+            </span>
+          </div>
+          <div class="decision decision--stack">
+            <span class="decision-marks"><i data-brand="stripe" data-size="14"></i><i data-brand="sentry" data-size="13"></i></span>
+            <span class="decision-what"><b><span>Stripe webhook retries rising</span><span class="bars" data-p="2"><i></i><i></i><i></i><i></i></span></b><span><span class="decision-kind">Proposal</span> · payments-api · up 4x</span><button class="btn btn--quiet btn--sm decision-always">Always…</button></span>
+            <span class="m-strip">
+              <button class="btn btn--accent btn--lg"><i data-face="Investigate" data-pose="idle" data-size="18"></i>Investigate</button>
+              <button class="btn btn--lg">Accept</button>
+              <button class="btn btn--quiet btn--lg">Dismiss</button>
+              <span class="answer-describe">Starts on <b>payments-api</b></span>
+              <span class="answer-describe answer-describe--2">Removes label <b>proposed</b></span>
+              <span class="answer-describe answer-describe--3">Sets status to <b>cancelled</b></span>
+            </span>
+          </div>
+          <div class="decision decision--stack default-only" id="merge-4">
+            <span class="decision-marks"><i data-brand="github" data-size="15"></i></span>
+            <span class="decision-what"><b><span>Merge 4 dependency bumps</span></b><span><span class="decision-kind">Offer</span> · webshop · patch, green</span><button class="btn btn--quiet btn--sm decision-always">Always…</button></span>
+            <span class="m-strip">
+              <button class="btn btn--accent btn--lg">Merge all 4</button>
+              <button class="btn btn--lg">Review first</button>
+              <button class="btn btn--quiet btn--lg">Dismiss</button>
+              <span class="answer-describe">Merges <b>4</b> in <b>rogier/webshop</b> as <b>GitHub&nbsp;·&nbsp;rogier</b></span>
+              <span class="answer-describe answer-describe--2">Opens the 4 pull requests</span>
+              <span class="answer-describe answer-describe--3">Does nothing</span>
+            </span>
+          </div>
+
+          <div class="default-only">
+            <div class="m-lane">When you can <small>2</small></div>
+            <div class="decision decision--stack">
+              <span class="decision-marks"><i data-i="clock" data-size="15"></i></span>
+              <span class="decision-what"><b><span>SSL certificate expires in 12 days</span><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span></b><span><span class="decision-kind">Proposal</span> · ops · status.acme.dev</span><button class="btn btn--quiet btn--sm decision-always">Always…</button></span>
+              <span class="m-strip">
+                <button class="btn btn--accent btn--lg"><i data-face="Fix bug" data-pose="idle" data-size="18"></i>Fix bug</button>
+                <button class="btn btn--lg">Accept</button>
+                <button class="btn btn--quiet btn--lg">Dismiss</button>
+                <span class="answer-describe">Starts on <b>ops</b></span>
+                <span class="answer-describe answer-describe--2">Removes label <b>proposed</b></span>
+                <span class="answer-describe answer-describe--3">Sets status to <b>cancelled</b></span>
+              </span>
+            </div>
+            <div class="decision decision--stack">
+              <span class="decision-marks"><i data-brand="intercom" data-size="15"></i></span>
+              <span class="decision-what"><b><span>Add iDEAL as a payment method</span><span class="bars" data-p="1"><i></i><i></i><i></i><i></i></span></b><span><span class="decision-kind">Proposal</span> · webshop · 5 requests</span><button class="btn btn--quiet btn--sm decision-always">Always…</button></span>
+              <span class="m-strip">
+                <button class="btn btn--accent btn--lg">Accept</button>
+                <button class="btn btn--quiet btn--lg">Dismiss</button>
+                <span class="answer-describe">Removes label <b>proposed</b></span>
+                <span class="answer-describe answer-describe--3">Sets status to <b>cancelled</b></span>
+              </span>
+            </div>
+          </div>
+
+          <div class="swarm-only">
+            <div class="m-lane">Handled <small>57</small></div>
+            <div class="quiet">
+              <div class="quiet-row"><i data-i="check" data-size="14"></i><span><b>57 of 60 proposals</b> answered by your orders</span></div>
+            </div>
+          </div>
+
+          <div class="m-lane">Also</div>
+          <div class="quiet">
+            <div class="quiet-row default-only"><i data-i="link" data-size="14"></i><span><b>2 Sentry events</b> attached to "Cart total rounding on discounts"</span></div>
+            <div class="quiet-row default-only"><i data-brand="github" data-size="14"></i><span>FYI · payments-api <b>v2.14.0</b> published</span></div>
+            <div class="quiet-row default-only"><i data-brand="posthog" data-size="14"></i><span>FYI · sign-ups <b>+9%</b> week over week</span></div>
+            <div class="quiet-row default-only"><i data-brand="stripe" data-size="14"></i><span>FYI · payout of <b>€18,240</b> arrives Thursday</span></div>
+            <div class="quiet-row"><span class="src-x" role="img" aria-label="hetzner">h</span><span><b>Hetzner</b> · invoice for September · via Gmail · no action</span></div>
+            <div class="quiet-row"><i data-i="sparkle" data-size="14"></i><span>Triage note · <b>Stop proposing PostHog dips under 5%</b> <span class="later">later</span></span></div>
+            <div class="quiet-row"><i data-brand="slack" data-size="14"></i><span>Copies go to <b>Slack</b> · Discord is reconnecting since 09:12</span></div>
+            <div class="quiet-row receipt default-only"><i data-i="clock" data-size="13"></i><span>Since 18:20 <b>212 events → 5 proposals · 1 attached · 2 offers · 3 FYI · 1 unsure · 34 held · 166 no action</b></span></div>
+            <div class="quiet-row receipt swarm-only"><i data-i="clock" data-size="13"></i><span>Since 18:20 <b>2,120 events → 60 proposals · 214 attached · 1 offer · 41 FYI · 1 unsure · 340 held · 1,463 no action</b></span></div>
+          </div>
+        </div>
+      </div>
+
+      <nav data-tabbar="intake"></nav>
+
+      <!-- ?state=make: "Make it standing" from the Offer "Merge 4 dependency bumps". -->
+      <div class="scrim make-only"></div>
+      <section class="sheet editor make-sheet make-only" aria-label="Always do this">
+        <header class="editor-h">
+          <i data-face="Merge dependency bumps" data-pose="idle" data-size="32"></i>
+          <span><b>Always do this: Merge all 4</b><small>A start trigger you write. It runs without asking.</small></span>
+          <button class="icon-btn" title="Close"><i data-i="close"></i></button>
+        </header>
+        <section class="editor-sec">
+          <dl class="selector selector--narrow">
+            <dt>When</dt>
+            <dd><span class="field field--select">Pull request checks finished</span></dd>
+            <dt>From</dt>
+            <dd><span class="field field--select"><i data-brand="github" data-size="14"></i>GitHub · rogier</span></dd>
+            <dt>Where</dt>
+            <dd>
+              <span class="cond">author is <b>dependabot[bot]</b><i data-i="close" data-size="12"></i></span>
+              <span class="cond">all checks <b>passed</b><i data-i="close" data-size="12"></i></span>
+              <span class="cond">repository is <b>rogier/webshop</b><i data-i="close" data-size="12"></i></span>
+              <span class="cond cond--add" role="button" aria-label="Add a condition"><i data-i="plus" data-size="12"></i></span>
+            </dd>
+          </dl>
+        </section>
+        <section class="editor-sec">
+          <div class="editor-does">
+            <i data-face="Merge dependency bumps" data-pose="idle" data-size="28"></i>
+            <span><span>Start <b>Merge dependency bumps</b></span><span class="faint">One step: <code>github/pr.merge</code></span></span>
+          </div>
+          <div class="bound-pick">
+            <span>At most</span>
+            <input class="range" type="range" min="1" max="30" value="10" aria-label="Spawn Bound, runs per day" />
+            <span><b>10</b> a day</span>
+          </div>
+        </section>
+        <section class="editor-sec">
+          <div class="preview-h"><span class="deco-num">31</span><span>events last week would have matched</span></div>
+          <ul class="preview">
+            <li><span class="num">#1305</span><span>stripe 14.2.1 → 14.2.2</span><span class="faint">patch</span><time>today</time></li>
+            <li><span class="num">#1296</span><span>eslint 9.12.0 → 9.13.0</span><span class="preview-flag">minor</span><time>Fri</time></li>
+          </ul>
+          <div class="preview-warn"><i data-i="question" data-size="14"></i><span>6 of the 31 were minor bumps. A filter can't tell.</span></div>
+        </section>
+        <section class="editor-sec">
+          <p class="describe">Creates workflow <b>Merge dependency bumps</b> (one step: <code>github/pr.merge</code> as <b>GitHub&nbsp;·&nbsp;rogier</b>) and adds a start trigger: on <code>github.pr.checks-completed</code> in <b>rogier/webshop</b> where the author is <b>dependabot[bot]</b> and all checks passed, at most <b>10 per day</b>.</p>
+        </section>
+        <div class="m-answers">
+          <button class="m-ans m-ans--accent"><i data-face="Merge dependency bumps" data-pose="idle" data-size="32"></i><b>Merge all 4 and make standing</b><span>The next bumps like these merge on their own</span></button>
+          <button class="m-ans"><i data-i="check" data-size="20"></i><b>Merge all 4 only</b><span>Just this time; no trigger is made</span></button>
+        </div>
+      </section>
+      <div class="home-ind"></div>
+    </div>
+    <script src="../../../crew-bureau-2/brands.js"></script>
+    <script src="../../../crew-bureau-2/crew.js"></script>
+    <script>
+      // ?state=make opens the sheet from the Merge 4 row: mark that row and scroll it under the sheet's top.
+      if (document.documentElement.dataset.state === "make") {
+        var row = document.getElementById("merge-4");
+        row.classList.add("is-on");
+        var body = document.querySelector(".m-body");
+        body.scrollTop = row.offsetTop - body.offsetTop - 40;
+      }
+    </script>
+  </body>
+</html>
