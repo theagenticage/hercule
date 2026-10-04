@@ -20,7 +20,7 @@ import {
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
 import { SaveStatus } from "../../../screens/save-status";
-import { PollingFields } from "./-polling";
+import { FeedIntervalFields } from "./-feed-intervals";
 
 /**
  * Suggested topics for a connection. They are suggestions, not a closed list:
@@ -56,13 +56,18 @@ export function ConfigureConnection({
   const [intervals, setIntervals] = useState<FeedIntervalsDraft>(() =>
     buildFeedIntervalsDraft(feeds, connection.feedIntervals),
   );
+  // The interval fields whose text is not a whole number, found when the user
+  // pressed Save. Nothing is sent until every field can be read.
+  const [unreadableIntervals, setUnreadableIntervals] = useState<Readonly<Record<string, string>>>(
+    {},
+  );
   const [label, setLabel] = useState(connection.label);
   // The form shows only the first topic. Any topics after it, set through the
   // CLI or the API, are kept when the user saves.
   const [topic, setTopic] = useState(connection.labels[0] ?? "");
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: (feedIntervals: Connection["feedIntervals"]) => {
       const labels = buildTopicsUpdate(connection.labels, topic);
       return client.connection.update({
         params: { id: connection.id },
@@ -76,9 +81,7 @@ export function ConfigureConnection({
             : { config: buildConfigPayload(fields, draft, connection.config) }),
           // With no feeds on screen, which includes a type no longer in the
           // binary, the stored intervals are left exactly as they are.
-          ...(feeds.length === 0
-            ? {}
-            : { feedIntervals: buildFeedIntervalsPayload(feeds, intervals) }),
+          ...(feeds.length === 0 ? {} : { feedIntervals }),
         },
       });
     },
@@ -90,17 +93,23 @@ export function ConfigureConnection({
   const issues = readConnectionIssues(save.error, fields, feeds);
   const failure = issues.rest ? save.error : null;
 
-  // Clears the last save's error on any edit, because that error was about
-  // the values the fields held then.
+  // Clears the last save's errors on any edit, because those errors were
+  // about the values the fields held then.
   const edit = (): void => {
     if (!save.isIdle) save.reset();
+    setUnreadableIntervals({});
   };
 
   const send = (event: FormEvent): void => {
     event.preventDefault();
+    const reading = buildFeedIntervalsPayload(feeds, intervals);
+    if ("errors" in reading) {
+      setUnreadableIntervals(reading.errors);
+      return;
+    }
     // React Query calls a callback passed to `mutate` only while this form is
     // on screen, so a reply that arrives after Cancel cannot close another panel.
-    save.mutate(undefined, { onSuccess: onDone });
+    save.mutate(reading.feedIntervals, { onSuccess: onDone });
   };
 
   return (
@@ -149,6 +158,7 @@ export function ConfigureConnection({
               field={field}
               value={draft[field.name] ?? ""}
               error={issues.config[field.name]}
+              entryErrors={issues.configEntries[field.name]}
               onChange={(value) => {
                 edit();
                 setDraft((current) => ({ ...current, [field.name]: value }));
@@ -160,12 +170,12 @@ export function ConfigureConnection({
 
       {/* A type no longer in the binary polls no feeds, so it has no Polling section. */}
       {type === undefined ? null : (
-        <PollingFields
+        <FeedIntervalFields
           idPrefix={connection.id}
           typeName={type.displayName}
           feeds={feeds}
           draft={intervals}
-          errors={issues.feedIntervals}
+          errors={{ ...issues.feedIntervals, ...unreadableIntervals }}
           onChange={(feed, seconds) => {
             edit();
             setIntervals((current) => ({ ...current, [feed]: seconds }));

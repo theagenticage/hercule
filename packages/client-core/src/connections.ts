@@ -16,6 +16,7 @@ import {
   type PluginDetail,
 } from "@hercule/contract";
 import type { HerculeClient } from "./client";
+import { listIssuesInGroup, matchConfigIssues, type ConfigIssues } from "./config-fields";
 import { readValidationIssues } from "./errors";
 import { readJsonObject } from "./json-shape";
 import { describeMinutes } from "./minutes-left";
@@ -515,9 +516,21 @@ export const buildFeedIntervalsDraft = (
     }),
   );
 
+/** The message under a feed's interval field when its text is not a whole number of seconds. */
+export const FEED_INTERVAL_UNREADABLE = "Enter a whole number of seconds.";
+
+/** The result of reading the interval fields: the intervals to save, or the feeds whose text cannot be read. */
+export type FeedIntervalsReading =
+  | { readonly feedIntervals: Connection["feedIntervals"] }
+  | { readonly errors: Readonly<Record<string, string>> };
+
 /**
- * Returns the `feedIntervals` to save from the draft. A field left empty, or
- * holding only spaces, is left out, so that feed polls at its default.
+ * Converts the draft into the `feedIntervals` to save. A field left empty, or
+ * holding only spaces, is left out, so that feed polls at its default. A field
+ * holding anything but the digits of a whole number, such as "abc", "1.5" or
+ * "-5", is an error on that feed, and nothing is saved. Sending such text
+ * would either fail with a message about types or, because `Number` reads
+ * "1e3" and "0x10" as numbers, save a number the user did not type.
  *
  * The map is sent whole and replaces the stored one, so an interval stored
  * for a feed the type no longer declares is dropped; the controller would
@@ -528,13 +541,17 @@ export const buildFeedIntervalsDraft = (
 export const buildFeedIntervalsPayload = (
   feeds: ReadonlyArray<ConnectionFeed>,
   draft: FeedIntervalsDraft,
-): Connection["feedIntervals"] =>
-  Object.fromEntries(
-    feeds.flatMap((feed) => {
-      const typed = (draft[feed.name] ?? "").trim();
-      return typed === "" ? [] : [[feed.name, Number(typed)]];
-    }),
-  );
+): FeedIntervalsReading => {
+  const feedIntervals: Record<string, number> = {};
+  const errors: Record<string, string> = {};
+  for (const feed of feeds) {
+    const typed = (draft[feed.name] ?? "").trim();
+    if (typed === "") continue;
+    if (/^\d+$/.test(typed)) feedIntervals[feed.name] = Number(typed);
+    else errors[feed.name] = FEED_INTERVAL_UNREADABLE;
+  }
+  return Object.keys(errors).length === 0 ? { feedIntervals } : { errors };
+};
 
 /**
  * The validation errors of a refused `connection.update`, split by the part
@@ -543,6 +560,11 @@ export const buildFeedIntervalsPayload = (
 export interface ConnectionIssues {
   /** The error for each setting of the type's config schema, keyed by field name. */
   readonly config: Readonly<Record<string, string>>;
+  /**
+   * The error for each entry of a list setting, keyed by field name and then
+   * by the entry's position, counted from 0.
+   */
+  readonly configEntries: ConfigIssues["perEntry"];
   /** The error for each feed's poll interval, keyed by feed name. */
   readonly feedIntervals: Readonly<Record<string, string>>;
   /**
@@ -553,33 +575,43 @@ export interface ConnectionIssues {
   readonly rest: boolean;
 }
 
+const NO_CONNECTION_ISSUES: ConnectionIssues = {
+  config: {},
+  configEntries: {},
+  feedIntervals: {},
+  rest: false,
+};
+
 /**
  * Returns the errors of a failed `connection.update`, matched to the config
- * fields and the feeds the configure form renders. An issue at
- * `config.<field>` or `feedIntervals.<feed>` goes under that field when the
- * form renders it, and only the first issue of each field is kept. Any other
- * issue sets `rest`.
+ * fields and the feeds the configure form renders.
+ *
+ * - An issue under `config` is matched as `matchConfigIssues` describes, so
+ *   `config.repos.2` goes under the third entry of the `repos` list.
+ * - An issue at `feedIntervals.<feed>` goes under that feed's field.
+ * - Any other issue sets `rest`.
+ *
+ * Only the first issue of each field, and of each entry, is kept.
  */
 export const readConnectionIssues = (
   error: unknown,
   configFields: ReadonlyArray<{ readonly name: string }>,
   feeds: ReadonlyArray<ConnectionFeed>,
 ): ConnectionIssues => {
-  if (error === null || error === undefined) return { config: {}, feedIntervals: {}, rest: false };
+  if (error === null || error === undefined) return NO_CONNECTION_ISSUES;
   const issues = readValidationIssues(error);
-  if (issues === undefined) return { config: {}, feedIntervals: {}, rest: true };
+  if (issues === undefined) return { ...NO_CONNECTION_ISSUES, rest: true };
 
-  const configNames = new Set(configFields.map((field) => field.name));
+  const config = matchConfigIssues(listIssuesInGroup(issues, "config"), configFields);
   const feedNames = new Set(feeds.map((feed) => feed.name));
-  const config: Record<string, string> = {};
   const feedIntervals: Record<string, string> = {};
-  let rest = false;
+  let rest = config.rest;
   for (const { path, message } of issues) {
-    const [part, name] = path;
-    if (name === undefined) rest = true;
-    else if (part === "config" && configNames.has(name)) config[name] ??= message;
-    else if (part === "feedIntervals" && feedNames.has(name)) feedIntervals[name] ??= message;
+    const [part, feed] = path;
+    if (part === "config") continue;
+    if (part === "feedIntervals" && path.length === 2 && feed !== undefined && feedNames.has(feed))
+      feedIntervals[feed] ??= message;
     else rest = true;
   }
-  return { config, feedIntervals, rest };
+  return { config: config.perField, configEntries: config.perEntry, feedIntervals, rest };
 };

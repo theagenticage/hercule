@@ -14,6 +14,7 @@ export function StringList({
   label,
   values,
   required = false,
+  errors = {},
   onChange,
   addLabel = "Add",
 }: {
@@ -22,6 +23,12 @@ export function StringList({
   /** Set on the group, because the list as a whole is required, not any one entry. */
   readonly required?: boolean;
   readonly values: ReadonlyArray<string>;
+  /**
+   * The error of each entry, keyed by the entry's position, counted from 0.
+   * Each one is shown under its entry, so the user can tell which entry is
+   * wrong.
+   */
+  readonly errors?: Readonly<Record<number, string>> | undefined;
   readonly onChange: (values: ReadonlyArray<string>) => void;
   readonly addLabel?: string;
 }): JSX.Element {
@@ -37,27 +44,40 @@ export function StringList({
       aria-required={required ? true : undefined}
       className="flex flex-col items-start gap-1.5"
     >
-      {values.map((value, index) => (
-        // Entries have no identity of their own, so the position is the key;
-        // the list is short and only ever edited in place.
-        <div key={index} className="flex w-full items-center gap-1.5">
-          <Input
-            aria-label={buildEntryName(index)}
-            value={value}
-            onChange={(event) => {
-              replaceEntry(index, event.target.value);
-            }}
-          />
-          <Button
-            aria-label={`Remove ${buildEntryName(index)}`}
-            onClick={() => {
-              onChange(values.filter((_, at) => at !== index));
-            }}
-          >
-            Remove
-          </Button>
-        </div>
-      ))}
+      {values.map((value, index) => {
+        const error = errors[index];
+        return (
+          // Entries have no identity of their own, so the position is the key;
+          // the list is short and only ever edited in place.
+          <div key={index} className="flex w-full flex-col gap-1.5">
+            <div className="flex w-full items-center gap-1.5">
+              <Input
+                aria-label={buildEntryName(index)}
+                aria-invalid={error === undefined ? undefined : true}
+                value={value}
+                onChange={(event) => {
+                  replaceEntry(index, event.target.value);
+                }}
+              />
+              <Button
+                aria-label={`Remove ${buildEntryName(index)}`}
+                onClick={() => {
+                  onChange(values.filter((_, at) => at !== index));
+                }}
+              >
+                Remove
+              </Button>
+            </div>
+            {/* The margin puts the error nearer its own entry than the next
+                one, so it reads as belonging to the entry above it. */}
+            {error === undefined ? null : (
+              <p className="mb-1.5 text-fine text-fail" role="alert">
+                {error}
+              </p>
+            )}
+          </div>
+        );
+      })}
       {/* Shifted left by the button's padding, so its text lines up with the
           rest of the form. It is drawn in ink with a leading `+`, like the
           app's other add buttons, because a muted word under a form looks like

@@ -8,15 +8,16 @@ import {
 } from "@hercule/client-core";
 
 /**
- * The poll interval of each feed the connection's type polls, one number
+ * Renders the poll interval of each feed the connection's type polls, one
  * field per feed under a "Polling" heading. An empty field polls the feed at
  * its default, which the placeholder shows. Renders nothing for a type that
  * polls no feeds.
  *
- * The fields are not limited to each feed's minimum here. The controller
- * checks the minimum, and its errors are shown under the fields.
+ * Text that is not a whole number is refused before the save, under its
+ * field. The fields are not limited to each feed's minimum here. The
+ * controller checks the minimum, and its errors are shown under the fields.
  */
-export function PollingFields({
+export function FeedIntervalFields({
   idPrefix,
   typeName,
   feeds,
@@ -50,11 +51,13 @@ export function PollingFields({
                 fields, so an error appears directly under the input. */}
             <p className="text-fine text-faint">{describeFeedInterval(feed, typeName)}</p>
             <div className="flex items-center gap-2">
+              {/* A text field, not a number field: for text the browser cannot
+                  read as a number, such as "abc", a number field hands over an
+                  empty value, so the form could not say what is wrong. */}
               <Input
                 id={inputId}
                 className="w-[140px]"
-                type="number"
-                step={1}
+                inputMode="numeric"
                 placeholder={String(feed.defaultIntervalSeconds)}
                 value={draft[feed.name] ?? ""}
                 onChange={(event) => {

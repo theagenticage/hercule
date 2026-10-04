@@ -5,6 +5,7 @@ import {
   buildConfigPayload,
   type ConfigDraft,
   type ConfigField,
+  type ConfigIssues,
   type ConfigJson,
   type ConfigValue,
 } from "@hercule/client-core";
@@ -30,7 +31,8 @@ export function ConfigForm({
   readonly id: string;
   readonly fields: ReadonlyArray<ConfigField>;
   readonly config: unknown;
-  readonly issues: Readonly<Record<string, string>>;
+  /** The errors of the last save. Errors that belong to no field are the parent's to show. */
+  readonly issues: ConfigIssues;
   readonly saving: boolean;
   /** Called on every edit, so the parent can clear the result of the last save. */
   readonly onEdit: () => void;
@@ -59,7 +61,8 @@ export function ConfigForm({
             inputId={`${id}-${field.name}`}
             field={field}
             value={draft[field.name] ?? ""}
-            error={issues[field.name]}
+            error={issues.perField[field.name]}
+            entryErrors={issues.perEntry[field.name]}
             onChange={(value) => {
               setField(field.name, value);
             }}
@@ -94,12 +97,16 @@ export function ConfigFieldRow({
   field,
   value,
   error,
+  entryErrors,
   onChange,
 }: {
   readonly inputId: string;
   readonly field: ConfigField;
   readonly value: ConfigValue;
+  /** The error about the setting as a whole, shown under the field. */
   readonly error: string | undefined;
+  /** For a list setting, the error of each entry by position, shown under that entry. */
+  readonly entryErrors: Readonly<Record<number, string>> | undefined;
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
   if (field.kind === "boolean") {
@@ -123,7 +130,13 @@ export function ConfigFieldRow({
     <Field id={field.kind === "stringList" ? undefined : inputId} label={field.label} error={error}>
       {/* The description goes above the input, so an error appears directly under the input. */}
       <Description field={field} />
-      <ConfigWidget inputId={inputId} field={field} value={value} onChange={onChange} />
+      <ConfigWidget
+        inputId={inputId}
+        field={field}
+        value={value}
+        entryErrors={entryErrors}
+        onChange={onChange}
+      />
     </Field>
   );
 }
@@ -142,11 +155,13 @@ function ConfigWidget({
   inputId,
   field,
   value,
+  entryErrors,
   onChange,
 }: {
   readonly inputId: string;
   readonly field: ConfigField;
   readonly value: ConfigValue;
+  readonly entryErrors: Readonly<Record<number, string>> | undefined;
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
   // Announced with `aria-required` but not enforced with `required`. If the
@@ -184,6 +199,7 @@ function ConfigWidget({
         required={field.required}
         label={field.label}
         values={Array.isArray(value) ? value : []}
+        errors={entryErrors}
         onChange={onChange}
       />
     );

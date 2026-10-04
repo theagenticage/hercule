@@ -34,6 +34,7 @@ export {
   readConfigIssues,
   buildConfigPayload,
   type ConfigDraft,
+  type ConfigIssues,
   type ConfigField,
   type ConfigJson,
   type ConfigValue,

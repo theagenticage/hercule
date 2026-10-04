@@ -74,7 +74,10 @@ const PAPER_TYPE = {
   ],
   configSchema: {
     type: "object",
-    properties: { folder: { type: "string", title: "Folder" } },
+    properties: {
+      folder: { type: "string", title: "Folder" },
+      tags: { type: "array", items: { type: "string" }, title: "Tags" },
+    },
     required: [],
     additionalProperties: false,
   },
@@ -902,6 +905,32 @@ describe("Connections > configuring a connection", () => {
     );
   });
 
+  it("shows a rejected list entry's error under that entry, not under the whole list", async () => {
+    const user = userEvent.setup();
+    const complaint = "Write a tag as one word, such as invoices.";
+    const TAGGED: Connection = {
+      ...PAPER,
+      config: { folder: "inbox", tags: ["receipts", "not one word", "travel"] },
+    };
+    await openApp([TAGGED], {
+      [`PATCH /api/v1/connections/${TAGGED.id}`]: buildRefusal("the settings were refused", [
+        { path: ["config", "tags", "1"], message: complaint },
+      ]),
+    });
+
+    await user.click(
+      within(await findConnectionRow(TAGGED)).getByRole("button", { name: "Configure" }),
+    );
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await screen.findByText(complaint);
+    const second = screen.getByLabelText("Tags entry 2");
+    expectMessageAtField(complaint, second, screen.getByLabelText("Tags entry 1"));
+    expectMessageAtField(complaint, second, screen.getByLabelText("Tags entry 3"));
+    // The error sits under its entry, so it is not repeated under the list or the buttons.
+    expect(screen.getAllByText(complaint)).toHaveLength(1);
+  });
+
   it("shows only the name and the topic for a type with no settings of its own", async () => {
     const user = userEvent.setup();
     await openApp([SKY]);
@@ -984,6 +1013,31 @@ describe("Connections > configuring how often a connection is polled", () => {
       expect(listWrites(api)).toHaveLength(1);
     });
     expect(listWrites(api)[0]?.body).toMatchObject({ feedIntervals: {} });
+  });
+
+  it("refuses an interval that is not a whole number under its field, and sends nothing", async () => {
+    const complaint = "Enter a whole number of seconds.";
+    const { api, user } = await openPolling(GLASS);
+    const repos = screen.getByLabelText<HTMLInputElement>("Repos");
+
+    await user.type(repos, "abc");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await screen.findByText(complaint);
+    expectMessageAtField(complaint, repos, screen.getByLabelText("Check runs"));
+    // What the user typed stays, so they can see what to fix.
+    expect(repos.value).toBe("abc");
+    expect(listWrites(api)).toHaveLength(0);
+
+    await user.clear(repos);
+    await user.type(repos, "300");
+    expect(screen.queryByText(complaint)).toBeNull();
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toMatchObject({ feedIntervals: { repos: 300 } });
   });
 
   it("shows an interval below the feed's minimum under that feed, and keeps the form open", async () => {

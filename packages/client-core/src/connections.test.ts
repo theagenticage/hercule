@@ -20,6 +20,7 @@ import {
   describeFeedInterval,
   buildFeedIntervalsDraft,
   buildFeedIntervalsPayload,
+  FEED_INTERVAL_UNREADABLE,
   readConnectionIssues,
   type ConnectionFeed,
   type ConnectionType,
@@ -697,15 +698,33 @@ describe("buildFeedIntervalsPayload", () => {
   it("sends each typed interval as a number and leaves out the empty fields", () => {
     expect(
       buildFeedIntervalsPayload([REPOS, CHECKS], { repos: " 300 ", check_runs: "  " }),
-    ).toEqual({ repos: 300 });
+    ).toEqual({ feedIntervals: { repos: 300 } });
   });
 
   it("sends an empty map when every feed is back on its default", () => {
-    expect(buildFeedIntervalsPayload([REPOS, CHECKS], { repos: "", check_runs: "" })).toEqual({});
+    expect(buildFeedIntervalsPayload([REPOS, CHECKS], { repos: "", check_runs: "" })).toEqual({
+      feedIntervals: {},
+    });
   });
 
   it("leaves the minimum to the controller, so a value below it is still sent", () => {
-    expect(buildFeedIntervalsPayload([REPOS], { repos: "10" })).toEqual({ repos: 10 });
+    expect(buildFeedIntervalsPayload([REPOS], { repos: "10" })).toEqual({
+      feedIntervals: { repos: 10 },
+    });
+  });
+
+  it("refuses text that is not a whole number of seconds, on the feed that holds it", () => {
+    expect(buildFeedIntervalsPayload([REPOS, CHECKS], { repos: "abc", check_runs: "90" })).toEqual({
+      errors: { repos: FEED_INTERVAL_UNREADABLE },
+    });
+  });
+
+  // `Number` reads every one of these as a number or as NaN, so each would
+  // otherwise save a value the user did not type or fail with a type error.
+  it.each(["1.5", "-5", "1e3", "0x10", "12 s", "+60"])("refuses %j", (typed) => {
+    expect(buildFeedIntervalsPayload([REPOS], { repos: typed })).toEqual({
+      errors: { repos: FEED_INTERVAL_UNREADABLE },
+    });
   });
 });
 
@@ -723,7 +742,29 @@ describe("readConnectionIssues", () => {
 
     expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
       config: { folder: "must not be empty" },
+      configEntries: {},
       feedIntervals: { repos: "Poll repos every 60 seconds or slower" },
+      rest: false,
+    });
+  });
+
+  it("puts an error about one entry of a list setting under that entry", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [
+        { path: ["config", "repos", "1"], message: "Write the repository as owner/repo." },
+        { path: ["config", "repos", "3"], message: "Write the repository as owner/repo." },
+      ],
+    });
+
+    expect(readConnectionIssues(refusal, [{ name: "repos" }], [REPOS])).toEqual({
+      config: {},
+      configEntries: {
+        repos: {
+          1: "Write the repository as owner/repo.",
+          3: "Write the repository as owner/repo.",
+        },
+      },
+      feedIntervals: {},
       rest: false,
     });
   });
@@ -737,6 +778,7 @@ describe("readConnectionIssues", () => {
     });
     expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
       config: {},
+      configEntries: {},
       feedIntervals: {},
       rest: true,
     });
@@ -751,6 +793,7 @@ describe("readConnectionIssues", () => {
   it("finds nothing before the first save", () => {
     expect(readConnectionIssues(null, fields, [REPOS])).toEqual({
       config: {},
+      configEntries: {},
       feedIntervals: {},
       rest: false,
     });
