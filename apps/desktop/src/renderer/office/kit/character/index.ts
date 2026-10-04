@@ -198,7 +198,7 @@ function createSkinnedMesh(
   skeleton: Skeleton,
 ): SkinnedMesh {
   const mesh = new SkinnedMesh(geometry, material);
-  // Each part is built in its readBone's own space, so nothing needs unbinding.
+  // Each part is built in its bone's own space, so nothing needs unbinding.
   mesh.bind(skeleton, new Matrix4());
   mesh.boundingSphere = RIG_BOUNDS;
   return mesh;

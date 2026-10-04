@@ -574,7 +574,7 @@ function addHatShadow(
       1,
       Math.max(0, (position.getY(vertex) - readShadeBottom(angle)) / width),
     );
-    // Squared, so the shade gathers under the brim and thins out slowly readShadeBottom it.
+    // Squared, so the shade gathers under the brim and thins out slowly below it.
     coverage[vertex] = 0.85 * reach * reach;
   }
   shell.setAttribute("coverage", new BufferAttribute(coverage, 1));
