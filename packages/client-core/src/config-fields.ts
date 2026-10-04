@@ -11,6 +11,7 @@
 import type { Issue, PluginConfigureInput } from "@hercule/contract";
 import { readValidationIssues } from "./errors";
 import { readJsonObject, readStringList } from "./json-shape";
+import { parseWholeNumber } from "./whole-number";
 
 /** The type of a setting, which decides the widget that renders it. */
 export type ConfigFieldKind = "string" | "number" | "integer" | "boolean" | "enum" | "stringList";
@@ -23,6 +24,12 @@ export interface ConfigField {
   readonly required: boolean;
   /** The choices of an `enum` field, in the order the schema lists them. */
   readonly options?: ReadonlyArray<string>;
+  /**
+   * The schema's default for a text or number field, as text. The form shows
+   * it as the placeholder, so an empty field shows the value the plugin uses
+   * when the setting is unset. Absent when the schema declares no default.
+   */
+  readonly defaultValue?: string;
 }
 
 export type ConfigJson = PluginConfigureInput["config"];
@@ -41,6 +48,20 @@ const decideFieldKind = (property: Record<string, unknown>): ConfigFieldKind => 
   return "stringList";
 };
 
+/**
+ * Returns the default of a text or number field as text, or `undefined` when
+ * the schema declares none. Other kinds get none, because a checkbox, a
+ * select and a list have no placeholder to show it in.
+ */
+const readDefaultValue = (
+  kind: ConfigFieldKind,
+  property: Record<string, unknown>,
+): string | undefined => {
+  if (kind !== "string" && kind !== "number" && kind !== "integer") return undefined;
+  const value = property["default"];
+  return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
+};
+
 /** Returns the form fields for a config schema, in the schema's order. */
 export const buildConfigFields = (
   schema: Record<string, unknown> | undefined,
@@ -56,6 +77,7 @@ export const buildConfigFields = (
 
     const title = property["title"];
     const description = property["description"];
+    const defaultValue = readDefaultValue(kind, property);
     fields.push({
       name,
       kind,
@@ -63,6 +85,7 @@ export const buildConfigFields = (
       ...(typeof description === "string" ? { description } : {}),
       required: required.has(name),
       ...(kind === "enum" ? { options: readStringList(property["enum"]) ?? [] } : {}),
+      ...(defaultValue === undefined ? {} : { defaultValue }),
     });
   }
   return fields;
@@ -111,20 +134,54 @@ const isUnfilled = (
   atRest: boolean,
 ): boolean => atRest && !field.required && stored[field.name] === undefined;
 
+/** The message under an integer field whose text is not a whole number. */
+export const CONFIG_WHOLE_NUMBER_UNREADABLE = "Enter a whole number.";
+
+/** The message under a number field whose text is not a number. */
+export const CONFIG_NUMBER_UNREADABLE = "Enter a number.";
+
 /**
- * Returns the config to send for a draft, with each value converted to the
- * type the schema declares. An empty text or number field is left out rather
- * than sent as `""` or `NaN`: every schema can express "absent", and the
- * plugin's schema decides whether that is allowed. The stored config is read
- * for the same reason: it shows which settings the user has already set.
+ * Parses a decimal number, such as "1.5" or "-2", from typed text. Returns
+ * `undefined` for anything else, including "1e3" and "0x10", which `Number`
+ * alone would read as numbers the user did not type.
+ */
+const parseDecimal = (text: string): number | undefined => {
+  const trimmed = text.trim();
+  return /^-?\d+(\.\d+)?$/.test(trimmed) ? Number(trimmed) : undefined;
+};
+
+/** The result of reading a draft: the config to send, or the fields whose text cannot be read. */
+export type ConfigReading =
+  | { readonly config: Readonly<Record<string, ConfigJson>> }
+  | { readonly errors: Readonly<Record<string, string>> };
+
+/**
+ * Converts a draft into the config to send, with each value converted to the
+ * type the schema declares. An empty field is left out rather than sent as
+ * `""`: every schema can express "absent", and the plugin's schema decides
+ * whether that is allowed. The stored config is read for the same reason: it
+ * shows which settings the user has already set.
+ *
+ * A number field whose text cannot be read as a number is an error on that
+ * field, and nothing is sent:
+ *
+ * - an integer field takes only digits, as `parseWholeNumber` describes, so
+ *   "abc", "1.5" and "-5" are refused;
+ * - a number field takes digits with an optional minus and decimal part, so
+ *   "abc" and "1e3" are refused.
+ *
+ * Nothing else about a value is checked here, such as a minimum. Only the
+ * controller holds the plugin's schema, and the form shows its errors under
+ * the fields, so the browser and the controller never disagree about a rule.
  */
 export const buildConfigPayload = (
   fields: ReadonlyArray<ConfigField>,
   draft: ConfigDraft,
   config: unknown,
-): Readonly<Record<string, ConfigJson>> => {
+): ConfigReading => {
   const stored = readJsonObject(config) ?? {};
   const payload: Record<string, ConfigJson> = {};
+  const errors: Record<string, string> = {};
   for (const field of fields) {
     const value = draft[field.name];
     if (field.kind === "boolean") {
@@ -132,12 +189,17 @@ export const buildConfigPayload = (
     } else if (field.kind === "stringList") {
       const list = [...(readStringList(value) ?? [])];
       if (!isUnfilled(field, stored, list.length === 0)) payload[field.name] = list;
-    } else if (typeof value === "string" && value !== "") {
-      payload[field.name] =
-        field.kind === "string" || field.kind === "enum" ? value : Number(value);
+    } else if (field.kind === "string" || field.kind === "enum") {
+      if (typeof value === "string" && value !== "") payload[field.name] = value;
+    } else if (typeof value === "string" && value.trim() !== "") {
+      const number = field.kind === "integer" ? parseWholeNumber(value) : parseDecimal(value);
+      if (number !== undefined) payload[field.name] = number;
+      else
+        errors[field.name] =
+          field.kind === "integer" ? CONFIG_WHOLE_NUMBER_UNREADABLE : CONFIG_NUMBER_UNREADABLE;
     }
   }
-  return payload;
+  return Object.keys(errors).length === 0 ? { config: payload } : { errors };
 };
 
 /**

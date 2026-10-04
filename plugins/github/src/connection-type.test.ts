@@ -14,12 +14,12 @@ describe("the GitHub Connection's config", () => {
     if (!Result.isSuccess(result)) return;
     const properties = result.success.properties as Record<string, Record<string, unknown>>;
     expect(properties["repos"]).toMatchObject({ type: "array", items: { type: "string" } });
-    expect(properties["checksWindowDays"]).toMatchObject({ type: "integer" });
+    expect(properties["checksWindowDays"]).toMatchObject({ type: "integer", default: 7 });
     expect(result.success.required ?? []).toEqual([]);
   });
 
-  it("accepts the empty config every existing Connection has", () => {
-    expect(Result.isSuccess(decodeConfig({}))).toBe(true);
+  it("accepts the empty config every existing Connection has, and leaves the window unset", () => {
+    expect(decodeConfig({})).toEqual(Result.succeed({}));
   });
 
   it("accepts repositories as owner/repo and a window from 1 to 30 days", () => {

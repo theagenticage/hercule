@@ -45,6 +45,10 @@ export const GithubConnectionConfig = Schema.Struct({
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })).annotate({
       title: "Checks window (days)",
       description: `Follows checks on open pull requests updated within this many days. ${String(DEFAULT_CHECKS_WINDOW_DAYS)} by default, from 1 to 30.`,
+      // Only describes the setting, so the form can show it as the field's
+      // placeholder. Decoding leaves an unset window unset; the checks feed
+      // falls back to the same constant.
+      default: DEFAULT_CHECKS_WINDOW_DAYS,
     }),
   ),
 }).annotate({ title: "Watching" });

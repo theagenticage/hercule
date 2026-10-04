@@ -11,12 +11,13 @@ import {
 } from "@hercule/client-core";
 
 /**
- * The form generated from a plugin's config schema. The form does not
- * validate anything beyond giving each widget the right input type. The
- * schema lives in the plugin and only the controller can apply it, so a
- * second check in the browser could disagree with the controller about the
- * same value. Validation errors come back from the save and are shown under
- * the field they belong to.
+ * The form generated from a plugin's config schema. Before the save, the form
+ * checks only that each number field's text can be read as a number, because
+ * nothing could be sent for it otherwise; that error is shown under the field
+ * and nothing is sent. Every other rule belongs to the schema, which lives in
+ * the plugin and which only the controller can apply, so a second check in
+ * the browser could disagree with the controller about the same value. Those
+ * errors come back from the save and are shown under the field they belong to.
  */
 export function ConfigForm({
   id,
@@ -39,15 +40,24 @@ export function ConfigForm({
   readonly onSave: (config: ConfigJson) => void;
 }): JSX.Element {
   const [draft, setDraft] = useState<ConfigDraft>(() => buildConfigDraft(fields, config));
+  // The number fields whose text cannot be read as a number, found when the
+  // user pressed Save. Nothing is sent until every field can be read.
+  const [unreadable, setUnreadable] = useState<Readonly<Record<string, string>>>({});
 
   const setField = (name: string, value: ConfigValue): void => {
     onEdit();
+    setUnreadable({});
     setDraft((current) => ({ ...current, [name]: value }));
   };
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    onSave(buildConfigPayload(fields, draft, config));
+    const reading = buildConfigPayload(fields, draft, config);
+    if ("errors" in reading) {
+      setUnreadable(reading.errors);
+      return;
+    }
+    onSave(reading.config);
   };
 
   return (
@@ -61,7 +71,7 @@ export function ConfigForm({
             inputId={`${id}-${field.name}`}
             field={field}
             value={draft[field.name] ?? ""}
-            error={issues.perField[field.name]}
+            error={unreadable[field.name] ?? issues.perField[field.name]}
             entryErrors={issues.perEntry[field.name]}
             onChange={(value) => {
               setField(field.name, value);
@@ -182,7 +192,7 @@ function ConfigWidget({
           }}
         >
           {/* An optional setting needs an empty choice, so the user can unset it. */}
-          {field.required ? null : <option value="">—</option>}
+          {field.required ? null : <option value="">Not set</option>}
           {(field.options ?? []).map((option) => (
             <option key={option} value={option}>
               {option}
@@ -209,10 +219,17 @@ function ConfigWidget({
     <Input
       id={inputId}
       aria-required={required}
-      // A number needs only a few characters; only text can be arbitrarily long.
+      // A number needs only a few characters, so a number field is as narrow
+      // as a feed's poll interval field; only text can be arbitrarily long.
       className={field.kind === "string" ? undefined : "w-[140px]"}
-      type={field.kind === "string" ? "text" : "number"}
-      step={field.kind === "integer" ? 1 : "any"}
+      // A text field even for a number, like the poll interval fields. For
+      // text the browser cannot read as a number, a number field hands over
+      // an empty value or blocks the save with a popup of its own, so the
+      // form could not say under the field what is wrong.
+      inputMode={
+        field.kind === "integer" ? "numeric" : field.kind === "number" ? "decimal" : undefined
+      }
+      placeholder={field.defaultValue}
       value={typeof value === "string" ? value : ""}
       onChange={(event) => {
         onChange(event.target.value);

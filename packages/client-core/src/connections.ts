@@ -20,6 +20,7 @@ import { listIssuesInGroup, matchConfigIssues, type ConfigIssues } from "./confi
 import { readValidationIssues } from "./errors";
 import { readJsonObject } from "./json-shape";
 import { describeMinutes } from "./minutes-left";
+import { parseWholeNumber } from "./whole-number";
 
 /**
  * Returns the GitHub connections: the accounts a repo can be cloned through.
@@ -527,10 +528,9 @@ export type FeedIntervalsReading =
 /**
  * Converts the draft into the `feedIntervals` to save. A field left empty, or
  * holding only spaces, is left out, so that feed polls at its default. A field
- * holding anything but the digits of a whole number, such as "abc", "1.5" or
+ * holding anything `parseWholeNumber` cannot read, such as "abc", "1.5" or
  * "-5", is an error on that feed, and nothing is saved. Sending such text
- * would either fail with a message about types or, because `Number` reads
- * "1e3" and "0x10" as numbers, save a number the user did not type.
+ * would fail with a message about types rather than about the field.
  *
  * The map is sent whole and replaces the stored one, so an interval stored
  * for a feed the type no longer declares is dropped; the controller would
@@ -545,10 +545,11 @@ export const buildFeedIntervalsPayload = (
   const feedIntervals: Record<string, number> = {};
   const errors: Record<string, string> = {};
   for (const feed of feeds) {
-    const typed = (draft[feed.name] ?? "").trim();
-    if (typed === "") continue;
-    if (/^\d+$/.test(typed)) feedIntervals[feed.name] = Number(typed);
-    else errors[feed.name] = FEED_INTERVAL_UNREADABLE;
+    const typed = draft[feed.name] ?? "";
+    if (typed.trim() === "") continue;
+    const seconds = parseWholeNumber(typed);
+    if (seconds === undefined) errors[feed.name] = FEED_INTERVAL_UNREADABLE;
+    else feedIntervals[feed.name] = seconds;
   }
   return Object.keys(errors).length === 0 ? { feedIntervals } : { errors };
 };

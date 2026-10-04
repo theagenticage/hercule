@@ -5,6 +5,8 @@ import {
   readConfigHeading,
   readConfigIssues,
   buildConfigPayload,
+  CONFIG_NUMBER_UNREADABLE,
+  CONFIG_WHOLE_NUMBER_UNREADABLE,
 } from "./config-fields";
 import { ApiError } from "./errors";
 
@@ -93,6 +95,36 @@ describe("buildConfigFields", () => {
     expect(fields[1]?.description).toBeUndefined();
   });
 
+  it("passes a text or number field's default through as text", () => {
+    const fields = buildConfigFields(
+      buildObjectSchema({
+        endpoint: { type: "string", default: "https://notes.test" },
+        timeout: { type: "number", default: 1.5 },
+        days: { type: "integer", minimum: 1, maximum: 30, default: 7 },
+        retries: { type: "integer" },
+      }),
+    );
+
+    expect(fields.map((field) => [field.name, field.defaultValue])).toEqual([
+      ["endpoint", "https://notes.test"],
+      ["timeout", "1.5"],
+      ["days", "7"],
+      ["retries", undefined],
+    ]);
+  });
+
+  it("gives no default to a kind whose widget has no placeholder", () => {
+    const fields = buildConfigFields(
+      buildObjectSchema({
+        verbose: { type: "boolean", default: true },
+        mode: { type: "string", enum: ["fast", "slow"], default: "fast" },
+        tags: { type: "array", items: { type: "string" }, default: ["alpha"] },
+      }),
+    );
+
+    expect(fields.every((field) => field.defaultValue === undefined)).toBe(true);
+  });
+
   it("returns no fields for a plugin with nothing to configure", () => {
     expect(buildConfigFields(buildObjectSchema({}))).toEqual([]);
   });
@@ -171,11 +203,13 @@ describe("buildConfigPayload", () => {
         {},
       ),
     ).toEqual({
-      endpoint: "https://notes.test",
-      timeout: 1.5,
-      retries: 3,
-      verbose: true,
-      tags: ["alpha", "beta"],
+      config: {
+        endpoint: "https://notes.test",
+        timeout: 1.5,
+        retries: 3,
+        verbose: true,
+        tags: ["alpha", "beta"],
+      },
     });
   });
 
@@ -183,16 +217,16 @@ describe("buildConfigPayload", () => {
     expect(
       buildConfigPayload(
         fields,
-        { endpoint: "", timeout: "", retries: "", verbose: false, tags: [] },
+        { endpoint: "", timeout: " ", retries: "  ", verbose: false, tags: [] },
         {},
       ),
-    ).toEqual({});
+    ).toEqual({ config: {} });
   });
 
   it("keeps sending a checkbox and a list that the stored config already has a value for", () => {
     expect(
       buildConfigPayload(fields, { verbose: false, tags: [] }, { verbose: true, tags: ["alpha"] }),
-    ).toEqual({ verbose: false, tags: [] });
+    ).toEqual({ config: { verbose: false, tags: [] } });
   });
 
   it("sends a required checkbox and list even when nothing is stored", () => {
@@ -204,9 +238,30 @@ describe("buildConfigPayload", () => {
     );
 
     expect(buildConfigPayload(required, { verbose: false, tags: [] }, {})).toEqual({
-      verbose: false,
-      tags: [],
+      config: { verbose: false, tags: [] },
     });
+  });
+
+  it("reads a number field's text with spaces around it", () => {
+    expect(buildConfigPayload(fields, { timeout: " -2.5 ", retries: " 7 " }, {})).toEqual({
+      config: { timeout: -2.5, retries: 7 },
+    });
+  });
+
+  it("refuses an integer field's text that is not a whole number, and sends nothing", () => {
+    for (const typed of ["abc", "1.5", "-5", "1e3", "0x10"]) {
+      expect(
+        buildConfigPayload(fields, { endpoint: "https://notes.test", retries: typed }, {}),
+      ).toEqual({ errors: { retries: CONFIG_WHOLE_NUMBER_UNREADABLE } });
+    }
+  });
+
+  it("refuses a number field's text that is not a number, on the field that holds it", () => {
+    for (const typed of ["abc", "1e3", "0x10", "1.", "1,5"]) {
+      expect(buildConfigPayload(fields, { timeout: typed, retries: "x" }, {})).toEqual({
+        errors: { timeout: CONFIG_NUMBER_UNREADABLE, retries: CONFIG_WHOLE_NUMBER_UNREADABLE },
+      });
+    }
   });
 });
 
