@@ -127,21 +127,6 @@ export interface InputFailure {
 }
 
 /**
- * Returns the input or the output schema of an action in the catalog, or
- * `undefined` when the action is not in the catalog. The catalog holds any
- * Effect schema, but what a step record stores is JSON, so the engine reads
- * the schema as one that encodes to JSON.
- */
-export const findActionSchema = (
-  actions: ReadonlyArray<RegisteredWorkflowAction>,
-  actionId: string,
-  side: "input" | "output",
-): Schema.Codec<unknown, Schema.Json> | undefined => {
-  const action = actions.find((candidate) => candidate.id === actionId);
-  return action === undefined ? undefined : (action[side] as Schema.Codec<unknown, Schema.Json>);
-};
-
-/**
  * Returns the action step of a run's plan with this id. Throws when there is
  * none, which the calling effect turns into a defect: the plan never changes,
  * so a missing step is a bug.
@@ -333,6 +318,10 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      *   input, or when the action acts through a Connection and the
      *   `connection` param did not render to a Connection id.
      *
+     * The action is looked up in the full catalog, so the action of a plugin
+     * that is disabled, or that failed to start, is still found: a run that
+     * has started finishes its frozen plan.
+     *
      * For an action that acts through a Connection, the `connection` param is
      * left out of the decode and stored beside the encoded input. Whether it
      * names a usable Connection is checked by `executeStep`, just before the
@@ -352,15 +341,14 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             failureReason: "expression-error",
           });
         }
-        const action = (yield* host.listActiveWorkflowActions()).find(
-          (candidate) => candidate.id === step.action,
-        );
-        if (action === undefined) {
+        const found = yield* host.findWorkflowAction(step.action);
+        if (Option.isNone(found)) {
           return Result.fail({
             error: buildActionUnavailableError(step.action),
             failureReason: "step-failed",
           });
         }
+        const action = found.value;
         const schema = action.input as Schema.Codec<unknown, Schema.Json>;
         // Rendering keeps the shape of the params, which are a record.
         const params = rendered.success as Readonly<Record<string, unknown>>;
@@ -481,6 +469,10 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      * transaction, except for `wait`. A plugin's action reaches outside the
      * controller, so it is called after its record's `running` commits and
      * outside any transaction, and its record ends in a transaction of its own.
+     *
+     * As in `prepareInput`, the action is looked up in the full catalog. A
+     * plugin disabled while the step waits, for example on a token refresh,
+     * does not stop the step: the run finishes its frozen plan.
      */
     const executeStep = (
       run: Run,
@@ -490,10 +482,8 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
       Effect.gen(function* () {
         const step = findActionStep(run, attempt.stepId);
         const { startedAt } = attempt;
-        const catalogEntry = (yield* host.listActiveWorkflowActions()).find(
-          (action) => action.id === step.action,
-        );
-        if (catalogEntry === undefined) {
+        const found = yield* host.findWorkflowAction(step.action);
+        if (Option.isNone(found)) {
           return yield* failRun(
             run.id,
             attempt,
@@ -501,6 +491,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             "step-failed",
           );
         }
+        const catalogEntry = found.value;
         // `prepareInput` stored the Connection's id beside the action's own
         // input, which is an object.
         const { connection: connectionId, actionParams } =

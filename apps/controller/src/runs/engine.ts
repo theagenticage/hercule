@@ -147,7 +147,6 @@ import {
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
-  findActionSchema,
   findActionStep,
   makeStepExecution,
   type EngineStepError,
@@ -1048,12 +1047,13 @@ export const makeRunEngine = Effect.gen(function* () {
   ): Effect.Effect<Result.Result<Schema.Json, EngineStepError>> =>
     Effect.gen(function* () {
       const step = findActionStep(run, stepId);
-      const schema = findActionSchema(
-        yield* host.listActiveWorkflowActions(),
-        step.action,
-        "output",
-      );
-      if (schema === undefined) return Result.fail(buildActionUnavailableError(step.action));
+      // The run has started, so its action is looked up in the full catalog,
+      // as `executeStep` does.
+      const action = yield* host.findWorkflowAction(step.action);
+      if (Option.isNone(action)) return Result.fail(buildActionUnavailableError(step.action));
+      // A step record stores JSON, so the output schema is read as one that
+      // encodes to JSON.
+      const schema = action.value.output as Schema.Codec<unknown, Schema.Json>;
       const decoded = Schema.decodeUnknownResult(schema)(output);
       if (Result.isFailure(decoded)) {
         return Result.fail<EngineStepError>({

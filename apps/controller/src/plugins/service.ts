@@ -197,10 +197,15 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Disables a plugin. It is stopped before the flag is written, so nothing
-     * is still running once its contributions read as disabled. This is the
-     * one change allowed for a plugin that needs a restart, because turning it
-     * off is how to deal with parts a failed teardown left running.
+     * Disables a plugin. It is stopped before the flag is written, so its
+     * ingest has closed and its `deactivate` has run by the time its
+     * contributions read as disabled. From then on no new workflow or run may
+     * use its actions. A run that had already started still executes them,
+     * because it finishes the plan it froze when it started.
+     *
+     * This is the one change allowed for a plugin that needs a restart,
+     * because turning it off is how to deal with parts a failed teardown left
+     * running.
      */
     disable: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
