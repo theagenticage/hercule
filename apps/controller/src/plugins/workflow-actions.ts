@@ -168,10 +168,57 @@ const addWorkflowAction = (
 };
 
 /**
+ * The param a step uses to name the Connection that an action acts through.
+ * Only an action that declares a Connection type takes it. The run engine
+ * removes it from the params before the action decodes them, so the action's
+ * own input schema cannot have a field with this name.
+ */
+export const CONNECTION_PARAM = "connection";
+
+/**
+ * Splits a step's params into the value of the `connection` param and the
+ * params the action itself decodes. Returns `connection` as the step wrote it,
+ * which is `undefined` when the param is missing and may be any JSON value:
+ * the caller decides whether it is a usable Connection id.
+ */
+export const separateConnectionParam = (
+  params: Readonly<Record<string, unknown>>,
+): { readonly connection: unknown; readonly actionParams: Record<string, unknown> } => {
+  const { [CONNECTION_PARAM]: connection, ...actionParams } = params;
+  return { connection, actionParams };
+};
+
+/**
+ * Checks the Connection type that a plugin's action declares. Returns the
+ * reason the action is refused, or `undefined` when it is accepted. `input` is
+ * the action's input schema, already known to be a struct.
+ *
+ * - The type must be one the same plugin declares, with the plugin id as its
+ *   prefix. A plugin can read the credentials of its own Connections only, so
+ *   an action declaring another plugin's type would fail every time it ran.
+ * - The input schema cannot have a `connection` field, because a step's
+ *   `connection` param names the Connection and never reaches the action.
+ */
+const checkConnectionDeclaration = (
+  pluginId: string,
+  type: string,
+  input: SchemaAST.Objects,
+): string | undefined => {
+  if (!type.startsWith(`${pluginId}/`)) {
+    return `it acts through a Connection of type ${type}, which the plugin ${pluginId} does not declare. An action can act only through a Connection type of its own plugin, because a plugin can read the credentials of its own Connections only`;
+  }
+  if (input.propertySignatures.some((property) => property.name === CONNECTION_PARAM)) {
+    return `its input schema has a field named ${CONNECTION_PARAM}, and that name is reserved: an action that acts through a Connection gets the step's ${CONNECTION_PARAM} param, which names the Connection, removed from its input. Rename the field`;
+  }
+  return undefined;
+};
+
+/**
  * Validates and registers one workflow action that a plugin declares. The
  * qualified id is `<pluginId>/<word>`. Fails with a `PluginError` if a field
- * is invalid, the id is already registered, or the input schema is not a
- * struct.
+ * is invalid, the id is already registered, the input schema is not a struct,
+ * or the action declares a Connection that `checkConnectionDeclaration`
+ * refuses.
  */
 export const registerWorkflowActionContribution = (
   pluginId: string,
@@ -211,6 +258,18 @@ export const registerWorkflowActionContribution = (
           message: `the workflow action ${id} is invalid: its input schema must be a struct, because a step writes its params as named fields`,
         }),
       );
+    }
+    if (header.connection !== undefined) {
+      const refusal = checkConnectionDeclaration(
+        pluginId,
+        header.connection.type,
+        contribution.input.ast,
+      );
+      if (refusal !== undefined) {
+        return yield* Effect.fail(
+          new PluginError({ message: `the workflow action ${id} is invalid: ${refusal}` }),
+        );
+      }
     }
     addWorkflowAction(
       pluginId,

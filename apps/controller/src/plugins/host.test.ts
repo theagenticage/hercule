@@ -693,6 +693,42 @@ describe("the workflow action catalog", () => {
       "wait",
     ]);
   });
+
+  it("marks a plugin errored if an action that acts through a Connection has a connection field, or declares another plugin's Connection type", async () => {
+    const statuses = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildActionPlugin("shadowed", {
+            ...NOTE_APPEND_ACTION,
+            connection: { type: "shadowed/shadowed" },
+            input: Schema.Struct({ text: Schema.String, connection: Schema.String }),
+          }),
+          buildActionPlugin("borrowed", {
+            ...NOTE_APPEND_ACTION,
+            connection: { type: "github/github" },
+          }),
+          buildActionPlugin("owned", {
+            ...NOTE_APPEND_ACTION,
+            connection: { type: "owned/owned" },
+          }),
+        ]);
+        return {
+          shadowed: yield* host.status("shadowed"),
+          borrowed: yield* host.status("borrowed"),
+          owned: yield* host.status("owned"),
+        };
+      }),
+    );
+
+    expect(readErroredMessage(statuses.shadowed)).toContain(
+      "its input schema has a field named connection, and that name is reserved",
+    );
+    expect(readErroredMessage(statuses.borrowed)).toContain(
+      "a Connection of type github/github, which the plugin borrowed does not declare",
+    );
+    expect(readErroredMessage(statuses.owned)).toBeUndefined();
+  });
 });
 
 /** Builds a plugin that declares one event source, with the id `word`, and one event kind. */
