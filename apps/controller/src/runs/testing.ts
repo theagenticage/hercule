@@ -361,6 +361,23 @@ export const buildCreateStep = (id: string, extra: Record<string, unknown> = {})
   ...extra,
 });
 
+/** The input a run with `buildLabelSignal` is started with: the label its signal waits for. */
+export const LABEL_INPUT = { name: "label", schema: { type: "string" }, required: true };
+
+/**
+ * Builds a signal trigger `labeled` on `github.pr.labeled` events from any
+ * Connection. An event correlates with a run when the first label it adds is
+ * the run's `label` input (see `LABEL_INPUT`). `extra` replaces or adds
+ * fields, such as `outputs` or another `correlation`.
+ */
+export const buildLabelSignal = (extra: Record<string, unknown> = {}) => ({
+  id: "labeled",
+  kind: "signal",
+  on: { kind: "github.pr.labeled", connectionId: "any" },
+  correlation: { event: "event.payload.added[0]", run: "inputs.label" },
+  ...extra,
+});
+
 /* ------------------------------------------------------------------------ */
 /* Starting a workflow sent with the request, listing and cancelling runs.   */
 /* ------------------------------------------------------------------------ */

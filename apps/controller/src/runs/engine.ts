@@ -959,12 +959,13 @@ export const makeRunEngine = Effect.gen(function* () {
             return;
           }
           if (busySteps.size === 0) {
-            // A run without a signal trigger always has a pending or running record until it ends:
-            // starting a run creates its entry records, and routing ends the
-            // run in the same transaction that ends its last record. Runs
-            // left without one by an earlier engine were completed by
-            // migration 30. So a run here is a bug in the engine, and it
-            // fails rather than completing with nothing to show.
+            // A run without a signal trigger always has a pending or running
+            // record until it ends: starting a run creates its entry records,
+            // and routing ends the run in the same transaction that ends its
+            // last record. Runs left without one by an earlier engine were
+            // completed by migration 30. So a run here is a bug in the
+            // engine, and it fails rather than completing with nothing to
+            // show.
             yield* Effect.logError(
               `Run ${runId} is still running but has no step record to execute. This is a bug in the run engine, so the run fails with controller-error.`,
             );
