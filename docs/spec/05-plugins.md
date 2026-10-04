@@ -73,7 +73,7 @@ type Deactivate = Effect<void>
 
 - Runs only for enabled plugins, after the whole catalog exists. It receives the decoded plugin config and the runtime surfaces of the granted capabilities (emit events, emit notifications, read connections, KV, secrets, the public-API client if requested).
 - Starts real machinery: opens channel connections, ~~starts one ingest loop per connection for each event source~~, and so on. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The core, not `activate()`, opens an event source's handle for each Connection (section 4.3).
-- Returns a deactivation function that stops everything it started. Deactivate-then-activate is the only reconfiguration protocol (section 8).
+- Returns a deactivation function that stops everything it started. Deactivate-then-activate is the only reconfiguration protocol (section 8). *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The core gives the deactivation function 10 seconds, and treats one that has not returned by then as failed (section 8).
 
 ### The catalog is the source of truth
 
@@ -165,7 +165,7 @@ interface IngestHandle {
   - A poll that runs longer than 5 minutes is stopped and counts as a failure (section 8.1). The 5 minutes start once the poll holds the handle's lock, so time spent waiting for another feed's poll does not count.
   - `close` gets 10 seconds. When it fails or times out, the core logs an error and the Connection is closed anyway.
   - `emit` refuses a `payload` or a `raw` larger than 256 KiB, each measured on its own as UTF-8 JSON, with a `PluginError`.
-  - `emit`, `state.set` and `state.delete` are refused when the Connection was deleted, or is no longer `connected` or `error`. The check runs in the transaction of the write, so nothing is written after a delete or a disable has committed. The refusal is not counted as a failure and not logged, because the core closes the handle within seconds.
+  - `emit`, `state.set` and `state.delete` are refused when the Connection was deleted, or is no longer `connected` or `error`. The check runs in the transaction of the write, so nothing is written after a delete or a disable has committed. The refusal is a defect, so a plugin that catches its own errors cannot keep writing. The core neither counts nor logs it, because it closes the handle within seconds.
   - `nextAfterSeconds` above 86,400 counts as 86,400, and a value that is not a finite number is ignored.
 
 Division of labour in one line: **core clock, plugin numbers.**
@@ -338,7 +338,7 @@ Failure handling:
 
 *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The rules as built:
 
-- Failures are counted per feed, and separately for `open()`. A defect counts as a failure and is logged. *(Amended again 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* So does a poll stopped after 5 minutes (section 4.3). A write refused because the Connection was deleted or left `connected` and `error` is neither counted nor logged.
+- Failures are counted per feed, and separately for `open()`. A defect counts as a failure and is logged. *(Amended again 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* A poll stopped after 5 minutes counts as a failure too (section 4.3). A write refused because the Connection was deleted or left `connected` and `error` is neither counted nor logged.
 - The wait after the n-th failure in a row is the interval times 2^n, capped at 15 minutes, or at the interval when that is longer. A failed `open()` backs off from the shortest feed interval~~, or from 60 seconds for a source with no feeds~~ *(amended again 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89): every source has a feed, section 4.3)*.
 - At the 5th failure in a row, a `connected` Connection goes `error`, with the plugin's message as its status detail, and the core raises one `core.connection-error` Notification, whose title reads the Connection's label as it is then, not as it was when the handle opened *(amended again 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89))* ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.2). The Notification leaves out the plugin's message, because agents read Notifications and the message may hold a credential; the Connection's card shows it.
 - A successful poll resets that feed's count. ~~Once no count is at 5, an `error` Connection goes back to `connected`.~~ *(Amended again 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* An `error` Connection goes back to `connected` once every feed has polled successfully since the handle opened, each feed's latest poll a success. A successful `open()` resets the count of `open()` failures, but does not clear `error`, because it proves nothing about the feeds. A healthy Connection gets no status write when a poll succeeds.
