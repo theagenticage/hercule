@@ -1171,7 +1171,7 @@ describe("saving a workflow whose step acts through a Connection", () => {
     );
   });
 
-  it("is refused to a session without connection.use when a run.start step gives a Connection to the workflow it starts", async () => {
+  it("is refused to a session without connection.use when a run.start step gives a Connection to the workflow it starts, named by its id or by a template", async () => {
     await withAgentFleet(
       async (arranged) => {
         const base = arranged.harness.base;
@@ -1188,27 +1188,30 @@ describe("saving a workflow whose step acts through a Connection", () => {
         const session = await spawnThreadUnder(arranged, profile);
         const entriesBefore = await readWorkflowEntries(base, arranged.token);
 
-        const response = await createWorkflow(base, session.token, {
-          definition: {
-            name: "Start a review",
-            steps: [
-              {
-                id: "start",
-                kind: "action",
-                action: "run.start",
-                params: { workflowId: target.id, inputs: { account: connectionId } },
-              },
-            ],
-          },
-        });
+        for (const workflowId of [target.id, "{{ inputs.child }}"]) {
+          const response = await createWorkflow(base, session.token, {
+            definition: {
+              name: "Start a review",
+              inputs: [{ name: "child", schema: { type: "string" }, required: false }],
+              steps: [
+                {
+                  id: "start",
+                  kind: "action",
+                  action: "run.start",
+                  params: { workflowId, inputs: { account: connectionId } },
+                },
+              ],
+            },
+          });
 
-        const refusal = await readErrorBody(response);
-        expect(response.status, refusal.text).toBe(403);
-        expect(refusal).toMatchObject({
-          code: "forbidden",
-          grant: "connection.use",
-          message: SAVE_REFUSAL,
-        });
+          const refusal = await readErrorBody(response);
+          expect(response.status, refusal.text).toBe(403);
+          expect(refusal).toMatchObject({
+            code: "forbidden",
+            grant: "connection.use",
+            message: SAVE_REFUSAL,
+          });
+        }
         expect((await queryWorkflows(base, arranged.token)).items.map((item) => item.id)).toEqual([
           target.id,
         ]);

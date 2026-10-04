@@ -77,7 +77,7 @@ describe("listConnectionParams for a run.start step", () => {
     }
   });
 
-  it("returns an inputs template as one param, unless the workflow is known to take no Connection", () => {
+  it("returns an inputs template as one param for an unknown input, unless the workflow is known to take no Connection", () => {
     for (const workflowId of [TARGET_ID, "{{ inputs.child }}"]) {
       expect(
         listConnectionParams(
@@ -86,7 +86,11 @@ describe("listConnectionParams for a run.start step", () => {
         ),
         workflowId,
       ).toEqual([
-        { path: INPUTS_PATH, value: "{{ inputs.payload }}", target: { kind: "started-inputs" } },
+        {
+          path: INPUTS_PATH,
+          value: "{{ inputs.payload }}",
+          target: { kind: "unknown-started-input", name: undefined },
+        },
       ]);
     }
 

@@ -2182,39 +2182,55 @@ describe("a run.start step that gives a value for a Connection input", () => {
     });
   });
 
-  it("refuses a computed value, and an inputs template, when the workflow to start is a template", async () => {
+  it("refuses every computed value, and a computed inputs template, when the workflow to start is a template", async () => {
     await withArrangedController(async (controller) => {
-      const [computed] = await expectErrorsAt(controller, {
-        description: "a computed template",
-        build: () =>
-          buildRunStartSource('"{{ inputs.child }}"', '{ account: "x-{{ inputs.acc }}" }'),
-        paths: [STARTED_ACCOUNT_PATH],
-      });
-      expect(computed!.message).toBe(
-        "The value for the input account cannot be computed by a template: the workflow this step starts may take a Connection in its inputs, and that Connection must be known before a run starts. Write the value itself, or a template that is exactly one input, such as {{ inputs.account }}. Or name the workflow to start by its id, so that only its Connection inputs are checked.",
-      );
-
-      const [whole] = await expectErrorsAt(controller, {
-        description: "an inputs template",
-        build: () => buildRunStartSource('"{{ inputs.child }}"', '"{{ inputs.label }}"'),
-        paths: [["steps", "0", "params", "inputs"]],
-      });
-      expect(whole!.message).toBe(
-        "The param inputs cannot be a template here: the workflow this step starts may take a Connection in its inputs, and that Connection must be known before a run starts. Write inputs as an object with a value for each input.",
-      );
+      const fix =
+        "Write the value itself, or a template that is exactly one input, such as {{ inputs.account }}. Or name the workflow to start by its id, so that only its Connection inputs are checked.";
+      const need =
+        "the workflow this step starts may take a Connection in its inputs, and that Connection must be known before a run starts.";
+      // Which inputs take a Connection is unknown, so even a computed value
+      // for what is plain text, such as a title, is refused.
+      for (const [description, inputs, path, message] of [
+        [
+          "a computed value for a Connection",
+          '{ account: "x-{{ inputs.acc }}" }',
+          STARTED_ACCOUNT_PATH,
+          `The value for the input account cannot be computed by a template: ${need} ${fix}`,
+        ],
+        [
+          "a computed value for plain text",
+          '{ title: "Review {{ inputs.label }}" }',
+          ["steps", "0", "params", "inputs", "title"],
+          `The value for the input title cannot be computed by a template: ${need} ${fix}`,
+        ],
+        [
+          "a computed inputs template",
+          '"{{ inputs.label }}-inputs"',
+          ["steps", "0", "params", "inputs"],
+          `The param inputs cannot be computed by a template: ${need} ${fix}`,
+        ],
+      ] as const) {
+        const [issue] = await expectErrorsAt(controller, {
+          description,
+          build: () => buildRunStartSource('"{{ inputs.child }}"', inputs),
+          paths: [path],
+        });
+        expect(issue!.message, description).toBe(message);
+      }
 
       // Any literal, and any single input, may fill an input of a workflow
-      // that is not known before a run.
-      await expectAccepted(
-        controller,
-        "a literal",
-        buildRunStartSource('"{{ inputs.child }}"', "{ account: any-text }"),
-      );
-      await expectAccepted(
-        controller,
-        "a string input",
-        buildRunStartSource('"{{ inputs.child }}"', '{ account: "{{ inputs.label }}" }'),
-      );
+      // that is not known before a run, and so may fill the whole inputs param.
+      for (const [description, inputs] of [
+        ["a literal", "{ account: any-text }"],
+        ["a string input", '{ account: "{{ inputs.label }}" }'],
+        ["an inputs template that is exactly one input", '"{{ inputs.label }}"'],
+      ] as const) {
+        await expectAccepted(
+          controller,
+          description,
+          buildRunStartSource('"{{ inputs.child }}"', inputs),
+        );
+      }
     });
   });
 });

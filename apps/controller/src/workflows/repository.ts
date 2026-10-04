@@ -43,6 +43,7 @@ import {
 } from "../db";
 import { CRON_TICK_EVENT_KIND } from "../events";
 import { CONNECTION_PARAM } from "../plugins";
+import type { Input } from "./validation";
 
 /** A YAML source and the definition it parses to. They are always stored together. */
 export interface ParsedSource {
@@ -378,7 +379,7 @@ const make = Effect.gen(function* () {
      */
     readInputs: (
       ids: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, NonNullable<WorkflowDefinition["inputs"]>>, SqlError> =>
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<Input>>, SqlError> =>
       ids.length === 0
         ? Effect.succeed(new Map())
         : Effect.map(
@@ -390,9 +391,7 @@ const make = Effect.gen(function* () {
               new Map(
                 rows.map((row) => [
                   uuidToString(row.id),
-                  row.inputs === null
-                    ? []
-                    : (JSON.parse(row.inputs) as NonNullable<WorkflowDefinition["inputs"]>),
+                  row.inputs === null ? [] : (JSON.parse(row.inputs) as ReadonlyArray<Input>),
                 ]),
               ),
           ),

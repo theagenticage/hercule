@@ -349,6 +349,68 @@ describe("a replay of a run whose step acts through a Connection", () => {
       [buildForgePlugin().plugin],
     );
   });
+
+  it("is refused to a session without connection.use when the sent workflow's run.start step gives a Connection to the run it starts", async () => {
+    await withRunFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createWorkflowOrFail(base, token, {
+          definition: {
+            name: "Review a pull request",
+            inputs: [
+              { name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: true },
+            ],
+            steps: [
+              {
+                id: "review",
+                kind: "action",
+                action: FORGE_REVIEW_ACTION_ID,
+                params: { connection: "{{ inputs.account }}", verdict: "approve" },
+              },
+            ],
+          },
+        });
+        const sentRunId = await startSentWorkflow(base, token, {
+          definition: {
+            name: "Start a review",
+            steps: [
+              {
+                id: "start",
+                kind: "action",
+                action: "run.start",
+                params: { workflowId: target.id, inputs: { account: connectionId } },
+              },
+            ],
+          },
+        });
+        expect((await waitForRunToFinish(base, token, sentRunId)).status).toBe("completed");
+        const [child] = (await queryRuns(base, token, `actor=run:${sentRunId}`)).items;
+        expect((await waitForRunToFinish(base, token, child!.id)).status).toBe("completed");
+        const withoutGrant = await spawnThreadWithGrants(arranged, "rerunner", [
+          "run.start",
+          "run.read",
+        ]);
+
+        const response = await requestRerun(base, withoutGrant.token, sentRunId, {
+          mode: "replay",
+        });
+
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message: REPLAY_REFUSAL,
+        });
+        expect(await countRuns(harness)).toBe(2);
+      },
+      [buildForgePlugin().plugin],
+    );
+  });
 });
 
 /* ------------------------------------------------------------------------ */
