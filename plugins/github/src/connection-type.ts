@@ -89,6 +89,13 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
     return { displayName: account.login, accountId: String(account.id) };
   }).pipe(Effect.catchTag("GithubUnreachable", (error) => failValidation(error.message)));
 
+/**
+ * The qualified id of the connection type below. The host qualifies the
+ * declared `type`, "github", with the plugin's id, so the event source and
+ * every workflow action name the type this way.
+ */
+export const GITHUB_CONNECTION_TYPE = "github/github";
+
 export const connectionType: ConnectionTypeContribution = {
   type: "github",
   displayName: "GitHub",

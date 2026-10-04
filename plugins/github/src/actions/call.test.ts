@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
+import { TestClock } from "effect/testing";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type { ActionError } from "@hercule/plugin-host";
 import {
@@ -26,6 +27,20 @@ const readFailure = async (
   context = buildActionContext(),
 ): Promise<ActionError> => {
   const outcome = await runAgainstStub(issueRead.perform(ADDRESS, context), stub);
+  if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
+  return outcome.failure;
+};
+
+/**
+ * Runs `issue.read` against a stub on a test clock, which reads the epoch,
+ * and returns the error it failed with. A message that gives a clock time is
+ * then the same on every run.
+ */
+const readFailureAtEpoch = async (stub: GithubStub): Promise<ActionError> => {
+  const outcome = await runAgainstStub(
+    Effect.provide(issueRead.perform(ADDRESS, buildActionContext()), TestClock.layer()),
+    stub,
+  );
   if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
   return outcome.failure;
 };
@@ -94,23 +109,39 @@ describe("how a GitHub failure becomes the step's error", () => {
     expect(error.message).toContain("60 seconds");
   });
 
-  it("reports a 403 with no requests left as rate_limited, even without Retry-After", async () => {
+  it("reports a 403 with no requests left as rate_limited, with when the window resets", async () => {
+    // The test clock starts at the epoch, so the window resets 12 minutes in.
     const stub = stubGithub(() => ({
       status: 403,
       body: { message: "API rate limit exceeded for user ID 1." },
-      headers: { "x-ratelimit-remaining": "0" },
+      headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(12 * 60) },
     }));
 
-    const error = await readFailure(stub);
+    const error = await readFailureAtEpoch(stub);
 
     expect(error.code).toBe("rate_limited");
-    expect(error.message).toContain("Try again later.");
+    expect(error.message).toBe(
+      "GitHub refused the request because of a rate limit on the Connection's account. Try again in 12 minutes, at 00:12 UTC. GitHub said: API rate limit exceeded for user ID 1.",
+    );
   });
 
-  it("reports a 403 as forbidden when requests are left, whatever its message says", async () => {
+  it("reports a 403 about a secondary rate limit as rate_limited, though requests are left", async () => {
     const stub = stubGithub(() => ({
       status: 403,
-      body: { message: "Mentions the rate limit, but is not one." },
+      body: { message: "You have exceeded a secondary rate limit." },
+      headers: { "x-ratelimit-remaining": "4999", "x-ratelimit-reset": String(50 * 60) },
+    }));
+
+    const error = await readFailureAtEpoch(stub);
+
+    expect(error.code).toBe("rate_limited");
+    expect(error.message).toContain("Try again in 60 seconds.");
+  });
+
+  it("reports a 403 that is not about a rate limit as forbidden, though no time is given", async () => {
+    const stub = stubGithub(() => ({
+      status: 403,
+      body: { message: "Must have admin rights to Repository." },
       headers: { "x-ratelimit-remaining": "4999" },
     }));
 
@@ -125,7 +156,7 @@ describe("how a GitHub failure becomes the step's error", () => {
     );
 
     expect(error.code).toBe("rate_limited");
-    expect(error.message).toContain("Try again later.");
+    expect(error.message).toContain("Try again in 60 seconds.");
   });
 
   it("reports a 404 as not_found, naming what was asked for", async () => {
@@ -135,6 +166,16 @@ describe("how a GitHub failure becomes the step's error", () => {
       code: "not_found",
       message:
         "The issue octocat/hello-world#1347 does not exist, or the Connection's account cannot see it.",
+    });
+  });
+
+  it("reports a 410 as not_found, saying the thing is gone", async () => {
+    const error = await readFailure(stubAnswer(410, { message: "This issue was deleted" }));
+
+    expect(error).toMatchObject({
+      code: "not_found",
+      message:
+        "The issue octocat/hello-world#1347 is gone from GitHub. GitHub said: This issue was deleted",
     });
   });
 

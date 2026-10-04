@@ -140,7 +140,7 @@ describe("pr.review", () => {
 
     const outcome = await runAgainstStub(
       prReview.perform(
-        { ...ADDRESS, event: "request-changes", body: "Please rename the function." },
+        { ...ADDRESS, verdict: "request-changes", body: "Please rename the function." },
         buildActionContext(),
       ),
       stub,
@@ -148,7 +148,7 @@ describe("pr.review", () => {
 
     expect(readSuccess(outcome)).toEqual({
       id: 80,
-      state: "changes-requested",
+      verdict: "changes-requested",
       url: "https://github.com/octocat/hello-world/pull/1347#pullrequestreview-80",
     });
     expect(listRequests(stub)).toEqual([`POST ${PULL_URL}/reviews`]);
@@ -161,10 +161,23 @@ describe("pr.review", () => {
   it("requires a body unless the review approves", () => {
     const decode = Schema.decodeUnknownResult(prReview.input);
 
-    expect(Result.isSuccess(decode({ ...ADDRESS, event: "approve" }))).toBe(true);
-    expect(Result.isFailure(decode({ ...ADDRESS, event: "comment" }))).toBe(true);
-    expect(Result.isFailure(decode({ ...ADDRESS, event: "request-changes" }))).toBe(true);
-    expect(Result.isFailure(decode({ ...ADDRESS, event: "dismiss", body: "x" }))).toBe(true);
+    expect(Result.isSuccess(decode({ ...ADDRESS, verdict: "approve" }))).toBe(true);
+    expect(Result.isFailure(decode({ ...ADDRESS, verdict: "comment" }))).toBe(true);
+    expect(Result.isFailure(decode({ ...ADDRESS, verdict: "request-changes" }))).toBe(true);
+    expect(Result.isFailure(decode({ ...ADDRESS, verdict: "dismiss", body: "x" }))).toBe(true);
+  });
+
+  it("fails as unexpected when GitHub returns a review with no verdict", async () => {
+    const stub = stubAnswer(200, { id: 80, state: "PENDING", html_url: "https://github.com/x" });
+
+    const outcome = await runAgainstStub(
+      prReview.perform({ ...ADDRESS, verdict: "approve" }, buildActionContext()),
+      stub,
+    );
+
+    if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
+    expect(outcome.failure.code).toBe("unexpected");
+    expect(outcome.failure.message).toContain("PENDING");
   });
 });
 
@@ -208,6 +221,60 @@ describe("pr.update", () => {
     expect(readJsonBody(stub.requests[0])).toEqual({ title: "Better title", base: "develop" });
     expect(readJsonBody(stub.requests[1])).toEqual({ labels: ["ready"] });
     expect(readJsonBody(stub.requests[2])).toEqual({ reviewers: ["hubot"] });
+  });
+
+  it("names the change that failed, the changes already made and the ones not tried", async () => {
+    const stub = stubRoutes({
+      [`PATCH ${PULL_URL}`]: { status: 200, body: GITHUB_PULL_REQUEST },
+      [`PATCH ${API}/repos/octocat/hello-world/issues/1347`]: {
+        status: 403,
+        body: { message: "Resource not accessible by personal access token" },
+      },
+    });
+
+    const outcome = await runAgainstStub(
+      prUpdate.perform(
+        {
+          ...ADDRESS,
+          title: "Better title",
+          base: "develop",
+          labels: ["ready"],
+          reviewers: ["hubot"],
+        },
+        buildActionContext(),
+      ),
+      stub,
+    );
+
+    if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
+    expect(outcome.failure.code).toBe("forbidden");
+    expect(outcome.failure.message).toBe(
+      "Could not change labels. Already changed, and not undone: title, base. Not tried: reviewers. The Connection's account is not allowed to do this on GitHub. GitHub said: Resource not accessible by personal access token",
+    );
+    expect(listRequests(stub)).toEqual([
+      `PATCH ${PULL_URL}`,
+      `PATCH ${API}/repos/octocat/hello-world/issues/1347`,
+    ]);
+  });
+
+  it("says nothing was changed when the first change fails", async () => {
+    const stub = stubRoutes({
+      [`PATCH ${PULL_URL}`]: { status: 422, body: { message: "Validation Failed" } },
+    });
+
+    const outcome = await runAgainstStub(
+      prUpdate.perform(
+        { ...ADDRESS, title: "Better title", labels: ["ready"] },
+        buildActionContext(),
+      ),
+      stub,
+    );
+
+    if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
+    expect(outcome.failure.code).toBe("validation");
+    expect(outcome.failure.message).toContain(
+      "Could not change title. Nothing was changed before it. Not tried: labels.",
+    );
   });
 
   it("marks a draft ready for review through GitHub's GraphQL API", async () => {
@@ -279,6 +346,32 @@ describe("pr.update", () => {
     expect(outcome.failure.message).toContain("Resource not accessible by integration");
   });
 
+  it("reports a token without the scope GraphQL needs as forbidden", async () => {
+    const stub = stubRoutes({
+      [`GET ${PULL_URL}`]: { status: 200, body: GITHUB_PULL_REQUEST },
+      [`POST ${API}/graphql`]: {
+        status: 200,
+        body: {
+          errors: [
+            {
+              type: "INSUFFICIENT_SCOPES",
+              message: "Your token has not been granted the required scopes to execute this query.",
+            },
+          ],
+        },
+      },
+    });
+
+    const outcome = await runAgainstStub(
+      prUpdate.perform({ ...ADDRESS, draft: true }, buildActionContext()),
+      stub,
+    );
+
+    if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
+    expect(outcome.failure.code).toBe("forbidden");
+    expect(outcome.failure.message).toContain("required scopes");
+  });
+
   it("refuses an update that changes nothing, and an empty list of reviewers", () => {
     const decode = Schema.decodeUnknownResult(prUpdate.input);
 
@@ -289,6 +382,8 @@ describe("pr.update", () => {
 });
 
 describe("pr.merge", () => {
+  /** A head commit other than the merge commit, so a test can tell the two apart. */
+  const HEAD_SHA = "e5bd3914e2e596debea16f433f57875b5b90bcd6";
   const MERGED = {
     sha: "6dcb09b5b57875f334f61aebed695e2e4193db5e",
     merged: true,
@@ -324,7 +419,10 @@ describe("pr.merge", () => {
     const stub = stubRoutes({
       [`GET ${PULL_URL}`]: {
         status: 200,
-        body: { ...GITHUB_PULL_REQUEST, head: { ...GITHUB_PULL_REQUEST.head, ref: "feature/x" } },
+        body: {
+          ...GITHUB_PULL_REQUEST,
+          head: { ...GITHUB_PULL_REQUEST.head, ref: "feature/x", sha: HEAD_SHA },
+        },
       },
       [`PUT ${PULL_URL}/merge`]: { status: 200, body: MERGED },
       [`DELETE ${API}/repos/octocat/hello-world/git/refs/heads/feature/x`]: { status: 204 },
@@ -341,6 +439,52 @@ describe("pr.merge", () => {
       `PUT ${PULL_URL}/merge`,
       `DELETE ${API}/repos/octocat/hello-world/git/refs/heads/feature/x`,
     ]);
+    // The merge is held to the head commit the step read, so a commit pushed
+    // between the read and the merge is refused, not merged and deleted.
+    expect(readJsonBody(stub.requests[1])).toEqual({ sha: HEAD_SHA });
+  });
+
+  it("holds the merge to the step's sha over the head commit it read", async () => {
+    const stub = stubRoutes({
+      [`GET ${PULL_URL}`]: {
+        status: 200,
+        body: { ...GITHUB_PULL_REQUEST, head: { ...GITHUB_PULL_REQUEST.head, sha: HEAD_SHA } },
+      },
+      [`PUT ${PULL_URL}/merge`]: { status: 200, body: MERGED },
+      [`DELETE ${API}/repos/octocat/hello-world/git/refs/heads/new-topic`]: { status: 204 },
+    });
+
+    const outcome = await runAgainstStub(
+      prMerge.perform({ ...ADDRESS, deleteBranch: true, sha: MERGED.sha }, buildActionContext()),
+      stub,
+    );
+
+    expect(readSuccess(outcome)).toEqual({ ...MERGED, branchDeleted: true });
+    expect(readJsonBody(stub.requests[1])).toEqual({ sha: MERGED.sha });
+  });
+
+  it("deletes the branch of a pull request from a fork in the fork", async () => {
+    const stub = stubRoutes({
+      [`GET ${PULL_URL}`]: {
+        status: 200,
+        body: {
+          ...GITHUB_PULL_REQUEST,
+          head: { ...GITHUB_PULL_REQUEST.head, repo: { full_name: "hubot/hello-world" } },
+        },
+      },
+      [`PUT ${PULL_URL}/merge`]: { status: 200, body: MERGED },
+      [`DELETE ${API}/repos/hubot/hello-world/git/refs/heads/new-topic`]: { status: 204 },
+    });
+
+    const outcome = await runAgainstStub(
+      prMerge.perform({ ...ADDRESS, deleteBranch: true }, buildActionContext()),
+      stub,
+    );
+
+    expect(readSuccess(outcome)).toEqual({ ...MERGED, branchDeleted: true });
+    expect(listRequests(stub)[2]).toBe(
+      `DELETE ${API}/repos/hubot/hello-world/git/refs/heads/new-topic`,
+    );
   });
 
   it("succeeds when the branch was already deleted by the repository", async () => {
@@ -379,6 +523,28 @@ describe("pr.merge", () => {
     if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
     expect(outcome.failure.code).toBe("forbidden");
     expect(outcome.failure.message).toContain(`was merged as ${MERGED.sha}`);
+  });
+
+  it("fails when GitHub refuses to delete the branch as invalid for another reason", async () => {
+    const stub = stubRoutes({
+      [`GET ${PULL_URL}`]: { status: 200, body: GITHUB_PULL_REQUEST },
+      [`PUT ${PULL_URL}/merge`]: { status: 200, body: MERGED },
+      [`DELETE ${API}/repos/octocat/hello-world/git/refs/heads/new-topic`]: {
+        status: 422,
+        body: { message: "Cannot delete the default branch" },
+      },
+    });
+
+    const outcome = await runAgainstStub(
+      prMerge.perform({ ...ADDRESS, deleteBranch: true }, buildActionContext()),
+      stub,
+    );
+
+    if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
+    expect(outcome.failure.code).toBe("validation");
+    expect(outcome.failure.message).toBe(
+      `The pull request was merged as ${MERGED.sha}, but its branch new-topic of octocat/hello-world was not deleted. GitHub refused the request as invalid. GitHub said: Cannot delete the default branch`,
+    );
   });
 
   it("refuses before merging when the branch to delete is in a fork that is gone", async () => {

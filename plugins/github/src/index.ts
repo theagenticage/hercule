@@ -12,7 +12,7 @@ import {
   type Plugin,
 } from "@hercule/plugin-host";
 import { GITHUB_WORKFLOW_ACTIONS } from "./actions";
-import { connectionType } from "./connection-type";
+import { connectionType, GITHUB_CONNECTION_TYPE } from "./connection-type";
 import { openGithubIngest } from "./ingest";
 import { GITHUB_EVENT_KINDS } from "./kinds";
 
@@ -26,7 +26,7 @@ import { GITHUB_EVENT_KINDS } from "./kinds";
  */
 const eventSource: EventSourceContribution = {
   id: "github",
-  connectionType: "github/github",
+  connectionType: GITHUB_CONNECTION_TYPE,
   kinds: GITHUB_EVENT_KINDS,
   feeds: {
     notifications: { defaultIntervalSeconds: 60 },
