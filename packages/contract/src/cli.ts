@@ -1053,7 +1053,7 @@ export const CLI = {
   },
   "subscription.create": {
     command: "subscription create",
-    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can hold a subscription, and the calling session becomes the holder.",
+    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can create a subscription, and the calling session becomes the holder.",
     examples: [
       { args: ["github:pr:o/r#87"] },
       { args: ["gmail:thread:19b2c"] },
@@ -1089,6 +1089,8 @@ export const CLI = {
     errors: {
       not_found:
         "nothing to end: no subscription has that id, or it has ended already, or another session holds it; the three cases fail the same way",
+      invalid_state:
+        "a run holds the subscription for one of its signal triggers, and it ends when the run ends: cancel the run with `hercule run cancel` instead",
     },
   },
 

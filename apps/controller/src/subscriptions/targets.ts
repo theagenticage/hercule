@@ -10,7 +10,7 @@
  * caller-written text, and quoting it by hand would let a quotation mark in it
  * change the expression.
  */
-import type { SubscriptionTarget } from "@hercule/contract";
+import { ANY_CONNECTION, type EventSelector, type SubscriptionTarget } from "@hercule/contract";
 
 /** Returns the value as a CEL string literal. A JSON string is also a valid CEL string literal. */
 const quoteAsCelString = (value: string): string => JSON.stringify(value);
@@ -51,3 +51,27 @@ export const expandTarget = (target: SubscriptionTarget): string => {
       );
   }
 };
+
+/**
+ * Returns the CEL source that matches the events a signal trigger's Event
+ * Selector accepts:
+ *
+ * - the event's kind is the selector's kind;
+ * - when the selector names one Connection, the event arrived through it.
+ *   `any`, or no Connection at all for a core kind, adds no test;
+ * - the selector's filter, if it has one, holds.
+ *
+ * The tests are joined with `&&`, which stops at the first false one. So the
+ * filter, written for events of the selector's kind, is never evaluated
+ * against an event of another kind, where it could fail on a missing field.
+ */
+export const expandEventSelector = (selector: EventSelector): string =>
+  [
+    `event.kind == ${quoteAsCelString(selector.kind)}`,
+    ...(selector.connectionId === undefined || selector.connectionId === ANY_CONNECTION
+      ? []
+      : [`event.connectionId == ${quoteAsCelString(selector.connectionId)}`]),
+    // The filter goes on lines of its own, so a `//` comment at its end
+    // cannot swallow the closing parenthesis.
+    ...(selector.filter === undefined ? [] : [`(\n${selector.filter}\n)`]),
+  ].join(" && ");

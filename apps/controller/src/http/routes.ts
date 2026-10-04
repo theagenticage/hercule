@@ -56,6 +56,7 @@ import {
   Retirement,
   RetirementLayer,
   RunExecutorLayer,
+  RunTargetsLayer,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
   WorkspaceStepsLayer,
@@ -709,10 +710,11 @@ export const operationLayers = Layer.mergeAll(
     Layer.provideMerge(DispatchLayer),
   ),
   ProvisioningLayer,
-  // The subscription service needs the run domain only to check a run
-  // target: it reads the run through RunService.read to check that the run
-  // exists, that the caller may read it, and that it has not ended.
-  SubscriptionServiceLayer.pipe(Layer.provide(RunDomainLayer)),
+  // The subscription service checks a run target through its Run Targets
+  // port: the controller daemon answers it with RunService.read, which checks
+  // that the run exists and that the caller may read it, and then tells
+  // whether the run has ended.
+  SubscriptionServiceLayer.pipe(Layer.provide(RunTargetsLayer), Layer.provide(RunDomainLayer)),
   EventKindsOperationLayer,
   RunDomainLayer,
   LiveTopicsLayer,

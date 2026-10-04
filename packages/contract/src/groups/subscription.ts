@@ -280,7 +280,7 @@ export const subscription = HttpApiGroup.make("subscription")
     HttpApiEndpoint.delete("cancel", "/subscriptions/:id", {
       params: { id: Id },
       success: Schema.Struct({}),
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

@@ -1,8 +1,15 @@
 /**
- * Subscriptions: the standing claims a session holds on events that have not
- * arrived. One table and three operations. `targets.ts` expands a target into
- * the expression the event router evaluates, and only this domain's service
- * calls it.
+ * Subscriptions: the standing claims a holder has on events that have not
+ * arrived. A session registers its own through three operations; a run opens
+ * one for each signal trigger of its plan through `runHeldSubscriptions`.
+ * `targets.ts` expands a target or an Event Selector into the expression the
+ * event router evaluates, and only this domain calls it.
+ *
+ * `subscription.create` checks a run target through the `RunTargets` port,
+ * which the controller daemon provides, because the runs domain depends on
+ * this one and not the other way round.
  */
 export { subscriptionRepository, type StoredSubscription } from "./repository";
+export { runHeldSubscriptions } from "./run-held";
+export { RunTargets } from "./run-targets";
 export { buildHolderEndedReason, SubscriptionService, SubscriptionServiceLayer } from "./service";

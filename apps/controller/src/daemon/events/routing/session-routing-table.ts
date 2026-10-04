@@ -1,5 +1,6 @@
 /**
- * The routing table for sessions: one route per live subscription.
+ * The routing table for sessions: one route per live subscription a session
+ * holds. The subscriptions a run holds have a routing table of their own.
  *
  * This is the only module that imports both subscriptions and sessions, so
  * neither of them has to import the other. It holds no rules of its own about
@@ -23,7 +24,7 @@ import {
 import type { Route, RoutingTable } from "../event-router";
 import { renderEventInput } from "./render-event-input";
 
-/** One route per live subscription, held by the session that registered it. */
+/** One route per live session-held subscription. */
 export const sessionRoutingTable: Effect.Effect<
   RoutingTable,
   never,
@@ -93,15 +94,15 @@ export const sessionRoutingTable: Effect.Effect<
     });
 
   /**
-   * Ends the subscriptions whose holder is gone, then returns the live
-   * subscriptions as routes. A subscription admits every event: its condition
+   * Ends the subscriptions whose holder session is gone, then returns the
+   * live session-held subscriptions as routes. A subscription admits every event: its condition
    * is its only test. The condition is passed on as stored: the router
    * parses it, and a condition that no longer parses is recorded as an error
    * of that one subscription, like one that fails while it runs.
    */
   const prepare = (): Effect.Effect<ReadonlyArray<Route>, SqlError> =>
     Effect.gen(function* () {
-      const live = yield* subscriptions.listLive();
+      const live = yield* subscriptions.listLive("session");
       const swept = yield* sweepEndedHolders(live);
       return live
         .filter((subscription) => !swept.has(subscription.id))
