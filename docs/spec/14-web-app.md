@@ -483,7 +483,7 @@ Under the line come the health error with its time, and the scheduled times a cr
 
 - **An agent step's session.** Under each record of an agent step, one line links to the record's session, `/threads/<session id>`, with the session's title and its state. The page reads the sessions with `session.query` and `runId`, prefetched in the route's loader, and keeps them live on the `session` topic.
 - **Signal records.** A signal trigger's records show as rows like a step's, labelled as a signal, one per firing.
-- **Waiting on a signal.** While the run is `running`, no record is `running` or `pending`, and the plan has signal triggers, the header's status reads "Running · waiting on pr_merged", naming the signal triggers. The client-core function `describeSignalWait` decides this and returns the trigger ids, so the web app does not work it out itself.
+- **Waiting on a signal.** While the run is `running`, no record is `running` or `pending`, and the plan has signal triggers, the header's status reads "Running · waiting on pr_merged", naming the signal triggers. The client-core function `listAwaitedSignals` decides this and returns the trigger ids, so the web app does not work it out itself.
 
 ## Onboarding and first run
 

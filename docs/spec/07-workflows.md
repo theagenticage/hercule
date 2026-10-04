@@ -377,7 +377,12 @@ Example: `review_a` finishes in 1 second and `review_b` takes 1 minute. `summari
 
 Validation also refuses `join: all` on an entry step: an entry step starts when the run starts, so it cannot wait for its incoming edges first.
 
-*(Amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83).)* A signal node can always fire again while its run is live, so an edge out of a signal node never makes a `join: all` step dead.
+*(Amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83).)* **Signal nodes and `join: all`.** A signal node can always fire again while its run is live, so an edge out of a signal node never makes a `join: all` step dead. The settled rule reads a signal node like this:
+
+- Before its first firing, a signal node counts as a source that can still run. A join it has a path to waits for that firing.
+- After its first firing, its edges settle like those of a step that completed. Later firings are not waited for, so the join still runs once.
+
+Example: `review` and the signal `approved` both lead into `merge` (`join: all`). `merge` waits until `review` has finished and `approved` has fired once, then runs once. A join downstream of a signal that never fires never runs; the run stays `running` until a terminal step or a cancel ends it.
 
 **Skips.** A step whose `condition` evaluates false is skipped: a record with status `skipped`, no output, and its outgoing edges are evaluated as if it had completed (pass-through). Skipping is never a runtime act; it is a condition the author wrote, so the steps after it are written to expect it: `steps.<id>` is absent for a skipped step (section 5), and a downstream condition that reads it guards with `has()`:
 
