@@ -50,7 +50,7 @@ const localGithubPlugin: Plugin = {
     id: "github",
     displayName: "GitHub",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources"],
+    capabilities: ["connections", "event-sources", "events"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>

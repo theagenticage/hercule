@@ -15,8 +15,12 @@ import { openGithubIngest } from "./ingest";
 import { GITHUB_EVENT_KINDS } from "./kinds";
 
 /**
- * The unqualified id, which the host prefixes to make `github/github`. The
- * feed intervals are spec 08 section 5.1's defaults.
+ * The unqualified id, which the host prefixes to make `github/github`.
+ *
+ * The default intervals are spec 08 section 5.1's. The floors are this
+ * plugin's: the notifications feed may not go below its default because
+ * GitHub's `X-Poll-Interval` is 60 seconds, and the other two stay well
+ * inside the hourly quota at their floor.
  */
 const eventSource: EventSourceContribution = {
   id: "github",
@@ -35,7 +39,7 @@ export const github: Plugin = {
     id: "github",
     displayName: "GitHub",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources"],
+    capabilities: ["connections", "event-sources", "events", "resources", "workflow-actions"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>

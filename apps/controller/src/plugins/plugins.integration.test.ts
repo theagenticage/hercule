@@ -610,7 +610,7 @@ const buildEventSourcePlugin = (kinds: ReadonlyArray<string>): Plugin => ({
     id: "acme",
     displayName: "Plugin acme",
     hostApi: HOST_API,
-    capabilities: ["event-sources"],
+    capabilities: ["event-sources", "events"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>

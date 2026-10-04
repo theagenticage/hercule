@@ -5,11 +5,8 @@
  * to.
  */
 import { Effect, Schema } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
 import { ConnectionValidationFailed, type ConnectionTypeContribution } from "@hercule/plugin-host";
-
-/** The endpoint that returns the account a token belongs to. */
-const USER_URL = "https://api.github.com/user";
+import { readToken, requestGithub } from "./api";
 
 /**
  * The client id of Hercule's OAuth App on GitHub. A client id is public: the
@@ -23,9 +20,6 @@ const OAUTH_APP_CLIENT_ID = "Ov23liAQFrHlllNX9ld6";
  * workflows), the organizations it belongs to, and its notifications.
  */
 const SCOPES = ["repo", "read:org", "notifications", "workflow"];
-
-/** GitHub rejects a request without a user agent, so one is always sent. */
-const USER_AGENT = "Hercule";
 
 const failValidation = (message: string) =>
   Effect.fail(new ConnectionValidationFailed({ message }));
@@ -50,30 +44,20 @@ const decodeAccount = Schema.decodeUnknownEffect(Account);
  */
 const validate: ConnectionTypeContribution["validate"] = (credentials) =>
   Effect.gen(function* () {
-    const token = credentials["pat"] ?? credentials["accessToken"];
+    const token = readToken(credentials);
     if (token === undefined) return yield* failValidation("No GitHub token was given.");
-    const response = yield* HttpClient.get(USER_URL, {
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/vnd.github+json",
-        "user-agent": USER_AGENT,
-      },
-    });
+    const response = yield* requestGithub({ method: "GET", path: "/user", token });
     if (response.status === 401) return yield* failValidation("GitHub rejected the token.");
     if (response.status !== 200) {
       return yield* failValidation(`GitHub returned status ${String(response.status)}.`);
     }
-    const account = yield* decodeAccount(yield* response.json).pipe(
+    const account = yield* decodeAccount(response.body).pipe(
       Effect.catchTag("SchemaError", () =>
         failValidation("GitHub's response did not include the account's login and user id."),
       ),
     );
     return { displayName: account.login, accountId: String(account.id) };
-  }).pipe(
-    Effect.catchTag("HttpClientError", (error) =>
-      failValidation(`GitHub could not be reached: ${error.message}`),
-    ),
-  );
+  }).pipe(Effect.catchTag("GithubUnreachable", (error) => failValidation(error.message)));
 
 export const connectionType: ConnectionTypeContribution = {
   type: "github",

@@ -701,7 +701,7 @@ const buildEventSourcePlugin = (id: string, word: string, kind: string): Plugin 
     id,
     displayName: `Plugin ${id}`,
     hostApi: HOST_API,
-    capabilities: ["event-sources"],
+    capabilities: ["event-sources", "events"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>

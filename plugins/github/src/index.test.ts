@@ -3,15 +3,12 @@
  * GitHub's responses.
  *
  * `validate` needs an `HttpClient` and nothing else, so it is tested in full
- * against a stub client: the test checks the request it builds, and replays
+ * against the stub client from `testing.ts`: the test checks the request it builds, and replays
  * every kind of response GitHub can give.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Result } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
+import { Effect, Result } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import type {
   ConnectionTypeContribution,
   EventSourceContribution,
@@ -20,6 +17,7 @@ import type {
   RegistrationHost,
 } from "@hercule/plugin-host";
 import { github } from "./index";
+import { stubAnswer, stubHttpClient, type GithubStub } from "./testing";
 
 /** Runs `register` and returns everything the plugin contributed. */
 const collectContributions = async (
@@ -48,39 +46,6 @@ const collectContributions = async (
   return { types, sources };
 };
 
-/** The requests the stub received, and the response it returned. */
-interface Stub {
-  readonly layer: Layer.Layer<HttpClient.HttpClient>;
-  readonly requests: Array<HttpClientRequest.HttpClientRequest>;
-}
-
-const stubHttpClient = (
-  answer: (
-    request: HttpClientRequest.HttpClientRequest,
-  ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>,
-): Stub => {
-  const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-  const client = HttpClient.make((request) => {
-    requests.push(request);
-    return answer(request);
-  });
-  return { layer: Layer.succeed(HttpClient.HttpClient, client), requests };
-};
-
-/** Builds a stub that responds to every request with this status and body. */
-const stubAnswer = (status: number, body: unknown): Stub =>
-  stubHttpClient((request) =>
-    Effect.succeed(
-      HttpClientResponse.fromWeb(
-        request,
-        new Response(JSON.stringify(body), {
-          status,
-          headers: { "content-type": "application/json" },
-        }),
-      ),
-    ),
-  );
-
 const PAT = "ghp_a-real-looking-token";
 
 /** The one type the plugin contributes, for the tests that drive its `validate`. */
@@ -95,7 +60,7 @@ const readConnectionType = async (): Promise<ConnectionTypeContribution> => {
  * The credentials default to a pasted token.
  */
 const runValidate = async (
-  stub: Stub,
+  stub: GithubStub,
   credentials: Readonly<Record<string, string>> = { pat: PAT },
 ): Promise<Result.Result<ExternalAccount, { readonly message: string }>> => {
   const type = await readConnectionType();
@@ -132,10 +97,10 @@ const KINDS = [
 ] as const;
 
 describe("what the github plugin registers", () => {
-  it("requests the connections and event-sources capabilities", () => {
+  it("requests the capabilities its connection type, ingest and actions use", () => {
     expect(github.manifest).toMatchObject({
       id: "github",
-      capabilities: ["connections", "event-sources"],
+      capabilities: ["connections", "event-sources", "events", "resources", "workflow-actions"],
     });
   });
 

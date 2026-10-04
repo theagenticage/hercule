@@ -80,6 +80,8 @@ const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "secrets",
   "connections",
   "event-sources",
+  "events",
+  "resources",
   "workflow-actions",
 ];
 

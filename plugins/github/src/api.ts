@@ -5,7 +5,6 @@
  * the same way.
  */
 import { Effect, Schema } from "effect";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
@@ -74,10 +73,14 @@ const parseNextPageUrl = (link: string | undefined): string | undefined =>
  * `GithubUnreachable` only when no response arrived or its body was not JSON.
  *
  * `path` may also be a full URL, which is how a caller follows `nextPageUrl`.
+ *
+ * The `HttpClient` stays a requirement: the plugin provides the fetch client
+ * only where the host calls in, so a test can drive any function below that
+ * point with a stub client (see `testing.ts`).
  */
 export const requestGithub = (
   request: GithubRequest,
-): Effect.Effect<GithubResponse, GithubUnreachable> =>
+): Effect.Effect<GithubResponse, GithubUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const url = request.path.startsWith("https://")
       ? request.path
@@ -132,7 +135,7 @@ export const requestGithub = (
       ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       ...(nextPageUrl === undefined ? {} : { nextPageUrl }),
     };
-  }).pipe(Effect.provide(FetchHttpClient.layer));
+  });
 
 /**
  * Returns the token in a GitHub Connection's credentials: the pasted `pat`
