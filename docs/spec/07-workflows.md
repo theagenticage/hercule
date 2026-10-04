@@ -83,6 +83,12 @@ The warning has the path `["steps"]`. A save answers it beside the stored workfl
 
 These are decided by the definition alone, because a policy's checkouts are written out and never rendered from a template. A `resourceId` that is not in the run's workspace is not checked at save, because the param can be a template. The step fails when it runs, with the code `validation` (section 7.2).
 
+*(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* A plugin action may declare a Connection type of its own plugin. A step names the Connection in `params.connection`, as a literal id or a template; that param is validated at save, a disabled literal is refused at start (section 7.1), and the param never reaches the action's input. The checks at save:
+
+- The param is required, and must be a string.
+- A literal must be the id of an existing Connection of the action's type. Whether it is disabled is not checked at save.
+- A template that is exactly `{{ inputs.<name> }}` must name a Connection input of the action's type. Any other template is accepted, because its value is known only when the run renders it.
+
 ### Invalid after the fact
 
 A stored workflow can stop validating without being edited: its plugin is disabled, its agent or a Connection named in a default is deleted. The controller re-validates every workflow that references the mutated thing at the moment of the mutation. A workflow that fails is marked **invalid**: a health warning on the workflow, one Notification, and its start triggers no longer match while it is invalid (matched events show as ignored in the events view, [./08-events-and-connections.md](./08-events-and-connections.md)). A manual run of an invalid workflow is rejected with the validation error. The mark clears on the next successful validation (the plugin is re-enabled, or the workflow is saved with a fix). Runs are never spawned only to fail at stamp: one notification, not a failed-run flood.
@@ -237,7 +243,7 @@ A workflow declares typed inputs. A start trigger maps event fields onto them wi
 
 Connections flow through inputs: an outbound action names the Connection it acts as, and that id may be mapped from the triggering event's `event.connectionId` into an input, then referenced by the action's parameters (`inputs.connection`).
 
-A Connection input is **first-class**: the declaration says ~~`connection: { type: "github" }`~~ `connection: { type: "github/github" }` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the qualified Connection type, as everywhere else)* instead of a JSON schema, the value is a Connection id, and stamping validates that the Connection exists, is of that type and is not disabled, so a dead Connection fails at start rather than at step four. The manual-run form renders a Connection picker for it. A trigger with no event Connection (cron, manual) fills it from the declaration's `default` or a literal in its mapping (`'conn_abc'`). An action step may also name a Connection id literally in its `params` when the workflow only ever acts through one.
+A Connection input is **first-class**: the declaration says ~~`connection: { type: "github" }`~~ `connection: { type: "github/github" }` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the qualified Connection type, as everywhere else)* instead of a JSON schema, the value is a Connection id, and stamping validates that the Connection exists, is of that type and is not disabled, so a dead Connection fails at start rather than at step four. The manual-run form renders a Connection picker for it. A trigger with no event Connection (cron, manual) fills it from the declaration's `default` or a literal in its mapping (`'conn_abc'`). An action step may also name a Connection id literally in its `params` when the workflow only ever acts through one. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The param is `connection` (section 1). A literal names the Connection the step always acts through, and a template such as `{{ inputs.account }}` names the one the run was given.
 
 *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **The inputs are checked when a run starts**, by ~~`workflow.run`, `workflow.submit` and the `workflow.run` action~~ `run.start`, as an operation and as an action *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* (section 8). The controller checks the given values against the declarations:
 
@@ -504,19 +510,24 @@ Concurrent runs of one workflow are unlimited in v1; the per-runner session cap 
 - the definition has an element that runs cannot execute yet (the list below);
 - the inputs are not valid (section 3).
 
+*(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* Two more checks apply to a step whose action acts through a Connection:
+
+- A literal `connection` param that names a disabled Connection is refused with `validation` at the param's path, as a disabled Connection input is. This holds for a stored workflow and a sent one alike. A start from a trigger effect runs the same check, and its run fails with `validation-error` (below).
+- A sent workflow (`source` or `definition`) with such a step is refused with `forbidden` when the caller lacks the `connection.use` grant, whether the param is an id or a template ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). A stored workflow needs no grant, because the user wrote its steps.
+
 A run that failed at start would be one more failed run to read, for a problem the caller can be told about at once. `validation-error` as a run's failure reason stays for starts that nobody waits on: a trigger effect ([#82](https://github.com/theagenticage/hercule/issues/82)) *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): built, below)*.
 
 Runs execute part of this document so far. Each element they cannot execute yet is one issue, at its place, in plain words ("Runs cannot evaluate edge conditions yet."):
 
 - an agent step, and a signal trigger ([#83](https://github.com/theagenticage/hercule/issues/83));
 - ~~a step or edge `condition`, `join`, `terminal`, `maxTraversals`, a step that more than one edge leads into, and `entry: true` on a step that an edge also leads into. Such a step would run once as an entry step and again when the edge fires, and a step that runs twice needs the rules for loops ([#80](https://github.com/theagenticage/hercule/issues/80));~~
-- a plugin action that declares a Connection. The first plugin action that needs a Connection decides how a step names it (section 3, [./05-plugins.md](./05-plugins.md) section 4.4).
+- ~~a plugin action that declares a Connection. The first plugin action that needs a Connection decides how a step names it (section 3, [./05-plugins.md](./05-plugins.md) section 4.4).~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* Runs execute these now (section 1).
 
 *(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* Runs execute every routing element of section 4.3, `terminal` included, so the struck bullet lists nothing any more.
 
 Accepted: action steps, ~~edges with no condition~~ step and edge conditions, `join`, `maxTraversals`, a step that several edges lead into, `entry: true` on a step that an edge also leads into, `terminal` *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*, fan-out (one step leading to several), several entry steps, start triggers (frozen and inert) and a `workspace` policy (frozen and unused, because no step needs a workspace yet).
 
-*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* Action steps that call a workspace action, such as `git.commit`, are accepted too, and a run uses its `workspace` policy for them (section 4.4). Agent steps are still refused ([#83](https://github.com/theagenticage/hercule/issues/83)), and so are plugin actions that declare a Connection.
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* Action steps that call a workspace action, such as `git.commit`, are accepted too, and a run uses its `workspace` policy for them (section 4.4). Agent steps are still refused ([#83](https://github.com/theagenticage/hercule/issues/83)), ~~and so are plugin actions that declare a Connection~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)*.
 
 How the numbered steps above apply to a start by request:
 
@@ -636,6 +647,7 @@ interface StepRecord {
   - `expression_error`, when a template in the step's params could not be rendered, or the step's condition could not be decided *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*;
   - `unexpected`, for a failure that is not one of the API's errors, such as a database error or a bug in the controller;
   - `interrupted`, for a plugin action cut off by a restart (below);
+  - *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* `connection_unavailable`, when the Connection a plugin action acts through is disabled, or its credentials cannot be read. A step whose `connection` param renders to anything other than a non-empty string, or names a Connection of another type, fails with `validation`, and one that names a Connection that does not exist fails with `not_found`;
   - the `code` of a plugin's `ActionError` ([./05-plugins.md](./05-plugins.md) section 4.4).
 - **Built so far:** the failure reasons `expression-error`, `step-failed` and `controller-error` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*. The others join with the tickets that can cause them. ~~The step status `skipped` joins with step conditions ([#80](https://github.com/theagenticage/hercule/issues/80)).~~ `iteration-limit` and the step status `skipped` are built *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*, and so is `workspace-failed` *(amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257))*, and so is `validation-error`, for a run a trigger starts *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82), below)*.
 - **`pending`** means created and not started yet, for a run and for a step record alike. A run is `pending` from the request that creates it until the run engine takes it up; it is never held back by validation, which happens before it exists, and nothing places it yet. *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* A run a trigger starts whose checks fail (section 7.1) moves from `pending` straight to `failed` with `validation-error`, in the transaction that writes it, so no reader ever sees it `pending` and it is never `running`. A step record is `pending` from when the step before it completes until the engine calls its action, not only as a queued iteration behind a busy step.
@@ -765,7 +777,7 @@ Five built-in actions ship in the core (~~three~~ four of them now *(amended 202
 - It authenticates with the checkout's Connection, through the runner's credential helper, which asks as the runner and names the workspace while the step runs ([./13-security.md](./13-security.md) section 9.1).
 - It fails with `timeout` after 10 minutes, as every workspace action does. Sending the same step to the runner again is safe: a remote that already has the commit accepts the same push and changes nothing.
 
-GitHub and Gmail actions (for example creating a PR, commenting, fetching a mail body on demand, merging) are plugin contributions of the `github` and `gmail` plugins, invoked as ordinary action steps naming the Connection they act as (`connection.use` grant, [./13-security.md](./13-security.md)). Their exact roster is Open in [./05-plugins.md](./05-plugins.md). Mid-session mailbox access from an agent step is covered in v1 by gmail action steps around it and the session spec's MCP passthrough.
+GitHub and Gmail actions (for example creating a PR, commenting, fetching a mail body on demand, merging) are plugin contributions of the `github` and `gmail` plugins, invoked as ordinary action steps naming the Connection they act as (`connection.use` grant, [./13-security.md](./13-security.md)). ~~Their exact roster is Open in [./05-plugins.md](./05-plugins.md).~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* Their roster is in [./05-plugins.md](./05-plugins.md) section 4.4, and the GitHub actions are built. `connection.use` is checked only when a run of a sent workflow starts (section 7.1). Mid-session mailbox access from an agent step is covered in v1 by gmail action steps around it and the session spec's MCP passthrough.
 
 ## 9. Ad-hoc workflows
 
