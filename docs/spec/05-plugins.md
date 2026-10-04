@@ -72,7 +72,7 @@ type Deactivate = Effect<void>
 `activate()`:
 
 - Runs only for enabled plugins, after the whole catalog exists. It receives the decoded plugin config and the runtime surfaces of the granted capabilities (emit events, emit notifications, read connections, KV, secrets, the public-API client if requested).
-- Starts real machinery: opens channel connections, starts one ingest loop per connection for each event source, and so on.
+- Starts real machinery: opens channel connections, ~~starts one ingest loop per connection for each event source~~, and so on. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The core, not `activate()`, opens an event source's handle for each Connection (section 4.3).
 - Returns a deactivation function that stops everything it started. Deactivate-then-activate is the only reconfiguration protocol (section 8).
 
 ### The catalog is the source of truth
@@ -122,38 +122,54 @@ An event-source contribution ingests external facts ([ADR 0009](../adr/0009-all-
 ```ts
 interface EventSourceContribution {
   id: string                                   // the bare word "github", "gmail"; identified as "github/github"
-  connectionType: string                       // the qualified id of the Connection type it ingests for
-  kinds: Record<string, KindDeclaration>       // "github.issue.opened" -> payload schema + description
-  feeds?: Record<string, FeedDeclaration>      // named poll feeds; absent for purely push-driven sources
-  connectionConfigSchema?: Schema              // per-Connection config (the GitHub watch list)
-  open(connection: ConnectionRef, ctx: IngestContext): Effect<IngestHandle>
+  connectionType: string                       // the qualified id of the plugin's own Connection type it ingests for
+  kinds: Record<string, EventKindDeclaration>  // "github.issue.opened" -> payload schema + description
+  feeds: Record<string, FeedDeclaration>       // named poll feeds; {} for a purely push-driven source
+  open(connection: IngestConnection, ctx: IngestContext): Effect<IngestHandle, AuthError | PluginError>
 }
 
-interface KindDeclaration { schema: Schema; description: string }
-interface FeedDeclaration { defaultIntervalSeconds: number; minIntervalSeconds?: number }
+interface EventKindDeclaration { description: string; schema: Schema }
+interface FeedDeclaration { defaultIntervalSeconds: number; minIntervalSeconds?: number }  // positive integers; min <= default
+interface IngestConnection { id: string; config: unknown }  // config decoded with the Connection type's configSchema
 
-// What the core hands the ingest loop.
+// What the core hands the ingest handle of one Connection.
 interface IngestContext {
-  emit(e: EmitEvent): Effect<{ eventId: string }>    // the `events` capability; connection-stamped by the host
-  state: KeyValueStore                         // Connection-scoped KV view (section 6): cursors, watch-list diffs
-  status(s: { state: "connected" | "degraded" | "disconnected"; detail?: string }): void
+  emit(e: EmittedEvent): Effect<void, PluginError>      // the `events` capability; connection-stamped by the host
+  state: KeyValueStore                                   // this Connection's state (section 6): cursors, snapshots
+  credentials(): Effect<Record<string, string>, ConnectionUnavailable>  // read through the type's runtime, OAuth refreshed
+  resources?: { list(): Effect<LinkedResource[]> }       // the Resources linked to this Connection; only with `resources`
 }
 
-// What the core calls on a live ingest loop.
+interface EmittedEvent {
+  kind: string; dedupKey: string; occurredAt: string; payload: unknown
+  refs: string[]; url?: string; system?: string; raw?: JsonObject
+}
+interface LinkedResource { id: string; kind: "repo" | "folder" | "mailbox"; label: string | null; remote: string | null }
+
+// What the core calls on an open handle.
 interface IngestHandle {
-  poll?(feed: string): Effect<{ nextAfterSeconds?: number } | void>
-  close(): Effect<void>
+  poll(feed: string): Effect<{ nextAfterSeconds?: number }, AuthError | PluginError>
+  close: Effect<void>                                    // run once, after the last poll
 }
 ```
 
+*(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The block above is now the interface as shipped. It changed in these places:
+
+- `feeds` is required. A push source declares `{}`.
+- `connectionConfigSchema` is gone. A Connection's config is decoded with the `configSchema` of its Connection type (section 10), so it exists for a type with no event source too. The source's `connectionType` must be a type of its own plugin, and a type has at most one source.
+- `emit` returns nothing. A duplicate dedup key succeeds and writes nothing, so there is no event id to return.
+- `status()` is gone. The core sets a Connection's status from what `open` and `poll` return (section 8.1).
+- `credentials()` and `resources` are new. A plugin needs credentials to call its service, and `resources` lists the linked Resources again on each call, so a repo the user links later is in the next answer.
+- `poll` is required, and `close` is an `Effect` value, not a function. The core never runs two polls of one handle at the same time.
+
 Division of labour in one line: **core clock, plugin numbers.**
 
-- The core drives the lifecycle exactly as it does for channels: `open()` once per `connected` Connection of the type after `activate()`, `close()` on disable, deactivate, Connection removal or status change. The core owns the timers - one per (Connection, feed), fired at the per-Connection interval, paused during controller promotion, backed off on errors (section 8.1) - and reports health uniformly.
-- The plugin owns the cadence *numbers*: each feed declares its `defaultIntervalSeconds` (and optionally a `minIntervalSeconds` floor), and `poll()` may return `nextAfterSeconds` as a per-tick floor derived from what the wire said (`X-Poll-Interval`, `Retry-After`, quota math); the core never fires sooner. The user may override the interval per Connection, per feed, clamped to the plugin's floor.
-- **Push sources declare no feeds**: a source holding a persistent connection (a websocket, post-v1 webhook delivery) opens it inside `open()`, emits whenever the wire says so, reports `status()`, and never implements `poll`. The core restarts a dead handle with backoff. Poll and push are one contribution shape (ADR 0009's push-agnostic boundary); the Discord channel plugin's gateway socket already proves the always-on pattern in v1.
+- The core drives the lifecycle exactly as it does for channels: ~~`open()` once per `connected` Connection of the type after `activate()`, `close()` on disable, deactivate, Connection removal or status change~~ `open()` once per Connection of the type that is `connected` or `error` while the plugin is active, and `close()` once the Connection is deleted, disabled or `needs-reauth`, or the plugin stops. A change to the Connection's config or feed intervals closes the handle and opens a new one. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The core owns the timers - one per (Connection, feed), fired at the per-Connection interval, ~~paused during controller promotion,~~ backed off on errors (section 8.1) - and reports health uniformly. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89): promotion is not built, so there is nothing to pause for yet.)*
+- The plugin owns the cadence *numbers*: each feed declares its `defaultIntervalSeconds` (and optionally a `minIntervalSeconds` floor), and `poll()` may return `nextAfterSeconds` as a per-tick floor derived from what the wire said (`X-Poll-Interval`, `Retry-After`, quota math); the core never fires sooner. The user may override the interval per Connection, per feed, ~~clamped to the plugin's floor~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* in `feedIntervals` ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.1). An override below the feed's floor is refused, not clamped. The floor is `minIntervalSeconds`, or `defaultIntervalSeconds` when the feed declares no minimum.
+- **Push sources declare no feeds**: a source holding a persistent connection (a websocket, post-v1 webhook delivery) opens it inside `open()`, emits whenever the wire says so, ~~reports `status()`, and never implements `poll`. The core restarts a dead handle with backoff.~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* and is never polled. The core retries a failed `open()` with backoff. A handle has no way to report that its connection died after `open()`, so the core cannot restart it yet. Poll and push are one contribution shape (ADR 0009's push-agnostic boundary); the Discord channel plugin's gateway socket already proves the always-on pattern in v1.
 - **Kind names are prefixed** with the plugin id (`github.`), enforced at `register()`. Kinds and their payload schemas are catalog data, so ~~trigger filters and UI validate against them~~ the UI can show them, and old events still render, while the plugin is disabled. *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* A trigger cannot name a kind of a plugin that is disabled or did not start: its source ingests nothing, so the trigger could never match, and validation refuses it. A plugin may not declare a kind the core declares ([./08-events-and-connections.md](./08-events-and-connections.md) section 2), because a trigger names a kind by its name alone; the registration fails.
 - **Emit is the whole output**: the plugin supplies `kind`, `dedupKey`, `occurredAt`, `payload`, `refs` (canonicalized by this plugin: `github:issue:owner/repo#42`), `url`, `system` and `raw` per the envelope in [./08-events-and-connections.md](./08-events-and-connections.md); the host stamps `connectionId`. The core persists, deduplicates, matches and dispatches; a plugin never sees triggers, subscriptions or dispatch.
-- **Baseline at now**: a newly established connection emits no history.
+- **Baseline at now**: a newly established connection emits no history. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* As built, the first poll of each feed only records where the feed stands. The same happens after Reset plugin state (section 6), and for a GitHub repo that joins the watch list ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.1).
 
 ### 4.4 Workflow action
 
@@ -171,12 +187,13 @@ interface WorkflowActionContribution {
 }
 
 interface ActionContext {
-  connection?: { id: string; credentials: unknown; config: unknown }   // decoded; present iff declared
+  connection?: { id: string; credentials: Record<string, string>; config: unknown }   // present iff declared
   run: { runId: string; stepId: string }       // where this execution sits
-  api: PublicApiClient                         // stamped run:<runId>, stepId carried in the audit entry (ADR 0026)
   signal: AbortSignal                          // fires when the run is cancelled
 }
 ```
+
+*(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The block above is now the shape as shipped. `api` is not in it (see the bullets on #79 below), and `credentials` holds the Connection's credential fields by name.
 
 Rules at the boundary:
 
@@ -193,8 +210,8 @@ Rules at the boundary:
 
 - `input` is the step's `params`, with their templates rendered and then decoded against the action's input schema ([./07-workflows.md](./07-workflows.md) section 5). A decode failure fails the step with the code `validation`, and `execute` is not called.
 - `ctx` carries `run` (`{ runId, stepId }`) and `signal`, an `AbortSignal` that aborts when the run is cancelled.
-- `api` is not shipped, not even as a stub that fails. It joins with the first plugin action that needs it.
-- `connection` is never set yet. A run is refused at start while it has a step that calls a plugin action which declares a Connection ([./07-workflows.md](./07-workflows.md) section 7.1). The first plugin action that needs a Connection decides which param names it, and how the core checks and resolves it.
+- `api` is not shipped, not even as a stub that fails. ~~It joins with the first plugin action that needs it.~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* No GitHub action needs it, so it is left to a follow-up ticket.
+- ~~`connection` is never set yet. A run is refused at start while it has a step that calls a plugin action which declares a Connection ([./07-workflows.md](./07-workflows.md) section 7.1). The first plugin action that needs a Connection decides which param names it, and how the core checks and resolves it.~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* `connection` is set when the action declares a Connection: `{ id, credentials, config }`, with credentials read through the Connection type's runtime (OAuth refreshed) just before `execute`. The step names the Connection in its `connection` param, which never reaches `input` ([./07-workflows.md](./07-workflows.md) section 3). The step fails without calling `execute` when the Connection is missing (`not_found`), has another type (`validation`), or is disabled or its credentials cannot be read (`connection_unavailable`). A Connection in `error` or `needs-reauth` is passed on, and the action reports what its service answers.
 - The step record stores `{ code, message }` from an `ActionError`. Any other failure is stored as the code `unexpected`, and the controller's log holds the details. Either way the run fails with `step-failed`.
 - What `execute` returns is encoded with the action's `output` schema before it becomes the step's output. A value the schema refuses fails the step with the code `unexpected`, because later steps read the output and must not route on a value of the wrong shape.
 - `execute` is called after the step record is `running` and has committed, outside any transaction, because it reaches outside the database. A step record found `running` when the controller starts fails with the code `interrupted`: the action may or may not have taken effect, and runs never retry one ([./07-workflows.md](./07-workflows.md) section 7.2).
@@ -205,6 +222,8 @@ The v1 rosters (the words follow the entity-verb shape of the operation vocabula
 |---|---|
 | `github` | `github/issue.read`, `github/issue.comment`, `github/issue.update` (labels, assignees, state); `github/pr.read`, `github/pr.comment`, `github/pr.review` (approve / request-changes / comment), `github/pr.update` (labels, reviewers, draft/ready, base), `github/pr.merge` (method, delete-branch), `github/pr.create` (from an already-pushed branch) |
 | `gmail` | `gmail/message.read` (full body, parsed text + html), `gmail/thread.read`, `gmail/message.search` (Gmail query syntax, headers only), `gmail/message.send`, `gmail/message.reply` (in-thread), `gmail/message.modify` (add/remove labels: archive, mark read, star) |
+
+*(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The nine `github` actions are built. Each acts through a `github/github` Connection. `issue.update` and `pr.update` also change the title, body and open or closed state; `pr.merge` also takes the commit title and message and the expected head commit.
 
 ~~Anything git (clone, push, branch) is not an action: it happens in the run's workspace.~~ *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md): git is a built-in workspace action, below.)* Gmail bodies stay out of ingest and are fetched on demand through `gmail/message.read` / `gmail/thread.read` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2).
 
@@ -225,12 +244,12 @@ V1 plugin capabilities:
 |---|---|---|
 | `providers` | register | register a `ProviderDefinition` |
 | `channels` | register + activate | register a channel contribution (scope model included); at runtime deliver inbound messages and clicks, report connection status, and receive outbound send, activity and notification-delivery requests ([./12-assistants.md](./12-assistants.md) section 11.1) |
-| `event-sources` | register + activate | register an event-source contribution (kinds + schemas, per-connection config schema) |
+| `event-sources` | register + activate | register an event-source contribution (kinds + schemas, ~~per-connection config schema~~ feeds) *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The per-Connection config schema is the Connection type's (section 10) |
 | `workflow-actions` | register | register workflow actions |
 | `connections` | register + activate | declare the connection types the plugin services and their setup flow; at runtime list the plugin's own connections, read their decoded credentials and per-connection config, report connection status |
 | `events` | activate | emit events into the pipeline ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)) |
 | `notifications` | activate | emit a Notification, withdraw one of its own ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) |
-| `resources` | activate | read Resources (repos, mailboxes) relevant to the plugin's connection types, e.g. to seed a watch list |
+| `resources` | activate | read Resources (repos, mailboxes) relevant to the plugin's connection types, e.g. to ~~seed~~ build a watch list *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* As built, an ingest handle lists the Resources linked to its Connection through `ctx.resources` (section 4.3) |
 | `secrets` | activate | plugin-scoped secrets service (section 7) |
 | `kv` | activate | plugin-scoped state (section 6) |
 | `public-api` | activate | a client for the public API (below) |
@@ -239,7 +258,7 @@ Rules:
 
 - `channels` and `notifications` are the capability names pinned by the tickets; the remaining spellings are this spec's and MUST be used consistently. The `events` capability has one method, `emit`; "`events.emit`" in [./08-events-and-connections.md](./08-events-and-connections.md) names that method, not a separate capability. The *set* of services is pinned: contribution registration per extension point, events emit, notifications emit, connections, resources read, secrets, KV, public-API client.
 - A capability's registration surface is what `register()` receives; its runtime surface is what `activate()` receives. `register()` never sees a runtime surface.
-- *(Added 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **~~Three~~ Six of the eleven exist so far**: `providers`, `kv` and `secrets` ([#63](https://github.com/theagenticage/hercule/issues/63)), `connections` ([#71](https://github.com/theagenticage/hercule/issues/71)), `event-sources` ([#77](https://github.com/theagenticage/hercule/issues/77)) and `workflow-actions` ([#78](https://github.com/theagenticage/hercule/issues/78), registration only). *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the count was not updated when `connections` and `event-sources` shipped.)* All eleven names are valid in a manifest, so a manifest never has to be rewritten as the rest arrive, but a plugin requesting one that is not implemented is refused at load with that capability named, on the same footing as a `hostApi` mismatch (section 8). Nothing is granted silently and nothing is granted empty.
+- *(Added 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **~~Three~~ ~~Six~~ Eight of the eleven exist so far**: `providers`, `kv` and `secrets` ([#63](https://github.com/theagenticage/hercule/issues/63)), `connections` ([#71](https://github.com/theagenticage/hercule/issues/71)), `event-sources` ([#77](https://github.com/theagenticage/hercule/issues/77)), ~~and~~ `workflow-actions` ([#78](https://github.com/theagenticage/hercule/issues/78), registration only; executed since [#79](https://github.com/theagenticage/hercule/issues/79)), and `events` and `resources` ([#89](https://github.com/theagenticage/hercule/issues/89)). *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the count was not updated when `connections` and `event-sources` shipped.)* All eleven names are valid in a manifest, so a manifest never has to be rewritten as the rest arrive, but a plugin requesting one that is not implemented is refused at load with that capability named, on the same footing as a `hostApi` mismatch (section 8). Nothing is granted silently and nothing is granted empty.
 - Everything crossing a capability API is plain serializable data.
 - **Interfaces are Effect-typed natively** ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): every hook and capability method returns an `Effect` (typed failures; deactivation interrupts whatever `activate()` started) and anything stream-shaped is a `Stream`. V1 plugins are in-process built-ins, so there is no promise-shaped facade; one can be added post-v1 if third-party loading wants it.
 - **Schemas are authored in Effect Schema, persisted as JSON Schema.** Every schema crossing the host API (manifest `configSchema`, event payload kinds, action input/output, per-Connection config, credential fields) is written as an Effect Schema in plugin code; the catalog persists the JSON Schema Effect derives from it, which is what workflow validation and the web app's generated forms consume.
@@ -256,7 +275,7 @@ Plugin-originated mutations are stamped `plugin:<pluginId>` and are ungated: the
 - Every plugin gets a key-value store namespaced by plugin id, values as JSON, stored as rows in the one controller SQLite database ([ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md); [./04-state-store.md](./04-state-store.md)).
 - This is the only durable state a plugin has. Plugins keep nothing on disk: no files under Hercule Home, no caches outside the database. Consequences: plugin state is inside the Data Root, moves with promotion ([ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)), and is covered by the daily backup.
 - Typical contents: polling cursors per connection (GitHub `since` markers, Gmail `historyId`), last-seen markers, small caches. Secrets do not go in KV (section 7).
-- KV has two views over the same table. `activate()` receives the **plugin-scoped** store: global, connection-agnostic state (a repo metadata cache, a sender-rule override map). Ingest and channel handles additionally receive a **Connection-scoped** view (`ctx.state`), keys physically `<pluginId>/<connectionId>/...`: cursors and per-connection markers live there, so the core can wipe exactly that slice when the Connection is deleted or re-baselined, without knowing the plugin's key conventions.
+- KV has two views over the same table. `activate()` receives the **plugin-scoped** store: global, connection-agnostic state (a repo metadata cache, a sender-rule override map). Ingest and channel handles additionally receive a **Connection-scoped** view (`ctx.state`), ~~keys physically `<pluginId>/<connectionId>/...`~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* rows of their own `connection_state` table, keyed by Connection id and key ([./04-state-store.md](./04-state-store.md)): cursors and per-connection markers live there, so the core can wipe exactly that slice when the Connection is deleted or re-baselined, without knowing the plugin's key conventions.
 
 KV is **retained on disable**: disable is a toggle, and re-enabling resumes cursors. It is wiped only by an explicit **Reset plugin state** in Settings > Plugins (which also re-baselines every Connection of the plugin) or, per slice, by deleting a Connection.
 
@@ -277,7 +296,7 @@ Three levels of configuration exist and MUST not be confused:
 | Level | Schema from | Stored | Example |
 |---|---|---|---|
 | Plugin config | manifest `configSchema` | controller state, one per plugin | Gmail plugin: BYO OAuth client id (or per-Connection; Open in section 7) |
-| Per-connection config | event-source contribution's per-connection schema | controller state, one per Connection | GitHub: watched-repo list for this account |
+| Per-connection config | ~~event-source contribution's per-connection schema~~ the Connection type's `configSchema` *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* | controller state, one per Connection | GitHub: ~~watched-repo list for this account~~ extra repositories to watch, and how many days of check results to watch *(amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89))* |
 | Provider-instance config | `ProviderDefinition.configSchema` | one per provider instance; logical settings on the controller, path resolution per [./06-providers.md](./06-providers.md) section 2.1 and its Conflict line | Claude Code instance: isolated provider home |
 
 Lifecycle rules:
@@ -293,13 +312,23 @@ Failure handling:
 - **`activate()` throws**: the plugin enters an **`errored`** state (beside enabled, disabled and the `hostApi` mismatch) with the error shown in Settings > Plugins, and one `core.plugin-error` Notification is emitted. There is no automatic retry loop - a broken plugin retrying every 30 seconds is noise; it is retried at the next controller boot or by the user's Retry button. Transient per-Connection trouble is the ingest loop's business (section 8.1), not this state's.
 - **Deactivate fails**: logged, the plugin is marked `errored`, its contributions are treated as disabled, and Settings says a controller restart clears the leftover machinery.
 
-*(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **Retry and Reset plugin state are operations**, not screen-local behaviour: `plugin.retry` and `plugin.resetState` in the catalogue ([./11](./11-public-api-and-agent-surface.md) section 2), under `infra.write` like the other plugin writes. Retry re-runs `activate()` once and is refused with `validation` on a plugin that is not `errored`, so the button is never a second spelling of Enable. Reset is deactivate, wipe the plugin's KV rows, activate again when the plugin is enabled; it is allowed while `inactive` and while `errored` too, since leftover state is one of the things an errored plugin may be stuck on. Both are reachable from every client, not only from Settings, which is what makes them recoverable when the screen is what is broken.
+*(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **Retry and Reset plugin state are operations**, not screen-local behaviour: `plugin.retry` and `plugin.resetState` in the catalogue ([./11](./11-public-api-and-agent-surface.md) section 2), under `infra.write` like the other plugin writes. Retry re-runs `activate()` once and is refused with `validation` on a plugin that is not `errored`, so the button is never a second spelling of Enable. Reset is deactivate, wipe the plugin's KV rows and the `connection_state` rows of its Connections *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)*, activate again when the plugin is enabled; it is allowed while `inactive` and while `errored` too, since leftover state is one of the things an errored plugin may be stuck on. Both are reachable from every client, not only from Settings, which is what makes them recoverable when the screen is what is broken.
 
 *(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* Two states join the `hostApi` mismatch as **load-time refusals**, on the same footing: a manifest naming a capability the host has not implemented yet, and a `configSchema` the generated form cannot render. A refused plugin is listed with its reason, `register()` is never run for it, it contributes nothing, and every write on it is refused with `validation`. Nothing is substituted silently. Until a notifications domain exists, the `core.plugin-error` Notification above is an audit row (`plugin.errored`, carrying the plugin id, the phase and the message); the notifications ticket routes from it.
 
 ### 8.1 Ingest-loop failures
 
 `open()` or `poll()` throwing is the common failure (network blip, rate limit). The core retries with exponential backoff (base = the feed's interval, cap 15 minutes); after 5 consecutive failures the Connection goes `error` with one Notification. A success resets the counter and recovers `connected` without user action. A plugin throws a typed `AuthError` to send the Connection straight to `needs-reauth`, no retries.
+
+*(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The rules as built:
+
+- Failures are counted per feed, and separately for `open()`. A defect counts as a failure and is logged.
+- The wait after the n-th failure in a row is the interval times 2^n, capped at 15 minutes, or at the interval when that is longer. A failed `open()` backs off from the shortest feed interval, or from 60 seconds for a source with no feeds.
+- At the 5th failure in a row, a `connected` Connection goes `error`, with the plugin's message as its status detail, and the core raises one `core.connection-error` Notification ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.2). The Notification leaves out the plugin's message, because agents read Notifications and the message may hold a credential; the Connection's card shows it.
+- A successful poll resets that feed's count. Once no count is at 5, an `error` Connection goes back to `connected`.
+- An `AuthError` sends a `connected` or `error` Connection to `needs-reauth` with the error's message as detail, and closes the handle. No Notification is raised for it.
+- A rate limit is not a failure: the plugin returns `nextAfterSeconds`, and the core waits that long when it is longer than the interval.
+- A status change never overwrites `disabled`.
 
 ## 9. Versioning
 
@@ -315,7 +344,7 @@ Connections are core-owned; plugins define types and drive setup. The full Conne
 - A plugin **declares the connection types it services** through the `connections` capability. The plugin declares a bare word; the host mints the qualified id `<pluginId>/<word>` and that is the type everywhere downstream, so two plugins may declare the same word and both load ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). Two plugins wanting the same external service each define their own type and the user authenticates twice. Deduping on OAuth identity is post-v1.
 - The plugin **drives the flow that establishes a connection**: paste-a-token (GitHub PAT, Slack and Discord bot tokens), ~~or~~ a BYO-OAuth-client redirect flow to the controller's own origin (Google), or a device flow through an OAuth App whose public client id the plugin ships (GitHub) *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*. A type may offer more than one, and the user picks one per connection (section 10.1). Policy is pinned in [./13-security.md](./13-security.md): BYO OAuth client where the provider demands ~~one~~ a client secret, no Hercule-hosted relay, no shipped client secret, paste-a-token as the universal fallback. The controller displays the exact redirect URI derived from the origin the user's browser is using.
 - The **core owns** storage, listing, status, the single connected-accounts UI, and the credential secrets. The plugin reads a connection's decoded credentials and per-connection config through the `connections` capability and reports status (for example "token expiring") back through it.
-- **Ingest is per connection**: one loop per enabled connection, every event stamped with its `connectionId`. Triggers select connections explicitly; outbound actions name their connection.
+- **Ingest is per connection**: one ~~loop per enabled connection~~ handle per Connection that is `connected` or `error` *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)*, every event stamped with its `connectionId`. Triggers select connections explicitly; outbound actions name their connection.
 - A Resource may reference the Connection used to reach it; the `resources` capability exposes that link to the plugin.
 
 ### 10.1 The setup-flow contribution
@@ -399,7 +428,7 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 
 | Plugin | Contributions | Connection types | Notes |
 |---|---|---|---|
-| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (~~PAT paste; BYO OAuth app + device flow optional~~ device flow through Hercule's own OAuth App, PAT paste as the fallback *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*) | per-connection watch list seeded from repo Resources; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)) |
+| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (~~PAT paste; BYO OAuth app + device flow optional~~ device flow through Hercule's own OAuth App, PAT paste as the fallback *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*) | per-connection watch list ~~seeded from repo Resources~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* made of the linked repo Resources and the repos in the Connection's config, read on every poll; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)) |
 | `gmail` | event source (`history.list` polling: headers, subject, snippet, ids); workflow actions (body fetch on demand) | `gmail/gmail` (BYO Google OAuth client, redirect flow) | emits `system` enrichment where a sender rule recognises the originating system |
 | `discord` | channel (+ notification sink) | `discord/discord` (bot token paste) | conversation container = channel or DM |
 | `slack` | channel (+ notification sink) | `slack/slack` (bot token paste) | conversation container = thread |
