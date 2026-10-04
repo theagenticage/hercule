@@ -346,7 +346,10 @@ export const describeRunStatus = (run: TimedRun, now: number): string => {
  * "iteration limit" for an edge the run was to follow more often than its
  * `maxTraversals` allows, "controller error" for a run the controller
  * could not carry out, or "workspace failed" for a run whose workspace could
- * not be set up or was lost with its runner.
+ * not be set up or was lost with its runner. For an agent step it returns
+ * "schema failure" for a turn that ended without a value matching the step's
+ * output schema, and "session failed" for a turn or session that failed
+ * before the turn ended.
  */
 export const describeFailureReason = (reason: FailureReason): string => {
   switch (reason) {
@@ -362,6 +365,10 @@ export const describeFailureReason = (reason: FailureReason): string => {
       return "controller error";
     case "workspace-failed":
       return "workspace failed";
+    case "schema-failure":
+      return "schema failure";
+    case "session-failed":
+      return "session failed";
   }
 };
 

@@ -674,6 +674,7 @@ const make = Effect.gen(function* () {
           agentId,
           permissionProfileId,
           conversationId,
+          runId,
           thread,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         // A Thread is a session with no Agent behind it. `agentId` filters for
@@ -704,6 +705,7 @@ const make = Effect.gen(function* () {
             agentId,
             permissionProfileId,
             conversationId,
+            runId,
             thread,
           }),
         );

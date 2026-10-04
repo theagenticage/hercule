@@ -118,6 +118,7 @@ const RUNNING_RUN: Run = {
   plan: PLAN,
   inputs: { title: "Fix login" },
   origin: { kind: "manual", actor: "user" },
+  subscriptions: [],
   status: "running",
   steps: [
     CREATE_DONE,
@@ -1110,6 +1111,7 @@ describe("A run's page > a run a trigger started", () => {
     plan: PLAN,
     inputs: {},
     origin: { kind: "trigger", triggerId: "on_issue", eventId: 43 },
+    subscriptions: [],
     status: "failed",
     failureReason: "validation-error",
     failureMessage: "The input title is required, and the trigger's mapping gave it no value.",

@@ -190,6 +190,8 @@ const NEW_SESSION: Session = {
   permissionProfileId: PROFILE_UNRESTRICTED.id,
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: INSTANCE_A.id,
   runnerId: RUNNER.id,
   workspaceId: null,

@@ -60,6 +60,7 @@ const STARTED_RUN: Run = {
   },
   inputs: {},
   origin: { kind: "manual", actor: "user" },
+  subscriptions: [],
   status: "pending",
   steps: [{ stepId: "sweep", iteration: 1, status: "pending" }],
   edgeTraversals: [],

@@ -337,6 +337,7 @@ describe("listing the sessions on one profile", () => {
           agentId: undefined,
           permissionProfileId: profileId,
           thread: undefined,
+          runId: undefined,
           conversationId: undefined,
         });
         return { listed: page.items, profileId, live };

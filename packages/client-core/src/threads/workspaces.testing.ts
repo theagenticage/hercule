@@ -103,6 +103,8 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   permissionProfileId: "p-unrestricted",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: "i-claude",
   runnerId: SLOTS.moss,
   workspaceId: null,

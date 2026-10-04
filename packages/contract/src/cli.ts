@@ -1039,7 +1039,7 @@ export const CLI = {
 
   "subscription.query": {
     command: "subscription list",
-    help: "Lists what a session is waiting on. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own. Only live subscriptions are listed; a cancelled one no longer appears.",
+    help: "Lists what a session or a run is waiting on. A run waits on the events its signal triggers fire on. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own. Only live subscriptions are listed; a cancelled one no longer appears.",
     examples: [
       { args: [] },
       { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
@@ -1047,7 +1047,7 @@ export const CLI = {
     fields: {
       holder: {
         flag: "holder",
-        help: "Whose subscriptions to list, written session:<session id> with the full id. Without it, a session token lists its own; a user credential must give one.",
+        help: "Whose subscriptions to list, written session:<session id> or run:<run id> with the full id. Without it, a session token lists its own; a user credential must give one.",
       },
     },
   },
@@ -2442,6 +2442,11 @@ export const CLI = {
         flag: "conversation",
         help: "Only the sessions of this conversation, by its id or a tail of eight or more characters; find it with `hercule conversation list`.",
         resolves: "conversation.query",
+      },
+      runId: {
+        flag: "run",
+        help: "Only the sessions this run's agent steps started, by the run's id or a tail of eight or more characters; find it with `hercule run list`.",
+        resolves: "run.query",
       },
       permissionProfileId: {
         flag: "profile",

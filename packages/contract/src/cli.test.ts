@@ -339,6 +339,7 @@ const RESOLVES: Record<string, string> = {
   "session.query agentId": "agent.query",
   "session.query conversationId": "conversation.query",
   "session.query permissionProfileId": "profile.query",
+  "session.query runId": "run.query",
   "session.query runnerId": "runner.query",
   "session.spawn agentId": "agent.query",
   "session.spawn instanceId": "provider.query",

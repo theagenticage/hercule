@@ -374,6 +374,7 @@ export {
 } from "./groups/event";
 export {
   SUBSCRIPTION_SORT_FIELDS,
+  SignalTriggerTarget,
   Subscription,
   SubscriptionCreateInput,
   SubscriptionCreated,

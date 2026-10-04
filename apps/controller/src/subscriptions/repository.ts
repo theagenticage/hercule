@@ -95,7 +95,7 @@ const COLUMNS =
 
 const toSubscription = (row: SubscriptionRow): StoredSubscription => ({
   id: uuidToString(row.id),
-  holder: { kind: row.holder_kind as "session", id: uuidToString(row.holder_id) },
+  holder: { kind: row.holder_kind as SubscriptionHolder["kind"], id: uuidToString(row.holder_id) },
   target: JSON.parse(row.target) as SubscriptionTarget,
   condition: row.condition,
   healthErrorMessage: row.health_error_message,

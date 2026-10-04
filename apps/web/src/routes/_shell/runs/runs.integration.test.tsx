@@ -210,6 +210,7 @@ const buildStartedRun = (workflow: Workflow, name: string): Run => ({
   },
   inputs: {},
   origin: { kind: "manual", actor: "user" },
+  subscriptions: [],
   status: "pending",
   steps: [{ stepId: "create", iteration: 1, status: "pending" }],
   edgeTraversals: [],

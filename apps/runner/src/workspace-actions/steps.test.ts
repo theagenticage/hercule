@@ -13,6 +13,7 @@ import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type {
+  ActionStepStart,
   WorkspaceStepKey,
   WorkspaceStepOutcome,
   WorkspaceStepResult,
@@ -176,10 +177,11 @@ const makeRunner = (
 
 const buildStart = (
   workspace: Workspace,
-  input: WorkspaceStepStart["input"],
+  input: ActionStepStart["input"],
   action = "git.commit",
-): WorkspaceStepStart => ({
+): ActionStepStart => ({
   _tag: "workspaceStepStart",
+  kind: "action",
   runId: createId(),
   stepId: "commit",
   iteration: 1,
@@ -601,6 +603,24 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
 
     expect(outcome).toMatchObject({ status: "failed", code: "unsupported_action" });
     expect(outcome.status === "failed" && outcome.message).toContain("git.teleport");
+  });
+
+  it("answers an agent step with session_failed, because this build does not run agent steps", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+
+    const outcome = await runStep(runner, {
+      _tag: "workspaceStepStart",
+      kind: "agent",
+      runId: createId(),
+      stepId: "review",
+      iteration: 1,
+      sessionId: createId(),
+      workspaceId: workspace.workspaceId,
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", code: "session_failed" });
+    expect(runner.steps.listInFlight()).toEqual([]);
   });
 
   it("fails with action_failed when the checkout's git fails", async () => {

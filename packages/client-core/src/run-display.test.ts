@@ -229,6 +229,9 @@ describe("describeFailureReason", () => {
     assert.strictEqual(describeFailureReason("expression-error"), "expression error");
     assert.strictEqual(describeFailureReason("controller-error"), "controller error");
     assert.strictEqual(describeFailureReason("iteration-limit"), "iteration limit");
+    assert.strictEqual(describeFailureReason("workspace-failed"), "workspace failed");
+    assert.strictEqual(describeFailureReason("schema-failure"), "schema failure");
+    assert.strictEqual(describeFailureReason("session-failed"), "session failed");
   });
 
   it("does not call an expression error a template error, because a condition fails with it too", () => {
@@ -256,6 +259,7 @@ describe("findFailedEdge", () => {
     },
     inputs: {},
     origin: { kind: "manual", actor: "user" },
+    subscriptions: [],
     steps: [],
     edgeTraversals: [4, 3, 0],
     createdAt: START,
@@ -351,6 +355,7 @@ describe("describeRunnerWait", () => {
     },
     inputs: {},
     origin: { kind: "manual", actor: "user" },
+    subscriptions: [],
     steps: [
       { stepId: "commit", iteration: 1, status: "running", startedAt: START },
       { stepId: "note", iteration: 1, status: "running", startedAt: START },

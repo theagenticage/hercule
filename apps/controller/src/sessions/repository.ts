@@ -71,6 +71,10 @@ export interface StoredSession {
   readonly agentId: string | null;
   /** The assistant's conversation the session answers; `null` for any other session. */
   readonly conversationId: string | null;
+  /** The run whose agent step started the session; `null` for any other session. */
+  readonly runId: string | null;
+  /** The agent step's id in the run's plan; `null` when `runId` is. */
+  readonly stepId: string | null;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -175,6 +179,8 @@ export interface SessionPageRequest {
   readonly permissionProfileId: string | undefined;
   /** Only the sessions of this conversation. */
   readonly conversationId: string | undefined;
+  /** Only the sessions this run's agent steps started. */
+  readonly runId: string | undefined;
   /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
 }
@@ -185,6 +191,8 @@ interface SessionRow {
   readonly permission_profile_id: Uint8Array;
   readonly agent_id: Uint8Array | null;
   readonly conversation_id: Uint8Array | null;
+  readonly run_id: Uint8Array | null;
+  readonly step_id: string | null;
   readonly provider_id: string | null;
   /** The spec's disallowed tool families as a JSON array, or null for none. */
   readonly disallowed_tools: string | null;
@@ -218,7 +226,8 @@ interface SessionRow {
  * that depends only on which domain was imported first.
  */
 const buildColumnList = (): string =>
-  "id, title, permission_profile_id, agent_id, conversation_id, instance_id, runner_id, workspace_id, project_id, " +
+  "id, title, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
+  "workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
   // Both are read to compute `unenforced`: the provider behind the instance,
   // and the tool families this session's spec disallowed.
@@ -239,6 +248,8 @@ const toSession = (row: SessionRow): StoredSession => ({
   permissionProfileId: uuidToString(row.permission_profile_id),
   agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
   conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
+  runId: row.run_id === null ? null : uuidToString(row.run_id),
+  stepId: row.step_id,
   instanceId: uuidToString(row.instance_id),
   runnerId: uuidToString(row.runner_id),
   workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
@@ -517,6 +528,9 @@ const make = Effect.gen(function* () {
         }
         if (request.conversationId !== undefined) {
           clauses.push(sql`conversation_id = ${uuidFromString(request.conversationId)}`);
+        }
+        if (request.runId !== undefined) {
+          clauses.push(sql`run_id = ${uuidFromString(request.runId)}`);
         }
         if (request.thread !== undefined) {
           clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);

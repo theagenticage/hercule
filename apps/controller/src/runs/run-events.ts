@@ -78,6 +78,8 @@ const FAILURE_SENTENCES: Record<FailureReason, string> = {
   "iteration-limit": "An edge was followed as often as its limit allows.",
   "controller-error": "The controller could not carry out the run. Its log has the details.",
   "workspace-failed": "The run's workspace could not be set up.",
+  "schema-failure": "An agent step's turn ended without a value that matches its output schema.",
+  "session-failed": "An agent step's session failed before its turn ended.",
 };
 
 /** The outcome of a run that failed. */

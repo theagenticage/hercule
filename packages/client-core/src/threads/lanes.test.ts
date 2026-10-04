@@ -16,6 +16,8 @@ const BASE: Session = {
   permissionProfileId: "profile-unrestricted",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: "instance-claude-code",
   runnerId: "runner-1",
   workspaceId: null,

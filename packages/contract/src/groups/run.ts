@@ -45,6 +45,7 @@ import { Actor, Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { Event, EventId } from "./event";
+import { Subscription } from "./subscription";
 import { WORKFLOW_CONTENT_FIELDS } from "./workflow";
 import { WorkflowDefinition } from "./workflow-definition";
 
@@ -93,6 +94,14 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  *   because a setup command failed, the runner that holds it was retired, or
  *   no runner can run the workspace steps of a run a start trigger started.
  *   `failedStepId` names the workspace step that was running, if one was.
+ * - `schema-failure`: an agent step declares an output schema, and its turn
+ *   ended without a value that matches it: the harness gave up after its
+ *   retries, or the turn ended without a structured result. `failedStepId`
+ *   names the step, and its step record holds the error.
+ * - `session-failed`: an agent step's session ended its turn abnormally: the
+ *   turn failed or was interrupted, or the session exited, crashed, timed out
+ *   or was stopped while the turn ran. `failedStepId` names the step, and its
+ *   step record's error says what happened to the session.
  *
  * The list grows as runs learn to do more; a client shows a reason it does not
  * know as the word itself.
@@ -104,6 +113,8 @@ const FAILURE_REASONS = [
   "iteration-limit",
   "controller-error",
   "workspace-failed",
+  "schema-failure",
+  "session-failed",
 ] as const;
 
 export const FailureReason = Schema.Literals(FAILURE_REASONS);
@@ -175,6 +186,12 @@ const STEP_RECORD_FIELDS = {
    * the step starts, and for an agent step.
    */
   input: Schema.optionalKey(Schema.Json),
+  /**
+   * The session an agent step's record drives. Set when the record starts,
+   * and absent for every other step. Records of one step share a session
+   * unless the step asks for a fresh session per iteration.
+   */
+  sessionId: Schema.optionalKey(Id),
 };
 
 /**
@@ -230,8 +247,9 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  * - `running`: `startedAt`.
  * - `completed`: `startedAt` and `finishedAt`, and the fields only a
  *   completed run has (`output`), which `completedFields` holds.
- * - `failed` at a step (`expression-error`, `step-failed` or
- *   `iteration-limit`): `failedStepId`, `startedAt` and `finishedAt`, and
+ * - `failed` at a step (`expression-error`, `step-failed`,
+ *   `iteration-limit`, `schema-failure` or `session-failed`): `failedStepId`,
+ *   `startedAt` and `finishedAt`, and
  *   the fields only a run failed at a step has (`failedEdge`), which
  *   `failedAtStepFields` holds.
  * - `failed` with `validation-error`: `finishedAt` and `failureMessage`. The
@@ -267,7 +285,13 @@ const buildRunStatusVariants = <
       ...fields,
       ...failedAtStepFields,
       status: Schema.Literal("failed"),
-      failureReason: Schema.Literals(["expression-error", "step-failed", "iteration-limit"]),
+      failureReason: Schema.Literals([
+        "expression-error",
+        "step-failed",
+        "iteration-limit",
+        "schema-failure",
+        "session-failed",
+      ]),
       failedStepId: Schema.String,
       startedAt: Timestamp,
       finishedAt: Timestamp,
@@ -333,6 +357,13 @@ export const Run = Schema.Union(
       edgeTraversals: Schema.Array(Schema.Int),
       /** The run this run re-runs, when `run.rerun` started it. */
       originalRunId: Schema.optionalKey(Id),
+      /**
+       * The run's live subscriptions: one for each signal trigger of its plan,
+       * held by the run from the moment it is written until it ends. Empty
+       * for a run whose plan has no signal trigger, and for a run that has
+       * ended.
+       */
+      subscriptions: Schema.Array(Subscription),
       createdAt: Timestamp,
     },
     {

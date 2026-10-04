@@ -61,6 +61,8 @@ const BASE_SESSION: Session = {
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: CLAUDE_ID,
   runnerId: "01a06d02-beff-7037-9f5b-042822015952",
   workspaceId: null,

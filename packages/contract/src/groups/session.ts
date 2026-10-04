@@ -94,6 +94,13 @@ export const Session = Schema.Struct({
    * session. Kept after the conversation is deleted, as a record of origin.
    */
   conversationId: Schema.NullOr(Id),
+  /**
+   * The run whose agent step started this session; `null` for any other
+   * session. Kept after the run ends, as a record of origin.
+   */
+  runId: Schema.NullOr(Id),
+  /** The id, in that run's plan, of the agent step this session runs; `null` when `runId` is. */
+  stepId: Schema.NullOr(Schema.String),
   instanceId: Id,
   /** The runner the session started on. A session never moves to another runner. */
   runnerId: Id,
@@ -361,6 +368,8 @@ export const SessionFilter = Schema.Struct({
   permissionProfileId: Schema.optionalKey(Id),
   /** Only the sessions of this conversation. */
   conversationId: Schema.optionalKey(Id),
+  /** Only the sessions this run's agent steps started. */
+  runId: Schema.optionalKey(Id),
   /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
 });

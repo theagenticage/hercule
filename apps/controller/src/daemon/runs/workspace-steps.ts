@@ -39,6 +39,7 @@ const make = Effect.gen(function* () {
       const gitIdentity = yield* workspaces.readCommitAuthor(step.workspaceId);
       return {
         _tag: "workspaceStepStart",
+        kind: "action",
         runId: step.runId,
         stepId: step.stepId,
         iteration: step.iteration,

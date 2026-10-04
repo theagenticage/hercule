@@ -41,6 +41,7 @@ const RUN_FIELDS = {
   workflowId: null,
   inputs: {},
   origin: { kind: "manual", actor: "user" },
+  subscriptions: [],
   createdAt: START,
 } as const;
 
@@ -503,6 +504,7 @@ describe("buildTimeline", () => {
     plan: PLAN,
     inputs: {},
     origin: { kind: "manual", actor: "user" },
+    subscriptions: [],
     steps: STEPS,
     // `create` went to `label` and to `query`; `query` has not run yet.
     edgeTraversals: [1, 1, 0],

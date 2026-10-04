@@ -16,6 +16,7 @@ import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import {
+  type ActionStepStart,
   MAX_MESSAGE_LENGTH,
   type WorkspaceStepKey,
   type WorkspaceStepOutcome,
@@ -67,7 +68,10 @@ export interface WorkspaceSteps {
    * - any other step is queued behind the steps of its workspace and run.
    *
    * An action this runner does not implement is answered at once with
-   * `unsupported_action`.
+   * `unsupported_action`. An agent step is answered at once with
+   * `session_failed`, because this runner build does not run agent steps
+   * yet; it does not list the agent steps capability, so a controller never
+   * sends one.
    */
   readonly start: (frame: WorkspaceStepStart) => Effect.Effect<void>;
   /**
@@ -187,7 +191,7 @@ export const makeWorkspaceSteps = (options: {
    * a message that hides that error.
    */
   const runAction = (
-    frame: WorkspaceStepStart,
+    frame: ActionStepStart,
     action: WorkspaceAction,
   ): Effect.Effect<WorkspaceStepOutcome | undefined> =>
     Effect.gen(function* () {
@@ -276,7 +280,7 @@ export const makeWorkspaceSteps = (options: {
    * interrupts it.
    */
   const runStep = (
-    frame: WorkspaceStepStart,
+    frame: ActionStepStart,
     action: WorkspaceAction,
     step: HeldStep,
   ): Effect.Effect<void> =>
@@ -336,6 +340,16 @@ export const makeWorkspaceSteps = (options: {
     start: (frame) =>
       Effect.gen(function* () {
         const key = readKey(frame);
+        if (frame.kind === "agent") {
+          return yield* send(
+            buildResultFrame(key, {
+              status: "failed",
+              code: "session_failed",
+              message:
+                "This runner cannot run agent steps, because its build does not implement them. Update the runner to the controller's version.",
+            }),
+          );
+        }
         const name = buildStepName(key);
         if (settled.has(name) || held.has(name)) return;
         const recorded = readStepResult(storageDir, frame.workspaceId, key);

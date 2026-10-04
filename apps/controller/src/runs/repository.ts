@@ -200,6 +200,7 @@ interface StepRow {
   readonly iteration: number;
   readonly status: StepStatus;
   readonly input: string | null;
+  readonly session_id: Uint8Array | null;
   readonly output: string | null;
   readonly error: string | null;
   readonly started_at: string | null;
@@ -236,6 +237,7 @@ const parseStepRow = (row: StepRow): StepRecord => {
     stepId: row.step_id,
     iteration: row.iteration,
     ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
+    ...(row.session_id === null ? {} : { sessionId: uuidToString(row.session_id) }),
   };
   const startedAt = () => requireColumn(row.started_at, "run_steps", "started_at");
   const finishedAt = () => requireColumn(row.finished_at, "run_steps", "finished_at");
@@ -393,6 +395,8 @@ const parseRunRow = (
     ...(row.workspace_id === null ? {} : { workspaceId: uuidToString(row.workspace_id) }),
     steps: steps.map(parseStepRow),
     edgeTraversals,
+    // Nothing opens a run-held subscription yet: signal triggers do not run.
+    subscriptions: [],
     ...(row.original_run_id === null ? {} : { originalRunId: uuidToString(row.original_run_id) }),
     ...(row.trigger_event === null
       ? {}
@@ -469,7 +473,8 @@ const make = Effect.gen(function* () {
           const row = rows[0];
           if (row === undefined) return Option.none();
           const steps = yield* sql<StepRow>`
-            SELECT step_id, iteration, status, input, output, error, started_at, finished_at
+            SELECT step_id, iteration, status, input, session_id, output, error, started_at,
+                   finished_at
             FROM run_steps WHERE run_id = ${bytes} ORDER BY rowid
           `;
           const traversals = yield* sql<TraversalRow>`

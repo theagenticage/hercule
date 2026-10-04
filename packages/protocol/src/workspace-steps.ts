@@ -1,6 +1,8 @@
 /**
- * Workspace steps on the wire: a step of a run whose action runs in the run's
- * workspace on a runner, such as `git.commit`, rather than on the controller.
+ * Workspace steps on the wire: a step of a run that runs on the run's runner
+ * rather than on the controller. That is an action step whose action runs in
+ * the run's workspace, such as `git.commit`, or an agent step, whose turn runs
+ * in a session on that runner.
  *
  * Every frame names its step by the step key: the run, the step's id in the
  * run's plan, and the iteration of that step. The key makes every delivery
@@ -11,7 +13,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, StorageId } from "./primitives";
+import { Fact, SessionId, StorageId, WorkspaceStepKey } from "./primitives";
 import { GitIdentity, MAX_MESSAGE_LENGTH } from "./sessions";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
@@ -35,25 +37,28 @@ export const MAX_WORKSPACE_STEPS = 256;
 export const buildWorkspaceActionCapability = (actionId: string): string => `action:${actionId}`;
 
 /**
- * Identifies one step record of a run. The run id and the step id are storage
- * ids because the runner names the step's result file after them, so neither
- * may escape the directory that file goes in.
+ * The capability for agent steps. A runner lists it at hello when it runs an
+ * agent step's turn and answers `AgentStepStart`, and the controller when it
+ * sends them. A runner on an older build closes the socket on a frame it
+ * cannot read, and ignores the `step` field of a `TurnInput`, so the
+ * controller places a run with an agent step only on a runner whose hello
+ * lists this.
  */
-export const WorkspaceStepKey = Schema.Struct({
-  runId: StorageId,
-  stepId: StorageId,
-  iteration: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-});
-
-export type WorkspaceStepKey = Schema.Schema.Type<typeof WorkspaceStepKey>;
+export const AGENT_STEPS_CAPABILITY = "agentSteps";
 
 /**
- * Starts one workspace step. It carries everything the runner needs to run
- * the action, because the runner holds no Hercule state and cannot look any of
- * it up.
+ * Starts one workspace action step. It carries everything the runner needs to
+ * run the action, because the runner holds no Hercule state and cannot look
+ * any of it up.
  */
-export const WorkspaceStepStart = Schema.Struct({
+export const ActionStepStart = Schema.Struct({
   _tag: Schema.Literal("workspaceStepStart"),
+  /**
+   * Always written by the controller. Optional only so a runner still reads
+   * the frame from a controller built before agent steps, which sent no
+   * `kind`.
+   */
+  kind: Schema.optionalKey(Schema.Literal("action")),
   ...WorkspaceStepKey.fields,
   /** The run's workspace, which the runner already holds. */
   workspaceId: StorageId,
@@ -85,6 +90,43 @@ export const WorkspaceStepStart = Schema.Struct({
   gitIdentity: Schema.optionalKey(GitIdentity),
 });
 
+export type ActionStepStart = Schema.Schema.Type<typeof ActionStepStart>;
+
+/**
+ * Asks for the result of one agent step: the turn its session runs for this
+ * step key. The controller sends the turn's prompt as the session's input,
+ * not in this frame. This frame only asks how the turn ended, and it is sent
+ * again whenever the controller cannot know whether the runner still owes
+ * the answer, for example after either side restarts. The runner answers:
+ *
+ * - from the step's result file, when the turn has ended;
+ * - when the turn ends, when it is still running;
+ * - at once with a failed `interrupted` outcome otherwise, because the turn
+ *   was lost when the runner restarted.
+ */
+export const AgentStepStart = Schema.Struct({
+  _tag: Schema.Literal("workspaceStepStart"),
+  kind: Schema.Literal("agent"),
+  ...WorkspaceStepKey.fields,
+  /** The session the step's turn runs in. */
+  sessionId: SessionId,
+  /**
+   * The run's workspace, which names the directory the step's result file is
+   * kept in. `null` for a run with no workspace.
+   */
+  workspaceId: Schema.NullOr(StorageId),
+});
+
+export type AgentStepStart = Schema.Schema.Type<typeof AgentStepStart>;
+
+/**
+ * Starts one workspace step, or asks for its result: a workspace action step
+ * runs on the runner, and an agent step's turn runs in a session there. Both
+ * kinds share the step key, so a runner answers both with
+ * `WorkspaceStepResult` and keeps both results in the same place.
+ */
+export const WorkspaceStepStart = Schema.Union([ActionStepStart, AgentStepStart]);
+
 export type WorkspaceStepStart = Schema.Schema.Type<typeof WorkspaceStepStart>;
 
 /**
@@ -113,13 +155,22 @@ export type WorkspaceStepSettle = Schema.Schema.Type<typeof WorkspaceStepSettle>
  *   rejected;
  * - `timeout`: the action ran past its deadline and was stopped;
  * - `unsupported_action`: this runner build does not implement the action;
- * - `interrupted`: the step was stopped before it finished.
+ * - `interrupted`: the step was stopped before it finished. For an agent
+ *   step, the runner restarted while the step's turn ran, so the turn was
+ *   lost;
+ * - `schema_failure`: an agent step's turn ended without a value that matches
+ *   the step's output schema;
+ * - `session_failed`: an agent step's turn failed or was interrupted, or its
+ *   session exited, crashed, timed out or was stopped while the turn ran. The
+ *   message names which.
  */
 export const WorkspaceStepFailureCode = Schema.Literals([
   "action_failed",
   "timeout",
   "unsupported_action",
   "interrupted",
+  "schema_failure",
+  "session_failed",
 ]);
 
 export type WorkspaceStepFailureCode = Schema.Schema.Type<typeof WorkspaceStepFailureCode>;
