@@ -8,6 +8,7 @@
 import { Effect, Schema } from "effect";
 import { ConnectionValidationFailed, type ConnectionTypeContribution } from "@hercule/plugin-host";
 import { readToken, requestGithub } from "./api";
+import { RepoName } from "./repo-name";
 
 /**
  * The client id of Hercule's OAuth App on GitHub. A client id is public: the
@@ -27,16 +28,6 @@ const SCOPES = ["repo", "read:org", "notifications", "workflow"];
  * Connection does not set its own window (spec 08 section 5.1).
  */
 export const DEFAULT_CHECKS_WINDOW_DAYS = 7;
-
-/**
- * A repository as `owner/repo`. Owner names allow letters, digits and
- * hyphens; repository names also allow dots and underscores.
- */
-const RepoName = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, {
-    message: "Write a repository as owner/repo, such as octocat/hello-world.",
-  }),
-);
 
 /**
  * A GitHub Connection's own settings, shown as a form on the Connection. Every

@@ -12,8 +12,8 @@ import {
   Issue,
   ItemNumber,
   refuseEmptyUpdate,
-  RepoName,
 } from "./objects";
+import { RepoName } from "../repo-name";
 
 /** The fields that name one issue. */
 const ISSUE_ADDRESS = {

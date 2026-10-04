@@ -16,18 +16,6 @@ import { Effect, Schema } from "effect";
 import type { ActionError } from "@hercule/plugin-host";
 import { decodeGithubBody } from "./call";
 
-/**
- * A repository as `owner/repo`. The pattern allows only the characters GitHub
- * allows in an owner and a repository name, so the value can be put into a
- * URL path as it is. A name made of dots only is refused, because a URL path
- * would read `..` as "one level up".
- */
-export const RepoName = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9-]+\/(?!\.{1,2}$)[A-Za-z0-9._-]+$/, {
-    message: "Write the repository as owner/repo, such as octocat/hello-world.",
-  }),
-).annotate({ description: "The repository, written as owner/repo." });
-
 /** The number of an issue or a pull request in its repository. */
 export const ItemNumber = Schema.Int.check(Schema.isGreaterThan(0));
 

@@ -17,10 +17,10 @@ import {
   ItemNumber,
   PullRequest,
   refuseEmptyUpdate,
-  RepoName,
   Review,
   type GithubPullRequest,
 } from "./objects";
+import { RepoName } from "../repo-name";
 
 /** The fields that name one pull request. */
 const PULL_REQUEST_ADDRESS = {
