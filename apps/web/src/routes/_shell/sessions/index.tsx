@@ -139,7 +139,8 @@ function WorkflowSessionsFold({
       {/*
         A digest steps back from the lanes above it, until it is opened. The
         button reaches past the section by its own padding, so its words line
-        up with the lane headings and only its hover background sticks out.
+        up with the lane headings. Only its background, shown on hover and
+        while the fold is open, reaches past them.
       */}
       <button
         type="button"
