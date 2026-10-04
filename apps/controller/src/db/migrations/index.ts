@@ -49,6 +49,7 @@ import deviceSetups from "./0038-device-setups";
 import setupTargetsByKind from "./0039-setup-targets-by-kind";
 import connectionAccountId from "./0040-connection-account-id";
 import taskSortRanks from "./0041-task-sort-ranks";
+import connectionIngest from "./0042-connection-ingest";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -92,6 +93,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [39, "setup-targets-by-kind", Effect.succeed(setupTargetsByKind)],
   [40, "connection-account-id", Effect.succeed(connectionAccountId)],
   [41, "task-sort-ranks", Effect.succeed(taskSortRanks)],
+  [42, "connection-ingest", Effect.succeed(connectionIngest)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
