@@ -15,23 +15,45 @@
  * restart does.
  *
  * No runner is connected: action steps run on the controller.
+ *
+ * The tests of a step that acts through a Connection use the forge test
+ * plugin, whose review action records the context it was called with. The
+ * OAuth refresh test runs the provider's token endpoint as an in-test
+ * `Bun.serve`, so the refresh is a real HTTP request.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Effect, Redacted } from "effect";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import type { Task } from "@hercule/contract";
 import {
   collectMessages,
   expectHeld,
   fetchTicket,
+  get,
   onSocket,
   post,
+  send,
   waitWithin,
   type ServerHarness,
 } from "../http/testing";
-import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
+import { OAUTH_TOKENS } from "../connections";
+import { serializeTokens } from "../connections/oauth";
+import {
+  buildActionPlugin,
+  buildForgePlugin,
+  FORGE_CONNECTION_TYPE,
+  FORGE_REVIEW_ACTION_ID,
+  NOTE_APPEND_ACTION,
+  NOTE_APPEND_ACTION_ID,
+} from "../plugins/testing";
 import { WAIT_DEADLINE_MS } from "../sessions/testing";
-import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
+import {
+  ABSENT_ID,
+  ACCEPTED_GITHUB_TOKEN,
+  createConnection,
+  createWorkflowOrFail,
+  withSetUpController,
+} from "../workflows/testing";
 import {
   buildCreateStep,
   FILE_AND_START_DEFINITION,
@@ -230,6 +252,330 @@ describe("a run of a plugin's action", () => {
         expect(await listTasks(base, token)).toEqual([]);
       });
     }
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Executing an action that acts through a Connection.                      */
+/* ------------------------------------------------------------------------ */
+
+/** The token the tests paste into a forge Connection. */
+const FORGE_TOKEN = "a-forge-token";
+
+/**
+ * A workflow whose one step calls the forge review action through the
+ * Connection its `connection` param renders to. The `target` input is an
+ * object, so `{{ inputs.target.connection }}` can render to any value: saving
+ * the workflow checks only a template that is exactly one input, and the
+ * tests below are about what the run engine checks when the step runs.
+ */
+const REVIEW_TARGET_DEFINITION = {
+  name: "Review a pull request",
+  inputs: [{ name: "target", schema: { type: "object" }, required: true }],
+  steps: [
+    {
+      id: "review",
+      kind: "action",
+      action: FORGE_REVIEW_ACTION_ID,
+      params: { connection: "{{ inputs.target.connection }}", verdict: "approve", body: "LGTM" },
+    },
+  ],
+};
+
+/** Builds a workflow whose one step calls the forge review action through the Connection with this id. */
+const buildReviewDefinition = (connectionId: string) => ({
+  name: "Review a pull request",
+  steps: [
+    {
+      id: "review",
+      kind: "action",
+      action: FORGE_REVIEW_ACTION_ID,
+      params: { connection: connectionId, verdict: "approve" },
+    },
+  ],
+});
+
+/** Sets a Connection's status directly, because no operation disables a Connection or marks it needs-reauth. */
+const setConnectionStatus = (harness: ServerHarness, id: string, status: string) =>
+  runEffect(
+    harness.sql`UPDATE connections SET status = ${status}
+                WHERE id = unhex(replace(${id}, '-', ''))`,
+  );
+
+describe("a run whose step acts through a Connection", () => {
+  it("hands the action the Connection's id, credentials and config, and stores only the id", async () => {
+    const forge = buildForgePlugin();
+    await withSetUpController(
+      async ({ harness, base, token }) => {
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: FORGE_TOKEN,
+        });
+        // No Connection type of the forge plugin has config fields, so the
+        // config is written directly, to show that it reaches the action.
+        await runEffect(
+          harness.sql`UPDATE connections SET config = ${JSON.stringify({ org: "acme" })}
+                      WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+        );
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: REVIEW_TARGET_DEFINITION,
+        });
+
+        const runId = await startRun(base, token, workflow.id, {
+          inputs: { target: { connection: connectionId } },
+        });
+        const run = await waitForRunToFinish(base, token, runId);
+
+        expect(run.status, JSON.stringify(run)).toBe("completed");
+        expect(forge.contexts).toHaveLength(1);
+        expect(forge.contexts[0]!.connection).toEqual({
+          id: connectionId,
+          credentials: { token: FORGE_TOKEN },
+          config: { org: "acme" },
+        });
+        expect(forge.contexts[0]!.run).toEqual({ runId, stepId: "review" });
+        // The action decodes its own input, without the connection param.
+        expect(forge.inputs).toEqual([{ verdict: "approve", body: "LGTM" }]);
+        // The step record keeps the Connection's id, and never its credentials.
+        expect(findStepRecords(run, "review")[0]!.input).toEqual({
+          connection: connectionId,
+          verdict: "approve",
+          body: "LGTM",
+        });
+        expect(JSON.stringify(run)).not.toContain(FORGE_TOKEN);
+      },
+      [forge.plugin],
+    );
+  });
+
+  it("fails the step without calling the action when the Connection is missing, of another type, disabled, or not a string", async () => {
+    const forge = buildForgePlugin();
+    await withSetUpController(
+      async ({ harness, base, token }) => {
+        const githubConnectionId = await createConnection(base, token, "github/github", {
+          pat: ACCEPTED_GITHUB_TOKEN,
+        });
+        const disabledConnectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: FORGE_TOKEN,
+        });
+        await setConnectionStatus(harness, disabledConnectionId, "disabled");
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: REVIEW_TARGET_DEFINITION,
+        });
+
+        for (const [description, connection, code, message] of [
+          [
+            "a Connection that does not exist",
+            ABSENT_ID,
+            "not_found",
+            `No Connection has the id ${ABSENT_ID}.`,
+          ],
+          ["a value that is not an id", "nope", "not_found", "No Connection has the id nope."],
+          [
+            "a Connection of another type",
+            githubConnectionId,
+            "validation",
+            `The Connection ${githubConnectionId} is of type github/github, but the action ${FORGE_REVIEW_ACTION_ID} acts through a Connection of type ${FORGE_CONNECTION_TYPE}.`,
+          ],
+          [
+            "a disabled Connection",
+            disabledConnectionId,
+            "connection_unavailable",
+            `The Connection ${disabledConnectionId} is disabled. Enable it, or name another Connection of type ${FORGE_CONNECTION_TYPE}.`,
+          ],
+          [
+            "a number",
+            42,
+            "validation",
+            `The param connection must render to the id of a Connection of type ${FORGE_CONNECTION_TYPE}, but it rendered to 42.`,
+          ],
+          [
+            "an empty string",
+            "",
+            "validation",
+            `The param connection must render to the id of a Connection of type ${FORGE_CONNECTION_TYPE}, but it rendered to "".`,
+          ],
+        ] as const) {
+          const runId = await startRun(base, token, workflow.id, {
+            inputs: { target: { connection } },
+          });
+          const run = await waitForRunToFinish(base, token, runId);
+          expect(expectStatus(run, "failed"), description).toMatchObject({
+            failedStepId: "review",
+          });
+          const { error } = expectStatus(findStepRecords(run, "review")[0], "failed");
+          expect(error.code, description).toBe(code);
+          expect(error.message, description).toContain(message);
+        }
+        expect(forge.contexts).toEqual([]);
+      },
+      [forge.plugin],
+    );
+  });
+
+  it("calls the action through a Connection that needs reauth, because its credentials may still work", async () => {
+    const forge = buildForgePlugin();
+    await withSetUpController(
+      async ({ harness, base, token }) => {
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: FORGE_TOKEN,
+        });
+        await setConnectionStatus(harness, connectionId, "needs-reauth");
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: buildReviewDefinition(connectionId),
+        });
+
+        const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
+
+        expect(run.status, JSON.stringify(run)).toBe("completed");
+        expect(forge.contexts.map((context) => context.connection?.credentials)).toEqual([
+          { token: FORGE_TOKEN },
+        ]);
+      },
+      [forge.plugin],
+    );
+  });
+
+  describe("with an OAuth token set", () => {
+    /** The token endpoint's response to a refresh, which a test can replace. */
+    type RefreshAnswer = () => Response;
+
+    /**
+     * Starts a token endpoint that answers every refresh with `answer()`,
+     * and records the form of every request it receives.
+     */
+    const startTokenEndpoint = (answer: { current: RefreshAnswer }) => {
+      const requests: Array<Record<string, string>> = [];
+      const server = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        fetch: async (request) => {
+          requests.push(Object.fromEntries(new URLSearchParams(await request.text())));
+          return answer.current();
+        },
+      });
+      return { tokenUrl: `http://127.0.0.1:${server.port}/token`, requests, server };
+    };
+
+    /**
+     * Runs `body` against a controller with the forge plugin pointed at a
+     * token endpoint, an OAuth client for the plugin, and one forge
+     * Connection whose access token has expired. The endpoint answers a
+     * refresh with `answer`.
+     */
+    const withExpiredToken = async (
+      answer: RefreshAnswer,
+      body: (arranged: {
+        readonly forge: ReturnType<typeof buildForgePlugin>;
+        readonly requests: ReadonlyArray<Record<string, string>>;
+        readonly base: string;
+        readonly token: string;
+        readonly connectionId: string;
+        readonly workflowId: string;
+      }) => Promise<void>,
+    ): Promise<void> => {
+      const endpoint = startTokenEndpoint({ current: answer });
+      const forge = buildForgePlugin({ tokenUrl: endpoint.tokenUrl });
+      try {
+        await withSetUpController(
+          async ({ harness, base, token }) => {
+            for (const [path, request] of [
+              ["/api/v1/plugins/forge/config", { config: { clientId: "client-1" } }],
+              ["/api/v1/secrets/plugin/forge/clientSecret", { value: "shh-1" }],
+            ] as const) {
+              const response = await send("PUT", base, path, { body: request, token });
+              expect(response.status, await response.clone().text()).toBe(200);
+            }
+            // A Connection is created with pasted credentials, then given the
+            // token set a redirect flow would have stored, already expired.
+            const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+              token: FORGE_TOKEN,
+            });
+            const owner = { kind: "connection", id: connectionId } as const;
+            await runEffect(harness.secrets.delete(owner, "token"));
+            await runEffect(
+              harness.secrets.set(
+                owner,
+                OAUTH_TOKENS,
+                Redacted.make(
+                  serializeTokens({
+                    accessToken: "expired-access-token",
+                    refreshToken: "refresh-1",
+                    expiresAt: new Date(Date.now() - 60_000).toISOString(),
+                  }),
+                ),
+              ),
+            );
+            const workflow = await createWorkflowOrFail(base, token, {
+              definition: buildReviewDefinition(connectionId),
+            });
+            await body({
+              forge,
+              requests: endpoint.requests,
+              base,
+              token,
+              connectionId,
+              workflowId: workflow.id,
+            });
+          },
+          [forge.plugin],
+        );
+      } finally {
+        await endpoint.server.stop(true);
+      }
+    };
+
+    it("refreshes an expired access token before the action runs, and hands the action the new one", async () => {
+      await withExpiredToken(
+        () =>
+          Response.json({
+            access_token: "refreshed-access-token",
+            refresh_token: "refresh-2",
+            token_type: "bearer",
+            expires_in: 3600,
+          }),
+        async ({ forge, requests, base, token, workflowId }) => {
+          const run = await waitForRunToFinish(
+            base,
+            token,
+            await startRun(base, token, workflowId),
+          );
+
+          expect(run.status, JSON.stringify(run)).toBe("completed");
+          expect(requests).toEqual([
+            expect.objectContaining({ grant_type: "refresh_token", refresh_token: "refresh-1" }),
+          ]);
+          expect(forge.contexts.map((context) => context.connection?.credentials)).toEqual([
+            { accessToken: "refreshed-access-token" },
+          ]);
+          expect(JSON.stringify(run)).not.toContain("access-token");
+        },
+      );
+    });
+
+    it("fails the step with connection_unavailable, and marks the Connection needs-reauth, when the provider refuses the refresh", async () => {
+      await withExpiredToken(
+        () => Response.json({ error: "invalid_grant" }, { status: 400 }),
+        async ({ forge, base, token, connectionId, workflowId }) => {
+          const run = await waitForRunToFinish(
+            base,
+            token,
+            await startRun(base, token, workflowId),
+          );
+
+          const { error } = expectStatus(findStepRecords(run, "review")[0], "failed");
+          expect(error.code).toBe("connection_unavailable");
+          expect(error.message).toMatch(
+            new RegExp(
+              `^The credentials of the Connection ${connectionId} could not be read: .*invalid_grant.*\\. If the Connection needs to sign in again, reconnect it under Connections\\.$`,
+            ),
+          );
+          expect(JSON.stringify(run)).not.toContain("refresh-1");
+          expect(forge.contexts).toEqual([]);
+          const connection = await get(base, `/api/v1/connections/${connectionId}`, token);
+          expect(((await connection.json()) as { status: string }).status).toBe("needs-reauth");
+        },
+      );
+    });
   });
 });
 
