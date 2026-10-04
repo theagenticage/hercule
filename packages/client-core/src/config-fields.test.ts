@@ -6,7 +6,7 @@ import {
   readConfigIssues,
   buildConfigPayload,
   CONFIG_NUMBER_UNREADABLE,
-  CONFIG_WHOLE_NUMBER_UNREADABLE,
+  CONFIG_INTEGER_UNREADABLE,
 } from "./config-fields";
 import { ApiError } from "./errors";
 
@@ -248,18 +248,32 @@ describe("buildConfigPayload", () => {
     });
   });
 
-  it("refuses an integer field's text that is not a whole number, and sends nothing", () => {
-    for (const typed of ["abc", "1.5", "-5", "1e3", "0x10"]) {
+  it("refuses an integer field's text that is not an integer, and sends nothing", () => {
+    for (const typed of ["abc", "1.5", "1e3", "0x10", "--5", "5-"]) {
       expect(
         buildConfigPayload(fields, { endpoint: "https://notes.test", retries: typed }, {}),
-      ).toEqual({ errors: { retries: CONFIG_WHOLE_NUMBER_UNREADABLE } });
+      ).toEqual({ errors: { retries: CONFIG_INTEGER_UNREADABLE } });
     }
+  });
+
+  it("sends a negative integer, because an integer setting may be negative", () => {
+    expect(buildConfigPayload(fields, { retries: "-5" }, {})).toEqual({
+      config: { retries: -5 },
+    });
+  });
+
+  it("saves a stored negative integer back unchanged", () => {
+    const stored = { retries: -5 };
+
+    expect(buildConfigPayload(fields, buildConfigDraft(fields, stored), stored)).toEqual({
+      config: { retries: -5 },
+    });
   });
 
   it("refuses a number field's text that is not a number, on the field that holds it", () => {
     for (const typed of ["abc", "1e3", "0x10", "1.", "1,5"]) {
       expect(buildConfigPayload(fields, { timeout: typed, retries: "x" }, {})).toEqual({
-        errors: { timeout: CONFIG_NUMBER_UNREADABLE, retries: CONFIG_WHOLE_NUMBER_UNREADABLE },
+        errors: { timeout: CONFIG_NUMBER_UNREADABLE, retries: CONFIG_INTEGER_UNREADABLE },
       });
     }
   });

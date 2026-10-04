@@ -55,8 +55,8 @@ describe("ConfigForm", () => {
     expect(onSave).toHaveBeenCalledWith({});
   });
 
-  it("refuses text that is not a whole number under its field, keeps it, and sends nothing", async () => {
-    const complaint = "Enter a whole number.";
+  it("refuses text that is not an integer under its field, keeps it, and sends nothing", async () => {
+    const complaint = "Enter an integer.";
     const { onSave, user } = renderForm();
     const days = screen.getByLabelText<HTMLInputElement>("Window (days)");
 
