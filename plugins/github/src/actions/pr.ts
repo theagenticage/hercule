@@ -96,8 +96,11 @@ export const prComment = defineGithubAction({
     }),
 });
 
-/** The verdict a step gives in `pr.review`, and GitHub's word for it. */
-const REVIEW_EVENTS = {
+/**
+ * The verdict a step gives in `pr.review`, and GitHub's word for it, which
+ * GitHub's API takes in the review's `event` field.
+ */
+const GITHUB_REVIEW_VERDICTS = {
   approve: "APPROVE",
   "request-changes": "REQUEST_CHANGES",
   comment: "COMMENT",
@@ -107,20 +110,21 @@ export const prReview = defineGithubAction({
   id: "pr.review",
   displayName: "Review a GitHub pull request",
   description:
-    "Submits a review of a pull request, as the Connection's account: approve, request changes, or comment. The output holds the review's id, state and URL.",
+    "Submits a review of a pull request, as the Connection's account, with the verdict approve, request-changes or comment. The output holds the review's id, verdict and URL.",
   input: Schema.Struct({
     ...PULL_REQUEST_ADDRESS,
-    event: Schema.Literals(["approve", "request-changes", "comment"]).annotate({
-      description: "The review's verdict.",
+    verdict: Schema.Literals(["approve", "request-changes", "comment"]).annotate({
+      description: "The review's verdict: approve, request-changes or comment.",
     }),
     body: Schema.optionalKey(
       Schema.NonEmptyString.annotate({
-        description: "The review's text, in GitHub Markdown. Required unless the event is approve.",
+        description:
+          "The review's text, in GitHub Markdown. Required unless the verdict is approve.",
       }),
     ),
   }).check(
-    Schema.makeFilter((review: { readonly event: string; readonly body?: string }) =>
-      review.event === "approve" || review.body !== undefined
+    Schema.makeFilter((review: { readonly verdict: string; readonly body?: string }) =>
+      review.verdict === "approve" || review.body !== undefined
         ? undefined
         : "A review that requests changes or comments must have a body.",
     ),
@@ -134,7 +138,7 @@ export const prReview = defineGithubAction({
           method: "POST",
           path: `${buildPullRequestPath(input)}/reviews`,
           token,
-          body: { event: REVIEW_EVENTS[input.event], body: input.body },
+          body: { event: GITHUB_REVIEW_VERDICTS[input.verdict], body: input.body },
         },
         describePullRequest(input),
       );

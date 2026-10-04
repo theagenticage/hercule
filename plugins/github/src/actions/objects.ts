@@ -152,7 +152,10 @@ const GithubReview = Schema.Struct({
 /** A submitted review, as an action returns it. */
 export const Review = Schema.Struct({
   id: Schema.Int.annotate({ description: "GitHub's id of the review." }),
-  state: ReviewVerdict,
+  verdict: ReviewVerdict.annotate({
+    description:
+      "The review's verdict, in the words of the github.pr.review-submitted event: approved, changes-requested or commented.",
+  }),
   url: Schema.String.annotate({ description: "Where a person opens the review on GitHub." }),
 });
 
@@ -236,7 +239,7 @@ export const decodeReview = (body: Schema.Json): Effect.Effect<Review, ActionErr
             message: `GitHub returned the submitted review in the state ${review.state}, which is not a verdict.`,
           }),
         )
-      : Effect.succeed({ id: review.id, state: verdict, url: review.html_url });
+      : Effect.succeed({ id: review.id, verdict, url: review.html_url });
   });
 
 /** Decodes the answer to a merge from GitHub's response. */

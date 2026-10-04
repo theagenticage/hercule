@@ -140,7 +140,7 @@ describe("pr.review", () => {
 
     const outcome = await runAgainstStub(
       prReview.perform(
-        { ...ADDRESS, event: "request-changes", body: "Please rename the function." },
+        { ...ADDRESS, verdict: "request-changes", body: "Please rename the function." },
         buildActionContext(),
       ),
       stub,
@@ -148,7 +148,7 @@ describe("pr.review", () => {
 
     expect(readSuccess(outcome)).toEqual({
       id: 80,
-      state: "changes-requested",
+      verdict: "changes-requested",
       url: "https://github.com/octocat/hello-world/pull/1347#pullrequestreview-80",
     });
     expect(listRequests(stub)).toEqual([`POST ${PULL_URL}/reviews`]);
@@ -161,10 +161,23 @@ describe("pr.review", () => {
   it("requires a body unless the review approves", () => {
     const decode = Schema.decodeUnknownResult(prReview.input);
 
-    expect(Result.isSuccess(decode({ ...ADDRESS, event: "approve" }))).toBe(true);
-    expect(Result.isFailure(decode({ ...ADDRESS, event: "comment" }))).toBe(true);
-    expect(Result.isFailure(decode({ ...ADDRESS, event: "request-changes" }))).toBe(true);
-    expect(Result.isFailure(decode({ ...ADDRESS, event: "dismiss", body: "x" }))).toBe(true);
+    expect(Result.isSuccess(decode({ ...ADDRESS, verdict: "approve" }))).toBe(true);
+    expect(Result.isFailure(decode({ ...ADDRESS, verdict: "comment" }))).toBe(true);
+    expect(Result.isFailure(decode({ ...ADDRESS, verdict: "request-changes" }))).toBe(true);
+    expect(Result.isFailure(decode({ ...ADDRESS, verdict: "dismiss", body: "x" }))).toBe(true);
+  });
+
+  it("fails as unexpected when GitHub returns a review with no verdict", async () => {
+    const stub = stubAnswer(200, { id: 80, state: "PENDING", html_url: "https://github.com/x" });
+
+    const outcome = await runAgainstStub(
+      prReview.perform({ ...ADDRESS, verdict: "approve" }, buildActionContext()),
+      stub,
+    );
+
+    if (!Result.isFailure(outcome)) throw new Error("the action was expected to fail");
+    expect(outcome.failure.code).toBe("unexpected");
+    expect(outcome.failure.message).toContain("PENDING");
   });
 });
 
