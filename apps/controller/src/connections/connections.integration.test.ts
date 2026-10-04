@@ -37,10 +37,12 @@ import {
   buildAccount,
   buildAccountName,
   listConnections,
+  readConnection,
   readConnectionsSurface,
   type ConnectionRecord,
   type TestPlugin,
 } from "./testing";
+import { IDLE_INGEST_OPEN } from "../plugins/testing";
 
 /** The error envelope every failing operation returns. */
 interface ErrorBody {
@@ -131,7 +133,7 @@ const buildConnectionPlugin = (options: {
               kinds: {},
               feeds,
               // These tests are about the feeds' intervals, so the source polls nothing.
-              open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
+              open: IDLE_INGEST_OPEN,
             }),
       ),
     activate: (ctx) =>
@@ -195,16 +197,6 @@ const createConnectionOrFail = async (
     ...body,
   });
   expect(response.status, await response.clone().text()).toBe(201);
-  return (await response.json()) as ConnectionRecord;
-};
-
-const readConnection = async (
-  base: string,
-  token: string,
-  id: string,
-): Promise<ConnectionRecord> => {
-  const response = await get(base, `/api/v1/connections/${id}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as ConnectionRecord;
 };
 

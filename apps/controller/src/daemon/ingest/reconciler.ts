@@ -21,7 +21,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { connectionRepository, type StoredConnection } from "../../connections";
+import { connectionRepository, INGESTING_STATUSES, type StoredConnection } from "../../connections";
 import {
   computeIngestFingerprint,
   IngestLoops,
@@ -72,7 +72,7 @@ export const runIngestReconciler: Effect.Effect<
     SqlError
   > = Effect.gen(function* () {
     const sources = yield* host.listActiveEventSources();
-    const candidates = yield* connections.listByStatus(["connected", "error"]);
+    const candidates = yield* connections.listByStatus(INGESTING_STATUSES);
     const wanted = new Map<string, ConnectionToIngest>();
     for (const connection of candidates) {
       const source = sources.find((one) => one.connectionType === connection.type);
@@ -84,20 +84,20 @@ export const runIngestReconciler: Effect.Effect<
   /** Closes the handles that should not be open as they are, then opens the missing ones. */
   const reconcileHandles: Effect.Effect<void, SqlError> = Effect.gen(function* () {
     const wanted = yield* listConnectionsToIngest;
-    const open = new Set<string>();
-    for (const handle of yield* ingest.listOpen()) {
-      const match = wanted.get(handle.connectionId);
+    const keptOpen = new Set<string>();
+    for (const running of yield* ingest.listOpen()) {
+      const match = wanted.get(running.connectionId);
       if (
         match !== undefined &&
-        handle.fingerprint === computeIngestFingerprint(match.connection)
+        running.fingerprint === computeIngestFingerprint(match.connection)
       ) {
-        open.add(handle.connectionId);
+        keptOpen.add(running.connectionId);
       } else {
-        yield* ingest.close(handle.connectionId);
+        yield* ingest.close(running.connectionId);
       }
     }
     for (const [id, { source, connection }] of wanted) {
-      if (!open.has(id)) yield* ingest.open(source, connection);
+      if (!keptOpen.has(id)) yield* ingest.open(source, connection);
     }
   });
 

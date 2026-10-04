@@ -20,6 +20,7 @@ import {
   MAX_EVENT_URL_LENGTH,
 } from "@hercule/contract";
 import {
+  MAX_EMITTED_FIELD_BYTES,
   PluginError,
   type IngestConnection,
   type EmittedEvent,
@@ -27,7 +28,11 @@ import {
   type LinkedResource,
 } from "@hercule/plugin-host";
 import { nowIso, withTransaction } from "../db";
-import { connectionStateRepository, ConnectionTypes } from "../connections";
+import {
+  assertConnectionIngesting,
+  connectionStateRepository,
+  ConnectionTypes,
+} from "../connections";
 import { appendIngestedEvent, decodeAgainstKind } from "../events";
 import { resourceRepository, type StoredResource } from "../resources";
 import { describeFieldIssues, truncateMessage } from "./errors";
@@ -37,7 +42,7 @@ import type { RegisteredEventSource } from "./event-sources";
  * The fields of an emitted event that are the same for every kind. An unknown
  * key is ignored here, because `kind` and `payload` are checked on their own.
  */
-const decodeEnvelope = Schema.decodeUnknownEffect(
+const decodeEmittedEventFields = Schema.decodeUnknownEffect(
   Schema.Struct({
     dedupKey: bounded(1, MAX_DEDUP_KEY_LENGTH),
     occurredAt: Schema.String,
@@ -72,6 +77,28 @@ const normalizeOccurredAt = (kind: string, value: string): Effect.Effect<string,
     : Effect.succeed(new Date(time).toISOString());
 };
 
+/**
+ * Fails with a `PluginError` when `value`, as UTF-8 JSON, is larger than
+ * `limit` bytes. `field` names the value in the message.
+ */
+const assertJsonSizeWithin = (
+  kind: string,
+  field: "payload" | "raw",
+  value: unknown,
+  limit: number,
+): Effect.Effect<void, PluginError> => {
+  const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  return bytes <= limit
+    ? Effect.void
+    : Effect.fail(
+        new PluginError({
+          message:
+            `the ${field} of a ${kind} event is ${bytes} bytes as JSON, more than the limit of ${limit}. ` +
+            `Leave out what a workflow does not need, or shorten long text fields.`,
+        }),
+      );
+};
+
 /** Converts a stored Resource to what an ingest handle reads: a repo's canonical remote, or null. */
 const toLinkedResource = (resource: StoredResource): LinkedResource => ({
   id: resource.id,
@@ -89,9 +116,11 @@ const make = Effect.gen(function* () {
   /**
    * Checks one emitted event and appends it to the log in its own short
    * transaction. Fails with a `PluginError` when the source did not declare
-   * the kind, when the payload does not match the kind's schema, or when a
-   * common field is invalid. An event whose dedup key the log already holds
-   * for this Connection succeeds and writes nothing.
+   * the kind, when the payload does not match the kind's schema, when a
+   * common field is invalid, or when the payload or `raw` is too large. An
+   * event whose dedup key the log already holds for this Connection succeeds
+   * and writes nothing. Dies with `ConnectionNotIngesting` when the
+   * Connection was deleted or left the ingesting statuses.
    */
   const emit = (
     source: RegisteredEventSource,
@@ -111,7 +140,7 @@ const make = Effect.gen(function* () {
         );
       }
       const envelope = yield* Effect.mapError(
-        decodeEnvelope(event),
+        decodeEmittedEventFields(event),
         (error) =>
           new PluginError({
             message: truncateMessage(`a ${event.kind} event: ${describeFieldIssues(error)}`),
@@ -127,27 +156,36 @@ const make = Effect.gen(function* () {
             ),
           }),
       );
+      yield* assertJsonSizeWithin(event.kind, "payload", event.payload, MAX_EMITTED_FIELD_BYTES);
+      if (envelope.raw !== undefined) {
+        yield* assertJsonSizeWithin(event.kind, "raw", envelope.raw, MAX_EMITTED_FIELD_BYTES);
+      }
       const occurredAt = yield* normalizeOccurredAt(event.kind, envelope.occurredAt);
       const receivedAt = yield* nowIso;
       // A database failure is a defect: the plugin cannot recover from it,
-      // and the loop that called `poll` logs it and retries the feed.
+      // and the loop that called `poll` logs it and retries the feed. The
+      // Connection is checked in the same transaction as the append, so an
+      // event is never written after a delete or a disable has committed.
       yield* Effect.orDie(
         withTransaction(
           sql,
-          appendIngestedEvent(sql, {
-            source: source.pluginId,
-            connectionId,
-            system: envelope.system ?? source.pluginId,
-            kind: event.kind,
-            occurredAt,
-            receivedAt,
-            dedupKey: envelope.dedupKey,
-            // Each ref once, as `event.emit` stores them.
-            refs: [...new Set(envelope.refs)],
-            url: envelope.url ?? null,
-            payload: event.payload,
-            raw: envelope.raw ?? null,
-          }),
+          Effect.andThen(
+            assertConnectionIngesting(sql, connectionId),
+            appendIngestedEvent(sql, {
+              source: source.pluginId,
+              connectionId,
+              system: envelope.system ?? source.pluginId,
+              kind: event.kind,
+              occurredAt,
+              receivedAt,
+              dedupKey: envelope.dedupKey,
+              // Each ref once, as `event.emit` stores them.
+              refs: [...new Set(envelope.refs)],
+              url: envelope.url ?? null,
+              payload: event.payload,
+              raw: envelope.raw ?? null,
+            }),
+          ),
         ),
       );
     });

@@ -4,10 +4,16 @@
  * database and the host are real; the source is the fixture from `./testing`.
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { EmittedEvent, IngestContext, PluginCapability } from "@hercule/plugin-host";
-import { uuidToString } from "../db";
+import {
+  MAX_EMITTED_FIELD_BYTES,
+  type EmittedEvent,
+  type IngestContext,
+  type PluginCapability,
+} from "@hercule/plugin-host";
+import { connectionRepository, ConnectionNotIngesting } from "../connections";
+import { nowIso, uuidToString } from "../db";
 import { resourceRepository } from "../resources";
 import { PluginHost } from "./index";
 import { ingestContexts } from "./ingest-context";
@@ -98,9 +104,8 @@ describe("IngestContext.emit", () => {
 
     expect(rows).toHaveLength(1);
     const row = rows[0];
-    expect(row?.connection_id === null ? null : uuidToString(row!.connection_id)).toBe(
-      connectionId,
-    );
+    if (row === undefined) throw new Error("the event was not written");
+    expect(row.connection_id === null ? null : uuidToString(row.connection_id)).toBe(connectionId);
     expect(row).toMatchObject({
       source: EVENT_SOURCE_FIXTURE.pluginId,
       system: EVENT_SOURCE_FIXTURE.pluginId,
@@ -110,9 +115,9 @@ describe("IngestContext.emit", () => {
       url: "https://acme.example/things/1",
       actor: null,
     });
-    expect(JSON.parse(row!.refs)).toEqual(["acme:thing:1"]);
-    expect(JSON.parse(row!.payload)).toEqual({ title: "Shipped" });
-    expect(JSON.parse(row!.raw!)).toEqual({ id: 1, state: "done" });
+    expect(JSON.parse(row.refs)).toEqual(["acme:thing:1"]);
+    expect(JSON.parse(row.payload)).toEqual({ title: "Shipped" });
+    expect(row.raw === null ? null : JSON.parse(row.raw)).toEqual({ id: 1, state: "done" });
   });
 
   it("keeps the system the source names, and converts a time zone offset to UTC", async () => {
@@ -175,6 +180,50 @@ describe("IngestContext.emit", () => {
     );
 
     expect(message).toContain(field);
+  });
+
+  it.each([
+    ["a payload", { payload: { title: "x".repeat(MAX_EMITTED_FIELD_BYTES) } }, "payload"],
+    ["a raw body", { raw: { body: "x".repeat(MAX_EMITTED_FIELD_BYTES) } }, "raw"],
+  ] as const)("refuses %s larger than its limit, and writes nothing", async (_, change, field) => {
+    const { message, rows } = await runWithContext((context) =>
+      Effect.gen(function* () {
+        return {
+          message: yield* readEmitFailure(context, { ...THING_DONE, ...change }),
+          rows: yield* readFixtureEvents,
+        };
+      }),
+    );
+
+    expect(message).toContain(`the ${field} of a ${EVENT_SOURCE_FIXTURE.kind} event is`);
+    expect(rows).toEqual([]);
+  });
+
+  it.each([
+    [
+      "disabled",
+      (id: string) =>
+        Effect.flatMap(connectionRepository, (connections) =>
+          Effect.flatMap(nowIso, (at) => connections.update(id, { status: "disabled" }, at)),
+        ),
+    ],
+    [
+      "deleted",
+      (id: string) => Effect.flatMap(connectionRepository, (connections) => connections.delete(id)),
+    ],
+  ] as const)("dies and writes nothing once the Connection is %s", async (_, change) => {
+    const { exit, rows } = await runWithContext((context, connectionId) =>
+      Effect.gen(function* () {
+        yield* change(connectionId);
+        return {
+          exit: yield* Effect.exit(context.emit(THING_DONE)),
+          rows: yield* readFixtureEvents,
+        };
+      }),
+    );
+
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBeInstanceOf(ConnectionNotIngesting);
+    expect(rows).toEqual([]);
   });
 });
 

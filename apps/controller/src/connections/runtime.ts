@@ -86,6 +86,11 @@ const make = Effect.gen(function* () {
     config: row.config,
   });
 
+  /**
+   * Sets the connection's status and detail, unless the user disabled it.
+   * Only the user enables a connection again, so a plugin's report or a
+   * failed refresh that lands after the user disabled it changes nothing.
+   */
   const setStatus = (
     connectionId: string,
     status: ConnectionStatus,
@@ -97,7 +102,14 @@ const make = Effect.gen(function* () {
         withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* connections.update(connectionId, { status, statusDetail: detail }, at);
+            const changed = yield* connections.changeStatusFrom(
+              connectionId,
+              ["connected", "error", "needs-reauth"],
+              status,
+              detail,
+              at,
+            );
+            if (!changed) return;
             yield* announce({
               _tag: "record",
               topic: "connection",
@@ -404,6 +416,18 @@ const make = Effect.gen(function* () {
       Effect.map(Ref.get(declared), (all) => [...all.values()]),
 
     runtimeFor,
+
+    /**
+     * Returns a string that changes whenever the connection's credentials
+     * change: the name and rotation time of each secret it holds, without
+     * decrypting any. A reconnect either rotates a secret of the same name or
+     * swaps the names, so the string differs after one. An OAuth refresh
+     * rotates the token set, so it changes the string too.
+     */
+    readCredentialsVersion: (connectionId: string): Effect.Effect<string> =>
+      Effect.map(Effect.orDie(secrets.refs("connection", [connectionId])), (all) =>
+        JSON.stringify(all.get(connectionId) ?? []),
+      ),
   };
 });
 

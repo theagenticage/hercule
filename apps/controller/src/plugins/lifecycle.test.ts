@@ -4,7 +4,7 @@
  * than in two files that would each see half of every outcome.
  */
 import { describe, expect, it } from "vitest";
-import { Cause, Effect, Option, Redacted, Schema } from "effect";
+import { Cause, Deferred, Effect, Option, Redacted, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   HOST_API,
@@ -38,6 +38,12 @@ type Services =
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
   Effect.runPromise(body.pipe(Effect.provide(buildPluginStack()), asUser));
+
+/**
+ * The call a running plugin receives last in every `run`: the stack shuts down
+ * when `run` returns, and shutdown deactivates every plugin still running.
+ */
+const AT_SHUTDOWN = "deactivate";
 
 /**
  * Reads the `ownerEnabled` flag of each of a plugin's catalog rows. The flag
@@ -151,8 +157,8 @@ describe("the activation pass at the end of a boot", () => {
       }),
     );
 
-    expect(enabled.calls).toEqual(["activate"]);
-    expect(other.calls).toEqual(["activate"]);
+    expect(enabled.calls).toEqual(["activate", AT_SHUTDOWN]);
+    expect(other.calls).toEqual(["activate", AT_SHUTDOWN]);
     expect(off.calls).toEqual([]);
     expect(readCurrentContext(enabled).config).toEqual({ model: "opus" });
   });
@@ -202,7 +208,7 @@ describe("disabling and enabling a plugin", () => {
     expect(detail.enabled).toBe(false);
     expect(detail.contributions).toHaveLength(1);
     expect(owned).toEqual([false]);
-    expect(beta.calls).toEqual(["activate"]);
+    expect(beta.calls).toEqual(["activate", AT_SHUTDOWN]);
   });
 
   it("activates it again when it is enabled", async () => {
@@ -223,7 +229,7 @@ describe("disabling and enabling a plugin", () => {
     );
 
     expect(rows).toMatchObject([{ actor: "user", payload: { pluginId: "alpha" } }]);
-    expect(alpha.calls).toEqual(["activate", "deactivate", "activate"]);
+    expect(alpha.calls).toEqual(["activate", "deactivate", "activate", AT_SHUTDOWN]);
     expect(detail.status).toEqual({ _tag: "active" });
     expect(detail.enabled).toBe(true);
     expect(owned).toEqual([true]);
@@ -256,7 +262,7 @@ describe("configuring a plugin", () => {
     );
 
     expect(rows).toMatchObject([{ actor: "user", payload: { pluginId: "alpha" } }]);
-    expect(alpha.calls).toEqual(["activate", "deactivate", "activate"]);
+    expect(alpha.calls).toEqual(["activate", "deactivate", "activate", AT_SHUTDOWN]);
     expect(readCurrentContext(alpha).config).toEqual({ model: "sonnet" });
     expect(detail.config).toEqual({ model: "sonnet" });
   });
@@ -288,7 +294,7 @@ describe("configuring a plugin", () => {
     ).error.details.issues;
     expect(issues[0]?.path).toEqual(["model"]);
     expect(issues[0]?.message.length).toBeGreaterThan(0);
-    expect(alpha.calls).toEqual(["activate"]);
+    expect(alpha.calls).toEqual(["activate", AT_SHUTDOWN]);
   });
 });
 
@@ -356,7 +362,7 @@ describe("a plugin whose activate fails", () => {
     );
 
     expect(rows).toMatchObject([{ actor: "user", payload: { pluginId: "flaky" } }]);
-    expect(flaky.calls).toEqual(["activate", "activate"]);
+    expect(flaky.calls).toEqual(["activate", "activate", AT_SHUTDOWN]);
     expect(detail.status).toEqual({ _tag: "active" });
   });
 });
@@ -374,7 +380,7 @@ describe("retrying a plugin that is not errored", () => {
     );
 
     expect(failure).toMatchObject({ error: { code: "validation" } });
-    expect(alpha.calls).toEqual(["activate"]);
+    expect(alpha.calls).toEqual(["activate", AT_SHUTDOWN]);
   });
 });
 
@@ -523,8 +529,8 @@ describe("resetting a plugin's state", () => {
 
     expect(Option.isNone(result.alpha)).toBe(true);
     expect(Option.getOrNull(result.beta)).toBe(2);
-    expect(alpha.calls).toEqual(["activate", "deactivate", "activate"]);
-    expect(beta.calls).toEqual(["activate"]);
+    expect(alpha.calls).toEqual(["activate", "deactivate", "activate", AT_SHUTDOWN]);
+    expect(beta.calls).toEqual(["activate", AT_SHUTDOWN]);
     expect(result.detail.status).toEqual({ _tag: "active" });
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]?.actor).toBe("user");
@@ -554,6 +560,8 @@ describe("resetting a plugin's state", () => {
 
   it("closes the plugin's ingest handles and deletes its Connections' state", async () => {
     const acme = createEventSourceFixture();
+    const opened = Deferred.makeUnsafe<void>();
+    acme.open = () => Effect.asVoid(Deferred.succeed(opened, undefined));
 
     const result = await run(
       Effect.gen(function* () {
@@ -564,8 +572,10 @@ describe("resetting a plugin's state", () => {
         if (source === undefined) return yield* Effect.die("the fixture registered no source");
         const ingest = yield* IngestLoops;
         yield* ingest.open(source, connection);
-        yield* Effect.yieldNow;
-        yield* acme.opened[0]!.context.state.set("cursor", "2026-09-06");
+        yield* Deferred.await(opened);
+        const handle = acme.opened[0];
+        if (handle === undefined) return yield* Effect.die("the source was never opened");
+        yield* handle.context.state.set("cursor", "2026-09-06");
         yield* Effect.flatMap(Plugins, (plugins) => plugins.resetState(acme.plugin.manifest.id));
         const state = yield* connectionStateRepository;
         return {
@@ -826,7 +836,7 @@ describe("a lifecycle change that changes nothing", () => {
       }),
     );
 
-    expect(alpha.calls).toEqual(["activate"]);
+    expect(alpha.calls).toEqual(["activate", AT_SHUTDOWN]);
     expect(rows).toEqual([]);
   });
 
@@ -846,6 +856,32 @@ describe("a lifecycle change that changes nothing", () => {
 
     expect(alpha.calls).toEqual(["activate", "deactivate"]);
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe("shutting the controller down", () => {
+  it("closes a running plugin's ingest handles, then deactivates it", async () => {
+    const acme = createEventSourceFixture();
+    const opened = Deferred.makeUnsafe<void>();
+    acme.open = () => Effect.asVoid(Deferred.succeed(opened, undefined));
+    const plugin: Plugin = {
+      ...acme.plugin,
+      activate: () => Effect.succeed(Effect.sync(() => acme.calls.push("deactivate"))),
+    };
+
+    await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([plugin]);
+        const connection = yield* insertFixtureConnection();
+        const source = (yield* host.listActiveEventSources())[0];
+        if (source === undefined) return yield* Effect.die("the fixture registered no source");
+        yield* Effect.flatMap(IngestLoops, (ingest) => ingest.open(source, connection));
+        yield* Deferred.await(opened);
+      }),
+    );
+
+    expect(acme.calls.slice(-2)).toEqual(["close", "deactivate"]);
   });
 });
 
@@ -993,7 +1029,7 @@ describe("a caller with no credential behind it", () => {
     for (const failure of failures) {
       expect(failure).toMatchObject({ error: { code: "forbidden" } });
     }
-    expect(alpha.calls).toEqual(["activate"]);
+    expect(alpha.calls).toEqual(["activate", AT_SHUTDOWN]);
     expect(rows.flat()).toEqual([]);
   });
 });

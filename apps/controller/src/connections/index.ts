@@ -23,4 +23,9 @@ export {
   type QueryInput,
   type UpdateInput,
 } from "./service";
-export { connectionStateRepository } from "./state";
+export {
+  assertConnectionIngesting,
+  ConnectionNotIngesting,
+  connectionStateRepository,
+  INGESTING_STATUSES,
+} from "./state";
