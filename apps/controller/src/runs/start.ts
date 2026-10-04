@@ -187,7 +187,7 @@ const SENT_WORKFLOW_CONNECTION_USE_REFUSAL =
  * reads.
  */
 const describeConnectionInputRefusal = (inputName: string): string =>
-  `The input ${inputName} chooses the Connection a step acts through, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.`;
+  `The input ${inputName} chooses the Connection a step acts through, or one a step gives to a run it starts, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.`;
 
 /** The message of the `Forbidden` error for a replay of a sent workflow with a connection param. */
 const REPLAY_CONNECTION_USE_REFUSAL =

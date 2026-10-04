@@ -676,7 +676,7 @@ describe("run.start of a workflow that acts through a Connection", () => {
 
   /** The message of the refusal of a value for the input `account`, for a caller without the connection.use grant. */
   const ACCOUNT_INPUT_REFUSAL =
-    "The input account chooses the Connection a step acts through, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.";
+    "The input account chooses the Connection a step acts through, or one a step gives to a run it starts, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.";
 
   /**
    * Builds a workflow with one review step. Its `connection` param is
@@ -829,7 +829,7 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
 
   /** The message of the refusal of a value for the input `acc`, for a caller without the connection.use grant. */
   const ACC_INPUT_REFUSAL =
-    "The input acc chooses the Connection a step acts through, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.";
+    "The input acc chooses the Connection a step acts through, or one a step gives to a run it starts, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.";
 
   /**
    * Builds a workflow with one step that starts the workflow `targetId` and
