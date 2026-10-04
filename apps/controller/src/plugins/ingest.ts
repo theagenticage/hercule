@@ -109,10 +109,18 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const contexts = yield* ingestContexts;
   const supervisors = yield* FiberMap.make<string>();
-  // What each supervisor was opened with. An entry outlives its fiber when
-  // the fiber ends by itself, so only entries whose fiber is still in the
-  // fiber map count as open.
+  // What each supervisor was opened with. A supervisor removes its entry when
+  // it ends, and `close` removes it too, in case the fiber was interrupted
+  // before it started.
   const opened = yield* Ref.make(new Map<string, OpenIngest>());
+
+  /** Removes the entry of a Connection whose supervisor has ended or is being closed. */
+  const forgetOpened = (connectionId: string): Effect.Effect<void> =>
+    Ref.update(opened, (all) => {
+      const next = new Map(all);
+      next.delete(connectionId);
+      return next;
+    });
 
   /**
    * Runs one Connection's ingest until it is interrupted or its credentials
@@ -348,17 +356,11 @@ const make = Effect.gen(function* () {
           ? Effect.void
           : Effect.logError(`The ingest loop of the Connection ${connection.id} stopped`, cause),
       ),
+      Effect.ensuring(forgetOpened(connection.id)),
     );
 
   const close = (connectionId: string): Effect.Effect<void> =>
-    Effect.andThen(
-      FiberMap.remove(supervisors, connectionId),
-      Ref.update(opened, (all) => {
-        const next = new Map(all);
-        next.delete(connectionId);
-        return next;
-      }),
-    );
+    Effect.andThen(FiberMap.remove(supervisors, connectionId), forgetOpened(connectionId));
 
   return {
     /**
