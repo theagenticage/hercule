@@ -16,7 +16,7 @@ import {
   type StubResponse,
 } from "../testing";
 import { computeDigest } from "./digest";
-import { MAX_ITEMS_PER_POLL, pollRepos } from "./repos";
+import { MAX_ITEMS_PER_REPO, MAX_REQUESTS_PER_POLL, pollRepos } from "./repos";
 
 const REPO = "octocat/hello-world";
 
@@ -54,7 +54,7 @@ interface StubRepository {
     Array<{ id: number; user: { login: string }; state: string; submitted_at: string | null }>
   >;
   comments: Array<StubComment>;
-  /** How many items one page of the issue listing holds; GitHub's is 100. */
+  /** How many items one page of an issue listing of all or open issues holds; GitHub's is 100. */
   issuesPerPage: number;
   /** How many comments one page of the comment listing holds; GitHub's is 100. */
   commentsPerPage: number;
@@ -151,7 +151,8 @@ const answerFrom =
       return { status: 200, body: [...repository.issues].sort(byUpdate).reverse().slice(0, 1) };
     }
     if (path === `${base}/issues` && query["state"] === "open") {
-      return { status: 200, body: repository.issues.filter((issue) => issue.state === "open") };
+      const open = repository.issues.filter((issue) => issue.state === "open");
+      return answerPage(request, open, repository.issuesPerPage);
     }
     if (path === `${base}/issues`) {
       if (request.headers["if-none-match"] === repository.etag) return { status: 304 };
@@ -230,6 +231,9 @@ const listEvents = (harness: IngestHarness) =>
  * before as nothing, so this is what the host keeps.
  */
 const listWrittenEvents = (harness: IngestHarness) => [...new Set(listEvents(harness))];
+
+/** Returns the `owner/repo` a request path such as `/repos/octocat/hello-world/issues` is for. */
+const readRepoOf = (path: string): string => path.split("/").slice(2, 4).join("/");
 
 describe("the repos feed", () => {
   it("emits nothing on a repository's first poll, and records its open items", async () => {
@@ -622,7 +626,7 @@ describe("the repos feed", () => {
     expect(result.failure.message).toBe(
       "The repos feed could not poll octocat/gone: GitHub returned status 404 for " +
         "GET /repos/octocat/gone/issues: Not Found. " +
-        "The other repositories on the watch list were polled. " +
+        "The other repositories on the watch list are still polled. " +
         "If a repository was deleted, renamed or hidden from the Connection's account, " +
         "unlink its repo Resource or remove it from the Connection's extra repositories.",
     );
@@ -751,10 +755,11 @@ describe("the repos feed", () => {
     expect(assigned[1]).toBe(assigned[0]);
   });
 
-  it("emits no comment or review from before the first poll, except once for one in the newest update's second", async () => {
+  it("emits no comment or review from before the first poll, even one in the newest update's second", async () => {
     const repository = buildRepository();
     // The newest update is a pull request closed just before the first poll,
-    // with a review in an earlier second and another in its update's second.
+    // with a review in an earlier second, and a review and a comment in its
+    // update's second.
     repository.issues[1] = {
       ...repository.issues[1]!,
       state: "closed",
@@ -774,16 +779,17 @@ describe("the repos feed", () => {
     ];
     const harness = await baseline(repository);
 
+    // Every listing after the baseline repeats the newest item, so two polls
+    // that GitHub does not answer with 304 both diff it again.
     const { result } = await poll(harness, answerFrom(repository));
+    repository.etag = '"v2"';
+    await poll(harness, answerFrom(repository));
 
-    // GitHub's times count whole seconds, so the feed cannot tell a review or
-    // comment made in the baseline's own second from one made just after it.
-    // It emits each once rather than risk losing a new one.
     expect(Result.isSuccess(result)).toBe(true);
-    expect(listEvents(harness)).toEqual([
-      "github.pr.review-submitted pr.review-submitted:100",
-      "github.pr.commented pr.commented:500",
-    ]);
+    expect(harness.events).toEqual([]);
+    expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
+      items: { "2": { fromBaseline: true } },
+    });
 
     // A label added after the close is diffed, because the closed item is in the snapshot.
     repository.issues[1] = {
@@ -791,15 +797,14 @@ describe("the repos feed", () => {
       labels: [{ name: "late" }],
       updated_at: "2026-10-01T10:30:00Z",
     };
-    repository.etag = '"v2"';
+    repository.etag = '"v3"';
 
     await poll(harness, answerFrom(repository));
 
-    expect(listWrittenEvents(harness)).toEqual([
-      "github.pr.review-submitted pr.review-submitted:100",
-      "github.pr.commented pr.commented:500",
+    expect(listEvents(harness)).toEqual([
       `github.pr.labeled pr.labeled:${REPO}#2:2026-10-01T10:00:00Z:${computeDigest(["+late"])}`,
     ]);
+    expect(harness.state.get(`repos/${REPO}`)).not.toHaveProperty(["items", "2", "fromBaseline"]);
   });
 
   it("emits reopened for an old issue missing from the snapshot only when GitHub says it was reopened", async () => {
@@ -889,21 +894,21 @@ describe("the repos feed", () => {
     };
 
     it("diffs its budget in one poll, stopping at a whole second, and the rest in the next", async () => {
-      const repository = buildPullRepository(MAX_ITEMS_PER_POLL + 50);
+      const repository = buildPullRepository(MAX_ITEMS_PER_REPO + MAX_ITEMS_PER_REPO / 2);
       const harness = await baseline(repository);
       labelEveryItem(repository);
 
       await poll(harness, answerFrom(repository));
 
-      const lastDiffed = addSeconds(CHANGE_TIME, MAX_ITEMS_PER_POLL - 1);
-      expect(harness.events).toHaveLength(MAX_ITEMS_PER_POLL);
+      const lastDiffed = addSeconds(CHANGE_TIME, MAX_ITEMS_PER_REPO - 1);
+      expect(harness.events).toHaveLength(MAX_ITEMS_PER_REPO);
       const firstState = harness.state.get(`repos/${REPO}`);
       expect(firstState).toMatchObject({
         cursor: lastDiffed,
         items: {
-          [String(MAX_ITEMS_PER_POLL)]: { updatedAt: lastDiffed },
-          [String(MAX_ITEMS_PER_POLL + 1)]: {
-            updatedAt: addSeconds(BASELINE_TIME, MAX_ITEMS_PER_POLL),
+          [String(MAX_ITEMS_PER_REPO)]: { updatedAt: lastDiffed },
+          [String(MAX_ITEMS_PER_REPO + 1)]: {
+            updatedAt: addSeconds(BASELINE_TIME, MAX_ITEMS_PER_REPO),
           },
         },
       });
@@ -929,7 +934,7 @@ describe("the repos feed", () => {
 
     it("moves on past a second that holds more items than its budget", async () => {
       const repository = buildRepository();
-      const count = MAX_ITEMS_PER_POLL + 20;
+      const count = MAX_ITEMS_PER_REPO + 20;
       for (let index = 0; index < count; index += 1) {
         repository.issues.push(buildIssue(10 + index, BASELINE_TIME));
       }
@@ -975,12 +980,12 @@ describe("the repos feed", () => {
       ]);
     });
 
-    it("shares its budget across the watch list, so every repository is polled", async () => {
+    it("starts each poll after the repository it polled last, so a busy one cannot hold up the others", async () => {
       const other = "octocat/spoon-knife";
-      const busy = buildPullRepository(MAX_ITEMS_PER_POLL);
+      const busy = buildPullRepository(MAX_ITEMS_PER_REPO);
       const quiet = buildRepository();
       const route = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
-        readStubRequestTarget(request).path.startsWith(`/repos/${other}/`)
+        readRepoOf(readStubRequestTarget(request).path) === other
           ? answerFrom(quiet, other)(request)
           : answerFrom(busy)(request);
       const harness = buildIngestHarness();
@@ -989,11 +994,20 @@ describe("the repos feed", () => {
       quiet.issues[0] = { ...quiet.issues[0]!, labels: [], updated_at: "2026-10-01T11:00:00Z" };
       quiet.etag = '"v2"';
 
-      await poll(harness, route, [REPO, other]);
+      // The first poll ended with the quiet repository, so this one starts
+      // with the busy one. Its head commits and reviews spend the budget.
+      const second = await poll(harness, route, [REPO, other]);
 
-      const busyEvents = harness.events.filter((event) => event.dedupKey.includes(`${REPO}#`));
-      expect(busyEvents).toHaveLength(Math.ceil(MAX_ITEMS_PER_POLL / 2));
-      expect(listEvents(harness).at(-1)).toBe(
+      expect(second.requests.length).toBeGreaterThanOrEqual(MAX_REQUESTS_PER_POLL);
+      expect(new Set(second.requests.map((request) => readRepoOf(request.path)))).toEqual(
+        new Set([REPO]),
+      );
+      expect(harness.events).toHaveLength(MAX_ITEMS_PER_REPO);
+
+      const third = await poll(harness, route, [REPO, other]);
+
+      expect(readRepoOf(third.requests[0]!.path)).toBe(other);
+      expect(listEvents(harness)).toContain(
         `github.issue.labeled issue.labeled:${other}#1:2026-10-01T09:00:00Z:${computeDigest(["-bug"])}`,
       );
     });
@@ -1024,6 +1038,80 @@ describe("the repos feed", () => {
         ),
       );
       expect(harness.state.get(`repos/${REPO}`)).toMatchObject({ etag: '"v2"' });
+    });
+  });
+
+  describe("with more repositories waiting than one poll reaches", () => {
+    /** Open issues in each repository, listed one per page. */
+    const OPEN_ISSUES = 30;
+    /** One baseline: the newest item, a page per open issue, closed issues and open pull requests. */
+    const BASELINE_REQUESTS = 1 + OPEN_ISSUES + 1 + 1;
+
+    /** Returns twenty watched repositories, sorted, and a route that answers for each. */
+    const buildWatchedRepositories = () => {
+      const repositories = new Map<string, StubRepository>();
+      for (let index = 0; index < 20; index += 1) {
+        const repository = buildRepository();
+        repository.issues = Array.from({ length: OPEN_ISSUES }, (_, number) =>
+          buildIssue(number + 1, addSeconds("2026-10-01T09:00:00Z", number)),
+        );
+        repository.heads = {};
+        repository.issuesPerPage = 1;
+        repositories.set(`octocat/repo-${String(index).padStart(2, "0")}`, repository);
+      }
+      const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+        const repo = readRepoOf(readStubRequestTarget(request).path);
+        return answerFrom(repositories.get(repo)!, repo)(request);
+      };
+      return { watchList: [...repositories.keys()], route };
+    };
+
+    /** Returns the repositories a poll sent requests for, in the order it first did. */
+    const listPolledRepos = (requests: ReadonlyArray<{ path: string }>) => [
+      ...new Set(requests.map((request) => readRepoOf(request.path))),
+    ];
+
+    it("baselines them over several polls, each within its request budget and one repository", async () => {
+      const { watchList, route } = buildWatchedRepositories();
+      const harness = buildIngestHarness();
+      const polled: Array<Array<string>> = [];
+
+      while (!watchList.every((repo) => harness.state.has(`repos/${repo}`))) {
+        expect(polled.length).toBeLessThan(
+          Math.ceil((watchList.length * BASELINE_REQUESTS) / MAX_REQUESTS_PER_POLL) + 1,
+        );
+        const { result, requests } = await poll(harness, route, watchList);
+        expect(Result.isSuccess(result)).toBe(true);
+        expect(requests.length).toBeLessThanOrEqual(MAX_REQUESTS_PER_POLL - 1 + BASELINE_REQUESTS);
+        polled.push(listPolledRepos(requests));
+      }
+
+      // Every page counts, so the first poll stops once its baselines have
+      // sent the budget.
+      expect(polled[0]).toHaveLength(Math.ceil(MAX_REQUESTS_PER_POLL / BASELINE_REQUESTS));
+      // Each poll goes on where the last one stopped, and no repository is polled twice.
+      expect(polled.flat()).toEqual(watchList);
+      expect(harness.events).toEqual([]);
+
+      // After the last repository, the turn wraps around to the first.
+      const { requests } = await poll(harness, route, watchList);
+
+      expect(listPolledRepos(requests)).toEqual(watchList);
+    });
+
+    it("keeps its turn when the repository it polled last leaves the watch list", async () => {
+      const { watchList, route } = buildWatchedRepositories();
+      const harness = buildIngestHarness();
+      await poll(harness, route, watchList);
+      const lastPolled = watchList.filter((repo) => harness.state.has(`repos/${repo}`)).at(-1)!;
+
+      const { requests } = await poll(
+        harness,
+        route,
+        watchList.filter((repo) => repo !== lastPolled),
+      );
+
+      expect(readRepoOf(requests[0]!.path)).toBe(watchList[watchList.indexOf(lastPolled) + 1]);
     });
   });
 });
