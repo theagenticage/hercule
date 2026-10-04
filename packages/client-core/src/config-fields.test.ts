@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildConfigDraft,
   buildConfigFields,
+  readConfigHeading,
   readConfigIssues,
   buildConfigPayload,
 } from "./config-fields";
@@ -94,6 +95,18 @@ describe("buildConfigFields", () => {
 
   it("returns no fields for a plugin with nothing to configure", () => {
     expect(buildConfigFields(buildObjectSchema({}))).toEqual([]);
+  });
+});
+
+describe("readConfigHeading", () => {
+  it("returns the schema's title", () => {
+    expect(readConfigHeading({ ...buildObjectSchema({}), title: "Watching" })).toBe("Watching");
+  });
+
+  it("falls back to Configuration for a schema with no title, or an empty one", () => {
+    expect(readConfigHeading(buildObjectSchema({}))).toBe("Configuration");
+    expect(readConfigHeading({ ...buildObjectSchema({}), title: "" })).toBe("Configuration");
+    expect(readConfigHeading(undefined)).toBe("Configuration");
   });
 });
 

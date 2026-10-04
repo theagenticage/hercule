@@ -30,6 +30,7 @@ export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
   buildConfigDraft,
   buildConfigFields,
+  readConfigHeading,
   readConfigIssues,
   buildConfigPayload,
   type ConfigDraft,

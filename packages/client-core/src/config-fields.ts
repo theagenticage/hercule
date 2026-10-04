@@ -68,6 +68,16 @@ export const buildConfigFields = (
   return fields;
 };
 
+/**
+ * Returns the heading the form shows above the config's fields: the schema's
+ * own `title`, so the plugin can name what its settings are about, or
+ * "Configuration" when the schema has no title.
+ */
+export const readConfigHeading = (schema: Record<string, unknown> | undefined): string => {
+  const title = schema?.["title"];
+  return typeof title === "string" && title !== "" ? title : "Configuration";
+};
+
 const toDraftValue = (field: ConfigField, stored: unknown): ConfigValue => {
   if (field.kind === "boolean") return stored === true;
   if (field.kind === "stringList") return readStringList(stored) ?? [];
