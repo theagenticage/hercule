@@ -29,22 +29,16 @@ import { Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, type GithubItem } from "../subject";
-import {
-  GithubComment,
-  GithubIssue,
-  GithubPull,
-  GithubReview,
-  type GithubIssue as GithubIssueType,
-} from "./feed-objects";
+import { ListedComment, ListedIssue, ListedPull, ListedReview } from "./feed-objects";
 import {
   decodeGithubValue,
-  fetchGithub,
+  fetchFeedResponse,
   fetchListing,
   readGithubObject,
   truncateRaw,
   type FeedError,
 } from "./requests";
-import { pollWatchedRepos } from "./state";
+import { pollWatchedRepos, type RepoPoll } from "./state";
 
 /** What the snapshot keeps of one issue or pull request: only what a diff compares. */
 const ItemSnapshot = Schema.Struct({
@@ -103,24 +97,25 @@ interface ItemChange {
   readonly fields?: Readonly<Record<string, unknown>>;
 }
 
-/** Returns the values in `after` that are not in `before`, sorted. */
-const listAdded = (before: ReadonlyArray<string>, after: ReadonlyArray<string>): Array<string> =>
-  after.filter((value) => !before.includes(value)).sort();
+/** Returns the values that are not in `reference`, sorted. */
+const listMissingFrom = (
+  values: ReadonlyArray<string>,
+  reference: ReadonlyArray<string>,
+): Array<string> => values.filter((value) => !reference.includes(value)).sort();
 
 /** Checks whether ISO 8601 timestamp `time` is at or after `cursor`. An absent cursor is before everything. */
 const isAtOrAfter = (time: string, cursor: string | undefined): boolean =>
   cursor === undefined || Date.parse(time) >= Date.parse(cursor);
 
 /** Returns the label names of an issue. */
-const readLabels = (issue: GithubIssueType): Array<string> =>
-  issue.labels.map((label) => label.name);
+const readLabels = (issue: ListedIssue): Array<string> => issue.labels.map((label) => label.name);
 
 /** Returns the logins of an issue's assignees. */
-const readAssignees = (issue: GithubIssueType): Array<string> =>
+const readAssignees = (issue: ListedIssue): Array<string> =>
   (issue.assignees ?? []).map((user) => user.login);
 
 /** Describes an issue from the listing as the item the subject block is built from. */
-const describeIssue = (repo: string, issue: GithubIssueType): GithubItem => ({
+const buildIssueItem = (repo: string, issue: ListedIssue): GithubItem => ({
   repo,
   kind: issue.pull_request === undefined ? "issue" : "pr",
   number: issue.number,
@@ -147,9 +142,9 @@ const describeIssue = (repo: string, issue: GithubIssueType): GithubItem => ({
  * The plugin declares no kind for a pull request that was reopened or
  * assigned, and none for an unassignment, so those changes emit nothing.
  */
-export const listItemChanges = (
+const listItemChanges = (
   repo: string,
-  issue: GithubIssueType,
+  issue: ListedIssue,
   previous: ItemSnapshot | undefined,
   cursor: string | undefined,
 ): ReadonlyArray<ItemChange> => {
@@ -178,8 +173,8 @@ export const listItemChanges = (
   }
   if (known !== undefined) {
     const labels = readLabels(issue);
-    const added = listAdded(known.labels, labels);
-    const removed = listAdded(labels, known.labels);
+    const added = listMissingFrom(labels, known.labels);
+    const removed = listMissingFrom(known.labels, labels);
     if (added.length > 0 || removed.length > 0) {
       changes.push({
         kind: `github.${kind}.labeled`,
@@ -188,7 +183,7 @@ export const listItemChanges = (
         fields: { added, removed },
       });
     }
-    const assigned = listAdded(known.assignees, readAssignees(issue));
+    const assigned = listMissingFrom(readAssignees(issue), known.assignees);
     if (kind === "issue" && assigned.length > 0) {
       changes.push({
         kind: "github.issue.assigned",
@@ -230,13 +225,6 @@ const readVerdict = (state: string): "approved" | "changes-requested" | "comment
   }
 };
 
-/** The per-repository work of one poll: what it needs and where its events go. */
-interface RepoPoll {
-  readonly repo: string;
-  readonly token: string;
-  readonly emit: IngestContext["emit"];
-}
-
 /**
  * Records where a newly watched repository stands and emits nothing: the
  * newest update as the cursor, and every open issue and pull request, with
@@ -245,14 +233,14 @@ interface RepoPoll {
 const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const path = `/repos/${poll.repo}`;
-    const newest = yield* fetchGithub({
+    const newest = yield* fetchFeedResponse({
       method: "GET",
       path: `${path}/issues`,
       token: poll.token,
       query: { state: "all", sort: "updated", direction: "desc", per_page: "1" },
     });
     const [latest] = yield* decodeGithubValue(
-      Schema.Array(GithubIssue),
+      Schema.Array(ListedIssue),
       newest.body,
       "the newest issue",
     );
@@ -274,21 +262,21 @@ const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpC
       },
       MAX_BASELINE_PAGES,
     );
-    const issues = yield* decodeGithubValue(Schema.Array(GithubIssue), open.items, "open issues");
+    const issues = yield* decodeGithubValue(Schema.Array(ListedIssue), open.items, "open issues");
     const heads = yield* decodeGithubValue(
-      Schema.Array(GithubPull),
+      Schema.Array(ListedPull),
       pulls.items,
       "open pull requests",
     );
     const headSha = new Map(heads.map((pull) => [pull.number, pull.head.sha]));
     const items: Record<string, ItemSnapshot> = {};
     for (const issue of issues)
-      items[String(issue.number)] = recordIssue(issue, headSha.get(issue.number));
+      items[String(issue.number)] = buildItemSnapshot(issue, headSha.get(issue.number));
     return { ...(latest === undefined ? {} : { cursor: latest.updated_at }), items };
   });
 
 /** Builds an item's snapshot from the listing, with its head commit when it has one. */
-const recordIssue = (issue: GithubIssueType, headSha: string | undefined): ItemSnapshot => ({
+const buildItemSnapshot = (issue: ListedIssue, headSha: string | undefined): ItemSnapshot => ({
   pullRequest: issue.pull_request !== undefined,
   state: issue.state,
   labels: readLabels(issue),
@@ -319,7 +307,7 @@ const emitNewReviews = (
       MAX_DETAIL_PAGES,
     );
     for (const raw of listing.items) {
-      const review = yield* decodeGithubValue(GithubReview, raw, "a review");
+      const review = yield* decodeGithubValue(ListedReview, raw, "a review");
       const verdict = readVerdict(review.state);
       const submittedAt = review.submitted_at ?? null;
       if (verdict === undefined || submittedAt === null || !isAtOrAfter(submittedAt, cursor)) {
@@ -348,13 +336,13 @@ const emitNewHead = (
   previousSha: string | undefined,
 ): Effect.Effect<string, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const response = yield* fetchGithub({
+    const response = yield* fetchFeedResponse({
       method: "GET",
       path: `/repos/${poll.repo}/pulls/${String(item.number)}`,
       token: poll.token,
     });
     const body = yield* readGithubObject(response.body, "a pull request");
-    const pull = yield* decodeGithubValue(GithubPull, body, "a pull request");
+    const pull = yield* decodeGithubValue(ListedPull, body, "a pull request");
     if (previousSha !== undefined && previousSha !== pull.head.sha) {
       yield* poll.emit(
         buildItemEvent(item, {
@@ -397,7 +385,7 @@ const emitNewComments = (
       MAX_DETAIL_PAGES,
     );
     for (const raw of listing.items) {
-      const comment = yield* decodeGithubValue(GithubComment, raw, "a comment");
+      const comment = yield* decodeGithubValue(ListedComment, raw, "a comment");
       const number = Number(/\/issues\/(\d+)$/.exec(comment.issue_url)?.[1]);
       if (!Number.isInteger(number) || !isAtOrAfter(comment.created_at, cursor)) continue;
       const kind = comment.html_url.includes("/pull/") ? "pr" : "issue";
@@ -442,21 +430,21 @@ const pollRepo = (
     if (listing.unchanged) return stored;
 
     const issues = yield* Effect.forEach(listing.items, (raw) =>
-      Effect.map(decodeGithubValue(GithubIssue, raw, "an issue"), (issue) => ({ issue, raw })),
+      Effect.map(decodeGithubValue(ListedIssue, raw, "an issue"), (issue) => ({ issue, raw })),
     );
     // The listing repeats the item at the cursor, because `since` includes it.
     const changed = issues.filter(
       ({ issue }) => stored.items[String(issue.number)]?.updatedAt !== issue.updated_at,
     );
     const listed = new Map(
-      issues.map(({ issue }) => [issue.number, describeIssue(poll.repo, issue)] as const),
+      issues.map(({ issue }) => [issue.number, buildIssueItem(poll.repo, issue)] as const),
     );
     const items: Record<string, ItemSnapshot> = { ...stored.items };
     let needsComments = false;
 
     for (const { issue, raw } of changed) {
       const previous = stored.items[String(issue.number)];
-      const item = describeIssue(poll.repo, issue);
+      const item = buildIssueItem(poll.repo, issue);
       for (const change of listItemChanges(poll.repo, issue, previous, stored.cursor)) {
         yield* poll.emit(buildItemEvent(item, { ...change, raw: truncateRaw(raw) }));
       }
@@ -466,7 +454,7 @@ const pollRepo = (
         yield* emitNewReviews(poll, item, stored.cursor);
       }
       if (issue.comments > (previous?.comments ?? 0)) needsComments = true;
-      items[String(issue.number)] = recordIssue(issue, headSha);
+      items[String(issue.number)] = buildItemSnapshot(issue, headSha);
     }
     if (needsComments) yield* emitNewComments(poll, stored.cursor, listed);
 
@@ -476,7 +464,7 @@ const pollRepo = (
     );
     return {
       ...(cursor === undefined ? {} : { cursor }),
-      ...(listing.first.etag === undefined ? {} : { etag: listing.first.etag }),
+      ...(listing.firstPage.etag === undefined ? {} : { etag: listing.firstPage.etag }),
       items: evictClosedItems(items, cursor),
     };
   });

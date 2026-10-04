@@ -19,15 +19,15 @@ import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, type GithubItem } from "../subject";
-import { GithubCheckSuites, GithubPull, type GithubCheckSuite } from "./feed-objects";
+import { GithubCheckSuites, ListedPull, type GithubCheckSuite } from "./feed-objects";
 import {
   decodeGithubValue,
-  fetchGithub,
+  fetchFeedResponse,
   readGithubObject,
   truncateRaw,
   type FeedError,
 } from "./requests";
-import { pollWatchedRepos } from "./state";
+import { pollWatchedRepos, type RepoPoll } from "./state";
 
 /** What the feed keeps of one open pull request, to reuse when the listing answers 304. */
 const PullRequestSnapshot = Schema.Struct({
@@ -109,13 +109,6 @@ const findLatestUpdate = (suites: ReadonlyArray<GithubCheckSuite>): string | und
       undefined,
     );
 
-/** The per-repository work of one poll: what it needs and where its events go. */
-interface RepoPoll {
-  readonly repo: string;
-  readonly token: string;
-  readonly emit: IngestContext["emit"];
-}
-
 /**
  * Fetches the repository's open pull requests, or returns the stored ones
  * with their ETag when GitHub answers 304.
@@ -129,7 +122,7 @@ const fetchOpenPullRequests = (
   HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
-    const response = yield* fetchGithub({
+    const response = yield* fetchFeedResponse({
       method: "GET",
       path: `/repos/${poll.repo}/pulls`,
       token: poll.token,
@@ -138,7 +131,7 @@ const fetchOpenPullRequests = (
     });
     if (response.status === 304) return stored;
     const pulls = yield* decodeGithubValue(
-      Schema.Array(GithubPull),
+      Schema.Array(ListedPull),
       response.body,
       "open pull requests",
     );
@@ -167,7 +160,7 @@ const checkHead = (
   watchedSince: string,
 ): Effect.Effect<HeadState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const response = yield* fetchGithub({
+    const response = yield* fetchFeedResponse({
       method: "GET",
       path: `/repos/${poll.repo}/commits/${pullRequest.headSha}/check-suites`,
       token: poll.token,

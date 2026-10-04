@@ -60,7 +60,7 @@ const describeRequest = (request: GithubRequest): string => `${request.method} $
  * and with a `PluginError` that names the request and GitHub's message for
  * any other status or when GitHub could not be reached.
  */
-export const fetchGithub = (
+export const fetchFeedResponse = (
   request: GithubRequest,
 ): Effect.Effect<GithubResponse, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
@@ -69,9 +69,11 @@ export const fetchGithub = (
     );
     if (response.status === 200 || response.status === 304) return response;
     const message = readErrorMessage(response.body);
-    const said = message === undefined ? "" : `: ${message}`;
+    const githubDetail = message === undefined ? "" : `: ${message}`;
     if (response.status === 401) {
-      return yield* new AuthError({ message: `GitHub rejected the Connection's token${said}` });
+      return yield* new AuthError({
+        message: `GitHub rejected the Connection's token${githubDetail}`,
+      });
     }
     if (isRateLimited(response)) {
       return yield* new GithubRateLimited({
@@ -79,18 +81,18 @@ export const fetchGithub = (
       });
     }
     return yield* new PluginError({
-      message: `GitHub returned status ${String(response.status)} for ${describeRequest(request)}${said}`,
+      message: `GitHub returned status ${String(response.status)} for ${describeRequest(request)}${githubDetail}`,
     });
   });
 
 /** Every page of one listing, or the news that it has not changed. */
-export interface GithubListing {
+interface GithubListing {
   /** True when GitHub answered the first page with 304; `items` is then empty. */
   readonly unchanged: boolean;
   /** The items of every page fetched, in GitHub's order. */
   readonly items: ReadonlyArray<Schema.JsonObject>;
   /** The first page's response, whose `ETag`, `Last-Modified` and `X-Poll-Interval` pace the next request. */
-  readonly first: GithubResponse;
+  readonly firstPage: GithubResponse;
   /** True when the listing had more pages than `maxPages` and the rest were not fetched. */
   readonly truncated: boolean;
 }
@@ -117,7 +119,7 @@ export const readGithubObject = (
 /**
  * Fetches a listing and follows its `Link` header for up to `maxPages`
  * pages. Only the first request carries the ETag or `Last-Modified`: a 304
- * on it means the whole listing is unchanged. Fails as `fetchGithub` fails,
+ * on it means the whole listing is unchanged. Fails as `fetchFeedResponse` fails,
  * and with a `PluginError` when a page's body is not a JSON array of objects.
  */
 export const fetchListing = (
@@ -125,10 +127,12 @@ export const fetchListing = (
   maxPages: number,
 ): Effect.Effect<GithubListing, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const first = yield* fetchGithub(request);
-    if (first.status === 304) return { unchanged: true, items: [], first, truncated: false };
+    const firstPage = yield* fetchFeedResponse(request);
+    if (firstPage.status === 304) {
+      return { unchanged: true, items: [], firstPage, truncated: false };
+    }
     const items: Array<Schema.JsonObject> = [];
-    let page = first;
+    let page = firstPage;
     let pages = 1;
     for (;;) {
       if (!Array.isArray(page.body) || !page.body.every(isJsonObject)) {
@@ -138,11 +142,15 @@ export const fetchListing = (
       }
       items.push(...page.body);
       if (page.nextPageUrl === undefined) break;
-      if (pages === maxPages) return { unchanged: false, items, first, truncated: true };
-      page = yield* fetchGithub({ method: "GET", path: page.nextPageUrl, token: request.token });
+      if (pages === maxPages) return { unchanged: false, items, firstPage, truncated: true };
+      page = yield* fetchFeedResponse({
+        method: "GET",
+        path: page.nextPageUrl,
+        token: request.token,
+      });
       pages += 1;
     }
-    return { unchanged: false, items, first, truncated: false };
+    return { unchanged: false, items, firstPage, truncated: false };
   });
 
 /**

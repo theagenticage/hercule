@@ -12,11 +12,11 @@
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { EmittedEvent, IngestContext, PollResult } from "@hercule/plugin-host";
-import { buildItemEvent, buildRepoRef, buildRepoSubject } from "../subject";
+import { buildItemEvent, buildRepoEvent } from "../subject";
 import { GithubNotification } from "./feed-objects";
 import {
   decodeGithubValue,
-  fetchGithub,
+  fetchFeedResponse,
   fetchListing,
   truncateRaw,
   type FeedError,
@@ -62,7 +62,7 @@ const parseSubjectUrl = (
  * as a release, a discussion or a check suite, gets its repository's: this
  * plugin has no ref for those.
  */
-export const buildNotificationEvent = (
+const buildNotificationEvent = (
   thread: GithubNotification,
   raw: Schema.JsonObject,
 ): EmittedEvent => {
@@ -78,16 +78,7 @@ export const buildNotificationEvent = (
   if (item !== undefined) {
     return buildItemEvent({ repo, ...item, title: thread.subject.title }, facts);
   }
-  const subject = buildRepoSubject(repo, thread.subject.title);
-  return {
-    kind: facts.kind,
-    dedupKey: facts.dedupKey,
-    occurredAt: facts.occurredAt,
-    payload: { subject, ...facts.fields },
-    refs: [buildRepoRef(repo)],
-    url: subject.url,
-    raw: facts.raw,
-  };
+  return buildRepoEvent(repo, thread.subject.title, facts);
 };
 
 /** Converts an HTTP date, as `Last-Modified` carries it, to ISO 8601. Returns undefined when it does not parse. */
@@ -109,7 +100,7 @@ const pickLater = (left: string, right: string): string =>
  * The first poll, with no state yet, emits nothing: it records where the
  * feed stands, so a new Connection never emits the user's backlog.
  *
- * Fails as `fetchGithub` fails, and with a `PluginError` when GitHub returns
+ * Fails as `fetchFeedResponse` fails, and with a `PluginError` when GitHub returns
  * a thread without the fields this feed reads or the host refuses an event.
  */
 export const pollNotifications = (
@@ -121,7 +112,7 @@ export const pollNotifications = (
 
     if (Option.isNone(stored)) {
       // One thread is enough: only the response's `Last-Modified` is kept.
-      const response = yield* fetchGithub({
+      const response = yield* fetchFeedResponse({
         method: "GET",
         path: "/notifications",
         token,
@@ -149,7 +140,7 @@ export const pollNotifications = (
       },
       MAX_PAGES,
     );
-    if (listing.unchanged) return buildPollResult(listing.first.pollIntervalSeconds);
+    if (listing.unchanged) return buildPollResult(listing.firstPage.pollIntervalSeconds);
 
     const threads = yield* Effect.forEach(listing.items, (raw) =>
       Effect.map(decodeGithubValue(GithubNotification, raw, "a notification"), (thread) => ({
@@ -165,7 +156,7 @@ export const pollNotifications = (
       yield* context.emit(buildNotificationEvent(thread, raw));
     }
 
-    const lastModified = listing.first.lastModified ?? stored.value.lastModified;
+    const lastModified = listing.firstPage.lastModified ?? stored.value.lastModified;
     const since = oldestFirst.reduce(
       (latest, { thread }) => pickLater(latest, thread.updated_at),
       stored.value.since,
@@ -174,7 +165,7 @@ export const pollNotifications = (
       ...(lastModified === undefined ? {} : { lastModified }),
       since,
     });
-    return buildPollResult(listing.first.pollIntervalSeconds);
+    return buildPollResult(listing.firstPage.pollIntervalSeconds);
   });
 
 /** Builds the poll's result from GitHub's `X-Poll-Interval`, when it sent one. */

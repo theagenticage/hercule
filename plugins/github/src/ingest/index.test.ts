@@ -16,12 +16,12 @@ import {
   type StubResponse,
 } from "../testing";
 import type { GithubConnectionConfig } from "../connection-type";
-import { openGithubIngest, pollGithubFeed } from "./index";
+import { openGithubIngest, pollGithubFeed, type GithubFeed } from "./index";
 
 /** Polls `feed` once against `stub` and returns the result, success or failure. */
 const poll = (
   stub: GithubStub,
-  feed = "notifications",
+  feed: GithubFeed = "notifications",
   harness: IngestHarness = buildIngestHarness(),
   config: GithubConnectionConfig = {},
 ) => runAgainstStub(pollGithubFeed(feed, config, harness.context), stub);
@@ -116,14 +116,6 @@ describe("a GitHub feed's poll", () => {
     );
 
     expect(Result.isFailure(result) && result.failure instanceof PluginError).toBe(true);
-  });
-
-  it("fails with a PluginError for a feed it does not have", async () => {
-    const result = await poll(answerAlways({ status: 200, body: [] }), "releases");
-
-    expect(Result.isFailure(result)).toBe(true);
-    if (!Result.isFailure(result)) return;
-    expect(result.failure.message).toContain('"releases"');
   });
 
   it("reads the watch list on every poll, so a Resource linked later is watched from the next poll", async () => {

@@ -8,7 +8,15 @@
  * is always safe.
  */
 import { Effect, Option, Schema } from "effect";
-import { PluginError, type KeyValueStore } from "@hercule/plugin-host";
+import { PluginError, type IngestContext, type KeyValueStore } from "@hercule/plugin-host";
+
+/** The work of one per-repository feed on one repository in one poll: what it needs and where its events go. */
+export interface RepoPoll {
+  /** The repository, as lowercase `owner/repo`. */
+  readonly repo: string;
+  readonly token: string;
+  readonly emit: IngestContext["emit"];
+}
 
 /**
  * Reads one key and decodes it against the shape the feed writes. Returns
