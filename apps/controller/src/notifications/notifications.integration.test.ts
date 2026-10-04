@@ -12,8 +12,8 @@ import type { Notification, NotificationCreateInput } from "@hercule/contract";
 import { completeSetup, get, post, readErrorBody, withServer } from "../http/testing";
 import {
   createProfile,
-  spawnAgentUnder,
-  spawnAgentWithGrants,
+  spawnThreadUnder,
+  spawnThreadWithGrants,
   WAIT_DEADLINE_MS,
   withAgentFleet,
   type Arranged,
@@ -82,7 +82,7 @@ const listOrFail = async (base: string, token: string, query = ""): Promise<Noti
 
 /** Spawns a session whose profile may read and write notifications. */
 const spawnNotifier = (arranged: Arranged) =>
-  spawnAgentWithGrants(arranged, "notifiers", ["notification.read", "notification.write"]);
+  spawnThreadWithGrants(arranged, "notifiers", ["notification.read", "notification.write"]);
 
 describe("the user", () => {
   it("lists and reads notifications, and is refused a create with 403 and the reason", async () => {
@@ -212,9 +212,9 @@ describe("a session", () => {
         "notification.read",
         "notification.write",
       ]);
-      const producer = await spawnAgentUnder(arranged, profile);
-      const other = await spawnAgentUnder(arranged, profile);
-      const reader = await spawnAgentWithGrants(arranged, "readers", ["notification.read"]);
+      const producer = await spawnThreadUnder(arranged, profile);
+      const other = await spawnThreadUnder(arranged, profile);
+      const reader = await spawnThreadWithGrants(arranged, "readers", ["notification.read"]);
       const id = await createOrFail(base, producer.token, DECISION);
 
       const created = await requestCreate(base, reader.token, INFORMATIONAL);

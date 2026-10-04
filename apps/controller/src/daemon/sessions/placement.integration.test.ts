@@ -17,7 +17,7 @@ import {
 import { get, post, send } from "../../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   findInstanceId,
   listInputs,
   readProfileNamed,
@@ -367,7 +367,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow", ["session.read"])).id,
       });
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await createProfile(arranged, "spawner", ["session.spawn", "session.read"]),
       );
@@ -389,7 +389,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await readProfileNamed(arranged, "unrestricted")).id,
       });
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await createProfile(arranged, "spawner-2", ["session.spawn", "session.read"]),
       );
@@ -415,7 +415,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow-3", ["session.read"])).id,
       });
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await createProfile(arranged, "spawner-3", ["session.spawn", "session.read"]),
       );
@@ -441,7 +441,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow-4", ["session.read"])).id,
       });
-      const { token } = await spawnAgentUnder(
+      const { token } = await spawnThreadUnder(
         arranged,
         await createProfile(arranged, "spawner-4", ["session.spawn", "session.read"]),
       );

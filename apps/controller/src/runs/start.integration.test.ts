@@ -16,7 +16,7 @@ import { del, readErrorBody } from "../http/testing";
 import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
 import {
   readProfileNamed,
-  spawnAgentUnder,
+  spawnThreadUnder,
   WAIT_DEADLINE_MS,
   withAgentFleet,
 } from "../sessions/testing";
@@ -113,7 +113,7 @@ describe("run.start of a stored workflow", () => {
       const definition = { name: "One task", steps: [buildCreateStep("create")] };
       const workflow = await createWorkflowOrFail(base, arranged.token, { definition });
       // The shipped assistant profile has the run.start and run.read grants.
-      const agent = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "assistant"));
+      const agent = await spawnThreadUnder(arranged, await readProfileNamed(arranged, "assistant"));
 
       const runId = await startRun(base, agent.token, workflow.id);
 

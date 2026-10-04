@@ -11,6 +11,7 @@ import type { SessionStart } from "@hercule/protocol";
 import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
+import { provisionUserMaterial } from "../user-material";
 
 /** The facts about this machine that a session's context is built from. */
 export interface Machine {
@@ -27,7 +28,7 @@ export interface Machine {
   /** The runner's own environment. A session's environment is built on top of it. */
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
   /** Returns the harness path the last probe found for a binary name, or undefined if it found none. */
-  readonly binaryOf: (binaryName: string) => string | undefined;
+  readonly findBinary: (binaryName: string) => string | undefined;
   /** The workspaces on this machine. A session with a workspace runs in it. */
   readonly workspaces: Workspaces;
   /** The socket the git credential helper connects to when it asks this runner for credentials. */
@@ -172,8 +173,9 @@ const placeSession = (
 /**
  * Resolves the context an adapter needs to start a session: its cwd, the
  * instance's provider home, the harness binary, the environment and the
- * secrets. Fails with a message the user can read when the session cannot be
- * placed on this machine.
+ * secrets. When the frame's `userMaterial` flag is set, the context also
+ * carries the user's own material (spec 06 section 9.1). Fails with a message the user can read
+ * when the session cannot be placed on this machine.
  */
 export const resolveSessionContext = (
   frame: SessionStart,
@@ -187,18 +189,26 @@ export const resolveSessionContext = (
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       return dir;
     });
+    // Only a Thread on the controller's local runner sees the user's own
+    // material. The key is left out for every other session, so its adapter
+    // keeps the harness isolated from the user's installation.
+    const userMaterial =
+      frame.userMaterial === true
+        ? yield* provisionUserMaterial(frame.providerId, home, machine.baseEnv)
+        : undefined;
     return {
       scratch: placed.scratch,
       ctx: {
         cwd: placed.cwd,
         home,
-        binary: machine.binaryOf(binaryName),
+        binary: machine.findBinary(binaryName),
         env: buildEnv(machine, frame),
         // Passed to the adapter as they are, not added to the environment:
         // only the adapter knows which variable its harness reads a credential
         // from.
         secrets: frame.secrets,
         herculeTool: machine.herculeTool,
+        ...(userMaterial === undefined ? {} : { userMaterial }),
       },
     };
   });

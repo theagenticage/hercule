@@ -512,21 +512,28 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
 
 /**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
- * user's work, so it gets the workspace as its working directory and the
- * instance's home as its config directory, so the user's own settings,
- * skills and MCP servers never load.
+ * user's work, so it gets the workspace as its working directory. Its config
+ * directory is always the instance's home, which every session of the
+ * instance shares. The setting sources it loads depend on the session:
  *
- * - A session with a workspace loads the project setting source, because the
+ * - A Thread that sees User Material loads the user source, which the CLI
+ *   reads from its config directory. The runner links the user's own skills,
+ *   agents, commands, rules and `CLAUDE.md` into the instance's home, so this
+ *   is how the Thread finds them (spec 06 section 9.1). Every other session
+ *   leaves the user source out, so an assistant session or a workflow step
+ *   never reads those links, even though it shares the home.
+ * - A session with a workspace also loads the project source, because the
  *   repository's instructions are part of the work. The CLI then reads
  *   `CLAUDE.md`, `.claude/CLAUDE.md` and `.claude/rules/` in the workspace
  *   and in every directory above it. Workspaces sit under the Hercule Home,
  *   usually in the user's home directory, so this includes
  *   `~/.claude/CLAUDE.md`. That is accepted.
- * - A session without a workspace runs in an empty scratch directory and
- *   loads no setting source at all, so no stray file on this runner can reach
- *   it.
+ * - Any other session without a workspace runs in an empty scratch directory
+ *   and loads no setting source at all, so no stray file on this runner can
+ *   reach it.
  *
- * Auto memory is off in both cases (spec 06 section 9.1).
+ * MCP servers come only from the options, and auto memory is off, for every
+ * session (spec 06 section 9.1).
  */
 const buildSessionOptions = (
   ctx: ProviderRunnerContext,
@@ -553,7 +560,10 @@ const buildSessionOptions = (
       ? {}
       : { outputFormat: { type: "json_schema", schema: spec.outputSchema } }),
     ...(ctx.cwd === null ? {} : { cwd: ctx.cwd }),
-    settingSources: spec.workspaceId === null ? [] : ["project"],
+    settingSources: [
+      ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
+      ...(spec.workspaceId === null ? [] : (["project"] as const)),
+    ],
     strictMcpConfig: true,
     includePartialMessages: true,
     model: spec.modelSelection.model,

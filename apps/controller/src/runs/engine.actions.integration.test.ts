@@ -12,7 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@hercule/contract";
 import { get, post, send } from "../http/testing";
-import { spawnAgentWithGrants, WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
+import { spawnThreadWithGrants, WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
 import {
   ABSENT_ID,
   createWorkflow,
@@ -88,7 +88,7 @@ describe("a built-in action in a run", () => {
       const workflow = await createWorkflowOrFail(base, arranged.token, {
         definition: { name: "One task", steps: [buildCreateStep("create")] },
       });
-      const agent = await spawnAgentWithGrants(arranged, "starter", ["run.start", "run.read"]);
+      const agent = await spawnThreadWithGrants(arranged, "starter", ["run.start", "run.read"]);
 
       const runId = await startRun(base, agent.token, workflow.id);
       const run = await waitForRunToFinish(base, arranged.token, runId);

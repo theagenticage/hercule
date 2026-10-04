@@ -2697,7 +2697,7 @@ export const CLI = {
     },
     errors: {
       forbidden:
-        "you lack session.spawn, which a Permission Request can get you. Or a session token asked to fork a session on another Permission Profile, which no grant allows: a session may fork only sessions on its own profile, so ask the user to fork this one",
+        "you lack session.spawn, which a Permission Request can get you. Or a session token asked to fork a Thread, or a session on another Permission Profile, which no grant allows: only the user may fork a Thread, and a session may fork only an Agent's sessions on its own profile, so ask the user to fork this one",
       invalid_state:
         "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
     },

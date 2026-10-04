@@ -28,7 +28,7 @@ import {
   runEffect,
   listFramesCarrying,
   spawnSubscriber,
-  subscribeAgent,
+  subscribeThread,
   reportTurnCompleted,
   waitOutSeveralTicks,
   withPipeline,
@@ -41,7 +41,7 @@ describe("the delivery of a queued input", () => {
   it("delivers to an idle session at once", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await endPromptTurn(arranged, agent);
 
       await emitManualEvent(arranged, [REF], "delivered at once");
@@ -60,7 +60,7 @@ describe("the delivery of a queued input", () => {
   it("keeps a busy session's inputs waiting, and sends the oldest first when the turn ends", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await makeBusy(arranged, agent, 2);
 
       await emitManualEvent(arranged, [REF], "the older one");
@@ -94,7 +94,7 @@ describe("the delivery of a queued input", () => {
   it("sends no second input while the first is sent and unanswered", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await endPromptTurn(arranged, agent);
       // The fake runner accepts the frame and reports nothing, so as far as the
       // controller knows, the turn has not started.
@@ -123,7 +123,7 @@ describe("the delivery of a queued input", () => {
   it("resumes an exited session whose transcript still exists, and starts its turn with the input", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
       await exitSession(arranged, agent, 2);
       const ended = await readSession(arranged, agent.session.id);
       expect(ended.status).toBe("exited");

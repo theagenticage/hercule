@@ -333,10 +333,12 @@ export interface ServerOptions {
    */
   readonly plugins?: ReadonlyArray<Plugin>;
   /**
-   * The id the local runner reported. The harness starts no local runner, so
-   * without this the controller has none.
+   * Returns the id the local runner reported, or `undefined` while it has
+   * reported none. The harness starts no local runner, so without this the
+   * controller has none. The controller calls it each time it needs the id,
+   * so a test can name a runner that joins after the server is up.
    */
-  readonly localRunnerId?: string;
+  readonly readLocalRunnerId?: () => string | undefined;
 }
 
 /**
@@ -470,7 +472,9 @@ export const withServer = (
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
-      Effect.provideService(LocalRunnerId, { read: () => options.localRunnerId }),
+      Effect.provideService(LocalRunnerId, {
+        read: options.readLocalRunnerId ?? (() => undefined),
+      }),
       provideTimings(options),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));

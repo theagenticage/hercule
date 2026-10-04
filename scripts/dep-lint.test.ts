@@ -435,3 +435,80 @@ describe("the controller daemon's folders", () => {
     expect(stderr).toContain('events/index.ts imports "../sessions/placement"');
   });
 });
+
+/**
+ * Only `sessions/context.ts` imports the runner's `user-material/`, the module
+ * that finds the user's own skills and instructions for a Thread. Each case
+ * writes a small runner into a copy's root: the folder's files import each
+ * other, the context resolver imports the folder, and a test, a harness and a
+ * type-only import reach it too, which the rule allows.
+ */
+describe("the runner's user material", () => {
+  const CLEAN_RUNNER = {
+    "user-material/index.ts": 'export * from "./links";\n',
+    "user-material/links.ts": "export type Link = string;\nexport const linkUserMaterial = 1;\n",
+    "sessions/context.ts":
+      'import { linkUserMaterial } from "../user-material";\nexport const ctx = linkUserMaterial;\n',
+    "sessions/context.test.ts": 'import "../user-material/links";\n',
+    "sessions/testing.ts": 'import "../user-material";\n',
+    "providers/claude.ts":
+      'import type { Link } from "../user-material";\nexport const link: Link = "";\n',
+  };
+
+  /** Writes a runner from `files` into a copy's root, and returns the copy's path. */
+  const createRunnerRoot = async (files: Readonly<Record<string, string>>): Promise<string> => {
+    const script = await createScriptRoot(`${SDK}@0.3.263`);
+    const src = join(dirname(script), "../apps/runner/src");
+    for (const [name, body] of Object.entries(files)) {
+      await mkdir(dirname(join(src, name)), { recursive: true });
+      await writeFile(join(src, name), body);
+    }
+    return script;
+  };
+
+  it("passes when only the context resolver imports it", async () => {
+    const { stdout } = await runDepLint("runner", "clean.ts", await createRunnerRoot(CLEAN_RUNNER));
+
+    expect(stdout).toContain("only sessions/context.ts imports the runner's user-material/");
+  });
+
+  // Each case is the file that imports the folder, its body, and the line
+  // dep-lint reports it with.
+  it.each([
+    [
+      "a provider imports the folder",
+      "providers/claude.ts",
+      'import "../user-material";\n',
+      'providers/claude.ts imports "../user-material"',
+    ],
+    [
+      "a file beside the context resolver re-exports a file in it",
+      "sessions/index.ts",
+      'export * from "../user-material/links";\n',
+      'sessions/index.ts imports "../user-material/links"',
+    ],
+    [
+      "a top-level file imports its index",
+      "daemon.ts",
+      'import "./user-material/index";\n',
+      'daemon.ts imports "./user-material/index"',
+    ],
+    [
+      "a provider imports it at runtime",
+      "providers/codex.ts",
+      'export const load = () => import("../user-material");\n',
+      'providers/codex.ts imports "../user-material"',
+    ],
+  ])("fails when %s", async (_, file, body, reported) => {
+    const script = await createRunnerRoot({ ...CLEAN_RUNNER, [file]: body });
+
+    const refusal = await runDepLint("runner", "clean.ts", script).then(
+      () => undefined,
+      (thrown: { readonly stderr: string }) => thrown,
+    );
+
+    expect(refusal, `dep-lint accepted ${file} importing user-material/`).toBeDefined();
+    expect(refusal!.stderr).toContain(`    ${reported}\n`);
+    expect(refusal!.stderr).toContain("ADR 0032");
+  });
+});

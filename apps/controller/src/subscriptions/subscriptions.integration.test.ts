@@ -13,8 +13,8 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { del, get, post, readErrorBody } from "../http/testing";
 import {
-  spawnAgentWithGrants,
-  spawnAgentUnder,
+  spawnThreadWithGrants,
+  spawnThreadUnder,
   createProfile,
   WAIT_DEADLINE_MS,
   withAgentFleet,
@@ -131,7 +131,7 @@ const cancelSubscription = (arranged: Arranged, id: string, token: string): Prom
 describe("subscription.create", () => {
   it("stores the target, its expansion and the calling session, as a live subscription", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "subscribers", [
+      const agent = await spawnThreadWithGrants(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);
@@ -156,7 +156,7 @@ describe("subscription.create", () => {
 
   it("rejects each target kind this version cannot wait on, and names it", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
+      const agent = await spawnThreadWithGrants(arranged, "subscribers", ["subscription.write"]);
       const cases: ReadonlyArray<readonly [unknown, RegExp]> = [
         [{ kind: "session", sessionId: agent.session.id }, /session/i],
         [{ kind: "request", requestId: "pr_7" }, /permission request/i],
@@ -199,7 +199,7 @@ describe("subscription.create with a run target", () => {
       async (arranged) => {
         try {
           const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
-          const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+          const agent = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
 
           const subscriptionId = await createSubscriptionOrFail(
             arranged,
@@ -236,7 +236,7 @@ describe("subscription.create with a run target", () => {
             plan: definition,
             stepId: "first",
           });
-          const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+          const agent = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
 
           await createSubscriptionOrFail(
             arranged,
@@ -263,7 +263,7 @@ describe("subscription.create with a run target", () => {
       const runId = await startRun(base, arranged.token, workflow.id);
       const ended = await waitForRunToFinish(base, arranged.token, runId);
       expect(ended.status).toBe("completed");
-      const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+      const agent = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
 
       const response = await createSubscription(arranged, { kind: "run", runId }, agent.token);
 
@@ -278,7 +278,7 @@ describe("subscription.create with a run target", () => {
 
   it("rejects a run id that is not a UUID with validation, and stores nothing", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+      const agent = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
 
       // The shorthand's prefix written into the id is the likeliest mistake.
       const response = await createSubscription(
@@ -297,7 +297,7 @@ describe("subscription.create with a run target", () => {
 
   it("returns not_found for a run id that matches no run, and stores nothing", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
+      const agent = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
 
       const response = await createSubscription(
         arranged,
@@ -318,7 +318,7 @@ describe("subscription.create with a run target", () => {
       async (arranged) => {
         try {
           const runId = await startHeldRun(arranged.harness.base, arranged.token, held);
-          const agent = await spawnAgentWithGrants(arranged, "subscribers", [
+          const agent = await spawnThreadWithGrants(arranged, "subscribers", [
             "subscription.write",
             "subscription.read",
           ]);
@@ -346,8 +346,8 @@ describe("subscription.query", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const mine = await spawnAgentUnder(arranged, profile);
-      const theirs = await spawnAgentUnder(arranged, profile);
+      const mine = await spawnThreadUnder(arranged, profile);
+      const theirs = await spawnThreadUnder(arranged, profile);
       const own = await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, mine.token);
       const other = await createSubscriptionOrFail(
         arranged,
@@ -372,8 +372,8 @@ describe("subscription.query", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const mine = await spawnAgentUnder(arranged, profile);
-      const theirs = await spawnAgentUnder(arranged, profile);
+      const mine = await spawnThreadUnder(arranged, profile);
+      const theirs = await spawnThreadUnder(arranged, profile);
       await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, mine.token);
       const other = await createSubscriptionOrFail(
         arranged,
@@ -401,7 +401,7 @@ describe("subscription.query", () => {
 describe("subscription.cancel", () => {
   it("ends the subscription, and records cancelled as the reason", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "subscribers", [
+      const agent = await spawnThreadWithGrants(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);
@@ -426,7 +426,7 @@ describe("subscription.cancel", () => {
 
   it("returns not found for a second cancel of the same subscription", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
+      const agent = await spawnThreadWithGrants(arranged, "subscribers", ["subscription.write"]);
       const subscriptionId = await createSubscriptionOrFail(
         arranged,
         { kind: "ref", ref: REF },
@@ -443,7 +443,7 @@ describe("subscription.cancel", () => {
 
   it("returns not found for an id that matches no subscription", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
+      const agent = await spawnThreadWithGrants(arranged, "subscribers", ["subscription.write"]);
       // One live subscription exists, so the not-found error is about this id
       // and not about an empty table.
       await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, agent.token);
@@ -468,8 +468,8 @@ describe("whose subscription a session may cancel", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const mine = await spawnAgentUnder(arranged, profile);
-      const theirs = await spawnAgentUnder(arranged, profile);
+      const mine = await spawnThreadUnder(arranged, profile);
+      const theirs = await spawnThreadUnder(arranged, profile);
       const other = await createSubscriptionOrFail(
         arranged,
         { kind: "ref", ref: REF },
@@ -489,7 +489,7 @@ describe("whose subscription a session may cancel", () => {
 
   it("lets the user cancel a session's subscription", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await spawnAgentWithGrants(arranged, "subscribers", [
+      const agent = await spawnThreadWithGrants(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);

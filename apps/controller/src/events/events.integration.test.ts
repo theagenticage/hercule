@@ -28,7 +28,7 @@ import {
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { readEvent } from "./testing";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   createProfile,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
@@ -156,7 +156,7 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
 /** A session on a profile that reads the log and may not write to it. */
 const spawnLogReader = async (arranged: Arranged): Promise<string> => {
   const profile = await createProfile(arranged, "log-reader", ["event.read"]);
-  return (await spawnAgentUnder(arranged, profile)).token;
+  return (await spawnThreadUnder(arranged, profile)).token;
 };
 
 describe("POST /events/emit", () => {

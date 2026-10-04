@@ -423,6 +423,15 @@ describe("what the controller sends for a session", () => {
     expect(decode(SessionStart, { ...start, token: "" })._tag).toBe("Failure");
   });
 
+  it("accepts the `userMaterial` flag only as true, and a start without it", () => {
+    // Only `true` is allowed, so a session that runs isolated has one
+    // spelling: no key at all.
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(start))).toEqual(start);
+    const flagged = { ...start, userMaterial: true };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(flagged))).toEqual(flagged);
+    expect(decode(SessionStart, { ...start, userMaterial: false })._tag).toBe("Failure");
+  });
+
   it("rejects an instance id that could escape its directory, on the spec and on the binding", () => {
     // The runner uses this id as a directory name, so a traversal would arrive
     // in a spec.

@@ -162,7 +162,7 @@ describe("the controller's local runner", () => {
 
         expect((await readControllerInfo(harness.base, token)).localRunnerId).toBe(localRunnerId);
       },
-      { localRunnerId },
+      { readLocalRunnerId: () => localRunnerId },
     );
   });
 

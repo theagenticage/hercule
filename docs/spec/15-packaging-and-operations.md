@@ -64,6 +64,8 @@ Rule: the runner entrypoint's module graph MUST NOT include any controller packa
 
 The compiled artifact still contains ~~all three graphs~~ every role's graph *(amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100))*. Isolation is a property of the import graph per entrypoint, not of the file on disk. The CLI package talks HTTP only and is reachable from both the runner graph (sessions call it) and the standalone CLI entrypoint. *(Added 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100).)* The service package (`packages/service`) is reachable from the runner graph too, because `hercule runner join` installs the unit, so it links nothing of the controller.
 
+*(Added 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75).)* The same lint carries one more rule, inside the runner. The folder that reads User Material, `apps/runner/src/user-material/`, has one importer, the session context resolver (`apps/runner/src/sessions/context.ts`), which calls it only for a Thread the controller flagged. So only that Thread can reach the user's own skills and instructions ([./06-providers.md](./06-providers.md) section 9.1).
+
 ## 4. Supervision
 
 - `hercule service install` writes and registers a **user-level** native unit: a systemd user unit plus `loginctl enable-linger` on Linux, a launchd LaunchAgent on macOS. The OS owns restarts. Hercule runs no process supervisor of its own. *(Amended 2026-09-17, [#208](https://github.com/theagenticage/hercule/issues/208): the sentence is narrowed to process supervision, so it no longer collides with the controller daemon, which is a layer inside the controller process and supervises nothing.)*

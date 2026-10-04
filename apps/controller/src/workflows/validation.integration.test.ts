@@ -34,7 +34,7 @@ import { lintOutputSchema } from "@hercule/protocol";
 import { get, post, readErrorBody } from "../http/testing";
 import { NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
 import {
-  spawnAgentUnder,
+  spawnThreadUnder,
   readProfileNamed,
   WAIT_DEADLINE_MS,
   withAgentFleet,
@@ -2395,7 +2395,7 @@ describe("the grant that validation and the catalogs need", () => {
       ];
 
       // The shipped worker profile has no workflow grant at all.
-      const workerSession = await spawnAgentUnder(
+      const workerSession = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "worker"),
       );
@@ -2408,7 +2408,7 @@ describe("the grant that validation and the catalogs need", () => {
       }
 
       // The shipped assistant profile has workflow.read.
-      const assistantSession = await spawnAgentUnder(
+      const assistantSession = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );
