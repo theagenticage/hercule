@@ -5,26 +5,31 @@ import {
   type RunnerWait,
   type StepLine,
 } from "@hercule/client-core";
-import type { RunStatus } from "@hercule/contract";
+import type { RunStatus, Session } from "@hercule/contract";
 import { WORK_STATE_HUES, cn } from "@hercule/ui";
 import { JsonText } from "./json-text";
-import { StepCells, StepErrorLine, StepWaitLine } from "./step-parts";
+import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
 
 /**
  * Renders the steps of a run as a list: one row per step record, then the steps the
  * run has not reached. A row shows the step's mark, id, action, state and
- * duration, and under it its error, or, while the step waits for a runner to
- * run it in the run's workspace, a line explaining which runner it waits for.
- * A row with an output opens to show it.
+ * duration. Under an agent step's row is a link to the session it drives.
+ * Under any row is its error, or, while the step waits for a runner to run it
+ * in the run's workspace, a line explaining which runner it waits for. A row
+ * with an output opens to show it. A signal's output is the event it fired
+ * on, as the signal trigger's `outputs` map it.
  */
 export function StepList({
   lines,
   runStatus,
+  sessions,
   runnerWait,
   now,
 }: {
   readonly lines: ReadonlyArray<StepLine>;
   readonly runStatus: RunStatus;
+  /** The sessions the run's agent steps started, by id. */
+  readonly sessions: ReadonlyMap<string, Session>;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
@@ -77,6 +82,7 @@ export function StepList({
                 {cells}
               </button>
             )}
+            <StepSessionLine line={line} sessions={sessions} />
             {line.error === undefined ? null : <StepErrorLine error={line.error} />}
             <StepWaitLine line={line} runnerWait={runnerWait} />
             {isOpen ? (

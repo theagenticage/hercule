@@ -6,9 +6,9 @@ import {
   isRunLive,
   type RunnerWait,
 } from "@hercule/client-core";
-import type { Run } from "@hercule/contract";
+import type { Run, Session } from "@hercule/contract";
 import { WORK_STATE_HUES, cn, useElementWidth, type WorkState } from "@hercule/ui";
-import { StepCells, StepErrorLine, StepWaitLine } from "./step-parts";
+import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
 
 /** The widths of the timeline's columns and the spacing around them, in pixels. */
 const MARK_COLUMN = 20;
@@ -51,19 +51,23 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
  * Renders the steps of a run on a shared time axis: one row per step record with a
  * bar from its start to its end, or to now while it runs, then the steps the
  * run has not reached. The axis ends at now while the run is live, and where
- * the run ended once it has ended; a vertical line marks that end. Under a
- * row is its error, or, while the step waits for a runner to run it in the
- * run's workspace, a line explaining which runner it waits for.
+ * the run ended once it has ended; a vertical line marks that end. Under an
+ * agent step's row is a link to the session it drives. Under any row is its
+ * error, or, while the step waits for a runner to run it in the run's
+ * workspace, a line explaining which runner it waits for.
  *
  * The ticks are as close together as the axis's width lets their labels be,
  * so the timeline measures its axis, and measures it again when it resizes.
  */
 export function StepTimeline({
   run,
+  sessions,
   runnerWait,
   now,
 }: {
   readonly run: Run;
+  /** The sessions the run's agent steps started, by id. */
+  readonly sessions: ReadonlyMap<string, Session>;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
@@ -153,6 +157,7 @@ export function StepTimeline({
                     {describeStepDuration(line, now)}
                   </span>
                 </div>
+                <StepSessionLine line={line} sessions={sessions} />
                 {line.error === undefined ? null : <StepErrorLine error={line.error} />}
                 <StepWaitLine line={line} runnerWait={runnerWait} />
               </li>

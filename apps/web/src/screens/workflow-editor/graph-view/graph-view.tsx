@@ -317,9 +317,16 @@ export function CardText({
 /**
  * Renders the card of a trigger or step of a workflow. A trigger is a flat
  * card with a thin border, because it is passive. A step is raised, with a
- * shadow, because steps do the work.
+ * shadow, because steps do the work. A `note` follows the id, as a run's
+ * page notes how often a signal trigger fired, such as `×2`.
  */
-export function WorkflowNodeCard({ node }: { readonly node: WorkflowGraphNode }): JSX.Element {
+export function WorkflowNodeCard({
+  node,
+  note,
+}: {
+  readonly node: WorkflowGraphNode;
+  readonly note?: string | undefined;
+}): JSX.Element {
   const isTrigger = node.kind === "start" || node.kind === "signal";
   return (
     <div
@@ -329,7 +336,7 @@ export function WorkflowNodeCard({ node }: { readonly node: WorkflowGraphNode })
         isTrigger ? "bg-surface" : "bg-raised shadow-card",
       )}
     >
-      <CardText node={node} />
+      <CardText node={node} note={note} />
     </div>
   );
 }

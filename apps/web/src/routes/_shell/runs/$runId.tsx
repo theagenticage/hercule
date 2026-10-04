@@ -15,6 +15,7 @@ import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   resourcesQuery,
   runQuery,
+  runSessionsQuery,
   runnerQuery,
   runsQuery,
   settingsQuery,
@@ -33,7 +34,8 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   validateSearch: (search: Record<string, unknown>): { readonly steps?: StepsView } =>
     search["steps"] === "timeline" ? { steps: "timeline" } : {},
   // Loads the run, the runner and workspace it is pinned to, the run's
-  // re-runs, the action catalog and the run's saved workflow before the page
+  // re-runs, the sessions its agent steps started, the action catalog and
+  // the run's saved workflow before the page
   // renders, so the page never waits on them. The catalog tells which steps
   // run in the workspace, and so which ones wait for a runner. The workflow
   // tells whether it still exists to re-run from.
@@ -46,6 +48,7 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
       }),
       queryClient.ensureQueryData(workflowActionsQuery(client)),
       queryClient.ensureInfiniteQueryData(runsQuery(client, { originalRunId: params.runId })),
+      queryClient.ensureQueryData(runSessionsQuery(client, params.runId)),
     ]);
     const { runnerId, workspaceId, workflowId } = run;
     await Promise.all([
@@ -66,7 +69,7 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
 });
 
 /**
- * Renders a run's page, kept current by three topics:
+ * Renders a run's page, kept current by four topics:
  *
  * - `run`: the run engine publishes the run's id on it after every change to
  *   the run or to one of its step records, and a new run's id when one
@@ -74,7 +77,9 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
  * - `runner`: the run's runner going offline or coming back changes what a
  *   running step shows;
  * - `workflow`: the run's workflow being deleted takes away the re-run from
- *   the current workflow.
+ *   the current workflow;
+ * - `session`: a session an agent step started changing its title or its
+ *   status changes the line under that step.
  *
  * The runner and the workspace are read only once the run is pinned to
  * them. The loader has read them for a run that already was; a run pinned
@@ -93,6 +98,7 @@ function RunScreen(): JSX.Element {
   useLiveInvalidation(live, queryClient, "run");
   useLiveInvalidation(live, queryClient, "runner");
   useLiveInvalidation(live, queryClient, "workflow");
+  useLiveInvalidation(live, queryClient, "session");
 
   const run = useSuspenseQuery(runQuery(client, runId)).data;
   const isLive = isRunLive(run.status);
