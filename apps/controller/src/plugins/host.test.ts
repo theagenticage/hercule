@@ -708,6 +708,9 @@ const buildEventSourcePlugin = (id: string, word: string, kind: string): Plugin 
     registerEventSource(host, {
       id: word,
       connectionType: `${id}/${id}`,
+      // A source that polls nothing: these tests are about its kinds.
+      feeds: {},
+      open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
       kinds: {
         [kind]: {
           description: `Something happened: ${kind}`,

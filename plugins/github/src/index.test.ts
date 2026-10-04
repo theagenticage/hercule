@@ -14,7 +14,7 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import type {
   ConnectionTypeContribution,
-  EventSourceDefinition,
+  EventSourceContribution,
   ExternalAccount,
   Plugin,
   RegistrationHost,
@@ -26,10 +26,10 @@ const collectContributions = async (
   plugin: Plugin,
 ): Promise<{
   readonly types: ReadonlyArray<ConnectionTypeContribution>;
-  readonly sources: ReadonlyArray<EventSourceDefinition>;
+  readonly sources: ReadonlyArray<EventSourceContribution>;
 }> => {
   const types: Array<ConnectionTypeContribution> = [];
-  const sources: Array<EventSourceDefinition> = [];
+  const sources: Array<EventSourceContribution> = [];
   const host: RegistrationHost = {
     connections: {
       registerType: (contribution) =>

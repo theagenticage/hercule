@@ -617,6 +617,9 @@ const buildEventSourcePlugin = (kinds: ReadonlyArray<string>): Plugin => ({
     registerEventSource(host, {
       id: "acme",
       connectionType: "acme/acme",
+      // A source that polls nothing: these tests are about its kinds.
+      feeds: {},
+      open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
       kinds: Object.fromEntries(
         kinds.map((kind) => [
           kind,

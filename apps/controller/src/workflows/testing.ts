@@ -69,6 +69,9 @@ const localGithubPlugin: Plugin = {
       registerEventSource(host, {
         id: "github",
         connectionType: "github/github",
+        // A source that polls nothing: these tests are about its kinds.
+        feeds: {},
+        open: () => Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void }),
         kinds: {
           "github.pr.labeled": {
             description: "The labels on a pull request changed.",

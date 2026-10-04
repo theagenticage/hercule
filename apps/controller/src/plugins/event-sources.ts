@@ -10,7 +10,7 @@
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
 import * as Schema from "effect/Schema";
-import { EventSourceNames, PluginError, type EventSourceDefinition } from "@hercule/plugin-host";
+import { EventSourceNames, PluginError, type EventSourceContribution } from "@hercule/plugin-host";
 import { MAX_EVENT_KIND_LENGTH, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
 import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../events";
 import { toPluginError, describeFieldIssues } from "./errors";
@@ -65,7 +65,7 @@ const decodeEventKindHeader = Schema.decodeUnknownEffect(EventKindHeader, { erro
  */
 export const registerEventSourceContribution = (
   pluginId: string,
-  definition: EventSourceDefinition,
+  definition: EventSourceContribution,
   declared: Array<NewContribution>,
   kinds: Map<string, RegisteredEventKind>,
 ): Effect.Effect<void, PluginError> =>

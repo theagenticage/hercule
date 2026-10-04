@@ -42,14 +42,23 @@ export {
 
 export {
   ActionError,
+  AuthError,
   DeclaredCapabilities,
   EventSourceNames,
+  FeedDeclaration,
   MAX_CONTRIBUTION_NAME_LENGTH,
   ProviderDefinition,
   WorkflowActionNames,
   type ActionContext,
+  type ConnectionRef,
+  type ConnectionResources,
+  type EmitEvent,
   type EventKindDeclaration,
-  type EventSourceDefinition,
+  type EventSourceContribution,
+  type IngestContext,
+  type IngestHandle,
+  type LinkedResource,
+  type PollResult,
   type WorkflowActionContribution,
 } from "./contributions";
 
