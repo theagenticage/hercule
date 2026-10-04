@@ -16,7 +16,7 @@ import {
   type StubResponse,
 } from "../testing";
 import { computeDigest } from "./digest";
-import { pollRepos } from "./repos";
+import { MAX_ITEMS_PER_POLL, pollRepos } from "./repos";
 
 const REPO = "octocat/hello-world";
 
@@ -54,6 +54,8 @@ interface StubRepository {
     Array<{ id: number; user: { login: string }; state: string; submitted_at: string | null }>
   >;
   comments: Array<StubComment>;
+  /** How many items one page of the issue listing holds; GitHub's is 100. */
+  issuesPerPage: number;
   /** How many comments one page of the comment listing holds; GitHub's is 100. */
   commentsPerPage: number;
   /** The ETag of the issue listing; a test changes it whenever it changes the repository. */
@@ -88,6 +90,7 @@ const buildRepository = (): StubRepository => ({
   heads: { 2: "sha-a" },
   reviews: {},
   comments: [],
+  issuesPerPage: 100,
   commentsPerPage: 100,
   etag: '"v1"',
 });
@@ -105,6 +108,29 @@ const buildComment = (
   created_at: time,
   updated_at: time,
 });
+
+/**
+ * Answers with the page of `listed` that the request's `page` asks for,
+ * `size` items long, with a `Link` header to the next page when there is one.
+ */
+const answerPage = (
+  request: HttpClientRequest.HttpClientRequest,
+  listed: ReadonlyArray<unknown>,
+  size: number,
+  headers: Record<string, string> = {},
+): StubResponse => {
+  const { path, query } = readStubRequestTarget(request);
+  const page = Number(query["page"] ?? "1");
+  const next = new URL(`https://api.github.com${path}`);
+  for (const [name, value] of Object.entries(query)) next.searchParams.set(name, value);
+  next.searchParams.set("page", String(page + 1));
+  return {
+    status: 200,
+    body: listed.slice((page - 1) * size, page * size),
+    headers:
+      listed.length > page * size ? { ...headers, link: `<${next.href}>; rel="next"` } : headers,
+  };
+};
 
 /** Answers a request the way GitHub would for `repository`, named `repo`. */
 const answerFrom =
@@ -131,7 +157,9 @@ const answerFrom =
       if (request.headers["if-none-match"] === repository.etag) return { status: 304 };
       const since = Date.parse(query["since"] ?? "1970-01-01T00:00:00Z");
       const changed = repository.issues.filter((issue) => Date.parse(issue.updated_at) >= since);
-      return { status: 200, body: changed.sort(byUpdate), headers: { etag: repository.etag } };
+      return answerPage(request, changed.sort(byUpdate), repository.issuesPerPage, {
+        etag: repository.etag,
+      });
     }
     if (path === `${base}/pulls`) {
       const open = repository.issues.filter(
@@ -151,16 +179,7 @@ const answerFrom =
       const listed = repository.comments
         .filter((comment) => Date.parse(comment.updated_at) >= since)
         .sort(byUpdate);
-      const page = Number(query["page"] ?? "1");
-      const size = repository.commentsPerPage;
-      const next = new URL(`https://api.github.com${path}`);
-      for (const [name, value] of Object.entries(query)) next.searchParams.set(name, value);
-      next.searchParams.set("page", String(page + 1));
-      return {
-        status: 200,
-        body: listed.slice((page - 1) * size, page * size),
-        headers: listed.length > page * size ? { link: `<${next.href}>; rel="next"` } : {},
-      };
+      return answerPage(request, listed, repository.commentsPerPage);
     }
     return { status: 404, body: { message: "Not Found" } };
   };
@@ -175,7 +194,11 @@ const buildPullBody = (repository: StubRepository, issue: StubIssue) => ({
   updated_at: issue.updated_at,
 });
 
-/** Polls the feed once over `watchList`, against `route`. Returns the result, success or failure, and the requests sent. */
+/**
+ * Polls the feed once over `watchList`, against `route`. Returns the result,
+ * success or failure, the path and query of each request sent, and the
+ * requests themselves.
+ */
 const poll = async (
   harness: IngestHarness,
   route: (request: HttpClientRequest.HttpClientRequest) => StubResponse,
@@ -183,8 +206,12 @@ const poll = async (
 ) => {
   const stub = stubGithub(route);
   const result = await runAgainstStub(pollRepos("token", harness.context, watchList), stub);
-  return { result, requests: stub.requests.map(readStubRequestTarget) };
+  return { result, requests: stub.requests.map(readStubRequestTarget), sent: stub.requests };
 };
+
+/** Returns the time `seconds` after `time`, both in GitHub's format, such as `2026-10-01T10:00:05Z`. */
+const addSeconds = (time: string, seconds: number): string =>
+  new Date(Date.parse(time) + seconds * 1000).toISOString().replace(".000Z", "Z");
 
 /** Returns a harness whose feed has polled `repository` once, so it has a baseline. */
 const baseline = async (repository: StubRepository): Promise<IngestHarness> => {
@@ -833,5 +860,170 @@ describe("the repos feed", () => {
     expect(keys.size).toBe(11);
     expect(keys.has("issue.commented:610")).toBe(true);
     expect(harness.state.get(`repos/${REPO}`)).not.toHaveProperty("pendingComments");
+  });
+
+  describe("with more changes waiting than one poll diffs", () => {
+    const BASELINE_TIME = "2026-10-01T08:00:00Z";
+    const CHANGE_TIME = "2026-10-01T10:00:00Z";
+
+    /** Returns a stub repository with `count` open pull requests, each created a second after the last. */
+    const buildPullRepository = (count: number): StubRepository => {
+      const repository = buildRepository();
+      repository.issues = Array.from({ length: count }, (_, index) =>
+        buildPull(index + 1, addSeconds(BASELINE_TIME, index)),
+      );
+      repository.heads = Object.fromEntries(
+        repository.issues.map((issue) => [issue.number, "sha-a"]),
+      );
+      return repository;
+    };
+
+    /** Labels every item `stale`, each updated a second after the last from `CHANGE_TIME` on, and changes the ETag. */
+    const labelEveryItem = (repository: StubRepository) => {
+      repository.issues = repository.issues.map((issue, index) => ({
+        ...issue,
+        labels: [{ name: "stale" }],
+        updated_at: addSeconds(CHANGE_TIME, index),
+      }));
+      repository.etag = '"v2"';
+    };
+
+    it("diffs its budget in one poll, stopping at a whole second, and the rest in the next", async () => {
+      const repository = buildPullRepository(MAX_ITEMS_PER_POLL + 50);
+      const harness = await baseline(repository);
+      labelEveryItem(repository);
+
+      await poll(harness, answerFrom(repository));
+
+      const lastDiffed = addSeconds(CHANGE_TIME, MAX_ITEMS_PER_POLL - 1);
+      expect(harness.events).toHaveLength(MAX_ITEMS_PER_POLL);
+      const firstState = harness.state.get(`repos/${REPO}`);
+      expect(firstState).toMatchObject({
+        cursor: lastDiffed,
+        items: {
+          [String(MAX_ITEMS_PER_POLL)]: { updatedAt: lastDiffed },
+          [String(MAX_ITEMS_PER_POLL + 1)]: {
+            updatedAt: addSeconds(BASELINE_TIME, MAX_ITEMS_PER_POLL),
+          },
+        },
+      });
+      // A 304 on the next poll would hide the items this one did not reach.
+      expect(firstState).not.toHaveProperty("etag");
+
+      const { sent } = await poll(harness, answerFrom(repository));
+
+      expect(sent[0]!.headers["if-none-match"]).toBeUndefined();
+      // Each label is emitted exactly once, even for the item in the cursor's
+      // second, which the second poll diffs again.
+      expect(listEvents(harness)).toEqual(
+        repository.issues.map(
+          (issue) =>
+            `github.pr.labeled pr.labeled:${REPO}#${String(issue.number)}:${issue.created_at}:${computeDigest(["+stale"])}`,
+        ),
+      );
+      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
+        cursor: repository.issues.at(-1)!.updated_at,
+        etag: '"v2"',
+      });
+    });
+
+    it("moves on past a second that holds more items than its budget", async () => {
+      const repository = buildRepository();
+      const count = MAX_ITEMS_PER_POLL + 20;
+      for (let index = 0; index < count; index += 1) {
+        repository.issues.push(buildIssue(10 + index, BASELINE_TIME));
+      }
+      const harness = await baseline(repository);
+      // Every one of them is labeled in the same second, as a bot might.
+      for (const issue of repository.issues.slice(2)) {
+        issue.labels = [{ name: "stale" }];
+        issue.updated_at = CHANGE_TIME;
+      }
+      repository.etag = '"v2"';
+
+      await poll(harness, answerFrom(repository));
+
+      // A second is never split, so the poll diffs them all.
+      expect(harness.events).toHaveLength(count);
+      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({ cursor: CHANGE_TIME });
+
+      // Two of them change again, in the next two seconds. The listing now
+      // starts with the cursor's second, which holds more than the budget.
+      const labelAgain = (number: number, seconds: number) => {
+        const issue = repository.issues.find((item) => item.number === number)!;
+        issue.labels = [...issue.labels, { name: "later" }];
+        issue.updated_at = addSeconds(CHANGE_TIME, seconds);
+      };
+      labelAgain(10, 1);
+      labelAgain(11, 2);
+      repository.etag = '"v3"';
+      const buildLaterKey = (number: number) =>
+        `github.issue.labeled issue.labeled:${REPO}#${String(number)}:${CHANGE_TIME}:${computeDigest(["+later"])}`;
+
+      await poll(harness, answerFrom(repository));
+
+      expect(listWrittenEvents(harness).slice(count)).toEqual([buildLaterKey(10)]);
+      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
+        cursor: addSeconds(CHANGE_TIME, 1),
+      });
+
+      await poll(harness, answerFrom(repository));
+
+      expect(listWrittenEvents(harness).slice(count)).toEqual([
+        buildLaterKey(10),
+        buildLaterKey(11),
+      ]);
+    });
+
+    it("shares its budget across the watch list, so every repository is polled", async () => {
+      const other = "octocat/spoon-knife";
+      const busy = buildPullRepository(MAX_ITEMS_PER_POLL);
+      const quiet = buildRepository();
+      const route = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
+        readStubRequestTarget(request).path.startsWith(`/repos/${other}/`)
+          ? answerFrom(quiet, other)(request)
+          : answerFrom(busy)(request);
+      const harness = buildIngestHarness();
+      await poll(harness, route, [REPO, other]);
+      labelEveryItem(busy);
+      quiet.issues[0] = { ...quiet.issues[0]!, labels: [], updated_at: "2026-10-01T11:00:00Z" };
+      quiet.etag = '"v2"';
+
+      await poll(harness, route, [REPO, other]);
+
+      const busyEvents = harness.events.filter((event) => event.dedupKey.includes(`${REPO}#`));
+      expect(busyEvents).toHaveLength(Math.ceil(MAX_ITEMS_PER_POLL / 2));
+      expect(listEvents(harness).at(-1)).toBe(
+        `github.issue.labeled issue.labeled:${other}#1:2026-10-01T09:00:00Z:${computeDigest(["-bug"])}`,
+      );
+    });
+
+    it("keeps no ETag when the listing stopped at its page limit", async () => {
+      const repository = buildRepository();
+      // One item per page, and ten pages is the limit.
+      repository.issuesPerPage = 1;
+      const harness = await baseline(repository);
+      for (let index = 0; index < 12; index += 1) {
+        repository.issues.push(buildIssue(10 + index, addSeconds(CHANGE_TIME, index)));
+      }
+      repository.etag = '"v2"';
+
+      await poll(harness, answerFrom(repository));
+
+      // The listing repeats the cursor's item first, so ten pages hold nine new issues.
+      expect(harness.events).toHaveLength(9);
+      expect(harness.state.get(`repos/${REPO}`)).not.toHaveProperty("etag");
+
+      const { sent } = await poll(harness, answerFrom(repository));
+
+      expect(sent[0]!.headers["if-none-match"]).toBeUndefined();
+      expect(listWrittenEvents(harness)).toEqual(
+        Array.from(
+          { length: 12 },
+          (_, index) => `github.issue.opened issue.opened:${REPO}#${String(10 + index)}`,
+        ),
+      );
+      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({ etag: '"v2"' });
+    });
   });
 });
