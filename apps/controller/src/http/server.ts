@@ -252,8 +252,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* checkSchedulerInterval;
     yield* Effect.forkScoped(runScheduler);
     // The Ingest Reconciler opens an ingest handle for each Connection that
-    // should be ingesting. The plugins booted with the layers, and it reads
-    // the Connections from the database, so it starts here like the others.
+    // should be ingesting. The plugins booted before `serve` runs, and it
+    // reads the Connections from the database, so it starts here like the
+    // others.
     // The events it lets the plugins emit reach the pipeline started above.
     yield* Effect.forkScoped(runIngestReconciler);
     // Runs a restart cut off continue from their rows. Each run executes on
