@@ -125,24 +125,24 @@ interface EventSourceContribution {
   connectionType: string                       // the qualified id of the plugin's own Connection type it ingests for
   kinds: Record<string, EventKindDeclaration>  // "github.issue.opened" -> payload schema + description
   feeds: Record<string, FeedDeclaration>       // named poll feeds; {} for a purely push-driven source
-  open(connection: ConnectionRef, ctx: IngestContext): Effect<IngestHandle, AuthError | PluginError>
+  open(connection: IngestConnection, ctx: IngestContext): Effect<IngestHandle, AuthError | PluginError>
 }
 
 interface EventKindDeclaration { description: string; schema: Schema }
 interface FeedDeclaration { defaultIntervalSeconds: number; minIntervalSeconds?: number }  // positive integers; min <= default
-interface ConnectionRef { id: string; config: unknown }  // config decoded with the Connection type's configSchema
+interface IngestConnection { id: string; config: unknown }  // config decoded with the Connection type's configSchema
 
 // What the core hands the ingest handle of one Connection.
 interface IngestContext {
-  emit(e: EmitEvent): Effect<void, PluginError>         // the `events` capability; connection-stamped by the host
+  emit(e: EmittedEvent): Effect<void, PluginError>      // the `events` capability; connection-stamped by the host
   state: KeyValueStore                                   // this Connection's state (section 6): cursors, snapshots
   credentials(): Effect<Record<string, string>, ConnectionUnavailable>  // read through the type's runtime, OAuth refreshed
   resources?: { list(): Effect<LinkedResource[]> }       // the Resources linked to this Connection; only with `resources`
 }
 
-interface EmitEvent {
+interface EmittedEvent {
   kind: string; dedupKey: string; occurredAt: string; payload: unknown
-  refs: string[]; url?: string; system?: string; raw?: Json
+  refs: string[]; url?: string; system?: string; raw?: JsonObject
 }
 interface LinkedResource { id: string; kind: "repo" | "folder" | "mailbox"; label: string | null; remote: string | null }
 
