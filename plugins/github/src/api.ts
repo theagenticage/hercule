@@ -4,18 +4,34 @@
  * and returns what the response held, so every caller reads the same headers
  * the same way.
  */
-import { Effect, Schema } from "effect";
+import { Duration, Effect, Option, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 
-/** The root every REST path is appended to. */
-export const GITHUB_API_URL = "https://api.github.com";
+/**
+ * The root every REST path is appended to. It is also the only origin a
+ * request is sent to, because every request carries the Connection's token.
+ */
+const GITHUB_API_URL = "https://api.github.com";
 
 /** GitHub rejects a request without a user agent, so one is always sent. */
 const USER_AGENT = "Hercule";
 
 /** The REST API version this plugin was written against. */
 const API_VERSION = "2022-11-28";
+
+/**
+ * How long one request may take, from sending it to reading the whole
+ * response. Without a limit, a connection GitHub never answers would hold a
+ * feed's poll or a workflow step forever.
+ */
+export const GITHUB_REQUEST_TIMEOUT = Duration.seconds(30);
+
+/**
+ * How long to wait after a rate limit when GitHub gives no time to wait for.
+ * GitHub's documentation asks for at least one minute.
+ */
+const DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60;
 
 /** One request to GitHub's REST API. */
 export interface GithubRequest {
@@ -74,12 +90,27 @@ const parseNextPageUrl = (link: string | undefined): string | undefined =>
     .find((url) => url !== undefined);
 
 /**
+ * Returns the origin of a URL, such as `https://api.github.com`, or undefined
+ * when the text is not a URL.
+ */
+const readOrigin = (url: string): string | undefined =>
+  URL.canParse(url) ? new URL(url).origin : undefined;
+
+/**
  * Sends one request to GitHub's REST API and returns its status, body and the
  * headers that pace the next request. Any status is returned as it is: the
  * caller decides what a 401 or a 404 means for it. Fails with
- * `GithubUnreachable` only when no response arrived or its body was not JSON.
+ * `GithubUnreachable` when:
+ *
+ * - the URL is not on GitHub's API, so the request is not sent at all;
+ * - no response arrived, or the whole response did not arrive within
+ *   `GITHUB_REQUEST_TIMEOUT`;
+ * - the response body was not JSON.
  *
  * `path` may also be a full URL, which is how a caller follows `nextPageUrl`.
+ * The origin is checked after the URL is built, because the request carries
+ * the Connection's token, and a path such as `@example.com/x` would otherwise
+ * send it to another host.
  *
  * The `HttpClient` stays a requirement: the plugin provides the fetch client
  * only where the host calls in, so a test can drive any function below that
@@ -92,6 +123,12 @@ export const requestGithub = (
     const url = request.path.startsWith("https://")
       ? request.path
       : `${GITHUB_API_URL}${request.path}`;
+    const origin = readOrigin(url);
+    if (origin !== GITHUB_API_URL) {
+      return yield* new GithubUnreachable({
+        message: `The request to ${origin ?? "an invalid URL"} was not sent, because it would carry the GitHub token and only ${GITHUB_API_URL} may receive it.`,
+      });
+    }
     let outgoing = HttpClientRequest.make(request.method)(url, {
       headers: {
         authorization: `Bearer ${request.token}`,
@@ -108,19 +145,32 @@ export const requestGithub = (
     if (request.body !== undefined) {
       outgoing = HttpClientRequest.bodyJsonUnsafe(outgoing, request.body);
     }
-    const response = yield* HttpClient.execute(outgoing).pipe(
-      Effect.mapError(
-        (error) =>
-          new GithubUnreachable({ message: `GitHub could not be reached: ${error.message}` }),
-      ),
-    );
-    const text = yield* response.text.pipe(
-      Effect.mapError(
-        (error) =>
-          new GithubUnreachable({
-            message: `GitHub's response could not be read: ${error.message}`,
-          }),
-      ),
+    const { response, text } = yield* Effect.gen(function* () {
+      const response = yield* HttpClient.execute(outgoing).pipe(
+        Effect.mapError(
+          (error) =>
+            new GithubUnreachable({ message: `GitHub could not be reached: ${error.message}` }),
+        ),
+      );
+      const text = yield* response.text.pipe(
+        Effect.mapError(
+          (error) =>
+            new GithubUnreachable({
+              message: `GitHub's response could not be read: ${error.message}`,
+            }),
+        ),
+      );
+      return { response, text };
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: GITHUB_REQUEST_TIMEOUT,
+        orElse: () =>
+          Effect.fail(
+            new GithubUnreachable({
+              message: `GitHub did not answer ${request.method} ${new URL(url).pathname} within ${String(Duration.toSeconds(GITHUB_REQUEST_TIMEOUT))} seconds.`,
+            }),
+          ),
+      }),
     );
     const body = yield* Effect.try({
       try: (): Schema.Json => (text.length === 0 ? null : (JSON.parse(text) as Schema.Json)),
@@ -150,14 +200,85 @@ export const requestGithub = (
 
 /**
  * Checks whether a response is GitHub refusing the request because of a rate
- * limit. That is a 429, or a 403 that carries `Retry-After` or reports no
- * requests left in the window. Any other 403 means the account may not do
- * what was asked.
+ * limit. That is a 429, or a 403 that:
+ *
+ * - carries `Retry-After`;
+ * - reports no requests left in the window (the primary rate limit);
+ * - has a message about a rate limit. A secondary rate limit, which GitHub
+ *   applies to bursts of requests, can come with requests still left and no
+ *   `Retry-After`, and only its message tells it apart.
+ *
+ * Any other 403 means the account may not do what was asked.
  */
 export const isRateLimited = (response: GithubResponse): boolean =>
   response.status === 429 ||
   (response.status === 403 &&
-    (response.retryAfterSeconds !== undefined || response.rateLimitRemaining === 0));
+    (response.retryAfterSeconds !== undefined ||
+      response.rateLimitRemaining === 0 ||
+      /rate limit/i.test(readGithubExplanation(response.body))));
+
+/**
+ * Returns how many seconds to wait before the next request after a rate
+ * limit, following GitHub's documentation:
+ *
+ * - `Retry-After`, when GitHub sent it;
+ * - else, when no requests are left, the time until `X-RateLimit-Reset`, at
+ *   least one second;
+ * - else one minute.
+ *
+ * `X-RateLimit-Reset` is ignored while requests are left, because it is when
+ * the primary window ends, and a secondary rate limit has nothing to do with
+ * that window. `nowMillis` is the current time, in milliseconds since the
+ * epoch.
+ */
+export const computeRateLimitWaitSeconds = (
+  response: GithubResponse,
+  nowMillis: number,
+): number => {
+  if (response.retryAfterSeconds !== undefined) return response.retryAfterSeconds;
+  if (response.rateLimitRemaining === 0 && response.rateLimitResetAt !== undefined) {
+    return Math.max(1, response.rateLimitResetAt - Math.floor(nowMillis / 1000));
+  }
+  return DEFAULT_RATE_LIMIT_WAIT_SECONDS;
+};
+
+/** The part of GitHub's error body the plugin reads. */
+const GithubErrorBody = Schema.Struct({
+  message: Schema.optionalKey(Schema.String),
+  /** On a 422, what was wrong with each field. An entry is a string or an object. */
+  errors: Schema.optionalKey(
+    Schema.Array(
+      Schema.Union([
+        Schema.String,
+        Schema.Struct({
+          message: Schema.optionalKey(Schema.String),
+          field: Schema.optionalKey(Schema.String),
+          code: Schema.optionalKey(Schema.String),
+        }),
+      ]),
+    ),
+  ),
+});
+
+const decodeGithubErrorBody = Schema.decodeUnknownOption(GithubErrorBody);
+
+/**
+ * Returns GitHub's own explanation in an error body: its message, followed by
+ * what was wrong with each field when GitHub lists that. Returns an empty
+ * string when the body holds neither.
+ */
+export const readGithubExplanation = (body: Schema.Json): string => {
+  const decoded = Option.getOrUndefined(decodeGithubErrorBody(body));
+  if (decoded === undefined) return "";
+  const details = (decoded.errors ?? []).map((entry) =>
+    typeof entry === "string"
+      ? entry
+      : (entry.message ?? [entry.field, entry.code].filter((part) => part !== undefined).join(" ")),
+  );
+  return [decoded.message, ...details]
+    .filter((part) => part !== undefined && part.length > 0)
+    .join(": ");
+};
 
 /**
  * Returns the token in a GitHub Connection's credentials: the pasted `pat`
