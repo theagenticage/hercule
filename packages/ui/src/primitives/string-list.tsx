@@ -68,8 +68,10 @@ export function StringList({
                 Remove
               </Button>
             </div>
+            {/* The margin puts the error nearer its own entry than the next
+                one, so it reads as belonging to the entry above it. */}
             {error === undefined ? null : (
-              <p className="text-fine text-fail" role="alert">
+              <p className="mb-1.5 text-fine text-fail" role="alert">
                 {error}
               </p>
             )}
