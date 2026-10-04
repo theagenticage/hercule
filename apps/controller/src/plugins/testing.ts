@@ -135,6 +135,8 @@ export const createPluginFixture = (options: {
   readonly activateFailures?: number;
   /** The message the returned deactivate fails with, when it fails. */
   readonly deactivateFails?: string;
+  /** Whether the returned deactivate never returns, like a plugin stuck on a lock. */
+  readonly deactivateHangs?: boolean;
   /** Whether the hooks yield, so a second caller can interleave with them. */
   readonly slow?: boolean;
   /** A hook that misbehaves in a way the options above cannot express. */
@@ -181,6 +183,7 @@ export const createPluginFixture = (options: {
           pause,
           Effect.suspend(() => {
             calls.push("deactivate");
+            if (options.deactivateHangs === true) return Effect.never;
             if (options.deactivateFails !== undefined) {
               return Effect.fail(new PluginError({ message: options.deactivateFails }));
             }
