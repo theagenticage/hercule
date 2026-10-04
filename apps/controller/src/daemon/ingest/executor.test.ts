@@ -22,9 +22,12 @@ describe("IngestExecutor", () => {
           Effect.ensuring(
             // The finalizer waits, as a handle's `close` does, so `stop`
             // returning early would show here.
-            Effect.andThen(Effect.yieldNow, () => {
-              finalized = true;
-            }),
+            Effect.andThen(
+              Effect.yieldNow,
+              Effect.sync(() => {
+                finalized = true;
+              }),
+            ),
           ),
         );
 
