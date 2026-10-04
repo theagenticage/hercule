@@ -8,7 +8,11 @@ import type { OpenRequest } from "@hercule/contract";
 import type { Accessory, Hue, Shape } from "../../faces/look";
 import type { ProjectTint } from "../../screens/project-tile";
 
-/** A hat a colleague can wear. */
+/**
+ * Headwear a colleague can wear on top of its look. The homburg is not
+ * here: it is one of the look's accessories, so every look that has it
+ * wears it.
+ */
 export type Headwear = "cloche" | "headset" | "beret";
 
 /** What a colleague looks like: its crew hue, body shape and what it wears. */
@@ -16,7 +20,7 @@ interface CrewLook {
   readonly hue: Hue;
   readonly shape: Shape;
   readonly accessories: ReadonlyArray<Accessory>;
-  /** The colleague's hat, or null. No look sets one yet: #338 decides who wears which. */
+  /** The colleague's headwear, or null. No look sets it yet: #338 decides who wears which. */
   readonly headwear: Headwear | null;
 }
 
