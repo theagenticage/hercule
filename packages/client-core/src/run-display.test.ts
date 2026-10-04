@@ -197,6 +197,12 @@ describe("describeStepDuration", () => {
     assert.strictEqual(describeStepDuration({ startedAt: START }, NOW), "4.3s");
     assert.strictEqual(describeStepDuration({}, NOW), "");
   });
+
+  it("is empty for a signal's line, which fires at one moment", () => {
+    const fired = { startedAt: START, finishedAt: at(3) };
+    assert.strictEqual(describeStepDuration({ ...fired, kind: "signal" }, NOW), "");
+    assert.strictEqual(describeStepDuration({ ...fired, kind: "agent" }, NOW), "3ms");
+  });
 });
 
 describe("describeRunStatus", () => {

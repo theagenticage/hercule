@@ -136,12 +136,16 @@ function WorkflowSessionsFold({
 
   return (
     <section className="flex max-w-[568px] flex-col gap-1.5">
-      {/* A digest steps back from the lanes above it, until it is opened. */}
+      {/*
+        A digest steps back from the lanes above it, until it is opened. The
+        button reaches past the section by its own padding, so its words line
+        up with the lane headings and only its hover background sticks out.
+      */}
       <button
         type="button"
         aria-expanded={open}
         onClick={toggle}
-        className="flex w-full cursor-pointer items-center gap-2 rounded-control px-2.5 py-1 text-left text-fine text-muted not-aria-expanded:opacity-82 hover:bg-line-soft hover:text-ink aria-expanded:bg-line-soft aria-expanded:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
+        className="-mx-2.5 flex cursor-pointer items-center gap-2 rounded-control px-2.5 py-1 text-left text-fine text-muted not-aria-expanded:opacity-82 hover:bg-line-soft hover:text-ink aria-expanded:bg-line-soft aria-expanded:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
       >
         <span className="min-w-0 flex-1 truncate">Sessions started by workflows</span>
         <span className="shrink-0 tabular-nums">{`${open ? "hide" : "show"} ${summary}`}</span>

@@ -1055,6 +1055,8 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     expect(rows).toHaveLength(2);
     expect(readPageText(rows[0])).toContain("Signal");
     expect(readStatusWords(rows[0]!)).toEqual(["completed"]);
+    // A signal fires at one moment, so its row shows no duration.
+    expect(readPageText(rows[0])).not.toMatch(/\dms\b/);
     // A signal that has not fired has no row: it is not a step the run failed to reach.
     expect(listStepRows("pr_merged")).toEqual([]);
 

@@ -25,6 +25,8 @@ import type {
   WorkflowAction,
 } from "@hercule/contract";
 import { describeActor, type ActorReading, type ActorTarget } from "./actor-display";
+// A type-only import, so it adds no import cycle at runtime: run-graph imports this module.
+import type { StepLineKind } from "./run-graph";
 import { toIdTail } from "./id-tail";
 import { formatNameList } from "./name-list";
 import { formatDuration } from "./threads/duration";
@@ -314,8 +316,16 @@ export const formatElapsed = (ms: number): string => {
  * `40ms` or `1m 15s`, or an empty string for a step that has not started. The
  * web app and the CLI both show a step's duration with it, so the two never
  * disagree about the same step record.
+ *
+ * A signal's line also returns an empty string: a signal fires at one moment,
+ * so the time between its record's start and end is how long the controller
+ * took to note it, not anything the signal did.
  */
-export const describeStepDuration = (times: Timestamps, now: number): string => {
+export const describeStepDuration = (
+  times: Timestamps & { readonly kind?: StepLineKind },
+  now: number,
+): string => {
+  if (times.kind === "signal") return "";
   const elapsed = measureElapsed(times.startedAt, times.finishedAt, now);
   return elapsed === undefined ? "" : formatElapsed(elapsed);
 };
