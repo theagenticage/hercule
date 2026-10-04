@@ -1889,7 +1889,7 @@ export const CLI = {
   },
   "connection.update": {
     command: "connection update",
-    help: "Edits what the user chose about a Connection: its label, its topics, its config, and how often each of its feeds is polled. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
+    help: "Edits a Connection's label, topics, config, and how often each of its feeds is polled. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
     examples: [
       { args: ["1f3a9c2e", "--label", "personal"] },
       { args: ["1f3a9c2e", "--feed-intervals", '{"repos":300}'] },
