@@ -197,6 +197,13 @@ const baseline = async (repository: StubRepository): Promise<IngestHarness> => {
 const listEvents = (harness: IngestHarness) =>
   harness.events.map((event) => `${event.kind} ${event.dedupKey}`);
 
+/**
+ * Returns each recorded event as `kind dedupKey`, once per dedup key, in the
+ * order of first emission. The host writes an event whose key it has seen
+ * before as nothing, so this is what the host keeps.
+ */
+const listWrittenEvents = (harness: IngestHarness) => [...new Set(listEvents(harness))];
+
 describe("the repos feed", () => {
   it("emits nothing on a repository's first poll, and records its open items", async () => {
     const repository = buildRepository();
@@ -372,6 +379,45 @@ describe("the repos feed", () => {
       `github.pr.closed pr.closed:${REPO}#3:2026-10-01T11:05:00Z`,
     ]);
     expect(harness.events[0]!.url).toBe(`https://github.com/${REPO}/pull/2`);
+  });
+
+  it("emits changes made in the same second as the last poll's snapshot", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    const time = "2026-10-01T11:00:00Z";
+    repository.issues[0] = { ...repository.issues[0]!, title: "Renamed", updated_at: time };
+    repository.issues[1] = { ...repository.issues[1]!, title: "Renamed", updated_at: time };
+    repository.etag = '"v2"';
+    await poll(harness, answerFrom(repository));
+    expect(harness.events).toEqual([]);
+    // Later in the same second: GitHub's `updated_at` counts whole seconds,
+    // so neither item's update time moves. Only the ETag tells that something
+    // changed.
+    repository.issues[0] = {
+      ...repository.issues[0],
+      labels: [{ name: "bug" }, { name: "triage" }],
+      comments: 1,
+    };
+    repository.comments.push(buildComment(501, 1, time));
+    repository.issues[1] = {
+      ...repository.issues[1],
+      state: "closed",
+      closed_at: time,
+      pull_request: { merged_at: time },
+    };
+    repository.reviews[2] = [
+      { id: 101, user: { login: "hubot" }, state: "APPROVED", submitted_at: time },
+    ];
+    repository.etag = '"v3"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual([
+      `github.issue.labeled issue.labeled:${REPO}#1:${time}:${computeDigest(["+triage"])}`,
+      `github.pr.merged pr.merged:${REPO}#2`,
+      "github.pr.review-submitted pr.review-submitted:101",
+      "github.issue.commented issue.commented:501",
+    ]);
   });
 
   it("emits a new head commit and each review submitted since the last poll", async () => {
@@ -637,10 +683,10 @@ describe("the repos feed", () => {
     expect(assigned[1]).toBe(assigned[0]);
   });
 
-  it("emits no comment or review that was there before the first poll", async () => {
+  it("emits no comment or review from before the first poll, except once for one in the newest update's second", async () => {
     const repository = buildRepository();
-    // The newest update is a comment on a pull request closed just before the
-    // first poll, with a review in the same second.
+    // The newest update is a pull request closed just before the first poll,
+    // with a review in an earlier second and another in its update's second.
     repository.issues[1] = {
       ...repository.issues[1]!,
       state: "closed",
@@ -650,6 +696,7 @@ describe("the repos feed", () => {
     };
     repository.comments.push(buildComment(500, 2, "2026-10-01T10:00:00Z", "pull"));
     repository.reviews[2] = [
+      { id: 99, user: { login: "mona" }, state: "APPROVED", submitted_at: "2026-10-01T09:50:00Z" },
       {
         id: 100,
         user: { login: "hubot" },
@@ -661,8 +708,11 @@ describe("the repos feed", () => {
 
     const { result } = await poll(harness, answerFrom(repository));
 
+    // GitHub's times count whole seconds, so the feed cannot tell a review
+    // submitted in the baseline's own second from one submitted just after
+    // it. It emits that review once rather than risk losing a new one.
     expect(Result.isSuccess(result)).toBe(true);
-    expect(harness.events).toEqual([]);
+    expect(listEvents(harness)).toEqual(["github.pr.review-submitted pr.review-submitted:100"]);
 
     // A label added after the close is diffed, because the closed item is in the snapshot.
     repository.issues[1] = {
@@ -674,7 +724,8 @@ describe("the repos feed", () => {
 
     await poll(harness, answerFrom(repository));
 
-    expect(listEvents(harness)).toEqual([
+    expect(listWrittenEvents(harness)).toEqual([
+      "github.pr.review-submitted pr.review-submitted:100",
       `github.pr.labeled pr.labeled:${REPO}#2:2026-10-01T10:00:00Z:${computeDigest(["+late"])}`,
     ]);
   });

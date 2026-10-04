@@ -8,9 +8,11 @@
  * 1. `GET /repos/{o}/{r}/issues?state=all&sort=updated&direction=asc&since=<cursor>`,
  *    with the last ETag. It lists issues and pull requests updated since the
  *    last poll. `since` includes the cursor's own second, so the listing
- *    repeats the items updated in that second; an item whose `updated_at`
- *    equals its snapshot's is skipped. A repository where nothing changed
- *    answers 304, which costs no quota.
+ *    repeats the items updated in that second, and every item listed is
+ *    diffed again. GitHub's `updated_at` counts whole seconds, so an item
+ *    can change twice in one second without its `updated_at` moving; a diff
+ *    that finds nothing new emits nothing. A repository where nothing
+ *    changed answers 304, which costs no quota.
  * 2. For each pull request in that list: `GET .../pulls/{n}/reviews`, for new
  *    reviews, and, when it is open, `GET .../pulls/{n}`, for its head commit.
  * 3. When an item's comment count went up, or the last poll's comment
@@ -24,10 +26,14 @@
  * the last poll was closed then, so when it shows up open it may have been
  * reopened; its `state_reason` tells.
  *
- * A comment or a review is new when it was created after the item's
- * snapshot, or after the cursor for an item with no snapshot. Comparing with
- * the item's own snapshot, rather than the cursor, keeps a comment that was
- * created in the cursor's second on another item.
+ * A comment or a review is new when it was created at or after the item's
+ * snapshot, or at or after the cursor for an item with no snapshot.
+ * Comparing with the item's own snapshot, rather than the cursor, keeps a
+ * comment that was created in the cursor's second on another item. "At or
+ * after" keeps one created in the snapshot's own second too; its dedup key
+ * is its id, so seeing it again in the next poll writes nothing. The price:
+ * a comment or review that was already there at the snapshot, in that same
+ * second, is emitted once, even when the snapshot is the baseline.
  *
  * The keys of the events a diff finds hold the snapshot's `updatedAt`: the
  * state the diff started from. A poll that emitted its events but failed
@@ -76,7 +82,7 @@ type ItemSnapshot = Schema.Schema.Type<typeof ItemSnapshot>;
 const PendingComments = Schema.Struct({
   /** The `updated_at` of the last comment read; the listing is sorted by it. */
   since: Schema.String,
-  /** The cursor of the poll that stopped. A comment created after it is new. */
+  /** The cursor of the poll that stopped. A comment created at or after it is new. */
   createdAfter: Schema.optionalKey(Schema.String),
 });
 
@@ -140,10 +146,6 @@ const listMissingFrom = (
 const isAtOrAfter = (time: string, start: string | undefined): boolean =>
   start === undefined || Date.parse(time) >= Date.parse(start);
 
-/** Checks whether ISO 8601 timestamp `time` is strictly after `start`. An absent start is before everything. */
-const isAfter = (time: string, start: string | undefined): boolean =>
-  start === undefined || Date.parse(time) > Date.parse(start);
-
 /** Returns the label names of an issue. */
 const readLabels = (issue: ListedIssue): Array<string> => issue.labels.map((label) => label.name);
 
@@ -172,7 +174,7 @@ const isNewItem = (
 ): boolean => previous === undefined && isAtOrAfter(issue.created_at, cursor);
 
 /**
- * Returns the time after which a comment or review on an item is new: the
+ * Returns the time from which a comment or review on an item is new: the
  * item's snapshot, or the cursor for an old item with no snapshot. Returns
  * undefined for a new item, whose every comment and review is new.
  */
@@ -382,7 +384,7 @@ const buildItemSnapshot = (issue: ListedIssue, headSha: string | undefined): Ite
 
 /**
  * Fetches a pull request's reviews and emits one `github.pr.review-submitted`
- * per review submitted after `start`. A pending review is not submitted
+ * per review submitted at or after `start`. A pending review is not submitted
  * yet, and a dismissed one is no longer a verdict, so neither emits.
  */
 const emitNewReviews = (
@@ -404,7 +406,7 @@ const emitNewReviews = (
       const review = yield* decodeGithubValue(ListedReview, raw, "a review");
       const verdict = readReviewVerdict(review.state);
       const submittedAt = review.submitted_at ?? null;
-      if (verdict === undefined || submittedAt === null || !isAfter(submittedAt, start)) {
+      if (verdict === undefined || submittedAt === null || !isAtOrAfter(submittedAt, start)) {
         continue;
       }
       yield* poll.emit(
@@ -459,7 +461,7 @@ interface CommentQuery {
   /** The comment listing to resume, which overrides `since` and the per-item starts. */
   readonly pending: PendingComments | undefined;
   /**
-   * The time after which a comment on an item is new, by item number, as
+   * The time from which a comment on an item is new, by item number, as
    * `computeNewActivityStart` returns it. An item not in the map uses `since`.
    */
   readonly starts: ReadonlyMap<number, string | undefined>;
@@ -468,16 +470,16 @@ interface CommentQuery {
 /**
  * Fetches the repository's comments updated since `query.since`, and emits
  * `github.issue.commented` or `github.pr.commented` for each one created
- * after its item's start; an edited old comment emits nothing. These are the
- * comments on an issue or on a pull request's conversation. A comment on a
- * pull request's diff belongs to a review and arrives as
+ * at or after its item's start; an edited old comment emits nothing. These
+ * are the comments on an issue or on a pull request's conversation. A
+ * comment on a pull request's diff belongs to a review and arrives as
  * `github.pr.review-submitted`.
  *
  * Returns where the next poll resumes when the listing stopped at its page
  * limit, or undefined when every comment was read. A resumed listing counts
- * a comment as new when it was created after the cursor of the poll that
- * stopped, because that poll saved snapshots newer than the comments it did
- * not read.
+ * a comment as new when it was created at or after the cursor of the poll
+ * that stopped, because that poll saved snapshots newer than the comments it
+ * did not read.
  */
 const emitNewComments = (
   poll: RepoPoll,
@@ -514,7 +516,7 @@ const emitNewComments = (
           : query.starts.has(number)
             ? query.starts.get(number)
             : query.since;
-      if (!isAfter(comment.created_at, start)) continue;
+      if (!isAtOrAfter(comment.created_at, start)) continue;
       const kind = /\/pull\/\d+#/.test(comment.html_url) ? "pr" : "issue";
       const item = listed.get(number) ?? { repo: poll.repo, kind, number };
       yield* poll.emit(
@@ -563,16 +565,13 @@ const pollRepo = (
     const issues = yield* Effect.forEach(listing.items, (raw) =>
       Effect.map(decodeGithubValue(ListedIssue, raw, "an issue"), (issue) => ({ issue, raw })),
     );
-    const changed = issues.filter(
-      ({ issue }) => stored.items[String(issue.number)]?.updatedAt !== issue.updated_at,
-    );
     const listed = new Map(
       issues.map(({ issue }) => [issue.number, buildIssueItem(poll.repo, issue)] as const),
     );
     const items: Record<string, ItemSnapshot> = { ...stored.items };
     const commentStarts = new Map<number, string | undefined>();
 
-    for (const { issue, raw } of changed) {
+    for (const { issue, raw } of issues) {
       const previous = stored.items[String(issue.number)];
       const item = buildIssueItem(poll.repo, issue);
       const start = computeNewActivityStart(issue, previous, stored.cursor);
