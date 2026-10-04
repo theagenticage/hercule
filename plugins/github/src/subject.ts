@@ -8,7 +8,7 @@
  * one spelling everywhere: a filter on `subject.repo` and a `task.query` on a
  * ref both match whatever case GitHub reported.
  */
-import type { EmitEvent } from "@hercule/plugin-host";
+import type { EmittedEvent } from "@hercule/plugin-host";
 import type { Schema } from "effect";
 import type { GithubSubject } from "./kinds";
 
@@ -78,7 +78,7 @@ export interface ItemEventFacts {
   readonly occurredAt: string;
   /** The payload's fields beside `subject`, such as `added` and `removed` for a label kind. */
   readonly fields?: Readonly<Record<string, unknown>>;
-  readonly raw: Schema.Json;
+  readonly raw: Schema.JsonObject;
 }
 
 /**
@@ -86,7 +86,7 @@ export interface ItemEventFacts {
  * is the item's subject block plus the kind's own fields, and the refs and
  * URL are the item's.
  */
-export const buildItemEvent = (item: GithubItem, facts: ItemEventFacts): EmitEvent => {
+export const buildItemEvent = (item: GithubItem, facts: ItemEventFacts): EmittedEvent => {
   const subject = buildItemSubject(item);
   return {
     kind: facts.kind,

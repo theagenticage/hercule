@@ -405,7 +405,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Checks the user's poll intervals against the feeds the type's event
-   * sources declare. Fails with `validation`, with one issue per refused feed
+   * source declares. Fails with `validation`, with one issue per refused feed
    * at `feedIntervals.<feed>`, when a feed is not declared, or when its
    * interval is shorter than the feed's shortest: its `minIntervalSeconds`, or
    * its default when it declares no minimum.
@@ -414,11 +414,10 @@ const make = Effect.gen(function* () {
    * the user would otherwise see a number stored that is not the one polled.
    */
   const checkFeedIntervals = (
-    contribution: Contribution,
+    { contribution, feeds }: RegisteredConnectionType,
     intervals: Readonly<Record<string, number>>,
   ): Effect.Effect<void, Validation> =>
     Effect.gen(function* () {
-      const feeds = yield* types.readFeeds(contribution.type);
       const issues = Object.entries(intervals).flatMap(([feed, seconds]) => {
         const declaration = feeds[feed];
         if (declaration === undefined) {
@@ -912,8 +911,7 @@ const make = Effect.gen(function* () {
           yield* readConfig(contribution, patch.config);
         }
         if (patch.feedIntervals !== undefined) {
-          const { contribution } = yield* readStoredTypeOrFail(row);
-          yield* checkFeedIntervals(contribution, patch.feedIntervals);
+          yield* checkFeedIntervals(yield* readStoredTypeOrFail(row), patch.feedIntervals);
         }
         return yield* withTransaction(
           sql,

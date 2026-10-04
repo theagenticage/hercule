@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { EmitEvent, IngestContext, PluginCapability } from "@hercule/plugin-host";
+import type { EmittedEvent, IngestContext, PluginCapability } from "@hercule/plugin-host";
 import { uuidToString } from "../db";
 import { resourceRepository } from "../resources";
 import { PluginHost } from "./index";
@@ -47,7 +47,7 @@ const runWithContext = <A, E>(
     }).pipe(Effect.provide(buildPluginStack()), asUser),
   );
 
-const THING_DONE: EmitEvent = {
+const THING_DONE: EmittedEvent = {
   kind: EVENT_SOURCE_FIXTURE.kind,
   dedupKey: "thing-1",
   occurredAt: "2026-09-01T10:00:00Z",
@@ -80,7 +80,7 @@ const readFixtureEvents = Effect.gen(function* () {
 });
 
 /** Runs an emit and returns its error message, or fails the test when it succeeds. */
-const readEmitFailure = (context: IngestContext, event: EmitEvent) =>
+const readEmitFailure = (context: IngestContext, event: EmittedEvent) =>
   Effect.map(Effect.flip(context.emit(event)), (error) => error.message);
 
 describe("IngestContext.emit", () => {

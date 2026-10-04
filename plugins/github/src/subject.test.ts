@@ -6,7 +6,7 @@ describe("the subject, refs and url of an event", () => {
   it("point an issue event at the issue, and its repository", () => {
     const event = buildItemEvent(
       { repo: "Octocat/Hello-World", kind: "issue", number: 42, title: "Bug", author: "mona" },
-      { kind: "github.issue.opened", dedupKey: "k", occurredAt: "2026-10-01T00:00:00Z", raw: null },
+      { kind: "github.issue.opened", dedupKey: "k", occurredAt: "2026-10-01T00:00:00Z", raw: {} },
     );
 
     expect(event.refs).toEqual([
@@ -33,7 +33,7 @@ describe("the subject, refs and url of an event", () => {
         dedupKey: "k",
         occurredAt: "2026-10-01T00:00:00Z",
         fields: { added: ["bug"], removed: [] },
-        raw: null,
+        raw: {},
       },
     );
 

@@ -139,7 +139,7 @@ describe("listConnectionTypes", () => {
     ]);
   });
 
-  it("gives a type the feeds of the event sources that poll for it, from any plugin", () => {
+  it("gives a type the feeds of the event source that polls for it", () => {
     const [paper] = listConnectionTypes([
       buildPlugin("paper-trail", [
         { extensionPoint: "connection-type", id: "paper-trail/paper", definition: PAPER },
@@ -162,24 +162,12 @@ describe("listConnectionTypes", () => {
           definition: { connectionType: "paper-trail/fax", kinds: {}, feeds: { pages: {} } },
         },
       ]),
-      buildPlugin("paper-extra", [
-        {
-          extensionPoint: "event-source",
-          id: "paper-extra/stamps",
-          definition: {
-            connectionType: "paper-trail/paper",
-            kinds: {},
-            feeds: { stamps: { defaultIntervalSeconds: 600 } },
-          },
-        },
-      ]),
     ]);
 
     expect(paper?.feeds).toEqual([
       { name: "letters", defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
       // No minimum declared, so the default is the shortest interval allowed.
       { name: "parcels", defaultIntervalSeconds: 300, minIntervalSeconds: 300 },
-      { name: "stamps", defaultIntervalSeconds: 600, minIntervalSeconds: 600 },
     ]);
   });
 

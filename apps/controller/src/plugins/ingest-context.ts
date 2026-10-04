@@ -21,8 +21,8 @@ import {
 } from "@hercule/contract";
 import {
   PluginError,
-  type ConnectionRef,
-  type EmitEvent,
+  type IngestConnection,
+  type EmittedEvent,
   type IngestContext,
   type LinkedResource,
 } from "@hercule/plugin-host";
@@ -44,7 +44,7 @@ const decodeEnvelope = Schema.decodeUnknownEffect(
     refs: Schema.Array(ExternalRef),
     url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
     system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
-    raw: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
+    raw: Schema.optionalKey(Schema.JsonObject),
   }),
   { errors: "all" },
 );
@@ -96,7 +96,7 @@ const make = Effect.gen(function* () {
   const emit = (
     source: RegisteredEventSource,
     connectionId: string,
-    event: EmitEvent,
+    event: EmittedEvent,
   ): Effect.Effect<void, PluginError> =>
     Effect.gen(function* () {
       const kind = source.kinds.get(event.kind);
@@ -160,7 +160,7 @@ const make = Effect.gen(function* () {
      */
     buildIngestContext: (
       source: RegisteredEventSource,
-      connection: ConnectionRef,
+      connection: IngestConnection,
     ): IngestContext => ({
       emit: (event) => emit(source, connection.id, event),
       state: connectionState.buildStore(connection.id),

@@ -20,7 +20,13 @@ import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, type GithubItem } from "../subject";
 import { GithubCheckSuites, GithubPull, type GithubCheckSuite } from "./feed-objects";
-import { decodeGithubValue, fetchGithub, truncateRaw, type FeedError } from "./requests";
+import {
+  decodeGithubValue,
+  fetchGithub,
+  readGithubObject,
+  truncateRaw,
+  type FeedError,
+} from "./requests";
 import { pollWatchedRepos } from "./state";
 
 /** What the feed keeps of one open pull request, to reuse when the listing answers 304. */
@@ -170,11 +176,8 @@ const checkHead = (
     });
     if (response.status === 304 && head !== undefined) return head;
     const etag = response.etag === undefined ? {} : { etag: response.etag };
-    const { check_suites } = yield* decodeGithubValue(
-      GithubCheckSuites,
-      response.body,
-      "check suites",
-    );
+    const body = yield* readGithubObject(response.body, "check suites");
+    const { check_suites } = yield* decodeGithubValue(GithubCheckSuites, body, "check suites");
     const suites = listCountedSuites(check_suites);
     if (suites.length === 0 || suites.some((suite) => suite.status !== "completed")) {
       return { ...etag, done: false };
@@ -201,7 +204,7 @@ const checkHead = (
               conclusion: suite.conclusion ?? "unknown",
             })),
           },
-          raw: truncateRaw(response.body),
+          raw: truncateRaw(body),
         }),
       );
     }

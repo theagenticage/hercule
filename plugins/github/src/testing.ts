@@ -14,7 +14,7 @@ import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
   PluginError,
-  type EmitEvent,
+  type EmittedEvent,
   type IngestContext,
   type KeyValueStore,
   type LinkedResource,
@@ -110,7 +110,7 @@ export const readStubRequestTarget = (
 export interface IngestHarness {
   readonly context: IngestContext;
   /** Every event emitted, in order. */
-  readonly events: Array<EmitEvent>;
+  readonly events: Array<EmittedEvent>;
   /** The Connection's state, by key. */
   readonly state: Map<string, Schema.Json>;
   /** The Resources linked to the Connection; a test may change them between polls. */
@@ -126,7 +126,7 @@ export interface IngestHarness {
 export const buildIngestHarness = (
   credentials: Readonly<Record<string, string>> = { pat: "ghp_test-token" },
 ): IngestHarness => {
-  const events: Array<EmitEvent> = [];
+  const events: Array<EmittedEvent> = [];
   const state = new Map<string, Schema.Json>();
   const resources: Array<LinkedResource> = [];
   const store: KeyValueStore = {
@@ -135,7 +135,7 @@ export const buildIngestHarness = (
     delete: (key) => Effect.sync(() => void state.delete(key)),
     list: () => Effect.sync(() => [...state.keys()]),
   };
-  const emit = (event: EmitEvent): Effect.Effect<void, PluginError> => {
+  const emit = (event: EmittedEvent): Effect.Effect<void, PluginError> => {
     const declaration = GITHUB_EVENT_KINDS[event.kind];
     if (declaration === undefined) {
       return Effect.fail(new PluginError({ message: `Undeclared kind ${event.kind}` }));

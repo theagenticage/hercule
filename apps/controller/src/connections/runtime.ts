@@ -1,11 +1,10 @@
 /**
- * Holds the connection types registered at boot and the feeds their event
- * sources declared, and builds the `ConnectionsRuntime` each plugin uses to
- * reach its own connections.
+ * Holds the connection types registered at boot, and builds the
+ * `ConnectionsRuntime` each plugin uses to reach its own connections.
  *
  * This module is in the connections domain rather than in the plugin host,
  * because everything it uses is here: the connection rows, their secrets and
- * the OAuth refresh. The plugin host registers types and feeds here at boot
+ * the OAuth refresh. The plugin host registers types here at boot
  * and asks for a plugin's `ConnectionsRuntime` at activation; this module
  * never calls the plugin host.
  *
@@ -48,28 +47,20 @@ import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository, type StoredConnection } from "./repository";
 
 /**
- * A connection type a plugin declared: the decoded catalog entry, plus the
- * `validate` function, which a catalog cannot hold because it is code.
- * `contribution.type` is the qualified `<pluginId>/<word>` name the host built,
- * and every lookup uses that name.
+ * A connection type a plugin declared.
+ *
+ * - `contribution` is the decoded catalog entry, plus the `validate`
+ *   function, which a catalog cannot hold because it is code.
+ *   `contribution.type` is the qualified `<pluginId>/<word>` name the host
+ *   built, and every lookup uses that name.
+ * - `feeds` are the feeds the type's event source declared, keyed by feed
+ *   name, and `{}` for a type no event source ingests for. A type has at
+ *   most one event source: the plugin host refuses a second one.
  */
 export interface RegisteredConnectionType {
   readonly pluginId: string;
   readonly contribution: ConnectionType & Pick<ConnectionTypeContribution, "validate">;
-}
-
-/** The feeds of one connection type, keyed by feed name. */
-export type FeedDeclarations = Readonly<Record<string, FeedDeclaration>>;
-
-/**
- * The feeds one event source declared, and the connection type it ingests
- * for. The plugin host passes these in at boot, so this domain learns each
- * type's feeds without reading the plugin host.
- */
-export interface FeedSource {
-  /** The qualified `<pluginId>/<word>` name of the connection type. */
-  readonly connectionType: string;
-  readonly feeds: FeedDeclarations;
+  readonly feeds: Readonly<Record<string, FeedDeclaration>>;
 }
 
 /**
@@ -85,7 +76,6 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const findOAuthClient = yield* oauthClients;
   const declared = yield* Ref.make<ReadonlyMap<string, RegisteredConnectionType>>(new Map());
-  const feeds = yield* Ref.make<ReadonlyMap<string, FeedDeclarations>>(new Map());
 
   const toConnectionSummary = (row: StoredConnection): ConnectionSummary => ({
     id: row.id,
@@ -404,32 +394,6 @@ const make = Effect.gen(function* () {
     /** Replaces the registered connection types with the ones this boot declared. */
     replace: (types: ReadonlyArray<RegisteredConnectionType>): Effect.Effect<void> =>
       Ref.set(declared, new Map(types.map((one) => [one.contribution.type, one]))),
-
-    /**
-     * Replaces the feeds of every connection type with the ones this boot's
-     * event sources declared. A type with two event sources gets the feeds of
-     * both.
-     */
-    replaceFeeds: (sources: ReadonlyArray<FeedSource>): Effect.Effect<void> =>
-      Ref.set(
-        feeds,
-        sources.reduce(
-          (byType, source) =>
-            byType.set(source.connectionType, {
-              ...byType.get(source.connectionType),
-              ...source.feeds,
-            }),
-          new Map<string, FeedDeclarations>(),
-        ),
-      ),
-
-    /**
-     * Returns the feeds the event sources of this boot declared for a
-     * connection type, keyed by feed name. Returns `{}` for a type no event
-     * source ingests for.
-     */
-    readFeeds: (type: string): Effect.Effect<FeedDeclarations> =>
-      Effect.map(Ref.get(feeds), (all) => all.get(type) ?? {}),
 
     /** Returns the connection type with this qualified name, if this boot registered one. */
     named: (type: string): Effect.Effect<Option.Option<RegisteredConnectionType>> =>

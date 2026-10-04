@@ -11,7 +11,7 @@
  */
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
-import type { EmitEvent, IngestContext, PollResult } from "@hercule/plugin-host";
+import type { EmittedEvent, IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, buildRepoRef, buildRepoSubject } from "../subject";
 import { GithubNotification } from "./feed-objects";
 import {
@@ -62,7 +62,10 @@ const parseSubjectUrl = (
  * as a release, a discussion or a check suite, gets its repository's: this
  * plugin has no ref for those.
  */
-export const buildNotificationEvent = (thread: GithubNotification, raw: Schema.Json): EmitEvent => {
+export const buildNotificationEvent = (
+  thread: GithubNotification,
+  raw: Schema.JsonObject,
+): EmittedEvent => {
   const repo = thread.repository.full_name;
   const facts = {
     kind: "github.notification",

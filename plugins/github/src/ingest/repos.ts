@@ -40,6 +40,7 @@ import {
   decodeGithubValue,
   fetchGithub,
   fetchListing,
+  readGithubObject,
   truncateRaw,
   type FeedError,
 } from "./requests";
@@ -352,14 +353,15 @@ const emitNewHead = (
       path: `/repos/${poll.repo}/pulls/${String(item.number)}`,
       token: poll.token,
     });
-    const pull = yield* decodeGithubValue(GithubPull, response.body, "a pull request");
+    const body = yield* readGithubObject(response.body, "a pull request");
+    const pull = yield* decodeGithubValue(GithubPull, body, "a pull request");
     if (previousSha !== undefined && previousSha !== pull.head.sha) {
       yield* poll.emit(
         buildItemEvent(item, {
           kind: "github.pr.synchronized",
           dedupKey: `pr.synchronized:${poll.repo}#${String(item.number)}:${pull.head.sha}`,
           occurredAt: pull.updated_at,
-          raw: truncateRaw(response.body),
+          raw: truncateRaw(body),
         }),
       );
     }

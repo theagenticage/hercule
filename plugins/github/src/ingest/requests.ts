@@ -88,18 +88,37 @@ export interface GithubListing {
   /** True when GitHub answered the first page with 304; `items` is then empty. */
   readonly unchanged: boolean;
   /** The items of every page fetched, in GitHub's order. */
-  readonly items: ReadonlyArray<Schema.Json>;
+  readonly items: ReadonlyArray<Schema.JsonObject>;
   /** The first page's response, whose `ETag`, `Last-Modified` and `X-Poll-Interval` pace the next request. */
   readonly first: GithubResponse;
   /** True when the listing had more pages than `maxPages` and the rest were not fetched. */
   readonly truncated: boolean;
 }
 
+/** Checks that a JSON value is an object, rather than an array, a string, a number, a boolean or null. */
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Returns a response body GitHub sent as one object, such as a pull request,
+ * for the event's `raw`. Fails with a `PluginError` when the body is not a
+ * JSON object. `what` names the body in the error, such as "a pull request".
+ */
+export const readGithubObject = (
+  body: Schema.Json,
+  what: string,
+): Effect.Effect<Schema.JsonObject, PluginError> =>
+  isJsonObject(body)
+    ? Effect.succeed(body)
+    : Effect.fail(
+        new PluginError({ message: `GitHub returned something other than an object for ${what}.` }),
+      );
+
 /**
  * Fetches a listing and follows its `Link` header for up to `maxPages`
  * pages. Only the first request carries the ETag or `Last-Modified`: a 304
  * on it means the whole listing is unchanged. Fails as `fetchGithub` fails,
- * and with a `PluginError` when a page's body is not a JSON array.
+ * and with a `PluginError` when a page's body is not a JSON array of objects.
  */
 export const fetchListing = (
   request: GithubRequest,
@@ -108,16 +127,16 @@ export const fetchListing = (
   Effect.gen(function* () {
     const first = yield* fetchGithub(request);
     if (first.status === 304) return { unchanged: true, items: [], first, truncated: false };
-    const items: Array<Schema.Json> = [];
+    const items: Array<Schema.JsonObject> = [];
     let page = first;
     let pages = 1;
     for (;;) {
-      if (!Array.isArray(page.body)) {
+      if (!Array.isArray(page.body) || !page.body.every(isJsonObject)) {
         return yield* new PluginError({
-          message: `GitHub returned something other than a list for ${describeRequest(request)}.`,
+          message: `GitHub returned something other than a list of objects for ${describeRequest(request)}.`,
         });
       }
-      items.push(...(page.body as ReadonlyArray<Schema.Json>));
+      items.push(...page.body);
       if (page.nextPageUrl === undefined) break;
       if (pages === maxPages) return { unchanged: false, items, first, truncated: true };
       page = yield* fetchGithub({ method: "GET", path: page.nextPageUrl, token: request.token });
@@ -148,24 +167,23 @@ export const decodeGithubValue = <S extends Schema.ConstraintDecoder<unknown>>(
 /** The longest string kept in an event's `raw`, in UTF-16 code units. */
 const MAX_RAW_STRING_LENGTH = 2000;
 
+/** Returns a copy of a JSON value with every string longer than 2000 characters cut to that length. */
+const truncateLongStrings = (value: Schema.Json): Schema.Json => {
+  if (typeof value === "string") {
+    return value.length > MAX_RAW_STRING_LENGTH ? value.slice(0, MAX_RAW_STRING_LENGTH) : value;
+  }
+  if (Array.isArray(value)) return value.map(truncateLongStrings);
+  if (typeof value === "object" && value !== null) return truncateRaw(value as Schema.JsonObject);
+  return value;
+};
+
 /**
  * Returns a copy of a GitHub object with every string longer than 2000
  * characters cut to that length. An issue body or a comment may be 65,536
  * characters long, and `raw` is kept for every event, so it is bounded here;
  * the fields a reader needs are in the payload.
  */
-export const truncateRaw = (value: Schema.Json): Schema.Json => {
-  if (typeof value === "string") {
-    return value.length > MAX_RAW_STRING_LENGTH ? value.slice(0, MAX_RAW_STRING_LENGTH) : value;
-  }
-  if (Array.isArray(value)) return value.map(truncateRaw);
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, Schema.Json>).map(([key, field]) => [
-        key,
-        truncateRaw(field),
-      ]),
-    );
-  }
-  return value;
-};
+export const truncateRaw = (value: Schema.JsonObject): Schema.JsonObject =>
+  Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [key, truncateLongStrings(field)]),
+  );

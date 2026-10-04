@@ -130,19 +130,19 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
  * user edits the config, the host closes the handle and opens a new one, so a
  * handle never has to check whether its config is still current.
  */
-export interface ConnectionRef {
+export interface IngestConnection {
   readonly id: string;
   readonly config: unknown;
 }
 
 /**
- * One event, as a plugin emits it. The host adds the source (the plugin's id),
- * the Connection, and the time the event was received.
+ * One event, as a plugin emits it. The host adds the event's `source` column
+ * (the plugin's id), the Connection, and the time the event was received.
  *
  * - `kind` is one of the kinds the event source declared, and `payload` must
  *   match that kind's schema.
  * - `dedupKey` identifies the fact the event records. The log keeps one event
- *   per source, Connection and dedup key, so emitting the same fact twice
+ *   per `source`, Connection and dedup key, so emitting the same fact twice
  *   writes it once.
  * - `occurredAt` is when the fact happened in the external system, as an ISO
  *   8601 timestamp.
@@ -151,10 +151,10 @@ export interface ConnectionRef {
  * - `url` is where a person opens the event in the external system.
  * - `system` is the external system the event is about. It defaults to the
  *   plugin's id.
- * - `raw` is the external system's own body. It is stored, and no expression
- *   can read it.
+ * - `raw` is the external system's own body, as a JSON object. It is stored,
+ *   and no expression can read it.
  */
-export interface EmitEvent {
+export interface EmittedEvent {
   readonly kind: string;
   readonly dedupKey: string;
   readonly occurredAt: string;
@@ -162,7 +162,7 @@ export interface EmitEvent {
   readonly refs: ReadonlyArray<string>;
   readonly url?: string;
   readonly system?: string;
-  readonly raw?: Schema.Json;
+  readonly raw?: Schema.JsonObject;
 }
 
 /** The Resources linked to the Connection an ingest handle is opened for. */
@@ -191,11 +191,11 @@ export interface LinkedResource {
 export interface IngestContext {
   /**
    * Appends one event to the event log, stamped with this Connection. Fails
-   * with a `PluginError` when the kind is not one the source declared, or the
-   * payload does not match the kind's schema. Emitting an event whose dedup
+   * with a `PluginError` when the kind is not one the event source declared,
+   * or the payload does not match the kind's schema. Emitting an event whose dedup
    * key the log already holds succeeds and writes nothing.
    */
-  readonly emit: (event: EmitEvent) => Effect.Effect<void, PluginError>;
+  readonly emit: (event: EmittedEvent) => Effect.Effect<void, PluginError>;
   /**
    * The plugin's state for this Connection only: cursors, snapshots and
    * markers. The host deletes it when the Connection is deleted, and when the
@@ -236,6 +236,12 @@ export interface IngestHandle {
    * retries with backoff.
    */
   readonly poll: (feed: string) => Effect.Effect<PollResult, AuthError | PluginError>;
+  /**
+   * Releases what `open` acquired. The host calls it when it stops ingesting
+   * the Connection: before it opens a new handle for the same Connection, when
+   * the Connection is deleted, disabled or needs reauthorization, and when the
+   * plugin stops.
+   */
   readonly close: Effect.Effect<void>;
 }
 
@@ -271,7 +277,7 @@ export interface EventSourceContribution {
    * as `poll` fails.
    */
   readonly open: (
-    connection: ConnectionRef,
+    connection: IngestConnection,
     context: IngestContext,
   ) => Effect.Effect<IngestHandle, AuthError | PluginError>;
 }

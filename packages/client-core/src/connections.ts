@@ -102,7 +102,7 @@ export interface ConnectionType {
   readonly setup: ReadonlyArray<SetupStep>;
   readonly configSchema?: Record<string, unknown>;
   /**
-   * The feeds the type's event sources poll, in the order the plugin declares
+   * The feeds the type's event source polls, in the order the plugin declares
    * them. Empty for a type no event source polls, such as a chat channel.
    */
   readonly feeds: ReadonlyArray<ConnectionFeed>;
@@ -123,7 +123,7 @@ export interface ConnectionFeed {
 
 /**
  * Returns the feeds of every event source in the plugin list, keyed by the
- * connection type the source polls for. A feed whose declaration does not
+ * connection type the event source polls for. A feed whose declaration does not
  * have the expected shape is left out: the definition arrives as untyped
  * JSON, and a form cannot offer an interval it cannot read.
  */
@@ -146,7 +146,7 @@ const listFeedsByConnectionType = (
           ? [{ name, defaultIntervalSeconds, minIntervalSeconds }]
           : [];
       });
-      feedsByType.set(connectionType, [...(feedsByType.get(connectionType) ?? []), ...feeds]);
+      feedsByType.set(connectionType, feeds);
     }
   }
   return feedsByType;
@@ -159,9 +159,10 @@ const listFeedsByConnectionType = (
  * plugins are included, because their `register()` still ran, so their types
  * can still validate what the user pastes.
  *
- * Each type carries the feeds of the event sources that poll for it. An event
- * source is a contribution of its own, so its feeds are matched to the type
- * by the connection type the source names.
+ * Each type carries the feeds of the type's event source. An event source is
+ * a contribution of its own, so its feeds are matched to the type by the
+ * connection type the event source names. The controller refuses a second
+ * event source for one type, so a type has at most one.
  */
 export const listConnectionTypes = (
   plugins: ReadonlyArray<PluginDetail>,

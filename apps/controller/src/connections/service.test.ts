@@ -136,6 +136,7 @@ const buildDeviceType = (
     },
     validate,
   },
+  feeds: {},
 });
 
 /**
@@ -269,6 +270,7 @@ describe("a device flow whose type changed while the user was approving it", () 
                   setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
                   validate: type.contribution.validate,
                 },
+                feeds: {},
               },
             ]),
           );
@@ -304,6 +306,7 @@ describe("the refusal of a setup operation the type does not offer", () => {
       setup,
       validate: () => Effect.succeed({ displayName: "account", accountId: "account-1" }),
     },
+    feeds: {},
   });
 
   it("says that nothing can set up a type with no credentials, oauth or device step", async () => {
@@ -372,6 +375,7 @@ const buildPastedType = (displayName: string): RegisteredConnectionType => ({
     setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
     validate: () => Effect.succeed({ displayName, accountId: "account-1" }),
   },
+  feeds: {},
 });
 
 describe("the label of a connection the user did not name", () => {

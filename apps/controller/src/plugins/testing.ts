@@ -19,7 +19,7 @@ import {
   type ActionContext,
   type ActivationContext,
   type AuthError,
-  type ConnectionRef,
+  type IngestConnection,
   type FeedDeclaration,
   type IngestContext,
   type PollResult,
@@ -315,8 +315,11 @@ export interface EventSourceFixture {
    * poll starts, `polled <feed>` when it ends, and `close`.
    */
   readonly calls: Array<string>;
-  /** The `ConnectionRef` and `IngestContext` of every open, in order. */
-  readonly opened: Array<{ readonly connection: ConnectionRef; readonly context: IngestContext }>;
+  /** The `IngestConnection` and `IngestContext` of every open, in order. */
+  readonly opened: Array<{
+    readonly connection: IngestConnection;
+    readonly context: IngestContext;
+  }>;
   /** Decides how each open ends. By default it succeeds. A test replaces it to make opens fail. */
   open: () => Effect.Effect<void, AuthError | PluginError>;
   /** Decides how each poll ends. By default it succeeds with no hint. */

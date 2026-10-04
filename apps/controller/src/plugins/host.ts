@@ -309,7 +309,7 @@ const buildRegistrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
   live: Array<ProviderDefinition>,
-  types: Array<RegisteredConnectionType>,
+  types: Array<Omit<RegisteredConnectionType, "feeds">>,
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
   actions: Map<string, RegisteredWorkflowAction>,
@@ -618,7 +618,7 @@ const make = Effect.gen(function* () {
     manifest: PluginManifest,
     declared: Array<NewContribution>,
     live: Array<ProviderDefinition>,
-    types: Array<RegisteredConnectionType>,
+    types: Array<Omit<RegisteredConnectionType, "feeds">>,
     kinds: Map<string, RegisteredEventKind>,
     sources: Array<RegisteredEventSource>,
     actions: Map<string, RegisteredWorkflowAction>,
@@ -767,7 +767,9 @@ const make = Effect.gen(function* () {
 
           const declared: Array<NewContribution> = [];
           const live: Array<ProviderDefinition> = [];
-          const types: Array<RegisteredConnectionType> = [];
+          // A plugin may register a type's event source before or after the
+          // type itself, so each type gets its feeds once the pass is over.
+          const types: Array<Omit<RegisteredConnectionType, "feeds">> = [];
           const kinds = new Map<string, RegisteredEventKind>();
           const sources: Array<RegisteredEventSource> = [];
           const actions = new Map<string, RegisteredWorkflowAction>();
@@ -785,7 +787,14 @@ const make = Effect.gen(function* () {
           if (registered) {
             catalog.push(...declared);
             registeredProviders.push(...live);
-            registeredTypes.push(...types);
+            registeredTypes.push(
+              ...types.map((type) => ({
+                ...type,
+                feeds:
+                  sources.find((source) => source.connectionType === type.contribution.type)
+                    ?.feeds ?? {},
+              })),
+            );
             for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
             registeredSources.push(...sources);
             for (const [id, action] of actions) registeredActions.set(id, action);
@@ -812,7 +821,6 @@ const make = Effect.gen(function* () {
         yield* Ref.set(eventSources, registeredSources);
         yield* Ref.set(workflowActions, registeredActions);
         yield* connectionTypes.replace(registeredTypes);
-        yield* connectionTypes.replaceFeeds(registeredSources);
 
         yield* gate.withPermits(1)(
           Effect.forEach(
