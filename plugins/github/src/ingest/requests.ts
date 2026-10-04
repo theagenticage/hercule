@@ -16,7 +16,7 @@
 import { Clock, Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { AuthError, PluginError } from "@hercule/plugin-host";
-import { requestGithub, type GithubRequest, type GithubResponse } from "../api";
+import { isRateLimited, requestGithub, type GithubRequest, type GithubResponse } from "../api";
 
 /** GitHub asked the token to wait before its next request. */
 export class GithubRateLimited extends Schema.TaggedError<GithubRateLimited>()(
@@ -36,12 +36,6 @@ const readErrorMessage = (body: Schema.Json): string | undefined => {
   const message = (body as Record<string, Schema.Json>)["message"];
   return typeof message === "string" ? message : undefined;
 };
-
-/** Checks whether a response is GitHub refusing the request because of a rate limit. */
-const isRateLimited = (response: GithubResponse): boolean =>
-  response.status === 429 ||
-  (response.status === 403 &&
-    (response.retryAfterSeconds !== undefined || response.rateLimitRemaining === 0));
 
 /**
  * Returns how long a rate-limited token must wait, in seconds: `Retry-After`

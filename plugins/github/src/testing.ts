@@ -2,12 +2,12 @@
  * Test support for this plugin:
  *
  * - a stub `HttpClient`. Every function that calls GitHub requires an
- *   `HttpClient`, so a test provides the stub's layer and reads back the
- *   requests it received;
+ *   `HttpClient`, so a test provides the stub's layer, or runs the function
+ *   with `runAgainstStub`, and reads back the requests it received;
  * - an ingest context that keeps its state in memory and records every event
  *   emitted, after checking it as the host would.
  */
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Option, type Result, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import type * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -76,6 +76,16 @@ export const stubGithub = (
 /** Builds a stub client that answers every request with this status and body. */
 export const stubAnswer = (status: number, body: unknown): GithubStub =>
   stubGithub(() => ({ status, body }));
+
+/**
+ * Runs an effect that calls GitHub against a stub client, and returns its
+ * result: the value it succeeded with, or the error it failed with.
+ */
+export const runAgainstStub = <A, E>(
+  effect: Effect.Effect<A, E, HttpClient.HttpClient>,
+  stub: GithubStub,
+): Promise<Result.Result<A, E>> =>
+  Effect.runPromise(Effect.result(effect).pipe(Effect.provide(stub.layer)));
 
 /** The path and query parameters of a request the stub received. */
 export interface StubRequestTarget {

@@ -8,9 +8,15 @@ import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type { ActionError } from "@hercule/plugin-host";
-import { stubAnswer, stubGithub, stubHttpClient, type GithubStub } from "../testing";
+import {
+  runAgainstStub,
+  stubAnswer,
+  stubGithub,
+  stubHttpClient,
+  type GithubStub,
+} from "../testing";
 import { issueRead } from "./issue";
-import { buildActionContext, runAgainstStub, TEST_TOKEN } from "./testing";
+import { buildActionContext, TEST_TOKEN } from "./testing";
 
 const ADDRESS = { repo: "octocat/hello-world", number: 1347 };
 
@@ -86,6 +92,31 @@ describe("how a GitHub failure becomes the step's error", () => {
 
     expect(error.code).toBe("rate_limited");
     expect(error.message).toContain("60 seconds");
+  });
+
+  it("reports a 403 with no requests left as rate_limited, even without Retry-After", async () => {
+    const stub = stubGithub(() => ({
+      status: 403,
+      body: { message: "API rate limit exceeded for user ID 1." },
+      headers: { "x-ratelimit-remaining": "0" },
+    }));
+
+    const error = await readFailure(stub);
+
+    expect(error.code).toBe("rate_limited");
+    expect(error.message).toContain("Try again later.");
+  });
+
+  it("reports a 403 as forbidden when requests are left, whatever its message says", async () => {
+    const stub = stubGithub(() => ({
+      status: 403,
+      body: { message: "Mentions the rate limit, but is not one." },
+      headers: { "x-ratelimit-remaining": "4999" },
+    }));
+
+    const error = await readFailure(stub);
+
+    expect(error.code).toBe("forbidden");
   });
 
   it("reports a 429 as rate_limited", async () => {

@@ -3,8 +3,9 @@
  * request, a comment, a review and a merge, and the input fields that name
  * them. Each object has two schemas.
  *
- * - The `Github...` schema is the part of GitHub's REST response the plugin
- *   reads. Fields it does not name are ignored.
+ * - The `Github...` schema is the part of GitHub's REST response the actions
+ *   read. Fields it does not name are ignored. The feeds read other fields,
+ *   from listings, and keep their own schemas in `ingest/feed-objects.ts`.
  * - The schema without the prefix is what an action returns, which an
  *   expression reads as `steps.<id>.output`. Its fields are named the way the
  *   rest of Hercule names things, not the way GitHub does.
@@ -14,19 +15,8 @@
  */
 import { Effect, Schema } from "effect";
 import type { ActionError } from "@hercule/plugin-host";
+import { GithubAccount, GithubAccounts, GithubLabel } from "../github-objects";
 import { decodeGithubBody } from "./call";
-
-/**
- * A repository as `owner/repo`. The pattern allows only the characters GitHub
- * allows in an owner and a repository name, so the value can be put into a
- * URL path as it is. A name made of dots only is refused, because a URL path
- * would read `..` as "one level up".
- */
-export const RepoName = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9-]+\/(?!\.{1,2}$)[A-Za-z0-9._-]+$/, {
-    message: "Write the repository as owner/repo, such as octocat/hello-world.",
-  }),
-).annotate({ description: "The repository, written as owner/repo." });
 
 /** The number of an issue or a pull request in its repository. */
 export const ItemNumber = Schema.Int.check(Schema.isGreaterThan(0));
@@ -40,14 +30,6 @@ export const refuseEmptyUpdate = (changes: Readonly<Record<string, unknown>>, me
   Schema.makeFilter((update: Readonly<Record<string, unknown>>) =>
     Object.keys(changes).some((field) => update[field] !== undefined) ? undefined : message,
   );
-
-/** A GitHub account, as GitHub's responses embed one. */
-const GithubAccount = Schema.Struct({ login: Schema.String });
-
-/** A list of accounts. GitHub sends null in place of an empty list in some responses. */
-const GithubAccounts = Schema.NullOr(Schema.Array(GithubAccount));
-
-const GithubLabel = Schema.Struct({ name: Schema.String });
 
 const OpenOrClosed = Schema.Literals(["open", "closed"]);
 

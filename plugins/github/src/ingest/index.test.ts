@@ -8,6 +8,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import { AuthError, PluginError } from "@hercule/plugin-host";
 import {
   buildIngestHarness,
+  runAgainstStub,
   stubGithub,
   stubHttpClient,
   type GithubStub,
@@ -23,10 +24,7 @@ const poll = (
   feed = "notifications",
   harness: IngestHarness = buildIngestHarness(),
   config: GithubConnectionConfig = {},
-) =>
-  Effect.runPromise(
-    Effect.result(pollGithubFeed(feed, config, harness.context).pipe(Effect.provide(stub.layer))),
-  );
+) => runAgainstStub(pollGithubFeed(feed, config, harness.context), stub);
 
 /** Returns a stub that answers every request with `response`. */
 const answerAlways = (response: StubResponse): GithubStub => stubGithub(() => response);

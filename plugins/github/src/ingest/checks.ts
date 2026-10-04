@@ -19,7 +19,7 @@ import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, type GithubItem } from "../subject";
-import { GithubCheckSuites, GithubPull, type GithubCheckSuite } from "./github-objects";
+import { GithubCheckSuites, GithubPull, type GithubCheckSuite } from "./feed-objects";
 import { decodeGithubValue, fetchGithub, truncateRaw, type FeedError } from "./requests";
 import { pollWatchedRepos } from "./state";
 

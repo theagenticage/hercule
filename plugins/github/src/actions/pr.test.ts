@@ -6,15 +6,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { Result, Schema } from "effect";
-import { stubAnswer, stubGithub, type StubResponse } from "../testing";
+import { runAgainstStub, stubAnswer, stubGithub, type StubResponse } from "../testing";
 import { prComment, prCreate, prMerge, prRead, prReview, prUpdate } from "./pr";
-import {
-  buildActionContext,
-  readJsonBody,
-  readSuccess,
-  runAgainstStub,
-  TEST_TOKEN,
-} from "./testing";
+import { buildActionContext, readJsonBody, readSuccess, TEST_TOKEN } from "./testing";
 
 const API = "https://api.github.com";
 const PULL_URL = `${API}/repos/octocat/hello-world/pulls/1347`;

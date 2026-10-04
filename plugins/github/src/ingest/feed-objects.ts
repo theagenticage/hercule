@@ -2,11 +2,14 @@
  * The GitHub objects the feeds read, as schemas of only the fields they use.
  * GitHub's responses hold many more fields; decoding ignores them, and the
  * whole object is kept as the event's `raw`.
+ *
+ * A feed reads GitHub's own words, such as an issue's or a review's `state`,
+ * as plain strings and passes them on. The workflow actions read a single
+ * object right after changing it, and keep their own, stricter schemas in
+ * `actions/objects.ts`.
  */
 import { Schema } from "effect";
-
-/** An account, as GitHub embeds one in another object. */
-const GithubUser = Schema.Struct({ login: Schema.String });
+import { GithubAccount, GithubAccounts, GithubLabel } from "../github-objects";
 
 /**
  * An issue, as `GET /repos/{owner}/{repo}/issues` returns it. That listing
@@ -17,9 +20,9 @@ export const GithubIssue = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
   state: Schema.String,
-  user: Schema.NullOr(GithubUser),
-  labels: Schema.Array(Schema.Struct({ name: Schema.String })),
-  assignees: Schema.optionalKey(Schema.NullOr(Schema.Array(GithubUser))),
+  user: Schema.NullOr(GithubAccount),
+  labels: Schema.Array(GithubLabel),
+  assignees: Schema.optionalKey(GithubAccounts),
   comments: Schema.Int,
   created_at: Schema.String,
   updated_at: Schema.String,
@@ -36,7 +39,7 @@ export const GithubPull = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
   state: Schema.String,
-  user: Schema.NullOr(GithubUser),
+  user: Schema.NullOr(GithubAccount),
   head: Schema.Struct({ sha: Schema.String }),
   updated_at: Schema.String,
 });
@@ -46,7 +49,7 @@ export type GithubPull = Schema.Schema.Type<typeof GithubPull>;
 /** A review, as `GET /repos/{owner}/{repo}/pulls/{number}/reviews` returns it. */
 export const GithubReview = Schema.Struct({
   id: Schema.Int,
-  user: Schema.NullOr(GithubUser),
+  user: Schema.NullOr(GithubAccount),
   state: Schema.String,
   submitted_at: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });

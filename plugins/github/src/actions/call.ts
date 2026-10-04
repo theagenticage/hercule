@@ -6,7 +6,7 @@
  * - `unauthenticated`: the step has no Connection, the Connection has no
  *   token, or GitHub rejected the token (401).
  * - `rate_limited`: GitHub's rate limit for the account is used up (429, or
- *   403 with a rate limit message).
+ *   403 with `Retry-After` or no requests left; see `isRateLimited`).
  * - `forbidden`: the account may not do this (403).
  * - `not_found`: the thing does not exist, or the account cannot see it (404).
  * - `conflict`: the thing is not in a state that allows the change, such as
@@ -27,7 +27,13 @@ import {
   type ActionContext,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
-import { readToken, requestGithub, type GithubRequest, type GithubResponse } from "../api";
+import {
+  isRateLimited,
+  readToken,
+  requestGithub,
+  type GithubRequest,
+  type GithubResponse,
+} from "../api";
 
 /** The qualified Connection type every GitHub action acts through. */
 const GITHUB_CONNECTION_TYPE = "github/github";
@@ -151,7 +157,7 @@ export const describeGithubFailure = (response: GithubResponse, subject: string)
       "GitHub rejected the Connection's token. Reconnect it under Connections.",
     );
   }
-  if (status === 429 || (status === 403 && /rate limit/i.test(explanation))) {
+  if (isRateLimited(response)) {
     const wait =
       response.retryAfterSeconds === undefined
         ? "Try again later."

@@ -13,7 +13,7 @@ import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { EmitEvent, IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, buildRepoRef, buildRepoSubject } from "../subject";
-import { GithubNotification } from "./github-objects";
+import { GithubNotification } from "./feed-objects";
 import {
   decodeGithubValue,
   fetchGithub,
