@@ -12,6 +12,7 @@ import {
   buildConfigPayload,
   queryKeys,
   type ConfigDraft,
+  type ConfigJson,
   type ConnectionType,
   type FeedIntervalsDraft,
   type HerculeClient,
@@ -56,8 +57,10 @@ export function ConfigureConnection({
   const [intervals, setIntervals] = useState<FeedIntervalsDraft>(() =>
     buildFeedIntervalsDraft(feeds, connection.feedIntervals),
   );
-  // The interval fields whose text is not a whole number, found when the user
-  // pressed Save. Nothing is sent until every field can be read.
+  // The setting and interval fields whose text cannot be read as a number,
+  // found when the user pressed Save. Nothing is sent until every field can
+  // be read.
+  const [unreadableConfig, setUnreadableConfig] = useState<Readonly<Record<string, string>>>({});
   const [unreadableIntervals, setUnreadableIntervals] = useState<Readonly<Record<string, string>>>(
     {},
   );
@@ -67,18 +70,21 @@ export function ConfigureConnection({
   const [topic, setTopic] = useState(connection.labels[0] ?? "");
 
   const save = useMutation({
-    mutationFn: (feedIntervals: Connection["feedIntervals"]) => {
+    mutationFn: ({
+      config,
+      feedIntervals,
+    }: {
+      /** The settings to save, or `undefined` to leave the stored ones as they are. */
+      readonly config: Readonly<Record<string, ConfigJson>> | undefined;
+      readonly feedIntervals: Connection["feedIntervals"];
+    }) => {
       const labels = buildTopicsUpdate(connection.labels, topic);
       return client.connection.update({
         params: { id: connection.id },
         payload: {
           label,
           ...(labels === undefined ? {} : { labels }),
-          // A type no longer in the binary has no schema to read its settings
-          // against, so they are left exactly as they are stored.
-          ...(type === undefined
-            ? {}
-            : { config: buildConfigPayload(fields, draft, connection.config) }),
+          ...(config === undefined ? {} : { config }),
           // With no feeds on screen, which includes a type no longer in the
           // binary, the stored intervals are left exactly as they are.
           ...(feeds.length === 0 ? {} : { feedIntervals }),
@@ -97,19 +103,30 @@ export function ConfigureConnection({
   // about the values the fields held then.
   const edit = (): void => {
     if (!save.isIdle) save.reset();
+    setUnreadableConfig({});
     setUnreadableIntervals({});
   };
 
   const send = (event: FormEvent): void => {
     event.preventDefault();
-    const reading = buildFeedIntervalsPayload(feeds, intervals);
-    if ("errors" in reading) {
-      setUnreadableIntervals(reading.errors);
+    // A type no longer in the binary has no schema to read its settings
+    // against, so they are left exactly as they are stored.
+    const settings =
+      type === undefined
+        ? { config: undefined }
+        : buildConfigPayload(fields, draft, connection.config);
+    const polling = buildFeedIntervalsPayload(feeds, intervals);
+    if ("errors" in settings || "errors" in polling) {
+      setUnreadableConfig("errors" in settings ? settings.errors : {});
+      setUnreadableIntervals("errors" in polling ? polling.errors : {});
       return;
     }
     // React Query calls a callback passed to `mutate` only while this form is
     // on screen, so a reply that arrives after Cancel cannot close another panel.
-    save.mutate(reading.feedIntervals, { onSuccess: onDone });
+    save.mutate(
+      { config: settings.config, feedIntervals: polling.feedIntervals },
+      { onSuccess: onDone },
+    );
   };
 
   return (
@@ -157,7 +174,7 @@ export function ConfigureConnection({
               inputId={`${connection.id}-${field.name}`}
               field={field}
               value={draft[field.name] ?? ""}
-              error={issues.config[field.name]}
+              error={unreadableConfig[field.name] ?? issues.config[field.name]}
               entryErrors={issues.configEntries[field.name]}
               onChange={(value) => {
                 edit();
