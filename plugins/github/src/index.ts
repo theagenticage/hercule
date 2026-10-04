@@ -7,9 +7,11 @@ import {
   HOST_API,
   registerConnectionType,
   registerEventSource,
+  registerWorkflowAction,
   type EventSourceContribution,
   type Plugin,
 } from "@hercule/plugin-host";
+import { GITHUB_WORKFLOW_ACTIONS } from "./actions";
 import { connectionType } from "./connection-type";
 import { openGithubIngest } from "./ingest";
 import { GITHUB_EVENT_KINDS } from "./kinds";
@@ -43,10 +45,11 @@ export const github: Plugin = {
     configSchema: Schema.Struct({}),
   },
   register: (host) =>
-    Effect.andThen(
-      registerConnectionType(host, connectionType),
-      registerEventSource(host, eventSource),
-    ),
+    Effect.gen(function* () {
+      yield* registerConnectionType(host, connectionType);
+      yield* registerEventSource(host, eventSource);
+      for (const action of GITHUB_WORKFLOW_ACTIONS) yield* registerWorkflowAction(host, action);
+    }),
   // The host opens and polls the ingest handles itself, so there is nothing
   // for the plugin to start.
   activate: () => Effect.succeed(Effect.void),

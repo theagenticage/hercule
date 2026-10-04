@@ -1,13 +1,14 @@
 /**
- * Tests the github plugin: what it adds to the catalog, and how it handles
- * GitHub's responses.
+ * Tests the github plugin: what it adds to the catalog, and how its
+ * connection type handles GitHub's responses. Each workflow action's requests
+ * and responses are tested beside it, in `actions/`.
  *
  * `validate` needs an `HttpClient` and nothing else, so it is tested in full
  * against the stub client from `testing.ts`: the test checks the request it builds, and replays
  * every kind of response GitHub can give.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Result } from "effect";
+import { Effect, Result, Schema, SchemaAST } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type {
   ConnectionTypeContribution,
@@ -15,6 +16,7 @@ import type {
   ExternalAccount,
   Plugin,
   RegistrationHost,
+  WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import { github } from "./index";
 import { stubAnswer, stubHttpClient, type GithubStub } from "./testing";
@@ -25,9 +27,11 @@ const collectContributions = async (
 ): Promise<{
   readonly types: ReadonlyArray<ConnectionTypeContribution>;
   readonly sources: ReadonlyArray<EventSourceContribution>;
+  readonly actions: ReadonlyArray<WorkflowActionContribution>;
 }> => {
   const types: Array<ConnectionTypeContribution> = [];
   const sources: Array<EventSourceContribution> = [];
+  const actions: Array<WorkflowActionContribution> = [];
   const host: RegistrationHost = {
     connections: {
       registerType: (contribution) =>
@@ -41,9 +45,15 @@ const collectContributions = async (
           sources.push(definition);
         }),
     },
+    workflowActions: {
+      register: (contribution) =>
+        Effect.sync(() => {
+          actions.push(contribution);
+        }),
+    },
   };
   await Effect.runPromise(plugin.register(host));
-  return { types, sources };
+  return { types, sources, actions };
 };
 
 const PAT = "ghp_a-real-looking-token";
@@ -96,6 +106,19 @@ const KINDS = [
   "github.pr.checks-completed",
 ] as const;
 
+/** The actions spec 05 section 4.4 lists, in the order the plugin registers them. */
+const ACTIONS = [
+  "issue.read",
+  "issue.comment",
+  "issue.update",
+  "pr.read",
+  "pr.comment",
+  "pr.review",
+  "pr.update",
+  "pr.merge",
+  "pr.create",
+];
+
 describe("what the github plugin registers", () => {
   it("requests the capabilities its connection type, ingest and actions use", () => {
     expect(github.manifest).toMatchObject({
@@ -139,6 +162,73 @@ describe("what the github plugin registers", () => {
     for (const kind of KINDS) {
       expect(sources[0]?.kinds[kind]?.description ?? "", kind).not.toBe("");
     }
+  });
+
+  it("contributes the nine actions, each acting through a GitHub Connection", async () => {
+    const actions = (await collectContributions(github)).actions;
+
+    expect(actions.map((action) => action.id)).toEqual(ACTIONS);
+    for (const action of actions) {
+      expect(action.connection, action.id).toEqual({ type: "github/github" });
+      expect(action.displayName, action.id).not.toBe("");
+      expect(action.description, action.id).not.toBe("");
+    }
+  });
+
+  it("gives every action a struct input the host can register, with no connection field", async () => {
+    const actions = (await collectContributions(github)).actions;
+
+    for (const action of actions) {
+      // The host refuses an id with a `/`, and an input that is not a struct.
+      expect(action.id).not.toContain("/");
+      const ast = action.input.ast;
+      if (!SchemaAST.isObjects(ast)) throw new Error(`the input of ${action.id} is not a struct`);
+      // The step's `connection` param names the Connection, and the host
+      // removes it before decoding the rest.
+      const fields = ast.propertySignatures.map((field) => field.name);
+      expect(fields, action.id).not.toContain("connection");
+      expect(fields, action.id).toContain("repo");
+      // The catalog stores both schemas as JSON Schema.
+      expect(() => Schema.toJsonSchemaDocument(action.input), action.id).not.toThrow();
+      expect(() => Schema.toJsonSchemaDocument(action.output), action.id).not.toThrow();
+    }
+  });
+
+  it("describes every field of every action's input", async () => {
+    const actions = (await collectContributions(github)).actions;
+
+    for (const action of actions) {
+      const document = Schema.toJsonSchemaDocument(action.input);
+      const properties = (document.schema["properties"] ?? {}) as Record<
+        string,
+        { readonly description?: string }
+      >;
+      expect(Object.keys(properties), action.id).toContain("repo");
+      for (const [name, property] of Object.entries(properties)) {
+        expect(property.description ?? "", `${action.id}.${name}`).not.toBe("");
+      }
+    }
+  });
+
+  it("refuses a repo that is not written as owner/repo", async () => {
+    const read = (await collectContributions(github)).actions.find(
+      (action) => action.id === "issue.read",
+    );
+    if (read === undefined) throw new Error("the plugin registered no issue.read");
+    const decode = Schema.decodeUnknownResult(read.input as Schema.Decoder<unknown>);
+
+    for (const repo of [
+      "octocat",
+      "octocat/hello/world",
+      "octocat/..",
+      "octocat/.",
+      "/x",
+      "a b/c",
+    ]) {
+      expect(Result.isFailure(decode({ repo, number: 1 })), repo).toBe(true);
+    }
+    expect(Result.isFailure(decode({ repo: "octocat/hello-world", number: 0 }))).toBe(true);
+    expect(Result.isSuccess(decode({ repo: "octocat/hello-world.js", number: 1 }))).toBe(true);
   });
 });
 
