@@ -17,7 +17,7 @@ import { WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
 import type { SeatedPose } from "@hercule/client-core";
-import type { Colleague, OfficeRequest } from "../world/types";
+import type { Colleague } from "../world/types";
 
 // ---------------------------------------------------------------------------
 // Timings, in seconds.
@@ -237,22 +237,6 @@ function isDeskSeat(spot: Spot): spot is Seat {
   return "kind" in spot && spot.kind === "desk";
 }
 
-/** Returns the short state a name tag shows for a pose the sim has just set, such as "typing". */
-function describePose(pose: SeatedPose): string {
-  return pose === "working" ? "typing" : pose;
-}
-
-/** Builds the question a colleague asks the user with when the world gave it none. */
-function buildRequest(colleague: Colleague): OfficeRequest {
-  return {
-    kind: "question",
-    short: "Go ahead with the plan?",
-    prompt: `${colleague.name} has a plan ready and asks whether to go ahead with it.`,
-    answers: ["Go ahead", "Not yet"],
-    waitingSince: new Date().toISOString(),
-  };
-}
-
 /** Returns the action a colleague does at its own seat in a pose. */
 function decideHomeAction(pose: SeatedPose, seat: Seat["kind"]): Action {
   if (seat === "standing") return pose === "waiting" ? "raise-hand" : "stand";
@@ -434,26 +418,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
   };
 
   /**
-   * Records a colleague's new pose in the states the UI reads, with the
-   * label and request that go with it, and calls the state listeners. A
-   * waiting colleague keeps its request, takes the world's, or gets one made
-   * up; any other pose has none. Does nothing when the pose is unchanged.
-   */
-  const recordPose = (actor: Actor, pose: SeatedPose): void => {
-    const id = actor.colleague.id;
-    const current = states.get(id);
-    if (current?.pose === pose) return;
-    const request =
-      pose === "waiting"
-        ? (current?.request ?? actor.colleague.request ?? buildRequest(actor.colleague))
-        : null;
-    const next = new Map(states);
-    next.set(id, { pose, request, stateLabel: describePose(pose) });
-    states = next;
-    for (const listener of stateListeners) listener();
-  };
-
-  /**
    * Records a colleague's state in the states the UI reads, as the world
    * gives it, and calls the state listeners. Does nothing when the state is
    * the one recorded already.
@@ -473,13 +437,12 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     for (const listener of stateListeners) listener();
   };
 
-  /** Sets a colleague's pose: its face, the lamp and note on its desk, and its state for the UI. */
+  /** Sets a colleague's pose: its face, and the lamp and note on its desk. */
   const setPose = (actor: Actor, pose: SeatedPose): void => {
     actor.pose = pose;
     actor.rig.setFace(pose);
     actor.home.desk?.setLamp(pose === "working");
     actor.home.desk?.setNote(pose === "waiting");
-    recordPose(actor, pose);
     stage.requestRender();
   };
 
@@ -1227,8 +1190,6 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     if (inLounge) loungeIds.add(colleagueId);
     else loungeIds.delete(colleagueId);
     const from = actor.pose;
-    // The state goes in first, so the pose set below keeps the world's
-    // request and label instead of making its own.
     recordState(colleagueId, state);
     if (state.pose === from) return;
     setPose(actor, state.pose);
