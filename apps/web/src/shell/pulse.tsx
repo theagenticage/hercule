@@ -1,43 +1,14 @@
-import { useState, type JSX } from "react";
-
-const OPEN_KEY = "hercule.pulse.open";
-
-/**
- * Reads whether the pulse was left open in this browser session.
- *
- * Both this function and `writeOpen` catch storage errors. A browser that denies
- * storage still renders the pulse; it just forgets its state between page loads.
- */
-const readOpen = (): boolean => {
-  try {
-    return window.sessionStorage.getItem(OPEN_KEY) === "true";
-  } catch {
-    return false;
-  }
-};
-
-const writeOpen = (open: boolean): void => {
-  try {
-    window.sessionStorage.setItem(OPEN_KEY, String(open));
-  } catch {
-    // Ignore the error: losing this state is harmless.
-  }
-};
+import type { JSX } from "react";
+import { useSessionFlag } from "@hercule/ui";
 
 /**
  * The pulse at the foot of the sidebar: a one-line summary of the fleet's
- * signals that expands to the full block. It starts closed. Nothing reports
- * into it yet, so both the line and the block explain that instead of showing
- * an empty list.
+ * signals that expands to the full block. It starts closed, and stays open
+ * across page loads in this tab once opened. Nothing reports into it yet, so
+ * both the line and the block explain that instead of showing an empty list.
  */
 export function Pulse(): JSX.Element {
-  const [open, setOpen] = useState(readOpen);
-
-  const toggle = (): void => {
-    const next = !open;
-    setOpen(next);
-    writeOpen(next);
-  };
+  const [open, toggle] = useSessionFlag("hercule.pulse.open");
 
   return (
     <div className="flex flex-col gap-[3px] pb-1">
