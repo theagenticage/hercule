@@ -74,6 +74,7 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import {
+  IngestLoops,
   PluginConfigsLayer,
   PluginHost,
   PluginHostLayer,
@@ -229,6 +230,7 @@ export type ControllerServices =
   | JoinTokens
   | Plugins
   | PluginHost
+  | IngestLoops
   | ConnectionTypes
   | RunnerConnections
   | ProviderProbes

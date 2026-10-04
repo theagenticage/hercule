@@ -61,6 +61,7 @@ import {
   Pipeline,
   Provisioning,
   checkSchedulerInterval,
+  runIngestReconciler,
   runScheduler,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
@@ -250,6 +251,11 @@ export const serve = (bundle: WebBundle | undefined) =>
     // database, so it starts here like the others.
     yield* checkSchedulerInterval;
     yield* Effect.forkScoped(runScheduler);
+    // The Ingest Reconciler opens an ingest handle for each Connection that
+    // should be ingesting. The plugins booted with the layers, and it reads
+    // the Connections from the database, so it starts here like the others.
+    // The events it lets the plugins emit reach the pipeline started above.
+    yield* Effect.forkScoped(runIngestReconciler);
     // Runs a restart cut off continue from their rows. Each run executes on
     // a fiber of the Run Executor, so this returns once they are all started.
     yield* resumeUnfinishedRuns;
