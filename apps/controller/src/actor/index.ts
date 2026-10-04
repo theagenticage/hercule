@@ -234,15 +234,32 @@ const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
  */
 export const checkGrant = (id: OperationId, actor: Actor): Forbidden | undefined => {
   const grant = findRequiredGrant(OPERATIONS[id].requires);
-  if (grant === undefined) return undefined;
+  return grant === undefined ? undefined : checkActorHoldsGrant(grant, actor);
+};
+
+/**
+ * Checks whether an actor holds a grant. Returns `undefined` when it does,
+ * and a `Forbidden` error with `message` when it does not.
+ *
+ * The user and a run hold every grant, and a session holds exactly the grants
+ * its permission profile holds, as for `checkGrant`. Use it for a grant an
+ * operation needs only for some payloads, which `checkGrant` cannot see,
+ * such as `connection.use` when `run.start` sends a workflow with a step
+ * that acts through a Connection.
+ */
+export const checkActorHoldsGrant = (
+  grant: Grant,
+  actor: Actor,
+  message?: string,
+): Forbidden | undefined => {
   switch (actor._tag) {
     case "user":
     case "run":
       return undefined;
     case "session":
-      return actor.grants.includes(grant) ? undefined : createForbiddenError(grant);
+      return actor.grants.includes(grant) ? undefined : createForbiddenError(grant, message);
     case "none":
-      return createForbiddenError(grant);
+      return createForbiddenError(grant, message);
   }
 };
 

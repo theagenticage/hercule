@@ -453,13 +453,25 @@ const AGENT_FACTS = {
 
 const AGENT_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
 
-/** Runs `body` against a fleet whose one runner can run a session on any built-in profile. */
+/**
+ * Runs `body` against a fleet whose one runner can run a session on any
+ * built-in profile. The controller loads the agent provider's plugin, and
+ * `plugins` beside it.
+ */
 export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  options: Omit<FleetOptions, "plugins" | "facts" | "models"> = {},
+  {
+    plugins = [],
+    ...options
+  }: Omit<FleetOptions, "plugins" | "facts" | "models"> & {
+    readonly plugins?: ReadonlyArray<Plugin>;
+  } = {},
 ): Promise<void> =>
   withFleet(body, {
-    plugins: [createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin],
+    plugins: [
+      createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
+      ...plugins,
+    ],
     facts: AGENT_FACTS,
     models: AGENT_MODELS,
     ...options,

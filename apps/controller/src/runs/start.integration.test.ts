@@ -22,6 +22,7 @@ import {
   NOTE_APPEND_ACTION_ID,
 } from "../plugins/testing";
 import {
+  createProfile,
   readProfileNamed,
   spawnThreadUnder,
   WAIT_DEADLINE_MS,
@@ -670,5 +671,105 @@ describe("the graphs a run accepts", () => {
         "File the root task",
       ]);
     });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* The connection.use grant.                                                 */
+/* ------------------------------------------------------------------------ */
+
+describe("run.start of a sent workflow that acts through a Connection", () => {
+  /** The message of the refusal for a caller without the connection.use grant. */
+  const CONNECTION_USE_REFUSAL =
+    "This run's definition has a step that acts through a Connection, and this session lacks the connection.use grant. Start a stored workflow that names the Connection instead, or ask the user to grant connection.use.";
+
+  /**
+   * Builds a workflow with one review step. Its `connection` param is
+   * `connection`, and it declares a Connection input `account` of the forge's
+   * type, which a template can read.
+   */
+  const buildReviewDefinition = (connection: string) => ({
+    name: "Review a pull request",
+    inputs: [{ name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: false }],
+    steps: [
+      {
+        id: "review",
+        kind: "action",
+        action: FORGE_REVIEW_ACTION_ID,
+        params: { connection, verdict: "approve" },
+      },
+    ],
+  });
+
+  it("refuses an assistant session, whether the step names the Connection by its id or through a template, and still starts a stored workflow for it", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        // The shipped assistant profile holds run.start but not connection.use.
+        const agent = await spawnThreadUnder(
+          arranged,
+          await readProfileNamed(arranged, "assistant"),
+        );
+
+        for (const connection of [connectionId, "{{ inputs.account }}"]) {
+          const response = await requestStart(base, agent.token, {
+            definition: buildReviewDefinition(connection),
+            inputs: { account: connectionId },
+          });
+
+          const refusal = await readErrorBody(response);
+          expect(response.status, refusal.text).toBe(403);
+          expect(refusal).toMatchObject({
+            code: "forbidden",
+            grant: "connection.use",
+            message: CONNECTION_USE_REFUSAL,
+          });
+        }
+        expect(await countRuns(harness)).toBe(0);
+
+        // A stored workflow was authored by the user, so the session may fill
+        // in the Connection input the user declared.
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: buildReviewDefinition("{{ inputs.account }}"),
+        });
+        const runId = await startRun(base, agent.token, workflow.id, {
+          inputs: { account: connectionId },
+        });
+        expect((await waitForRunToFinish(base, token, runId)).status).toBe("completed");
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+
+  it("starts the sent workflow for the user, and for a session whose profile holds connection.use", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const profile = await createProfile(arranged, "Acts through Connections", [
+          "run.start",
+          "run.read",
+          "connection.use",
+        ]);
+        const agent = await spawnThreadUnder(arranged, profile);
+
+        for (const caller of [token, agent.token]) {
+          const response = await requestStart(base, caller, {
+            definition: buildReviewDefinition(connectionId),
+          });
+          expect(response.status, await response.clone().text()).toBe(200);
+          const { runId } = (await response.json()) as { runId: string };
+          expect((await waitForRunToFinish(base, token, runId)).status).toBe("completed");
+        }
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
   });
 });
