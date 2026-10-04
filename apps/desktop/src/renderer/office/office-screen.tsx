@@ -3,11 +3,12 @@
  * Office. It reads the same records as the sidebar, so the Office changes
  * as soon as a thread does.
  *
- * The route's `session` search param and the Office's store say the same
+ * The route's `session` search param and the Office's store hold the same
  * thing: which thread the drawer shows. A change of the param opens or
  * closes the drawer, and the user opening or closing the drawer in the
- * Office changes the param, so Back closes a drawer the user opened and a
- * link can open the Office on a thread.
+ * Office changes the param. So a sidebar row, the Go menu and a notification
+ * open a thread in the drawer by linking to it, and the sidebar marks the
+ * row of the thread the drawer shows.
  */
 import { useEffect, useMemo, useRef, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";

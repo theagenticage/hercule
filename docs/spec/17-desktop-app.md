@@ -624,7 +624,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 **The way in.**
 
 - The sidebar's Office button, in the top row beside New thread and Search (see **The sidebar** in [Design system](#design-system)), and Go › Office `⌘⇧O`, the first item of the Go menu.
-- The Office is the route `/office`, drawn in the main pane beside the sidebar. The selected colleague is in the URL, `/office?session=<id>`, so a reload keeps it.
+- The Office is the route `/office`, drawn in the main pane beside the sidebar. ~~The selected colleague is in the URL, `/office?session=<id>`, so a reload keeps it.~~ The thread open in the drawer is in the URL, `/office?session=<id>`: a sidebar row, the Go menu and a notification open a thread in the drawer by going there (next point), and the sidebar marks the row of the thread the drawer shows *(amended 2026-10-04, [#332](https://github.com/theagenticage/hercule/issues/332): the router uses memory history, so nothing in the URL outlives a reload, and the window reloads only in the development build or when the user signs out or changes controller, where the selection should go)*.
 - While the Office is open, a thread clicked in the sidebar, chosen in the Go menu, or opened from a notification selects its colleague and opens its thread in the drawer, without leaving the Office. A thread with no colleague (see below) opens its thread screen, as it does from any other screen.
 
 **Who is in the Office.** `decideOfficeSeating` in `@hercule/client-core` decides it, from the records the sidebar already reads: threads, projects, workspaces and runners. The Office reads nothing else, and adds no operation to the API.
