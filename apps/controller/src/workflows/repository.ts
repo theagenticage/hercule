@@ -42,6 +42,7 @@ import {
   type Page,
 } from "../db";
 import { CRON_TICK_EVENT_KIND } from "../events";
+import { CONNECTION_PARAM } from "../plugins";
 
 /** A YAML source and the definition it parses to. They are always stored together. */
 export interface ParsedSource {
@@ -814,8 +815,8 @@ const make = Effect.gen(function* () {
     /**
      * Returns every action step whose `connection` param is the Connection's
      * id, written as a literal, sorted by workflow name and step id. A step
-     * whose param is a template names no Connection until a run renders it,
-     * so it is not returned.
+     * whose param is a template reads its Connection from an input that each
+     * run fills in, so it is not returned.
      *
      * Steps are not stored in a table of their own, so this reads each
      * stored definition's `steps` array.
@@ -833,7 +834,7 @@ const make = Effect.gen(function* () {
                  json_extract(step.value, '$.id') AS step_id
           FROM workflows, json_each(workflows.definition, '$.steps') AS step
           WHERE json_extract(step.value, '$.kind') = 'action'
-            AND json_extract(step.value, '$.params.connection') = ${connectionId}
+            AND json_extract(step.value, ${`$.params.${CONNECTION_PARAM}`}) = ${connectionId}
           ORDER BY workflow_name, step_id
         `,
         (rows) =>

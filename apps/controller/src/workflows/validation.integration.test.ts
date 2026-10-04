@@ -2043,7 +2043,7 @@ describe("an action that acts through a Connection", () => {
     });
   });
 
-  it("accepts a Connection of the action's type, a Connection input of that type, and any other template", async () => {
+  it("accepts a Connection of the action's type, and a Connection input of that type", async () => {
     await withArrangedController(async (controller) => {
       await expectAccepted(
         controller,
@@ -2055,13 +2055,33 @@ describe("an action that acts through a Connection", () => {
         "a Connection input",
         buildReviewSource('"{{ inputs.account }}"'),
       );
-      // Only a template that is exactly one input can be checked at save. Any
-      // other template is checked when the step runs.
       await expectAccepted(
         controller,
-        "a template that reads a step's output",
-        buildReviewSource('"{{ steps.find.output.id }}"'),
+        "a Connection input with no spaces inside the braces",
+        buildReviewSource('"{{inputs.account}}"'),
       );
+    });
+  });
+
+  it("rejects every other template, and names the two forms the param takes", async () => {
+    await withArrangedController(async (controller) => {
+      for (const [description, connection] of [
+        ["an input read with brackets", `'{{ inputs["account"] }}'`],
+        ["a step's output", '"{{ steps.find.output.id }}"'],
+        ["a field inside an input", '"{{ inputs.account.id }}"'],
+        ["text around an input", '"acct-{{ inputs.account }}"'],
+        ["two templates", '"{{ inputs.account }}{{ inputs.account }}"'],
+      ] as const) {
+        const [issue] = await expectErrorsAt(controller, {
+          description,
+          build: () => buildReviewSource(connection),
+          paths: [REVIEW_CONNECTION_PATH],
+        });
+        expect(issue!.message, description).toBe(
+          `The param connection cannot be computed by a template, so that the Connection a step acts through is known before a run starts. Write the id of a Connection of type ${FORGE_CONNECTION_TYPE}, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}.`,
+        );
+      }
+      await expectNothingStored(controller.base, controller.token);
     });
   });
 

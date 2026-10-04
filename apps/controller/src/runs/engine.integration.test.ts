@@ -49,18 +49,21 @@ import {
 import { WAIT_DEADLINE_MS } from "../sessions/testing";
 import {
   ABSENT_ID,
-  ACCEPTED_GITHUB_TOKEN,
   createConnection,
   createWorkflowOrFail,
+  setConnectionStatus,
   withSetUpController,
 } from "../workflows/testing";
 import {
   buildCreateStep,
+  buildHeldAction,
+  buildHeldStep,
   FILE_AND_START_DEFINITION,
   findStepRecords,
   listTasks,
   readTask,
   startRun,
+  waitForHeldExecutions,
   waitForRunToFinish,
   expectStatus,
 } from "./testing";
@@ -264,26 +267,23 @@ const FORGE_TOKEN = "a-forge-token";
 
 /**
  * A workflow whose one step calls the forge review action through the
- * Connection its `connection` param renders to. The `target` input is an
- * object, so `{{ inputs.target.connection }}` can render to any value: saving
- * the workflow checks only a template that is exactly one input, and the
- * tests below are about what the run engine checks when the step runs.
+ * Connection the run's `account` input names.
  */
-const REVIEW_TARGET_DEFINITION = {
+const REVIEW_ACCOUNT_DEFINITION = {
   name: "Review a pull request",
-  inputs: [{ name: "target", schema: { type: "object" }, required: true }],
+  inputs: [{ name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: true }],
   steps: [
     {
       id: "review",
       kind: "action",
       action: FORGE_REVIEW_ACTION_ID,
-      params: { connection: "{{ inputs.target.connection }}", verdict: "approve", body: "LGTM" },
+      params: { connection: "{{ inputs.account }}", verdict: "approve", body: "LGTM" },
     },
   ],
 };
 
 /** Builds a workflow whose one step calls the forge review action through the Connection with this id. */
-const buildReviewDefinition = (connectionId: string) => ({
+const buildLiteralReviewDefinition = (connectionId: string) => ({
   name: "Review a pull request",
   steps: [
     {
@@ -294,13 +294,6 @@ const buildReviewDefinition = (connectionId: string) => ({
     },
   ],
 });
-
-/** Sets a Connection's status directly, because no operation disables a Connection or marks it needs-reauth. */
-const setConnectionStatus = (harness: ServerHarness, id: string, status: string) =>
-  runEffect(
-    harness.sql`UPDATE connections SET status = ${status}
-                WHERE id = unhex(replace(${id}, '-', ''))`,
-  );
 
 describe("a run whose step acts through a Connection", () => {
   it("hands the action the Connection's id, credentials and config, and stores only the id", async () => {
@@ -317,11 +310,11 @@ describe("a run whose step acts through a Connection", () => {
                       WHERE id = unhex(replace(${connectionId}, '-', ''))`,
         );
         const workflow = await createWorkflowOrFail(base, token, {
-          definition: REVIEW_TARGET_DEFINITION,
+          definition: REVIEW_ACCOUNT_DEFINITION,
         });
 
         const runId = await startRun(base, token, workflow.id, {
-          inputs: { target: { connection: connectionId } },
+          inputs: { account: connectionId },
         });
         const run = await waitForRunToFinish(base, token, runId);
 
@@ -347,68 +340,77 @@ describe("a run whose step acts through a Connection", () => {
     );
   });
 
-  it("fails the step without calling the action when the Connection is missing, of another type, disabled, or not a string", async () => {
+  it("fails the step without calling the action when the Connection is deleted, of another type, or disabled by the time the step runs", async () => {
     const forge = buildForgePlugin();
+    const held = buildHeldAction();
     await withSetUpController(
       async ({ harness, base, token }) => {
-        const githubConnectionId = await createConnection(base, token, "github/github", {
-          pat: ACCEPTED_GITHUB_TOKEN,
-        });
-        const disabledConnectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
-          token: FORGE_TOKEN,
-        });
-        await setConnectionStatus(harness, disabledConnectionId, "disabled");
+        // Starting a run checks its Connection input, so each Connection is
+        // changed while the held step keeps the run from reaching the review.
         const workflow = await createWorkflowOrFail(base, token, {
-          definition: REVIEW_TARGET_DEFINITION,
+          definition: {
+            ...REVIEW_ACCOUNT_DEFINITION,
+            steps: [buildHeldStep(held, "first"), ...REVIEW_ACCOUNT_DEFINITION.steps],
+            edges: [{ from: "first", to: "review" }],
+          },
         });
+        const cases: ReadonlyArray<{
+          readonly description: string;
+          readonly change: (connectionId: string) => Promise<unknown>;
+          readonly code: string;
+          readonly message: (connectionId: string) => string;
+        }> = [
+          {
+            description: "a deleted Connection",
+            change: (connectionId) =>
+              runEffect(
+                harness.sql`DELETE FROM connections WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+              ),
+            code: "not_found",
+            message: (connectionId) => `No Connection has the id ${connectionId}.`,
+          },
+          {
+            description: "a Connection of another type",
+            change: (connectionId) =>
+              runEffect(
+                harness.sql`UPDATE connections SET type = 'github/github'
+                            WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+              ),
+            code: "validation",
+            message: (connectionId) =>
+              `The Connection ${connectionId} is of type github/github, but the action ${FORGE_REVIEW_ACTION_ID} acts through a Connection of type ${FORGE_CONNECTION_TYPE}.`,
+          },
+          {
+            description: "a disabled Connection",
+            change: (connectionId) => setConnectionStatus(harness, connectionId, "disabled"),
+            code: "connection_unavailable",
+            message: (connectionId) =>
+              `The Connection ${connectionId} is disabled. Enable it, or name another Connection of type ${FORGE_CONNECTION_TYPE}.`,
+          },
+        ];
 
-        for (const [description, connection, code, message] of [
-          [
-            "a Connection that does not exist",
-            ABSENT_ID,
-            "not_found",
-            `No Connection has the id ${ABSENT_ID}.`,
-          ],
-          ["a value that is not an id", "nope", "not_found", "No Connection has the id nope."],
-          [
-            "a Connection of another type",
-            githubConnectionId,
-            "validation",
-            `The Connection ${githubConnectionId} is of type github/github, but the action ${FORGE_REVIEW_ACTION_ID} acts through a Connection of type ${FORGE_CONNECTION_TYPE}.`,
-          ],
-          [
-            "a disabled Connection",
-            disabledConnectionId,
-            "connection_unavailable",
-            `The Connection ${disabledConnectionId} is disabled. Enable it, or name another Connection of type ${FORGE_CONNECTION_TYPE}.`,
-          ],
-          [
-            "a number",
-            42,
-            "validation",
-            `The param connection must render to the id of a Connection of type ${FORGE_CONNECTION_TYPE}, but it rendered to 42.`,
-          ],
-          [
-            "an empty string",
-            "",
-            "validation",
-            `The param connection must render to the id of a Connection of type ${FORGE_CONNECTION_TYPE}, but it rendered to "".`,
-          ],
-        ] as const) {
-          const runId = await startRun(base, token, workflow.id, {
-            inputs: { target: { connection } },
+        for (const [index, { description, change, code, message }] of cases.entries()) {
+          const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+            token: FORGE_TOKEN,
           });
+          const runId = await startRun(base, token, workflow.id, {
+            inputs: { account: connectionId },
+          });
+          await waitForHeldExecutions(held, index + 1);
+          await change(connectionId);
+          held.releaseStep("first");
+
           const run = await waitForRunToFinish(base, token, runId);
           expect(expectStatus(run, "failed"), description).toMatchObject({
             failedStepId: "review",
           });
           const { error } = expectStatus(findStepRecords(run, "review")[0], "failed");
           expect(error.code, description).toBe(code);
-          expect(error.message, description).toContain(message);
+          expect(error.message, description).toContain(message(connectionId));
         }
         expect(forge.contexts).toEqual([]);
       },
-      [forge.plugin],
+      [forge.plugin, held.plugin],
     );
   });
 
@@ -422,7 +424,7 @@ describe("a run whose step acts through a Connection", () => {
           });
           await setConnectionStatus(harness, connectionId, status);
           const workflow = await createWorkflowOrFail(base, token, {
-            definition: buildReviewDefinition(connectionId),
+            definition: buildLiteralReviewDefinition(connectionId),
           });
 
           const run = await waitForRunToFinish(
@@ -513,7 +515,7 @@ describe("a run whose step acts through a Connection", () => {
               ),
             );
             const workflow = await createWorkflowOrFail(base, token, {
-              definition: buildReviewDefinition(connectionId),
+              definition: buildLiteralReviewDefinition(connectionId),
             });
             await body({
               forge,
