@@ -501,11 +501,40 @@ describe("the repos feed", () => {
     const { result } = await poll(harness, route, ["octocat/gone", REPO]);
 
     expect(listEvents(harness)).toEqual([`github.issue.opened issue.opened:${REPO}#3`]);
+    expect(harness.state.get(`repos/${REPO}`)).toMatchObject({ items: { "3": { state: "open" } } });
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
     expect(result.failure).toBeInstanceOf(PluginError);
-    expect(result.failure.message).toContain("octocat/gone");
-    expect(result.failure.message).toContain("Not Found");
+    expect(result.failure.message).toBe(
+      "The repos feed could not poll octocat/gone: GitHub returned status 404 for " +
+        "GET /repos/octocat/gone/issues: Not Found. " +
+        "The other repositories on the watch list were polled. " +
+        "If a repository was deleted, renamed or hidden from the Connection's account, " +
+        "unlink its repo Resource or remove it from the Connection's extra repositories.",
+    );
+  });
+
+  it("fails naming the listing when GitHub's next-page link points outside its API", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    repository.issues.push(buildIssue(3, "2026-10-01T10:00:00Z"));
+    repository.etag = '"v2"';
+    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      const answer = answerFrom(repository)(request);
+      return readStubRequestTarget(request).path === `/repos/${REPO}/issues`
+        ? { ...answer, headers: { ...answer.headers, link: '<https://example.com/x>; rel="next"' } }
+        : answer;
+    };
+
+    const { result, requests } = await poll(harness, route);
+
+    expect(requests.map((request) => request.path)).toEqual([`/repos/${REPO}/issues`]);
+    expect(Result.isFailure(result)).toBe(true);
+    if (!Result.isFailure(result)) return;
+    expect(result.failure.message).toContain(
+      `${REPO}: Reading the next page of GET /repos/${REPO}/issues failed. ` +
+        "The request to https://example.com was not sent",
+    );
   });
 
   it("drops a closed item from its snapshot seven days after it closed", async () => {

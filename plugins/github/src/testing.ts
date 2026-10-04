@@ -26,6 +26,7 @@ import {
   MAX_EVENT_SYSTEM_LENGTH,
   MAX_EVENT_URL_LENGTH,
 } from "@hercule/contract";
+import { TEST_TOKEN } from "./actions/testing";
 import { GITHUB_EVENT_KINDS } from "./kinds";
 
 /** The stub's layer, and every request it received, in order. */
@@ -59,7 +60,7 @@ export const stubHttpClient = (
 };
 
 /** Converts a `StubResponse` into the response the client returns for `request`. */
-export const buildStubResponse = (
+const buildStubResponse = (
   request: HttpClientRequest.HttpClientRequest,
   response: StubResponse,
 ): HttpClientResponse.HttpClientResponse =>
@@ -171,7 +172,7 @@ const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError
  * `checkEmittedEvent` describes.
  */
 export const buildIngestHarness = (
-  credentials: Readonly<Record<string, string>> = { pat: "ghp_test-token" },
+  credentials: Readonly<Record<string, string>> = { pat: TEST_TOKEN },
 ): IngestHarness => {
   const events: Array<EmittedEvent> = [];
   const state = new Map<string, Schema.Json>();

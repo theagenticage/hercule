@@ -41,6 +41,7 @@
 import { Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
+import { readReviewVerdict } from "../github-objects";
 import { buildItemEvent, type GithubItem } from "../subject";
 import { computeDigest } from "./digest";
 import { ListedComment, ListedIssue, ListedPull, ListedReview } from "./feed-objects";
@@ -294,23 +295,6 @@ const listItemChanges = (
 };
 
 /**
- * Returns the hyphenated verdict of a submitted review, or undefined for a
- * review that is still pending or was dismissed, which emit nothing.
- */
-const readVerdict = (state: string): "approved" | "changes-requested" | "commented" | undefined => {
-  switch (state) {
-    case "APPROVED":
-      return "approved";
-    case "CHANGES_REQUESTED":
-      return "changes-requested";
-    case "COMMENTED":
-      return "commented";
-    default:
-      return undefined;
-  }
-};
-
-/**
  * Records where a newly watched repository stands and emits nothing. The
  * cursor is the newest update. The snapshot holds every open item, every
  * item updated in the seven days before the cursor, and the newest item,
@@ -418,7 +402,7 @@ const emitNewReviews = (
     );
     for (const raw of listing.items) {
       const review = yield* decodeGithubValue(ListedReview, raw, "a review");
-      const verdict = readVerdict(review.state);
+      const verdict = readReviewVerdict(review.state);
       const submittedAt = review.submitted_at ?? null;
       if (verdict === undefined || submittedAt === null || !isAfter(submittedAt, start)) {
         continue;
