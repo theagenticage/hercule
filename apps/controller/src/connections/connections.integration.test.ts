@@ -96,7 +96,8 @@ const buildConnectionPlugin = (options: {
       id: options.id,
       displayName: `Plugin ${options.id}`,
       hostApi: HOST_API,
-      capabilities: feeds === undefined ? ["connections"] : ["connections", "event-sources"],
+      capabilities:
+        feeds === undefined ? ["connections"] : ["connections", "event-sources", "events"],
       configSchema: Schema.Struct({}),
     },
     register: (host) =>
