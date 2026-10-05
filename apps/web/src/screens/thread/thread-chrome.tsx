@@ -6,9 +6,10 @@ import { HeaderRow } from "../header-row";
 
 /**
  * Renders the thread's header row: the project crumb, then the title, then
- * the actions on the right. A thread with no
- * project shows `Threads /` as its crumb. An assistant's session shows
- * `Assistants / <name> /`, the name linking to the assistant's conversation.
+ * the actions on the right. A thread with no project shows `Threads /` as its
+ * crumb. An assistant's session shows `Assistants / <name> /`, the name
+ * linking to the assistant's conversation. A step session shows
+ * `step implement · run 3db7d6bb /`, linking to the run.
  *
  * When the thread's workspace holds more than one thread, the title becomes
  * the active tab, with the other threads beside it in the workspace's order.
@@ -24,7 +25,7 @@ export function ThreadChrome({
   tabs = [],
   actions,
 }: {
-  /** The project's name, or the assistant's crumb; the crumb shows `Threads` when undefined. */
+  /** The project's name, or an assistant's or a step session's crumb; the crumb shows `Threads` when undefined. */
   readonly crumb?: ReactNode;
   readonly title: string;
   readonly tabs?: readonly ThreadTab[];

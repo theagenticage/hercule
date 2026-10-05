@@ -1831,6 +1831,19 @@ describe("Thread: the header is the screen's first row", () => {
     expect(overflow.disabled).toBe(true);
   });
 
+  it("shows a step session's step and run as its crumb, linked to the run", async () => {
+    const runId = "0199c0ff-2222-7000-8000-00003db7d6a1";
+    await openApp(
+      buildSession({ status: "idle", title: "Fix the login bug", runId, stepId: "implement" }),
+      buildTwoCompletedTurns(),
+    );
+
+    const link = await screen.findByRole("link", { name: "step implement · run 3db7d6a1" });
+    expect(link.getAttribute("href")).toBe(`/runs/${runId}`);
+    expect(readPageText(link.parentElement)).toBe("step implement · run 3db7d6a1 /");
+    expect(screen.queryByText("Threads /")).toBeNull();
+  });
+
   it("truncates a long title instead of pushing the breadcrumb or the actions out of place", async () => {
     const longTitle =
       "Fix the login bug for real this time and also the logout bug and the signup bug";

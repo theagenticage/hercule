@@ -5,7 +5,8 @@
  * An assistant's session uses the same surface with two changes: the crumb
  * links back to the assistant's conversation, and a card pointing to that
  * conversation takes the composer's place, because the user talks to an
- * assistant in its conversation. Spec 14 §The thread surface owns the layout.
+ * assistant in its conversation. A step session's crumb links to the run
+ * that started it. Spec 14 §The thread surface owns the layout.
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -13,6 +14,7 @@ import {
   buildSiblingTabs,
   buildTurns,
   chooseStamps,
+  describeStartingStep,
   findAnsweredAssistantId,
   isJoinable,
   mayBeRunningTurn,
@@ -31,6 +33,7 @@ import {
 import { Composer } from "../composer/composer";
 import { ContentColumn } from "../content-column";
 import { AssistantCrumb } from "./assistant-crumb";
+import { StepSessionCrumb } from "./step-session-crumb";
 import { ConversationSessionNotice } from "./conversation-session-notice";
 import { PermissionCard } from "./permission-card";
 import { QueuedInputs } from "./queued-inputs";
@@ -89,6 +92,8 @@ export function ThreadScreen({
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
   const project = projects.find((each) => each.id === session.projectId);
   const assistantId = findAnsweredAssistantId(session);
+  // A step session's crumb names the step and the run that started it.
+  const startingStep = describeStartingStep(session);
 
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
@@ -105,10 +110,12 @@ export function ThreadScreen({
     <div className="flex flex-1 flex-col">
       <ThreadChrome
         crumb={
-          assistantId === null ? (
-            project?.name
-          ) : (
+          assistantId !== null ? (
             <AssistantCrumb client={client} assistantId={assistantId} />
+          ) : session.runId !== null && startingStep !== undefined ? (
+            <StepSessionCrumb runId={session.runId} label={startingStep} />
+          ) : (
+            project?.name
           )
         }
         title={session.title}
