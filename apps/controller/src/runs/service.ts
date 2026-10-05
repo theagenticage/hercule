@@ -95,6 +95,7 @@ const make = Effect.gen(function* () {
     failStepWithDroppedPrompt: engine.failStepWithDroppedPrompt,
     listOwedWorkspaceSteps: engine.listOwedWorkspaceSteps,
     listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
+    stopSessionsOfEndedRuns: engine.stopSessionsOfEndedRuns,
     wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
 
     /** Returns one page of runs, the newest first unless the caller sorts the other way. */

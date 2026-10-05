@@ -9,7 +9,8 @@
  *    after the provision of its workspace when that workspace is still
  *    provisioning, and for an agent step whose prompt the runner already
  *    took, a request for the step's result;
- * 3. then the runs waiting for a runner are woken, because this one may be
+ * 3. a stop for every session on it whose run ended while it was away;
+ * 4. then the runs waiting for a runner are woken, because this one may be
  *    able to take them.
  *
  * Each delivery is idempotent by its key, so a runner that already has the
@@ -45,6 +46,7 @@ const make = Effect.gen(function* () {
         if (!startedWorkspaceIds.has(frame.workspaceId)) yield* connections.tell(runnerId, frame);
       }
       for (const step of steps) yield* workspaceSteps.start(step);
+      yield* runs.stopSessionsOfEndedRuns(runnerId);
       yield* runs.wakeRunsWaitingForRunner();
     });
 

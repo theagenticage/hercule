@@ -167,7 +167,8 @@ export class WorkspaceSteps extends Context.Service<
      * It reads the sessions in the caller's transaction, and stops them once
      * that transaction commits, as the run. It does not wait for the
      * sessions to stop. A stop that cannot be delivered because the runner
-     * is not connected is logged and not retried.
+     * is not connected is logged, and sent again when the runner connects
+     * (`RunService.stopSessionsOfEndedRuns`).
      */
     readonly stopSessions: (run: Pick<Run, "id" | "workflowId">) => Effect.Effect<void, SqlError>;
 

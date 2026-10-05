@@ -877,6 +877,31 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the ended runs that still have a session running on a runner,
+     * oldest first. The query names the session statuses of the
+     * `sessions_running` index, so SQLite reads that index rather than every
+     * session.
+     */
+    listEndedWithSessionsRunningOn: (
+      runnerId: string,
+    ): Effect.Effect<ReadonlyArray<Pick<Run, "id" | "workflowId">>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly workflow_id: Uint8Array | null }>`
+          SELECT runs.id, runs.workflow_id FROM runs
+          WHERE runs.status NOT IN ('pending', 'running')
+            AND runs.id IN (SELECT run_id FROM sessions
+                            WHERE runner_id = ${uuidFromString(runnerId)}
+                              AND status IN ('starting', 'idle', 'busy'))
+          ORDER BY runs.created_at, runs.id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
+          })),
+      ),
+
+    /**
      * Returns the ids of the running runs that work in a workspace. A run is
      * found through its runner first, so SQLite reads the
      * `runs_pinned_running` index rather than every run.

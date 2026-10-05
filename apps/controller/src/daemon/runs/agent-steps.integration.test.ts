@@ -581,6 +581,34 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "stops the session of a run that was cancelled while its runner was away, once the runner connects again",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const player = createSessionPlayer();
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
+        const sessionId = await startStepSession(arranged, player, buildStepKey(runId));
+
+        arranged.wire.close();
+        await waitForRunnerGone(arranged);
+        const response = await requestCancel(arranged.harness.base, arranged.token, runId);
+        expect(response.status, await response.clone().text()).toBe(200);
+        await waitForRunEnded(arranged, runId, "cancelled");
+        // The stop could not reach the runner, so the session is still running.
+        expect(await readSession(arranged, sessionId)).toMatchObject({ status: "busy" });
+
+        const back = await arranged.reconnect();
+        await waitForFrame(back, "stopped the session of the cancelled run", (frame) =>
+          stopsSession(frame, sessionId),
+        );
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "fails the run with session-failed when the runner restarted while the step's turn ran",
     async () => {
       await withAgentStepFleet(async (arranged) => {

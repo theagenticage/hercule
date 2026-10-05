@@ -1440,6 +1440,18 @@ export const makeRunEngine = Effect.gen(function* () {
       ),
 
     /**
+     * Stops the sessions of every ended run that still has a session running
+     * on a runner, as the run. A run that ended while the runner was not
+     * connected could not stop its sessions then (see
+     * `WorkspaceSteps.stopSessions`), so the controller daemon calls this
+     * when the runner connects.
+     */
+    stopSessionsOfEndedRuns: (runnerId: string): Effect.Effect<void, SqlError> =>
+      Effect.flatMap(runs.listEndedWithSessionsRunningOn(runnerId), (ended) =>
+        Effect.forEach(ended, (run) => workspaceSteps.stopSessions(run), { discard: true }),
+      ),
+
+    /**
      * Returns the steps among `steps` that a runner reports it is running but
      * should not be: the run is unknown, has ended, or is not pinned to the
      * runner, or the step record is not running. The controller daemon
