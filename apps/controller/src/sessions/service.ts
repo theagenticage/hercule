@@ -1619,33 +1619,26 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Handles an input the runner refused. It goes back to waiting with the
-     * reason, except when the session exited in the meantime and does not
-     * keep its input through that exit: then it is cancelled (see
-     * `requeueOrCancel`). Runs in its own transaction.
+     * Handles a claimed input the runner did not take: the runner refused it,
+     * or its frame never left the controller because the runner had no
+     * connection. Either way the runner cannot have run it, so an agent
+     * step's prompt is handled like any input. It goes back to waiting with
+     * `reason`, and is sent again on the next delivery, except when the
+     * session exited in the meantime and does not keep its input through
+     * that exit: then it is cancelled (see `requeueOrCancel`). Runs in its own
+     * transaction.
      */
-    recordRefusal: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
-      withTransaction(sql, requeueOrCancel(row, reason)),
-
-    /**
-     * Handles a claimed input whose frame never left the controller, because
-     * the runner had no connection. The runner cannot have taken it, so it is
-     * handled like a refused input, an agent step's prompt too: it goes back
-     * to waiting with `reason`, and is sent when the runner connects, unless
-     * the session exited in the meantime and does not keep it (see
-     * `requeueOrCancel`). Runs in its own transaction.
-     */
-    recordNotSent: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+    recordNotTaken: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
       withTransaction(sql, requeueOrCancel(row, reason)),
 
     /**
      * Handles an input the runner never answered: the frame left the
      * controller, but the connection dropped or no answer came before the
      * deadline. Whether the runner took the input is unknown. An input whose
-     * frame never left goes to `recordNotSent` instead.
+     * frame never left goes to `recordNotTaken` instead.
      *
      * - Any input but an agent step's prompt is handled as a refused one
-     *   (`recordRefusal`): `reason` is stored on it, as it goes back to
+     *   (`recordNotTaken`): `reason` is stored on it, as it goes back to
      *   waiting or is cancelled.
      * - An agent step's prompt is marked `sent` (`markSent`), so it is never
      *   sent again, and `reason` is not stored. Sending the prompt again could

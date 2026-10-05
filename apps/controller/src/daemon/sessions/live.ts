@@ -251,10 +251,10 @@ const make = Effect.gen(function* () {
    *
    * - If the runner reports a delivery, it is recorded and returned.
    * - If the runner rejects the input, the session service records that
-   *   (`recordRefusal`), and this fails with an invalid state error with the
+   *   (`recordNotTaken`), and this fails with an invalid state error with the
    *   same reason.
    * - If the runner is not connected, the frame never left the controller.
-   *   The session service puts the row back to waiting (`recordNotSent`), an
+   *   The session service puts the row back to waiting (`recordNotTaken`), an
    *   agent step's prompt too, and this fails with an invalid state error.
    *   The runner is asked nothing, because it never had the input.
    * - If the frame left but the runner does not reply, the session service
@@ -276,7 +276,7 @@ const make = Effect.gen(function* () {
       const session = yield* readSession(row.sessionId);
       const outcome = yield* deliverTo(session, row);
       if (outcome._tag === "notSent") {
-        yield* sessions.recordNotSent(row, NOT_SENT);
+        yield* sessions.recordNotTaken(row, NOT_SENT);
         return yield* Effect.fail(createInvalidStateError(NOT_SENT));
       }
       if (outcome._tag === "answered") {
@@ -286,7 +286,7 @@ const make = Effect.gen(function* () {
           return { inputId: row.id, result: answer.delivery };
         }
         const reason = answer.message ?? REFUSED;
-        yield* sessions.recordRefusal(row, reason);
+        yield* sessions.recordNotTaken(row, reason);
         return yield* Effect.fail(createInvalidStateError(reason));
       }
       const resultRequest = yield* sessions.recordNoAnswer(row, NOT_DELIVERED);
