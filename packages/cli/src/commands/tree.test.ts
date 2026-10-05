@@ -181,9 +181,11 @@ describe("a command's fields against the schema", () => {
       const listing = COMMANDS.find((each) => each.id === target);
       expect(listing, `${where} resolves through ${target}, which is not a command`).toBeDefined();
       expect(target.split(".")[1], `${target} is not a listing`).toMatch(/^query/);
+      // An error about a tail names what is listed by the word before `list`.
+      expect(listing!.words.at(-1), `${target} is not spelled <noun> list`).toBe("list");
       const listingParams = listPathParams(listing!.path);
       expect(
-        listing!.positionals.map((one) => one.name),
+        listing!.positionals.map((positional) => positional.name),
         `${target} takes an argument that is not a path parameter`,
       ).toEqual(listingParams);
       if (listingParams.length === 0) continue;
@@ -191,6 +193,8 @@ describe("a command's fields against the schema", () => {
       // The command's path parameters fill the list's, so the field must not
       // be one of them, and the command must name the same record.
       expect(field.carriedIn, `${where} is a path parameter`).not.toBe("path");
+      // The list's route cut just after its last path parameter, such as
+      // `/sessions/:id` for `/sessions/:id/subagents`.
       const recordRoute = listing!.path.slice(
         0,
         listing!.path.indexOf(`:${listingParams.at(-1)!}`) + listingParams.at(-1)!.length + 1,
@@ -214,7 +218,7 @@ describe("a command's fields against the schema", () => {
       ["agent", "list"],
     ]) {
       const listing = findCommandByWords(words)!;
-      const field = listing.query.find((one) => one.name === "permissionProfileId");
+      const field = listing.query.find((queryField) => queryField.name === "permissionProfileId");
       expect(field, words.join(" ")).toBeDefined();
       expect(field!.spelling).toBe("profile");
       expect(field!.resolves).toBe("profile.query");
@@ -223,7 +227,7 @@ describe("a command's fields against the schema", () => {
 
   it("lets conversation list filter by assistant", () => {
     const field = findCommandByWords(["conversation", "list"])?.query.find(
-      (one) => one.name === "assistantId",
+      (queryField) => queryField.name === "assistantId",
     );
     expect(field).toBeDefined();
     expect(field!.spelling).toBe("assistant");
@@ -232,7 +236,7 @@ describe("a command's fields against the schema", () => {
 
   it("lets session list filter by conversation", () => {
     const field = findCommandByWords(["session", "list"])?.query.find(
-      (one) => one.name === "conversationId",
+      (queryField) => queryField.name === "conversationId",
     );
     expect(field).toBeDefined();
     expect(field!.spelling).toBe("conversation");

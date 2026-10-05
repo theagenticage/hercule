@@ -78,6 +78,15 @@ const readAll = async (
 };
 
 /**
+ * Returns what a list command lists, in the words of its spelling: "task" for
+ * `task list`, "subagent" for `session subagent list`, "join-token" for
+ * `runner join-token list`. Every command a tail resolves through is spelled
+ * `<words> <noun> list`, which the tree test checks, so the noun is the word
+ * before `list`.
+ */
+const nameListedThing = (listing: Command): string => listing.words.at(-2)!;
+
+/**
  * Returns the full id that the text given for a field refers to.
  *
  * A canonical id is returned as it is. Anything else is read against the list
@@ -108,23 +117,23 @@ const resolveTail = async (
 ): Promise<string> => {
   if (CANONICAL_ID.test(text)) return text;
 
-  const tooShort = new UsageError(
-    `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
-    command.spelling,
-  );
+  const failTooShort = (): never => {
+    throw new UsageError(
+      `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
+      command.spelling,
+    );
+  };
   // A Hercule id is always canonical, so short text is wrong on the command
   // line, and nothing is sent.
-  if (field.holdsAnId && text.length < MIN_TAIL) throw tooShort;
+  if (field.holdsAnId && text.length < MIN_TAIL) failTooShort();
 
   const listing = findCommandById(field.resolves!)!;
-  // The word before the verb names what is listed: `task list` lists tasks,
-  // `session subagent list` lists subagents.
-  const noun = listing.words.at(-2)!;
-  const inPath = listing.positionals.filter((one) => one.carriedIn === "path");
+  const noun = nameListedThing(listing);
+  const inPath = listing.positionals.filter((positional) => positional.carriedIn === "path");
   const params =
     inPath.length === 0
       ? undefined
-      : Object.fromEntries(inPath.map((one) => [one.name, scope[one.name]!]));
+      : Object.fromEntries(inPath.map((positional) => [positional.name, scope[positional.name]!]));
 
   // Sort by creation time, not by the list's default order. Keyset paging
   // skips no row only as long as the value each row is sorted by does not
@@ -139,14 +148,23 @@ const resolveTail = async (
     .map((item) => item["id"])
     .filter((id): id is string => typeof id === "string");
   if (ids.includes(text)) return text;
-  if (text.length < MIN_TAIL) throw tooShort;
+  if (text.length < MIN_TAIL) failTooShort();
 
   const matches = ids.filter((id) => id.endsWith(text));
   if (matches.length === 1) return matches[0]!;
   if (matches.length === 0) {
-    throw new ApiError("not_found", `no ${noun} whose id ends with ${text}`);
+    // A Hercule id is canonical and was returned above, so the text of such a
+    // field is a tail. Any other id, such as a subagent's, may be given whole,
+    // so its message covers both readings.
+    throw new ApiError(
+      "not_found",
+      field.holdsAnId
+        ? `no ${noun} whose id ends with ${text}`
+        : `no ${noun} has the id ${text} or an id ending with it`,
+    );
   }
-  // Every match ends with the text, so only the whole ids tell them apart.
+  // Every match ends with the text, which is at least a tail long, so the
+  // matches' tails are all the same and only their whole ids tell them apart.
   throw new ApiError(
     "conflict",
     `${text} matches ${matches.length} ${noun} ids: ${matches.join(", ")}`,

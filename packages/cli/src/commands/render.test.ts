@@ -27,7 +27,7 @@ const buildTranscriptRow = (position: number, event: Record<string, unknown>) =>
 describe("hercule session spawn", () => {
   it("prints the session and a hint with the command that reads its transcript", () => {
     const lines = renderHuman(
-      { kind: "value", value: { id: SESSION, status: "starting" } },
+      { kind: "value", value: { id: SESSION, status: "starting", openRequests: [] } },
       lookUpCommand("session", "spawn"),
     );
 
@@ -39,11 +39,107 @@ describe("hercule session spawn", () => {
 
   it("prints no hint after an ordinary read", () => {
     const lines = renderHuman(
-      { kind: "value", value: { id: SESSION, status: "idle" } },
+      { kind: "value", value: { id: SESSION, status: "idle", openRequests: [] } },
       lookUpCommand("session", "read"),
     );
 
     expect(lines.join("\n")).not.toContain("hercule transcript read");
+  });
+});
+
+/**
+ * A request id the harness chose. It is shaped like a Hercule id, which the
+ * CLI would shorten to a tail, but `--request` takes only the whole id.
+ */
+const REQUEST_ID = "0199e0e7-2222-7000-8000-0000000000aa";
+
+const OPEN_REQUESTS = [
+  {
+    requestId: REQUEST_ID,
+    itemId: "toolu_1",
+    kind: "command_approval",
+    detail: { command: "rm -rf build/stale" },
+    decisions: ["allow", "allow_always", "deny", "cancel"],
+    subagentId: "agent-a1b2c3d4e5f60718",
+  },
+  {
+    requestId: "req_9c2e4f18",
+    itemId: "toolu_2",
+    kind: "question",
+    detail: {
+      questions: [{ question: "Which branch?", header: "Branch", options: [], multiSelect: false }],
+    },
+  },
+];
+
+describe("hercule session read", () => {
+  it("prints the open Requests as a table with whole request ids, who asked and what each asks", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: { id: SESSION, status: "busy", openRequests: OPEN_REQUESTS },
+      },
+      lookUpCommand("session", "read"),
+    );
+
+    expect(lines).toEqual([
+      `id      ${SESSION.slice(-8)}`,
+      "status  busy",
+      "",
+      "open requests",
+      "requestId                             kind              askedBy            decisions                       asks",
+      `${REQUEST_ID}  command_approval  subagent e5f60718  allow,allow_always,deny,cancel  Run rm -rf build/stale?`,
+      "req_9c2e4f18                          question          own agent                                          Which branch?",
+    ]);
+  });
+
+  it("prints the open Requests the same way after a command that returns the session", () => {
+    const value = { id: SESSION, status: "busy", openRequests: OPEN_REQUESTS };
+    const read = renderHuman({ kind: "value", value }, lookUpCommand("session", "read"));
+
+    for (const words of [
+      ["session", "respond-to-approval-request"],
+      ["session", "interrupt"],
+    ]) {
+      expect(renderHuman({ kind: "value", value }, lookUpCommand(...words))).toEqual(read);
+    }
+  });
+
+  it("prints no open requests heading when nothing waits on the user", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { id: SESSION, status: "idle", openRequests: [] } },
+      lookUpCommand("session", "read"),
+    );
+
+    expect(lines).toEqual([`id      ${SESSION.slice(-8)}`, "status  idle"]);
+  });
+});
+
+describe("hercule session list", () => {
+  it("counts each session's open Requests and sums its tokens instead of printing their JSON", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            {
+              id: SESSION,
+              status: "busy",
+              openRequests: OPEN_REQUESTS,
+              usage: { inputTokens: 1500, outputTokens: 200, cacheReadTokens: 1200 },
+            },
+            { id: SESSION, status: "starting", openRequests: [] },
+          ],
+        },
+      },
+      lookUpCommand("session", "list"),
+    );
+
+    expect(lines).toEqual([
+      "id        status    openRequests  tokens",
+      `${SESSION.slice(-8)}  busy      2             2900`,
+      `${SESSION.slice(-8)}  starting  0`,
+    ]);
   });
 });
 
@@ -125,7 +221,7 @@ describe("hercule transcript read", () => {
     ]);
   });
 
-  it("prints the whole ids of the subagents a subagent item started, after its kind", () => {
+  it("prints the whole ids of the subagents a subagent item started and its description, not its detail", () => {
     const lines = renderHuman(
       {
         kind: "value",
@@ -136,7 +232,11 @@ describe("hercule transcript read", () => {
               turnId: "t1",
               itemId: "i1",
               kind: "subagent",
-              detail: { description: "x".repeat(200), subagentIds: ["agent-a1", "agent-b2"] },
+              detail: {
+                name: "Agent",
+                input: { description: "Audit build output", prompt: "x".repeat(200) },
+                subagentIds: ["agent-a1", "agent-b2"],
+              },
             }),
           ],
         },
@@ -144,9 +244,55 @@ describe("hercule transcript read", () => {
       lookUpCommand("transcript", "read"),
     );
 
-    expect(lines[0]).toMatch(
-      /^1 {2}2026-09-07T10:00:00\.000Z {2}item\.started {2}kind=subagent {2}subagentIds=agent-a1,agent-b2 {2}detail=/,
+    expect(lines).toEqual([
+      "1  2026-09-07T10:00:00.000Z  item.started  kind=subagent  subagentIds=agent-a1,agent-b2  description=Audit build output",
+    ]);
+  });
+
+  it("prints the detail of a subagent item that names neither subagents nor a description", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            buildTranscriptRow(1, {
+              _tag: "item.started",
+              turnId: "t1",
+              itemId: "i1",
+              kind: "subagent",
+              detail: { name: "Agent" },
+            }),
+          ],
+        },
+      },
+      lookUpCommand("transcript", "read"),
     );
+
+    expect(lines).toEqual([
+      '1  2026-09-07T10:00:00.000Z  item.started  kind=subagent  detail={"name":"Agent"}',
+    ]);
+  });
+
+  it("prints an opened request's whole id, kind and what it asks, not its JSON", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            buildTranscriptRow(1, {
+              _tag: "request.opened",
+              subagentId: "agent-a1b2c3d4e5f60718",
+              request: OPEN_REQUESTS[0],
+            }),
+          ],
+        },
+      },
+      lookUpCommand("transcript", "read"),
+    );
+
+    expect(lines).toEqual([
+      `1  2026-09-07T10:00:00.000Z  request.opened  requestId=${REQUEST_ID}  kind=command_approval  asks=Run rm -rf build/stale?`,
+    ]);
   });
 
   it("prints no results when the transcript is empty", () => {
@@ -160,31 +306,33 @@ describe("hercule transcript read", () => {
 });
 
 describe("hercule session subagent list", () => {
-  it("prints one row per subagent, its tokens summed, and no column no subagent fills", () => {
-    const startedAt = new Date().toISOString();
+  it("prints every column on every call, ids as tails, tokens summed and how long each ran", () => {
+    const now = Date.now();
     const lines = renderHuman(
       {
         kind: "value",
         value: {
           items: [
             {
-              id: "agent-a1",
+              id: "agent-a1b2c3d4e5f60718",
               sessionId: SESSION,
               status: "completed",
               agentType: "Explore",
               toolCalls: 3,
               usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 5 },
-              startedAt,
+              startedAt: new Date(now - 60_000).toISOString(),
+              endedAt: new Date(now - 45_000).toISOString(),
               description: "Find the login handler",
               result: "It is in auth.ts\nline 12",
             },
             {
-              id: "agent-b2",
+              id: "b2",
               sessionId: SESSION,
-              parentSubagentId: "agent-a1",
-              status: "running",
+              parentSubagentId: "agent-a1b2c3d4e5f60718",
+              status: "completed",
               toolCalls: 0,
-              startedAt,
+              startedAt: new Date(now - 50_000).toISOString(),
+              endedAt: new Date(now - 48_000).toISOString(),
             },
           ],
         },
@@ -193,9 +341,9 @@ describe("hercule session subagent list", () => {
     );
 
     expect(lines).toEqual([
-      "id        parent    status     agentType  toolCalls  tokens  age  description             result",
-      "agent-a1            completed  Explore    3          125     now  Find the login handler  It is in auth.ts ...",
-      "agent-b2  agent-a1  running               0                  now",
+      "id        parent    status     agentType  model  toolCalls  tokens  took   description             activity  result",
+      "e5f60718            completed  Explore           3          125     15.0s  Find the login handler            It is in auth.ts ...",
+      "b2        e5f60718  completed                    0                  2.0s",
     ]);
   });
 });

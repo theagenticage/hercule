@@ -182,14 +182,20 @@ describe("a flag resolved within the command's own session", () => {
     expect(fetch.calls).toHaveLength(1);
   });
 
-  it("fails with not_found when no subagent of the session matches", async () => {
-    const { fetch, run } = await readTranscript("99999999");
+  /**
+   * A subagent's id is the harness's own and not canonical, so the CLI cannot
+   * tell a whole id from a tail, and the message reads true for both.
+   */
+  it("fails with not_found, for a whole id as for a tail, when no subagent of the session matches", async () => {
+    for (const text of ["99999999", "agent-nope00000000"]) {
+      const { fetch, run } = await readTranscript(text);
 
-    await expect(run()).rejects.toMatchObject({
-      code: "not_found",
-      message: "no subagent whose id ends with 99999999",
-    });
-    expect(fetch.calls).toHaveLength(1);
+      await expect(run()).rejects.toMatchObject({
+        code: "not_found",
+        message: `no subagent has the id ${text} or an id ending with it`,
+      });
+      expect(fetch.calls).toHaveLength(1);
+    }
   });
 
   it("fails with a usage error for short text that is no subagent's id", async () => {
