@@ -48,9 +48,10 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
  * the run ended once it has ended; a vertical line at the end of each row's
  * track marks that end. The line stays inside the track, like the ticks, so
  * it never crosses the lines under a row. Under an agent step's row is a link
- * to the session it drives. Under any row is its
- * error, or, while the step waits for a runner to run it in the run's
- * workspace, a line explaining which runner it waits for.
+ * to the session it drives, with the session's status on the newest record
+ * that drives it. Under any row is its error, or, while the step waits for a
+ * runner to run it in the run's workspace, a line explaining which runner it
+ * waits for.
  *
  * The ticks are as close together as the axis's width lets their labels be,
  * so the timeline measures its axis, and measures it again when it resizes.
@@ -158,7 +159,7 @@ export function StepTimeline({
                   {describeStepDuration(line, line.kind, now)}
                 </span>
               </div>
-              {line.sessionId === undefined ? null : <StepSessionLine sessionId={line.sessionId} />}
+              {line.session === undefined ? null : <StepSessionLine recordSession={line.session} />}
               {line.error === undefined ? null : <StepErrorLine error={line.error} />}
               <StepWaitLine line={line} runnerWait={runnerWait} />
             </li>

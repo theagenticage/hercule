@@ -19,6 +19,7 @@ import {
   isRunLive,
   readTimestamps,
   type StepLineKind,
+  type StepRecordSession,
   type Timestamps,
   type WorkState,
 } from "./run-display";
@@ -229,8 +230,11 @@ export interface StepLine extends StepProgress {
   readonly iterationLabel: string | undefined;
   /** The action an action step calls, as the plan names it. `undefined` on any other line. */
   readonly action: string | undefined;
-  /** The session an agent step's record drives, once the record has started. */
-  readonly sessionId: string | undefined;
+  /**
+   * The session an agent step's record drives, once the record has started,
+   * and whether the record is the newest that drives it.
+   */
+  readonly session: StepRecordSession | undefined;
   /**
    * What a completed record holds: what an action returned (`null` for an
    * action that returns nothing), an agent step's output, or a signal's.
@@ -249,8 +253,15 @@ export interface StepLine extends StepProgress {
 export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<StepLine> => {
   const steps = new Map(run.plan.steps.map((step) => [step.id, step]));
   const records = groupRecordsByStep(run.steps);
+  // The records are in the order they were created, so the last index seen
+  // for a session is the index of its newest record.
+  const newestIndexBySession = new Map(
+    run.steps.flatMap((record, index) =>
+      record.sessionId === undefined ? [] : [[record.sessionId, index] as const],
+    ),
+  );
   return [
-    ...run.steps.map((record): StepLine => {
+    ...run.steps.map((record, index): StepLine => {
       const step = steps.get(record.stepId);
       return {
         key: `${record.stepId}#${String(record.iteration)}`,
@@ -261,7 +272,13 @@ export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<
             ? `#${String(record.iteration)}`
             : undefined,
         action: step?.kind === "action" ? step.action : undefined,
-        sessionId: record.sessionId,
+        session:
+          record.sessionId === undefined
+            ? undefined
+            : {
+                id: record.sessionId,
+                isNewestRecord: newestIndexBySession.get(record.sessionId) === index,
+              },
         ...readStepProgress(record),
         output: record.status === "completed" ? record.output : undefined,
         error: record.status === "failed" ? record.error : undefined,
@@ -275,7 +292,7 @@ export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<
         kind: step.kind,
         iterationLabel: undefined,
         action: step.kind === "action" ? step.action : undefined,
-        sessionId: undefined,
+        session: undefined,
         ...readStepProgress(undefined),
         output: undefined,
         error: undefined,

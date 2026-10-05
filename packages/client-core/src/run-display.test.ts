@@ -536,6 +536,8 @@ describe("listAwaitedSignals", () => {
 describe("describeStepSession", () => {
   const SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f00005e55";
   const ATLAS = buildRunner("runner-atlas", "atlas");
+  /** The session as the newest record that drives it carries it. */
+  const NEWEST = { id: SESSION_ID, isNewestRecord: true };
 
   it("shows the session's status", () => {
     const session = buildSession({
@@ -543,15 +545,28 @@ describe("describeStepSession", () => {
       title: "Fix and ship a pull request · implement",
       status: "busy",
     });
-    assert.deepStrictEqual(describeStepSession(SESSION_ID, [session], undefined), {
+    assert.deepStrictEqual(describeStepSession(NEWEST, [session], undefined), {
       sessionId: SESSION_ID,
       status: "busy",
       wait: undefined,
     });
   });
 
+  it("shows neither status nor wait on a record that a later record of the same session follows", () => {
+    // The session is busy with the later record; the earlier record has ended.
+    const busy = buildSession({ id: SESSION_ID, status: "busy" });
+    const earlier = { id: SESSION_ID, isNewestRecord: false };
+    assert.deepStrictEqual(describeStepSession(earlier, [busy], undefined), {
+      sessionId: SESSION_ID,
+      status: undefined,
+      wait: undefined,
+    });
+    const queued = buildSession({ id: SESSION_ID, status: "queued", runnerId: ATLAS.id });
+    assert.strictEqual(describeStepSession(earlier, [queued], ATLAS).wait, undefined);
+  });
+
   it("shows no status for a session not read yet", () => {
-    assert.deepStrictEqual(describeStepSession(SESSION_ID, [], undefined), {
+    assert.deepStrictEqual(describeStepSession(NEWEST, [], undefined), {
       sessionId: SESSION_ID,
       status: undefined,
       wait: undefined,
@@ -561,7 +576,7 @@ describe("describeStepSession", () => {
   it("says a queued session waits for a free session slot on its online runner", () => {
     const queued = buildSession({ id: SESSION_ID, status: "queued", runnerId: ATLAS.id });
     assert.strictEqual(
-      describeStepSession(SESSION_ID, [queued], ATLAS).wait,
+      describeStepSession(NEWEST, [queued], ATLAS).wait,
       "Waiting for runner atlas to free a session slot",
     );
   });
@@ -570,9 +585,9 @@ describe("describeStepSession", () => {
     const queued = buildSession({ id: SESSION_ID, status: "queued", runnerId: ATLAS.id });
     const offline: Runner = { ...ATLAS, connectivity: "offline" };
     // The runner-wait line already says that the step waits for the runner to reconnect.
-    assert.strictEqual(describeStepSession(SESSION_ID, [queued], offline).wait, undefined);
-    assert.strictEqual(describeStepSession(SESSION_ID, [queued], undefined).wait, undefined);
+    assert.strictEqual(describeStepSession(NEWEST, [queued], offline).wait, undefined);
+    assert.strictEqual(describeStepSession(NEWEST, [queued], undefined).wait, undefined);
     const busy = { ...queued, status: "busy" } as const;
-    assert.strictEqual(describeStepSession(SESSION_ID, [busy], ATLAS).wait, undefined);
+    assert.strictEqual(describeStepSession(NEWEST, [busy], ATLAS).wait, undefined);
   });
 });

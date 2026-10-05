@@ -8,6 +8,7 @@ import {
   type RunnerWait,
   type StepLine,
   type StepLineKind,
+  type StepRecordSession,
 } from "@hercule/client-core";
 import type { FailureReason, StepError } from "@hercule/contract";
 import { WorkStateMark, cn } from "@hercule/ui";
@@ -93,30 +94,37 @@ export function StepWaitLine({
 }
 
 /**
- * Renders the line under an agent step's record that names the session the
- * record drives by the tail of its id, in mono and linked to the session's
- * thread, followed by the session's status, such as "Session 3f2a91c0 ·
- * busy". The header names the run the same way, and the records of one step
- * that drive one session show the same id. A session that has not been read
- * yet shows no status. A queued session adds a second line that says what it
- * waits for, such as "Waiting for runner atlas to free a session slot", as a
- * step that waits for a runner does.
+ * Renders the line under an agent step's record that names `recordSession`,
+ * the session the record drives, by the tail of its id, in mono and linked to the
+ * session's thread. On the newest record that drives the session, the
+ * session's status follows, such as "Session 3f2a91c0 · busy"; an earlier
+ * record of the same session shows only "Session 3f2a91c0", because the
+ * status is the session's now and not that record's. The header names the
+ * run the same way, and the records of one step that drive one session show
+ * the same id. A session that has not been read yet shows no status. A
+ * queued session adds a second line under its newest record that says what
+ * it waits for, such as "Waiting for runner atlas to free a session slot",
+ * as a step that waits for a runner does.
  *
  * It reads the run's sessions from the query cache itself, which the run's
- * page fills before it renders. Only a queued session's runner is read, and
- * its wait line shows once that read returns. Fails when it is rendered
- * outside a run's page.
+ * page fills before it renders. Only the runner of a queued session under its
+ * newest record is read, and its wait line shows once that read returns.
+ * Fails when it is rendered outside a run's page.
  */
-export function StepSessionLine({ sessionId }: { readonly sessionId: string }): JSX.Element {
+export function StepSessionLine({
+  recordSession,
+}: {
+  readonly recordSession: StepRecordSession;
+}): JSX.Element {
   const { client } = useRouteContext({ from: "/_shell" });
   const { runId } = useParams({ from: "/_shell/runs/$runId" });
   const sessions = useSuspenseQuery(runSessionsQuery(client, runId)).data.items;
-  const session = sessions.find((candidate) => candidate.id === sessionId);
+  const session = sessions.find((candidate) => candidate.id === recordSession.id);
   const runner = useQuery({
     ...runnerQuery(client, session?.runnerId ?? ""),
-    enabled: session?.status === "queued",
+    enabled: recordSession.isNewestRecord && session?.status === "queued",
   }).data;
-  const reading = describeStepSession(sessionId, sessions, runner);
+  const reading = describeStepSession(recordSession, sessions, runner);
   return (
     <>
       <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">

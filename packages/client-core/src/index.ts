@@ -113,6 +113,7 @@ export {
   shouldRunRecede,
   describeStepSession,
   type StepLineKind,
+  type StepRecordSession,
   type StepSessionReading,
 } from "./run-display";
 export {

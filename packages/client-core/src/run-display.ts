@@ -571,25 +571,46 @@ export const listAwaitedSignals = (
     .map((trigger) => trigger.id);
 };
 
+/**
+ * The session an agent step's record drives, and whether the record is the
+ * newest of the run's records that drive it. A step that runs again in the
+ * same session, such as one a signal sends back to, has several records that
+ * drive one session.
+ */
+export interface StepRecordSession {
+  readonly id: string;
+  /** Whether no record created after this one drives the same session. */
+  readonly isNewestRecord: boolean;
+}
+
 /** The session an agent step's record drove, as the line under the record shows it. */
 export interface StepSessionReading {
   readonly sessionId: string;
-  /** The session's status, or `undefined` while the session has not been read. */
+  /**
+   * The session's status, or `undefined` while the session has not been
+   * read, and on every record but the newest that drives the session.
+   */
   readonly status: SessionStatus | undefined;
   /**
    * Why a queued session has not started, such as "Waiting for runner atlas
-   * to free a session slot", or `undefined` for a session that is not queued.
+   * to free a session slot", or `undefined` for a session that is not queued
+   * and on every record but the newest that drives the session.
    */
   readonly wait: string | undefined;
 }
 
 /**
- * Returns how the lines under an agent step's record show the session the
- * record drove, looked up by `sessionId` in `sessions`, the run's sessions.
- * The line names the session by the tail of its id, not by its title: a step
- * session's title, such as "Fix and ship a pull request · implement", only
- * repeats the workflow and the step the run's page already shows.
+ * Returns how the lines under an agent step's record show `recordSession`,
+ * the session the record drove, looked up by its id in `sessions`, the run's
+ * sessions. The line names the session by the tail of its id, not by its
+ * title: a step session's title, such as "Fix and ship a pull request ·
+ * implement", only repeats the workflow and the step the run's page already
+ * shows.
  *
+ * - Only the newest record that drives the session shows the session's
+ *   status and wait. The status is the session's now, not the record's: an
+ *   earlier record that completed would read "busy" while a later record
+ *   runs in the same session.
  * - A session missing from `sessions`, such as one that started after they
  *   were last read, has no status.
  * - A queued session on an online `runner` waits for the runner to free one
@@ -600,17 +621,19 @@ export interface StepSessionReading {
  *   unknown.
  */
 export const describeStepSession = (
-  sessionId: string,
+  recordSession: StepRecordSession,
   sessions: readonly Session[],
   runner: Runner | undefined,
 ): StepSessionReading => {
-  const session = sessions.find((each) => each.id === sessionId);
+  const session = recordSession.isNewestRecord
+    ? sessions.find((each) => each.id === recordSession.id)
+    : undefined;
   const isWaitingForSlot =
     session?.status === "queued" &&
     runner?.id === session.runnerId &&
     runner.connectivity === "online";
   return {
-    sessionId,
+    sessionId: recordSession.id,
     status: session?.status,
     wait: isWaitingForSlot ? `Waiting for runner ${runner.name} to free a session slot` : undefined,
   };

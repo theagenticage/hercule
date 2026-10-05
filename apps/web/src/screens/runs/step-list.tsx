@@ -11,9 +11,10 @@ import { JsonText } from "./json-text";
 import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
 
 /**
- * Renders the steps of a run as a list: one row per step record, then the steps the
- * run has not reached. A row shows the step's mark, id, action, state and
- * duration. Under an agent step's row is a link to the session it drives.
+ * Renders the steps of a run as a list: one row per step record, then the
+ * steps the run has not reached. A row shows the step's mark, id, action,
+ * state and duration. Under an agent step's row is a link to the session it
+ * drives, with the session's status on the newest record that drives it.
  * Under any row is its error, or, while the step waits for a runner to run it
  * in the run's workspace, a line explaining which runner it waits for. A row
  * with an output opens to show it. A signal's output is the event it fired
@@ -79,7 +80,7 @@ export function StepList({
                 {cells}
               </button>
             )}
-            {line.sessionId === undefined ? null : <StepSessionLine sessionId={line.sessionId} />}
+            {line.session === undefined ? null : <StepSessionLine recordSession={line.session} />}
             {line.error === undefined ? null : <StepErrorLine error={line.error} />}
             <StepWaitLine line={line} runnerWait={runnerWait} />
             {isOpen ? (

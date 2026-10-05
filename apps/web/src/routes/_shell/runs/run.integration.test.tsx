@@ -956,8 +956,8 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
   /** The tail of the id of the session `implement` drives, which names the session on its line. */
   const SESSION_TAIL = toIdTail(IMPLEMENT_SESSION_ID);
 
-  it("links each record of an agent step to its session, named by the tail of its id, with its status", async () => {
-    await openRunPage(SIGNAL_WAITING_RUN, { sessions: [IMPLEMENT_SESSION] });
+  it("links each record of an agent step to its session, named by the tail of its id, with its status on the newest record", async () => {
+    await openRunPage(SIGNAL_WAITING_RUN, { sessions: [{ ...IMPLEMENT_SESSION, status: "busy" }] });
     await findPageHeader();
 
     const rows = listStepRows("implement");
@@ -968,8 +968,13 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
       expect(others).toEqual([]);
       expect(link?.textContent).toBe(SESSION_TAIL);
       expect(link?.getAttribute("href")).toBe(`/threads/${IMPLEMENT_SESSION_ID}`);
-      expect(readPageText(row)).toContain(`Session ${SESSION_TAIL} · idle`);
     }
+    // The status is the session's now, so a record that has ended does not read "busy".
+    const [first, second, newest] = rows;
+    expect(readPageText(first)).toContain(`Session ${SESSION_TAIL}`);
+    expect(readPageText(first)).not.toContain(`Session ${SESSION_TAIL} ·`);
+    expect(readPageText(second)).not.toContain(`Session ${SESSION_TAIL} ·`);
+    expect(readPageText(newest)).toContain(`Session ${SESSION_TAIL} · busy`);
     // An action step's row and a signal's row have no session.
     expect(listSessionLinks(listStepRows("open_pr")[0]!)).toEqual([]);
     expect(listSessionLinks(listStepRows("checks_failed")[0]!)).toEqual([]);
@@ -992,7 +997,7 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     await openRunPage(SIGNAL_WAITING_RUN);
     await findPageHeader();
 
-    const row = listStepRows("implement")[0]!;
+    const row = listStepRows("implement").at(-1)!;
     const [link] = listSessionLinks(row);
     expect(link?.textContent).toBe(SESSION_TAIL);
     expect(link?.getAttribute("href")).toBe(`/threads/${IMPLEMENT_SESSION_ID}`);
@@ -1015,11 +1020,13 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     });
     await findPageHeader();
 
-    const row = listStepRows("implement")[0]!;
+    const row = listStepRows("implement").at(-1)!;
     expect(readPageText(row)).toContain(`Session ${SESSION_TAIL} · queued`);
     await waitFor(() => {
       expect(readPageText(row)).toContain("Waiting for runner mac-mini to free a session slot");
     });
+    // An earlier record of the session has ended, so it does not wait.
+    expect(readPageText(listStepRows("implement")[0])).not.toContain("Waiting for runner");
   });
 
   it("updates the session line live when the session changes", async () => {
@@ -1037,7 +1044,7 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     });
 
     await waitFor(() => {
-      expect(readPageText(listStepRows("implement")[0])).toContain(
+      expect(readPageText(listStepRows("implement").at(-1))).toContain(
         `Session ${SESSION_TAIL} · busy`,
       );
     });

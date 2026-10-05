@@ -595,12 +595,13 @@ describe("buildStepLines", () => {
   it("tells action steps, agent steps and signals apart, and carries an agent step's session", () => {
     const lines = buildStepLines(SIGNAL_WAITING);
     assert.deepStrictEqual(
-      lines.map((line) => [line.key, line.kind, line.action, line.sessionId]),
+      lines.map((line) => [line.key, line.kind, line.action, line.session]),
       [
-        ["implement#1", "agent", undefined, IMPLEMENT_SESSION_ID],
+        // Only the newest record that drives the session is marked as newest.
+        ["implement#1", "agent", undefined, { id: IMPLEMENT_SESSION_ID, isNewestRecord: false }],
         ["open_pr#1", "action", "github.pr.open", undefined],
         ["checks_failed#1", "signal", undefined, undefined],
-        ["implement#2", "agent", undefined, IMPLEMENT_SESSION_ID],
+        ["implement#2", "agent", undefined, { id: IMPLEMENT_SESSION_ID, isNewestRecord: true }],
         ["open_pr#2", "action", "github.pr.open", undefined],
         // The steps the run has not reached. A signal that has not fired has no line.
         ["escalate", "action", "task.create", undefined],
