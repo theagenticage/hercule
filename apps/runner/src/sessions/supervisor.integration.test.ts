@@ -1438,6 +1438,58 @@ describe("a session parked on an open request", () => {
   }
 });
 
+describe("a session that exits while a subagent's turn and Request are open", () => {
+  // A subagent's Request stays open until it is answered, its own turn ends
+  // or the session exits, the same rule the controller follows. A subagent
+  // that never reports either keeps it open until the exit, and no longer:
+  // the session started again under the same id begins with nothing open.
+  it("leaves nothing open behind, so the next start is watched as usual", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* awaitForwarded(sent, 1);
+        const steps: ReadonlyArray<Step> = [
+          ["turn.started", "t-1"],
+          ["turn.started", "t-2", SUBAGENT],
+          ["request.opened", "r-1", SUBAGENT],
+          ["turn.completed", "t-1"],
+        ];
+        let count = 1;
+        for (const step of steps) {
+          count += 1;
+          yield* Effect.sync(() => emitStep(fake, step));
+          yield* awaitForwarded(sent, count);
+        }
+
+        // The subagent's open Request keeps the session from being watched.
+        yield* TestClock.adjust(INACTIVITY_MS * 2);
+        expect(fake.stops).toEqual([]);
+
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* awaitForwarded(sent, 6);
+        yield* supervisor.start(START);
+        yield* awaitForwarded(sent, 7);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-3"));
+        yield* awaitForwarded(sent, 8);
+
+        yield* TestClock.adjust(INACTIVITY_MS);
+        yield* waitOnWallClock("sent the second exit", () => listExitReasons(sent).length === 2);
+      }),
+    );
+
+    expect(fake.stops).toEqual([
+      { sessionId: SESSION, reason: "stopped" },
+      { sessionId: SESSION, reason: "inactivity_timeout" },
+    ]);
+    expect(listExitReasons(sent)).toEqual(["stopped", "inactivity_timeout"]);
+  });
+});
+
 describe("a session that has run for as long as it may", () => {
   it("is stopped at the absolute deadline, mid-turn and with events still arriving", async () => {
     const fake = createFake();

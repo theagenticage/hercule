@@ -66,13 +66,20 @@ interface Live {
    */
   readonly openTurns: Set<string>;
   /**
-   * The Requests the session is parked on, by request id, each with the
-   * subagent that asked it, or `undefined` when the session's own agent did.
-   * A session waiting for its user is not stuck, however long it waits, so it
-   * is not watched while any Request is open. Several agents can each be
-   * parked at once (spec 06 section 13.3).
+   * The open Requests the agents of the session wait on, by request id, each
+   * with the subagent that asked it, or `undefined` when the session's own
+   * agent did. A session waiting for its user is not stuck, however long it
+   * waits, so it is not watched while any Request is open. Several agents can
+   * each wait at once (spec 06 section 13.3).
+   *
+   * A Request leaves this map on exactly the events that close it at the
+   * controller: its `request.resolved`, the end of its own agent's turn, and
+   * the session's exit, which removes this whole entry. The runner must never
+   * drop one earlier. If the controller still showed that Request as open,
+   * the inactivity watch would be running, and a session whose user has not
+   * answered yet would be stopped as stuck.
    */
-  readonly parks: Map<string, SubagentId | undefined>;
+  readonly parkedRequests: Map<string, SubagentId | undefined>;
   /**
    * The fiber that stops the session at its spec's absolute deadline. It is
    * interrupted when this entry is torn down. Undefined before the fiber is
@@ -141,7 +148,16 @@ interface ArrivedStart {
  * Checks that no agent of the session has a turn open or waits on its user,
  * which is when the idle wait may run.
  */
-const isIdle = (held: Live): boolean => held.openTurns.size === 0 && held.parks.size === 0;
+const isIdle = (held: Live): boolean => held.openTurns.size === 0 && held.parkedRequests.size === 0;
+
+/**
+ * Checks that a turn of some agent of the session is open and no agent waits
+ * on its user, which is when the inactivity watch runs. This is not the
+ * opposite of `isIdle`: a session with an open turn and an open Request is
+ * neither watched nor idle.
+ */
+const isWatched = (held: Live): boolean =>
+  held.openTurns.size > 0 && held.parkedRequests.size === 0;
 
 /** What a connection gives the supervisor while the connection is up. */
 export interface Connection {
@@ -478,33 +494,34 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               case "turn.completed":
                 held.openTurns.delete(event.turnId);
                 // A Request cannot outlive its agent's turn. The controller
-                // also closes them on this event, and a park left here would
-                // stop every later turn from being watched. Only this agent's
-                // parks close: another agent may still wait on its user.
-                for (const [requestId, asker] of held.parks) {
-                  if (asker === event.subagentId) held.parks.delete(requestId);
+                // also closes them on this event, and a Request left here
+                // would stop every later turn from being watched. Only this
+                // agent's Requests close: another agent may still wait on its
+                // user, even after the session's own turn has ended.
+                for (const [requestId, asker] of held.parkedRequests) {
+                  if (asker === event.subagentId) held.parkedRequests.delete(requestId);
                 }
                 if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
                 break;
               case "request.opened":
-                held.parks.set(event.request.requestId, event.subagentId);
+                held.parkedRequests.set(event.request.requestId, event.subagentId);
                 // A session waiting on its user is in use, however long the
                 // user takes to answer.
                 yield* cancelIdleUnload(held);
                 break;
               case "request.resolved":
-                held.parks.delete(event.requestId);
+                held.parkedRequests.delete(event.requestId);
                 break;
               default:
                 break;
             }
             // A session is watched exactly while a turn of any agent is open
             // and no agent waits on its user. The watch is brought in line
-            // with the open turns and parks after every event, instead of
-            // being started and stopped in each case above, so a fiber from an
-            // earlier state can never be left behind to stop a session that is
-            // not stuck.
-            if (held.openTurns.size > 0 && held.parks.size === 0) {
+            // with the open turns and open Requests after every event,
+            // instead of being started and stopped in each case above, so a
+            // fiber from an earlier state can never be left behind to stop a
+            // session that is not stuck.
+            if (isWatched(held)) {
               held.lastEventAt = yield* Clock.currentTimeMillis;
               if (held.inactivity === undefined) {
                 held.inactivity = yield* Effect.forkDetach(watchInactivity(held, event.sessionId));
@@ -785,7 +802,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           lastEventAt: 0,
           inactivity: undefined,
           openTurns: new Set(),
-          parks: new Map(),
+          parkedRequests: new Map(),
           absolute: undefined,
           idleMs: frame.spec.timeouts.idleMs,
           idle: undefined,
