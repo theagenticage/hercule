@@ -134,8 +134,11 @@ export type PinnedRunningStep = {
       readonly kind: "action";
       /** The id of the step's action in the run's plan. */
       readonly action: string;
-      /** The step's input as stored when the record started. Every action step's record stores one. */
-      readonly input?: Schema.Json;
+      /**
+       * The step's input as stored when the record started, or undefined when
+       * it stored none. Every action step's record stores one.
+       */
+      readonly input: Schema.Json | undefined;
       /** The branch stored when the record started (see `startStep`), or undefined when it stored none. */
       readonly checkoutBranch: string | undefined;
     }
@@ -1003,7 +1006,7 @@ const make = Effect.gen(function* () {
                 ...record,
                 kind: "action",
                 action: row.action,
-                ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
+                input: row.input === null ? undefined : (JSON.parse(row.input) as Schema.Json),
                 checkoutBranch: row.checkout_branch ?? undefined,
               },
             ];

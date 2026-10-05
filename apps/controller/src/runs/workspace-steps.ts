@@ -43,8 +43,8 @@ export interface ActionStepToStart extends WorkspaceStepKey {
   readonly action: string;
   /** The step's input as stored on its step record: rendered and checked against the action's input schema. */
   readonly input: Schema.Json;
-  /** The resource whose checkout the action works in, when the step names one. */
-  readonly resourceId?: string;
+  /** The resource whose checkout the action works in, or undefined when the step names none. */
+  readonly resourceId: string | undefined;
   /**
    * The branch the checkout is switched to before the action runs. Set only
    * when this step is the run's first workspace step, in a run on a repo's

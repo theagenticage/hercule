@@ -261,14 +261,7 @@ const readResourceId = (input: Schema.Json): string | undefined => {
  */
 const buildActionStepToStart = (
   step: Omit<ActionStepToStart, "kind" | "resourceId">,
-): ActionStepToStart => {
-  const resourceId = readResourceId(step.input);
-  return {
-    kind: "action",
-    ...step,
-    ...(resourceId === undefined ? {} : { resourceId }),
-  };
-};
+): ActionStepToStart => ({ kind: "action", ...step, resourceId: readResourceId(step.input) });
 
 /** Formats a step's key as one string, to compare keys in a set. */
 const formatStepKey = (key: WorkspaceStepKey): string =>
