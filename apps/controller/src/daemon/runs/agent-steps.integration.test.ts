@@ -26,7 +26,7 @@ import {
   readRun,
   requestCancel,
   startSentWorkflow,
-  waitForRun,
+  waitForRunTo,
 } from "../../runs/testing";
 import {
   at,
@@ -153,10 +153,6 @@ const buildLoopDefinition = (agentId: string, extra: Record<string, unknown> = {
   ],
 });
 
-/** Starts a run of a workflow sent with the request, and returns its id. */
-const startRun = async (arranged: Arranged, definition: unknown): Promise<string> =>
-  startSentWorkflow(arranged.harness.base, arranged.token, { definition });
-
 /**
  * Plays the runner's side of the sessions a test runs. A runner numbers each
  * session's events from 1, so the player keeps the next number per session,
@@ -206,14 +202,6 @@ const createSessionPlayer = () => {
 };
 
 type SessionPlayer = ReturnType<typeof createSessionPlayer>;
-
-/** Reads a run until `holds` is true for it. */
-const waitForRunTo = (
-  arranged: Arranged,
-  runId: string,
-  what: string,
-  holds: (run: Run) => boolean,
-): Promise<Run> => waitForRun(arranged.harness.base, arranged.token, runId, what, holds);
 
 /** Waits until a run has ended with `status`, and returns it. */
 const waitForRunEnded = (arranged: Arranged, runId: string, status: Run["status"]): Promise<Run> =>
@@ -325,7 +313,9 @@ describe("agent steps over the runner socket", () => {
         const { wire } = arranged;
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, buildImplementDefinition(agentId));
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
         const key = buildStepKey(runId);
 
         const sessionId = await waitForStepSessionId(arranged, key);
@@ -393,10 +383,9 @@ describe("agent steps over the runner socket", () => {
       await withAgentStepFleet(async (arranged) => {
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(
-          arranged,
-          buildImplementDefinition(agentId, { outputSchema: DONE_SCHEMA }),
-        );
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId, { outputSchema: DONE_SCHEMA }),
+        });
         const key = buildStepKey(runId);
         const sessionId = await startStepSession(arranged, player, key);
         expect(listSessionStarts(arranged.wire, sessionId)[0]?.spec.outputSchema).toEqual(
@@ -424,7 +413,9 @@ describe("agent steps over the runner socket", () => {
         const { wire } = arranged;
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, buildLoopDefinition(agentId));
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildLoopDefinition(agentId),
+        });
         const first = buildStepKey(runId, 1);
         const second = buildStepKey(runId, 2);
         const sessionId = await startStepSession(arranged, player, first);
@@ -495,10 +486,9 @@ describe("agent steps over the runner socket", () => {
         const { wire } = arranged;
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(
-          arranged,
-          buildLoopDefinition(agentId, { freshSession: true }),
-        );
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildLoopDefinition(agentId, { freshSession: true }),
+        });
         const firstKey = buildStepKey(runId, 1);
         const secondKey = buildStepKey(runId, 2);
         const first = await startStepSession(arranged, player, firstKey);
@@ -532,11 +522,15 @@ describe("agent steps over the runner socket", () => {
       await withAgentStepFleet(async (arranged) => {
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const taken = await startRun(arranged, buildImplementDefinition(agentId));
+        const taken = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
         const takenKey = buildStepKey(taken);
         const takenSession = await startStepSession(arranged, player, takenKey);
         // This session never starts, so its prompt is still on the controller.
-        const waiting = await startRun(arranged, buildImplementDefinition(agentId));
+        const waiting = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
         const waitingSession = await waitForStepSessionId(arranged, buildStepKey(waiting));
         await waitForSessionStart(arranged.wire, waitingSession);
 
@@ -593,7 +587,9 @@ describe("agent steps over the runner socket", () => {
       await withAgentStepFleet(async (arranged) => {
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, buildImplementDefinition(agentId));
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
         const key = buildStepKey(runId);
         const sessionId = await startStepSession(arranged, player, key);
 
@@ -635,7 +631,9 @@ describe("agent steps over the runner socket", () => {
         const { wire } = arranged;
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, buildLoopDefinition(agentId));
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildLoopDefinition(agentId),
+        });
         const first = buildStepKey(runId, 1);
         const sessionId = await startStepSession(arranged, player, first);
         player.startTurn(wire, sessionId, first);
@@ -665,7 +663,9 @@ describe("agent steps over the runner socket", () => {
         async (arranged) => {
           const player = createSessionPlayer();
           const agentId = await createAgent(arranged.harness.base, arranged.token);
-          const runId = await startRun(arranged, buildImplementDefinition(agentId));
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildImplementDefinition(agentId),
+          });
           const sessionId = await startStepSession(arranged, player, buildStepKey(runId));
 
           arranged.wire.close();
@@ -700,7 +700,9 @@ describe("agent steps over the runner socket", () => {
       await withAgentStepFleet(async (arranged) => {
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, buildImplementDefinition(agentId));
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
         await startStepSession(arranged, player, buildStepKey(runId));
 
         const retired = await send(
@@ -744,7 +746,9 @@ describe("agent steps over the runner socket", () => {
         );
 
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, buildImplementDefinition(agentId));
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
         const key = buildStepKey(runId);
         const sessionId = await waitForStepSessionId(arranged, key);
         expect((await readSession(arranged, sessionId)).status).toBe("queued");
@@ -772,9 +776,11 @@ describe("agent steps over the runner socket", () => {
         const player = createSessionPlayer();
         const repoId = await createRepo(arranged, "https://github.com/o/agent.git");
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, {
-          ...buildImplementDefinition(agentId),
-          workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            ...buildImplementDefinition(agentId),
+            workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
+          },
         });
         const key = buildStepKey(runId);
         const sessionId = await waitForStepSessionId(arranged, key);
@@ -844,7 +850,9 @@ describe("agent steps over the runner socket", () => {
         await waitForRunnerGone(arranged);
 
         const agentId = await createAgent(arranged.harness.base, arranged.token);
-        const runId = await startRun(arranged, buildImplementDefinition(agentId));
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
         await waitForRunTo(arranged, runId, "running", (run) => run.status === "running");
         const waiting = await readRun(arranged.harness.base, arranged.token, runId);
         expect(findStepRecords(waiting, IMPLEMENT)[0]?.status).toBe("pending");
@@ -870,48 +878,50 @@ describe("agent steps over the runner socket", () => {
           const player = createSessionPlayer();
           const agentId = await createAgent(arranged.harness.base, arranged.token);
           const pullRequest = "https://github.com/octo/repo/pull/7";
-          const runId = await startRun(arranged, {
-            name: "Implement and open a pull request, again on a label",
-            // The event payload carries the pull request's url, so the signal
-            // correlates on it.
-            triggers: [
-              {
-                id: "labeled",
-                kind: "signal",
-                on: { kind: "github.pr.labeled", connectionId: "any" },
-                correlation: {
-                  event: "event.payload.subject.url",
-                  run: "steps.open_pr.output.url",
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: {
+              name: "Implement and open a pull request, again on a label",
+              // The event payload carries the pull request's url, so the signal
+              // correlates on it.
+              triggers: [
+                {
+                  id: "labeled",
+                  kind: "signal",
+                  on: { kind: "github.pr.labeled", connectionId: "any" },
+                  correlation: {
+                    event: "event.payload.subject.url",
+                    run: "steps.open_pr.output.url",
+                  },
                 },
-              },
-            ],
-            steps: [
-              {
-                id: IMPLEMENT,
-                kind: "agent",
-                agent: agentId,
-                prompt: "Implement the change.",
-                // The signal's edge leads into this step, so it has to be
-                // named as the start.
-                entry: true,
-              },
-              {
-                id: "open_pr",
-                kind: "agent",
-                agent: agentId,
-                prompt: "Open a pull request.",
-                outputSchema: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["url"],
-                  properties: { url: { type: "string" } },
+              ],
+              steps: [
+                {
+                  id: IMPLEMENT,
+                  kind: "agent",
+                  agent: agentId,
+                  prompt: "Implement the change.",
+                  // The signal's edge leads into this step, so it has to be
+                  // named as the start.
+                  entry: true,
                 },
-              },
-            ],
-            edges: [
-              { from: IMPLEMENT, to: "open_pr" },
-              { from: "labeled", to: IMPLEMENT, maxTraversals: 1 },
-            ],
+                {
+                  id: "open_pr",
+                  kind: "agent",
+                  agent: agentId,
+                  prompt: "Open a pull request.",
+                  outputSchema: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["url"],
+                    properties: { url: { type: "string" } },
+                  },
+                },
+              ],
+              edges: [
+                { from: IMPLEMENT, to: "open_pr" },
+                { from: "labeled", to: IMPLEMENT, maxTraversals: 1 },
+              ],
+            },
           });
           const implementOnce = buildStepKey(runId, 1);
           const openOnce = buildStepKey(runId, 1, "open_pr");

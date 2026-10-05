@@ -14,7 +14,6 @@
  * transaction that moves the cursor.
  */
 import { describe, expect, it, vi } from "vitest";
-import * as Duration from "effect/Duration";
 import type { Notification, Run } from "@hercule/contract";
 import { get, post } from "../../../http/testing";
 import {
@@ -28,6 +27,7 @@ import {
   readRun,
   startSentWorkflow,
   waitForRun,
+  withSignalController,
 } from "../../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../../sessions/testing";
 import {
@@ -36,22 +36,11 @@ import {
   createWorkflowOrFail,
   emitLabeledEvent,
   enableWorkflow,
-  withSetUpController,
   type SetUpController,
 } from "../../../workflows/testing";
-import type { Plugin } from "@hercule/plugin-host";
 import { waitUntilRouted } from "../../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
-
-/**
- * Starts a set-up controller whose event pipeline ticks every 10 ms instead
- * of every second, so a test that waits for several events stays fast.
- */
-const withSignalController = (
-  body: (controller: SetUpController) => Promise<void>,
-  plugins: ReadonlyArray<Plugin> = [],
-) => withSetUpController(body, plugins, { eventRoutingInterval: Duration.millis(10) });
 
 /**
  * Starts a run whose signal trigger is `buildLabelSignal(signal)`, with

@@ -7,14 +7,19 @@
  * observable through the API.
  */
 import { expect } from "vitest";
-import { Effect, Schema } from "effect";
+import { Duration, Effect, Schema } from "effect";
 import type { ActionContext, Plugin } from "@hercule/plugin-host";
 import type { Grant, Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
 import { get, post, type ServerHarness } from "../http/testing";
 import { buildActionPlugin, createPluginFixture } from "../plugins/testing";
 import type { RunPage } from "./service";
 import { waitUntil, withFleet as sharedWithFleet, type Arranged } from "../sessions/testing";
-import { createWorkflowOrFail, readIssues } from "../workflows/testing";
+import {
+  createWorkflowOrFail,
+  readIssues,
+  withSetUpController,
+  type SetUpController,
+} from "../workflows/testing";
 import { FACTS, MODELS, PROVIDER, runEffect } from "../daemon/testing";
 
 const FINAL_STATUSES: ReadonlyArray<RunStatus> = ["completed", "failed", "cancelled"];
@@ -220,6 +225,24 @@ export const waitForRun = async (
     return holds(run) ? run : undefined;
   });
 };
+
+/** Calls `waitForRun` for a run of an arranged fleet, as the fleet's user. */
+export const waitForRunTo = (
+  arranged: Arranged,
+  runId: string,
+  what: string,
+  holds: (run: Run) => boolean,
+): Promise<Run> => waitForRun(arranged.harness.base, arranged.token, runId, what, holds);
+
+/**
+ * Starts a set-up controller whose event pipeline ticks every 10 ms instead
+ * of every second, so a test that waits for several signals stays fast.
+ */
+export const withSignalController = (
+  body: (controller: SetUpController) => Promise<void>,
+  plugins: ReadonlyArray<Plugin> = [],
+): Promise<void> =>
+  withSetUpController(body, plugins, { eventRoutingInterval: Duration.millis(10) });
 
 /**
  * Reads the run over and over until its status is final, and returns the

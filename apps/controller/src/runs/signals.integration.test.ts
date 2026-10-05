@@ -19,13 +19,11 @@
  * No runner is connected: action steps run on the controller.
  */
 import { describe, expect, it, vi } from "vitest";
-import * as Duration from "effect/Duration";
 import type { Run, Subscription } from "@hercule/contract";
 import { runEffect, waitUntilRouted } from "../daemon/testing";
 import { get, post } from "../http/testing";
 import { WAIT_DEADLINE_MS } from "../sessions/testing";
-import { emitLabeledEvent, withSetUpController, type SetUpController } from "../workflows/testing";
-import type { Plugin } from "@hercule/plugin-host";
+import { emitLabeledEvent, type SetUpController } from "../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,
@@ -39,18 +37,10 @@ import {
   startSentWorkflow,
   waitForRun,
   waitForRunToFinish,
+  withSignalController,
 } from "./testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
-
-/**
- * Starts a set-up controller whose event pipeline ticks every 10 ms instead
- * of every second, so a test that waits for several signals stays fast.
- */
-const withSignalController = (
-  body: (controller: SetUpController) => Promise<void>,
-  plugins: ReadonlyArray<Plugin> = [],
-) => withSetUpController(body, plugins, { eventRoutingInterval: Duration.millis(10) });
 
 /**
  * Starts a run of `definition` with the input `label: "triage"`, and returns
