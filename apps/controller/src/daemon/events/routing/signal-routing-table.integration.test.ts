@@ -139,6 +139,23 @@ describe("an event that matches a run's signal trigger", () => {
     });
   });
 
+  it("compares whole numbers exactly, even above the integers a JS number holds", async () => {
+    await withSignalController(async (controller) => {
+      const { base, token } = controller;
+      // 2^62 + 1 as the run's id, and 2^62 on the first event. As JS numbers
+      // the two are the same value.
+      const run = await startSignalRun(controller, "4611686018427387905", {
+        correlation: { event: "int(event.payload.added[0])", run: "int(inputs.label)" },
+      });
+
+      const neighbour = await emitLabeledEvent(base, token, { added: ["4611686018427387904"] });
+      expect(await countSignalRecords(controller, run.id, neighbour)).toBe(0);
+
+      await emitLabeledEvent(base, token, { added: ["4611686018427387905"] });
+      await waitForFirings(controller, run.id, 1);
+    });
+  });
+
   it("maps the event onto the signal's output when the trigger has outputs", async () => {
     await withSignalController(async (controller) => {
       const { base, token } = controller;

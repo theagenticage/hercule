@@ -47,19 +47,27 @@ export interface SignalMatch {
 }
 
 /**
- * Converts a correlation value to the form two values are compared in: a
- * string as it is, and any number as a JS number. The evaluator returns an
- * integer as a `BigInt`, and a number read from the context as a decimal, so
- * `7` and `7.0` must meet as the same number. Returns `undefined` for any
- * other kind of value.
+ * Converts a correlation value to the form two values are compared in with
+ * `===`, or returns `undefined` for a value that is neither a string nor a
+ * number:
+ *
+ * - a string stays as it is;
+ * - a whole number becomes a `BigInt`;
+ * - any other number stays a JS number.
+ *
+ * The evaluator returns an integer as a `BigInt`, and a number read from the
+ * context as a JS number, so `7` and `7.0` must meet as the same `BigInt`. An
+ * integer is never converted to a JS number, because a JS number holds an
+ * integer exactly only up to 2^53, and two ids above that would compare
+ * equal.
  */
-const normalizeCorrelationValue = (value: unknown): string | number | undefined => {
+const normalizeCorrelationValue = (value: unknown): string | bigint | number | undefined => {
   switch (typeof value) {
     case "string":
-    case "number":
-      return value;
     case "bigint":
-      return Number(value);
+      return value;
+    case "number":
+      return Number.isInteger(value) ? BigInt(value) : value;
     default:
       return undefined;
   }
@@ -75,7 +83,7 @@ const evaluateCorrelationSide = (
   trigger: SignalTrigger,
   side: "event" | "run",
   context: EvaluationContext,
-): Effect.Effect<string | number, ExpressionError> =>
+): Effect.Effect<string | bigint | number, ExpressionError> =>
   Effect.gen(function* () {
     const site = `The ${side} side of the correlation of the signal trigger ${trigger.id}`;
     const value = yield* Effect.mapError(
