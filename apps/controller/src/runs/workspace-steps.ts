@@ -160,7 +160,8 @@ export class WorkspaceSteps extends Context.Service<
 
     /**
      * Stops every session of a run that has not exited, so their workspace
-     * leases are released and the runner frees their slots. Call it in the
+     * leases are released and the runner frees their slots, and cancels the
+     * step prompts still waiting on any session of the run. Call it in the
      * transaction that ends the run: the run has ended, so no turn of these
      * sessions is owed to it any more.
      *

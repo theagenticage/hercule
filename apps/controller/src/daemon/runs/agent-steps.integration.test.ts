@@ -480,6 +480,96 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "keeps the next iteration's waiting prompt when its runner restarts, and resumes the session in place for it",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const player = createSessionPlayer();
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildLoopDefinition(agentId),
+        });
+        const first = buildStepKey(runId, 1);
+        const second = buildStepKey(runId, 2);
+        const sessionId = await startStepSession(arranged, player, first);
+        // The result ends the first iteration while its turn still runs, so
+        // the second iteration's prompt waits on the busy session.
+        player.startTurn(arranged.wire, sessionId, first);
+        player.sendResult(arranged.wire, first, completeWith({ done: false }));
+        await waitUntil("queued the second iteration's prompt", async () =>
+          (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
+        );
+
+        // The runner restarts before the turn ends, and holds no session.
+        arranged.wire.close();
+        await waitForRunnerGone(arranged);
+        const back = await arranged.reconnect();
+        back.send({ _tag: "sessionsReport", sessions: [] });
+
+        // The session is resumed in place, and its prompt is sent to it.
+        const resumed = await waitForSessionStart(back, sessionId);
+        expect(resumed.spec.continue).toEqual({
+          nativeSessionId: `native-${sessionId}`,
+          mode: "resume",
+        });
+        player.reportStarted(back, sessionId);
+        await waitForStepInput(back, second);
+        player.runTurn(back, sessionId, second, completeWith({ done: true }));
+
+        const ended = await waitForRunEnded(arranged, runId, "completed");
+        expect(findStepRecords(ended, IMPLEMENT).map((record) => record.sessionId)).toEqual([
+          sessionId,
+          sessionId,
+        ]);
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "cancels the prompt an exited session kept when its run is cancelled, so the session is not resumed for it",
+    async () => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const player = createSessionPlayer();
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildLoopDefinition(agentId),
+          });
+          const first = buildStepKey(runId, 1);
+          const sessionId = await startStepSession(arranged, player, first);
+          player.startTurn(arranged.wire, sessionId, first);
+          player.sendResult(arranged.wire, first, completeWith({ done: false }));
+          await waitUntil("queued the second iteration's prompt", async () =>
+            (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
+          );
+
+          // The runner restarts and holds no session. The session keeps its
+          // prompt, and only the next delivery tick, an hour away here,
+          // would resume it.
+          arranged.wire.close();
+          await waitForRunnerGone(arranged);
+          const back = await arranged.reconnect();
+          back.send({ _tag: "sessionsReport", sessions: [] });
+          await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
+          expect((await listInputs(arranged, sessionId)).map((one) => one.status)).toContain(
+            "queued",
+          );
+
+          const response = await requestCancel(arranged.harness.base, arranged.token, runId);
+          expect(response.status, await response.clone().text()).toBe(200);
+          await waitForRunEnded(arranged, runId, "cancelled");
+          expect((await listInputs(arranged, sessionId)).at(-1)).toMatchObject({
+            status: "cancelled",
+            reason: "the step's run ended before this prompt was sent",
+          });
+        },
+        { eventRoutingInterval: Duration.hours(1) },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "runs each iteration of a fresh-session step in a new session, and stops them all when the run is cancelled",
     async () => {
       await withAgentStepFleet(async (arranged) => {

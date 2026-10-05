@@ -20,7 +20,7 @@ import { withTransaction } from "../../db";
 import type { GrantsError } from "../../permissions";
 import { RunnerConnections } from "../../runners";
 import { StepSessionRefused, type OpenedStepSession, type StepSessionToOpen } from "../../runs";
-import { sessionRepository } from "../../sessions";
+import { sessionRepository, SessionService } from "../../sessions";
 import type { SettingError } from "../../settings";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
@@ -53,6 +53,7 @@ const describeSessionRefusal = (refusal: SessionRefusal): string => {
 export const makeStepSessions = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const rows = yield* sessionRepository;
+  const sessions = yield* SessionService;
   const placement = yield* Placement;
   const live = yield* Live;
   const workspaces = yield* WorkspaceService;
@@ -143,6 +144,7 @@ export const makeStepSessions = Effect.gen(function* () {
 
     stopSessions: (run: Pick<Run, "id" | "workflowId">): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
+        yield* sessions.cancelStepPromptsOfEndedRun(run.id);
         for (const session of yield* rows.listLiveInRun(run.id)) {
           // A session's run and step are written together, when it is created.
           if (session.stepId === null) {

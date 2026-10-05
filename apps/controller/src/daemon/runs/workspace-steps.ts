@@ -21,6 +21,7 @@ import {
   type WorkspaceStepKey,
 } from "@hercule/protocol";
 import { RunnerConnections } from "../../runners";
+import type { SessionService } from "../../sessions";
 import { WorkspaceSteps, type ActionStepToStart, type WorkspaceStepToStart } from "../../runs";
 import { WorkspaceService } from "../../workspaces";
 import { Live, makeStepSessions, Placement } from "../sessions";
@@ -135,5 +136,5 @@ const make = Effect.gen(function* () {
 export const WorkspaceStepsLayer: Layer.Layer<
   WorkspaceSteps,
   never,
-  WorkspaceService | RunnerConnections | Placement | Live | SqlClient.SqlClient
+  WorkspaceService | SessionService | RunnerConnections | Placement | Live | SqlClient.SqlClient
 > = Layer.effect(WorkspaceSteps)(make);

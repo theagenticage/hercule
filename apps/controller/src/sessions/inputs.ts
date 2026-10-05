@@ -485,6 +485,25 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Cancels the agent step prompts not yet sent to any session of a run,
+     * exited sessions included, storing `reason` on them. Returns the ids of
+     * the sessions that had one.
+     */
+    cancelStepPromptsOfRun: (
+      runId: string,
+      reason: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
+          WHERE status = 'queued' AND sent_at IS NULL AND step_iteration IS NOT NULL
+            AND session_id IN (SELECT id FROM sessions WHERE run_id = ${uuidFromString(runId)})
+          RETURNING session_id
+        `,
+        (rows) => [...new Set(rows.map((row) => uuidToString(row.session_id)))],
+      ),
+
+    /**
      * Cancels every input of a session that is still waiting, because nothing
      * waits on a harness that has exited, and returns how many were
      * cancelled. An input already sent is left alone: the runner has its

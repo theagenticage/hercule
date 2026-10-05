@@ -332,6 +332,9 @@ const STEP_INPUT_FIXED =
   "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
   "it is sent when the session is next idle; to stop the step, cancel the run with run.cancel";
 
+/** Why a step prompt was cancelled when its run ended before the prompt was sent. */
+const STEP_RUN_ENDED = "the step's run ended before this prompt was sent";
+
 /** Why an input was cancelled on a session that `endOnLostRunners` ended. */
 const RUNNER_LOST =
   "that session's runner was not heard from for longer than the session's absolute timeout, " +
@@ -380,6 +383,35 @@ type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 const keepsInputsOnExit = (
   session: Pick<StoredSession, "conversationId" | "conversationDeleted">,
 ): boolean => session.conversationId !== null && !session.conversationDeleted;
+
+/**
+ * Checks whether an agent step's session keeps its waiting step prompt
+ * through this exit, so the prompt resumes the session in place. `exited` is
+ * the session as read after the exit. It keeps the prompt when all of these
+ * hold:
+ *
+ * - an agent step started the session;
+ * - the exit left the harness's native state behind (`idle_unload` or
+ *   `runner_restart`), so the next turn continues the same transcript;
+ * - the session can be resumed (`resumable`);
+ * - the crash-loop guard is not armed: a session that was resumed for this
+ *   prompt and exited before it started a turn would most likely fail the
+ *   same way again.
+ *
+ * Otherwise the prompt is cancelled, and the runs domain fails the step. Any
+ * other exit, such as a stop or a timeout, ends the step's session for good.
+ * When the step's run ends, the run cancels the prompts it still has waiting
+ * (`cancelStepPromptsOfEndedRun`), so a kept prompt never resumes a session
+ * for a run that has ended.
+ */
+const keepsStepPromptOnExit = (
+  exited: Pick<StoredSession, "runId" | "resumable" | "crashGuardArmed">,
+  reason: SessionEndReason,
+): boolean =>
+  exited.runId !== null &&
+  (reason === "idle_unload" || reason === "runner_restart") &&
+  exited.resumable &&
+  !exited.crashGuardArmed;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -577,7 +609,8 @@ const make = Effect.gen(function* () {
    * it. For each session, it:
    *
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
-   *   one is given, unless the session keeps them (`keepsInputsOnExit`);
+   *   one is given, unless the session keeps them (`keepsInputsOnExit`,
+   *   `keepsStepPromptOnExit`);
    * - releases its lease on its workspace: `idle` when it can be resumed,
    *   so a thread the user may come back to keeps its files for the long
    *   window, and `orphan` when it cannot;
@@ -596,16 +629,19 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
-        if (!keepsInputsOnExit(session)) {
+        // Read again after the exit: whether the session can be resumed is
+        // computed only for an exited row.
+        const after = yield* sessions.one(session.id);
+        const keeps =
+          Option.isSome(after) &&
+          (keepsInputsOnExit(after.value) || keepsStepPromptOnExit(after.value, reason));
+        if (!keeps) {
           yield* inputs.cancelQueued(session.id, cancelReason);
         }
         // For an exit the harness reported, `applyReport` has already
         // withdrawn the notification, so this call finds it resolved and does
         // nothing. For every other end, the notification is withdrawn here.
         yield* withdrawOpenRequestNotification(session, WITHDRAW_REASON_SESSION_ENDED);
-        // Read again after the exit and the cancel: whether the guard holds
-        // the session depends on the input that is still waiting.
-        const after = yield* sessions.one(session.id);
         if (session.workspaceId !== null && Option.isSome(after)) {
           yield* workspaces.release(
             { kind: "session", id: session.id },
@@ -613,10 +649,12 @@ const make = Effect.gen(function* () {
             after.value.exitedAt ?? (yield* nowIso),
           );
         }
+        // A session whose inputs were cancelled has nothing waiting, so the
+        // guard cannot hold it.
         yield* observer.sessionExited({
           session,
           reason,
-          resumeHeld: Option.isSome(after) && isResumeHeld(after.value),
+          resumeHeld: keeps && isResumeHeld(after.value),
         });
       }
       yield* forgetSessions(ended.map((session) => session.id));
@@ -1166,6 +1204,21 @@ const make = Effect.gen(function* () {
     endForWorkspace,
 
     /**
+     * Cancels the step prompts still waiting on the sessions of a run that
+     * has ended, exited sessions included. A session that kept its prompt
+     * through an exit (`keepsStepPromptOnExit`) would otherwise be resumed
+     * for a turn that the run no longer wants. Joins the caller's
+     * transaction, which ends the run.
+     */
+    cancelStepPromptsOfEndedRun: (runId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const touched = yield* inputs.cancelStepPromptsOfRun(runId, STEP_RUN_ENDED);
+        for (const id of touched) {
+          yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+        }
+      }),
+
+    /**
      * Ends every running session on a lost runner: the runner is not in
      * `connected`, and nothing was heard about the session for longer than the
      * session's absolute timeout (the repository method explains that limit).
@@ -1494,7 +1547,9 @@ const make = Effect.gen(function* () {
      * is read inside this transaction, so the check cannot race the write
      * that exits the session.
      *
-     * When the cancelled input is the prompt of an agent step,
+     * An agent step's prompt on an exited session is always cancelled here,
+     * even after an exit that would have kept it (`keepsStepPromptOnExit`),
+     * because the reason the session exited is not known here. Then
      * `SessionObserver` is told, so the step's run does not wait for a turn
      * that never comes.
      */
