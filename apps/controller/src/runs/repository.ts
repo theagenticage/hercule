@@ -121,9 +121,8 @@ export interface StepRecordId {
  *
  * - `action`: an action step, with its action, its stored input and the
  *   run's workspace policy;
- * - `agent`: an agent step, with the session it drives, and whether the
- *   step's prompt is still waiting in that session, not sent to the runner
- *   yet.
+ * - `agent`: an agent step, with whether its prompt is still waiting in
+ *   its session, not sent to the runner yet.
  */
 export type PinnedRunningStep = {
   readonly runId: string;
@@ -143,8 +142,6 @@ export type PinnedRunningStep = {
     }
   | {
       readonly kind: "agent";
-      /** The session the record drives. Every agent step's record stores one when it starts. */
-      readonly sessionId: string;
       /** Whether the step's prompt for this iteration is a queued input not yet sent to the runner. */
       readonly promptWaiting: boolean;
     }
@@ -966,7 +963,6 @@ const make = Effect.gen(function* () {
                 {
                   ...record,
                   kind: "agent",
-                  sessionId: uuidToString(row.session_id),
                   promptWaiting: row.prompt_waiting === 1,
                 },
               ];

@@ -13,7 +13,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, SessionId, StorageId, WorkspaceStepKey } from "./primitives";
+import { Fact, StorageId, WorkspaceStepKey } from "./primitives";
 import { GitIdentity, MAX_MESSAGE_LENGTH } from "./sessions";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
@@ -108,8 +108,6 @@ export const AgentStepResultRequest = Schema.Struct({
   _tag: Schema.Literal("workspaceStepStart"),
   kind: Schema.Literal("agent"),
   ...WorkspaceStepKey.fields,
-  /** The session the step's turn runs in. */
-  sessionId: SessionId,
   /**
    * The run's workspace, which names the directory the step's result file is
    * kept in. `null` for a run with no workspace.

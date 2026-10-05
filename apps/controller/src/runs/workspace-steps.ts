@@ -56,15 +56,13 @@ export interface ActionStepToStart extends WorkspaceStepKey {
 }
 
 /**
- * An agent step whose runner is asked how its turn ended: its step key, the
- * session the turn runs in, and the run's workspace, which names where the
- * runner keeps the step's result.
+ * An agent step whose runner is asked how its turn ended: its step key, and
+ * the run's workspace, which names where the runner keeps the step's result.
  */
 export interface AgentStepResultToRequest extends WorkspaceStepKey {
   readonly kind: "agent";
   /** The runner the step's run is pinned to. */
   readonly runnerId: string;
-  readonly sessionId: string;
   /** The run's workspace, or null for a run that has none. */
   readonly workspaceId: string | null;
 }

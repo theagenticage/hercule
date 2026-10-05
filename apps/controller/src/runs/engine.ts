@@ -1439,7 +1439,6 @@ export const makeRunEngine = Effect.gen(function* () {
                     stepId,
                     iteration,
                     runnerId,
-                    sessionId: record.sessionId,
                     workspaceId,
                   },
                 ];

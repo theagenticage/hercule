@@ -544,7 +544,6 @@ describe("agent steps over the runner socket", () => {
           _tag: "workspaceStepStart",
           kind: "agent",
           ...takenKey,
-          sessionId: takenSession,
           workspaceId: null,
         });
         // The restarted runner still holds the taken session and lost the other.
@@ -829,7 +828,7 @@ describe("agent steps over the runner socket", () => {
         const request = await waitForFrame(back, "asked for the step's result", (frame) =>
           asksForResult(frame, key),
         );
-        expect(request).toMatchObject({ sessionId, workspaceId });
+        expect(request).toMatchObject({ workspaceId });
         player.sendResult(back, key, answerText("Shipped"));
         await waitForRunEnded(arranged, runId, "completed");
       });

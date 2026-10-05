@@ -280,7 +280,6 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     _tag: "workspaceStepStart",
     kind: "agent",
     ...STEP_KEY,
-    sessionId: SESSION_ID,
     workspaceId: null,
   },
   { _tag: "workspaceStepSettle", steps: [STEP_KEY] },

@@ -630,7 +630,6 @@ const buildAgentStart = (workspaceId: string | null): AgentStepResultRequest => 
   runId: createId(),
   stepId: "review",
   iteration: 1,
-  sessionId: createId(),
   workspaceId,
 });
 

@@ -1666,7 +1666,6 @@ const STEP_START = {
   _tag: "workspaceStepStart",
   kind: "agent",
   ...STEP,
-  sessionId: SESSION,
   workspaceId: null,
 } as const;
 

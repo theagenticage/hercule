@@ -72,7 +72,6 @@ const make = Effect.gen(function* () {
           runId: step.runId,
           stepId: step.stepId,
           iteration: step.iteration,
-          sessionId: step.sessionId,
           workspaceId: step.workspaceId,
         });
       }
