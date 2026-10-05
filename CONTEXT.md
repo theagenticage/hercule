@@ -93,7 +93,7 @@ Delivering user input into a session's running turn, folding it into that turn i
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
-User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit.
+User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -438,7 +438,7 @@ A step whose work happens on the run's runner: an action step that calls a Works
 _Avoid_: remote step, runner step
 
 **Step Key**:
-The triple `(runId, stepId, iteration)` that names one iteration of a step. Every delivery of a Workspace Step and of its outcome is idempotent by it, so either side can send it again after a restart. An agent step's prompt is the exception: it is sent at most once, because a second turn could repeat what the first one did, and the controller asks for the step's result instead.
+The triple `(runId, stepId, iteration)` that names one iteration of a step. Every delivery of a Workspace Step and of its outcome is idempotent by it, so either side can send it again after a restart. An agent step's prompt is the exception: it is never sent again once it may have reached the harness, because a second turn could repeat what the first one did, and the controller asks for the step's result instead.
 _Avoid_: step id (bare, which names the step, not the iteration)
 
 **Entry Step**:
