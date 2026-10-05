@@ -305,6 +305,7 @@ export {
   type RecentModel,
 } from "./threads/recent";
 export { decideRelatedReads } from "./threads/related-reads";
+export { findOldestOpenRequest } from "./threads/oldest-request";
 export { formatRequestQuestion } from "./threads/request-question";
 export {
   buildQuestionAnswers,

@@ -15,6 +15,7 @@ import {
   buildTurns,
   chooseStamps,
   findAnsweredAssistantId,
+  findOldestOpenRequest,
   isJoinable,
   mayBeRunningTurn,
   type HerculeClient,
@@ -91,9 +92,7 @@ export function ThreadScreen({
   const project = projects.find((each) => each.id === session.projectId);
   const assistantId = findAnsweredAssistantId(session);
 
-  // Several Requests can be open at once; the dock shows the oldest, the one
-  // the agents have waited on longest.
-  const oldestRequest = session.openRequests[0];
+  const oldestRequest = findOldestOpenRequest(session);
 
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
@@ -165,7 +164,7 @@ export function ThreadScreen({
         <div className="sticky bottom-0 flex flex-col gap-2">
           <QueuedInputs client={client} sessionId={sessionId} />
           <div className="flex flex-col">
-            {oldestRequest === undefined ? null : (
+            {oldestRequest === null ? null : (
               <PermissionCard
                 // A new request gets a new card, so the answered state of the
                 // previous request is not carried over.

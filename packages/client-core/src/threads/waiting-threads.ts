@@ -5,6 +5,7 @@
  * last one, wherever it is answered, ends the wait.
  */
 import type { Session } from "@hercule/contract";
+import { findOldestOpenRequest } from "./oldest-request";
 import { formatRequestQuestion } from "./request-question";
 
 /** A thread waiting on the user, and the oldest Request it waits on. */
@@ -27,8 +28,8 @@ export interface WaitingThread {
  */
 export const listWaitingThreads = (sessions: readonly Session[]): WaitingThread[] =>
   sessions.flatMap((session) => {
-    const oldest = session.openRequests[0];
-    return oldest === undefined
+    const oldest = findOldestOpenRequest(session);
+    return oldest === null
       ? []
       : [
           {

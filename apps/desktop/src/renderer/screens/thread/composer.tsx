@@ -15,6 +15,7 @@ import {
   buildSubmission,
   buildThreadWorkspaceLabel,
   computeEffectiveConfig,
+  findOldestOpenRequest,
   findResumeBlockedReason,
   formatAccessMode,
   isMutationRunning,
@@ -163,9 +164,7 @@ export function ThreadComposer({
   const fields = buildComposerFields(catalogs, config, "active");
   const readOnly = findResumeBlockedReason(session);
   const busy = session.status === "busy";
-  // Several Requests can be open at once; the dock shows the oldest, the one
-  // the agents have waited on longest.
-  const oldestRequest = session.openRequests[0];
+  const oldestRequest = findOldestOpenRequest(session);
   const workspaceLabel = buildThreadWorkspaceLabel(session, workspaces);
   const placeholder = buildComposerPlaceholder({
     readOnly,
@@ -269,7 +268,7 @@ export function ThreadComposer({
         <div className="fold">
           <QueuedInputs sessionId={sessionId} />
         </div>
-        {oldestRequest === undefined ? null : (
+        {oldestRequest === null ? null : (
           <RequestDock
             key={oldestRequest.requestId}
             sessionId={sessionId}

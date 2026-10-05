@@ -8,6 +8,7 @@ import {
   buildApprovalCard,
   decideOfficeSeating,
   describePose,
+  findOldestOpenRequest,
   formatRequestQuestion,
   type SeatedPose,
 } from "@hercule/client-core";
@@ -47,8 +48,7 @@ function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): Offic
 
 /** Returns the colleague the Office draws for a seated thread in `pose`. */
 function buildColleague(session: Session, pose: SeatedPose): Colleague {
-  // A thread with several open Requests shows the oldest.
-  const oldestRequest = session.openRequests[0] ?? null;
+  const oldestRequest = findOldestOpenRequest(session);
   return {
     id: session.id,
     name: session.title,

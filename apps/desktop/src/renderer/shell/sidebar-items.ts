@@ -13,6 +13,7 @@ import {
   countThreadsByPose,
   decideThreadPose,
   decideThreadRowEnd,
+  findOldestOpenRequest,
   formatRequestQuestion,
   type DraftPlace,
   type ExpandedSections,
@@ -266,9 +267,9 @@ const buildWaitingContents = (
     },
   ];
   for (const row of waiting.rows) {
-    // A thread with several open Requests shows the oldest.
-    const request = sessions.get(row.id)?.openRequests[0];
-    if (request === undefined) continue;
+    const session = sessions.get(row.id);
+    const request = session === undefined ? null : findOldestOpenRequest(session);
+    if (request === null) continue;
     contents.push({
       kind: "waiting-row",
       key: `waiting:${row.id}`,
