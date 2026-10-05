@@ -152,8 +152,12 @@
   align-items: center;
   gap: 16px;
 }
+/* A long name is one word, which a flex item would not shrink below, so it
+   breaks anywhere instead of pushing the section wider than the window. */
 .set-col > .head h2 {
+  min-width: 0;
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--t-20);
   font-weight: var(--w-bold);
   letter-spacing: -0.015em;

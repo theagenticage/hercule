@@ -7,7 +7,8 @@
  * - Hercule › Settings… opens it too, and carries ⌘,;
  * - the rows of sections that are not built yet are inert: each says so in
  *   its tooltip, and pressing it leaves the open section as it was;
- * - in a window at its narrowest, a row's control stacks under its label;
+ * - in a window at its narrowest, a row's control stacks under its label,
+ *   and a long username wraps inside the section instead of overflowing it;
  * - a thread row in the sidebar leaves Settings, and the Settings button is
  *   no longer the current page.
  *
@@ -19,7 +20,13 @@
  */
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
-import { arrangeFleet, chooseMenuItem, openSignedIn, readMenuItems } from "./harness";
+import {
+  arrangeFleet,
+  chooseMenuItem,
+  openSignedIn,
+  readMenuItems,
+  startControllerForTest,
+} from "./harness";
 
 /** The rows of the Settings list whose sections are not built yet. */
 const INERT_ROWS = [
@@ -135,6 +142,31 @@ describe("Settings", () => {
     expect(control).not.toBeNull();
     expect(control!.y).toBeGreaterThanOrEqual(label!.y + label!.height);
     expect(control!.x).toBe(label!.x);
+  });
+
+  it("keeps a long username inside the section in a window at its narrowest", async () => {
+    // One long word, which a line cannot break between words.
+    const username = "AlexanderVanDerMeer";
+    const { url } = await startControllerForTest({ setUp: true, username });
+    const { app, page } = await openSignedIn(url, username);
+    await findSettingsButton(page).click();
+    await waitForSection(page, "Profile");
+
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]!.setSize(800, 500);
+    });
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(800);
+
+    const body = page.locator(".set-body");
+    const name = page.getByRole("heading", { level: 2, name: username });
+    const bodyBox = await body.boundingBox();
+    const nameBox = await name.boundingBox();
+    expect(bodyBox).not.toBeNull();
+    expect(nameBox).not.toBeNull();
+    expect(nameBox!.x).toBeGreaterThanOrEqual(bodyBox!.x);
+    expect(nameBox!.x + nameBox!.width).toBeLessThanOrEqual(bodyBox!.x + bodyBox!.width);
+    expect(await name.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await body.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   });
 
   it("closes when the user opens a thread from the sidebar", async () => {

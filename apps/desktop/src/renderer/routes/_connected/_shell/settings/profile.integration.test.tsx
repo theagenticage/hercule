@@ -189,6 +189,64 @@ describe("Settings > Profile", () => {
     expect(select.value).toBe("Asia/Tokyo");
   });
 
+  it("keeps a saved value when a read of the settings that started while the save ran answers after it", async () => {
+    const save = holdAnswer();
+    const staleRead = holdAnswer();
+    let reads = 0;
+    const { context } = await openProfile({
+      "GET /api/v1/settings": () => {
+        reads += 1;
+        return reads === 1 ? { body: STORED } : staleRead.handler();
+      },
+      "GET /api/v1/controller": {
+        body: {
+          id: "01a06d02-7800-7000-8000-000000000001",
+          publicKey: "cHVibGljLWtleQ==",
+          version: "0.4.2",
+          defaultRunnerId: null,
+          localRunnerId: null,
+        },
+      },
+      "PATCH /api/v1/settings": save.handler,
+    });
+    await userEvent.selectOptions(
+      screen.getByRole<HTMLSelectElement>("combobox", { name: "Time zone" }),
+      "Asia/Tokyo",
+    );
+    await waitFor(() => {
+      expect(context.queryClient.isMutating()).toBe(1);
+    });
+    // Opening Profile again while the save runs reads the settings again in
+    // the background. The test holds that read.
+    await userEvent.click(screen.getByRole("link", { name: "System" }));
+    await screen.findByRole("heading", { level: 1, name: "System" });
+    await userEvent.click(screen.getByRole("link", { name: "Profile" }));
+    await screen.findByRole("heading", { level: 1, name: "Profile" });
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+
+    save.answer({ body: { ...STORED, user: { ...STORED.user, timezone: "Asia/Tokyo" } } });
+    await waitFor(() => {
+      expect(context.queryClient.isMutating()).toBe(0);
+    });
+    // The controller read the settings before it stored the save.
+    staleRead.answer({ body: STORED });
+
+    await waitFor(() => {
+      expect(context.queryClient.isFetching({ queryKey: queryKeys.settings() })).toBe(0);
+    });
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Time zone" }).value).toBe(
+      "Asia/Tokyo",
+    );
+    expect(context.queryClient.getQueryData(queryKeys.settings())).toMatchObject({
+      user: { timezone: "Asia/Tokyo" },
+    });
+    // The cancelled read left nothing to read again.
+    expect(context.queryClient.getQueryState(queryKeys.settings())?.isInvalidated).toBe(false);
+    expect(reads).toBe(2);
+  });
+
   it("signs out: forgets the token, revokes it and shows the sign-in screen", async () => {
     const { calls, context, fake, router } = await openProfile();
 
