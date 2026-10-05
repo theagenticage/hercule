@@ -59,7 +59,12 @@ const make = Effect.gen(function* () {
    * does, so a runner that stops answering pings ends it, and the answer is
    * then recorded as missing, as for any input on the wire. A refused or
    * missing answer puts the input back to waiting with the reason, for the
-   * next send of the session's input.
+   * next send of the session's input. The one exception is an agent step's
+   * prompt with a missing answer: the runner may have run it, so it is
+   * marked `sent` and never sent again (`SessionService.recordInputAnswer`),
+   * and the runner is asked for the step's result instead. The wait ended
+   * with the connection, so the request is sent only when the runner has
+   * connected again by then. Otherwise the runner is asked when it connects.
    */
   const sendStart = (runnerId: string, start: StartRequest): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -69,10 +74,13 @@ const make = Effect.gen(function* () {
         Duration.infinity,
       );
       if (sent._tag === "notSent") return yield* sessions.requeue(start);
-      // The result needs no handling here: a refusal is recorded on the
-      // input, where its reader sees it, and nobody waits on this start to
-      // be told.
-      yield* sessions.recordInputAnswer(start.input, sent.answer, runnerId);
+      // Only an unconfirmed step prompt needs anything more: a refusal is
+      // recorded on the input, where its reader sees it, and nobody waits on
+      // this start to be told.
+      const recorded = yield* sessions.recordInputAnswer(start.input, sent, runnerId);
+      if (recorded._tag === "unconfirmed") {
+        yield* connections.tell(runnerId, recorded.resultRequest);
+      }
     });
 
   return {

@@ -27,7 +27,6 @@ import { buildControllerOrigin, type HomePaths } from "@hercule/home";
 import { makeProcessLogLayer } from "@hercule/process-log";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
-import { AssistantSessionObserverLayer } from "./assistants";
 import { ConversationMessagesLayer } from "./conversations";
 import {
   createDatabaseError,
@@ -39,9 +38,12 @@ import {
 } from "./db";
 import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./connections";
 import {
-  cancelStrandedInputsAndReportLostWakeUps,
+  endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
+  RunServiceReferenceLayer,
+  SessionObserverLayer,
+  type RunServiceReference,
 } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
@@ -239,6 +241,7 @@ export type ControllerServices =
   | SessionService
   | WorkspaceService
   | WorkspaceStepActivity
+  | RunServiceReference
   | ConnectionService
   | LocalRunnerId
   | HerculeHome
@@ -324,14 +327,15 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * The session service tells the assistants domain, through the sessions
-     * domain's `SessionObserver` port, about every report and every exit, and
-     * about inputs it drops, so an assistant's replies and notices reach its
-     * conversation. The sessions domain cannot import the assistants domain,
-     * so the two are joined here.
+     * The session service tells the assistants and runs domains, through the
+     * sessions domain's `SessionObserver` port, about every report and every
+     * exit, and about inputs it drops: an assistant's replies and notices
+     * reach its conversation, and an agent step whose turn no runner will
+     * report fails. The sessions domain cannot import either domain, so they
+     * are joined here.
      */
     const sessionService = SessionServiceLayer.pipe(
-      Layer.provide(AssistantSessionObserverLayer),
+      Layer.provide(SessionObserverLayer),
       Layer.provide(ConversationMessagesLayer),
     );
 
@@ -344,7 +348,10 @@ export const bootWith = <A, E>(
      * import the runs domain, so the two are joined here. The connection
      * service asks the resources and workflows domains, through the
      * `ConnectionReferences` port, what still names a Connection before it
-     * deletes one, and is joined to them here for the same reason.
+     * deletes one, and is joined to them here for the same reason. The
+     * session service's observer reaches the run service through
+     * `RunServiceReference`, which the operation layers set once they have
+     * built the run service, so the one reference is merged here for both.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
@@ -354,17 +361,19 @@ export const bootWith = <A, E>(
     ).pipe(
       Layer.provideMerge(WorkspaceServiceLayer),
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
+      Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(withFleet),
     );
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
       // There is no way to ask whether the harness received an input that was
-      // in flight before this boot. So the input is cancelled rather than
-      // resent, which could deliver it twice, and the subscription records
-      // which wake-up was lost. This runs after the migrations and before
+      // in flight before this boot. So the input is never sent again, which
+      // could deliver it twice: an agent step's prompt is marked sent, any
+      // other input is cancelled, and the subscription records which
+      // wake-up was lost. This runs after the migrations and before
       // anything is placed on a runner.
-      yield* cancelStrandedInputsAndReportLostWakeUps;
+      yield* endStrandedInputsAndReportLostWakeUps;
       yield* seed;
 
       const identity = yield* ControllerIdentity;

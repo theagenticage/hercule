@@ -11,13 +11,13 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { nowIso, withTransaction } from "../db";
-import { cancelStrandedInputs } from "../sessions";
+import { endStrandedInputs } from "../sessions";
 import { subscriptionRepository } from "../subscriptions";
 
 /**
- * Cancels every input that was being delivered when the controller stopped,
- * and records a lost wake-up on the subscription of each cancelled input that a
- * subscription match wrote.
+ * Ends every input that was being delivered when the controller stopped (see
+ * `endStrandedInputs`), and records a lost wake-up on the subscription of
+ * each cancelled input that a subscription match wrote.
  *
  * Such a wake-up is lost for good. The input row holds a subscription and an
  * event, that pair can be written only once, so the event router can never
@@ -26,7 +26,7 @@ import { subscriptionRepository } from "../subscriptions";
  * without knowing why. The record clears when a later wake-up for the same
  * subscription is written.
  */
-export const cancelStrandedInputsAndReportLostWakeUps: Effect.Effect<
+export const endStrandedInputsAndReportLostWakeUps: Effect.Effect<
   void,
   SqlError,
   SqlClient.SqlClient
@@ -39,7 +39,7 @@ export const cancelStrandedInputsAndReportLostWakeUps: Effect.Effect<
   yield* withTransaction(
     sql,
     Effect.gen(function* () {
-      const lost = yield* cancelStrandedInputs;
+      const lost = yield* endStrandedInputs;
       if (lost.length === 0) return;
       const subscriptions = yield* subscriptionRepository;
       const at = yield* nowIso;

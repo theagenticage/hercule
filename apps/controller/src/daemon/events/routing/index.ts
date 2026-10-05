@@ -5,8 +5,9 @@
  * Each table is the only module that knows both the domain that owns a claim
  * and the domain that handles it. Today the pipeline has:
  *
- * - two routing tables: one with a route per live subscription, and one with
- *   a route per active start trigger;
+ * - three routing tables: one with a route per live subscription a session
+ *   holds, one with a route per live subscription a run holds for a signal
+ *   trigger, and one with a route per active start trigger;
  * - two deliveries: one for queued inputs, whoever wrote them (a routing
  *   table or a person typing), and one that starts the runs of the start
  *   triggers that matched.
@@ -14,12 +15,14 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Notifier } from "../../../notifications";
+import type { RunService } from "../../../runs";
 import type { SessionService } from "../../../sessions";
 import type { TriggerEffects, TriggerHealth } from "../../../workflows";
 import type { Delivery, RoutingTable } from "../event-router";
 import { Live } from "../../sessions";
 import { queuedInputDelivery } from "./queued-input-delivery";
 import { sessionRoutingTable } from "./session-routing-table";
+import { signalRoutingTable } from "./signal-routing-table";
 import { triggerEffectDelivery } from "./trigger-effect-delivery";
 import { triggerRoutingTable } from "./trigger-routing-table";
 
@@ -31,8 +34,8 @@ import { triggerRoutingTable } from "./trigger-routing-table";
 export const buildRoutingTables: Effect.Effect<
   ReadonlyArray<RoutingTable>,
   never,
-  SqlClient.SqlClient | SessionService | Notifier | TriggerHealth | TriggerEffects
-> = Effect.all([sessionRoutingTable, triggerRoutingTable]);
+  SqlClient.SqlClient | SessionService | RunService | Notifier | TriggerHealth | TriggerEffects
+> = Effect.all([sessionRoutingTable, signalRoutingTable, triggerRoutingTable]);
 
 /** Builds every delivery that sends the rows waiting to go out, whoever wrote them. */
 export const buildDeliveries: Effect.Effect<

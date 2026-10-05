@@ -21,6 +21,7 @@ import {
   Sequenced,
   StorageId,
   Subdirectory,
+  WorkspaceStepKey,
 } from "./primitives";
 import {
   SessionEvent,
@@ -52,7 +53,16 @@ export * from "./remote";
 export * from "./sessions";
 export * from "./workspace-steps";
 export * from "./workspaces";
-export { Fact, InstanceId, MAX_FACT_ITEMS, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory };
+export {
+  Fact,
+  InstanceId,
+  MAX_FACT_ITEMS,
+  MAX_FACT_LENGTH,
+  Sequenced,
+  StorageId,
+  Subdirectory,
+  WorkspaceStepKey,
+};
 
 export const PROTOCOL_VERSION = 2;
 

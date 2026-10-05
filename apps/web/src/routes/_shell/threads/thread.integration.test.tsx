@@ -60,6 +60,8 @@ const BASE_SESSION: Session = {
   permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: "01a06d02-3000-7000-8000-000000000001",
   workspaceId: null,
@@ -1808,8 +1810,8 @@ describe("Thread: auto-scroll follows new content", () => {
  * breadcrumb.
  *
  * How these tests find the header:
- * - The breadcrumb `Threads /` and the title are separate elements in one
- *   row, so the row is the breadcrumb's parent element.
+ * - The breadcrumb `Threads`, the slash after it and the title are separate
+ *   elements in one row, so the row is the slash's parent element.
  * - The overflow button's accessible name is the glyph `…`, as in spec 14.
  *   It has no `aria-label`; adding one means changing this test.
  */
@@ -1820,8 +1822,7 @@ describe("Thread: the header is the screen's first row", () => {
       buildTwoCompletedTurns(),
     );
 
-    const crumb = await waitFor(() => screen.getByText("Threads /"));
-    const chrome = crumb.parentElement;
+    const chrome = await findThreadChrome();
     expect(readPageText(chrome)).toMatch(/^Threads \/ Fix the login bug/);
 
     const overflow = screen.getByRole<HTMLButtonElement>("button", { name: "…" });
@@ -1829,15 +1830,35 @@ describe("Thread: the header is the screen's first row", () => {
     expect(overflow.disabled).toBe(true);
   });
 
+  it("shows the run that started a step session as its crumb, linked to the run", async () => {
+    const runId = "0199c0ff-2222-7000-8000-00003db7d6a1";
+    await openApp(
+      buildSession({
+        status: "idle",
+        title: "Fix and ship a pull request · implement",
+        runId,
+        stepId: "implement",
+      }),
+      buildTwoCompletedTurns(),
+    );
+
+    const link = await screen.findByRole("link", { name: "run 3db7d6a1" });
+    expect(link.getAttribute("href")).toBe(`/runs/${runId}`);
+    expect(readPageText(await findThreadChrome())).toMatch(
+      /^run 3db7d6a1 \/ Fix and ship a pull request · implement/,
+    );
+  });
+
   it("truncates a long title instead of pushing the breadcrumb or the actions out of place", async () => {
     const longTitle =
       "Fix the login bug for real this time and also the logout bug and the signup bug";
     await openApp(buildSession({ status: "idle", title: longTitle }), buildTwoCompletedTurns());
 
-    const crumb = await waitFor(() => screen.getByText("Threads /"));
+    const crumb = (await findThreadChrome()).firstElementChild;
+    expect(readPageText(crumb as HTMLElement)).toBe("Threads");
     expect(screen.getByText(longTitle).className).toContain("truncate");
     // The breadcrumb and the actions still render in full; only the title is truncated.
-    expect(crumb.className).toContain("shrink-0");
+    expect(crumb?.className).toContain("shrink-0");
   });
 
   it("still warns about a time zone this browser does not know, even with the top bar hidden", async () => {
@@ -1866,9 +1887,7 @@ describe("Thread: the header is the screen's first row", () => {
       buildTwoCompletedTurns(),
     );
 
-    await waitFor(() => {
-      expect(screen.getByText("Threads /")).toBeDefined();
-    });
+    expect(readPageText(await findThreadChrome())).toMatch(/^Threads \/ /);
     expect(readPageText()).not.toContain("thread · ");
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
@@ -3475,7 +3494,7 @@ describe("Thread: the session view of an assistant's session", () => {
     expect(readPageText(crumb.closest("div"))).toMatch(
       /^Assistants \/ Ada \/ Answer Ada's conversation/,
     );
-    expect(screen.queryByText("Threads /")).toBeNull();
+    expect(readPageText(crumb.closest("div"))).not.toContain("Threads");
   });
 
   it("renders no composer, and a line that links to the assistant's conversation in its place", async () => {
@@ -3607,9 +3626,9 @@ describe("Thread: the session view of an assistant's session", () => {
         "This session replied in a conversation with an assistant that was deleted.",
       ),
     ).toBeDefined();
-    const crumb = screen.getByText("Assistants /");
-    expect(readPageText(crumb.parentElement)).toMatch(/^Assistants \/ Answer Ada's conversation/);
-    expect(crumb.querySelector("a")).toBeNull();
+    const chrome = await findThreadChrome();
+    expect(readPageText(chrome)).toMatch(/^Assistants \/ Answer Ada's conversation/);
+    expect(chrome.firstElementChild?.querySelector("a")).toBeNull();
     expect(screen.queryByRole("link", { name: "Open conversation" })).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });

@@ -94,7 +94,7 @@ export const resumable: Effect.Effect<
       }
       // Check the snapshot of the runner that holds the native state, not of
       // the whole fleet, because the transcript exists only on that runner.
-      const snapshots = yield* instances.snapshotsOf(session.instanceId);
+      const snapshots = yield* instances.listSnapshots(session.instanceId);
       if (!snapshots.some((one) => isLoggedIn(one) && one.runnerId === session.runnerId)) {
         return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       }

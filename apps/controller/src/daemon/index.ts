@@ -52,7 +52,7 @@
  *
  * ADR 0033 records this layout.
  */
-export { cancelStrandedInputsAndReportLostWakeUps } from "./boot";
+export { endStrandedInputsAndReportLostWakeUps } from "./boot";
 export {
   Enrichment,
   EnrichmentLayer,
@@ -75,7 +75,7 @@ export {
   RetirementLayer,
   sweepUnreachableRunners,
 } from "./runners";
-export { RunExecutorLayer, RunFibers, WorkspaceStepsLayer } from "./runs";
+export { RunExecutorLayer, RunFibers, RunTargetsLayer, WorkspaceStepsLayer } from "./runs";
 export {
   AssistantSessionsLayer,
   DispatchLayer,
@@ -84,7 +84,11 @@ export {
   LostRunnerSweepInterval,
   Placement,
   PlacementLayer,
+  RunServiceReference,
+  RunServiceReferenceFill,
+  RunServiceReferenceLayer,
   SessionInputDeadline,
+  SessionObserverLayer,
   sweepSessionsOnLostRunners,
 } from "./sessions";
 export {

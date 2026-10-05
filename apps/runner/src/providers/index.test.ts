@@ -46,6 +46,12 @@ describe("the adapters in this runner build", () => {
     const supervisor = makeSupervising(adapters).forConnection({
       machine,
       send: (frame) => Effect.sync(() => void sent.push(frame)),
+      // No session runs, so no agent step begins.
+      workspaceSteps: {
+        beginAgentStep: () => Effect.succeed(true),
+        finishAgentStep: () => Effect.void,
+        forgetAgentStep: () => undefined,
+      },
     });
 
     // The report asks every adapter in the array, Codex included, for its sessions.

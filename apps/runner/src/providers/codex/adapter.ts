@@ -173,9 +173,9 @@ const ACCESS_MODES: Readonly<
 
 /**
  * How long a control request, such as an interrupt, may take. The runner handles
- * session frames one at a time, in order, so without this timeout one
- * app-server that stops replying would hold up every session on the machine,
- * pings included.
+ * a session's frames one at a time, in order, so without this timeout an
+ * app-server that stops replying would hold up every later frame of its
+ * session.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
 

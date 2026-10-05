@@ -33,10 +33,50 @@ import {
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
+  type WorkspaceStepKey,
 } from "@hercule/protocol";
 import { describeMissingAdapter, type ProviderAdapter } from "../providers";
 import { now, describeCause } from "../report";
+import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
+import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
+
+/**
+ * The agent step whose turn runs in a session: from the input that carried
+ * the step's key until the turn ends or the session exits.
+ */
+interface RunningStep {
+  readonly key: WorkspaceStepKey;
+  /**
+   * The id of the step's turn, set once the adapter has said which turn the
+   * input went to. Until then, the next turn to end is taken as the step's.
+   * The controller delivers a step's input only to a session with no open
+   * turn, so no other turn can end in between.
+   */
+  turnId: string | undefined;
+  /**
+   * The assistant text written since the step's input, by item, in the order
+   * each item's first text arrived. The last item of the step's turn is the
+   * turn's final message, which is how the controller reads it too.
+   */
+  readonly texts: Map<string, { readonly turnId: string; text: string }>;
+}
+
+/**
+ * Why the runner refuses the input of an agent step the controller has
+ * already settled. A turn of a run that has ended could still push or
+ * comment, so the input never reaches the harness.
+ */
+const SETTLED_STEP_REFUSAL =
+  "the step ended before its prompt reached the harness, so the prompt was not run";
+
+/** Checks whether a turn that ended is the step's turn. */
+const isStepTurn = (step: RunningStep, turnId: string): boolean =>
+  step.turnId === undefined || step.turnId === turnId;
+
+/** Returns the final assistant message of one turn, or an empty string when it wrote none. */
+const readFinalText = (step: RunningStep, turnId: string): string =>
+  [...step.texts.values()].filter((item) => item.turnId === turnId).at(-1)?.text ?? "";
 
 /**
  * A session this runner holds. The binding is not stored here, because the
@@ -106,6 +146,10 @@ interface Live {
    * being refused because the old harness is still on its way out.
    */
   readonly gone: Deferred.Deferred<void>;
+  /** Whether the session runs under an output schema, so an agent step's turn must return a structured result. */
+  readonly hasOutputSchema: boolean;
+  /** The agent step whose turn runs in this session now, if any. */
+  step: RunningStep | undefined;
 }
 
 /**
@@ -130,6 +174,14 @@ interface ArrivedStart {
 /** What a connection gives the supervisor while the connection is up. */
 export interface Connection {
   readonly machine: Machine;
+  /**
+   * The workspace steps of this process. The supervisor tells them when an
+   * agent step's turn begins and how it ended.
+   */
+  readonly workspaceSteps: Pick<
+    WorkspaceSteps,
+    "beginAgentStep" | "finishAgentStep" | "forgetAgentStep"
+  >;
   /**
    * The error type is left to the transport. A failed write means the
    * connection is closing, and there is nowhere left to report the failure.
@@ -441,6 +493,23 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     /**
+     * Ends the session's agent step with the outcome of the event that ended
+     * its turn: saves the outcome, then sends it. The caller sends that event
+     * afterwards, so the controller has the step's result before it sees the
+     * session exit, and so never has to guess the step's end from the exit.
+     */
+    const finishStepTurn = (held: Live, step: RunningStep, ending: StepTurnEnding) =>
+      Effect.suspend(() => {
+        held.step = undefined;
+        const text = ending._tag === "turn.completed" ? readFinalText(step, ending.turnId) : "";
+        const outcome = buildAgentStepOutcome(ending, {
+          hasOutputSchema: held.hasOutputSchema,
+          text,
+        });
+        return connection.workspaceSteps.finishAgentStep(step.key, outcome);
+      });
+
+    /**
      * Numbers an event and sends it. Every event goes out through here, in
      * sequence order. The inactivity clock is updated before the send, so
      * anyone who has seen the frame knows the clock already reflects the
@@ -465,7 +534,34 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 // stop every later turn from being watched.
                 held.parked = false;
                 yield* armIdleUnload(held, event.sessionId);
+                if (held.step !== undefined && isStepTurn(held.step, event.turnId)) {
+                  yield* finishStepTurn(held, held.step, event);
+                }
                 break;
+              case "content.delta": {
+                const step = held.step;
+                if (step === undefined || event.streamKind !== "assistant_text") break;
+                const item = step.texts.get(event.itemId);
+                if (item === undefined) {
+                  step.texts.set(event.itemId, { turnId: event.turnId, text: event.delta });
+                } else {
+                  item.text += event.delta;
+                }
+                break;
+              }
+              case "session.exited": {
+                // Every exit the relay sees passes through here, whatever
+                // ended the session: the harness itself, a stop by the
+                // controller, a timeout or the runner's shutdown.
+                const step = held.step;
+                if (step === undefined) break;
+                // The exit of an earlier run under the same id must not end
+                // the step of the run that replaced it. Only the adapter can
+                // tell the two apart, as in `releaseSession`.
+                if (yield* isHeldBy(held.adapter, event.sessionId)) break;
+                yield* finishStepTurn(held, step, event);
+                break;
+              }
               case "request.opened":
                 held.parked = true;
                 // A session waiting on its user is in use, however long the
@@ -579,26 +675,77 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      * or refused, with the reason. Never fails. Both a `sessionInput` and the
      * input a `sessionStart` carries are delivered through here. The caller
      * cancels the idle wait first.
+     *
+     * An input that carries a step key also begins that agent step. How the
+     * turn the input went to ends becomes the step's result, which is saved
+     * and sent before the event that ended the turn. The input of a step the
+     * controller has already settled is refused, and never reaches the
+     * harness. A refused step input forgets its step and sends no step
+     * result: what happens to the input next is the controller's call, and a
+     * later request for the step's result is answered with `interrupted`.
+     *
+     * The caller runs this uninterruptibly. Interrupted between recording the
+     * step and the harness's answer, the step would stay recorded with no
+     * turn, and a request for its result would wait for a turn end that never
+     * comes.
      */
     const sendInputAndAnswer = (
       held: Live,
       frame: SessionInput | SessionStart,
     ): Effect.Effect<void> => {
+      const stepKey = frame.input.step;
+      const step: RunningStep | undefined =
+        stepKey === undefined ? undefined : { key: stepKey, turnId: undefined, texts: new Map() };
+      // Recorded before the input reaches the harness, so the turn cannot end
+      // before its step is known. Returns false for a step that was already
+      // settled, whose input must not reach the harness.
+      const beginStep: Effect.Effect<boolean> =
+        step === undefined
+          ? Effect.succeed(true)
+          : Effect.tap(
+              connection.workspaceSteps.beginAgentStep(
+                step.key,
+                held.workspaceId,
+                Effect.map(
+                  isHeldBy(held.adapter, frame.sessionId),
+                  (isHeld) => isHeld && live.get(frame.sessionId) === held && held.step === step,
+                ),
+              ),
+              (recorded) =>
+                Effect.sync(() => {
+                  if (recorded) held.step = step;
+                }),
+            );
       // Input the harness refused opens no turn, so a session that was idle
       // before it is still idle and gets its wait back.
       const refuseHeldInput = (message: string): Effect.Effect<void> =>
         Effect.andThen(
           refuseInput(frame, message),
-          Effect.suspend(() =>
-            held.turnOpen || held.parked ? Effect.void : armIdleUnload(held, frame.sessionId),
-          ),
+          Effect.suspend(() => {
+            if (step !== undefined && held.step === step) {
+              held.step = undefined;
+              connection.workspaceSteps.forgetAgentStep(step.key);
+            }
+            return held.turnOpen || held.parked
+              ? Effect.void
+              : armIdleUnload(held, frame.sessionId);
+          }),
         );
-      return held.adapter.sendInput(frame.sessionId, frame.input).pipe(
+      const deliverInput = held.adapter.sendInput(frame.sessionId, frame.input).pipe(
+        Effect.tap((sent) =>
+          Effect.sync(() => {
+            // Unless the turn has already ended and finished the step.
+            if (step !== undefined && held.step === step) step.turnId = sent.turnId;
+          }),
+        ),
         Effect.flatMap((sent) =>
           sendInputResult(frame.requestId, { ok: true, delivery: sent.delivery }),
         ),
         Effect.catch(refuseHeldInput),
         Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
+      );
+      return Effect.flatMap(beginStep, (recorded) =>
+        recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
       );
     };
 
@@ -775,6 +922,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // same path as one that arrives while the harness starts.
           pendingStop: arrived.pendingStop,
           gone: Deferred.makeUnsafe<void>(),
+          hasOutputSchema: frame.spec.outputSchema !== undefined,
+          step: undefined,
         };
         // In the same step, with no yield between, so a stop finds either the
         // arrived start or this entry, and is never lost between the two.
@@ -898,7 +1047,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // drops. From the moment the harness is asked for until its input is
       // answered, the start runs to the end: a harness that was started but
       // never handed its input would have no turn and no idle wait, and
-      // nothing would ever stop it.
+      // nothing would ever stop it. That also keeps the input running to
+      // its answer once it has begun an agent step, as
+      // `sendInputAndAnswer` requires.
       //
       // So tearing down a dropped connection, which interrupts every frame
       // still being handled and waits for each, waits for this part too. The
@@ -960,7 +1111,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // Cancel the idle wait before the input reaches the harness. The
           // turn this input opens may start only after the wait would have
           // ended.
-          return Effect.andThen(cancelIdleUnload(held), sendInputAndAnswer(held, frame));
+          //
+          // Uninterruptible, as `sendInputAndAnswer` requires. A closing
+          // socket interrupts the frame's work, and the close waits for this
+          // block instead, as it waits for a start's input. The deadlines
+          // each adapter puts on its requests to the harness bound that wait;
+          // the comment on `start` lists them.
+          return Effect.uninterruptible(
+            Effect.andThen(cancelIdleUnload(held), sendInputAndAnswer(held, frame)),
+          );
         }),
 
       /** Idempotent: a session this runner does not hold has no turn to end. */

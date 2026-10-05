@@ -3,8 +3,9 @@
  * `activityAt` stays a raw timestamp: formatting "how long ago" needs a clock,
  * and only the caller should read one.
  */
-import type { ProviderInstance, Session, ThreadRows } from "@hercule/contract";
+import type { ProviderInstance, Runner, Session, ThreadRows } from "@hercule/contract";
 import { findModelName } from "./model-name";
+import { decideThreadRowEnd, type ThreadRowEnd } from "./pose";
 import { isSettled, WORKING_STATUSES } from "./status";
 
 /** A row's state marker: working, waiting for input, or over. */
@@ -16,6 +17,11 @@ export interface ThreadRow {
   readonly title: string;
   readonly activityAt: string;
   readonly secondLine: string | null;
+  /**
+   * What the end of the row shows. A row whose end is a word, "queued" or
+   * "offline", shows that word in place of its age.
+   */
+  readonly end: ThreadRowEnd;
 }
 
 /**
@@ -38,27 +44,49 @@ export const decideThreadMark = (session: Session): ThreadMark => {
 };
 
 /**
+ * Returns the row of one session, with `secondLine` under its title. The
+ * session's runner, looked up in `runners`, decides whether the row ends in
+ * "offline"; a runner missing from the list counts as connected.
+ */
+export const buildThreadRow = (
+  session: Session,
+  secondLine: string | null,
+  runners: readonly Runner[],
+): ThreadRow => ({
+  id: session.id,
+  mark: decideThreadMark(session),
+  title: session.title,
+  activityAt: session.lastActivityAt,
+  secondLine,
+  end: decideThreadRowEnd(
+    session,
+    runners.find((runner) => runner.id === session.runnerId),
+  ),
+});
+
+/**
  * Returns a row for each session, sorted by `compareNewestFirst`: the most
- * recently active first, and sessions active at the same moment by id.
+ * recently active first, and sessions active at the same moment by id. In
+ * `meta` mode the second line is the model's name from `instances`; in `plain`
+ * mode there is none.
  */
 export const buildThreadRows = (
   sessions: readonly Session[],
   mode: ThreadRows,
-  /** The instances whose catalogs give a `meta` row its model name. A plain row shows no model. */
+  runners: readonly Runner[],
   instances: readonly ProviderInstance[] = [],
 ): readonly ThreadRow[] =>
   sessions
-    .map((session) => ({
-      id: session.id,
-      mark: decideThreadMark(session),
-      title: session.title,
-      activityAt: session.lastActivityAt,
-      secondLine:
+    .map((session) =>
+      buildThreadRow(
+        session,
         mode === "meta"
           ? findModelName(
               instances.find((each) => each.id === session.instanceId),
               session.modelSelection.model,
             )
           : null,
-    }))
+        runners,
+      ),
+    )
     .sort(compareNewestFirst);

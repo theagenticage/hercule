@@ -228,7 +228,7 @@ const make = Effect.gen(function* () {
           workflowId: trigger.workflowId,
           triggerId: trigger.triggerId,
           eventId: event.id,
-          inputs: yield* evaluateMapping(trigger.inputs, context),
+          inputs: yield* evaluateMapping(trigger.inputs, context, "input"),
           matchedAt: yield* nowIso,
         });
       }),

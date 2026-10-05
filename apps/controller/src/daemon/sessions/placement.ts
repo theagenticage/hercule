@@ -19,6 +19,7 @@ import {
   type ModelSelection,
   type SessionSpec,
   type WorkspaceProvision,
+  type WorkspaceStepKey,
 } from "@hercule/protocol";
 import {
   ACCESS_MODE_CHAIN,
@@ -62,6 +63,7 @@ import {
 import {
   buildContinuingSpec,
   buildConversationTimeouts,
+  buildStepSessionTimeouts,
   readSessionOrFail,
   sessionRecordComposer,
   SessionService,
@@ -181,12 +183,16 @@ interface Placing {
   readonly agentId: string | undefined;
   /** The assistant's conversation the session answers, or undefined for any other session. */
   readonly conversationId: string | undefined;
+  /** The workflow run's agent step the session runs, or undefined for any other session. */
+  readonly step: WorkspaceStepKey | undefined;
   readonly runnerId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
   /** The spec the runner receives. Its workspace id is filled in while placing. */
   readonly spec: SessionSpec;
   readonly prompt: string;
+  /** The session's title, or undefined to take it from the prompt. */
+  readonly title: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, beyond the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -195,6 +201,12 @@ interface Placing {
   readonly workspace: SpawnWorkspace | undefined;
   /** The GitHub connection the session pushes as when its workspace names none. */
   readonly fallbackGithubConnectionId: string | undefined;
+  /**
+   * The branch the session's start switches a joined workspace's checkout
+   * to, or undefined to take the branch from the workspace it opens. Only a
+   * workflow run's first workspace step sets it.
+   */
+  readonly checkoutBranch: string | undefined;
 }
 
 const make = Effect.gen(function* () {
@@ -526,15 +538,17 @@ const make = Effect.gen(function* () {
             permissionProfileId: open.permissionProfileId,
             agentId: open.agentId,
             conversationId: open.conversationId,
+            step: open.step,
             runnerId: open.runnerId,
             requestedAccessMode: open.requestedAccessMode,
             parentSessionId: open.parentSessionId,
             spec: { ...open.spec, workspaceId: opened.workspaceId },
             prompt: open.prompt,
+            title: open.title,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
-            checkoutBranch: opened.checkoutBranch,
+            checkoutBranch: open.checkoutBranch ?? opened.checkoutBranch,
             // A session pushes as one GitHub account, chosen here: the
             // workspace's own connection if it has one, otherwise the
             // caller's fallback. The fallback is the user's default GitHub
@@ -656,15 +670,18 @@ const make = Effect.gen(function* () {
           permissionProfileId: agent.permissionProfileId,
           agentId: agent.id,
           conversationId: request.conversationId,
+          step: undefined,
           runnerId,
           requestedAccessMode: agent.accessMode,
           parentSessionId: undefined,
           spec,
           prompt: request.text,
+          title: undefined,
           kind: "session.spawned",
           projectId: undefined,
           workspace: undefined,
           fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
+          checkoutBranch: undefined,
           payload: {
             instanceId: agent.instanceId,
             runnerId,
@@ -675,6 +692,116 @@ const make = Effect.gen(function* () {
           },
         });
         return tellRunnerAndDispatch(runnerId, frame);
+      }),
+
+    /**
+     * Places a new session for one iteration of a workflow run's agent step,
+     * with `prompt` as its first input, inside the caller's transaction.
+     * Returns the new session's id and its start, which the caller runs after
+     * its commit: it tells the runner and dispatches.
+     *
+     * The session runs on the run's runner, in the run's workspace when the
+     * run has one, and takes its lease on that workspace. Its start switches
+     * the workspace's checkout to `checkoutBranch` when that is set. The run
+     * engine sets `checkoutBranch` only for the run's first workspace step.
+     *
+     * Each setting is the step's value if the step sets one, otherwise the
+     * Agent's: the model with its options, and the access mode. The Agent
+     * gives the instance, the permission profile, the system prompt and the
+     * disallowed tools. The step's output schema goes on the spec, and so
+     * does an idle unload of a few seconds, so the session frees its runner
+     * slot soon after each of its turns ends (`buildStepSessionTimeouts`).
+     *
+     * It checks no grant: the caller is the run's execution, and the user
+     * gave the run this step by saving the workflow. The current actor must
+     * be the step's run. Fails with `NotFound` or `InvalidState` when the
+     * Agent no longer exists or cannot be run, and with `InvalidState` or
+     * `Validation` when the run's runner cannot host the Agent's instance or
+     * its settings.
+     */
+    placeStepSession: (request: {
+      readonly step: WorkspaceStepKey;
+      readonly agentId: string;
+      readonly model: string | undefined;
+      readonly options: ModelSelection["options"] | undefined;
+      readonly accessMode: AccessMode | undefined;
+      readonly outputSchema: SessionSpec["outputSchema"];
+      readonly runnerId: string;
+      readonly workspaceId: string | null;
+      readonly checkoutBranch: string | undefined;
+      readonly prompt: string;
+      readonly title: string;
+    }): Effect.Effect<
+      { readonly sessionId: string; readonly start: Effect.Effect<void, SqlError> },
+      | InvalidState
+      | NotFound
+      | Validation
+      | GrantsError
+      | SettingError
+      | SqlError
+      | Schema.SchemaError
+    > =>
+      Effect.gen(function* () {
+        // The session is stamped with the current actor, so a session placed
+        // by anyone but the step's own run would be attributed wrongly.
+        const actor = yield* CurrentActor;
+        if (actor._tag !== "run" || actor.runId !== request.step.runId) {
+          return yield* Effect.die("an agent step's session is placed only by its own run");
+        }
+        const { agent } = yield* readAgentWithProfileOrFail(request.agentId);
+        const requestedAccessMode = request.accessMode ?? agent.accessMode;
+        // A model and its options are one selection, as for a spawn: the
+        // Agent's options apply only when the Agent's model is used.
+        const agentSelection = request.model === undefined ? agent.model : undefined;
+        const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
+          instanceId: agent.instanceId,
+          runnerId: request.runnerId,
+          requestedAccessMode,
+          model: request.model ?? agentSelection?.model,
+          options: request.options ?? agentSelection?.options ?? {},
+        });
+        const outputSchema = yield* validateOutputSchema(request.outputSchema);
+
+        const spec = {
+          instanceId: agent.instanceId,
+          // The session joins the run's workspace: `writeSession` opens no
+          // workspace of its own when it is given none, and keeps this one.
+          workspaceId: request.workspaceId,
+          modelSelection,
+          accessMode,
+          systemPrompt: agent.systemPrompt,
+          ...(agent.disallowedTools.length === 0 ? {} : { disallowedTools: agent.disallowedTools }),
+          ...(outputSchema === undefined ? {} : { outputSchema }),
+          timeouts: buildStepSessionTimeouts(yield* settings.all()),
+        } satisfies SessionSpec;
+
+        const { sessionId, frame } = yield* writeSession({
+          permissionProfileId: agent.permissionProfileId,
+          agentId: agent.id,
+          conversationId: undefined,
+          step: request.step,
+          runnerId,
+          requestedAccessMode,
+          parentSessionId: undefined,
+          spec,
+          prompt: request.prompt,
+          title: request.title,
+          kind: "session.spawned",
+          projectId: undefined,
+          workspace: undefined,
+          fallbackGithubConnectionId: undefined,
+          checkoutBranch: request.checkoutBranch,
+          payload: {
+            instanceId: agent.instanceId,
+            runnerId,
+            requestedAccessMode,
+            accessMode,
+            agentId: agent.id,
+            runId: request.step.runId,
+            stepId: request.step.stepId,
+          },
+        });
+        return { sessionId, start: tellRunnerAndDispatch(runnerId, frame) };
       }),
 
     /**
@@ -791,15 +918,18 @@ const make = Effect.gen(function* () {
           permissionProfileId: profileId,
           agentId: agent?.id,
           conversationId: undefined,
+          step: undefined,
           runnerId,
           requestedAccessMode,
           parentSessionId: undefined,
           spec,
           prompt: decoded.prompt,
+          title: undefined,
           kind: "session.spawned",
           projectId: decoded.projectId,
           workspace: decoded.workspace,
           fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
+          checkoutBranch: undefined,
           payload: {
             instanceId,
             runnerId,
@@ -861,6 +991,7 @@ const make = Effect.gen(function* () {
           // so it carries the same lineage as its parent.
           agentId: parent.agentId ?? undefined,
           conversationId: undefined,
+          step: undefined,
           runnerId: parent.runnerId,
           requestedAccessMode: parent.requestedAccessMode,
           parentSessionId: parent.id,
@@ -873,14 +1004,17 @@ const make = Effect.gen(function* () {
             nativeSessionId,
             mode,
             // A fork never answers a conversation: `session.continue`
-            // refuses a conversation's session above.
-            null,
+            // refuses a conversation's session above. Nor does it run a
+            // step, even when its parent did: it is placed with no step.
+            { conversationId: null, runId: null },
           ),
           prompt,
+          title: undefined,
           kind: "session.continued",
           projectId: parent.projectId ?? undefined,
           workspace: undefined,
           fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
+          checkoutBranch: undefined,
           payload: { parentSessionId: parent.id, mode },
         });
       }),

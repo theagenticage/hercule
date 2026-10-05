@@ -1,7 +1,7 @@
 /**
  * Unit tests for routing: which edges a finished step follows, when a
- * `join: all` step is ready, when a step can never run, and when an edge has
- * been followed as often as it may. Each test builds a run as it would be
+ * `join: all` step is ready, when a step can never run, when an edge has been
+ * followed as often as it may, and how a signal trigger keeps a run waiting. Each test builds a run as it would be
  * read inside the transaction that finished a step, and checks the decision.
  */
 import { describe, expect, it } from "vitest";
@@ -299,6 +299,131 @@ describe("a terminal step", () => {
     expect(decision).toEqual({
       traversedEdgeIndexes: [1],
       readyStepIds: ["after"],
+      ending: { _tag: "continues" },
+    });
+  });
+});
+
+describe("a run with a signal trigger", () => {
+  /**
+   * `labeled` is a signal trigger. `open` leads to `check`. `check` leads to
+   * `merge` when its output says so, and `labeled` leads to `merge` always.
+   * `merge` is a `join: all` step.
+   */
+  const PLAN: WorkflowDefinition = {
+    ...buildPlan(
+      ["open", "check", "merge"],
+      [
+        { from: "open", to: "check" },
+        { from: "check", to: "merge", condition: "steps.check.output.ok" },
+        { from: "labeled", to: "merge" },
+      ],
+      ["merge"],
+    ),
+    triggers: [
+      {
+        id: "labeled",
+        kind: "signal",
+        on: { kind: "github.pr.labeled", connectionId: "any" },
+        correlation: { event: "event.payload.added[0]", run: "inputs.label" },
+      },
+    ],
+  };
+
+  it("keeps the run going when no step is live, because the signal can still fire", () => {
+    const decision = routeAfter(
+      { ...PLAN, steps: PLAN.steps.slice(0, 1), edges: [] },
+      [buildCompleted("open")],
+      [],
+      "open",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [],
+      readyStepIds: [],
+      ending: { _tag: "continues" },
+    });
+  });
+
+  it("does not run a join while a signal that leads into it has not fired, even when its other edge fired", () => {
+    const decision = routeAfter(
+      PLAN,
+      [buildCompleted("open"), buildCompleted("check", 1, { ok: true })],
+      [1, 0, 0],
+      "check",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [1],
+      readyStepIds: [],
+      ending: { _tag: "continues" },
+    });
+  });
+
+  it("runs a join once the signal has fired, when the other edge into it fired too", () => {
+    const decision = routeAfter(
+      PLAN,
+      [
+        buildCompleted("open"),
+        buildCompleted("check", 1, { ok: true }),
+        buildCompleted("labeled", 1, { id: 7 }),
+      ],
+      [1, 1, 0],
+      "labeled",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [2],
+      readyStepIds: ["merge"],
+      ending: { _tag: "continues" },
+    });
+  });
+
+  it("runs a join once the signal has fired, when the other edge into it did not fire", () => {
+    const decision = routeAfter(
+      PLAN,
+      [
+        buildCompleted("open"),
+        buildCompleted("check", 1, { ok: false }),
+        buildCompleted("labeled", 1, { id: 7 }),
+      ],
+      [1, 0, 0],
+      "labeled",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [2],
+      readyStepIds: ["merge"],
+      ending: { _tag: "continues" },
+    });
+  });
+
+  it("does not run a join while the step upstream of it is still live, though the signal fired", () => {
+    const decision = routeAfter(
+      PLAN,
+      [buildCompleted("open"), buildPending("check"), buildCompleted("labeled", 1, { id: 7 })],
+      [1, 0, 0],
+      "labeled",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [2],
+      readyStepIds: [],
+      ending: { _tag: "continues" },
+    });
+  });
+
+  it("does not run a join a second time when the signal fires again", () => {
+    const decision = routeAfter(
+      PLAN,
+      [
+        buildCompleted("open"),
+        buildCompleted("check", 1, { ok: true }),
+        buildCompleted("labeled", 1, { id: 7 }),
+        buildCompleted("merge"),
+        buildCompleted("labeled", 2, { id: 8 }),
+      ],
+      [1, 1, 1],
+      "labeled",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [2],
+      readyStepIds: [],
       ending: { _tag: "continues" },
     });
   });

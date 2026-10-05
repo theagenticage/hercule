@@ -14,13 +14,22 @@
  * - `sessionExited` by the one cleanup step every path to `exited` goes
  *   through, so an exit path added later reaches the port without anyone
  *   remembering to call it;
- * - `inputsDropped` by the one step that gives up on waiting input.
+ * - `inputsDropped` by the steps that give up on waiting input: the one
+ *   that drops the input of a session that cannot be resumed, and the one
+ *   that cancels an input the runner refused after its session exited for
+ *   good.
+ *
+ * `sessionExited` and `inputsDropped` both name the agent step prompts that
+ * were cancelled before any runner took them (`droppedStepIterations`). A
+ * step prompt that left the controller and was never answered is not among
+ * them: the runner may have taken it, so only the runner's answer about the
+ * step settles the step.
  *
  * So a failure in the implementation rolls the change back, and the
  * implementation must not wait on anything outside the database.
  */
 import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ExitReason, ProviderEvent } from "@hercule/protocol";
 import type { StoredSession } from "./repository";
@@ -48,14 +57,29 @@ export interface SessionExit {
    * someone sends more.
    */
   readonly resumeHeld: boolean;
+  /**
+   * The iterations of the session's agent step whose prompts this exit
+   * cancelled before any runner took them. Empty for a session no agent
+   * step started, and for one that keeps its step prompt through the exit.
+   */
+  readonly droppedStepIterations: ReadonlyArray<number>;
 }
 
-/** Input that waited for an exited session and was cancelled, because the session cannot be resumed. */
+/**
+ * Input that waited for an exited session and was cancelled: the session
+ * cannot be resumed, or the runner refused the input after the session
+ * exited for good.
+ */
 export interface DroppedInputs {
   /** The exited session the input waited for. */
   readonly session: StoredSession;
-  /** The reason the resume was refused. */
+  /** The reason the input could not be delivered. */
   readonly refusal: string;
+  /**
+   * The iterations of the session's agent step whose prompts were among the
+   * cancelled input. No runner took them.
+   */
+  readonly droppedStepIterations: ReadonlyArray<number>;
 }
 
 /** The party told about what every session does. */
@@ -79,3 +103,21 @@ export class SessionObserver extends Context.Service<
     readonly inputsDropped: (dropped: DroppedInputs) => Effect.Effect<void, SqlError>;
   }
 >()("hercule/controller/sessions/SessionObserver") {}
+
+/**
+ * Returns one observer that passes every call to each of `observers` in turn,
+ * so more than one domain can watch the sessions through the one port. The
+ * calls run in the order given, and the first failure stops the rest, which
+ * rolls back the change being reported.
+ */
+export const combineSessionObservers = (
+  observers: ReadonlyArray<SessionObserver["Service"]>,
+): SessionObserver["Service"] =>
+  SessionObserver.of({
+    sessionReported: (session, event) =>
+      Effect.forEach(observers, (one) => one.sessionReported(session, event), { discard: true }),
+    sessionExited: (exit) =>
+      Effect.forEach(observers, (one) => one.sessionExited(exit), { discard: true }),
+    inputsDropped: (dropped) =>
+      Effect.forEach(observers, (one) => one.inputsDropped(dropped), { discard: true }),
+  });

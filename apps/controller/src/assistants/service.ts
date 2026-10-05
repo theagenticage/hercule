@@ -1,7 +1,7 @@
 /**
  * The assistant operations: `assistant.query`, `read`, `create`, `update` and
  * `delete`. The conversation messages an assistant's sessions write are
- * written by `AssistantSessionObserverLayer`.
+ * written by this domain's session observer (`session-observer.ts`).
  *
  * An assistant is an agent the user talks to through a conversation. It is stored as two rows that
  * share one id: an agent row of kind `assistant`, written through the agents

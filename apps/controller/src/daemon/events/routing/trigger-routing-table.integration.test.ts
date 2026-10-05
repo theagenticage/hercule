@@ -17,7 +17,7 @@ import * as Duration from "effect/Duration";
 import * as Struct from "effect/Struct";
 import type { Notification, Run } from "@hercule/contract";
 import { uuidFromString } from "../../../db";
-import { get, post, type ServerHarness } from "../../../http/testing";
+import { get, post } from "../../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../../sessions/testing";
 import {
@@ -34,7 +34,7 @@ import {
   type SetUpController,
 } from "../../../workflows/testing";
 import { readEvent } from "../../../events/testing";
-import { readCursorAndHead, runEffect } from "../../testing";
+import { runEffect, waitUntilRouted } from "../../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
@@ -102,17 +102,6 @@ const saveEnabledWorkflow = async (
   await enableWorkflow(base, token, workflow.id);
   return workflow.id;
 };
-
-/**
- * Waits until the event router's cursor has passed the event. From then on
- * the event has written every trigger match it ever will, because the router
- * writes the matches and moves the cursor in one transaction.
- */
-const waitUntilRouted = (harness: ServerHarness, eventId: number): Promise<void> =>
-  waitUntil(`routed the event ${eventId}`, async () => {
-    const { position } = await readCursorAndHead(harness);
-    return position !== null && position >= eventId ? true : undefined;
-  }).then(() => undefined);
 
 /**
  * Returns the ids of the events that started the workflow's runs, in

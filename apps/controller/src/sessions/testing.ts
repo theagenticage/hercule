@@ -15,6 +15,7 @@ import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  AGENT_STEPS_CAPABILITY,
   buildWorkspaceActionCapability,
   ControllerToRunner,
   PROTOCOL_VERSION,
@@ -47,11 +48,12 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 
 /**
  * The capabilities a runner of this build lists at hello: every workspace
- * action the controller's catalog knows.
+ * action the controller's catalog knows, and agent steps.
  */
-const CURRENT_CAPABILITIES: ReadonlyArray<string> = [...WORKSPACE_ACTION_IDS].map(
-  buildWorkspaceActionCapability,
-);
+const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
+  ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
+  AGENT_STEPS_CAPABILITY,
+];
 
 /**
  * How long `waitUntil` waits for the controller. Suites set vitest's test

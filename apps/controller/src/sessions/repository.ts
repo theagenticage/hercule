@@ -39,6 +39,7 @@ import {
   type Page,
 } from "../db";
 import { buildReadyClause } from "../workspaces";
+import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import type { StreamRow } from "./stream";
 
@@ -71,6 +72,10 @@ export interface StoredSession {
   readonly agentId: string | null;
   /** The assistant's conversation the session answers; `null` for any other session. */
   readonly conversationId: string | null;
+  /** The run whose agent step started the session; `null` for any other session. */
+  readonly runId: string | null;
+  /** The agent step's id in the run's plan; `null` when `runId` is. */
+  readonly stepId: string | null;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -88,6 +93,12 @@ export interface StoredSession {
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
+  /**
+   * Why the session last exited, kept like `exitedAt` through a resume. It is
+   * `null` until the session first exits, and for a session that exited
+   * before the reason was stored (migration 0045).
+   */
+  readonly exitReason: SessionEndReason | null;
   readonly lastActivityAt: string;
   /**
    * Whether the crash-loop guard is armed: the session was resumed, and since
@@ -127,6 +138,8 @@ export interface NewSession {
   readonly agentId: string | undefined;
   /** The assistant's conversation the session answers; `undefined` for any other session. */
   readonly conversationId: string | undefined;
+  /** The run and agent step that started the session; `undefined` for any other session. */
+  readonly step: { readonly runId: string; readonly stepId: string } | undefined;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
@@ -175,6 +188,8 @@ export interface SessionPageRequest {
   readonly permissionProfileId: string | undefined;
   /** Only the sessions of this conversation. */
   readonly conversationId: string | undefined;
+  /** Only the sessions this run's agent steps started. */
+  readonly runId: string | undefined;
   /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
 }
@@ -185,6 +200,8 @@ interface SessionRow {
   readonly permission_profile_id: Uint8Array;
   readonly agent_id: Uint8Array | null;
   readonly conversation_id: Uint8Array | null;
+  readonly run_id: Uint8Array | null;
+  readonly step_id: string | null;
   readonly provider_id: string | null;
   /** The spec's disallowed tool families as a JSON array, or null for none. */
   readonly disallowed_tools: string | null;
@@ -204,6 +221,7 @@ interface SessionRow {
   readonly created_at: string;
   readonly started_at: string | null;
   readonly exited_at: string | null;
+  readonly exit_reason: string | null;
   readonly last_activity_at: string;
   readonly crash_guard_armed: number;
   readonly input_waiting: number;
@@ -218,14 +236,15 @@ interface SessionRow {
  * that depends only on which domain was imported first.
  */
 const buildColumnList = (): string =>
-  "id, title, permission_profile_id, agent_id, conversation_id, instance_id, runner_id, workspace_id, project_id, " +
+  "id, title, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
+  "workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
   // Both are read to compute `unenforced`: the provider behind the instance,
   // and the tool families this session's spec disallowed.
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
-  "open_request, created_at, started_at, exited_at, " +
+  "open_request, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
@@ -239,6 +258,8 @@ const toSession = (row: SessionRow): StoredSession => ({
   permissionProfileId: uuidToString(row.permission_profile_id),
   agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
   conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
+  runId: row.run_id === null ? null : uuidToString(row.run_id),
+  stepId: row.step_id,
   instanceId: uuidToString(row.instance_id),
   runnerId: uuidToString(row.runner_id),
   workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
@@ -256,6 +277,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   createdAt: row.created_at,
   startedAt: row.started_at,
   exitedAt: row.exited_at,
+  exitReason: row.exit_reason as SessionEndReason | null,
   lastActivityAt: row.last_activity_at,
   crashGuardArmed: row.crash_guard_armed === 1,
   inputWaiting: row.input_waiting === 1,
@@ -309,6 +331,10 @@ export interface QueuedSession {
   readonly agentId: string | null;
   /** The model selection the session runs under now, which goes with the input its start carries. */
   readonly modelSelection: ModelSelection;
+  /** The run whose agent step started the session; `null` for any other session. */
+  readonly runId: string | null;
+  /** The agent step that started the session; `null` for any other session. */
+  readonly stepId: string | null;
 }
 
 /** A session's ingest state; see `ingestState`. */
@@ -400,15 +426,17 @@ const make = Effect.gen(function* () {
         const agent = session.agentId === undefined ? null : uuidFromString(session.agentId);
         const conversation =
           session.conversationId === undefined ? null : uuidFromString(session.conversationId);
+        const run = session.step === undefined ? null : uuidFromString(session.step.runId);
         yield* sql`
           INSERT INTO sessions (id, title, permission_profile_id, agent_id, conversation_id,
-                                instance_id, runner_id,
+                                run_id, step_id, instance_id, runner_id,
                                 workspace_id, project_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_at, last_activity_at)
           VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)}, ${agent},
-                  ${conversation}, ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
+                  ${conversation}, ${run}, ${session.step?.stepId ?? null},
+                  ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
                   ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
@@ -439,6 +467,32 @@ const make = Effect.gen(function* () {
           ORDER BY created_at, id
         `,
         (rows) => rows.map(toSession),
+      ),
+
+    /** Returns every session of one workflow run's agent steps that has not exited, oldest first. */
+    listLiveInRun: (runId: string): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      Effect.map(
+        sql<SessionRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM sessions
+          WHERE run_id = ${uuidFromString(runId)} AND status <> 'exited'
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map(toSession),
+      ),
+
+    /**
+     * Checks whether the session was started by an agent step whose run has
+     * ended: completed, failed or cancelled. Returns `false` for a session no
+     * run started, and for one whose run is still pending or running.
+     */
+    belongsToEndedRun: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT sessions.id FROM sessions JOIN runs ON runs.id = sessions.run_id
+          WHERE sessions.id = ${uuidFromString(sessionId)}
+            AND runs.status NOT IN ('pending', 'running')
+        `,
+        (rows) => rows.length > 0,
       ),
 
     /** Returns the ids of the exited sessions of one conversation that have a workspace. */
@@ -519,6 +573,9 @@ const make = Effect.gen(function* () {
         }
         if (request.conversationId !== undefined) {
           clauses.push(sql`conversation_id = ${uuidFromString(request.conversationId)}`);
+        }
+        if (request.runId !== undefined) {
+          clauses.push(sql`run_id = ${uuidFromString(request.runId)}`);
         }
         if (request.thread !== undefined) {
           clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);
@@ -723,6 +780,16 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Stores why the session exited. It decides nothing: the service writes
+     * it in the transaction that moves the session to `exited`.
+     */
+    setExitReason: (sessionId: string, reason: SessionEndReason): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET exit_reason = ${reason}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
      * Moves a resumed session that is still `queued` back to `exited`, and
      * returns whether it did. The row keeps the exit time of the exit the
      * resume began from, so the session reads as that exit again, not as a
@@ -857,6 +924,8 @@ const make = Effect.gen(function* () {
           readonly config: string;
           readonly agent_id: Uint8Array | null;
           readonly model_selection: string;
+          readonly run_id: Uint8Array | null;
+          readonly step_id: string | null;
         }>`
           SELECT s.id, s.created_at, s.spec,
                  -- The branch is used only once: the runner switches the main
@@ -866,7 +935,7 @@ const make = Effect.gen(function* () {
                  -- that checkout since.
                  CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
                  s.github_connection_id, pi.provider_id, pi.config, s.agent_id,
-                 s.model_selection
+                 s.model_selection, s.run_id, s.step_id
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
             -- A session waits until its workspace is ready. Starting it
@@ -892,6 +961,8 @@ const make = Effect.gen(function* () {
             config: JSON.parse(row.config) as unknown,
             agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
             modelSelection: JSON.parse(row.model_selection) as ModelSelection,
+            runId: row.run_id === null ? null : uuidToString(row.run_id),
+            stepId: row.step_id,
           })),
       ),
 

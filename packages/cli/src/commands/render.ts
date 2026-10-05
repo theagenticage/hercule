@@ -7,9 +7,11 @@
  * tail the CLI accepts back as an argument.
  */
 import {
+  describeInputStatus,
   describeRunOrigin,
   describeStepDuration,
   findFailedEdge,
+  findStepLineKind,
   formatAge,
   describeResolution,
   describeTriggerOn,
@@ -21,6 +23,7 @@ import {
   truncateText,
   formatIssue,
   isSchedule,
+  type Input,
   type Notification,
   type Resolution,
   type Run,
@@ -364,6 +367,13 @@ const renderTriggerList = (triggers: ReadonlyArray<Trigger>): ReadonlyArray<stri
 };
 
 /**
+ * Returns the lines of `input list`: the generic table, with each status in
+ * the words `describeInputStatus` gives it.
+ */
+const renderInputList = (inputs: ReadonlyArray<Input>): ReadonlyArray<string> =>
+  renderTable(inputs.map((input) => ({ ...input, status: describeInputStatus(input.status) })));
+
+/**
  * Returns the lines printed after `run start` and `run rerun`: the new run's
  * full id, and the command that subscribes to it. A caller who started a run
  * usually wants to know when it ends, and the subscription wakes it when the
@@ -463,17 +473,22 @@ const renderRunOutput = (run: Run): ReadonlyArray<string> => {
 /**
  * Returns the table of a run's step records, one row per record. The
  * iteration column shows only when a step has more than one record, so a run
- * with no loops reads as before.
+ * with no loops reads as before. A signal's record has no duration, as on the
+ * run's page.
  */
-const renderStepTable = (steps: Run["steps"], now: number): ReadonlyArray<string> => {
-  const stepIds = new Set(steps.map((record) => record.stepId));
-  const hasRepeats = stepIds.size < steps.length;
+const renderStepTable = (run: Run, now: number): ReadonlyArray<string> => {
+  const stepIds = new Set(run.steps.map((record) => record.stepId));
+  const hasRepeats = stepIds.size < run.steps.length;
   return renderTable(
-    steps.map((record) => ({
+    run.steps.map((record) => ({
       step: record.stepId,
       ...(hasRepeats ? { iteration: record.iteration } : {}),
       status: record.status,
-      took: describeStepDuration(readTimestamps(record), now),
+      took: describeStepDuration(
+        readTimestamps(record),
+        findStepLineKind(run.plan, record.stepId),
+        now,
+      ),
       error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
     })),
   );
@@ -507,7 +522,7 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderRunOutput(run),
   "",
   "steps",
-  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run.steps, now)),
+  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run, now)),
 ];
 
 /**
@@ -593,7 +608,8 @@ const renderNotificationDecided = (
 const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   // The derived client decoded each item with the operation's schema, so the
   // items of `run.query` are run summaries, those of `trigger.query` are
-  // triggers, and those of `notification.query` are notifications.
+  // triggers, those of `notification.query` are notifications, and those of
+  // `input.query` are inputs.
   const asLines =
     command.id === "transcript.read"
       ? renderTranscript
@@ -606,7 +622,10 @@ const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> 
           : command.id === "notification.query"
             ? (items: ReadonlyArray<Record<string, unknown>>) =>
                 renderNotificationList(items as unknown as ReadonlyArray<Notification>)
-            : renderTable;
+            : command.id === "input.query"
+              ? (items: ReadonlyArray<Record<string, unknown>>) =>
+                  renderInputList(items as unknown as ReadonlyArray<Input>)
+              : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 

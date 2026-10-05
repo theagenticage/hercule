@@ -42,6 +42,7 @@ const insertSession = (permissionProfileId: string) =>
       permissionProfileId,
       agentId: undefined,
       conversationId: undefined,
+      step: undefined,
       instanceId: mintId(),
       runnerId: mintId(),
       requestedAccessMode: "approval-required",
@@ -337,6 +338,7 @@ describe("listing the sessions on one profile", () => {
           agentId: undefined,
           permissionProfileId: profileId,
           thread: undefined,
+          runId: undefined,
           conversationId: undefined,
         });
         return { listed: page.items, profileId, live };
@@ -410,6 +412,7 @@ const insertResumableSession = Effect.gen(function* () {
     permissionProfileId: mintId(),
     agentId: undefined,
     conversationId: undefined,
+    step: undefined,
     instanceId,
     runnerId: uuidToString(runner),
     requestedAccessMode: "approval-required",

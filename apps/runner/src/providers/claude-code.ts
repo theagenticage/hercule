@@ -66,9 +66,10 @@ const CLAUDE_BINARY = "claude";
 
 /**
  * How long a control request may take. A control request writes to the harness
- * child process and waits for its reply. The runner handles session frames one
- * at a time, in order, so without a time limit one child that stops responding
- * would hold up every session on the machine, pings included.
+ * child process and waits for its reply. The runner handles a session's frames
+ * one at a time, in order, so without a time limit a child that stops
+ * responding would hold up every later frame of its session, and the close of
+ * a connection, which waits for a start or an input already under way.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
 

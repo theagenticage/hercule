@@ -27,6 +27,8 @@ const SESSION: Session = {
   permissionProfileId: "p-unrestricted",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: "instance-claude-code",
   runnerId: "r-local",
   workspaceId: null,

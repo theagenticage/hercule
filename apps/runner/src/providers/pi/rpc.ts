@@ -47,9 +47,9 @@ export interface PiRpc {
 /**
  * How long `send` waits for pi's response. Five seconds is enough because every
  * command is local: a write to a process on this machine and a response on the
- * same pipe, never a request to a model. The runner handles session frames one
- * at a time, in order, so a pi that stops responding would otherwise block
- * every session on the machine, pings included.
+ * same pipe, never a request to a model. The runner handles a session's frames
+ * one at a time, in order, so a pi that stops responding would otherwise block
+ * every later frame of its session.
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 

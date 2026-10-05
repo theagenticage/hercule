@@ -16,7 +16,7 @@
  * real account. The integration tests in
  * `apps/controller/src/daemon/runs/workspace-steps.integration.test.ts` check
  * that the step frame carries the Connection's identity, and
- * `apps/runner/src/workspace-actions/steps.test.ts` checks that the commit is
+ * `apps/runner/src/workspace-steps/steps.test.ts` checks that the commit is
  * made as the identity in the frame.
  *
  * The suite is in vitest's `binary` project, so `pnpm test:binary` runs it and

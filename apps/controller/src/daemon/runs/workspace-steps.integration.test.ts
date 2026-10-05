@@ -5,7 +5,6 @@
  * way a real runner does.
  */
 import { describe, expect, it } from "vitest";
-import type { Run } from "@hercule/contract";
 import { MAX_WORKSPACE_STEPS } from "@hercule/protocol";
 import { send } from "../../http/testing";
 import {
@@ -14,7 +13,7 @@ import {
   requestCancel,
   requestStart,
   startSentWorkflow,
-  waitForRun,
+  waitForRunTo,
 } from "../../runs/testing";
 import {
   waitForRunnerGone,
@@ -88,14 +87,6 @@ const namesStep =
 /** Counts the settle frames that name a step key. */
 const countSettles = (wire: Wire, key: ReturnType<typeof commitKey>): number =>
   listFramesTagged(wire, "workspaceStepSettle").filter(namesStep(key)).length;
-
-/** Reads a run until `holds` is true for it. */
-const waitForRunTo = (
-  arranged: Arranged,
-  runId: string,
-  what: string,
-  holds: (run: Run) => boolean,
-) => waitForRun(arranged.harness.base, arranged.token, runId, what, holds);
 
 /** Reads the status of a run's `commit` step record. */
 const readCommitStatus = async (arranged: Arranged, runId: string): Promise<string | undefined> =>

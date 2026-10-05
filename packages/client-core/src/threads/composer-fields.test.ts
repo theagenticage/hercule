@@ -452,6 +452,8 @@ const buildThread = (id: string, title: string): Session => ({
   permissionProfileId: "profile-unrestricted",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: CLAUDE.id,
   runnerId: LOCAL.id,
   workspaceId: "ws-thread-3f1",

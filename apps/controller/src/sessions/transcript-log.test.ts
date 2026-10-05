@@ -63,6 +63,7 @@ const readTexts = (rows: ReadonlyArray<Row>, turnId: string, itemId?: string) =>
         permissionProfileId: mintId(),
         agentId: undefined,
         conversationId: undefined,
+        step: undefined,
         instanceId: mintId(),
         runnerId: mintId(),
         requestedAccessMode: "approval-required",

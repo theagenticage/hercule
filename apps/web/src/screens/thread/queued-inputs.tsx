@@ -13,8 +13,8 @@ import { inputsQuery, sessionQuery } from "../../app/queries";
 /**
  * The list of queued messages above the composer, each with Steer and Cancel.
  * The query returns the session's whole input history; this component shows
- * only the inputs still `queued`, because delivered or cancelled ones can no
- * longer be acted on.
+ * only the inputs still `queued`, because sent, delivered or cancelled ones
+ * can no longer be acted on.
  *
  * On a session that answers an assistant's conversation, the rows have no
  * Steer and no Cancel: each queued input is a message the conversation

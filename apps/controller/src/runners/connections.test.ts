@@ -316,4 +316,46 @@ describe("sendFrameCarryingInput", () => {
     expect(result.written).toEqual([INPUT_FRAME]);
     expect(result.sent).toEqual({ _tag: "sent", answer: Option.some(result.answer) });
   });
+
+  it("returns sent with no answer when the connection ends after the write", async () => {
+    const { sent, written } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const connection = mintConnection();
+        const written: Array<ControllerToRunner> = [];
+        yield* connections.greeted(
+          runner!.id,
+          connection,
+          {
+            ...HELD,
+            // The connection closes right after the write, before any answer.
+            ask: (frame) =>
+              Effect.andThen(
+                Effect.sync(() => written.push(frame)),
+                Effect.asVoid(
+                  Effect.forkDetach(connections.ended(runner!.id, connection, "unreachable")),
+                ),
+              ),
+          },
+          {
+            binaryVersion: "0.1.0",
+            protocolVersion: PROTOCOL_VERSION,
+            negotiatedCapabilities: [],
+            facts: FACTS,
+          },
+        );
+        const sent = yield* connections.sendFrameCarryingInput(
+          runner!.id,
+          INPUT_FRAME,
+          Duration.infinity,
+        );
+        return { sent, written };
+      }).pipe(Effect.provide(layer)),
+    );
+
+    // The runner may have the input, so the caller must not treat it as never sent.
+    expect(written).toEqual([INPUT_FRAME]);
+    expect(sent).toEqual({ _tag: "sent", answer: Option.none() });
+  });
 });

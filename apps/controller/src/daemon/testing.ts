@@ -338,6 +338,17 @@ export const readCursorAndHead = async (
 };
 
 /**
+ * Waits until the event router's cursor has passed the event. From then on
+ * the event has written every match it ever will, because the router writes
+ * the matches and moves the cursor in one transaction.
+ */
+export const waitUntilRouted = (harness: ServerHarness, eventId: number): Promise<void> =>
+  waitUntil(`routed the event ${eventId}`, async () => {
+    const { position } = await readCursorAndHead(harness);
+    return position !== null && position >= eventId ? true : undefined;
+  }).then(() => undefined);
+
+/**
  * Waits until the router's cursor reaches the end of the log, and returns it.
  * The cursor and the newest event id are read in one statement, so they
  * always come from the same moment.

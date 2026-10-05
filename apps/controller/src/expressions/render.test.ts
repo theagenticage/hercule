@@ -175,6 +175,7 @@ describe("evaluateMapping", () => {
             title: "event.payload.title + '!'",
           },
           EVENT_CONTEXT,
+          "input",
         ),
       ),
     );
@@ -182,14 +183,42 @@ describe("evaluateMapping", () => {
   });
 
   it("names the input whose expression fails", () => {
-    expect(readFailure(evaluateMapping({ author: "event.payload.author" }, EVENT_CONTEXT))).toMatch(
-      /^The expression for the input author: /,
-    );
+    expect(
+      readFailure(evaluateMapping({ author: "event.payload.author" }, EVENT_CONTEXT, "input")),
+    ).toMatch(/^The expression for the input author: /);
+  });
+
+  it("names the output whose expression fails, for a signal trigger's outputs", () => {
+    expect(
+      readFailure(evaluateMapping({ author: "event.payload.author" }, EVENT_CONTEXT, "output")),
+    ).toMatch(/^The expression for the output author: /);
   });
 
   it("refuses a value with no JSON form, naming the input", () => {
-    expect(readFailure(evaluateMapping({ blob: "b'abc'" }, EVENT_CONTEXT))).toMatch(
+    expect(readFailure(evaluateMapping({ blob: "b'abc'" }, EVENT_CONTEXT, "input"))).toMatch(
       /^The expression for the input blob returns a value that cannot be written as JSON/,
     );
+  });
+});
+
+/**
+ * A signal trigger's correlation reads the run's steps, and a step that has
+ * not run yet is a missing key. The run engine tells that case apart from a
+ * broken expression by this flag.
+ */
+describe("an unresolved reference", () => {
+  /** Returns the error an evaluation failed with. */
+  const readError = (source: string) => {
+    const exit = Effect.runSyncExit(provideUnlimitedBudget(evaluateExpression(source, CONTEXT)));
+    if (Exit.isSuccess(exit)) throw new Error(`expected a failure, got ${String(exit.value)}`);
+    return Option.getOrThrow(Cause.findErrorOption(exit.cause));
+  };
+
+  it("is flagged when the expression reads a key the context does not have", () => {
+    expect(readError("steps.missing.output.id").isUnresolvedReference).toBe(true);
+  });
+
+  it("is not flagged for any other failure", () => {
+    expect(readError("1 / 0").isUnresolvedReference).toBeUndefined();
   });
 });

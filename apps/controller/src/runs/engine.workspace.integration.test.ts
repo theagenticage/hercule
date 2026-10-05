@@ -5,7 +5,7 @@
  *
  * No runner is connected. Workspace Steps is a fake that records what the
  * run engine hands to runners and settles with them, and the test plays the
- * runner by calling `recordStepResult` with a step's result, as the controller
+ * runner by calling `completeStep` with a step's result, as the controller
  * daemon does when a result arrives. The fake also notes every call made
  * inside a database transaction, and each test fails if there is one: a
  * transaction must never wait on a runner.
@@ -105,6 +105,8 @@ const runTest = <A, E>(
           noteIfInTransaction("settle");
           recorded.settles.push(...steps);
         },
+        openSession: () => Effect.die("these tests run no agent step"),
+        stopSessions: () => Effect.void,
       };
     }),
   );
@@ -212,6 +214,14 @@ const buildCommitDefinition = (repoId: string, commitParams: Record<string, unkn
   edges: [{ from: "commit", to: "file" }],
 });
 
+/** A `git.commit` step with this id, whose commit message names the step. */
+const buildCommitStep = (id: string) => ({
+  id,
+  kind: "action" as const,
+  action: "git.commit",
+  params: { message: `Save ${id}` },
+});
+
 const COMMITTED = { sha: "abc123", branch: "hercule/run-x", committed: true };
 
 /** Reads a run through the run service. */
@@ -264,7 +274,10 @@ const startCommitRun = (recorded: Recorded) =>
     const runs = yield* RunService;
     const { runId } = yield* runs.start({ definition: buildCommitDefinition(repoId) });
     const [start] = yield* waitForStarts(recorded, 1);
-    return { runnerId, repoId, runId, start: start! };
+    if (start?.kind !== "action") {
+      return yield* Effect.die("the commit step was not handed on as an action step");
+    }
+    return { runnerId, repoId, runId, start };
   });
 
 describe("a workspace step", () => {
@@ -277,6 +290,7 @@ describe("a workspace step", () => {
 
         // The workspace id is checked against the run below.
         expect(start).toEqual({
+          kind: "action",
           runId,
           stepId: "commit",
           iteration: 1,
@@ -318,10 +332,10 @@ describe("a workspace step", () => {
           outcome: { status: "completed" as const, output: COMMITTED },
         };
         // A result from a runner the run is not pinned to is ignored.
-        yield* runs.recordStepResult(yield* insertRunner(), result);
+        yield* runs.completeStep(yield* insertRunner(), result);
         expect(findRecord(yield* readRun(runId), "commit")?.status).toBe("running");
 
-        yield* runs.recordStepResult(runnerId, result);
+        yield* runs.completeStep(runnerId, result);
         const ended = yield* waitForRunToEnd(runId);
         expect(ended.status).toBe("completed");
         expect(findRecord(ended, "commit")).toMatchObject({
@@ -334,7 +348,7 @@ describe("a workspace step", () => {
         });
 
         // The same result again finds the record ended, and changes nothing.
-        yield* runs.recordStepResult(runnerId, result);
+        yield* runs.completeStep(runnerId, result);
         expect(yield* readRun(runId)).toEqual(ended);
       }),
     );
@@ -345,7 +359,7 @@ describe("a workspace step", () => {
       Effect.gen(function* () {
         const { runnerId, runId } = yield* startCommitRun(recorded);
         const runs = yield* RunService;
-        yield* runs.recordStepResult(runnerId, {
+        yield* runs.completeStep(runnerId, {
           runId,
           stepId: "commit",
           iteration: 1,
@@ -442,22 +456,16 @@ describe("a workspace step", () => {
         const runnerId = yield* insertRunner();
         const repoId = yield* insertRepo;
         const runs = yield* RunService;
-        const commit = (id: string) => ({
-          id,
-          kind: "action" as const,
-          action: "git.commit",
-          params: { message: `Save ${id}` },
-        });
         const { runId } = yield* runs.start({
           definition: {
             name: "Two commits at once",
             workspace: { kind: "ephemeral", checkouts: [{ resourceId: repoId }] },
-            steps: [commit("first"), commit("second")],
+            steps: [buildCommitStep("first"), buildCommitStep("second")],
           },
         });
         yield* waitForStarts(recorded, 2);
 
-        yield* runs.recordStepResult(runnerId, {
+        yield* runs.completeStep(runnerId, {
           runId,
           stepId: "first",
           iteration: 1,
@@ -474,22 +482,62 @@ describe("a workspace step", () => {
     );
   });
 
-  it("switches a repo's main workspace to the workflow's branch before each step", async () => {
+  it("switches a repo's main workspace to the workflow's branch only before the run's first workspace step", async () => {
     await runTest((recorded) =>
       Effect.gen(function* () {
         const runnerId = yield* insertRunner();
         const repoId = yield* insertRepo;
         const runs = yield* RunService;
-        yield* runs.start({
+        const { runId } = yield* runs.start({
           definition: {
-            ...buildCommitDefinition(repoId),
+            name: "Commit twice on the release branch",
             workspace: { kind: "primary", resourceId: repoId, branch: "release" },
+            steps: [buildCommitStep("first"), buildCommitStep("second")],
+            edges: [{ from: "first", to: "second" }],
           },
         });
-        const [start] = yield* waitForStarts(recorded, 1);
-        expect(start).toMatchObject({ runnerId, checkoutBranch: "release" });
-        // The step sent again when the runner reconnects carries the branch too.
-        expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([start]);
+        const [first] = yield* waitForStarts(recorded, 1);
+        expect(first).toMatchObject({ runnerId, stepId: "first", checkoutBranch: "release" });
+        // The first step sent again when the runner reconnects still carries
+        // the branch, because the runner may never have received it.
+        expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([first]);
+
+        yield* runs.completeStep(runnerId, {
+          runId,
+          stepId: "first",
+          iteration: 1,
+          outcome: { status: "completed", output: COMMITTED },
+        });
+        const second = (yield* waitForStarts(recorded, 2))[1];
+        // After the first step the branch belongs to the run's work: an agent
+        // step may have switched or renamed it, so the second commit goes to
+        // whatever branch is current.
+        expect(second).toMatchObject({ runnerId, stepId: "second", checkoutBranch: undefined });
+        expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([second]);
+      }),
+    );
+  });
+
+  it("switches a repo's main workspace to the workflow's branch for only one of two first steps that start at once", async () => {
+    await runTest((recorded) =>
+      Effect.gen(function* () {
+        yield* insertRunner();
+        const repoId = yield* insertRepo;
+        const runs = yield* RunService;
+        yield* runs.start({
+          definition: {
+            name: "Commit twice at once on the release branch",
+            workspace: { kind: "primary", resourceId: repoId, branch: "release" },
+            steps: [buildCommitStep("first"), buildCommitStep("second")],
+          },
+        });
+        const starts = yield* waitForStarts(recorded, 2);
+        // Only the step whose start pinned the run switches the branch. If
+        // both did, the second switch could undo a branch the first step's
+        // work had already moved to.
+        expect(
+          starts.filter((start) => start.kind === "action" && start.checkoutBranch !== undefined),
+        ).toEqual([expect.objectContaining({ checkoutBranch: "release" })]);
       }),
     );
   });

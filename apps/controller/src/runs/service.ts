@@ -1,7 +1,8 @@
 /**
  * The run operations: `run.start`, `run.rerun`, `run.cancel`, `run.query` and `run.read`,
- * writing the run of a start trigger that matched an event, resuming unfinished
- * runs when the controller starts, and what the
+ * writing the run of a start trigger that matched an event, recording an event
+ * that matched a run's signal trigger, resuming unfinished runs when the
+ * controller starts, and what the
  * controller daemon calls about workspace steps: their results, the runners
  * and workspaces that fail under them, and the steps a runner is owed.
  * Everything but querying and reading is the run engine's (`engine.ts`).
@@ -15,7 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createDecodeValidationError,
@@ -34,11 +35,18 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import type { ConnectionTypes } from "../connections";
-import { buildPageInputFields, refuseCursor, resolveSortDirection, type AfterCommit } from "../db";
+import {
+  buildPageInputFields,
+  refuseCursor,
+  resolveSortDirection,
+  withTransaction,
+  type AfterCommit,
+} from "../db";
 import type { PlatformEvents } from "../events";
 import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
 import type { Settings } from "../settings";
+import { runHeldSubscriptions } from "../subscriptions";
 import type { TaskService } from "../tasks";
 import type { WorkflowService } from "../workflows";
 import type { WorkspaceService } from "../workspaces";
@@ -66,22 +74,28 @@ export interface RunPage {
 }
 
 const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const runs = yield* runRepository;
+  const runHeld = yield* runHeldSubscriptions;
   const engine = yield* makeRunEngine;
 
   return {
     start: engine.start,
     rerun: engine.rerun,
     startTriggeredRun: engine.startTriggeredRun,
+    recordSignalMatch: engine.recordSignalMatch,
 
     /** `run.cancel`: cancels a run and returns it, as the run engine's `cancel` describes. */
     cancel: engine.cancel,
     resumeUnfinished: engine.resumeUnfinished,
-    recordStepResult: engine.recordStepResult,
+    completeStep: engine.completeStep,
     failRunsInWorkspace: engine.failRunsInWorkspace,
     failRunsPinnedTo: engine.failRunsPinnedTo,
+    failStepsOfEndedSessions: engine.failStepsOfEndedSessions,
+    failStepWithDroppedPrompt: engine.failStepWithDroppedPrompt,
     listOwedWorkspaceSteps: engine.listOwedWorkspaceSteps,
     listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
+    stopSessionsOfEndedRuns: engine.stopSessionsOfEndedRuns,
     wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
 
     /** Returns one page of runs, the newest first unless the caller sorts the other way. */
@@ -109,15 +123,24 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns a run with its frozen plan, its inputs and every step record.
-     * Fails with `NotFound` if no run has the id.
+     * Returns a run with its frozen plan, its inputs, every step record and
+     * its live subscriptions. Fails with `NotFound` if no run has the id.
+     * The run and its subscriptions are read in one transaction, so they are
+     * from the same moment.
      */
     read: (id: Id): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("run.read");
-        const found = yield* runs.read(id);
-        if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError("no such run"));
-        return found.value;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const found = yield* runs.read(id);
+            if (Option.isNone(found)) {
+              return yield* Effect.fail(createNotFoundError("no such run"));
+            }
+            return { ...found.value, subscriptions: yield* runHeld.list(id) };
+          }),
+        );
       }),
   };
 });

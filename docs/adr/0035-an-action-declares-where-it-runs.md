@@ -6,6 +6,8 @@ Date: 2026-09-25
 
 Accepted. Decided by [The run's workspace and workspace actions (#254)](https://github.com/theagenticage/hercule/issues/254) and built first by [Workspace steps: the round trip, proven by `git.commit` (#257)](https://github.com/theagenticage/hercule/issues/257). Reverses two statements of the spec: "action steps run on the controller" ([spec 07](../spec/07-workflows.md) §4.4) and "anything git (clone, push, branch) is not an action" ([spec 05](../spec/05-plugins.md) §4.4). Keeps [ADR 0002](./0002-orchestration-stays-on-the-controller.md) (orchestration stays on the controller) and [ADR 0006](./0006-plugins-request-capabilities-and-register-contributions-in-code.md) (plugins run only on the controller).
 
+**Amended 2026-10-04 ([#83](https://github.com/theagenticage/hercule/issues/83)):** agent steps are built as workspace steps, as the consequence below expected. The transaction that starts a run's first workspace step, an agent step or a workspace action, pins the run and opens its workspace. A run with an agent step is pinned even when it has no workspace policy, because its sessions run on that runner. An agent step's result reaches the controller as a workspace action's does, as a `WorkspaceStepResult` keyed by the step key. Unlike a workspace action, an agent step does not wait for the other steps in its workspace ([spec 07](../spec/07-workflows.md) §4.2 and §4.4).
+
 ## Context
 
 A run takes place in one workspace on one runner ([spec 07](../spec/07-workflows.md) §4.4). Until now only an agent step could touch that workspace, because every action step ran on the controller. So this workflow could not be written:

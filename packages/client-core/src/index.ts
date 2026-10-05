@@ -93,6 +93,7 @@ export {
 } from "./runner-edit";
 export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
 export { formatRunnerLabel } from "./runner-label";
+export { describeInputStatus } from "./input-status";
 export {
   describeFailureReason,
   describeRunOrigin,
@@ -104,11 +105,17 @@ export {
   describeStepDuration,
   describeStepState,
   findFailedEdge,
+  findStepLineKind,
   formatElapsed,
   isRunLive,
+  listAwaitedSignals,
   listRerunChoices,
   readTimestamps,
   shouldRunRecede,
+  describeStepSession,
+  type StepLineKind,
+  type StepRecordSession,
+  type StepSessionReading,
 } from "./run-display";
 export {
   buildRunGraph,
@@ -226,6 +233,7 @@ export {
   formatSince,
   formatStamp,
   formatTimeContext,
+  isSameDay,
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
 export { resolveThreadRowsMode } from "./thread-rows";
@@ -268,7 +276,14 @@ export type {
   ThreadPicks,
 } from "./threads/config";
 export { findNextDurationChange, formatDuration } from "./threads/duration";
-export { buildHeadline, buildLanes, type LaneKind } from "./threads/lanes";
+export {
+  buildHeadline,
+  buildLanes,
+  buildStepSessionRows,
+  describeStartingRun,
+  summarizeStepSessions,
+  type LaneKind,
+} from "./threads/lanes";
 export {
   describeMessageMeta,
   describeWaitingNote,

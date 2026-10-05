@@ -321,6 +321,7 @@ const make = Effect.gen(function* () {
                 agentId: id,
                 permissionProfileId: undefined,
                 conversationId: undefined,
+                runId: undefined,
                 thread: undefined,
               }),
             );

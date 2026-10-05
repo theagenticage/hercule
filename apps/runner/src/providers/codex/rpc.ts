@@ -82,7 +82,7 @@ export interface Rpc {
  * for the life of the process. The timeout is thirty seconds because some
  * requests go over the network (starting a thread authenticates), and the
  * app-server handles the runner's frames on its own loop, not on the loop the
- * runner uses to handle sessions one at a time.
+ * runner uses to handle a session's frames one at a time.
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(30);
 

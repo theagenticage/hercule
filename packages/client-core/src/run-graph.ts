@@ -15,8 +15,11 @@ import {
 } from "@hercule/contract";
 import {
   describeUnstartedStep,
+  findStepLineKind,
   isRunLive,
   readTimestamps,
+  type StepLineKind,
+  type StepRecordSession,
   type Timestamps,
   type WorkState,
 } from "./run-display";
@@ -34,11 +37,15 @@ export interface StepProgress extends Timestamps {
 /** A trigger or a step of a run's plan. A step carries its progress; a trigger has none. */
 export interface RunGraphNode extends WorkflowGraphNode {
   readonly progress: StepProgress | undefined;
-  /** How many step records the step has: how often the run came to it. 0 for a trigger. */
+  /**
+   * How many step records the node has: how often the run came to a step, or
+   * how often a signal trigger fired. 0 for a start trigger.
+   */
   readonly iterationCount: number;
   /**
-   * The text after the step's id on its card, such as `×3` for a step the run
-   * came to three times. `undefined` for a step the run came to at most once.
+   * The text after the node's id on its card, such as `×3` for a step the run
+   * came to three times or a signal that fired three times. `undefined` for a
+   * node with at most one record.
    */
   readonly iterationLabel: string | undefined;
 }
@@ -55,12 +62,19 @@ export interface RunGraphNode extends WorkflowGraphNode {
  * - `notYet`: the run is live, has not followed it, and may still. Its source
  *   step has not finished yet, or can still run again: the step has a pending
  *   or running record, or a step with one has a path of edges to it, as in a
- *   loop that is still going round.
+ *   loop that is still going round, or a signal trigger has a path of edges
+ *   to it.
  *
  * An edge from the start trigger that started the run is `fired`, or `active`
- * while the entry step it leads to runs. An edge from any other trigger is
- * never followed: it is `notYet` while the run is live, and `notTaken` once
+ * while the entry step it leads to runs. An edge from any other start trigger
+ * is never followed: it is `notYet` while the run is live, and `notTaken` once
  * the run has ended, as for a run started by hand or through the API.
+ *
+ * An edge from a signal trigger is a plan edge, so the run counts how often it
+ * followed it, as for an edge from a step. A signal can fire again for as long
+ * as the run is live, so an edge from a signal that the run has not followed
+ * is `notYet` until the run ends, even after the signal has fired. So is every
+ * edge a signal has a path to.
  */
 export type EdgeTravel = "fired" | "active" | "notTaken" | "notYet";
 
@@ -120,6 +134,8 @@ const groupRecordsByStep = (
  * run's progress on it:
  * - each step carries the state and times of its current record (see
  *   `findCurrentRecord`) and how many records it has;
+ * - each signal trigger carries how many records it has, one per firing,
+ *   but no state: a trigger card shows no progress;
  * - each edge carries how far the run came along it (see `EdgeTravel`), from
  *   the run's count of how often it followed each edge;
  * - an edge with `maxTraversals` carries that count out of its limit;
@@ -135,17 +151,21 @@ export const buildRunGraph = (run: Run): RunGraph => {
   const isOverLimitRun = run.status === "failed" && run.failureReason === "iteration-limit";
   const isLive = isRunLive(run.status);
   const startingTriggerId = run.origin.kind === "trigger" ? run.origin.triggerId : undefined;
-  // The steps that can still run: those with a pending or running record,
-  // and every step they have a path to.
-  const canStillRun = collectReachableSteps(
-    run.plan.edges ?? [],
-    run.steps
+  // The nodes that can still run while the run is live: those with a pending
+  // or running record, every signal trigger, because a signal can fire again
+  // until the run ends, and every step one of them has a path to.
+  const canStillRun = collectReachableSteps(run.plan.edges ?? [], [
+    ...run.steps
       .filter((record) => record.status === "pending" || record.status === "running")
       .map((record) => record.stepId),
-  );
+    ...(run.plan.triggers ?? [])
+      .filter((trigger) => trigger.kind === "signal")
+      .map((trigger) => trigger.id),
+  ]);
   /**
    * Checks whether a step has finished at least once: completed, or skipped
-   * by its condition. A trigger has no records, so it never has.
+   * by its condition. A start trigger has no records, so it never has. A
+   * signal trigger has a completed record for each time it fired.
    */
   const hasFinished = (stepId: string): boolean =>
     (records.get(stepId) ?? []).some(
@@ -162,13 +182,10 @@ export const buildRunGraph = (run: Run): RunGraph => {
   };
   return {
     nodes: graph.nodes.map((node) => {
-      if (!stepIds.has(node.id)) {
-        return { ...node, progress: undefined, iterationCount: 0, iterationLabel: undefined };
-      }
       const iterationCount = records.get(node.id)?.length ?? 0;
       return {
         ...node,
-        progress: readStepProgress(current.get(node.id)),
+        progress: stepIds.has(node.id) ? readStepProgress(current.get(node.id)) : undefined,
         iterationCount,
         iterationLabel: iterationCount > 1 ? `×${String(iterationCount)}` : undefined,
       };
@@ -196,21 +213,32 @@ type StepOutput = Extract<StepRecord, { readonly status: "completed" }>["output"
 
 /**
  * One line of a run's step list and timeline: a step record, or a step that
- * has none, with its state and times.
+ * has none, with its state and times. A signal's record is a line too, under
+ * the signal trigger's id.
  */
 export interface StepLine extends StepProgress {
   /** Unique within the run. */
   readonly key: string;
+  /** The id of the step, or of the signal trigger that fired. */
   readonly stepId: string;
+  readonly kind: StepLineKind;
   /**
    * The record's iteration, such as `#2`, on every line of a step that has
    * more than one record. `undefined` on the line of a step that ran once, so
    * a run with no loops reads as before.
    */
   readonly iterationLabel: string | undefined;
-  /** The action an action step calls, as the plan names it. */
+  /** The action an action step calls, as the plan names it. `undefined` on any other line. */
   readonly action: string | undefined;
-  /** What the action returned, for a completed step; `null` for an action that returns nothing. */
+  /**
+   * The session an agent step's record drives, once the record has started,
+   * and whether the record is the newest that drives it.
+   */
+  readonly session: StepRecordSession | undefined;
+  /**
+   * What a completed record holds: what an action returned (`null` for an
+   * action that returns nothing), an agent step's output, or a signal's.
+   */
   readonly output: StepOutput | undefined;
   /** Why the step failed, for a failed step. */
   readonly error: StepError | undefined;
@@ -219,31 +247,52 @@ export interface StepLine extends StepProgress {
 /**
  * Returns a run's step lines: one per step record, in the order the records
  * were created, then one for each step of the plan that has no record, in the
- * plan's order.
+ * plan's order. A signal trigger has a line only for each time it fired,
+ * because a signal that never fires is not a step the run failed to reach.
  */
 export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<StepLine> => {
-  const actions = new Map(
-    run.plan.steps.map((step) => [step.id, step.kind === "action" ? step.action : undefined]),
-  );
+  const steps = new Map(run.plan.steps.map((step) => [step.id, step]));
   const records = groupRecordsByStep(run.steps);
+  // The records are in the order they were created, so the last index seen
+  // for a session is the index of its newest record.
+  const newestIndexBySession = new Map(
+    run.steps.flatMap((record, index) =>
+      record.sessionId === undefined ? [] : [[record.sessionId, index] as const],
+    ),
+  );
   return [
-    ...run.steps.map((record): StepLine => ({
-      key: `${record.stepId}#${String(record.iteration)}`,
-      stepId: record.stepId,
-      iterationLabel:
-        (records.get(record.stepId)?.length ?? 0) > 1 ? `#${String(record.iteration)}` : undefined,
-      action: actions.get(record.stepId),
-      ...readStepProgress(record),
-      output: record.status === "completed" ? record.output : undefined,
-      error: record.status === "failed" ? record.error : undefined,
-    })),
+    ...run.steps.map((record, index): StepLine => {
+      const step = steps.get(record.stepId);
+      return {
+        key: `${record.stepId}#${String(record.iteration)}`,
+        stepId: record.stepId,
+        kind: findStepLineKind(run.plan, record.stepId),
+        iterationLabel:
+          (records.get(record.stepId)?.length ?? 0) > 1
+            ? `#${String(record.iteration)}`
+            : undefined,
+        action: step?.kind === "action" ? step.action : undefined,
+        session:
+          record.sessionId === undefined
+            ? undefined
+            : {
+                id: record.sessionId,
+                isNewestRecord: newestIndexBySession.get(record.sessionId) === index,
+              },
+        ...readStepProgress(record),
+        output: record.status === "completed" ? record.output : undefined,
+        error: record.status === "failed" ? record.error : undefined,
+      };
+    }),
     ...run.plan.steps
       .filter((step) => !records.has(step.id))
       .map((step): StepLine => ({
         key: step.id,
         stepId: step.id,
+        kind: step.kind,
         iterationLabel: undefined,
-        action: actions.get(step.id),
+        action: step.kind === "action" ? step.action : undefined,
+        session: undefined,
         ...readStepProgress(undefined),
         output: undefined,
         error: undefined,

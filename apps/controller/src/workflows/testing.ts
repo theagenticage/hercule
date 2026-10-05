@@ -50,7 +50,7 @@ export const AGENT_PROVIDER = buildProviderDefinition("test-provider", { token: 
  * ids it declares, and so the qualified ids, are the same as the real
  * plugin's.
  */
-const localGithubPlugin: Plugin = {
+export const localGithubPlugin: Plugin = {
   manifest: {
     id: "github",
     displayName: "GitHub",

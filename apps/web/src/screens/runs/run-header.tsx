@@ -5,6 +5,7 @@ import {
   describeRunStatus,
   findFailedEdge,
   formatPreciseStamp,
+  listAwaitedSignals,
   readTimestamps,
   toIdTail,
   type RerunsReading,
@@ -23,8 +24,9 @@ const QUIET_LINK =
  * Renders the header of a run's page. The first line is a breadcrumb back to
  * the run list and the workflow's name, with the page's actions on the right.
  * The second line shows where the run is: its status mark and status with its
- * duration, why it failed, who or which trigger started it and how, when it
- * started and ended, and its id's tail, which the CLI takes. For a run that is
+ * duration, why it failed or which signals a running run with nothing left
+ * to run waits on, their ids in the live hue, who or which trigger started it and how,
+ * when it started and ended, and its id's tail, which the CLI takes. For a run that is
  * a re-run, or that was re-run, the next line links the runs on either side,
  * such as "re-run of run 1f3a9c2e" or "re-run as run 4e5f6a7b, run 8c9d0e1f,
  * run 2b7c4d9a and 2 more". Once the run is pinned to a runner, the next line
@@ -86,6 +88,7 @@ export function RunHeader({
   readonly question?: ReactNode;
 }): JSX.Element {
   const origin = describeRunOrigin(run);
+  const awaitedSignals = listAwaitedSignals(run);
   const { startedAt, finishedAt } = readTimestamps(run);
   const started = startedAt ?? run.createdAt;
   return (
@@ -141,6 +144,20 @@ export function RunHeader({
                 stepId={run.failureReason === "validation-error" ? undefined : run.failedStepId}
                 edge={findFailedEdge(run)}
               />
+              <Dot inline />
+            </>
+          )}
+          {awaitedSignals.length === 0 ? null : (
+            <>
+              {/* Colour stays at the scale of a word: only the signal ids
+                  take the live hue, and the words around them stay muted. */}
+              {"waiting on "}
+              {awaitedSignals.map((signalId, index) => (
+                <Fragment key={signalId}>
+                  {index === 0 ? null : " or "}
+                  <span className="font-mono text-fine leading-none text-live">{signalId}</span>
+                </Fragment>
+              ))}
               <Dot inline />
             </>
           )}

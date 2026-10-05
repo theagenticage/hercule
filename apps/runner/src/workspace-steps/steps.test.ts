@@ -1,9 +1,11 @@
 /**
  * Tests for running workspace steps.
  *
- * Every step runs real git in a real ephemeral workspace, provisioned from a
- * bare "remote" on disk. A step that must stay running blocks in a pre-commit
- * hook until the test creates a release file, so no test waits a fixed time.
+ * Every action step runs real git in a real ephemeral workspace, provisioned
+ * from a bare "remote" on disk. A step that must stay running blocks in a
+ * pre-commit hook until the test creates a release file, so no test waits a
+ * fixed time. An agent step's turn is played by the test, which begins and
+ * finishes the step the way the session supervisor does.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
@@ -13,6 +15,8 @@ import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type {
+  ActionStepStart,
+  AgentStepResultRequest,
   WorkspaceStepKey,
   WorkspaceStepOutcome,
   WorkspaceStepResult,
@@ -176,10 +180,11 @@ const makeRunner = (
 
 const buildStart = (
   workspace: Workspace,
-  input: WorkspaceStepStart["input"],
+  input: ActionStepStart["input"],
   action = "git.commit",
-): WorkspaceStepStart => ({
+): ActionStepStart => ({
   _tag: "workspaceStepStart",
+  kind: "action",
   runId: createId(),
   stepId: "commit",
   iteration: 1,
@@ -593,6 +598,55 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(runner.steps.listInFlight()).toEqual([]);
   });
 
+  it("holds back a step started after the workspace's first step ended, while the step that took over the lock runs", async () => {
+    const runner = makeRunner();
+    const first = await runner.provisionWorkspace();
+    const other = await runner.provisionWorkspace();
+    writeFileSync(join(first.dir, "a.txt"), "a\n");
+    writeFileSync(join(first.dir, "b.txt"), "b\n");
+    writeFileSync(join(first.dir, "c.txt"), "c\n");
+    writeFileSync(join(other.dir, "d.txt"), "d\n");
+    // Each commit blocks in the hook until the test releases the file it
+    // commits, so step A can end while step B stays blocked.
+    const signals = createTemporaryDir("hercule-hook-");
+    first.writePreCommitHook(
+      [
+        "name=$(git diff --cached --name-only)",
+        `touch "${signals}/reached-$name"`,
+        `while [ ! -f "${signals}/released-$name" ]; do sleep 0.02; done`,
+      ].join("\n"),
+    );
+    const hasReached = (name: string) => existsSync(join(signals, `reached-${name}`));
+    const release = (name: string) => writeFileSync(join(signals, `released-${name}`), "");
+    const stepA = buildStart(first, { message: "Add a", paths: ["a.txt"] });
+    const stepB = { ...buildStart(first, { message: "Add b", paths: ["b.txt"] }), stepId: "b" };
+    const stepC = { ...buildStart(first, { message: "Add c", paths: ["c.txt"] }), stepId: "c" };
+    const stepD = buildStart(other, { message: "Add d" });
+
+    try {
+      await startStep(runner, stepA);
+      await waitUntil(() => hasReached("a.txt"), "step A to reach its hook");
+      await startStep(runner, stepB);
+      release("a.txt");
+      expect((await waitForResult(runner, stepA)).status).toBe("completed");
+      await waitUntil(() => hasReached("b.txt"), "step B to reach its hook");
+
+      // Step A has ended and step B holds the lock. Step C must wait for B.
+      await startStep(runner, stepC);
+      // Step D, in another workspace, finishes without waiting: proof that
+      // step C had time to reach its hook, had it not waited.
+      expect((await runStep(runner, stepD)).status).toBe("completed");
+      expect(hasReached("c.txt")).toBe(false);
+      expect(listResults(runner, stepC)).toEqual([]);
+    } finally {
+      for (const name of ["a.txt", "b.txt", "c.txt"]) release(name);
+    }
+
+    expect((await waitForResult(runner, stepB)).status).toBe("completed");
+    expect((await waitForResult(runner, stepC)).status).toBe("completed");
+    expect(runGitOrThrow(first.dir, "log", "-3", "--format=%s")).toBe("Add c\nAdd b\nAdd a");
+  });
+
   it("answers an action this runner does not implement with unsupported_action", async () => {
     const runner = makeRunner();
     const workspace = await runner.provisionWorkspace();
@@ -616,5 +670,191 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     // The message ends with git's own error output.
     expect(outcome).toMatchObject({ status: "failed", code: "action_failed" });
     expect(outcome.status === "failed" && outcome.message).toContain("missing.txt");
+  });
+});
+
+const buildAgentStart = (workspaceId: string | null): AgentStepResultRequest => ({
+  _tag: "workspaceStepStart",
+  kind: "agent",
+  runId: createId(),
+  stepId: "review",
+  iteration: 1,
+  sessionId: "0199e0e7-0000-7000-8000-0000000000a1",
+  workspaceId,
+});
+
+const REVIEWED: WorkspaceStepOutcome = { status: "completed", output: { verdict: "approve" } };
+
+/**
+ * Begins the agent step, with a turn that runs for as long as `running`
+ * returns true. Returns whether the step was recorded.
+ */
+const beginAgentStep = (
+  runner: Runner,
+  frame: AgentStepResultRequest,
+  running: () => boolean = () => true,
+): Promise<boolean> =>
+  Effect.runPromise(runner.steps.beginAgentStep(frame, frame.workspaceId, Effect.sync(running)));
+
+const finishAgentStep = (
+  runner: Runner,
+  key: WorkspaceStepKey,
+  outcome: WorkspaceStepOutcome = REVIEWED,
+): Promise<void> => Effect.runPromise(runner.steps.finishAgentStep(key, outcome));
+
+const settleSteps = (runner: Runner, ...steps: ReadonlyArray<WorkspaceStepKey>): Promise<void> =>
+  Effect.runPromise(
+    runner.steps.settle({
+      _tag: "workspaceStepSettle",
+      steps: steps.map(({ runId, stepId, iteration }) => ({ runId, stepId, iteration })),
+    }),
+  );
+
+describe("an agent step", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("sends its result when its turn ends, and answers a start sent again from its result file", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(createId());
+    expect(await beginAgentStep(runner, frame)).toBe(true);
+    expect(runner.steps.listInFlight()).toEqual([
+      { runId: frame.runId, stepId: "review", iteration: 1 },
+    ]);
+
+    await finishAgentStep(runner, frame);
+
+    expect(listResults(runner, frame)).toEqual([REVIEWED]);
+    expect(runner.steps.listInFlight()).toEqual([]);
+    await startStep(runner, frame);
+    expect(listResults(runner, frame)).toEqual([REVIEWED, REVIEWED]);
+  });
+
+  it("keeps the result of a step with no workspace, and answers a start sent again from it", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(null);
+    await beginAgentStep(runner, frame);
+    await finishAgentStep(runner, frame);
+
+    expect(
+      existsSync(
+        join(runner.storageDir, "step-results", ".no-workspace", `${frame.runId}-review-1.json`),
+      ),
+    ).toBe(true);
+    await startStep(runner, frame);
+    expect(listResults(runner, frame)).toEqual([REVIEWED, REVIEWED]);
+  });
+
+  it("answers a start sent while its turn runs only once the turn ends", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(createId());
+    await beginAgentStep(runner, frame);
+
+    await startStep(runner, frame);
+    expect(listResults(runner, frame)).toEqual([]);
+
+    await finishAgentStep(runner, frame);
+    expect(listResults(runner, frame)).toEqual([REVIEWED]);
+  });
+
+  it("answers interrupted when this runner knows nothing of the step, as after a restart", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(createId());
+
+    await startStep(runner, frame);
+
+    expect(listResults(runner, frame)).toEqual([
+      expect.objectContaining({ status: "failed", code: "interrupted" }),
+    ]);
+  });
+
+  it("answers interrupted when its session ended unseen, and sends nothing for it after that", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(createId());
+    await beginAgentStep(runner, frame, () => false);
+
+    await startStep(runner, frame);
+    await finishAgentStep(runner, frame);
+
+    expect(listResults(runner, frame)).toEqual([
+      expect.objectContaining({ status: "failed", code: "interrupted" }),
+    ]);
+    expect(runner.steps.listInFlight()).toEqual([]);
+  });
+
+  it("deletes its result file when settled, and ignores a later start of it", async () => {
+    const runner = makeRunner();
+    const workspaceId = createId();
+    const frame = buildAgentStart(workspaceId);
+    await beginAgentStep(runner, frame);
+    await finishAgentStep(runner, frame);
+
+    await settleSteps(runner, frame);
+    await startStep(runner, frame);
+
+    expect(listResults(runner, frame)).toEqual([REVIEWED]);
+    const results = join(runner.storageDir, "step-results", workspaceId);
+    expect(existsSync(join(results, `${frame.runId}-review-1.json`))).toBe(false);
+  });
+
+  it("sends nothing and writes nothing when its turn ends after it was settled", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(null);
+    await beginAgentStep(runner, frame);
+
+    await settleSteps(runner, frame);
+    expect(runner.steps.listInFlight()).toEqual([]);
+    await finishAgentStep(runner, frame);
+    // The settled step is not recorded again, and the supervisor is told so,
+    // so it does not run the step's prompt.
+    expect(await beginAgentStep(runner, frame)).toBe(false);
+    await finishAgentStep(runner, frame);
+
+    expect(runner.sent).toEqual([]);
+    expect(runner.steps.listInFlight()).toEqual([]);
+    expect(existsSync(join(runner.storageDir, "step-results", ".no-workspace"))).toBe(false);
+  });
+
+  it("sends nothing when it begins, even when this runner already holds a result for it", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(createId());
+    await beginAgentStep(runner, frame);
+    await finishAgentStep(runner, frame);
+
+    // The controller sends a step's input at most once, so beginning a step
+    // never answers for it: only the end of its turn, or a request for its
+    // result, sends one.
+    await beginAgentStep(runner, frame);
+
+    expect(listResults(runner, frame)).toEqual([REVIEWED]);
+    expect(runner.steps.listInFlight()).toEqual([
+      { runId: frame.runId, stepId: "review", iteration: 1 },
+    ]);
+  });
+
+  it("is forgotten without an answer when the harness refuses its input", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(createId());
+    await beginAgentStep(runner, frame);
+
+    runner.steps.forgetAgentStep(frame);
+    await finishAgentStep(runner, frame);
+
+    expect(runner.sent).toEqual([]);
+    expect(runner.steps.listInFlight()).toEqual([]);
+  });
+
+  it("takes no workspace lock: a commit in its workspace runs while its turn runs", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+    writeFileSync(join(workspace.dir, "a.txt"), "a\n");
+    const agent = buildAgentStart(workspace.workspaceId);
+    await beginAgentStep(runner, agent);
+
+    const commit = await runStep(runner, buildStart(workspace, { message: "Add a" }));
+
+    expect(commit.status).toBe("completed");
+    expect(runner.steps.listInFlight()).toEqual([
+      { runId: agent.runId, stepId: "review", iteration: 1 },
+    ]);
+    await finishAgentStep(runner, agent);
+    expect(listResults(runner, agent)).toEqual([REVIEWED]);
   });
 });

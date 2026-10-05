@@ -184,6 +184,11 @@ const insertQueuedSession = (
      * carried its first input. `create` always stores the prompt.
      */
     readonly withoutInput?: boolean;
+    /**
+     * The agent step that started the session. Its input is then the
+     * prompt of the step's first iteration.
+     */
+    readonly step?: { readonly runId: string; readonly stepId: string };
   },
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -196,6 +201,7 @@ const insertQueuedSession = (
       permissionProfileId: options.permissionProfileId ?? mintId(),
       agentId: options.agentId,
       conversationId: undefined,
+      step: options.step,
       instanceId: options.instanceId,
       runnerId,
       workspaceId: null,
@@ -212,7 +218,14 @@ const insertQueuedSession = (
       at,
     });
     if (options.withoutInput !== true) {
-      yield* inputs.insert({ sessionId: id, source: "user", actor: "user", text: "begin", at });
+      yield* inputs.insert({
+        sessionId: id,
+        source: "user",
+        actor: "user",
+        text: "begin",
+        at,
+        ...(options.step === undefined ? {} : { stepIteration: 1 }),
+      });
     }
     return id;
   });
@@ -402,6 +415,34 @@ describe("SessionService.claimStarts", () => {
     expect(result.claimed.find((claim) => claim.sessionId === result.onBranch)?.input).toEqual(
       input,
     );
+  });
+
+  it("puts the step key on the input the start of an agent step's session carries", async () => {
+    // The runner reports the result of the turn the prompt starts only when
+    // the prompt carries its step's key, whether a start or a sessionInput
+    // carries it.
+    const runId = mintId();
+    const result = await run(
+      Effect.gen(function* () {
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const runnerId = mintId();
+        const spec = buildSpec(instanceId, "fast");
+        yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec,
+          step: { runId, stepId: "implement" },
+        });
+        const [claimed] = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
+        return { frame: claimed!.frame, input: claimed!.input, spec };
+      }),
+    );
+
+    expect(result.input.stepIteration).toBe(1);
+    expect(result.frame.input).toStrictEqual({
+      text: "begin",
+      modelSelection: result.spec.modelSelection,
+      step: { runId, stepId: "implement", iteration: 1 },
+    });
   });
 
   it("skips a queued session that never ran and has no waiting input, leaves it queued, and warns once", async () => {
@@ -877,12 +918,16 @@ describe("the frame builders on SessionService", () => {
       deliveredAt: null,
       sentAt: null,
       reason: null,
+      stepIteration: null,
     };
     const modelSelection: ModelSelection = { model: "fast", options: { verbose: true } };
     const frame = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
-        return sessions.inputFrame(row, modelSelection);
+        return sessions.inputFrame(
+          { id: row.sessionId, runId: null, stepId: null, modelSelection },
+          row,
+        );
       }),
     );
 
@@ -892,6 +937,72 @@ describe("the frame builders on SessionService", () => {
       sessionId: row.sessionId,
       input: { text: row.text, modelSelection: modelSelection },
     });
+  });
+
+  it("inputFrame puts the step key on the prompt of an agent step", async () => {
+    const row: StoredInput = {
+      id: mintId(),
+      sessionId: mintId(),
+      source: "user",
+      actor: "run:0199e0e7-0000-7000-8000-000000000001",
+      text: "implement the change",
+      status: "queued",
+      delivery: null,
+      createdAt: at,
+      deliveredAt: null,
+      sentAt: null,
+      reason: null,
+      stepIteration: 2,
+    };
+    const runId = mintId();
+    const modelSelection: ModelSelection = { model: "fast", options: {} };
+    const frame = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        return sessions.inputFrame(
+          { id: row.sessionId, runId, stepId: "implement", modelSelection },
+          row,
+        );
+      }),
+    );
+
+    expect(frame.input).toStrictEqual({
+      text: row.text,
+      modelSelection,
+      step: { runId, stepId: "implement", iteration: 2 },
+    });
+  });
+
+  it("inputFrame fails with a defect on a step prompt whose session no step started", async () => {
+    const row: StoredInput = {
+      id: mintId(),
+      sessionId: mintId(),
+      source: "user",
+      actor: "run:0199e0e7-0000-7000-8000-000000000001",
+      text: "implement the change",
+      status: "queued",
+      delivery: null,
+      createdAt: at,
+      deliveredAt: null,
+      sentAt: null,
+      reason: null,
+      stepIteration: 2,
+    };
+    const modelSelection: ModelSelection = { model: "fast", options: {} };
+
+    // Sending the prompt without its step key would run a turn whose result
+    // no runner reports, so the run would wait for it for ever.
+    await expect(
+      run(
+        Effect.gen(function* () {
+          const sessions = yield* SessionService;
+          return sessions.inputFrame(
+            { id: row.sessionId, runId: null, stepId: null, modelSelection },
+            row,
+          );
+        }),
+      ),
+    ).rejects.toThrow("holds the prompt of an agent step, but no step started it");
   });
 
   it("interrupting returns exactly the sessionInterrupt frame", async () => {
@@ -966,7 +1077,7 @@ const insertRunningSession = (
     const [claim] = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
     if (status !== "starting") {
       yield* rows.moved(sessionId, status, at);
-      yield* inputs.delivered(claim!.input.id, claim!.input.sentAt, "opened", at);
+      yield* inputs.markDelivered(claim!.input.id, claim!.input.sentAt, "opened", at);
     }
     const heardAt = new Date(Date.now() - heardAgoMs).toISOString();
     yield* sql`
@@ -1161,7 +1272,11 @@ describe("an answer that an input opened a turn", () => {
         const runnerId = mintId();
         const row = yield* insertIdleSessionWithSentInput(runnerId);
 
-        yield* sessions.recordInputAnswer(row, Option.some(openedAnswer(row.id)), runnerId);
+        yield* sessions.recordInputAnswer(
+          row,
+          { _tag: "sent", answer: Option.some(openedAnswer(row.id)) },
+          runnerId,
+        );
 
         return {
           status: yield* readStatus(row.sessionId),
@@ -1194,7 +1309,11 @@ describe("an answer that an input opened a turn", () => {
         };
         // The turn the input opened ends before the waiting send runs.
         yield* rows.moved(row.sessionId, "idle", at);
-        yield* sessions.recordInputAnswer(row, Option.some(openedAnswer(row.id)), runnerId);
+        yield* sessions.recordInputAnswer(
+          row,
+          { _tag: "sent", answer: Option.some(openedAnswer(row.id)) },
+          runnerId,
+        );
 
         return { applied, status: yield* readStatus(row.sessionId) };
       }),

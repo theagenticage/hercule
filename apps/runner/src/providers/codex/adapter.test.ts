@@ -473,7 +473,7 @@ describe("what an input does to a Codex session", () => {
 });
 
 describe("an app-server that stops replying to a control request", () => {
-  it("stops waiting for the interrupt after the timeout, rather than holding up every session on the machine", async () => {
+  it("stops waiting for the interrupt after the timeout, rather than holding up the stop for ever", async () => {
     const { adapter, ctx, seen } = createDriving({ "turn/interrupt": SILENT });
 
     await Effect.runPromise(
@@ -482,8 +482,8 @@ describe("an app-server that stops replying to a control request", () => {
           yield* adapter.startSession(SESSION, SPEC, ctx);
           yield* adapter.sendInput(SESSION, { text: "look around" });
           const stopping = yield* Effect.forkChild(adapter.stopSession(SESSION, "stopped"));
-          // The runner handles session frames one at a time, so a stop that
-          // waited for the full request timeout would stall every session.
+          // A stop that waited on the silent app-server with no time limit
+          // would never end the session.
           yield* TestClock.adjust(CONTROL_DEADLINE);
           return yield* Fiber.join(stopping);
         }),
