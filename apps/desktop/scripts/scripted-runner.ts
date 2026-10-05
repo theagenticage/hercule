@@ -30,9 +30,9 @@
  * `playScript` reports a whole turn's work instead: messages that stream word
  * by word, tool calls that may ask for approval and wait for the user to
  * allow them, Token Usage, and subagents that play steps of their own. It
- * reports the same events, with the same details, that the
- * Claude Code adapter in `apps/runner/src/providers` reports for that work, so
- * a screen sees what it would see from a real agent.
+ * reports the same events, with the same details, that the Claude Code
+ * adapter in `apps/runner/src/providers` reports for that work, so a screen
+ * sees what it would see from a real agent.
  *
  * Like the root `scripts/controller-process.ts`, it uses only Node's APIs,
  * imports nothing from a test framework, and uses only TypeScript that Node
@@ -488,9 +488,8 @@ export async function enlistScriptedRunner(
    * `interrupted`. An agent with no turn running reports nothing.
    */
   const interruptAgents = (session: HostedSession, agents: ReadonlyArray<Agent>): void => {
+    // An agent with no turn running plays no script and is parked on no Request.
     for (const agent of agents) {
-      stopScript(agent);
-      withdrawRequests(session, agent);
       if (agent.turnId !== undefined) completeTurn(session, agent, "interrupted");
     }
   };
