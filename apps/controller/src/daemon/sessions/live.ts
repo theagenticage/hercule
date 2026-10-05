@@ -227,10 +227,10 @@ const make = Effect.gen(function* () {
    *
    * - If the runner reports a delivery, it is recorded and returned.
    * - If the runner rejects the input, the session service records that
-   *   (`undelivered`), and this fails with an invalid state error with the
+   *   (`recordRefusal`), and this fails with an invalid state error with the
    *   same reason.
    * - If the runner does not reply, the session service records that
-   *   (`unanswered`), and this fails with an invalid state error. When the
+   *   (`recordNoAnswer`), and this fails with an invalid state error. When the
    *   input was an agent step's prompt, it is not sent again, and the runner
    *   is asked at once for the step's result instead.
    *
@@ -249,15 +249,15 @@ const make = Effect.gen(function* () {
       const answer = yield* deliverTo(session, row);
       const delivery = Option.isSome(answer) && answer.value.ok ? answer.value.delivery : undefined;
       if (delivery !== undefined) {
-        yield* sessions.delivered(row, delivery, session.runnerId);
+        yield* sessions.recordDelivery(row, delivery, session.runnerId);
         return { inputId: row.id, result: delivery };
       }
       if (Option.isSome(answer)) {
         const reason = answer.value.message ?? REFUSED;
-        yield* sessions.undelivered(row, reason);
+        yield* sessions.recordRefusal(row, reason);
         return yield* Effect.fail(createInvalidStateError(reason));
       }
-      const resultRequest = yield* sessions.unanswered(row, NOT_DELIVERED);
+      const resultRequest = yield* sessions.recordNoAnswer(row, NOT_DELIVERED);
       // The runner handles frames one at a time, in the order they arrive, so
       // this request cannot overtake the input it asks about. If the runner
       // is gone, the request is not sent, and the runner is asked again when

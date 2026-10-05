@@ -339,7 +339,7 @@ const STEP_INPUT_FIXED =
   "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
   "it is sent when the session is next idle; to stop the step, cancel the run with run.cancel";
 
-/** Why a step prompt the runner never answered was cancelled, as `unanswered` cancels it. */
+/** Why a step prompt the runner never answered was cancelled, as `recordNoAnswer` cancels it. */
 const STEP_PROMPT_UNANSWERED =
   "the runner did not answer this step prompt, so it is unknown whether the runner took it; " +
   "it is not sent again, and the runner's report of the step's turn settles the step";
@@ -1533,7 +1533,7 @@ const make = Effect.gen(function* () {
      * read `idle` with no input sent and unanswered, and the next delivery
      * pass would send a second input into the turn that just opened.
      */
-    delivered: (
+    recordDelivery: (
       row: StoredInput,
       delivery: Delivery,
       runnerId: string,
@@ -1541,7 +1541,7 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const recorded = yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
+          const recorded = yield* inputs.markDelivered(row.id, row.sentAt, delivery, yield* nowIso);
           // Only the first to record the answer moves the session. When
           // `applyInputResult` recorded it already, the turn may have ended
           // since, and moving the session now would leave it `busy` for good.
@@ -1556,7 +1556,7 @@ const make = Effect.gen(function* () {
      * the result puts it back to waiting.
      *
      * A delivered input is recorded on the row while a send still holds it.
-     * The waiting send (`delivered`) and this method both get the answer, and
+     * The waiting send (`recordDelivery`) and this method both get the answer, and
      * whichever runs first records it. Once it is recorded here, a waiting
      * send that runs after the turn ended cannot move the session back to
      * `busy`.
@@ -1583,7 +1583,7 @@ const make = Effect.gen(function* () {
           const row = found.value;
           const recorded =
             row.sentAt !== null &&
-            (yield* inputs.delivered(row.id, row.sentAt, result.delivery, yield* nowIso));
+            (yield* inputs.markDelivered(row.id, row.sentAt, result.delivery, yield* nowIso));
           const moved = result.delivery === "opened" && (yield* openTurn(runnerId, row.sessionId));
           if (recorded || moved) {
             yield* announce({
@@ -1602,7 +1602,7 @@ const make = Effect.gen(function* () {
      * keep its input through that exit: then it is cancelled (see
      * `requeueOrCancel`). Runs in its own transaction.
      */
-    undelivered: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+    recordRefusal: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
       withTransaction(sql, requeueOrCancel(row, reason)),
 
     /**
@@ -1611,7 +1611,7 @@ const make = Effect.gen(function* () {
      * is unknown.
      *
      * - Any input but an agent step's prompt is handled as a refused one
-     *   (`undelivered`), with `reason`.
+     *   (`recordRefusal`), with `reason`.
      * - An agent step's prompt is cancelled, so it is never sent again, and
      *   keeps when it was sent (`cancelUnanswered`). Sending it again could
      *   run the step's turn twice, and that turn may push or comment. The
@@ -1622,7 +1622,7 @@ const make = Effect.gen(function* () {
      * prompt, so the caller can ask the runner how the step's turn ended, and
      * `none` otherwise. Runs in its own transaction.
      */
-    unanswered: (
+    recordNoAnswer: (
       row: StoredInput,
       reason: string,
     ): Effect.Effect<Option.Option<AgentStepResultRequest>, SqlError> =>

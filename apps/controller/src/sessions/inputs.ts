@@ -420,7 +420,7 @@ const make = Effect.gen(function* () {
      * Returns whether the row changed, so the caller knows whether it was the
      * one that recorded the delivery.
      */
-    delivered: (
+    markDelivered: (
       id: string,
       sentAt: string | null,
       delivery: Delivery,

@@ -1,7 +1,7 @@
 /**
  * Tests the claim rules of the input repository:
  *
- * - `delivered`, `requeue` and `cancelWithReason` each change a row only
+ * - `markDelivered`, `requeue` and `cancelWithReason` each change a row only
  *   while it still holds the claim of the send being answered;
  * - `claim` never claims an input of a session that has exited;
  * - `claimOldestUnlessOneIsOnTheWire` claims one input of an idle session at a time.
@@ -105,7 +105,7 @@ const SENT_AGAIN = { status: "queued", sentAt: SECOND_SEND, reason: null, delive
 describe("a late answer to a send that was released and sent again", () => {
   it("does not mark the input delivered", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.delivered(id, FIRST_SEND, "steered", at),
+      inputs.markDelivered(id, FIRST_SEND, "steered", at),
     );
 
     expect(row).toMatchObject(SENT_AGAIN);
@@ -133,7 +133,7 @@ describe("a late answer to a send that was released and sent again", () => {
 describe("an answer to the send that holds the row", () => {
   it("marks the input delivered", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.delivered(id, SECOND_SEND, "steered", at),
+      inputs.markDelivered(id, SECOND_SEND, "steered", at),
     );
 
     expect(row).toMatchObject({ status: "delivered", sentAt: null, delivery: "steered" });

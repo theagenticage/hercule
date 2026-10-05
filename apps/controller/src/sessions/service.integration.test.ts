@@ -998,7 +998,7 @@ const insertIdleSessionWithSentInput = (runnerId: string) =>
 
 /**
  * The runner's answer that an input opened a turn reaches the controller
- * twice: the send waiting for it records it (`delivered`), and the session's
+ * twice: the send waiting for it records it (`recordDelivery`), and the session's
  * ordered traffic applies it (`applyInputResult`). Either can run first.
  */
 describe("an answer that an input opened a turn", () => {
@@ -1013,7 +1013,7 @@ describe("an answer that an input opened a turn", () => {
         const runnerId = mintId();
         const row = yield* insertIdleSessionWithSentInput(runnerId);
 
-        yield* sessions.delivered(row, "opened", runnerId);
+        yield* sessions.recordDelivery(row, "opened", runnerId);
 
         return {
           status: yield* readStatus(row.sessionId),
@@ -1046,7 +1046,7 @@ describe("an answer that an input opened a turn", () => {
         };
         // The turn the input opened ends before the waiting send runs.
         yield* rows.moved(row.sessionId, "idle", at);
-        yield* sessions.delivered(row, "opened", runnerId);
+        yield* sessions.recordDelivery(row, "opened", runnerId);
 
         return { applied, status: yield* readStatus(row.sessionId) };
       }),
