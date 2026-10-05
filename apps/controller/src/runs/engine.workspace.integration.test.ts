@@ -512,8 +512,7 @@ describe("a workspace step", () => {
         // After the first step the branch belongs to the run's work: an agent
         // step may have switched or renamed it, so the second commit goes to
         // whatever branch is current.
-        expect(second).toMatchObject({ runnerId, stepId: "second" });
-        expect(second).not.toHaveProperty("checkoutBranch");
+        expect(second).toMatchObject({ runnerId, stepId: "second", checkoutBranch: undefined });
         expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([second]);
       }),
     );
@@ -536,9 +535,9 @@ describe("a workspace step", () => {
         // Only the step whose start pinned the run switches the branch. If
         // both did, the second switch could undo a branch the first step's
         // work had already moved to.
-        expect(starts.filter((start) => "checkoutBranch" in start)).toEqual([
-          expect.objectContaining({ checkoutBranch: "release" }),
-        ]);
+        expect(
+          starts.filter((start) => start.kind === "action" && start.checkoutBranch !== undefined),
+        ).toEqual([expect.objectContaining({ checkoutBranch: "release" })]);
       }),
     );
   });

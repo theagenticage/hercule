@@ -125,25 +125,25 @@ describe("buildContinuingSpec", () => {
 
   it.each([
     {
-      session: "answers a conversation",
-      links: { conversationId: CONVERSATION_ID, runId: null },
+      does: "answers a conversation",
+      session: { conversationId: CONVERSATION_ID, runId: null },
       idleMs: 5 * MINUTE_MS,
     },
     {
-      session: "runs a workflow run's agent step",
-      links: { conversationId: null, runId: RUN_ID },
+      does: "runs a workflow run's agent step",
+      session: { conversationId: null, runId: RUN_ID },
       idleMs: 5_000,
     },
   ])(
-    "gives the idle unload to a session that $session, whatever the parent's spec held",
-    ({ links, idleMs }) => {
+    "gives the idle unload to a session that $does, whatever the parent's spec held",
+    ({ session, idleMs }) => {
       const spec = buildContinuingSpec(
         buildParent({ inactivityMs: MINUTE_MS, absoluteMs: MINUTE_MS }),
         CONTROLLER,
         { model: "clever", options: {} },
         "native-1",
         "resume",
-        links,
+        session,
       );
 
       expect(spec.timeouts).toEqual({

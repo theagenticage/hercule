@@ -50,10 +50,10 @@ export interface ActionStepToStart extends WorkspaceStepKey {
    * when this step is the run's first workspace step, in a run on a repo's
    * main workspace whose workflow names a branch. After the first step the
    * branch belongs to the run's agents, which may rename it or switch to
-   * another, so no later step switches it back. Absent for an ephemeral
+   * another, so no later step switches it back. Undefined for an ephemeral
    * workspace, which is already on the run's own branch.
    */
-  readonly checkoutBranch?: string;
+  readonly checkoutBranch: string | undefined;
 }
 
 /**

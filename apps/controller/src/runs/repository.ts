@@ -136,8 +136,8 @@ export type PinnedRunningStep = {
       readonly action: string;
       /** The step's input as stored when the record started. Every action step's record stores one. */
       readonly input?: Schema.Json;
-      /** The branch stored when the record started (see `startStep`), if it has one. */
-      readonly checkoutBranch?: string;
+      /** The branch stored when the record started (see `startStep`), or undefined when it stored none. */
+      readonly checkoutBranch: string | undefined;
     }
   | {
       readonly kind: "agent";
@@ -725,7 +725,7 @@ const make = Effect.gen(function* () {
       runId: string,
       step: StepRecordId,
       started:
-        | { readonly input: Schema.Json; readonly checkoutBranch?: string }
+        | { readonly input: Schema.Json; readonly checkoutBranch: string | undefined }
         | { readonly sessionId: string },
       at: string,
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
@@ -1004,7 +1004,7 @@ const make = Effect.gen(function* () {
                 kind: "action",
                 action: row.action,
                 ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
-                ...(row.checkout_branch === null ? {} : { checkoutBranch: row.checkout_branch }),
+                checkoutBranch: row.checkout_branch ?? undefined,
               },
             ];
           }),

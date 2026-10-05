@@ -702,8 +702,8 @@ const make = Effect.gen(function* () {
      *
      * The session runs on the run's runner, in the run's workspace when the
      * run has one, and takes its lease on that workspace. Its start switches
-     * the workspace's checkout to `checkoutBranch` when that is set, which
-     * the run engine does only for the run's first workspace step.
+     * the workspace's checkout to `checkoutBranch` when that is set. The run
+     * engine sets `checkoutBranch` only for the run's first workspace step.
      *
      * Each setting is the step's value if the step sets one, otherwise the
      * Agent's: the model with its options, and the access mode. The Agent

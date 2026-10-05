@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hercule/protocol";
 import { createValidationError, type Validation } from "@hercule/contract";
 import type { ScopeSettings } from "../settings";
+import type { StoredSession } from "./repository";
 
 /** The model options a caller picked, as the row and the wire store them. */
 export type ModelOptions = ModelSelection["options"];
@@ -146,7 +147,7 @@ export const buildContinuingSpec = (
   modelSelection: ModelSelection,
   nativeSessionId: string,
   mode: NonNullable<SessionSpec["continue"]>["mode"],
-  session: { readonly conversationId: string | null; readonly runId: string | null },
+  session: Pick<StoredSession, "conversationId" | "runId">,
 ): SessionSpec => ({
   ...parent,
   modelSelection,

@@ -255,20 +255,18 @@ const readResourceId = (input: Schema.Json): string | undefined => {
 
 /**
  * Builds the action step to hand to a runner from its step record, with the
- * `resourceId` its input names. `checkoutBranch` is the branch stored on the
- * record when it started; the step switches the checkout to it only when it
- * is set.
+ * `resourceId` its input names. `step.checkoutBranch` is the branch stored on
+ * the record when it started; the step switches the checkout to it only when
+ * it is set.
  */
 const buildActionStepToStart = (
-  step: Omit<ActionStepToStart, "kind" | "resourceId" | "checkoutBranch">,
-  checkoutBranch: string | undefined,
+  step: Omit<ActionStepToStart, "kind" | "resourceId">,
 ): ActionStepToStart => {
   const resourceId = readResourceId(step.input);
   return {
     kind: "action",
     ...step,
     ...(resourceId === undefined ? {} : { resourceId }),
-    ...(checkoutBranch === undefined ? {} : { checkoutBranch }),
   };
 };
 
@@ -752,7 +750,7 @@ export const makeRunEngine = Effect.gen(function* () {
           }
           const input = prepared.success;
           if (!runsInWorkspace(step.action)) {
-            yield* runs.startStep(runId, record, { input }, at);
+            yield* runs.startStep(runId, record, { input, checkoutBranch: undefined }, at);
             return { _tag: "started", run, startedAt: at, input } as const;
           }
           const policy = run.plan.workspace;
@@ -773,29 +771,22 @@ export const makeRunEngine = Effect.gen(function* () {
             return yield* Effect.die(`run ${runId} is pinned with no workspace`);
           }
           const { checkoutBranch } = placed;
-          yield* runs.startStep(
-            runId,
-            record,
-            { input, ...(checkoutBranch === undefined ? {} : { checkoutBranch }) },
-            at,
-          );
+          yield* runs.startStep(runId, record, { input, checkoutBranch }, at);
           return {
             _tag: "started",
             run,
             startedAt: at,
             input,
-            workspaceStep: buildActionStepToStart(
-              {
-                runId,
-                stepId: record.stepId,
-                iteration: record.iteration,
-                runnerId: placed.runnerId,
-                workspaceId: placed.workspaceId,
-                action: step.action,
-                input,
-              },
+            workspaceStep: buildActionStepToStart({
+              runId,
+              stepId: record.stepId,
+              iteration: record.iteration,
+              runnerId: placed.runnerId,
+              workspaceId: placed.workspaceId,
+              action: step.action,
+              input,
               checkoutBranch,
-            ),
+            }),
           } as const;
         }),
       ),
@@ -1441,10 +1432,16 @@ export const makeRunEngine = Effect.gen(function* () {
           return !runsInWorkspace(action) || input === undefined || workspaceId === null
             ? []
             : [
-                buildActionStepToStart(
-                  { runId, stepId, iteration, runnerId, workspaceId, action, input },
+                buildActionStepToStart({
+                  runId,
+                  stepId,
+                  iteration,
+                  runnerId,
+                  workspaceId,
+                  action,
+                  input,
                   checkoutBranch,
-                ),
+                }),
               ];
         }),
       ),
