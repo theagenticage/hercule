@@ -63,6 +63,7 @@ import {
 import {
   buildContinuingSpec,
   buildConversationTimeouts,
+  buildStepSessionTimeouts,
   readSessionOrFail,
   sessionRecordComposer,
   SessionService,
@@ -697,7 +698,9 @@ const make = Effect.gen(function* () {
      * step's value if the step sets one, otherwise the Agent's: the model
      * with its options, and the access mode. The Agent gives the instance,
      * the permission profile, the system prompt and the disallowed tools. The
-     * step's output schema goes on the spec.
+     * step's output schema goes on the spec, and so does an idle unload of a
+     * few seconds, so the session frees its runner slot soon after each of
+     * its turns ends (`buildStepSessionTimeouts`).
      *
      * It checks no grant: the caller is the run's execution, and the user
      * gave the run this step by saving the workflow. The current actor must
@@ -758,7 +761,7 @@ const make = Effect.gen(function* () {
           systemPrompt: agent.systemPrompt,
           ...(agent.disallowedTools.length === 0 ? {} : { disallowedTools: agent.disallowedTools }),
           ...(outputSchema === undefined ? {} : { outputSchema }),
-          timeouts: buildTimeouts(yield* settings.all()),
+          timeouts: buildStepSessionTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
         const { sessionId, frame } = yield* writeSession({
@@ -988,8 +991,9 @@ const make = Effect.gen(function* () {
             nativeSessionId,
             mode,
             // A fork never answers a conversation: `session.continue`
-            // refuses a conversation's session above.
-            null,
+            // refuses a conversation's session above. Nor does it run a
+            // step, even when its parent did: it is placed with no step.
+            { conversationId: null, runId: null },
           ),
           prompt,
           title: undefined,

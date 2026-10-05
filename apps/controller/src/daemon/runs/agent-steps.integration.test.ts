@@ -51,6 +51,9 @@ import { createRepo, FACTS, MODELS, reportWorkspaceReady } from "../../workspace
 /** The workflow step that runs the agent in every definition here. */
 const IMPLEMENT = "implement";
 
+/** The second agent step of a definition that runs the agent twice in a row. */
+const REVIEW = "review";
+
 /** The step key of one iteration of a run's agent step, `implement` unless named. */
 const buildStepKey = (runId: string, iteration = 1, stepId = IMPLEMENT) => ({
   runId,
@@ -470,7 +473,9 @@ describe("agent steps over the runner socket", () => {
           sessionId,
         ]);
         expect(listSessionStarts(wire, sessionId)).toHaveLength(1);
-        // Settling an iteration never stops the session; only the run's end does.
+        // The controller never stops the session when an iteration settles;
+        // only the run's end does. A real runner would also unload it once it
+        // sat idle, which this test never reports.
         const stopAt = wire.frames.findIndex((frame) => stopsSession(frame, sessionId));
         const secondInputAt = wire.frames.indexOf(input);
         expect(stopAt === -1 || stopAt > secondInputAt).toBe(true);
@@ -1080,6 +1085,53 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "has the runner unload a step's session five seconds after its turn ends, so the next step gets the runner's only slot",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        const capped = await send(
+          "PATCH",
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}`,
+          { body: { maxConcurrentSessions: 1 }, token: arranged.token },
+        );
+        expect(capped.status, await capped.clone().text()).toBe(200);
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            name: "Implement, then review",
+            steps: [
+              { id: IMPLEMENT, kind: "agent", agent: agentId, prompt: "Implement the change." },
+              { id: REVIEW, kind: "agent", agent: agentId, prompt: "Review the change." },
+            ],
+            edges: [{ from: IMPLEMENT, to: REVIEW }],
+          },
+        });
+        const implementKey = buildStepKey(runId);
+        const reviewKey = buildStepKey(runId, 1, REVIEW);
+        const implementer = await startStepSession(arranged, player, implementKey);
+        expect(listSessionStarts(wire, implementer)[0]?.spec.timeouts.idleMs).toBe(5_000);
+        player.runTurn(wire, implementer, implementKey, answerText("Implemented"));
+
+        // The idle implementer still holds the only slot, so the reviewer waits.
+        const reviewer = await waitForStepSessionId(arranged, reviewKey);
+        expect((await readSession(arranged, reviewer)).status).toBe("queued");
+        expect(listSessionStarts(wire, reviewer)).toEqual([]);
+
+        // The runner unloads the implementer once it has sat idle that long.
+        player.report(wire, implementer, { _tag: "session.exited", reason: "idle_unload" });
+        await startStepSession(arranged, player, reviewKey);
+        expect(listSessionStarts(wire, reviewer)[0]?.spec.timeouts.idleMs).toBe(5_000);
+        player.runTurn(wire, reviewer, reviewKey, answerText("Approved"));
+        const ended = await waitForRunEnded(arranged, runId, "completed");
+        expect(listRunSessionIds(ended)).toEqual([implementer, reviewer]);
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "opens the run's workspace on its runner before the step's session, which works in it",
     async () => {
       await withAgentStepFleet(async (arranged) => {
@@ -1283,6 +1335,94 @@ describe("agent steps over the runner socket", () => {
             stopsSession(frame, implementer),
           );
           await waitForFrame(wire, "stopped the opener", (frame) => stopsSession(frame, opener));
+        },
+        { plugins: [localGithubPlugin], eventRoutingInterval: Duration.millis(10) },
+      );
+    },
+    WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "resumes a step's session the runner unloaded while the run waited for its signal, with the same five-second idle unload",
+    async () => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const player = createSessionPlayer();
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const pullRequest = "https://github.com/octo/repo/pull/7";
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: {
+              name: "Open a pull request, and work on it again on a label",
+              triggers: [
+                {
+                  id: "labeled",
+                  kind: "signal",
+                  on: { kind: "github.pr.labeled", connectionId: "any" },
+                  correlation: {
+                    event: "event.payload.subject.url",
+                    run: "steps.implement.output.url",
+                  },
+                },
+              ],
+              steps: [
+                {
+                  id: IMPLEMENT,
+                  kind: "agent",
+                  agent: agentId,
+                  prompt: "Implement the change and open a pull request.",
+                  // The signal's edge leads into this step, so it has to be
+                  // named as the start.
+                  entry: true,
+                  outputSchema: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["url"],
+                    properties: { url: { type: "string" } },
+                  },
+                },
+              ],
+              edges: [{ from: "labeled", to: IMPLEMENT, maxTraversals: 1 }],
+            },
+          });
+          const first = buildStepKey(runId, 1);
+          const second = buildStepKey(runId, 2);
+          const sessionId = await startStepSession(arranged, player, first);
+          player.runTurn(wire, sessionId, first, completeWith({ url: pullRequest }));
+          await waitForRunTo(arranged, runId, "ran the first iteration", (run) =>
+            findStepRecords(run, IMPLEMENT).some((record) => record.status === "completed"),
+          );
+
+          // The runner unloads the idle session while the run waits for its signal.
+          player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+          await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
+
+          await emitLabeledEvent(arranged.harness.base, arranged.token, { added: ["changes"] });
+          const resumed = await waitUntil("resumed the step's session", () =>
+            listSessionStarts(wire, sessionId).find((frame) => frame.spec.continue !== undefined),
+          );
+          expect(resumed.spec.continue).toEqual({
+            nativeSessionId: `native-${sessionId}`,
+            mode: "resume",
+          });
+          // The resumed session unloads again once the second iteration's turn ends.
+          expect(resumed.spec.timeouts.idleMs).toBe(5_000);
+          player.reportStarted(wire, sessionId);
+          await waitForStepInput(wire, second);
+          player.runTurn(wire, sessionId, second, completeWith({ url: pullRequest }));
+          const run = await waitForRunTo(
+            arranged,
+            runId,
+            "ran the second iteration",
+            (one) =>
+              findStepRecords(one, IMPLEMENT).filter((record) => record.status === "completed")
+                .length === 2,
+          );
+          expect(findStepRecords(run, IMPLEMENT).map((record) => record.sessionId)).toEqual([
+            sessionId,
+            sessionId,
+          ]);
+          expect(listSessionStarts(wire, sessionId)).toHaveLength(2);
         },
         { plugins: [localGithubPlugin], eventRoutingInterval: Duration.millis(10) },
       );

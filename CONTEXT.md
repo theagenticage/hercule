@@ -177,7 +177,7 @@ A conversation message the system writes in one of two forms: "<name> was interr
 _Avoid_: notification (Hercule's central message to its user), error message, alert
 
 **Idle Unload**:
-Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default). The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation. Nothing treats it as a special exit: it writes no notice because no turn runs at an idle unload. The owner sees the assistant as "asleep", the presence word for an exited session the next message resumes; that is a word on screen, not a name for the unload.
+Stopping the process of a session after it has sat idle for a while: an assistant's conversation session after `session.idleUnloadMinutes` (15 by default), and an agent step's session five seconds after its turn ends, so a finished step frees its runner slot for the run's next step. A Thread is never unloaded. The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id; for an agent step's session, that is the next iteration's prompt. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation. Nothing treats it as a special exit: it writes no notice because no turn runs at an idle unload. The owner sees the assistant as "asleep", the presence word for an exited session the next message resumes; that is a word on screen, not a name for the unload.
 _Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:

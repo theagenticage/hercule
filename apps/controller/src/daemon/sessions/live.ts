@@ -271,7 +271,7 @@ const make = Effect.gen(function* () {
         modelSelection,
         nativeSessionId,
         "resume",
-        session.conversationId,
+        session,
       );
       return JSON.stringify(encodeSpec(spec));
     });
@@ -330,7 +330,7 @@ const make = Effect.gen(function* () {
         session.modelSelection,
         nativeSessionId,
         "resume",
-        session.conversationId,
+        session,
       );
       return JSON.stringify(encodeSpec({ ...spec, accessMode }));
     });

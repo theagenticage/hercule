@@ -21,6 +21,7 @@ export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
 export {
   buildContinuingSpec,
   buildConversationTimeouts,
+  buildStepSessionTimeouts,
   buildTimeouts,
   validateOptions,
 } from "./options";

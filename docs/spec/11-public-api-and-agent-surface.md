@@ -521,7 +521,7 @@ The user settings store: per-user preference and presentation state with a close
 
 *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* The controller settings hold `run.nestingLimit`, a whole number from 1, default 5: how many runs deep a run that a `run.start` step starts may be ([./07](./07-workflows.md) section 8). It has no field in the web app yet; `hercule settings update --controller '{"run.nestingLimit": 8}'` sets it.
 
-*(Amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92).)* The controller setting `session.idleUnloadMinutes` is a whole number of minutes from 1, default 15: how long an assistant's session may sit with no turn before its runner stops the process, to be resumed at the next message ([./12-assistants.md](./12-assistants.md) section 5.1). It has no field in the web app yet; `hercule settings update --controller '{"session.idleUnloadMinutes": 30}'` sets it.
+*(Amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92).)* The controller setting `session.idleUnloadMinutes` is a whole number of minutes from 1, default 15: how long an assistant's session may sit with no turn before its runner stops the process, to be resumed at the next message ([./12-assistants.md](./12-assistants.md) section 5.1). It has no field in the web app yet; `hercule settings update --controller '{"session.idleUnloadMinutes": 30}'` sets it. *(Amended 2026-10-05, [#83](https://github.com/theagenticage/hercule/issues/83).)* It does not apply to an agent step's session, whose idle unload is a fixed 5 seconds ([./07-workflows.md](./07-workflows.md) section 4.2).
 
 ### project, resource
 
