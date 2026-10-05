@@ -1964,6 +1964,98 @@ describe("an agent step's turn", () => {
     expect(listStepResults(sent)).toHaveLength(1);
   });
 
+  it("runs one turn when its input is sent again while the turn runs, and sends one result", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => emitText(fake, "i-1", "Reviewed "));
+        yield* waitUntil("sent the first text", () => findEventIndex(sent, "content.delta") >= 0);
+        // The controller lost the answer to the first input and sends it again.
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => {
+          emitText(fake, "i-1", "and approved.");
+          emitStepTurnEnd(fake, { state: "completed" });
+        });
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+        yield* awaitMarker(fake);
+      }),
+    );
+
+    expect(fake.inputs).toHaveLength(1);
+    expect(listInputResults(sent)).toMatchObject([
+      { ok: true, delivery: "opened" },
+      { ok: true, delivery: "steered" },
+    ]);
+    // The text written before the input came again still counts: the step
+    // whose turn ran was not replaced.
+    expect(listStepResults(sent).map((frame) => frame.outcome)).toEqual([
+      { status: "completed", output: { text: "Reviewed and approved.", exitStatus: "completed" } },
+    ]);
+  });
+
+  it("runs no turn when its input is sent again after the turn ended, and sends the saved result again", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+        yield* supervisor.input(STEP_INPUT);
+      }),
+    );
+
+    expect(fake.inputs).toHaveLength(1);
+    const results = listStepResults(sent);
+    expect(results).toHaveLength(2);
+    expect(results[1]).toEqual(results[0]);
+    expect(listInputResults(sent)).toMatchObject([
+      { ok: true, delivery: "opened" },
+      { ok: true, delivery: "steered" },
+    ]);
+    // The result is sent again before the input is answered.
+    expect(sent.indexOf(results[1] as RunnerToController)).toBeLessThan(
+      sent.indexOf(listInputResults(sent)[1] as RunnerToController),
+    );
+    expect(steps.listInFlight()).toEqual([]);
+  });
+
+  it("runs no turn and sends no result when its input is sent again after the step was settled", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+        yield* steps.settle({ _tag: "workspaceStepSettle", steps: [STEP] });
+        yield* supervisor.input(STEP_INPUT);
+      }),
+    );
+
+    expect(fake.inputs).toHaveLength(1);
+    expect(listStepResults(sent)).toHaveLength(1);
+    expect(listInputResults(sent)).toMatchObject([
+      { ok: true, delivery: "opened" },
+      { ok: true, delivery: "steered" },
+    ]);
+    expect(steps.listInFlight()).toEqual([]);
+  });
+
   it("is not ended by the exit of an earlier run under the same session id", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);

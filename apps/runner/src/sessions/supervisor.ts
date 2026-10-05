@@ -684,6 +684,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
        * An input that carries a step key also begins that agent step. How the
        * turn the input went to ends becomes the step's result, which is saved
        * and sent before the event that ended the turn.
+       *
+       * A step input this runner has seen before never reaches the harness.
+       * The controller sends a step's input again when it lost the answer to
+       * the first one, and a second turn could push or comment a second time.
+       * Such an input is answered `ok` with delivery `steered`: the controller
+       * records the input as delivered and changes nothing else, because the
+       * step's turn already opened, or the step is already over. Before that
+       * answer, `beginAgentStep` sends whatever the step itself is owed, such
+       * as its saved result.
        */
       input: (frame: SessionInput): Effect.Effect<void> => {
         const sendInputResult = (result: Omit<SessionInputResult, "_tag" | "requestId">) =>
@@ -703,25 +712,29 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const step: RunningStep | undefined =
           stepKey === undefined ? undefined : { key: stepKey, turnId: undefined, texts: new Map() };
         // Recorded before the input reaches the harness, so the turn cannot
-        // end before its step is known. A second step's input replaces the
-        // first step here. The controller never sends one while a step's turn
-        // runs; if it did, a start sent again for the first step finds its
-        // turn no longer running and is answered with `interrupted`.
-        const beginStep = Effect.sync(() => {
-          if (step === undefined) return;
-          held.step = step;
-          connection.workspaceSteps.beginAgentStep(
-            step.key,
-            held.workspaceId,
-            Effect.map(
-              held.adapter.listSessions,
-              (bindings) =>
-                live.get(frame.sessionId) === held &&
-                held.step === step &&
-                bindings.some((binding) => binding.sessionId === frame.sessionId),
-            ),
-          );
-        });
+        // end before its step is known. The session's running step is set
+        // only once the workspace steps have begun the step: a step input
+        // sent again must leave the step whose turn runs in place.
+        const beginStep: Effect.Effect<"begun" | "repeated"> =
+          step === undefined
+            ? Effect.succeed("begun")
+            : Effect.tap(
+                connection.workspaceSteps.beginAgentStep(
+                  step.key,
+                  held.workspaceId,
+                  Effect.map(
+                    held.adapter.listSessions,
+                    (bindings) =>
+                      live.get(frame.sessionId) === held &&
+                      held.step === step &&
+                      bindings.some((binding) => binding.sessionId === frame.sessionId),
+                  ),
+                ),
+                (begun) =>
+                  Effect.sync(() => {
+                    if (begun === "begun") held.step = step;
+                  }),
+              );
         // Input the harness refused opens no turn, so a session that was idle
         // before it is still idle and gets its wait back. A refused step input
         // sends no step result: the controller delivers the input again.
@@ -740,8 +753,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           );
         // Cancel the idle wait before the input reaches the harness. The turn
         // this input opens may start only after the wait would have ended.
-        return Effect.andThen(
-          Effect.andThen(cancelIdleUnload(held), beginStep),
+        const deliverInput = Effect.andThen(
+          cancelIdleUnload(held),
           held.adapter.sendInput(frame.sessionId, frame.input),
         ).pipe(
           Effect.tap((sent) =>
@@ -753,6 +766,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.flatMap((sent) => sendInputResult({ ok: true, delivery: sent.delivery })),
           Effect.catch(refuseHeldInput),
           Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
+        );
+        // A repeated step input opens no turn, so the idle wait is left as it is.
+        return Effect.flatMap(beginStep, (begun) =>
+          begun === "repeated" ? sendInputResult({ ok: true, delivery: "steered" }) : deliverInput,
         );
       },
 

@@ -85,9 +85,10 @@ export interface WorkspaceSteps {
    * - ignored once settled, like an action step;
    * - left alone while its turn still runs, because the turn's end answers it;
    * - answered from its result file once the turn has ended;
-   * - otherwise answered at once with `interrupted`, because the turn was
-   *   lost: the runner restarted, or the session ended while the runner was
-   *   disconnected and could not see it end.
+   * - otherwise answered at once with `interrupted`, because this runner has
+   *   no record of the turn: the runner restarted, the session ended while
+   *   the runner was disconnected and could not see it end, or the step's
+   *   input never reached this runner.
    */
   readonly start: (frame: WorkspaceStepStart) => Effect.Effect<void>;
   /**
@@ -114,13 +115,25 @@ export interface WorkspaceSteps {
    *
    * `isTurnRunning` checks whether the turn still runs in a session this
    * runner hosts. A start sent again for the step waits for the turn only
-   * while it returns true. A step that was already settled is not recorded.
+   * while it returns true.
+   *
+   * Returns `begun` when the step was recorded, and `repeated` when this
+   * runner already knows the step and records nothing. The controller sends
+   * a step's input again when the answer to the first one was lost. That
+   * input must not reach the harness, or the step would run a second turn,
+   * which could push or comment a second time. A known step is answered the
+   * way `start` answers a start of it:
+   *
+   * - a settled step, or one whose turn still runs, gets no answer;
+   * - a step whose turn ended has its saved result sent again;
+   * - a step recorded here whose turn no longer runs is answered with
+   *   `interrupted`.
    */
   readonly beginAgentStep: (
     key: WorkspaceStepKey,
     workspaceId: string | null,
     isTurnRunning: Effect.Effect<boolean>,
-  ) => void;
+  ) => Effect.Effect<"begun" | "repeated">;
   /**
    * Saves how an agent step ended in its result file, forgets the step, then
    * sends the result. Does nothing for a step that is not recorded, because
@@ -168,6 +181,18 @@ const buildResultFrame = (
   iteration: key.iteration,
   outcome,
 });
+
+/**
+ * How an agent step ends when this runner has no record of its turn. The
+ * runner never runs the step's prompt again on its own: the lost turn may
+ * already have made changes, such as a push, that a second turn would repeat.
+ */
+const AGENT_TURN_UNKNOWN: WorkspaceStepOutcome = {
+  status: "failed",
+  code: "interrupted",
+  message:
+    "The runner has no record of this step's turn: the runner restarted, the step's session ended while the runner was disconnected from the controller, or the runner never received the step's prompt.",
+};
 
 const readKey = (frame: WorkspaceStepKey): WorkspaceStepKey => ({
   runId: frame.runId,
@@ -318,21 +343,38 @@ export const makeWorkspaceSteps = (options: {
     });
 
   /**
-   * Writes the step's result file, forgets the step, then sends its result.
-   * The file is written before the step is forgotten, so a start sent again
-   * at any moment finds the step either still held or finished on disk.
+   * Writes a step's result file, calls `forget` to drop the step from what
+   * this runner holds, then sends the result. The file is written before the
+   * step is forgotten, so a start sent again at any moment finds the step
+   * either still held or finished on disk.
+   *
+   * A failed write does not stop the result from being sent. Without the
+   * file, a start sent again after a lost result is answered as for a step
+   * this runner never heard of: an action step runs again, as after a crash,
+   * and an agent step is answered with `interrupted`.
    */
-  const finishStep = (step: HeldStep, outcome: WorkspaceStepOutcome): Effect.Effect<void> =>
-    Effect.gen(function* () {
+  const saveAndSendResult = (
+    workspaceId: string | null,
+    key: WorkspaceStepKey,
+    outcome: WorkspaceStepOutcome,
+    forget: () => void,
+  ): Effect.Effect<void> =>
+    Effect.suspend(() => {
       try {
-        writeStepResult(storageDir, step.workspaceId, step.key, outcome);
+        writeStepResult(storageDir, workspaceId, key, outcome);
       } catch {
-        // The result is still sent. Without the file, a start sent again
-        // after a lost result runs the step again, as after a crash.
+        // Sent anyway: a result the controller receives is worth more than
+        // the file, which only answers a start sent again.
       }
+      forget();
+      return send(buildResultFrame(key, outcome));
+    });
+
+  /** Saves the result of an action step, forgets the step, then sends the result. */
+  const finishStep = (step: HeldStep, outcome: WorkspaceStepOutcome): Effect.Effect<void> =>
+    saveAndSendResult(step.workspaceId, step.key, outcome, () => {
       step.finished = true;
       releaseStep(step);
-      yield* send(buildResultFrame(step.key, outcome));
     });
 
   /**
@@ -386,31 +428,52 @@ export const makeWorkspaceSteps = (options: {
     });
 
   /**
+   * Answers for an agent step this runner knows, and returns whether it knew
+   * the step. A known step is one that is:
+   *
+   * - settled: nothing is sent;
+   * - recorded, with its turn still running: nothing is sent, because the
+   *   turn's end sends the result;
+   * - recorded, with its turn no longer running: the session ended while no
+   *   connection was up, so its exit never reached the supervisor. The step
+   *   is forgotten and answered with `interrupted`;
+   * - finished, with a saved result: the result is sent again.
+   *
+   * Returns false, and sends nothing, for any other step.
+   */
+  const answerKnownAgentStep = (
+    key: WorkspaceStepKey,
+    workspaceId: string | null,
+  ): Effect.Effect<boolean> =>
+    Effect.gen(function* () {
+      const name = buildStepName(key);
+      if (settled.has(name)) return true;
+      const recorded = agentSteps.get(name);
+      if (recorded !== undefined) {
+        if (yield* recorded.isTurnRunning) return true;
+        // Unless the turn ended while `isTurnRunning` was read: its result
+        // file then answers below.
+        if (agentSteps.get(name) === recorded) {
+          agentSteps.delete(name);
+          yield* send(buildResultFrame(key, AGENT_TURN_UNKNOWN));
+          return true;
+        }
+      }
+      const saved = readStepResult(storageDir, workspaceId, key);
+      if (saved === undefined) return false;
+      yield* send(buildResultFrame(key, saved));
+      return true;
+    });
+
+  /**
    * Answers the controller's question about an agent step, as `start`
    * describes. Takes no workspace lock and runs nothing.
    */
   const answerAgentStep = (frame: AgentStepResultRequest): Effect.Effect<void> =>
     Effect.gen(function* () {
       const key = readKey(frame);
-      const name = buildStepName(key);
-      if (settled.has(name)) return;
-      const running = agentSteps.get(name);
-      if (running !== undefined) {
-        if (yield* running.isTurnRunning) return;
-        // The session ended while no connection was up, so its exit never
-        // reached the supervisor and the step was never answered.
-        if (agentSteps.get(name) === running) agentSteps.delete(name);
-      }
-      const recorded = readStepResult(storageDir, frame.workspaceId, key);
-      if (recorded !== undefined) return yield* send(buildResultFrame(key, recorded));
-      yield* send(
-        buildResultFrame(key, {
-          status: "failed",
-          code: "interrupted",
-          message:
-            "The step's turn did not finish on this runner: the runner restarted, or the step's session ended while the runner was disconnected from the controller.",
-        }),
-      );
+      if (yield* answerKnownAgentStep(key, frame.workspaceId)) return;
+      yield* send(buildResultFrame(key, AGENT_TURN_UNKNOWN));
     });
 
   return {
@@ -487,27 +550,21 @@ export const makeWorkspaceSteps = (options: {
 
     listInFlight: () => [...held.values(), ...agentSteps.values()].map((step) => step.key),
 
-    beginAgentStep: (key, workspaceId, isTurnRunning) => {
-      const name = buildStepName(key);
-      if (settled.has(name)) return;
-      agentSteps.set(name, { key: readKey(key), workspaceId, isTurnRunning });
-    },
+    beginAgentStep: (key, workspaceId, isTurnRunning) =>
+      Effect.gen(function* () {
+        if (yield* answerKnownAgentStep(key, workspaceId)) return "repeated" as const;
+        agentSteps.set(buildStepName(key), { key: readKey(key), workspaceId, isTurnRunning });
+        return "begun" as const;
+      }),
 
     finishAgentStep: (key, outcome) =>
-      Effect.gen(function* () {
+      Effect.suspend(() => {
         const name = buildStepName(key);
         const step = agentSteps.get(name);
-        if (step === undefined) return;
-        // Written before the step is forgotten, so a start sent again at any
-        // moment finds the step either still running or finished on disk.
-        try {
-          writeStepResult(storageDir, step.workspaceId, step.key, outcome);
-        } catch {
-          // The result is still sent. Without the file, a start sent again
-          // after a lost result is answered with `interrupted`.
-        }
-        agentSteps.delete(name);
-        yield* send(buildResultFrame(step.key, outcome));
+        if (step === undefined) return Effect.void;
+        return saveAndSendResult(step.workspaceId, step.key, outcome, () => {
+          agentSteps.delete(name);
+        });
       }),
 
     forgetAgentStep: (key) => {
