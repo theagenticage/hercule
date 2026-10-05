@@ -42,6 +42,7 @@ describe("the adapters in this runner build", () => {
       findBinary: () => undefined,
       workspaces: makeWorkspaces({ storageDir: "/var/hercule/runner" }),
       socketPath: "/var/hercule/runner/daemon.sock",
+      runUnderWorkspaceLock: () => Effect.die("no session starts, so no workspace is locked"),
     };
     const supervisor = makeSupervising(adapters).forConnection({
       machine,

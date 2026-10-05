@@ -355,6 +355,7 @@ export const connect = (
         findBinary: findBinaryPath,
         workspaces: options.workspaces,
         socketPath: options.socketPath,
+        runUnderWorkspaceLock: options.workspaceSteps.runUnderWorkspaceLock,
       },
     });
 

@@ -147,6 +147,21 @@ export interface WorkspaceSteps {
    * delivers the input again later.
    */
   readonly forgetAgentStep: (key: WorkspaceStepKey) => void;
+  /**
+   * Runs `effect` while holding the lock of a workspace, so that no action
+   * step of that workspace runs git at the same time. A session start uses
+   * it to switch the workspace's branch.
+   *
+   * Waits at most `maxWait` for the lock. Returns none, and runs nothing,
+   * when the lock is still held after that. `maxWait` bounds only the wait:
+   * once `effect` has begun, it runs to its end. Fails with the error of
+   * `effect`.
+   */
+  readonly runUnderWorkspaceLock: <A, E>(
+    workspaceId: string,
+    maxWait: Duration.Duration,
+    effect: Effect.Effect<A, E>,
+  ) => Effect.Effect<Option.Option<A>, E>;
 }
 
 /** An action step this runner has started and not yet finished. */
@@ -233,35 +248,49 @@ export const makeWorkspaceSteps = (options: {
    */
   const settled = new Set<string>();
   /**
-   * One lock per workspace with a step queued or running. The steps of one
-   * workspace run one at a time, because two git processes in one checkout
-   * collide on `index.lock`. Steps of different workspaces run side by side.
+   * One lock per workspace that has a step, or a session start's branch
+   * switch, waiting for its lock or holding it. The git work of one workspace
+   * runs one at a time, because two git processes in one checkout collide on
+   * `index.lock`. Steps of different workspaces run side by side.
+   *
+   * `users` counts what waits for the lock or holds it.
    */
-  const locks = new Map<string, Semaphore.Semaphore>();
+  const locks = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>();
   let sending: Send | undefined;
 
   const send = (frame: WorkspaceStepResult): Effect.Effect<void> =>
     sending === undefined ? Effect.void : Effect.ignoreCause(sending(frame));
 
   /**
-   * Returns the lock of a workspace, and creates it when no step of that
-   * workspace holds one yet.
+   * Waits for the lock of a workspace, then runs `effect` while holding it.
+   * Creates the lock when nothing uses it yet, and forgets it once nothing
+   * waits for it or holds it. A lock forgotten while something still waited
+   * for it would let the next step create a second lock, and the two would
+   * run git side by side.
    */
-  const ensureWorkspaceLock = (workspaceId: string): Semaphore.Semaphore => {
-    const known = locks.get(workspaceId);
-    if (known !== undefined) return known;
-    const made = Semaphore.makeUnsafe(1);
-    locks.set(workspaceId, made);
-    return made;
-  };
+  const holdWorkspaceLock = <A, E>(
+    workspaceId: string,
+    effect: Effect.Effect<A, E>,
+  ): Effect.Effect<A, E> =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const lock = locks.get(workspaceId) ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 };
+        lock.users += 1;
+        locks.set(workspaceId, lock);
+        return lock;
+      }),
+      (lock) => lock.semaphore.withPermits(1)(effect),
+      (lock) =>
+        Effect.sync(() => {
+          lock.users -= 1;
+          if (lock.users === 0) locks.delete(workspaceId);
+        }),
+    );
 
-  /** Forgets a step, and its workspace's lock once no step of that workspace is left. */
+  /** Forgets a step. */
   const releaseStep = (step: HeldStep): void => {
     const name = buildStepName(step.key);
     if (held.get(name) === step) held.delete(name);
-    if (![...held.values()].some((other) => other.workspaceId === step.workspaceId)) {
-      locks.delete(step.workspaceId);
-    }
   };
 
   /**
@@ -386,20 +415,19 @@ export const makeWorkspaceSteps = (options: {
     action: WorkspaceAction,
     step: HeldStep,
   ): Effect.Effect<void> =>
-    ensureWorkspaceLock(step.workspaceId)
-      .withPermits(1)(
-        Effect.suspend(() => {
-          step.phase = "running";
-          return runAction(frame, action);
-        }),
-      )
-      .pipe(
-        Effect.flatMap((outcome) =>
-          outcome === undefined
-            ? Effect.sync(() => releaseStep(step))
-            : Effect.uninterruptible(finishStep(step, outcome)),
-        ),
-      );
+    holdWorkspaceLock(
+      step.workspaceId,
+      Effect.suspend(() => {
+        step.phase = "running";
+        return runAction(frame, action);
+      }),
+    ).pipe(
+      Effect.flatMap((outcome) =>
+        outcome === undefined
+          ? Effect.sync(() => releaseStep(step))
+          : Effect.uninterruptible(finishStep(step, outcome)),
+      ),
+    );
 
   /**
    * Stops one held step, then forgets it. A running step is answered with
@@ -569,5 +597,25 @@ export const makeWorkspaceSteps = (options: {
     forgetAgentStep: (key) => {
       agentSteps.delete(buildStepName(key));
     },
+
+    runUnderWorkspaceLock: (workspaceId, maxWait, effect) =>
+      Effect.suspend(() => {
+        let began = false;
+        const run = holdWorkspaceLock(
+          workspaceId,
+          Effect.suspend(() => {
+            began = true;
+            return Effect.asSome(effect);
+          }),
+        );
+        // Gives up only while the lock is still awaited. Once `effect` has
+        // begun, this never ends, so the race waits for `effect` instead of
+        // interrupting it halfway.
+        const giveUp = Effect.andThen(
+          Effect.sleep(maxWait),
+          Effect.suspend(() => (began ? Effect.never : Effect.succeedNone)),
+        );
+        return Effect.raceFirst(run, giveUp);
+      }),
   };
 };

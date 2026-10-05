@@ -8,6 +8,7 @@
  *   from the `hercule` CLI the session calls.
  */
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -19,13 +20,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect } from "effect";
-import type { SessionStart } from "@hercule/protocol";
+import { Effect, Exit, Option, Scope } from "effect";
+import type { ActionStepStart, SessionStart, WorkspaceStepResult } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
 import { NO_USER_MATERIAL_PATHS } from "../providers/testing";
 import { makeWorkspaces } from "../workspaces";
+import { makeWorkspaceSteps } from "../workspace-steps";
 import {
   addBranch,
   buildCheckout,
@@ -34,6 +36,7 @@ import {
   createId,
   makeRemote,
   buildProvisionFrame,
+  type Remote,
 } from "../workspaces/testing";
 
 const roots: Array<string> = [];
@@ -64,6 +67,8 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
     findBinary: (name) => `/usr/local/bin/${name}`,
     workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
+    // No action step runs in these tests, so the lock is always free.
+    runUnderWorkspaceLock: (_workspaceId, _maxWait, effect) => Effect.asSome(effect),
     ...overrides,
   };
 };
@@ -384,6 +389,152 @@ describe("a session that has a workspace", () => {
     // failure the user reads, not something the runner works around.
     expect(outcome._tag).toBe("Failure");
     expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("no-such-branch");
+    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  });
+
+  /** Provisions a primary workspace with one checkout of `remote`, and returns its id and folder. */
+  const provisionPrimary = async (machine: Machine, remote: Remote) => {
+    const workspaceId = createId();
+    await machine.workspaces.provision(
+      buildProvisionFrame({
+        workspaceId,
+        kind: "primary",
+        checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+      }),
+    );
+    return { workspaceId, folder: machine.workspaces.resolve(workspaceId)!.cwd };
+  };
+
+  /** Installs `script`, a shell script, as the hook `name` of the checkout in `dir`. */
+  const writeHook = (dir: string, name: string, script: string): void => {
+    const hooksPath = runGitOrThrow(dir, "rev-parse", "--git-path", "hooks");
+    const hooks = isAbsolute(hooksPath) ? hooksPath : join(dir, hooksPath);
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, name), `#!/bin/sh\n${script}\n`);
+    chmodSync(join(hooks, name), 0o755);
+  };
+
+  const WAIT_DEADLINE_MS = 10_000;
+  /**
+   * Longer than three waits, so a slow machine fails the test with the
+   * wait's message, which names what it waited for, and not with vitest's
+   * generic timeout.
+   */
+  const TEST_TIMEOUT_MS = 40_000;
+
+  /** Polls `ready` until it returns true, and fails the test when the wait deadline passes first. */
+  const waitUntil = async (ready: () => boolean, what: string): Promise<void> => {
+    const deadline = Date.now() + WAIT_DEADLINE_MS;
+    while (!ready() && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ready(), `timed out waiting for ${what}`).toBe(true);
+  };
+
+  const buildCommitStart = (workspaceId: string): ActionStepStart => ({
+    _tag: "workspaceStepStart",
+    kind: "action",
+    runId: createId(),
+    stepId: "commit",
+    iteration: 1,
+    workspaceId,
+    action: "git.commit",
+    input: { message: "Add a file" },
+    gitIdentity: { name: "Hercule Bot", email: "bot@example.invalid" },
+  });
+
+  it(
+    "holds back an action step of the same workspace until the branch switch ends",
+    { timeout: TEST_TIMEOUT_MS },
+    async () => {
+      const remote = makeRemote();
+      addBranch(remote, "release");
+      // The machine's own PATH, so the hook below finds `sleep`.
+      const machine = buildMachine({ baseEnv: { PATH: process.env["PATH"], HOME: createRoot() } });
+      const steps = makeWorkspaceSteps({
+        storageDir: createRoot(),
+        workspaces: machine.workspaces,
+        socketPath: machine.socketPath,
+        baseEnv: machine.baseEnv,
+      });
+      const results: Array<WorkspaceStepResult> = [];
+      const scope = Effect.runSync(Scope.make());
+      Effect.runSync(
+        steps
+          .attachConnection((frame) => Effect.sync(() => void results.push(frame)))
+          .pipe(Scope.provide(scope)),
+      );
+      const listResults = (step: ActionStepStart) =>
+        results.filter((result) => result.runId === step.runId).map((result) => result.outcome);
+      const switching = await provisionPrimary(machine, remote);
+      const other = await provisionPrimary(machine, makeRemote());
+      // Git runs the post-checkout hook once it has switched, and waits for
+      // it, so this hook holds the switch open until the test releases it.
+      const signals = createRoot();
+      const reached = join(signals, "reached");
+      const released = join(signals, "released");
+      writeHook(
+        switching.folder,
+        "post-checkout",
+        [`touch '${reached}'`, `while [ ! -f '${released}' ]; do sleep 0.02; done`].join("\n"),
+      );
+      const held = buildCommitStart(switching.workspaceId);
+      const free = buildCommitStart(other.workspaceId);
+
+      try {
+        const resolving = resolveAsync(
+          buildSessionStart({
+            spec: { ...buildSessionStart().spec, workspaceId: switching.workspaceId },
+            checkoutBranch: "release",
+          }),
+          { ...machine, runUnderWorkspaceLock: steps.runUnderWorkspaceLock },
+        );
+        await waitUntil(() => existsSync(reached), "the switch to reach its hook");
+        writeFileSync(join(switching.folder, "a.txt"), "a\n");
+        writeFileSync(join(other.folder, "b.txt"), "b\n");
+        await Effect.runPromise(steps.start(held));
+        await Effect.runPromise(steps.start(free));
+
+        // The step in the other workspace finishes without waiting: proof
+        // that the held step had time to finish, had it not waited.
+        await waitUntil(() => listResults(free).length === 1, "the other workspace's step");
+        expect(listResults(free)[0]?.status).toBe("completed");
+        expect(listResults(held)).toEqual([]);
+
+        writeFileSync(released, "");
+        expect((await resolving)._tag).toBe("Success");
+        await waitUntil(() => listResults(held).length === 1, "the held step");
+        expect(listResults(held)[0]).toMatchObject({
+          status: "completed",
+          output: { branch: "release", committed: true },
+        });
+      } finally {
+        writeFileSync(released, "");
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+      }
+    },
+  );
+
+  it("fails without switching when an action step holds the workspace for longer than the session start waits", async () => {
+    const remote = makeRemote();
+    addBranch(remote, "release");
+    const machine = buildMachine({
+      runUnderWorkspaceLock: () => Effect.succeed(Option.none()),
+    });
+    const { workspaceId, folder } = await provisionPrimary(machine, remote);
+
+    const outcome = await resolveAsync(
+      buildSessionStart({
+        spec: { ...buildSessionStart().spec, workspaceId },
+        checkoutBranch: "release",
+      }),
+      machine,
+    );
+
+    expect(outcome._tag).toBe("Failure");
+    const message = outcome._tag === "Failure" ? outcome.failure : "";
+    expect(message).toContain(workspaceId);
+    expect(message).toContain("release");
+    expect(message).toContain("Start the session again");
     expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
   });
 });

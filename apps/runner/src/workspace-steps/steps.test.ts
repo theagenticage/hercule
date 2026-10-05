@@ -9,9 +9,11 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type {
@@ -621,6 +623,96 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
     // The message ends with git's own error output.
     expect(outcome).toMatchObject({ status: "failed", code: "action_failed" });
     expect(outcome.status === "failed" && outcome.message).toContain("missing.txt");
+  });
+});
+
+describe("work run under a workspace's lock", { timeout: TEST_TIMEOUT_MS }, () => {
+  it("waits for the step that holds the lock, and holds back a step started after that one ended", async () => {
+    const runner = makeRunner();
+    const first = await runner.provisionWorkspace();
+    const other = await runner.provisionWorkspace();
+    writeFileSync(join(first.dir, "a.txt"), "a\n");
+    writeFileSync(join(first.dir, "b.txt"), "b\n");
+    writeFileSync(join(other.dir, "c.txt"), "c\n");
+    const hook = first.blockCommits();
+    const stepA = buildStart(first, { message: "Add a", paths: ["a.txt"] });
+    const stepB = { ...buildStart(first, { message: "Add b", paths: ["b.txt"] }), stepId: "b" };
+    const stepC = buildStart(other, { message: "Add c" });
+    const working = Deferred.makeUnsafe<void>();
+    let began = false;
+
+    await startStep(runner, stepA);
+    await waitUntil(() => existsSync(hook.reached), "step A to reach its hook");
+    const running = Effect.runPromise(
+      runner.steps.runUnderWorkspaceLock(
+        first.workspaceId,
+        Duration.minutes(1),
+        Effect.suspend(() => {
+          began = true;
+          return Effect.as(Deferred.await(working), "done");
+        }),
+      ),
+    );
+    try {
+      // Step C, in another workspace, finishes without waiting: proof that
+      // the work had time to begin, had the lock been free.
+      expect((await runStep(runner, stepC)).status).toBe("completed");
+      expect(began).toBe(false);
+      hook.release();
+      expect((await waitForResult(runner, stepA)).status).toBe("completed");
+      await waitUntil(() => began, "the work to begin once step A ended");
+
+      // Step B comes after step A let go of the lock, while the work holds
+      // it. It must wait for the work as it waited for step A.
+      writeFileSync(join(other.dir, "d.txt"), "d\n");
+      await startStep(runner, stepB);
+      const stepD = { ...buildStart(other, { message: "Add d" }), stepId: "d" };
+      expect((await runStep(runner, stepD)).status).toBe("completed");
+      expect(listResults(runner, stepB)).toEqual([]);
+    } finally {
+      hook.release();
+      Effect.runSync(Deferred.succeed(working, undefined));
+    }
+
+    expect(await running).toEqual(Option.some("done"));
+    expect((await waitForResult(runner, stepB)).status).toBe("completed");
+  });
+
+  it("runs nothing and returns none when the lock is not free within the wait, and leaves the lock usable", async () => {
+    const runner = makeRunner();
+    const workspace = await runner.provisionWorkspace();
+    writeFileSync(join(workspace.dir, "a.txt"), "a\n");
+    const hook = workspace.blockCommits();
+    const stepA = buildStart(workspace, { message: "Add a" });
+    let ran = false;
+
+    await startStep(runner, stepA);
+    await waitUntil(() => existsSync(hook.reached), "step A to reach its hook");
+    try {
+      const waited = await Effect.runPromise(
+        runner.steps.runUnderWorkspaceLock(
+          workspace.workspaceId,
+          Duration.millis(50),
+          Effect.sync(() => {
+            ran = true;
+          }),
+        ),
+      );
+      expect(waited).toEqual(Option.none());
+      expect(ran).toBe(false);
+    } finally {
+      hook.release();
+    }
+
+    expect((await waitForResult(runner, stepA)).status).toBe("completed");
+    const after = await Effect.runPromise(
+      runner.steps.runUnderWorkspaceLock(
+        workspace.workspaceId,
+        Duration.millis(50),
+        Effect.succeed("free"),
+      ),
+    );
+    expect(after).toEqual(Option.some("free"));
   });
 });
 
