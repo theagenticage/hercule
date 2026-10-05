@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import type { Input, Run, Session } from "@hercule/contract";
 import {
   buildWorkspaceActionCapability,
+  type ActionStepStart,
   type ControllerToRunner,
   type ProviderEvent,
   type SessionInput,
@@ -279,6 +280,29 @@ const waitForFrame = (
   what: string,
   matches: (frame: ControllerToRunner) => boolean,
 ): Promise<ControllerToRunner> => waitUntil(what, () => wire.frames.find(matches));
+
+/** The commit step of the definitions here that commit. */
+const COMMIT_STEP = {
+  id: "commit",
+  kind: "action",
+  action: "git.commit",
+  params: { message: "Save the work" },
+};
+
+/** Waits until the runner has been sent the start of a run's commit step, and returns that frame. */
+const waitForCommitStart = (wire: Wire, runId: string): Promise<ActionStepStart> =>
+  waitUntil("sent the commit step", () =>
+    wire.frames.find(
+      (frame): frame is ActionStepStart =>
+        frame._tag === "workspaceStepStart" &&
+        frame.kind !== "agent" &&
+        frame.runId === runId &&
+        frame.stepId === COMMIT_STEP.id,
+    ),
+  );
+
+/** What a runner reports for a commit step that committed. */
+const COMMITTED = completeWith({ sha: "abc123", branch: "release", committed: true });
 
 /**
  * Waits until the runner has been sent the provision of a run's workspace,
@@ -1322,7 +1346,7 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
-    "has the runner unload a step's session five seconds after its turn ends, so the next step gets the runner's only slot",
+    "gives a step session a 5 s idle unload, so the next step gets the runner's only slot once the runner unloads it",
     async () => {
       await withAgentStepFleet(async (arranged) => {
         const { wire } = arranged;
@@ -1459,12 +1483,7 @@ describe("agent steps over the runner socket", () => {
                 outputSchema: DONE_SCHEMA,
                 freshSession: true,
               },
-              {
-                id: "commit",
-                kind: "action",
-                action: "git.commit",
-                params: { message: "Save the work" },
-              },
+              COMMIT_STEP,
             ],
             edges: [
               {
@@ -1491,25 +1510,88 @@ describe("agent steps over the runner socket", () => {
         player.runTurn(wire, second, secondKey, completeWith({ done: true }));
 
         // The commit goes to that branch too.
-        const commit = await waitForFrame(
-          wire,
-          "sent the commit step",
-          (frame) =>
-            frame._tag === "workspaceStepStart" &&
-            frame.kind !== "agent" &&
-            frame.runId === runId &&
-            frame.stepId === "commit",
-        );
+        const commit = await waitForCommitStart(wire, runId);
         expect(commit).not.toHaveProperty("checkoutBranch");
-        player.sendResult(
-          wire,
-          { runId, stepId: "commit", iteration: 1 },
-          completeWith({ sha: "abc123", branch: "feature/renamed", committed: true }),
-        );
+        player.sendResult(wire, buildStepKey(runId, 1, COMMIT_STEP.id), COMMITTED);
         await waitForRunEnded(arranged, runId, "completed");
       });
     },
     WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "switches a repo's main workspace to the workflow's branch for a first commit step, and not for the agent step after it",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        const repoId = await createRepo(arranged, "https://github.com/o/agent.git");
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            name: "Commit on the release branch, then implement",
+            workspace: { kind: "primary", resourceId: repoId, branch: "release" },
+            steps: [
+              COMMIT_STEP,
+              { id: IMPLEMENT, kind: "agent", agent: agentId, prompt: "Implement the change." },
+            ],
+            edges: [{ from: COMMIT_STEP.id, to: IMPLEMENT }],
+          },
+        });
+        await reportRunWorkspaceReady(arranged);
+        const commit = await waitForCommitStart(wire, runId);
+        expect(commit.checkoutBranch).toBe("release");
+        player.sendResult(wire, buildStepKey(runId, 1, COMMIT_STEP.id), COMMITTED);
+
+        const key = buildStepKey(runId);
+        const sessionId = await startStepSession(arranged, player, key);
+        expect(listSessionStarts(wire, sessionId)[0]).not.toHaveProperty("checkoutBranch");
+        player.runTurn(wire, sessionId, key, answerText("Implemented"));
+        await waitForRunEnded(arranged, runId, "completed");
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "switches a repo's main workspace to the workflow's branch for only one of a first agent step and a first commit step that start at once",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        const repoId = await createRepo(arranged, "https://github.com/o/agent.git");
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            name: "Implement and commit at once on the release branch",
+            workspace: { kind: "primary", resourceId: repoId, branch: "release" },
+            steps: [
+              { id: IMPLEMENT, kind: "agent", agent: agentId, prompt: "Implement the change." },
+              COMMIT_STEP,
+            ],
+            edges: [],
+          },
+        });
+        await reportRunWorkspaceReady(arranged);
+        const key = buildStepKey(runId);
+        const sessionId = await startStepSession(arranged, player, key);
+        const commit = await waitForCommitStart(wire, runId);
+
+        // Only the step whose start pinned the run switches the branch, and
+        // either step may be the one. If both did, the second switch could
+        // undo a branch the first step's work had already moved to.
+        const switches = [
+          listSessionStarts(wire, sessionId)[0]?.checkoutBranch,
+          commit.checkoutBranch,
+        ];
+        expect(switches.filter((branch) => branch !== undefined)).toEqual(["release"]);
+
+        player.sendResult(wire, buildStepKey(runId, 1, COMMIT_STEP.id), COMMITTED);
+        player.runTurn(wire, sessionId, key, answerText("Implemented"));
+        await waitForRunEnded(arranged, runId, "completed");
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
   );
 
   it(
@@ -1531,21 +1613,31 @@ describe("agent steps over the runner socket", () => {
         const second = buildStepKey(runId, 2);
         const sessionId = await startStepSession(arranged, player, first);
         expect(listSessionStarts(wire, sessionId)[0]?.checkoutBranch).toBe("release");
-        // The second iteration's prompt waits on the busy session, which then
-        // unloads, so the session is resumed for it.
-        player.startTurn(wire, sessionId, first);
-        player.sendResult(wire, first, completeWith({ done: false }));
-        await waitUntil("queued the second iteration's prompt", async () =>
-          (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
-        );
+        // The runner holds the second iteration's prompt without answering,
+        // so the prompt is still on the wire when the idle session unloads.
+        wire.answering(() => undefined);
+        player.runTurn(wire, sessionId, first, completeWith({ done: false }));
+        const sent = await waitForStepInput(wire, second);
         player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+        await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
 
+        // The runner refuses the prompt, because the session is gone, so the
+        // session is resumed in place for it.
+        wire.answering(() => "opened");
+        wire.send({
+          _tag: "sessionInputResult",
+          requestId: sent.requestId,
+          ok: false,
+          message: "that session is not running",
+        });
         const resumed = await waitUntil("resumed the step's session", () =>
           listSessionStarts(wire, sessionId).find((frame) => frame.spec.continue !== undefined),
         );
         expect(resumed).not.toHaveProperty("checkoutBranch");
         player.reportStarted(wire, sessionId);
-        await waitForStepInput(wire, second);
+        await waitUntil("sent the second iteration's prompt again", () =>
+          countStepInputs([wire], second) === 2 ? true : undefined,
+        );
         player.runTurn(wire, sessionId, second, completeWith({ done: true }));
         await waitForRunEnded(arranged, runId, "completed");
       });
