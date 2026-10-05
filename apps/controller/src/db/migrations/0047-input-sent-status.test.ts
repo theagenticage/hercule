@@ -5,7 +5,7 @@
  * - an agent step's prompt that was cancelled because the runner never
  *   answered it becomes `sent`;
  * - every other input keeps its status and its fields;
- * - the table still has its three indexes and accepts `sent`.
+ * - the table still has its three indexes, each unchanged, and accepts `sent`.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -20,6 +20,22 @@ const BEFORE = migrations.filter(([id]) => id < 47);
 const at = "2026-10-05T00:00:00.000Z";
 
 const SENT_AT = "2026-10-05T00:01:00.000Z";
+
+/** An index of a table, as `sqlite_schema` stores it: its name and its `CREATE INDEX` statement. */
+interface StoredIndex {
+  readonly name: string;
+  readonly sql: string;
+}
+
+/**
+ * Returns the index with every run of whitespace in its statement made one
+ * space, so that two migrations that wrote the same index with different
+ * line breaks or indentation compare equal.
+ */
+const normalizeIndex = (index: StoredIndex): StoredIndex => ({
+  name: index.name,
+  sql: index.sql.replace(/\s+/g, " ").trim(),
+});
 
 /** Runs a test against a fresh in-memory database. */
 const runOnDatabase = <A>(test: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> =>
@@ -111,23 +127,29 @@ describe("the input sent status migration", () => {
     ]);
   });
 
-  it("keeps the three indexes of the table", async () => {
-    const indexes = await runOnDatabase(
+  it("keeps the three indexes of the table as they were", async () => {
+    const { before, after } = await runOnDatabase(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations();
-        return yield* sql<{ readonly name: string }>`
-          SELECT name FROM sqlite_schema
+        const listIndexes = sql<StoredIndex>`
+          SELECT name, sql FROM sqlite_schema
           WHERE type = 'index' AND tbl_name = 'session_inputs' AND sql IS NOT NULL
           ORDER BY name`;
+        yield* runMigrations(BEFORE);
+        const before = yield* listIndexes;
+        yield* runMigrations();
+        return { before, after: yield* listIndexes };
       }),
     );
 
-    expect(indexes.map((index) => index.name)).toEqual([
+    expect(before.map((index) => index.name)).toEqual([
       "session_inputs_awaiting",
       "session_inputs_match",
       "session_inputs_session",
     ]);
+    // The whole statement is compared, not only the name, so an index the
+    // migration made again without its UNIQUE or its WHERE fails the test.
+    expect(after.map(normalizeIndex)).toEqual(before.map(normalizeIndex));
   });
 
   it("accepts a sent input that records when it was sent, and refuses one that does not", async () => {
