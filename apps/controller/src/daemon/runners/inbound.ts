@@ -162,12 +162,18 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const applied = yield* sessions.applyReport(traffic.runnerId, event, report);
-          // A session that went idle can take its oldest queued input. The
+          // A session whose turn ended can take its oldest queued input. The
           // input is claimed in the same transaction as the change to idle,
           // so no delivery pass can read the session as idle and claim an
           // input of its own first.
+          //
+          // Only the end of a turn sends one. A session that becomes idle
+          // because its harness started has had its oldest input carried by
+          // the start, and that input's turn may not have opened yet.
+          // Sending the next input now would put it into that turn, so two
+          // queued inputs would run as one turn.
           const claimed =
-            applied.moved === "idle"
+            applied.moved === "idle" && event._tag === "turn.completed"
               ? yield* sessions.claimOldest(event.sessionId)
               : Option.none<StoredInput>();
           return { applied, claimed };

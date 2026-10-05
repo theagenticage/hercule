@@ -77,9 +77,9 @@ interface Live {
   readonly idleMs: number | undefined;
   /**
    * The fiber that stops the session once it has sat `idleMs` with no open
-   * turn. It is forked when the session starts and when a turn completes, and
-   * interrupted by the next input, turn or open request. Undefined whenever
-   * no such wait is running.
+   * turn. It is forked when a turn completes and when the harness refuses
+   * input while no turn is open, and interrupted by the next input, turn or
+   * open request. Undefined whenever no such wait is running.
    */
   idle: Fiber.Fiber<void> | undefined;
   /**
@@ -110,6 +110,10 @@ export interface SessionSupervisor {
   readonly relay: Effect.Effect<void>;
   /** Sends a `sessionsReport` of what the adapters host. The controller reconciles its own state against it. */
   readonly report: Effect.Effect<void>;
+  /**
+   * Starts or resumes a session and hands its harness the input the frame
+   * carries. Never fails, and answers that input exactly once.
+   */
   readonly start: (frame: SessionStart) => Effect.Effect<void>;
   readonly input: (frame: SessionInput) => Effect.Effect<void>;
   readonly interrupt: (frame: SessionInterrupt) => Effect.Effect<void>;
@@ -144,6 +148,29 @@ export interface Supervising {
  * goodbye noticeably.
  */
 const SHUTDOWN_STOP_BOUND: Duration.Duration = Duration.seconds(5);
+
+/**
+ * Why the input a start carries never reached the harness, and how the
+ * session ended, if it did:
+ *
+ * - `crash`: the session failed to start. The controller keeps a session in
+ *   `starting` until it receives an exit, and `crash` is the reason for an
+ *   end nobody asked for that leaves nothing to resume.
+ * - `runner_restart`: the runner began shutting down while the session was
+ *   starting.
+ * - undefined: the session is left as it was, running or stopping.
+ */
+interface UndeliveredStart {
+  /** The reason the input is refused with. */
+  readonly message: string;
+  readonly exit: "crash" | "runner_restart" | undefined;
+}
+
+/** Builds the `UndeliveredStart` of a session that failed to start for the given reason. */
+const buildCrashedStart = (message: string): UndeliveredStart => ({ message, exit: "crash" });
+
+/** A shorthand for the input a frame carries and the Queued Input row it came from. */
+type CarriedInput = Pick<SessionInput, "requestId" | "sessionId" | "input">;
 
 /**
  * Creates the session supervisor. Call it once per process: the session table
@@ -256,10 +283,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      * Starts the wait that stops an idle session with `idle_unload` after
      * `idleMs`. It is called whenever the session is left with no open turn:
      *
-     * - when the session starts, because a session resumed to take queued
-     *   input may start before the input reaches it, and may never get it;
      * - when a turn completes;
-     * - when the harness refuses input to a session with no open turn.
+     * - when the harness refuses input to a session with no open turn,
+     *   including the input its start carried.
+     *
+     * It is not called when the session starts. Every start carries an input,
+     * and the turn that input opens must not race a wait that started before
+     * it.
      *
      * Does nothing when the spec sets no `idleMs`, when a wait is already
      * running, or when the entry was torn down, since a wait armed on a torn
@@ -321,9 +351,6 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           const held = live.get(event.sessionId);
           if (held !== undefined) {
             switch (event._tag) {
-              case "session.started":
-                if (!held.turnOpen && !held.parked) yield* armIdleUnload(held, event.sessionId);
-                break;
               case "turn.started":
                 held.turnOpen = true;
                 // A turn the harness opened on its own also ends the idle
@@ -412,133 +439,252 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         message: message.slice(0, MAX_MESSAGE_LENGTH),
       });
 
+    /** Sends a `session.exited` for a session that ended without the adapter reporting it. */
+    const reportExit = (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
+      forwardEvent({
+        _tag: "session.exited",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at: now(),
+        reason,
+      });
+
+    /** Sends the answer to one input: the `sessionInputResult` the controller waits for under `requestId`. */
+    const sendInputResult = (
+      requestId: string,
+      result: Omit<SessionInputResult, "_tag" | "requestId">,
+    ): Effect.Effect<void> => sendFrame({ _tag: "sessionInputResult", requestId, ...result });
+
     /**
-     * Reports a session that failed to start: sends the error, then a
-     * `session.exited` with reason `crash`. The controller keeps the session in
-     * `starting` until it receives an exit, and `crash` is the reason for an
-     * end nobody asked for that leaves nothing to resume.
+     * Answers an input as refused, and reports the reason on the session's
+     * stream too. The controller waiting on the result needs the reason, and
+     * the user reading the thread sees the session's stream.
      */
-    const reportDeath = (sessionId: string, message: string): Effect.Effect<void> =>
-      Effect.flatMap(reportFailure(sessionId, message), () =>
-        forwardEvent({
-          _tag: "session.exited",
-          eventId: crypto.randomUUID(),
-          sessionId,
-          at: now(),
-          reason: "crash",
+    const refuseInput = (
+      frame: Omit<CarriedInput, "input">,
+      message: string,
+    ): Effect.Effect<void> =>
+      Effect.andThen(
+        reportFailure(frame.sessionId, message),
+        sendInputResult(frame.requestId, {
+          ok: false,
+          message: message.slice(0, MAX_MESSAGE_LENGTH),
         }),
       );
 
     /**
-     * Starts a session: resolves its context on this machine, then asks the
-     * adapter for the harness. Never fails; a failure is reported as the
-     * session's exit.
+     * Hands one input to the harness of a session this runner holds, and
+     * answers it: delivered, with the adapter's report of what the input did,
+     * or refused, with the reason. Never fails. Both a `sessionInput` and the
+     * input a `sessionStart` carries are delivered through here.
+     */
+    const deliverInput = (held: Live, frame: CarriedInput): Effect.Effect<void> => {
+      // Input the harness refused opens no turn, so a session that was idle
+      // before it is still idle and gets its wait back.
+      const refuseHeldInput = (message: string): Effect.Effect<void> =>
+        Effect.andThen(
+          refuseInput(frame, message),
+          Effect.suspend(() =>
+            held.turnOpen || held.parked ? Effect.void : armIdleUnload(held, frame.sessionId),
+          ),
+        );
+      // Cancel the idle wait before the input reaches the harness. The turn
+      // this input opens may start only after the wait would have ended.
+      return Effect.andThen(
+        cancelIdleUnload(held),
+        held.adapter.sendInput(frame.sessionId, frame.input),
+      ).pipe(
+        Effect.flatMap((sent) =>
+          sendInputResult(frame.requestId, { ok: true, delivery: sent.delivery }),
+        ),
+        Effect.catch(refuseHeldInput),
+        Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
+      );
+    };
+
+    /**
+     * Answers the input of a start that never reached the harness, then
+     * reports how the session ended, if it did. The answer goes first, so the
+     * controller has it before the exit closes the session.
+     *
+     * Only a crash is reported on the session's stream, because only a crash
+     * leaves the user something to fix. A duplicate start, for example, is
+     * routine after a reconnect and would only add noise to the thread.
+     */
+    const answerUndeliveredStart = (
+      frame: SessionStart,
+      undelivered: UndeliveredStart,
+    ): Effect.Effect<void> =>
+      Effect.andThen(
+        sendInputResult(frame.requestId, {
+          ok: false,
+          message: undelivered.message.slice(0, MAX_MESSAGE_LENGTH),
+        }),
+        Effect.suspend(() => {
+          switch (undelivered.exit) {
+            case "crash":
+              return Effect.andThen(
+                reportFailure(frame.sessionId, undelivered.message),
+                reportExit(frame.sessionId, "crash"),
+              );
+            case "runner_restart":
+              return reportExit(frame.sessionId, "runner_restart");
+            case undefined:
+              return Effect.void;
+          }
+        }),
+      );
+
+    /**
+     * Starts a session: checks that it can run here, resolves its context on
+     * this machine, then asks the adapter for the harness. Returns the
+     * session's entry once the harness is up and the input the frame carries
+     * can be handed to it. Fails with an `UndeliveredStart` on every path
+     * where that input must not or cannot reach the harness.
      *
      * The entry is added before the adapter is asked, and removed on any
      * failure, in one uninterruptible block. A session that exits while it is
      * still starting must find its entry, and a session that never came up
      * must leave no entry behind.
      */
-    const startSession = (frame: SessionStart, adapter: ProviderAdapter): Effect.Effect<void> => {
-      // The controller linted this schema before it sent the frame, and the
-      // harness would hold every turn of the session to it. A schema outside
-      // the subset means the controller and the runner disagree about which
-      // schemas are allowed. Such a session must not start at all, because its
-      // results could not be trusted.
-      const issues =
-        frame.spec.outputSchema === undefined ? [] : lintOutputSchema(frame.spec.outputSchema);
-      if (issues.length > 0) {
-        return reportDeath(
-          frame.sessionId,
-          `the output schema is outside the subset every harness accepts: ${issues.join("; ")}`,
+    const launchSession = (frame: SessionStart): Effect.Effect<Live, UndeliveredStart> =>
+      Effect.gen(function* () {
+        // The controller may have sent this start before it learned of the
+        // shutdown. A harness spawned now would never be stopped.
+        if (stopped) {
+          return yield* Effect.fail<UndeliveredStart>({
+            message: "the runner is shutting down",
+            exit: undefined,
+          });
+        }
+        const adapter = adapters.find((one) => one.providerId === frame.providerId);
+        if (adapter === undefined) {
+          return yield* Effect.fail(buildCrashedStart(describeMissingAdapter(frame.providerId)));
+        }
+        // Ask the adapter, not the `live` table. A start for a session the
+        // adapter still holds was sent again by the controller after a
+        // reconnect, and is a no-op for the session (spec 03 section 2.3).
+        // Its input is refused, not delivered: the resent frame carries the
+        // same input the first one did, and delivering it again would hand
+        // the harness the same prompt twice.
+        const bindings = yield* adapter.listSessions;
+        if (bindings.some((binding) => binding.sessionId === frame.sessionId)) {
+          return yield* Effect.fail<UndeliveredStart>({
+            message: `session ${frame.sessionId} is already running on this runner`,
+            exit: undefined,
+          });
+        }
+        // An exit published while the socket was down reached no relay, so
+        // the `live` entry can outlive its session. Remove such a stale
+        // entry before starting again.
+        const stale = live.get(frame.sessionId);
+        if (stale !== undefined) {
+          live.delete(frame.sessionId);
+          yield* tearDownSession(stale);
+        }
+        // The controller linted this schema before it sent the frame, and the
+        // harness would hold every turn of the session to it. A schema outside
+        // the subset means the controller and the runner disagree about which
+        // schemas are allowed. Such a session must not start at all, because
+        // its results could not be trusted.
+        const issues =
+          frame.spec.outputSchema === undefined ? [] : lintOutputSchema(frame.spec.outputSchema);
+        if (issues.length > 0) {
+          return yield* Effect.fail(
+            buildCrashedStart(
+              `the output schema is outside the subset every harness accepts: ${issues.join("; ")}`,
+            ),
+          );
+        }
+        const resolved = yield* Effect.mapError(
+          resolveSessionContext(frame, connection.machine, adapter.binaryName),
+          buildCrashedStart,
         );
-      }
-      return resolveSessionContext(frame, connection.machine, adapter.binaryName).pipe(
-        Effect.flatMap((resolved) =>
-          Effect.asVoid(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const held: Live = {
-                  adapter,
-                  scratch: resolved.scratch,
-                  workspaceId: frame.spec.workspaceId,
-                  inactivityMs: frame.spec.timeouts.inactivityMs,
-                  // Not used until the session is watched: `sendSequenced`
-                  // sets it together with `inactivity`, on the event that
-                  // starts the watch.
-                  lastEventAt: 0,
-                  inactivity: undefined,
-                  turnOpen: false,
-                  parked: false,
-                  absolute: undefined,
-                  idleMs: frame.spec.timeouts.idleMs,
-                  idle: undefined,
-                  phase: "starting",
-                  pendingStop: undefined,
-                };
-                live.set(frame.sessionId, held);
-                // Check `stopped` again. A shutdown that began after `start`
-                // checked it would not see this session, because
-                // `listSessions` and `resolveSessionContext` both yield to
-                // other fibers before this line. There is no point asking the
-                // adapter for a harness that is about to be stopped.
-                if (stopped) {
+        return yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const held: Live = {
+              adapter,
+              scratch: resolved.scratch,
+              workspaceId: frame.spec.workspaceId,
+              inactivityMs: frame.spec.timeouts.inactivityMs,
+              // Not used until the session is watched: `sendSequenced` sets
+              // it together with `inactivity`, on the event that starts the
+              // watch.
+              lastEventAt: 0,
+              inactivity: undefined,
+              turnOpen: false,
+              parked: false,
+              absolute: undefined,
+              idleMs: frame.spec.timeouts.idleMs,
+              idle: undefined,
+              phase: "starting",
+              pendingStop: undefined,
+            };
+            live.set(frame.sessionId, held);
+            // Check `stopped` again. A shutdown that began after the check
+            // above would not see this session, because `listSessions` and
+            // `resolveSessionContext` both yield to other fibers before this
+            // line. There is no point asking the adapter for a harness that
+            // is about to be stopped.
+            if (stopped) {
+              live.delete(frame.sessionId);
+              yield* tearDownSession(held);
+              return yield* Effect.fail<UndeliveredStart>({
+                message: "the runner is shutting down",
+                exit: "runner_restart",
+              });
+            }
+            // Start the absolute timer here, not on `session.started`: the
+            // runner itself promises to end the session at the deadline,
+            // whether or not the harness confirms it started.
+            held.absolute = yield* Effect.forkDetach(
+              Effect.andThen(
+                Effect.sleep(Duration.millis(frame.spec.timeouts.absoluteMs)),
+                Effect.suspend(() => {
+                  if (live.get(frame.sessionId) !== held) return Effect.void;
+                  held.absolute = undefined;
+                  return requestStop(frame.sessionId, held, "absolute_timeout");
+                }),
+              ),
+            );
+            yield* Effect.tapCause(
+              Effect.mapError(
+                adapter.startSession(frame.sessionId, frame.spec, resolved.ctx),
+                buildCrashedStart,
+              ),
+              () =>
+                Effect.gen(function* () {
+                  // Compare by identity: if a later start has replaced the
+                  // entry, it is not this start's to remove.
+                  if (live.get(frame.sessionId) !== held) return;
                   live.delete(frame.sessionId);
                   yield* tearDownSession(held);
-                  return yield* forwardEvent({
-                    _tag: "session.exited",
-                    eventId: crypto.randomUUID(),
-                    sessionId: frame.sessionId,
-                    at: now(),
-                    reason: "runner_restart",
-                  });
-                }
-                // Start the absolute timer here, not on `session.started`:
-                // the runner itself promises to end the session at the
-                // deadline, whether or not the harness confirms it started.
-                held.absolute = yield* Effect.forkDetach(
-                  Effect.andThen(
-                    Effect.sleep(Duration.millis(frame.spec.timeouts.absoluteMs)),
-                    Effect.suspend(() => {
-                      if (live.get(frame.sessionId) !== held) return Effect.void;
-                      held.absolute = undefined;
-                      return requestStop(frame.sessionId, held, "absolute_timeout");
-                    }),
-                  ),
-                );
-                const binding = yield* Effect.tapCause(
-                  adapter.startSession(frame.sessionId, frame.spec, resolved.ctx),
-                  () =>
-                    Effect.gen(function* () {
-                      // Compare by identity: if a later start has replaced
-                      // the entry, it is not this start's to remove.
-                      if (live.get(frame.sessionId) !== held) return;
-                      live.delete(frame.sessionId);
-                      yield* tearDownSession(held);
-                    }),
-                );
-                // Compare by identity, as both timers do: if a later start
-                // has replaced the entry, this start must not mark it running
-                // or apply its own pending stop to it.
-                if (live.get(frame.sessionId) === held) {
-                  held.phase = "running";
-                  // Apply a stop that was requested while the harness was
-                  // still starting, by a shutdown, a timer or the controller.
-                  if (held.pendingStop !== undefined) {
-                    yield* requestStop(frame.sessionId, held, held.pendingStop);
-                  }
-                }
-                return binding;
-              }),
-            ),
-          ),
-        ),
-        Effect.catch((message) => reportDeath(frame.sessionId, message)),
-        Effect.catchCause((cause) =>
-          reportDeath(frame.sessionId, describeCause(cause, MAX_MESSAGE_LENGTH)),
-        ),
-      );
-    };
+                }),
+            );
+            // Compare by identity, as both timers do: if a later start has
+            // replaced the entry, this start must not mark it running, apply
+            // its own pending stop to it, or hand its harness this input.
+            if (live.get(frame.sessionId) !== held) {
+              return yield* Effect.fail<UndeliveredStart>({
+                message: `session ${frame.sessionId} was started again before its input was handed over`,
+                exit: undefined,
+              });
+            }
+            held.phase = "running";
+            // Apply a stop that was requested while the harness was still
+            // starting, by a shutdown, a timer or the controller. The input
+            // would open a turn in a session that is on its way out.
+            if (held.pendingStop !== undefined) {
+              yield* requestStop(frame.sessionId, held, held.pendingStop);
+              return yield* Effect.fail<UndeliveredStart>({
+                message: `session ${frame.sessionId} was stopped before its input was handed over`,
+                exit: undefined,
+              });
+            }
+            return held;
+          }),
+        );
+      });
 
     return {
       relay: Stream.runForEach(
@@ -556,73 +702,34 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         (held) => sendFrame({ _tag: "sessionsReport", sessions: held.flat() }),
       ),
 
+      // Every path answers the input the frame carries exactly once: a
+      // launched session gets it through `deliverInput`, and every other path
+      // ends in `answerUndeliveredStart`. Nothing arms the idle unload after
+      // a delivered input: the turn it opens is reported by the adapter, and
+      // that turn's `turn.completed` arms the wait.
       start: (frame: SessionStart): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          // The controller may have sent this start before it learned of the
-          // shutdown. A harness spawned now would never be stopped, so the
-          // start is dropped.
-          if (stopped) return;
-          const adapter = adapters.find((one) => one.providerId === frame.providerId);
-          if (adapter === undefined) {
-            return yield* reportDeath(frame.sessionId, describeMissingAdapter(frame.providerId));
-          }
-          // Ask the adapter, not the `live` table. A start for a session the
-          // adapter still holds was sent again by the controller after a
-          // reconnect, and is a no-op rather than an error
-          // (spec 03 section 2.3).
-          const held = yield* adapter.listSessions;
-          if (held.some((binding) => binding.sessionId === frame.sessionId)) return;
-          // An exit published while the socket was down reached no relay, so
-          // the `live` entry can outlive its session. Remove such a stale
-          // entry before starting again.
-          const stale = live.get(frame.sessionId);
-          if (stale !== undefined) {
-            live.delete(frame.sessionId);
-            yield* tearDownSession(stale);
-          }
-          return yield* startSession(frame, adapter);
-        }),
+        launchSession(frame).pipe(
+          Effect.flatMap((held) => deliverInput(held, frame)),
+          Effect.catch((undelivered) => answerUndeliveredStart(frame, undelivered)),
+          Effect.catchCause((cause) =>
+            answerUndeliveredStart(
+              frame,
+              buildCrashedStart(describeCause(cause, MAX_MESSAGE_LENGTH)),
+            ),
+          ),
+        ),
 
       /**
        * Delivers input to the session, or reports that it could not. The runner
        * never queues input; queuing is the controller's job
-       * (spec 06 section 5). The `sessionInputResult` carries the adapter's report of what the
-       * input did, because only the adapter knows. The controller waits for it
-       * under the Queued Input row's id, `requestId`.
+       * (spec 06 section 5). The controller waits for the answer under the
+       * Queued Input row's id, `requestId`.
        */
       input: (frame: SessionInput): Effect.Effect<void> => {
-        const sendInputResult = (result: Omit<SessionInputResult, "_tag" | "requestId">) =>
-          sendFrame({ _tag: "sessionInputResult", requestId: frame.requestId, ...result });
-        // Report the failure in both places: the controller waiting on the
-        // result needs the reason, and the user reading the thread sees the
-        // session's stream.
-        const refuseInput = (message: string): Effect.Effect<void> =>
-          Effect.flatMap(reportFailure(frame.sessionId, message), () =>
-            sendInputResult({ ok: false, message: message.slice(0, MAX_MESSAGE_LENGTH) }),
-          );
         const held = live.get(frame.sessionId);
-        if (held === undefined) {
-          return refuseInput(`session ${frame.sessionId} is not running on this runner`);
-        }
-        // Input the harness refused opens no turn, so a session that was idle
-        // before it is still idle and gets its wait back.
-        const refuseHeldInput = (message: string): Effect.Effect<void> =>
-          Effect.andThen(
-            refuseInput(message),
-            Effect.suspend(() =>
-              held.turnOpen || held.parked ? Effect.void : armIdleUnload(held, frame.sessionId),
-            ),
-          );
-        // Cancel the idle wait before the input reaches the harness. The turn
-        // this input opens may start only after the wait would have ended.
-        return Effect.andThen(
-          cancelIdleUnload(held),
-          held.adapter.sendInput(frame.sessionId, frame.input),
-        ).pipe(
-          Effect.flatMap((sent) => sendInputResult({ ok: true, delivery: sent.delivery })),
-          Effect.catch(refuseHeldInput),
-          Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
-        );
+        return held === undefined
+          ? refuseInput(frame, `session ${frame.sessionId} is not running on this runner`)
+          : deliverInput(held, frame);
       },
 
       /** Idempotent: a session this runner does not hold has no turn to end. */

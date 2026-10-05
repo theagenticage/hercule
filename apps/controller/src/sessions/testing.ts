@@ -80,7 +80,16 @@ export const waitUntil = async <A>(
   throw new Error(`the controller never ${what}`);
 };
 
-type Answered = Delivery | { readonly message: string } | undefined;
+/** A runner's answer to an input: a delivery, or a refusal with its message. */
+type Answer = Delivery | { readonly message: string };
+
+type Answered = Answer | undefined;
+
+/**
+ * A frame that carries an input the runner answers: a `sessionInput`, or the
+ * `sessionStart` that carries a session's first input.
+ */
+export type InputCarrier = SessionInput | SessionStart;
 
 /** A fake runner's end of the socket. It answers pings and probes by itself. */
 export interface Wire {
@@ -88,13 +97,16 @@ export interface Wire {
   readonly frames: ReadonlyArray<ControllerMessage>;
   readonly close: () => void;
   /**
-   * Sets how this runner answers an input frame: with a delivery, with an
-   * error message, or with `undefined` to leave the frame unanswered, like a
-   * runner that has stopped responding.
+   * Sets how this runner answers the input an input frame or a start frame
+   * carries: with a delivery, with an error message, or with `undefined` to
+   * leave the frame unanswered, like a runner that has stopped responding.
    */
-  readonly answering: (delivery: (frame: SessionInput) => Answered) => void;
-  /** Answers every input frame this runner has left unanswered so far. */
-  readonly release: (delivery: Delivery) => void;
+  readonly answering: (delivery: (frame: InputCarrier) => Answered) => void;
+  /**
+   * Answers every input this runner has left unanswered so far, with a
+   * delivery or with a refusal.
+   */
+  readonly release: (answer: Answer) => void;
 }
 
 export const listFrames = <T extends ControllerMessage>(
@@ -142,32 +154,23 @@ const dial = (
       headers: { authorization: `Bearer ${credential}` },
     });
     const frames: Array<ControllerMessage> = [];
-    let decideDelivery: (frame: SessionInput) => Answered = () => "opened";
-    const withheld: Array<SessionInput> = [];
+    let decideDelivery: (frame: InputCarrier) => Answered = () => "opened";
+    const withheld: Array<InputCarrier> = [];
     const writeMessage = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
+    const writeAnswer = (frame: InputCarrier, answer: Answer): void =>
+      writeMessage(
+        typeof answer === "string"
+          ? { _tag: "sessionInputResult", requestId: frame.requestId, ok: true, delivery: answer }
+          : { _tag: "sessionInputResult", requestId: frame.requestId, ok: false, ...answer },
+      );
     socket.onmessage = (event) => {
       const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);
       frames.push(frame);
       if (frame._tag === "ping") writeMessage({ _tag: "pong" });
-      if (frame._tag === "sessionInput") {
+      if (frame._tag === "sessionInput" || frame._tag === "sessionStart") {
         const answer = decideDelivery(frame);
-        if (typeof answer === "string") {
-          writeMessage({
-            _tag: "sessionInputResult",
-            requestId: frame.requestId,
-            ok: true,
-            delivery: answer,
-          });
-        } else if (answer !== undefined) {
-          writeMessage({
-            _tag: "sessionInputResult",
-            requestId: frame.requestId,
-            ok: false,
-            ...answer,
-          });
-        } else {
-          withheld.push(frame);
-        }
+        if (answer === undefined) withheld.push(frame);
+        else writeAnswer(frame, answer);
       }
       if (frame._tag === "probeRequest") {
         const request = frame satisfies ProbeRequest;
@@ -196,14 +199,7 @@ const dial = (
           decideDelivery = next;
         },
         release: (answer) => {
-          for (const held of withheld.splice(0)) {
-            writeMessage({
-              _tag: "sessionInputResult",
-              requestId: held.requestId,
-              ok: true,
-              delivery: answer,
-            });
-          }
+          for (const held of withheld.splice(0)) writeAnswer(held, answer);
         },
       });
     };
@@ -597,10 +593,11 @@ export const spawnThreadWithGrants = async (
  * A test that needs a session spawned from an Agent must create the Agent and
  * spawn from it; this helper never does.
  *
- * The fake runner answers the prompt with `opened` and reports no turn
- * events, so the session stays `busy` with its prompt's turn until the test
- * reports that turn's end. The runner has reported one event, at sequence
- * number 1, so the test's next event is 2.
+ * The start frame carries the prompt, and the fake runner answers it with
+ * `opened` and reports no turn events, so the session stays `busy` with its
+ * prompt's turn until the test reports that turn's end. The runner has
+ * reported one event, `session.started` at sequence number 1, so the test's
+ * next event is 2.
  */
 export const spawnThreadUnder = async (
   arranged: Arranged,

@@ -41,6 +41,7 @@ import {
   type SessionEvent,
   type SessionInput,
   type SessionInputResult,
+  type SessionStart,
   type SessionsReport,
   type CredentialRequest,
   type WorkspaceReport,
@@ -71,7 +72,13 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
-export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | SessionInput;
+/**
+ * A frame the runner answers under its `requestId`. A `SessionStart` is one:
+ * it carries the session's first input, and the runner answers that input
+ * with a `SessionInputResult`, as it answers a `SessionInput`.
+ */
+export type Request =
+  ProbeRequest | InstallRequest | LoginStart | LoginCode | SessionInput | SessionStart;
 
 /**
  * A frame a runner sent about the sessions it hosts, and which runner sent it.
@@ -395,7 +402,9 @@ const make = Effect.gen(function* () {
     /**
      * Sends a request to the runner and waits for its answer, up to
      * `deadline`. Returns `none` when the runner has no connection, the
-     * connection ended, or no answer came in time.
+     * connection ended, or no answer came in time. With
+     * `Duration.infinity` the wait ends only on the answer or on the end of
+     * the connection, which ends every wait on it.
      */
     asked: (
       id: string,

@@ -19,6 +19,7 @@ import type {
   RunnerWatermark,
 } from "@hercule/contract";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { PROTOCOL_VERSION } from "@hercule/protocol";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -193,7 +194,7 @@ describe("a draining runner whose socket drops", () => {
         const connection = mintConnection();
         yield* connections.greeted(runner!.id, connection, HELD, {
           binaryVersion: "0.1.0",
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           negotiatedCapabilities: [],
           facts: FACTS,
         });
@@ -222,14 +223,14 @@ describe("a report from a connection the runner has replaced", () => {
         const newer = mintConnection();
         yield* connections.greeted(runner!.id, older, HELD, {
           binaryVersion: "0.1.0",
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           negotiatedCapabilities: [],
           facts: FACTS,
         });
         // The runner connected again, and the row now follows the newer connection.
         yield* connections.greeted(runner!.id, newer, HELD, {
           binaryVersion: "0.1.0",
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           negotiatedCapabilities: [],
           facts: { ...FACTS, docker: true },
         });

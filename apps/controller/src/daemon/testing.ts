@@ -36,6 +36,7 @@ import {
   withFleet as sharedWithFleet,
   type SpawnedThread,
   type Arranged,
+  type InputCarrier,
 } from "../sessions/testing";
 
 /** The tick interval in tests: short enough to wait several ticks without a long sleep. */
@@ -400,9 +401,18 @@ export const storeCondition = (
 export const listInputFrames = (arranged: Arranged): ReadonlyArray<SessionInput> =>
   listFrames<SessionInput>(arranged.wire, "sessionInput");
 
-/** Lists the input frames sent so far whose text contains `text`. */
-export const listFramesCarrying = (arranged: Arranged, text: string): ReadonlyArray<SessionInput> =>
-  listInputFrames(arranged).filter((frame) => frame.input.text.includes(text));
+/**
+ * Lists the frames sent so far that carry an input whose text contains
+ * `text`. A resume carries its input on the start frame, so a start frame
+ * counts as well as an input frame.
+ */
+export const listFramesCarrying = (arranged: Arranged, text: string): ReadonlyArray<InputCarrier> =>
+  arranged.wire.frames
+    .filter(
+      (frame): frame is InputCarrier =>
+        frame._tag === "sessionInput" || frame._tag === "sessionStart",
+    )
+    .filter((frame) => frame.input.text.includes(text));
 
-export const waitForFrameCarrying = (arranged: Arranged, text: string): Promise<SessionInput> =>
+export const waitForFrameCarrying = (arranged: Arranged, text: string): Promise<InputCarrier> =>
   waitUntil(`sent a frame carrying ${text}`, () => listFramesCarrying(arranged, text)[0]);

@@ -40,6 +40,10 @@ const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
 const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
 /** The id of the Queued Input row an input frame and its result are sent under. */
 const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
+/** The id of the Queued Input row a start carries, distinct from `REQUEST` so the two results can be told apart. */
+const START_REQUEST = "0199e0e7-0000-7000-8000-0000000000fa";
+/** The input every start in these tests carries. */
+const START_INPUT: TurnInput = { text: "begin" };
 /** The adapter's own id for the open request an answer refers to. The controller does not create one. */
 const PARK = "0199e0e7-0000-7000-8000-0000000000fb";
 
@@ -60,7 +64,9 @@ const SPEC: SessionSpec = {
 
 const START: SessionStart = {
   _tag: "sessionStart",
+  requestId: START_REQUEST,
   sessionId: SESSION,
+  input: START_INPUT,
   providerId: "fake",
   config: {},
   secrets: {},
@@ -295,6 +301,17 @@ const listInputResults = (
 ): ReadonlyArray<SessionInputResult> =>
   sent.filter((frame): frame is SessionInputResult => frame._tag === "sessionInputResult");
 
+/**
+ * Checks that the input a start carried was answered once, as refused, with
+ * a reason that contains `reason`.
+ */
+const expectStartInputRefused = (sent: ReadonlyArray<RunnerToController>, reason: string): void => {
+  const results = listInputResults(sent);
+  expect(results).toHaveLength(1);
+  expect(results[0]).toMatchObject({ requestId: START_REQUEST, ok: false });
+  expect(results[0]?.message ?? "").toContain(reason);
+};
+
 describe("one session, start to exit", () => {
   it("sends every event under a sequence that only goes up", async () => {
     const fake = createFake();
@@ -329,7 +346,7 @@ describe("one session, start to exit", () => {
       }),
     );
 
-    expect(fake.inputs).toEqual([{ text: "hi" }]);
+    expect(fake.inputs).toEqual([START_INPUT, { text: "hi" }]);
     const events = listSessionEvents(sent);
     expect(events.map((frame) => frame.event._tag)).toEqual([
       "session.started",
@@ -383,6 +400,48 @@ describe("one session, start to exit", () => {
   });
 });
 
+describe("the input a start carries", () => {
+  it("is handed to the harness and answered as delivered, with no input frame after the start", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(fake, supervisor, supervisor.start(START));
+
+    expect(fake.inputs).toEqual([START_INPUT]);
+    expect(listInputResults(sent)).toEqual([
+      { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },
+    ]);
+  });
+
+  it("is answered as refused, with a runtime error, when the harness refuses it, and the session runs on", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    Object.assign(fake.adapter, {
+      sendInput: () => Effect.fail("the harness is not ready for input"),
+    });
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent two events", () => listSessionEvents(sent).length === 2);
+        yield* supervisor.report;
+      }),
+    );
+
+    expectStartInputRefused(sent, "the harness is not ready for input");
+    // Sorted, because the two are sent independently: `session.started`
+    // through the relay, and the error by the start itself.
+    const events = listSessionEvents(sent).map((frame) => frame.event._tag);
+    expect([...events].sort()).toEqual(["runtime.error", "session.started"]);
+    // The controller's usual rule for a refused input applies to a session
+    // that is still running, so the runner must not end it.
+    const reports = sent.filter((frame) => frame._tag === "sessionsReport");
+    expect(reports[0]?.sessions.map((binding) => binding.sessionId)).toEqual([SESSION]);
+  });
+});
+
 describe("a start the controller sends twice", () => {
   it("is a no-op, and leaves the running session its working directory", async () => {
     const fake = createFake();
@@ -411,6 +470,32 @@ describe("a start the controller sends twice", () => {
     expect(fake.contexts).toHaveLength(1);
     // No second start, and above all no exit for a session that is still running.
     expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.started"]);
+  });
+
+  it("refuses the input the second start carries, instead of handing the harness the same prompt again", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.start(START);
+      }),
+    );
+
+    expect(fake.inputs).toEqual([START_INPUT]);
+    // Both frames carry the same row, and each is answered once.
+    expect(listInputResults(sent)).toEqual([
+      { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },
+      {
+        _tag: "sessionInputResult",
+        requestId: START_REQUEST,
+        ok: false,
+        message: `session ${SESSION} is already running on this runner`,
+      },
+    ]);
   });
 });
 
@@ -450,7 +535,7 @@ describe("an exit that arrives after the id was started again", () => {
 
     expect(existsSync(scratch)).toBe(true);
     // Still held, so its input reached the harness rather than a runtime error.
-    expect(fake.inputs).toEqual([{ text: "hi" }]);
+    expect(fake.inputs).toEqual([START_INPUT, { text: "hi" }]);
     expect(listSessionEvents(sent)).toHaveLength(2);
   });
 });
@@ -615,6 +700,16 @@ describe("a session that cannot run here", () => {
     expect(events[1]).toMatchObject({ reason: "crash" });
     // And nothing of it is left on disk.
     expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
+    // The input never reached a harness, and the controller is told so.
+    expect(fake.inputs).toEqual([]);
+    expectStartInputRefused(sent, "no fake-harness on this machine");
+    // The answer comes before the exit, so the controller has it before the
+    // exit closes the session.
+    expect(sent.findIndex((frame) => frame._tag === "sessionInputResult")).toBeLessThan(
+      sent.findIndex(
+        (frame) => frame._tag === "sessionEvent" && frame.event._tag === "session.exited",
+      ),
+    );
   });
 
   it("ends a start whose output schema is outside the subset, before any harness is asked", async () => {
@@ -643,6 +738,7 @@ describe("a session that cannot run here", () => {
     // The adapter was never asked for a harness, and nothing was written to disk.
     expect(fake.contexts).toEqual([]);
     expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
+    expectStartInputRefused(sent, "minProperties");
   });
 
   it("ends a start for a provider this build has no adapter for", async () => {
@@ -654,6 +750,7 @@ describe("a session that cannot run here", () => {
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events[0]).toMatchObject({ message: "no adapter for codex in this runner build" });
     expect(events[1]).toMatchObject({ _tag: "session.exited", reason: "crash" });
+    expectStartInputRefused(sent, "no adapter for codex in this runner build");
   });
 
   it("reports a defect on the session instead of letting it end the connection", async () => {
@@ -671,6 +768,26 @@ describe("a session that cannot run here", () => {
     // And it left nothing behind: neither the directory nor an entry that
     // would make the next start for this session look like a duplicate.
     expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
+    expectStartInputRefused(sent, "the harness threw where nothing declared it could");
+  });
+
+  it("ends a start whose context cannot be prepared, before any harness is asked", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const workspaceId = "0199e0e7-0000-7000-8000-0000000000ee";
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      // A workspace this runner does not hold, so the session has nowhere to run.
+      supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+    );
+
+    const events = listSessionEvents(sent).map((frame) => frame.event);
+    expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
+    expect(events[1]).toMatchObject({ reason: "crash" });
+    expect(fake.contexts).toEqual([]);
+    expectStartInputRefused(sent, `this runner does not hold workspace ${workspaceId}`);
   });
 
   it("reports input for a session it does not hold as lost, and ignores a stop for one", async () => {
@@ -724,8 +841,9 @@ describe("what the runner sends back for input, interrupts and answers", () => {
       }),
     );
 
-    expect(fake.inputs).toEqual([{ text: "hi" }]);
+    expect(fake.inputs).toEqual([START_INPUT, { text: "hi" }]);
     expect(listInputResults(sent)).toEqual([
+      { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },
       { _tag: "sessionInputResult", requestId: REQUEST, ok: true, delivery: "opened" },
     ]);
   });
@@ -1220,7 +1338,7 @@ describe("a session that sits idle between turns", () => {
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
 
-  it("is stopped with idle_unload once idleMs has passed since it started, when no turn opens", async () => {
+  it("is not unloaded before the turn its start input opens, however late that turn is reported", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -1228,11 +1346,44 @@ describe("a session that sits idle between turns", () => {
       fake,
       supervisor,
       Effect.gen(function* () {
-        // A session resumed to take queued input starts before the input
-        // reaches it, and the input may never come.
+        // A resumed session hands its harness the input at once. Its turn may
+        // be reported much later, for example while the controller is busy
+        // with other sessions' events, and nothing may unload the session in
+        // that gap: the input would be lost with the harness.
         yield* supervisor.start(IDLE_START);
         yield* awaitForwarded(sent, 1);
+        yield* TestClock.adjust(IDLE_MS * 10);
+        expect(fake.stops).toEqual([]);
 
+        // The turn the input opened arms the wait once it completes, as any
+        // turn does.
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+        yield* TestClock.adjust(IDLE_MS);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.inputs).toEqual([START_INPUT]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is stopped with idle_unload once idleMs has passed since its harness refused the start input", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    Object.assign(fake.adapter, {
+      sendInput: () => Effect.fail("the harness is not ready for input"),
+    });
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        // The refused input opens no turn, so the session is idle from the
+        // refusal on, and nothing else would ever end it.
+        yield* supervisor.start(IDLE_START);
         yield* TestClock.adjust(IDLE_MS - 1);
         expect(fake.stops).toEqual([]);
 
@@ -1241,6 +1392,14 @@ describe("a session that sits idle between turns", () => {
       }),
     );
 
+    expect(listInputResults(sent)).toEqual([
+      {
+        _tag: "sessionInputResult",
+        requestId: START_REQUEST,
+        ok: false,
+        message: "the harness is not ready for input",
+      },
+    ]);
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
@@ -1285,7 +1444,7 @@ describe("a session that sits idle between turns", () => {
       }),
     );
 
-    expect(fake.inputs).toEqual([{ text: "still there?" }]);
+    expect(fake.inputs).toEqual([START_INPUT, { text: "still there?" }]);
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
@@ -1323,7 +1482,7 @@ describe("a session that sits idle between turns", () => {
       }),
     );
 
-    expect(fake.inputs).toEqual([]);
+    expect(fake.inputs).toEqual([START_INPUT]);
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
@@ -1492,6 +1651,17 @@ describe("an announced shutdown", () => {
 
     expect(fake.contexts).toHaveLength(1);
     expect(sortStopsBySession(fake)).toEqual([{ sessionId: SESSION, reason: "runner_restart" }]);
+    // The second start's input is answered all the same, so the controller
+    // does not wait for it.
+    expect(listInputResults(sent)).toEqual([
+      { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },
+      {
+        _tag: "sessionInputResult",
+        requestId: START_REQUEST,
+        ok: false,
+        message: "the runner is shutting down",
+      },
+    ]);
   });
 });
 
@@ -1535,6 +1705,9 @@ describe("a stop that arrives while a session is still starting", () => {
 
     expect(fake.contexts).toHaveLength(1);
     expect(sortStopsBySession(fake)).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    // A session on its way out gets no turn.
+    expect(fake.inputs).toEqual([]);
+    expectStartInputRefused(sent, "was stopped before its input was handed over");
   });
 });
 
@@ -1581,6 +1754,8 @@ describe("a shutdown that happens before a start has added its entry", () => {
 
     expect(fake.contexts).toHaveLength(0);
     expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.exited"]);
+    expect(listExitReasons(sent)).toEqual(["runner_restart"]);
+    expectStartInputRefused(sent, "the runner is shutting down");
   });
 });
 

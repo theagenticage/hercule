@@ -12,7 +12,8 @@
  * - a probe with a logged-in report that offers two models, each with a
  *   reasoning effort and a fast mode;
  * - a workspace provision with `ready`, and a dispose with `deleted`;
- * - a session start with `session.started`;
+ * - a session start with `session.started`, and then the input the start
+ *   carries as it answers any other input;
  * - an input by starting a turn and reporting the user's message in it, or,
  *   while a turn runs, by reporting the message as steered into that turn.
  *   A turn runs until the caller or a script ends it, so a spawned thread
@@ -55,6 +56,7 @@ import type {
   RunnerFacts,
   RunnerToController,
   SessionBinding,
+  SessionInput,
   TurnState,
 } from "../../../packages/protocol/src/index";
 
@@ -602,6 +604,26 @@ export async function enlistScriptedRunner(
     }
   };
 
+  /**
+   * Answers an input as delivered, then reports the user's message: in a new
+   * turn when the session is idle, or as steered into the running turn. Both
+   * a session input and the input a session start carries arrive here.
+   */
+  const deliverInput = (
+    session: HostedSession,
+    frame: Pick<SessionInput, "requestId" | "sessionId" | "input">,
+  ): void => {
+    const running = session.turnId !== undefined;
+    send({
+      _tag: "sessionInputResult",
+      requestId: frame.requestId,
+      ok: true,
+      delivery: running ? "steered" : "opened",
+    });
+    if (!running) startTurn(frame.sessionId);
+    reportUserMessage(frame.sessionId, frame.input.text, running);
+  };
+
   const answerFrame = (frame: ControllerToRunner): void => {
     switch (frame._tag) {
       case "ping":
@@ -638,11 +660,12 @@ export async function enlistScriptedRunner(
         };
         // A resume starts the same session id again, as a new process.
         sessions.set(frame.sessionId, session);
-        return reportEvent(session, {
+        reportEvent(session, {
           _tag: "session.started",
           ...stampEvent(frame.sessionId),
           providerRefs: { nativeSessionId: buildNativeSessionId(frame.sessionId) },
         });
+        return deliverInput(session, frame);
       }
       case "sessionInput": {
         const session = sessions.get(frame.sessionId);
@@ -654,15 +677,7 @@ export async function enlistScriptedRunner(
             message: `runner ${runnerId} holds no session ${frame.sessionId}`,
           });
         }
-        const running = session.turnId !== undefined;
-        send({
-          _tag: "sessionInputResult",
-          requestId: frame.requestId,
-          ok: true,
-          delivery: running ? "steered" : "opened",
-        });
-        if (!running) startTurn(frame.sessionId);
-        return reportUserMessage(frame.sessionId, frame.input.text, running);
+        return deliverInput(session, frame);
       }
       // A frame can cross a session's exit on the wire: the controller sends it
       // before it has handled the `session.exited` this runner already sent.
@@ -716,7 +731,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 1 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 2 satisfies typeof PROTOCOL_VERSION,
             capabilities: [],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),

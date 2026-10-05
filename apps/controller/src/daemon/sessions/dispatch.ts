@@ -9,19 +9,28 @@
  * ending, a workspace becoming ready, a watermark crossed, a cap raised, a
  * drain lifted, or a new connection. So one place decides what starts next,
  * and one frame starts it.
+ *
+ * Each start frame carries the session's first input, and the runner answers
+ * that input as it answers any `sessionInput`. The answer is recorded by the
+ * same rule, so a start's input and an input sent on its own end up the same
+ * way.
  */
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { InvalidState } from "@hercule/contract";
 import { withTransaction } from "../../db";
 import { PluginHost } from "../../plugins";
 import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
 import { readInstanceSecrets, Secrets } from "../../secrets";
-import { SessionService } from "../../sessions";
+import { SessionService, type StartRequest } from "../../sessions";
 import { githubAccounts } from "../../workspaces";
+import { absorbFailures } from "../absorbing";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -32,13 +41,53 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const host = yield* PluginHost;
   const localRunnerId = yield* LocalRunnerId;
+  // Each start waits for the runner's answer on a fiber of its own, owned by
+  // this layer and not by the caller: a dispatch runs on a request's or a
+  // driver item's fiber, which ends long before the answer comes. The fibers
+  // end with the controller.
+  const runInBackground = yield* FiberSet.makeRuntime();
+
+  /**
+   * Sends one start frame and records the answer to the input it carries.
+   *
+   * When the runner is not connected, the frame is never sent, and the
+   * session and its input go back to the queue (`SessionService.requeue`), so
+   * the next change to this runner's capacity tries again.
+   *
+   * Otherwise the wait has no deadline, unlike a `sessionInput`'s. The answer
+   * comes only after the harness has started, and a start can take a while:
+   * a cold harness, a large checkout. The wait still ends when the connection
+   * does, so a runner that stops answering pings ends it, and the answer is
+   * then recorded as missing, as for any input on the wire. A refused or
+   * missing answer puts the input back to waiting with the reason; a
+   * delivery pass sends it again once the session is idle.
+   */
+  const sendStart = (runnerId: string, start: StartRequest): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      if (!(yield* connections.holdsConnection(runnerId))) return yield* sessions.requeue(start);
+      const answer = yield* connections.asked(runnerId, start.frame, Duration.infinity);
+      yield* sessions
+        .recordInputAnswer(
+          start.input,
+          Option.filter(answer, (one) => one._tag === "sessionInputResult"),
+          runnerId,
+        )
+        .pipe(
+          // The refusal is recorded on the input, where its reader sees it.
+          // Nobody waits on this start to be told.
+          Effect.catchIf(
+            (error): error is InvalidState => error instanceof InvalidState,
+            () => Effect.void,
+          ),
+        );
+    });
 
   return {
     /**
      * Moves this runner's oldest queued sessions to `starting`, as many as its
      * cap and its disk watermark allow, and sends the runner a frame to start
-     * each one. If a frame cannot be sent, the session goes back to the queue,
-     * and the next change to this runner's capacity tries again.
+     * each one, carrying the input the session starts with (`sendStart`).
+     * The answers are recorded later, on fibers of their own.
      */
     dispatch: (runnerId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -72,8 +121,13 @@ const make = Effect.gen(function* () {
         );
         // Send after the commit: a transaction never waits on a runner, and a
         // runner must never be told about a row that could still roll back.
-        for (const { sessionId, frame } of ready) {
-          if (!(yield* connections.tell(runnerId, frame))) yield* sessions.requeue(sessionId);
+        for (const start of ready) {
+          runInBackground(
+            absorbFailures(
+              "Recording the answer to a session's start failed",
+              sendStart(runnerId, start),
+            ),
+          );
         }
       }),
   };

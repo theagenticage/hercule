@@ -70,7 +70,9 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
 
 const buildSessionStart = (overrides: Partial<SessionStart> = {}): SessionStart => ({
   _tag: "sessionStart",
+  requestId: "0199e0e7-0000-7000-8000-0000000000fc",
   sessionId: SESSION,
+  input: { text: "hi" },
   providerId: "claude-code",
   config: {},
   secrets: {},

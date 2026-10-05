@@ -307,6 +307,8 @@ export interface QueuedSession {
   readonly config: unknown;
   /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
+  /** The model selection the session runs under now, which goes with the input its start carries. */
+  readonly modelSelection: ModelSelection;
 }
 
 /** A session's ingest state; see `ingestState`. */
@@ -815,6 +817,7 @@ const make = Effect.gen(function* () {
           readonly provider_id: string;
           readonly config: string;
           readonly agent_id: Uint8Array | null;
+          readonly model_selection: string;
         }>`
           SELECT s.id, s.created_at, s.spec,
                  -- The branch is used only once: the runner switches the main
@@ -823,7 +826,8 @@ const make = Effect.gen(function* () {
                  -- would change the branch under whatever the user has done in
                  -- that checkout since.
                  CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
-                 s.github_connection_id, pi.provider_id, pi.config, s.agent_id
+                 s.github_connection_id, pi.provider_id, pi.config, s.agent_id,
+                 s.model_selection
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
             -- A session waits until its workspace is ready. Starting it
@@ -848,6 +852,7 @@ const make = Effect.gen(function* () {
             providerId: row.provider_id,
             config: JSON.parse(row.config) as unknown,
             agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
+            modelSelection: JSON.parse(row.model_selection) as ModelSelection,
           })),
       ),
 

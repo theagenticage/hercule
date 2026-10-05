@@ -313,6 +313,21 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the oldest input of a session that is still `queued`, sent or
+     * not. While the session has not started, that is the input its start
+     * carries, or will carry.
+     */
+    oldestQueued: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.map(
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
+          ORDER BY created_at, id LIMIT 1
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+      ),
+
+    /**
      * Marks an input as sent, just before its frame goes out to the runner.
      * Returns the row as the update found it, not a copy read earlier, which
      * an edit in between could have changed. Returns `none` when the input was
@@ -421,6 +436,17 @@ const make = Effect.gen(function* () {
     requeue: (id: string, sentAt: string | null, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+      `),
+
+    /**
+     * Puts a claimed input back to waiting, with no reason, because its frame
+     * never left the controller: the runner was not connected. Nothing failed
+     * that a reader needs to know about. `sentAt` works as for `requeue`.
+     */
+    releaseClaim: (id: string, sentAt: string | null): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET sent_at = NULL, reason = NULL
         WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
       `),
 

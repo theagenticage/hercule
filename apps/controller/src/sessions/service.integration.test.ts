@@ -18,7 +18,12 @@ import { Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Redacted } from "
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionSpec, type ModelSelection, type SessionStart } from "@hercule/protocol";
+import {
+  SessionSpec,
+  type ModelSelection,
+  type SessionInputResult,
+  type SessionStart,
+} from "@hercule/protocol";
 import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
@@ -161,10 +166,16 @@ const insertQueuedSession = (
     readonly permissionProfileId?: string;
     /** The Agent the session runs as. Without it the session is a Thread. */
     readonly agentId?: string;
+    /**
+     * Stores no input with the session, like a row queued before a start
+     * carried its first input. `create` always stores the prompt.
+     */
+    readonly withoutInput?: boolean;
   },
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
+    const inputs = yield* inputRepository;
     const id = mintId();
     yield* sessions.insert({
       id,
@@ -187,6 +198,9 @@ const insertQueuedSession = (
       parentSessionId: undefined,
       at,
     });
+    if (options.withoutInput !== true) {
+      yield* inputs.insert({ sessionId: id, source: "user", actor: "user", text: "begin", at });
+    }
     return id;
   });
 
@@ -322,6 +336,7 @@ describe("SessionService.starting", () => {
         });
         const plain = yield* insertQueuedSession(runnerId, { instanceId, spec: specPlain });
         const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+        const inputs = yield* inputRepository;
         return {
           claimed,
           onBranch,
@@ -330,6 +345,7 @@ describe("SessionService.starting", () => {
           specPlain,
           onBranchAfter: yield* Effect.map(rows.one(onBranch), Option.getOrUndefined),
           plainAfter: yield* Effect.map(rows.one(plain), Option.getOrUndefined),
+          onBranchInput: yield* Effect.map(inputs.oldestQueued(onBranch), Option.getOrUndefined),
         };
       }),
     );
@@ -356,6 +372,51 @@ describe("SessionService.starting", () => {
     // Both claimed rows moved to `starting`.
     expect(result.onBranchAfter?.status).toBe("starting");
     expect(result.plainAfter?.status).toBe("starting");
+
+    // The frame carries the session's waiting input, claimed in the same
+    // transaction, with the model selection the session runs on.
+    const input = result.onBranchInput;
+    expect(input).toMatchObject({ status: "queued", text: "begin" });
+    expect(input!.sentAt).not.toBeNull();
+    expect(branch.requestId).toBe(input!.id);
+    expect(branch.input).toStrictEqual({
+      text: "begin",
+      modelSelection: result.specOnBranch.modelSelection,
+    });
+    expect(result.claimed.find((claim) => claim.sessionId === result.onBranch)?.input).toEqual(
+      input,
+    );
+  });
+
+  it("skips a queued session that has no waiting input to start with, and leaves it queued", async () => {
+    // A row queued before a start carried its first input. A start without
+    // an input would open no turn, so the session is left for a person to
+    // see, not started empty.
+    const result = await run(
+      Effect.gen(function* () {
+        const rows = yield* sessionRepository;
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const runnerId = mintId();
+        const legacy = yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec: buildSpec(instanceId, "clever"),
+          withoutInput: true,
+        });
+        const current = yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec: buildSpec(instanceId, "clever"),
+        });
+        const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+        return {
+          claimed: claimed.map((claim) => claim.sessionId),
+          current,
+          legacyAfter: yield* Effect.map(rows.one(legacy), Option.getOrUndefined),
+        };
+      }),
+    );
+
+    expect(result.claimed).toEqual([result.current]);
+    expect(result.legacyAfter?.status).toBe("queued");
   });
 
   it("creates a new token and stores only its hash on the row", async () => {
@@ -777,7 +838,9 @@ const HOUR_MS = 3_600_000;
 
 /**
  * Inserts a session started on this runner with a new token, last heard from
- * `heardAgoMs` ago. Its absolute timeout is one hour (`buildSpec`).
+ * `heardAgoMs` ago. Its absolute timeout is one hour (`buildSpec`). A session
+ * past `starting` has had the input its start carried delivered, so no input
+ * of it is on the wire.
  */
 const insertRunningSession = (
   runnerId: string,
@@ -787,6 +850,7 @@ const insertRunningSession = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sessionRepository;
+    const inputs = yield* inputRepository;
     const instanceId = yield* insertInstance("an-adapter", {});
     const sessionId = yield* insertQueuedSession(runnerId, {
       instanceId,
@@ -794,7 +858,10 @@ const insertRunningSession = (
       permissionProfileId: yield* aProfile,
     });
     const [claim] = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
-    if (status !== "starting") yield* rows.moved(sessionId, status, at);
+    if (status !== "starting") {
+      yield* rows.moved(sessionId, status, at);
+      yield* inputs.delivered(claim!.input.id, claim!.input.sentAt, "opened", at);
+    }
     const heardAt = new Date(Date.now() - heardAgoMs).toISOString();
     yield* sql`
       UPDATE sessions SET last_activity_at = ${heardAt} WHERE id = ${uuidFromString(sessionId)}
@@ -963,9 +1030,17 @@ const insertIdleSessionWithSentInput = (runnerId: string) =>
     return Option.getOrThrow(yield* inputs.claim(input.id, at));
   });
 
+/** Builds the runner's answer that the input `requestId` opened a turn. */
+const openedAnswer = (requestId: string): SessionInputResult => ({
+  _tag: "sessionInputResult",
+  requestId,
+  ok: true,
+  delivery: "opened",
+});
+
 /**
  * The runner's answer that an input opened a turn reaches the controller
- * twice: the send waiting for it records it (`delivered`), and the session's
+ * twice: the send waiting for it records it (`recordInputAnswer`), and the session's
  * ordered traffic applies it (`applyInputResult`). Either can run first.
  */
 describe("an answer that an input opened a turn", () => {
@@ -980,7 +1055,7 @@ describe("an answer that an input opened a turn", () => {
         const runnerId = mintId();
         const row = yield* insertIdleSessionWithSentInput(runnerId);
 
-        yield* sessions.delivered(row, "opened", runnerId);
+        yield* sessions.recordInputAnswer(row, Option.some(openedAnswer(row.id)), runnerId);
 
         return {
           status: yield* readStatus(row.sessionId),
@@ -1013,7 +1088,7 @@ describe("an answer that an input opened a turn", () => {
         };
         // The turn the input opened ends before the waiting send runs.
         yield* rows.moved(row.sessionId, "idle", at);
-        yield* sessions.delivered(row, "opened", runnerId);
+        yield* sessions.recordInputAnswer(row, Option.some(openedAnswer(row.id)), runnerId);
 
         return { applied, status: yield* readStatus(row.sessionId) };
       }),

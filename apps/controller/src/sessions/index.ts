@@ -29,7 +29,12 @@ export {
   type SessionRows,
   type StoredSession,
 } from "./repository";
-export { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./service";
+export {
+  cancelStrandedInputs,
+  SessionService,
+  SessionServiceLayer,
+  type StartRequest,
+} from "./service";
 export {
   readAssistantTexts,
   readTranscriptHead,

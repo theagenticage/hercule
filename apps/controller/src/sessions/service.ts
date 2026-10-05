@@ -183,10 +183,15 @@ export interface CreateRequest {
   readonly at: string;
 }
 
-/** A session claimed for starting, and the complete frame that starts it. */
+/**
+ * A session claimed for starting, the complete frame that starts it, and the
+ * input the frame carries, claimed with it.
+ */
 export interface StartRequest {
   readonly sessionId: string;
   readonly frame: SessionStart;
+  /** The session's oldest waiting input, claimed (`sentAt` set) in the same transaction. */
+  readonly input: StoredInput;
 }
 
 /**
@@ -276,6 +281,26 @@ const INPUT_DIRECTION: SortDirection = "asc";
 const NO_SUCH_INPUT = "no such input on that session";
 
 const ALREADY_SENT = "that input has already been sent to the runner";
+
+/**
+ * The refusal of `input.cancel` on the input a session that has not started
+ * yet starts with. A start always carries an input, so without it the
+ * session would start with nothing to do.
+ */
+const STARTS_WITH_INPUT =
+  "this input is what the session starts with, so it cannot be cancelled; stop the session instead";
+
+/** The reason stored on an input the runner refused without giving one. */
+const REFUSED = "that session's runner rejected the input";
+
+/**
+ * The reason stored on an input that did not reach the harness, either
+ * because the runner is not connected or because no reply came in time. Both
+ * cases look the same to the caller. The row goes back to waiting, and the
+ * next change to idle, a delivery pass, or a manual steer tries again.
+ */
+const NOT_DELIVERED =
+  "that session's runner did not take the input; it stays queued for the next turn";
 
 /**
  * The refusal of a second answer to one request. The runner still reports
@@ -639,10 +664,16 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Moves an `idle` session to `busy`, because an input the runner received
-   * opened a turn. Returns whether the session moved. Leaves the session
-   * alone when it is in any other status, or when another runner holds it
-   * now. Runs inside the caller's transaction.
+   * Moves an `idle` or `starting` session to `busy`, because an input the
+   * runner received opened a turn. Returns whether the session moved. Leaves
+   * the session alone when it is in any other status, or when another runner
+   * holds it now. Runs inside the caller's transaction.
+   *
+   * A `starting` session moves too, because the input its start carried can
+   * open a turn before the controller folds the runner's `session.started`:
+   * the answer to the input is read as soon as it arrives, while
+   * `session.started` waits in the ingest queue behind every other session's
+   * events.
    *
    * From that answer until the turn ends, a turn is running, even before the
    * runner reports `turn.started`. So an exit in between is an exit during a
@@ -653,13 +684,66 @@ const make = Effect.gen(function* () {
       const found = yield* sessions.one(sessionId);
       if (Option.isNone(found)) return false;
       const session = found.value;
-      if (session.runnerId !== runnerId || session.status !== "idle") return false;
+      if (session.runnerId !== runnerId) return false;
+      if (session.status !== "idle" && session.status !== "starting") return false;
       yield* sessions.moved(session.id, "busy", yield* nowIso);
       // A turn opened, so the process did work: the crash-loop guard no
       // longer applies to it, as when `turn.started` moves it to `busy`.
       yield* sessions.setCrashGuardArmed(session.id, false);
       return true;
     });
+
+  /**
+   * Records the delivery the runner reported for an input it received, as
+   * the send that waited for the answer. Part of `recordInputAnswer`. The row
+   * changes only while it still holds this send's claim (`row.sentAt`).
+   *
+   * An input that opened a turn also moves the session held by `runnerId` to
+   * `busy` (`openTurn`), in the same transaction. The same answer reaches
+   * `applyInputResult` on another fiber, and it can get there later. If only
+   * that method moved the session, the session would for a moment read
+   * `idle` with no input sent and unanswered, and the next delivery pass
+   * would send a second input into the turn that just opened.
+   */
+  const delivered = (
+    row: StoredInput,
+    delivery: Delivery,
+    runnerId: string,
+  ): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const recorded = yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
+        // Only the first to record the answer moves the session. When
+        // `applyInputResult` recorded it already, the turn may have ended
+        // since, and moving the session now would leave it `busy` for good.
+        if (recorded && delivery === "opened") yield* openTurn(runnerId, row.sessionId);
+        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+      }),
+    );
+
+  /**
+   * Handles an input whose delivery failed. Part of `recordInputAnswer`. It
+   * goes back to waiting with the reason, except when the session exited in
+   * the meantime and does not keep its input (`keepsInputsOnExit`): then it
+   * is cancelled. The session is read inside this transaction, so the check
+   * cannot race the write that exits the session.
+   */
+  const undelivered = (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const now = yield* sessions.one(row.sessionId);
+        const dropped =
+          Option.isSome(now) && now.value.status === "exited" && !keepsInputsOnExit(now.value);
+        if (dropped) {
+          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+        } else {
+          yield* inputs.requeue(row.id, row.sentAt, reason);
+        }
+        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+      }),
+    );
 
   return {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
@@ -794,8 +878,8 @@ const make = Effect.gen(function* () {
           at: open.at,
         });
         // The prompt is stored as an ordinary input, waiting with the
-        // session. It is sent when the harness starts, and a controller that
-        // restarts in between still has it.
+        // session. The frame that starts the session carries it, and a
+        // controller that restarts in between still has it.
         yield* inputs.insert({
           sessionId: open.id,
           source: "user",
@@ -819,9 +903,15 @@ const make = Effect.gen(function* () {
     /**
      * Moves up to `room` of this runner's oldest queued sessions to
      * `starting`, and returns the complete start frame for each: the token,
-     * the spec, the GitHub account it pushes as, when a Connection is set, and
-     * the `userMaterial` flag that lets a Thread on the local runner see User
-     * Material.
+     * the spec, the input the session starts with, the GitHub account it
+     * pushes as, when a Connection is set, and the `userMaterial` flag that
+     * lets a Thread on the local runner see User Material.
+     *
+     * The input is the session's oldest waiting input. It is claimed in the
+     * same write, exactly as an input sent on its own is, so the runner's
+     * answer to it is recorded the same way, and a controller restart before
+     * that answer cancels it like any other input on the wire.
+     *
      * Joins the caller's transaction and reads what the frames need inside it,
      * which is fine because a database read and a decrypt do not wait on a
      * runner. The daemon sends the frames only after that transaction commits.
@@ -836,6 +926,7 @@ const make = Effect.gen(function* () {
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const keyless: Array<string> = [];
+        const inputless: Array<string> = [];
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
         // room is for sessions that can start, not for specs that cannot.
@@ -867,6 +958,18 @@ const make = Effect.gen(function* () {
               keyless.push(row.id);
               continue;
             }
+            // Every path that queues a session stores its input first, and the
+            // input it starts with cannot be cancelled. Only a session queued
+            // by an older build, whose first input was cancelled, can have
+            // none. A start always carries an input, so such a session stays
+            // queued, where a user can see it and stop it. This is the last
+            // check that skips a row, so no row is claimed for a session that
+            // is then skipped.
+            const waiting = yield* inputs.oldestWaiting(row.id);
+            if (Option.isNone(waiting)) {
+              inputless.push(row.id);
+              continue;
+            }
             // The session's own token for the public API. It is created for
             // this start and its hash is stored in the same update that marks
             // the session as starting, so the token is valid exactly while the
@@ -875,6 +978,9 @@ const make = Effect.gen(function* () {
             // held.
             const token = mintToken();
             yield* sessions.started(row.id, hashToken(token), at);
+            // The row was read in this transaction, and nothing else writes
+            // between that read and this claim.
+            const input = Option.getOrThrow(yield* inputs.claim(waiting.value.id, at));
             yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
             // The account's token is read now rather than stored: the only
             // place it is written is the frame that carries it to the runner.
@@ -884,9 +990,15 @@ const make = Effect.gen(function* () {
                 : yield* needs.readGithubAccount(row.githubConnectionId);
             claimed.push({
               sessionId: row.id,
+              input,
               frame: {
                 _tag: "sessionStart",
+                requestId: input.id,
                 sessionId: row.id,
+                // The session's current model selection, as for an input sent
+                // on its own (`inputFrame`): a `session.update` while the
+                // session was queued changes it, and the spec does not.
+                input: { text: input.text, modelSelection: row.modelSelection },
                 providerId: row.providerId,
                 config: row.config as Schema.Json,
                 secrets: secrets.value,
@@ -920,6 +1032,12 @@ const make = Effect.gen(function* () {
             "skipped queued sessions whose provider instance's stored credential could not be " +
               "decrypted; they stay queued",
             keyless,
+          );
+        }
+        if (inputless.length > 0) {
+          yield* Effect.logWarning(
+            "skipped queued sessions that have no waiting input to start with; they stay queued",
+            inputless,
           );
         }
         return claimed;
@@ -1052,14 +1170,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Puts a session back on the queue when no runner accepted its start frame.
-     * Runs in its own transaction, because the one that claimed the row
-     * committed before the frame was sent.
+     * Puts a session back on the queue when its start frame could not be
+     * sent, because the runner was not connected, and puts the input the
+     * frame carried back to waiting. The input never left the controller, so
+     * no reason is stored on it. Runs in its own transaction, because the one
+     * that claimed the rows committed before the frame was sent.
      */
-    requeue: (sessionId: string): Effect.Effect<void, SqlError> =>
+    requeue: (start: StartRequest): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
+          const { sessionId, input } = start;
+          yield* inputs.releaseClaim(input.id, input.sentAt);
           // The update also clears the token hash. The token was sent on a
           // frame nobody accepted, so nothing holds it, and no one may call the
           // API as a queued session. The cache is cleared after the commit,
@@ -1329,9 +1451,10 @@ const make = Effect.gen(function* () {
       Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
 
     /**
-     * Claims the oldest input still waiting on a session that just changed to
-     * idle. Returns `none` when no input is waiting. The caller runs this in
-     * the transaction that moves the session to idle.
+     * Claims the oldest input still waiting on a session whose turn just
+     * ended, moving it from `busy` to `idle`. Returns `none` when no input is
+     * waiting. The caller runs this in the transaction that moves the session
+     * to idle.
      *
      * An input sent and still unanswered does not block this claim. It was
      * sent before the turn that just ended, so that turn already took it,
@@ -1362,38 +1485,40 @@ const make = Effect.gen(function* () {
       Effect.flatMap(nowIso, (at) => inputs.claimOldestUnlessOneIsOnTheWire(sessionId, at)),
 
     /**
-     * Records the delivery the runner reported for an input it received, as
-     * the send that waited for the answer. The row changes only while it
-     * still holds this send's claim (`row.sentAt`).
+     * Records what the runner answered for an input that was sent to it, as
+     * the send that waited for the answer: a `sessionInput`, or a
+     * `sessionStart` that carried the input. `answer` is `none` when no
+     * answer came: the runner was not connected, the connection ended, or the
+     * wait ran out. Returns the delivery when the runner reported one.
      *
-     * An input that opened a turn also moves the `idle` session held by
-     * `runnerId` to `busy`, in the same transaction. The same answer reaches
-     * `applyInputResult` on another fiber, and it can get there later. If
-     * only that method moved the session, the session would for a moment
-     * read `idle` with no input sent and unanswered, and the next delivery
-     * pass would send a second input into the turn that just opened.
+     * Fails with `InvalidState` when the input was not delivered, with the
+     * reason, after recording it: the runner's own message, a generic refusal
+     * when it gave none, or that no answer came. The input then goes back to
+     * waiting with that reason (`undelivered`), so the next change to idle or
+     * delivery pass sends it again.
      */
-    delivered: (
+    recordInputAnswer: (
       row: StoredInput,
-      delivery: Delivery,
+      answer: Option.Option<SessionInputResult>,
       runnerId: string,
-    ): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const recorded = yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
-          // Only the first to record the answer moves the session. When
-          // `applyInputResult` recorded it already, the turn may have ended
-          // since, and moving the session now would leave it `busy` for good.
-          if (recorded && delivery === "opened") yield* openTurn(runnerId, row.sessionId);
-          yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
-        }),
-      ),
+    ): Effect.Effect<Delivery, InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        const delivery =
+          Option.isSome(answer) && answer.value.ok ? answer.value.delivery : undefined;
+        if (delivery !== undefined) {
+          yield* delivered(row, delivery, runnerId);
+          return delivery;
+        }
+        const reason = Option.isSome(answer) ? (answer.value.message ?? REFUSED) : NOT_DELIVERED;
+        yield* undelivered(row, reason);
+        return yield* Effect.fail(createInvalidStateError(reason));
+      }),
 
     /**
      * Applies a runner's result for one input, in order with the session's
-     * events. A rejected input changes nothing here: the send that waits for
-     * the result puts it back to waiting.
+     * events. The input came in a `sessionInput` or in a `sessionStart`. A
+     * rejected input changes nothing here: the send that waits for the result
+     * puts it back to waiting.
      *
      * A delivered input is recorded on the row while a send still holds it.
      * The waiting send (`delivered`) and this method both get the answer, and
@@ -1401,13 +1526,14 @@ const make = Effect.gen(function* () {
      * send that runs after the turn ended cannot move the session back to
      * `busy`.
      *
-     * An input that opened a turn moves an `idle` session to `busy`, even
-     * when the send gave up waiting before the answer came, because the
-     * runner did open a turn. The session is left alone when:
+     * An input that opened a turn moves an `idle` or `starting` session to
+     * `busy` (`openTurn`), even when the send gave up waiting before the
+     * answer came, because the runner did open a turn. The session is left
+     * alone when:
      *
      * - it is already `busy`: the runner reported `turn.started` before this
      *   result, or the waiting send recorded the answer first;
-     * - it is in any other status but `idle`, such as `exited`;
+     * - it is in any other status, such as `exited`;
      * - another runner holds it now, so the result is stale.
      */
     applyInputResult: (
@@ -1433,29 +1559,6 @@ const make = Effect.gen(function* () {
               kind: "updated",
             });
           }
-        }),
-      ),
-
-    /**
-     * Handles an input whose delivery failed. It goes back to waiting with the
-     * reason, except when the session exited in the meantime and does not
-     * keep its input (`keepsInputsOnExit`): then it is cancelled. The session
-     * is read inside this transaction, so the check cannot race the write
-     * that exits the session.
-     */
-    undelivered: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const now = yield* sessions.one(row.sessionId);
-          const dropped =
-            Option.isSome(now) && now.value.status === "exited" && !keepsInputsOnExit(now.value);
-          if (dropped) {
-            yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
-          } else {
-            yield* inputs.requeue(row.id, row.sentAt, reason);
-          }
-          yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
         }),
       ),
 
@@ -1619,8 +1722,17 @@ const make = Effect.gen(function* () {
         }
         // `exited` is final, so a stray event after it is still recorded but
         // never brings the session back to life. Spec 06 §4.1 owns the rule.
+        //
+        // `session.started` moves only a `starting` session to `idle`. The
+        // answer to the input the start carried is read as soon as it
+        // arrives, while this event waits in the ingest queue, so that answer
+        // may already have opened a turn and moved the session to `busy`. A
+        // late `session.started` must not end that turn.
         const moved =
-          folded.status === undefined || folded.status === before || before === "exited"
+          folded.status === undefined ||
+          folded.status === before ||
+          before === "exited" ||
+          (event._tag === "session.started" && before !== "starting")
             ? undefined
             : folded.status;
         let exitedHoldingInput = false;
@@ -1715,9 +1827,14 @@ const make = Effect.gen(function* () {
 
     /**
      * Cancels an input still waiting on its session, and returns the
-     * cancelled input. Fails with `InvalidState` when the input was already
-     * sent, delivered or cancelled, or when the session answers an
-     * assistant's conversation.
+     * cancelled input. Fails with `InvalidState` when:
+     *
+     * - the input was already sent, delivered or cancelled;
+     * - the session answers an assistant's conversation;
+     * - the session is `queued` or `starting` and the input is the one it
+     *   starts with: its oldest queued input. A start always carries an
+     *   input, so a session with that input cancelled would start with
+     *   nothing to do. The user stops the session instead.
      */
     cancelInput: (
       sessionId: Id,
@@ -1729,6 +1846,15 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Read inside the transaction, so a dispatch that starts the
+            // session meanwhile cannot slip between this check and the cancel.
+            const session = yield* readSession(sessionId);
+            if (session.status === "queued" || session.status === "starting") {
+              const first = yield* inputs.oldestQueued(sessionId);
+              if (Option.isSome(first) && first.value.id === inputId) {
+                return yield* Effect.fail(createInvalidStateError(STARTS_WITH_INPUT));
+              }
+            }
             const row = yield* queuedInput(sessionId, inputId);
             yield* inputs.cancel(inputId);
             yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });

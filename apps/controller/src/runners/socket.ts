@@ -98,8 +98,8 @@ const CAPABILITIES: ReadonlyArray<string> = [
 
 const UNREADABLE = "that is not a message this controller can read";
 const WRONG_VERSION =
-  `this controller speaks runner protocol version ${String(PROTOCOL_VERSION)}; ` +
-  "update the runner to a build that matches the controller";
+  `this controller speaks runner protocol version ${String(PROTOCOL_VERSION)}, and the runner ` +
+  `speaks another; upgrade the runner to a build that speaks version ${String(PROTOCOL_VERSION)}`;
 const GREETED_ALREADY = "this connection has already said hello";
 
 /** The RFC 6455 protocol error close code. The other close codes used here are defined in the protocol package. */

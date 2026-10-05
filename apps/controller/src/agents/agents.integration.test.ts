@@ -437,6 +437,9 @@ describe("deleting an agent a session still points at", () => {
           arranged,
           findInstanceId(arranged, "claude-provider"),
         );
+        // The runner leaves a starting session's start unanswered, so the
+        // session cannot move on to `busy`.
+        if (status === "starting") arranged.wire.answering(() => undefined);
         const session = await spawnSessionFor(arranged, agent.id);
         if (status === "starting") await waitForStartFrames(arranged, session.id, 1);
         if (status === "idle") await driveSessionToIdle(arranged, session);

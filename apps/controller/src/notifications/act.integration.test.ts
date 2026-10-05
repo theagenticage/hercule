@@ -535,8 +535,9 @@ describe("an agent's question", () => {
       await waitUntil("sent the answer to the session", () =>
         listSentTexts(arranged, agent.session.id).includes("Yes, deploy it.") ? true : undefined,
       );
-      // The prompt was sent first; the answer was sent once, by the second act.
-      expect(listSentTexts(arranged, agent.session.id)).toEqual(["hello", "Yes, deploy it."]);
+      // The prompt rode the start frame; the answer was sent once, by the
+      // second act.
+      expect(listSentTexts(arranged, agent.session.id)).toEqual(["Yes, deploy it."]);
     });
   });
 });
