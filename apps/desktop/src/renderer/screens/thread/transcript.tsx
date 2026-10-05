@@ -30,7 +30,22 @@ import {
   type Ref,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { resolveBrowserTimezone, type Pose, type ThreadBlock } from "@hercule/client-core";
+import {
+  resolveBrowserTimezone,
+  type Pose,
+  type ThreadBlock as CoreThreadBlock,
+} from "@hercule/client-core";
+import type { ReactNode } from "react";
+
+/** PROTOTYPE (#354): a block the subagents prototype draws itself, spliced in among the real ones. */
+export interface PrototypeBlock {
+  readonly kind: "custom";
+  readonly key: string;
+  readonly estimate: number;
+  readonly render: () => ReactNode;
+}
+
+type ThreadBlock = CoreThreadBlock | PrototypeBlock;
 import { ageClock } from "../../app/age-clock";
 import { AgentMessage, LiveRow, TurnEnding, UserMessage, WaitingNote, WorkDivider } from "./blocks";
 import { useShowsClassicScrollbar } from "./classic-scrollbar";
@@ -97,6 +112,8 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
       );
     case "live":
       return 42.8;
+    case "custom":
+      return block.estimate;
     case "work":
     case "ending":
     case "waiting":
@@ -314,6 +331,8 @@ export function Transcript({
         );
       case "ending":
         return <TurnEnding block={block} />;
+      case "custom":
+        return <>{block.render()}</>;
       case "waiting":
         return (
           <WaitingNote

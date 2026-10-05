@@ -279,6 +279,7 @@ const buildRouter = (
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
+  renderThread?: (sessionId: string) => JSX.Element,
 ) => {
   const rootRoute = createRootRoute();
   const connectedRoute = createRoute({
@@ -308,7 +309,9 @@ const buildRouter = (
           getParentRoute: () => shellRoute,
           path: "threads/$sessionId",
           component: () =>
-            openThreadId === undefined ? null : (
+            openThreadId === undefined ? null : renderThread !== undefined ? (
+              renderThread(openThreadId)
+            ) : (
               <ThreadScreen key={openThreadId} sessionId={openThreadId} />
             ),
         }),
@@ -383,11 +386,14 @@ async function mountShellSpecimen(
   records: SidebarRecords,
   path: string,
   screens: OpenScreens,
+  renderThread?: (sessionId: string) => JSX.Element,
+  onQueryClient?: (queryClient: QueryClient, client: HerculeClient) => void,
 ): Promise<void> {
   applySheetTheme();
   const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);
+  onQueryClient?.(queryClient, client);
   const pendingSubmissions = createPendingSubmissions();
   if (screens.draft !== undefined) {
     pendingSubmissions.writePicks(
@@ -395,7 +401,13 @@ async function mountShellSpecimen(
       screens.draft.picks,
     );
   }
-  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
+  const router = buildRouter(
+    client,
+    pendingSubmissions,
+    path,
+    screens.thread?.session.id,
+    renderThread,
+  );
   await router.load();
 
   const root = document.getElementById("root");
@@ -456,4 +468,24 @@ export async function mountDraftSpecimen(
   draft: DraftScreenRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft });
+}
+
+/**
+ * PROTOTYPE (#354): draws the shell with `thread` open, as `mountThreadSpecimen`
+ * does, but with `renderThread` drawing the main pane instead of the app's
+ * thread screen. `onQueryClient` receives the cache before the first render.
+ */
+export async function mountPrototypeThreadSpecimen(
+  records: SidebarRecords,
+  thread: ThreadScreenRecords,
+  renderThread: (sessionId: string) => JSX.Element,
+  onQueryClient: (queryClient: QueryClient, client: HerculeClient) => void,
+): Promise<void> {
+  await mountShellSpecimen(
+    records,
+    `/threads/${thread.session.id}`,
+    { thread },
+    renderThread,
+    onQueryClient,
+  );
 }

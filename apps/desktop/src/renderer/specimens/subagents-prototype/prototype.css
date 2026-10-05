@@ -1,0 +1,667 @@
+/* PROTOTYPE (#354), throwaway. The subagents prototype's own parts, drawn
+   with the Bureau tokens. */
+
+/* ------------------------------------------------------------ shared */
+
+.proto-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: var(--w-medium);
+}
+/* A subagent with no description is called by the start of its brief, in
+   italics and quotes, so it never reads as a name someone gave it. */
+.proto-name--unnamed {
+  font-style: italic;
+  font-weight: var(--w-regular);
+  color: var(--muted);
+}
+.proto-name--unnamed::before {
+  content: "“";
+}
+.proto-name--unnamed::after {
+  content: "”";
+}
+.proto-ink {
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+}
+.proto-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.proto-flip {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+.proto-link {
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.proto-link:hover {
+  text-decoration: underline;
+}
+.proto-stop {
+  gap: 5px;
+  color: var(--fail-ink);
+}
+.proto-stop:hover {
+  background: var(--fail-tint);
+}
+
+/* The Request pager: a tab on the dock's top edge, in the dock's tint, that
+   says whose Request the dock shows and which of the open ones. */
+.proto-pager {
+  position: relative;
+  z-index: 2;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 28px);
+  height: 30px;
+  margin: 0 0 -1px 14px;
+  padding: 0 12px 0 6px;
+  border: 1px solid color-mix(in oklab, var(--you) 45%, transparent);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--you-tint);
+  font-size: var(--t-12);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.proto-pager:not(:has(.proto-pager-nav)) {
+  padding-left: 12px;
+}
+.proto-pager-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+  border-right: 1px solid color-mix(in oklab, var(--you) 45%, transparent);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.proto-pager-nav b {
+  font-weight: var(--w-bold);
+  padding: 0 2px;
+}
+.proto-pager-nav .icon-btn:disabled {
+  opacity: 0.35;
+}
+.proto-pager-who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proto-pager-sub {
+  color: var(--faint);
+}
+/* The dock's top-left corner sits under the tab, so it is square there. */
+.proto-pager + .dock {
+  border-top-left-radius: 6px;
+}
+
+/* The brief: what the parent asked, as the first block of the subagent's
+   transcript. It is not the user's bubble: nobody typed it here. */
+.proto-brief {
+  margin-left: 46px;
+  padding: 10px 14px 12px;
+  border-left: 3px solid var(--who);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: var(--who-tint);
+}
+.proto-brief-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.proto-brief-meta b {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.proto-brief-text {
+  margin: 0;
+  font-size: var(--t-14);
+  line-height: 1.55;
+  cursor: default;
+}
+
+/* The floating bar that switches variant and state. */
+.proto-switcher {
+  position: fixed;
+  z-index: 100;
+  left: 8px;
+  bottom: 64px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 4px 0 6px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-3);
+  opacity: 0.35;
+  transition: opacity var(--dur-2);
+}
+.proto-switcher:hover {
+  opacity: 1;
+}
+.proto-switcher .icon-btn {
+  color: inherit;
+}
+.proto-switcher-name {
+  text-align: center;
+  white-space: nowrap;
+}
+.proto-switcher-sep {
+  width: 1px;
+  height: 18px;
+  background: color-mix(in oklab, var(--surface) 25%, transparent);
+}
+.proto-switcher .seg {
+  background: color-mix(in oklab, var(--surface) 12%, transparent);
+  box-shadow: none;
+}
+.proto-switcher .seg button {
+  height: 22px;
+  color: color-mix(in oklab, var(--surface) 70%, transparent);
+  font-size: var(--t-12);
+}
+.proto-switcher .seg button[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+/* ------------------------------------------- A: the inline tree */
+
+.proto-a-group {
+  margin-left: 46px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  padding: 4px;
+}
+.proto-a-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px 6px;
+  font-size: var(--t-12);
+  color: var(--faint);
+}
+.proto-a-group-head b {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.proto-a-tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.proto-a-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  cursor: default;
+  transition: background var(--dur-1);
+}
+.proto-a-row.is-compact {
+  min-height: 32px;
+  gap: 8px;
+}
+.proto-a-row:hover {
+  background: var(--hover);
+}
+/* The elbow that ties a nested subagent to its parent's face. */
+.proto-a-elbow {
+  position: absolute;
+  left: calc(var(--elbow-x, 0px));
+  top: -6px;
+  width: 9px;
+  height: 22px;
+  margin-left: -13px;
+  border-left: 1.5px solid var(--line);
+  border-bottom: 1.5px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+.proto-a-row .proto-a-elbow {
+  left: auto;
+  margin-left: -14px;
+}
+.proto-a-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+.proto-a-line {
+  font-size: var(--t-12);
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proto-a-line.is-waiting {
+  color: var(--you-ink);
+}
+.proto-a-line.is-failed {
+  color: var(--fail-ink);
+}
+.proto-a-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* Stop shows on hover, over the row's end, so a row does not shout. */
+.proto-a-row .proto-stop,
+.proto-b-row .proto-stop {
+  position: absolute;
+  right: 6px;
+  opacity: 0;
+  background: var(--raised);
+  box-shadow: var(--shadow-1);
+}
+.proto-a-row:hover .proto-stop,
+.proto-b-row:hover .proto-stop {
+  opacity: 1;
+}
+
+.proto-a-chip-wrap {
+  position: relative;
+}
+.proto-a-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 400px;
+  padding: 4px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-3);
+  white-space: normal;
+}
+.proto-a-popover footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding: 6px 4px 2px 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+.proto-a-running {
+  align-self: flex-end;
+  gap: 8px;
+  height: 34px;
+  margin-bottom: 8px;
+  padding: 0 4px 0 8px;
+  font-size: var(--t-12);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.proto-a-faces,
+.proto-b-faces {
+  display: inline-flex;
+}
+.proto-a-faces > * + *,
+.proto-b-faces > * + * {
+  margin-left: -5px;
+}
+
+/* ------------------------------- A and C: a subagent's own page */
+
+.proto-page {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.proto-crumbs {
+  min-width: 0;
+}
+.proto-crumb {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.proto-crumb-sep {
+  padding: 0 2px;
+  color: var(--faint);
+}
+.proto-crumbs .ptab {
+  max-width: 260px;
+}
+.proto-crumbs .proto-crumb-here {
+  max-width: 340px;
+}
+.proto-crumb-here {
+  color: var(--ink);
+}
+.proto-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+}
+.proto-status-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-12);
+  color: var(--faint);
+  line-height: 1.4;
+}
+.proto-status-text > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.proto-status-text b {
+  font-size: var(--t-13);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.proto-status-text b.is-waiting {
+  color: var(--you-ink);
+}
+.proto-status-text b.is-failed {
+  color: var(--fail-ink);
+}
+
+/* C: the page is tinted in the subagent's hue, from the top, and its tab
+   says "subagent", so it can never pass for a thread. */
+.proto-page.is-strong {
+  background: linear-gradient(to bottom, var(--who-tint), var(--surface) 140px);
+}
+.proto-page.is-strong::before {
+  content: "";
+  position: absolute;
+  z-index: 6;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--who);
+}
+.proto-page.is-strong .proto-crumb-here {
+  background: var(--who-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 55%, transparent);
+}
+.proto-tag {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--who);
+  color: var(--face-ink) !important;
+  font-size: var(--t-11) !important;
+  font-weight: var(--w-bold) !important;
+  letter-spacing: 0.02em;
+}
+
+/* ------------------------------------------- B: the side panel */
+
+.proto-b-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.proto-b-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.proto-b-panel {
+  flex: none;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  box-shadow: -1px 0 0 var(--line-soft);
+}
+.proto-b-panel.is-wide {
+  width: 460px;
+}
+.proto-b-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 10px 10px 4px 14px;
+  -webkit-app-region: no-drag;
+}
+.proto-b-head > b {
+  font-weight: var(--w-bold);
+}
+.proto-b-back {
+  margin-left: -8px;
+  gap: 4px;
+}
+.proto-b-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 16px;
+}
+.proto-b-section {
+  margin: 14px 0 4px 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.proto-b-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 5px 8px 5px 10px;
+  border-radius: var(--r-sm);
+  cursor: default;
+}
+.proto-b-row:hover {
+  background: var(--hover);
+}
+.proto-b-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+.proto-b-line {
+  font-size: var(--t-12);
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proto-b-line.is-waiting {
+  color: var(--you-ink);
+}
+.proto-b-line.is-failed {
+  color: var(--fail-ink);
+}
+.proto-b-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.proto-b-who {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 4px 8px 6px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: var(--who-tint);
+}
+.proto-b-who-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-12);
+  color: var(--faint);
+  line-height: 1.45;
+}
+.proto-b-who-text .proto-name {
+  font-size: var(--t-14);
+  color: var(--ink);
+}
+.proto-b-tx {
+  padding: 0 4px 0 0;
+}
+.proto-b-tx .tx-item:first-child {
+  padding-top: 8px;
+}
+.proto-b-tx .proto-brief,
+.proto-b-tx .proto-b-children {
+  margin-left: 46px;
+}
+.proto-b-children {
+  padding: 4px 0;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.proto-b-dock {
+  padding: 0 10px 10px;
+}
+.proto-b-dock .dock {
+  margin-bottom: 0;
+  padding-bottom: 12px;
+  border-radius: 16px;
+}
+.proto-b-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 46px;
+  padding: 5px 10px 5px 6px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.proto-b-chip:hover {
+  background: var(--hover);
+}
+.proto-b-chip b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.proto-b-show {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+}
+
+/* --------------------------------------- C: the sidebar nest */
+
+.proto-c-nest {
+  position: relative;
+}
+.proto-c-row {
+  width: 100%;
+  min-height: 28px;
+  gap: 7px;
+  font-size: var(--t-12);
+  text-align: left;
+}
+/* The rail that ties the nested rows to their thread. */
+.proto-c-nest::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 0;
+  bottom: 14px;
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.proto-c-row .side-name {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+.proto-c-row .proto-name {
+  font-weight: var(--w-regular);
+}
+.proto-c-row.is-finished .proto-name:not(.proto-name--unnamed) {
+  color: var(--muted);
+}
+/* While a subagent is open, its row is the open screen, not its thread's. */
+.side-list:has(.proto-c-row.is-on) .side-row.is-on:not(.proto-c-row) {
+  background: transparent;
+}
+.proto-c-links {
+  margin: 0 0 0 46px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.proto-c-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  font-size: var(--t-13);
+}
+.proto-c-link:hover {
+  background: var(--hover);
+}
+.proto-c-arrow {
+  color: var(--faint);
+}
+.proto-c-state {
+  margin-left: auto;
+  padding-left: 12px;
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.proto-c-running {
+  gap: 6px;
+  padding-left: 10px;
+}
+.proto-c-running-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}

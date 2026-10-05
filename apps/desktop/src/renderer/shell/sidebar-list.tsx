@@ -17,6 +17,7 @@
  * the list, focus moves to the item `pickFocusFallback` picks.
  */
 import {
+  Fragment,
   useCallback,
   useLayoutEffect,
   useMemo,
@@ -24,6 +25,7 @@ import {
   useState,
   type FocusEvent,
   type JSX,
+  type ReactNode,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
@@ -126,19 +128,22 @@ const renderItem = (
       );
     case "thread-row":
       return (
-        <ThreadRow
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          sessionId={item.sessionId}
-          title={item.title}
-          secondLine={item.secondLine}
-          pose={item.pose}
-          end={item.end}
-          activityAt={item.activityAt}
-          onScreen={onScreen}
-          officeOpen={officeOpen}
-        />
+        <Fragment key={item.key}>
+          <ThreadRow
+            key={item.key}
+            itemKey={item.key}
+            leading={item.leading}
+            sessionId={item.sessionId}
+            title={item.title}
+            secondLine={item.secondLine}
+            pose={item.pose}
+            end={item.end}
+            activityAt={item.activityAt}
+            onScreen={onScreen}
+            officeOpen={officeOpen}
+          />
+          {prototypeSidebar.renderAfterThread?.(item.sessionId)}
+        </Fragment>
       );
     case "draft-row":
       return <DraftRow key={item.key} itemKey={item.key} leading={item.leading} meta={item.meta} />;
@@ -167,6 +172,9 @@ const renderItem = (
  *   pressed. It must keep its identity across renders, or every "more" row
  *   draws again on each render.
  */
+/** PROTOTYPE (#354): lets the subagents prototype draw rows under a thread's row. */
+export const prototypeSidebar: { renderAfterThread?: (sessionId: string) => ReactNode } = {};
+
 export function SidebarList({
   items,
   officeOpen,

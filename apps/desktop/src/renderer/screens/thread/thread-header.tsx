@@ -46,7 +46,14 @@ const SELECTED_TAB_PROPS = { className: "is-on" } as const;
  * move. The lists it reads are in the cache before the thread screen renders,
  * so nothing here waits in practice.
  */
-export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX.Element {
+export function ThreadHeader({
+  sessionId,
+  extra,
+}: {
+  readonly sessionId: string;
+  /** PROTOTYPE (#354): pills drawn before Open in editor. */
+  readonly extra?: ReactNode;
+}): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
@@ -81,6 +88,7 @@ export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX
         )}
       </ThreadTabsPill>
       <span className="spacer" />
+      {extra}
       <span className="pill">
         <button type="button" className="icon-btn" title="Open in editor" aria-disabled="true">
           <EditorIcon />

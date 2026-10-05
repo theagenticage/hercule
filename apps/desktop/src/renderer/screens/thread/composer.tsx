@@ -1,4 +1,11 @@
-import { useRef, useSyncExternalStore, type FocusEvent, type JSX, type Ref } from "react";
+import {
+  useRef,
+  useSyncExternalStore,
+  type FocusEvent,
+  type JSX,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   useIsMutating,
   useMutation,
@@ -115,7 +122,13 @@ export function ThreadComposer({
   onFocusChange,
   scrollTranscriptToBottom,
   ref,
+  aboveDock,
+  dockFaceSeed,
 }: {
+  /** PROTOTYPE (#354): drawn between the queued inputs and the dock. */
+  readonly aboveDock?: ReactNode;
+  /** PROTOTYPE (#354): whose face the dock draws. */
+  readonly dockFaceSeed?: string;
   readonly sessionId: string;
   readonly shrunk: boolean;
   readonly onFocusChange: (focused: boolean) => void;
@@ -266,11 +279,13 @@ export function ThreadComposer({
         <div className="fold">
           <QueuedInputs sessionId={sessionId} />
         </div>
+        {aboveDock}
         {session.openRequest === null ? null : (
           <RequestDock
             key={session.openRequest.requestId}
             sessionId={sessionId}
             request={session.openRequest}
+            {...(dockFaceSeed === undefined ? {} : { faceSeed: dockFaceSeed })}
           />
         )}
         <div className="composer-card">

@@ -112,9 +112,12 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
 export function RequestDock({
   sessionId,
   request,
+  faceSeed = sessionId,
 }: {
   readonly sessionId: string;
   readonly request: OpenRequest;
+  /** PROTOTYPE (#354): whose face asks; a subagent's id draws the subagent's face. */
+  readonly faceSeed?: string;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
@@ -195,7 +198,7 @@ export function RequestDock({
     >
       <div className="fold">
         <div className="dock-q">
-          <Face look={buildLook(sessionId)} pose="waiting" size={30} />
+          <Face look={buildLook(faceSeed)} pose="waiting" size={30} />
           <span className="dock-text">
             <span id={titleId}>{card.title}</span>
             {card.subject.map((line, index) => (
@@ -314,7 +317,7 @@ export function RequestDock({
         )}
       </div>
       <div className="dock-mini">
-        <Face look={buildLook(sessionId)} pose="waiting" size={24} />
+        <Face look={buildLook(faceSeed)} pose="waiting" size={24} />
         <span className="dock-mini-q">{formatRequestQuestion(request)}</span>
         <span className="spacer" />
         {card.rows
