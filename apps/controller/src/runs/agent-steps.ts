@@ -379,6 +379,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
                 runnerId: placed.runnerId,
                 workspaceId: placed.workspaceId,
                 prompt,
+                title: `${run.plan.name} · ${record.stepId}`,
                 previousSessionId: findPreviousStepSession(run, step),
               }),
               CurrentActor,

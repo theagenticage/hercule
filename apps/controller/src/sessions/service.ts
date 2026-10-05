@@ -174,6 +174,11 @@ export interface CreateRequest {
   /** The spec sent to the runner. The row's stored fields are taken from it. */
   readonly spec: SessionSpec;
   readonly prompt: string;
+  /**
+   * The session's title, chosen by the caller, or `undefined` to take it
+   * from the prompt (`buildTitle`).
+   */
+  readonly title: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -360,13 +365,14 @@ const findNativeId = (event: ProviderEvent): string | undefined =>
 const MAX_TITLE_LENGTH = 80;
 
 /**
- * Builds a short title for a session from its first prompt: the first
- * non-blank line, trimmed and cut to `MAX_TITLE_LENGTH`. That way a sidebar
- * row has something to show without reading the transcript.
+ * Builds a session's short title, trimmed and cut to `MAX_TITLE_LENGTH`:
+ * `chosen` when the caller chose a title, otherwise the first non-blank line
+ * of the session's first prompt. That way a sidebar row has something to show
+ * without reading the transcript.
  */
-const buildTitle = (prompt: string): string => {
-  const line = prompt.split("\n").find((one) => one.trim().length > 0) ?? "";
-  return line.trim().slice(0, MAX_TITLE_LENGTH);
+const buildTitle = (chosen: string | undefined, prompt: string): string => {
+  const title = chosen ?? prompt.split("\n").find((one) => one.trim().length > 0) ?? "";
+  return title.trim().slice(0, MAX_TITLE_LENGTH);
 };
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
@@ -841,7 +847,7 @@ const make = Effect.gen(function* () {
         const actor = yield* currentStamp;
         yield* sessions.insert({
           id: open.id,
-          title: buildTitle(open.prompt),
+          title: buildTitle(open.title, open.prompt),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,

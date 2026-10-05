@@ -62,7 +62,12 @@ export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
 
 export const Session = Schema.Struct({
   id: Id,
-  /** The opening prompt's first non-empty line, capped at 80 characters; set once and never rewritten. */
+  /**
+   * The session's title, capped at 80 characters, set once and never
+   * rewritten. For an agent step's session it is the run's workflow name and
+   * the step's id, as `<workflow name> · <step id>`. For any other session it
+   * is the opening prompt's first non-empty line.
+   */
   title: Schema.String,
   status: SessionStatus,
   /**

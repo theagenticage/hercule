@@ -94,6 +94,7 @@ export const makeStepSessions = Effect.gen(function* () {
         runnerId: request.runnerId,
         workspaceId: request.workspaceId,
         prompt: request.prompt,
+        title: request.title,
       });
       return { sessionId: placed.sessionId, send: placed.start };
     });

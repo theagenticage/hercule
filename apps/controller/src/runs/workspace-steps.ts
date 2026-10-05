@@ -82,6 +82,11 @@ export interface StepSessionToOpen {
   /** The step's prompt, rendered for this iteration. */
   readonly prompt: string;
   /**
+   * The title of a new session: the run's workflow name and the step's id,
+   * as `<workflow name> · <step id>`.
+   */
+  readonly title: string;
+  /**
    * The session an earlier iteration of the step ran in, whose next turn
    * this iteration is, or undefined to start a new session.
    */

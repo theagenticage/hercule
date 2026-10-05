@@ -324,9 +324,12 @@ describe("agent steps over the runner socket", () => {
         // works in no workspace.
         expect(start.spec.workspaceId).toBeNull();
         expect(start.spec).not.toHaveProperty("outputSchema");
+        // The session is named for the run's workflow and the step, not for
+        // the prompt, which may be long and is the same in every run.
         expect(await readSession(arranged, sessionId)).toMatchObject({
           runId,
           stepId: IMPLEMENT,
+          title: "Implement, then file a task · implement",
         });
         const started = await readRun(arranged.harness.base, arranged.token, runId);
         expect(started.runnerId).toBe(arranged.runnerId);

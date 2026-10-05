@@ -190,6 +190,8 @@ interface Placing {
   /** The spec the runner receives. Its workspace id is filled in while placing. */
   readonly spec: SessionSpec;
   readonly prompt: string;
+  /** The session's title, or undefined to take it from the prompt. */
+  readonly title: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, beyond the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -535,6 +537,7 @@ const make = Effect.gen(function* () {
             parentSessionId: open.parentSessionId,
             spec: { ...open.spec, workspaceId: opened.workspaceId },
             prompt: open.prompt,
+            title: open.title,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
@@ -666,6 +669,7 @@ const make = Effect.gen(function* () {
           parentSessionId: undefined,
           spec,
           prompt: request.text,
+          title: undefined,
           kind: "session.spawned",
           projectId: undefined,
           workspace: undefined,
@@ -712,6 +716,7 @@ const make = Effect.gen(function* () {
       readonly runnerId: string;
       readonly workspaceId: string | null;
       readonly prompt: string;
+      readonly title: string;
     }): Effect.Effect<
       { readonly sessionId: string; readonly start: Effect.Effect<void, SqlError> },
       | InvalidState
@@ -766,6 +771,7 @@ const make = Effect.gen(function* () {
           parentSessionId: undefined,
           spec,
           prompt: request.prompt,
+          title: request.title,
           kind: "session.spawned",
           projectId: undefined,
           workspace: undefined,
@@ -903,6 +909,7 @@ const make = Effect.gen(function* () {
           parentSessionId: undefined,
           spec,
           prompt: decoded.prompt,
+          title: undefined,
           kind: "session.spawned",
           projectId: decoded.projectId,
           workspace: decoded.workspace,
@@ -985,6 +992,7 @@ const make = Effect.gen(function* () {
             null,
           ),
           prompt,
+          title: undefined,
           kind: "session.continued",
           projectId: parent.projectId ?? undefined,
           workspace: undefined,
