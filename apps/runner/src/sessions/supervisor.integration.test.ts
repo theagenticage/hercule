@@ -30,6 +30,15 @@ import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
 import { makeWorkspaces } from "../workspaces";
 import { makeWorkspaceSteps } from "../workspace-steps";
+import {
+  addBranch,
+  buildCheckout,
+  buildProvisionFrame,
+  cleanTemporaries,
+  createId,
+  makeRemote,
+  runGitOrThrow,
+} from "../workspaces/testing";
 import { makeSupervising } from "./supervisor";
 
 const roots: Array<string> = [];
@@ -39,6 +48,7 @@ const attachments: Array<Scope.Closeable> = [];
 afterAll(async () => {
   for (const scope of attachments.splice(0)) await Effect.runPromise(Scope.close(scope, Exit.void));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  cleanTemporaries();
 });
 
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
@@ -1823,6 +1833,81 @@ describe("a stop that arrives while a session is still starting", () => {
     expect(sortStopsBySession(fake)).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
     // A session on its way out gets no turn.
     expect(fake.inputs).toEqual([]);
+    expectStartInputRefused(sent, "was stopped before its input was handed over");
+  });
+
+  it("spawns no harness when it arrives while the start switches the workspace's branch", async () => {
+    const fake = createFake();
+    const { runner, machine, steps } = buildConnection(fake);
+    const remote = makeRemote();
+    addBranch(remote, "release");
+    const workspaceId = createId();
+    await machine.workspaces.provision(
+      buildProvisionFrame({
+        workspaceId,
+        kind: "primary",
+        checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+      }),
+    );
+    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
+
+    // Other git work holds the workspace, so the start's branch switch waits
+    // for it. `switchAsked` is set once the start asks for the workspace,
+    // which is after its own check for a stop and before it adds its entry.
+    let switchAsked = false;
+    const sent: Array<RunnerToController> = [];
+    const supervisor = runner.forConnection({
+      machine: {
+        ...machine,
+        workspaces: {
+          ...machine.workspaces,
+          runExclusively: (id, work) => {
+            switchAsked = true;
+            return machine.workspaces.runExclusively(id, work);
+          },
+        },
+      },
+      workspaceSteps: steps,
+      send: (frame) => Effect.sync(() => void sent.push(frame)),
+    });
+    let releaseWorkspace: () => void = () => {};
+    const otherWork = new Promise<void>((resolve) => {
+      releaseWorkspace = resolve;
+    });
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* Effect.forkChild(
+          machine.workspaces.runExclusively(
+            workspaceId,
+            Effect.promise(() => otherWork),
+          ),
+        );
+        yield* Effect.forkChild(
+          supervisor.start({
+            ...START,
+            spec: { ...SPEC, workspaceId },
+            checkoutBranch: "release",
+          }),
+        );
+        yield* waitUntil("the start asked to switch the branch", () => switchAsked);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        releaseWorkspace();
+        yield* waitUntil("the exit reached the wire", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+      }),
+    );
+
+    // The branch switch ran, but no harness was asked for, so there was none
+    // to stop.
+    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
+    expect(fake.contexts).toEqual([]);
+    expect(fake.stops).toEqual([]);
+    expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.exited"]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
     expectStartInputRefused(sent, "was stopped before its input was handed over");
   });
 });

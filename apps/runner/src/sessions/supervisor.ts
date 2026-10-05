@@ -158,12 +158,14 @@ interface Live {
  * check the adapter, or resolve its context. The session has no `live` entry
  * in that time, so a stop that arrives then is kept here.
  *
- * - A stop kept here before the start resolves its context means no harness
- *   is spawned: the start refuses its input and reports the exit itself, with
- *   reason `stopped`. The controller has moved the session to `starting`, and
- *   it ends the session only when a `session.exited` arrives.
- * - A stop that arrives after that check moves to the entry's `pendingStop`
- *   when the entry is added, and the start stops the harness once it is up.
+ * - A stop kept here means no harness is spawned: the start refuses its input
+ *   and reports the exit itself, with reason `stopped`. The controller has
+ *   moved the session to `starting`, and it ends the session only when a
+ *   `session.exited` arrives. The start checks for such a stop before it
+ *   resolves its context, and again once it has added its entry, because
+ *   resolving the context can take a long time.
+ * - A stop that arrives once the entry exists goes to the entry's
+ *   `pendingStop`, and the start stops the harness once it is up.
  */
 interface ArrivedStart {
   readonly sessionId: string;
@@ -870,8 +872,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           );
         }
         // A stop that reached this start before now means no harness is
-        // spawned at all. Checked last before the context is resolved, which
-        // is the first step that changes anything on this machine.
+        // spawned at all. Checking here, before the context is resolved,
+        // spares the branch switch and the scratch directory. Resolving the
+        // context can wait a long time, for example on other git work in the
+        // workspace, so `launchHarness` checks again for a stop that arrives
+        // during it.
         if (arrived.pendingStop !== undefined) {
           return yield* Effect.fail<UndeliveredStart>({
             message: `session ${frame.sessionId} was stopped before its input was handed over`,
@@ -918,8 +923,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           idleMs: frame.spec.timeouts.idleMs,
           idle: undefined,
           phase: "starting",
-          // A stop that arrived before this entry existed is applied by the
-          // same path as one that arrives while the harness starts.
+          // A stop that arrived before this entry existed is checked for
+          // below, before the adapter is asked for a harness.
           pendingStop: arrived.pendingStop,
           gone: Deferred.makeUnsafe<void>(),
           hasOutputSchema: frame.spec.outputSchema !== undefined,
@@ -940,6 +945,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           return yield* Effect.fail<UndeliveredStart>({
             message: "the runner is shutting down",
             exitReason: "runner_restart",
+          });
+        }
+        // A stop that arrived while the context was being resolved, after
+        // `prepareStart` last checked, was saved on the arrived start and
+        // copied into this entry. No harness is spawned for it, the same as
+        // for a stop that arrived earlier (spec 03 section 2.2). The reason is
+        // always `stopped`: only the controller's stop marks an arrived start,
+        // and nothing else can reach this entry before this line.
+        if (held.pendingStop !== undefined) {
+          live.delete(frame.sessionId);
+          yield* tearDownSession(held);
+          return yield* Effect.fail<UndeliveredStart>({
+            message: `session ${frame.sessionId} was stopped before its input was handed over`,
+            exitReason: "stopped",
           });
         }
         // Start the absolute timer here, not on `session.started`: the
