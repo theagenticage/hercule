@@ -29,7 +29,6 @@ import type {
   StepError,
   StepRecord,
   StepStatus,
-  Subscription,
   TriggerEvent,
   WorkflowDefinition,
   WorkspacePolicy,
@@ -49,7 +48,6 @@ import {
   type PageRequest,
   withTransaction,
 } from "../db";
-import { runHeldSubscriptions } from "../subscriptions";
 
 /** A run to insert, before it has an id. */
 export interface NewRun {
@@ -391,18 +389,27 @@ const parseRunStatusColumns = (row: RunRow) => {
 };
 
 /**
- * Parses a run row, its step rows and its traversal rows into a `Run`, with
- * the live subscriptions the run holds. The JSON
- * columns are parsed without being decoded again: the run engine wrote them
- * from values that were already validated. An edge with no traversal row
- * has been followed 0 times.
+ * A run as the runs tables store it: a `Run` without its live
+ * subscriptions, which the subscriptions domain stores. `RunService.read`
+ * adds them, for the API; the run engine never reads them.
+ */
+export type StoredRun = Run extends infer Variant
+  ? Variant extends unknown
+    ? Omit<Variant, "subscriptions">
+    : never
+  : never;
+
+/**
+ * Parses a run row, its step rows and its traversal rows into a
+ * `StoredRun`. The JSON columns are parsed without being decoded again: the
+ * run engine wrote them from values that were already validated. An edge
+ * with no traversal row has been followed 0 times.
  */
 const parseRunRow = (
   row: RunRow,
   steps: ReadonlyArray<StepRow>,
   traversals: ReadonlyArray<TraversalRow>,
-  subscriptions: ReadonlyArray<Subscription>,
-): Run => {
+): StoredRun => {
   const plan = JSON.parse(row.plan) as WorkflowDefinition;
   const edgeTraversals = (plan.edges ?? []).map(() => 0);
   for (const traversal of traversals) edgeTraversals[traversal.edge_index] = traversal.count;
@@ -416,7 +423,6 @@ const parseRunRow = (
     ...(row.workspace_id === null ? {} : { workspaceId: uuidToString(row.workspace_id) }),
     steps: steps.map(parseStepRow),
     edgeTraversals,
-    subscriptions,
     ...(row.original_run_id === null ? {} : { originalRunId: uuidToString(row.original_run_id) }),
     ...(row.trigger_event === null
       ? {}
@@ -438,7 +444,6 @@ const parseSummaryRow = (row: SummaryRow): RunSummary => ({
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const runHeld = yield* runHeldSubscriptions;
 
   const announceChange = (id: string, kind: "created" | "updated"): Effect.Effect<void> =>
     announce({ _tag: "record", topic: "run", id, kind });
@@ -481,12 +486,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns a run with its step records in the order they were created, its
-     * edge traversal counts and its live subscriptions, or `None` if no run
-     * has the id. The reads are one transaction, so they are all from the
+     * Returns a run with its step records in the order they were created and
+     * its edge traversal counts, or `None` if no run has the id. The reads are one transaction, so they are all from the
      * same moment.
      */
-    read: (id: string): Effect.Effect<Option.Option<Run>, SqlError> =>
+    read: (id: string): Effect.Effect<Option.Option<StoredRun>, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
@@ -502,8 +506,7 @@ const make = Effect.gen(function* () {
           const traversals = yield* sql<TraversalRow>`
             SELECT edge_index, count FROM run_edge_traversals WHERE run_id = ${bytes}
           `;
-          const subscriptions = yield* runHeld.list(id);
-          return Option.some(parseRunRow(row, steps, traversals, subscriptions));
+          return Option.some(parseRunRow(row, steps, traversals));
         }),
       ),
 

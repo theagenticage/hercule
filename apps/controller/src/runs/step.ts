@@ -29,7 +29,6 @@ import {
   isApiError,
   isId,
   listDecodeIssues,
-  type Run,
   type RunStarted,
   type WorkflowDefinition,
   type RunStartCall,
@@ -59,7 +58,12 @@ import {
 } from "../plugins";
 import { Notifier } from "../notifications";
 import { TaskService } from "../tasks";
-import { runRepository, StepRecordEnded, type ExecutionFailureReason } from "./repository";
+import {
+  runRepository,
+  StepRecordEnded,
+  type ExecutionFailureReason,
+  type StoredRun,
+} from "./repository";
 import { buildRunContext } from "./run-context";
 import type { RunStartError } from "./start";
 
@@ -136,7 +140,7 @@ export interface InputFailure {
  * none, which the calling effect turns into a defect: the plan never changes,
  * so a missing step is a bug.
  */
-export const findActionStep = (run: Run, stepId: string): ActionStep => {
+export const findActionStep = (run: StoredRun, stepId: string): ActionStep => {
   // Starting the run checked that every step is an action step, and the plan
   // never changes.
   const step = run.plan.steps.find((candidate) => candidate.id === stepId);
@@ -333,7 +337,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      * action runs, because the Connection can change until then.
      */
     const prepareInput = (
-      run: Run,
+      run: StoredRun,
       step: ActionStep,
     ): Effect.Effect<Result.Result<Schema.Json, InputFailure>> =>
       Effect.gen(function* () {
@@ -480,7 +484,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      * does not stop the step: the run finishes its frozen plan.
      */
     const executeStep = (
-      run: Run,
+      run: StoredRun,
       attempt: Required<StepRecordKey>,
       input: Schema.Json,
     ): Effect.Effect<void, SqlError> =>

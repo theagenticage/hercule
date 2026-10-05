@@ -21,14 +21,14 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { isSqlError } from "effect/unstable/sql/SqlError";
-import type { Run, StepError, WorkflowDefinition } from "@hercule/contract";
+import type { StepError, WorkflowDefinition } from "@hercule/contract";
 import type { WorkspaceStepFailureCode } from "@hercule/protocol";
 import { buildRunActor, CurrentActor } from "../actor";
 import { agentRepository } from "../agents";
 import { renderTemplate } from "../expressions";
 import { isLoggedIn, providerRepository } from "../providers";
 import type { PlacementCandidate } from "../runners";
-import { runRepository, type ExecutionFailureReason } from "./repository";
+import { runRepository, type ExecutionFailureReason, type StoredRun } from "./repository";
 import { buildRunContext } from "./run-context";
 import type { StepRecordKey } from "./step";
 import { WorkspaceSteps, type AgentStep, type OpenedStepSession } from "./workspace-steps";
@@ -48,9 +48,9 @@ export const findAgentStep = (plan: WorkflowDefinition, stepId: string): AgentSt
  * step has `freshSession` set, or no earlier record has a session, so the
  * iteration starts a new session.
  */
-const findPreviousStepSession = (run: Run, step: AgentStep): string | undefined => {
+const findPreviousStepSession = (run: StoredRun, step: AgentStep): string | undefined => {
   if (step.freshSession === true) return undefined;
-  let latest: Run["steps"][number] | undefined;
+  let latest: StoredRun["steps"][number] | undefined;
   for (const record of run.steps) {
     if (record.stepId !== step.id || record.sessionId === undefined) continue;
     if (latest === undefined || record.iteration > latest.iteration) latest = record;
@@ -138,7 +138,7 @@ interface AgentStepNeeds {
    * run's workspace there when its plan has one.
    */
   readonly placeOnRunner: (
-    run: Run,
+    run: StoredRun,
     record: StepRecordKey,
     at: string,
   ) => Effect.Effect<WorkspaceStepPlacement, SqlError>;
@@ -245,7 +245,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
        * with `session_failed`; the run fails with them. Fails with
        * `StepRecordEnded` when the record is no longer pending.
        */
-      startAgentStep: (run: Run, record: StepRecordKey, step: AgentStep, at: string) =>
+      startAgentStep: (run: StoredRun, record: StepRecordKey, step: AgentStep, at: string) =>
         Effect.gen(function* () {
           const rendered = yield* Effect.result(renderTemplate(step.prompt, buildRunContext(run)));
           if (Result.isFailure(rendered)) {

@@ -153,6 +153,7 @@ import {
 import { RunExecutor } from "./executor";
 import {
   runRepository,
+  type StoredRun,
   type ExecutionFailureReason,
   type RunOutcome,
   type StepRecordId,
@@ -222,7 +223,7 @@ const INTERRUPTED: EngineStepError = {
 type StartedRecord =
   | {
       readonly _tag: "started";
-      readonly run: Run;
+      readonly run: StoredRun;
       readonly startedAt: string;
       readonly input: Schema.Json;
       readonly workspaceStep?: ActionStepToStart;
@@ -321,7 +322,7 @@ const findWorkspaceStepError = (
  * pinned to. A run that was never pinned has no workspace step running.
  */
 const listWorkspaceStepsToSettle = (
-  run: Run,
+  run: StoredRun,
   wasRunning: ReadonlyArray<StepRecordId>,
 ): ReadonlyArray<WorkspaceStepToSettle> => {
   const { runnerId } = run;
@@ -455,7 +456,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * Records of steps that run on the controller are left out.
    */
   const settleWorkspaceSteps = (
-    run: Run,
+    run: StoredRun,
     ended: ReadonlyArray<StepRecordId>,
   ): Effect.Effect<void> => {
     const toSettle = listWorkspaceStepsToSettle(run, ended);
@@ -606,7 +607,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * - `waitsForRunner`: no runner can take the run now.
    */
   const placeWorkspaceStep = (
-    run: Run,
+    run: StoredRun,
     record: StepRecordKey,
     at: string,
   ): Effect.Effect<WorkspaceStepPlacement, SqlError> =>
@@ -846,7 +847,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * only when that ending cannot be written either.
    */
   const executeRecord = (
-    run: Run,
+    run: StoredRun,
     record: UnfinishedStepRecord,
   ): Effect.Effect<RecordProgress, SqlError> =>
     Effect.catchCause(
@@ -1156,7 +1157,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * the action has left the catalog.
    */
   const decodeWorkspaceOutput = (
-    run: Run,
+    run: StoredRun,
     stepId: string,
     output: Schema.Json,
   ): Effect.Effect<Result.Result<Schema.Json, EngineStepError>> =>
@@ -1278,7 +1279,8 @@ export const makeRunEngine = Effect.gen(function* () {
             yield* afterCommit(() => executor.stop(cancelled));
             // The same transaction found the run above, and runs are never
             // deleted.
-            return Option.getOrThrow(yield* runs.read(id));
+            const ended = Option.getOrThrow(yield* runs.read(id));
+            return { ...ended, subscriptions: yield* runHeld.list(id) };
           }),
         );
       }),

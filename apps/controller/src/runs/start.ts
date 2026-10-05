@@ -32,7 +32,6 @@ import {
   type InvalidState,
   type Issue,
   type NotFound,
-  type Run,
   type RunOrigin,
   type RunStarted,
   type Unauthenticated,
@@ -52,7 +51,7 @@ import {
   WorkflowService,
   type PendingTriggerEffect,
 } from "../workflows";
-import { runRepository, type RunOutcome } from "./repository";
+import { runRepository, type RunOutcome, type StoredRun } from "./repository";
 import { describeMissingCapableRunner, listRequiredCapabilities } from "./runner-capabilities";
 import { isUnfinished } from "./step-records";
 
@@ -478,7 +477,9 @@ export const makeRunStart = (
      * ended. Fails with `NotFound` when no run has the id, and with
      * `InvalidState` when the run is still pending or running.
      */
-    const readEndedRun = (id: string): Effect.Effect<Run, NotFound | InvalidState | SqlError> =>
+    const readEndedRun = (
+      id: string,
+    ): Effect.Effect<StoredRun, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const found = yield* runs.read(id);
         if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError("no such run"));
