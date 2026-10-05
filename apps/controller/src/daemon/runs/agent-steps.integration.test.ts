@@ -671,6 +671,70 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "sends a step's prompt again when its runner never answered it, and completes the step on the result the runner sends back",
+    async () => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const player = createSessionPlayer();
+          // The runner takes the prompt but never answers it, like one whose
+          // connection drops just after the frame arrives.
+          arranged.wire.answering(() => undefined);
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildImplementDefinition(agentId),
+          });
+          const key = buildStepKey(runId);
+          const sessionId = await waitForStepSessionId(arranged, key);
+          await waitForSessionStart(arranged.wire, sessionId);
+          player.reportStarted(arranged.wire, sessionId);
+          await waitForStepInput(arranged.wire, key);
+
+          arranged.wire.close();
+          await waitForRunnerGone(arranged);
+          // The prompt went back to waiting when the connection closed, and
+          // the queued-input delivery pass sends it again. The runner ran the
+          // turn and kept its result, so for a prompt under the same step key
+          // it sends that result first, then answers that the prompt went
+          // into the turn it already ran.
+          const back = await arranged.reconnect();
+          back.answering((frame) => {
+            if (!startsStepTurn(frame, key)) return "opened";
+            player.sendResult(back, key, answerText("Shipped"));
+            return "steered";
+          });
+          back.send({
+            _tag: "sessionsReport",
+            sessions: [
+              {
+                sessionId,
+                nativeSessionId: `native-${sessionId}`,
+                instanceId: findInstanceId(arranged, "test-provider"),
+              },
+            ],
+          });
+
+          const ended = await waitForRunEnded(arranged, runId, "completed");
+          expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
+            status: "completed",
+            sessionId,
+            output: { text: "Shipped" },
+          });
+          expect(
+            listFrames<SessionInput>(back, "sessionInput").filter((frame) =>
+              startsStepTurn(frame, key),
+            ),
+          ).toHaveLength(1);
+          expect(await listInputs(arranged, sessionId)).toEqual([
+            expect.objectContaining({ status: "delivered", delivery: "steered" }),
+          ]);
+        },
+        { eventRoutingInterval: Duration.millis(50) },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "stops the session of a run that was cancelled while its runner was away, once the runner connects again",
     async () => {
       await withAgentStepFleet(async (arranged) => {
