@@ -7,6 +7,7 @@
  * tail the CLI accepts back as an argument.
  */
 import {
+  describeInputStatus,
   describeRunOrigin,
   describeStepDuration,
   findFailedEdge,
@@ -22,6 +23,7 @@ import {
   truncateText,
   formatIssue,
   isSchedule,
+  type Input,
   type Notification,
   type Resolution,
   type Run,
@@ -365,6 +367,13 @@ const renderTriggerList = (triggers: ReadonlyArray<Trigger>): ReadonlyArray<stri
 };
 
 /**
+ * Returns the lines of `input list`: the generic table, with each status in
+ * the words `describeInputStatus` gives it.
+ */
+const renderInputList = (inputs: ReadonlyArray<Input>): ReadonlyArray<string> =>
+  renderTable(inputs.map((input) => ({ ...input, status: describeInputStatus(input.status) })));
+
+/**
  * Returns the lines printed after `run start` and `run rerun`: the new run's
  * full id, and the command that subscribes to it. A caller who started a run
  * usually wants to know when it ends, and the subscription wakes it when the
@@ -599,7 +608,8 @@ const renderNotificationDecided = (
 const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   // The derived client decoded each item with the operation's schema, so the
   // items of `run.query` are run summaries, those of `trigger.query` are
-  // triggers, and those of `notification.query` are notifications.
+  // triggers, those of `notification.query` are notifications, and those of
+  // `input.query` are inputs.
   const asLines =
     command.id === "transcript.read"
       ? renderTranscript
@@ -612,7 +622,10 @@ const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> 
           : command.id === "notification.query"
             ? (items: ReadonlyArray<Record<string, unknown>>) =>
                 renderNotificationList(items as unknown as ReadonlyArray<Notification>)
-            : renderTable;
+            : command.id === "input.query"
+              ? (items: ReadonlyArray<Record<string, unknown>>) =>
+                  renderInputList(items as unknown as ReadonlyArray<Input>)
+              : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 

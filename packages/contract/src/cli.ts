@@ -2729,7 +2729,7 @@ export const CLI = {
 
   "input.query": {
     command: "input list",
-    help: "Lists every input a session was given, oldest first, whatever became of each. The rows still queued are the ones `hercule input update`, `hercule input cancel` and `hercule input steer` can act on.",
+    help: "Lists every input a session was given, oldest first, and what became of each. A status is queued, delivered, cancelled, or sent, not confirmed: a workflow step's prompt that left the controller and that the runner never confirmed. Such a prompt is never sent again, and the runner's report of the step settles the step. The rows still queued are the ones `hercule input update`, `hercule input cancel` and `hercule input steer` can act on.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {

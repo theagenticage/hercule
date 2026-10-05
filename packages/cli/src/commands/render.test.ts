@@ -1,6 +1,6 @@
 /**
  * Tests the output that is not the generic table: the hint after a spawn, the
- * transcript, the output of workflow read, create, update and validate, and
+ * status of a listed input, the transcript, the output of workflow read, create, update and validate, and
  * the two catalogs used to write a workflow, and a notification's answers.
  * Also tests two rules of all output: each table row stays on one line, and
  * no text reaches the terminal with characters the terminal would act on.
@@ -43,6 +43,29 @@ describe("hercule session spawn", () => {
     );
 
     expect(lines.join("\n")).not.toContain("hercule transcript read");
+  });
+});
+
+describe("hercule input list", () => {
+  it("prints an input the runner never confirmed as sent, not confirmed", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            { text: "implement the change", status: "sent" },
+            { text: "are you there?", status: "delivered" },
+          ],
+        },
+      },
+      lookUpCommand("input", "list"),
+    );
+
+    expect(lines).toEqual([
+      "text                  status",
+      "implement the change  sent, not confirmed",
+      "are you there?        delivered",
+    ]);
   });
 });
 
