@@ -42,7 +42,7 @@ import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
-  cancelStrandedInputsAndReportLostWakeUps,
+  endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   EventRoutingInterval,
   IngestExecutorLayer,
@@ -375,7 +375,7 @@ export const withServer = (
         // controller would have. Kept as one effect because `reboot` runs them
         // again.
         const bootSteps = Effect.gen(function* () {
-          yield* cancelStrandedInputsAndReportLostWakeUps;
+          yield* endStrandedInputsAndReportLostWakeUps;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
           yield* seed;
           yield* Effect.flatMap(PluginHost, (host) =>

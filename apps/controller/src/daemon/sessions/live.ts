@@ -145,13 +145,23 @@ const NO_OPEN_REQUEST = "that session is not waiting on a request";
 const STALE_REQUEST = "that request is not the one this session is waiting on";
 
 /**
- * The message for an input that did not reach the harness, either because the
- * runner is not connected or because no reply came in time. Both cases look
- * the same to the caller. The row goes back to waiting, and the next change to
- * idle, or a manual steer, tries again.
+ * The message for an input the runner never answered: the runner is not
+ * connected, or no reply came in time. Both cases look the same to the
+ * caller. The row goes back to waiting, and the next change to idle, or a
+ * manual steer, tries again. An agent step's prompt gets
+ * `STEP_PROMPT_NOT_CONFIRMED` instead.
  */
 const NOT_DELIVERED =
   "that session's runner did not take the input; it stays queued for the next turn";
+
+/**
+ * The message for an agent step's prompt the runner never answered. The
+ * prompt is marked `sent` and never sent again, because the runner may have
+ * run it.
+ */
+const STEP_PROMPT_NOT_CONFIRMED =
+  "that session's runner did not confirm it took the step's prompt; the prompt is not sent again, " +
+  "and the runner's report of the step's turn settles the step";
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -258,14 +268,21 @@ const make = Effect.gen(function* () {
         return yield* Effect.fail(createInvalidStateError(reason));
       }
       const resultRequest = yield* sessions.recordNoAnswer(row, NOT_DELIVERED);
-      // The runner handles frames one at a time, in the order they arrive, so
-      // this request cannot overtake the input it asks about. If the runner
-      // is gone, the request is not sent, and the runner is asked again when
-      // it connects.
+      // The runner handles the frames of one connection one at a time, in the
+      // order they arrive. So when the input went out on the same connection,
+      // this request cannot overtake it. When the connection dropped and the
+      // runner is back on a new one, the runner may have no trace of the
+      // input, and then it answers `interrupted`, which fails the step. If
+      // the runner is gone, the request is not sent, and the runner is asked
+      // again when it connects.
       if (Option.isSome(resultRequest)) {
         yield* connections.tell(session.runnerId, resultRequest.value);
       }
-      return yield* Effect.fail(createInvalidStateError(NOT_DELIVERED));
+      return yield* Effect.fail(
+        createInvalidStateError(
+          row.stepIteration === null ? NOT_DELIVERED : STEP_PROMPT_NOT_CONFIRMED,
+        ),
+      );
     });
 
   /**

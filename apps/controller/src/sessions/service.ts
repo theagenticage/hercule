@@ -339,11 +339,6 @@ const STEP_INPUT_FIXED =
   "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
   "it is sent when the session is next idle; to stop the step, cancel the run with run.cancel";
 
-/** Why a step prompt the runner never answered was cancelled, as `recordNoAnswer` cancels it. */
-const STEP_PROMPT_UNANSWERED =
-  "the runner did not answer this step prompt, so it is unknown whether the runner took it; " +
-  "it is not sent again, and the runner's report of the step's turn settles the step";
-
 /** Why a step prompt was cancelled when its run ended before the prompt was sent. */
 const STEP_RUN_ENDED = "the step's run ended before this prompt was sent";
 
@@ -645,10 +640,15 @@ const make = Effect.gen(function* () {
    * transaction, and reads the session inside it, so the check cannot race
    * the write that exits the session.
    *
-   * Only for an input the runner did not take: when an agent step's prompt
-   * is cancelled here, `SessionObserver` is told, and the step fails. A
-   * step prompt that goes back to waiting on an exited session resumes it,
-   * like any kept input: the next delivery pass does that.
+   * The caller must know the runner did not take the input: the runner
+   * refused it, or the input is an ordinary one the runner never answered.
+   * An agent step's prompt the runner never answered never comes here,
+   * because the runner may have run it (`recordNoAnswer`).
+   *
+   * When an agent step's prompt is cancelled here, `SessionObserver` is
+   * told, and the step fails. A step prompt that goes back to waiting on an
+   * exited session resumes it, like any kept input: the next delivery pass
+   * does that.
    */
   const requeueOrCancel = (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -1570,8 +1570,11 @@ const make = Effect.gen(function* () {
 
     /**
      * Applies a runner's result for one input, in order with the session's
-     * events. A rejected input changes nothing here: the send that waits for
-     * the result puts it back to waiting.
+     * events. A refused input changes nothing here. The send that waits for
+     * the result puts it back to waiting. When that send stopped waiting, it
+     * already handled the input as unanswered (`recordNoAnswer`): an agent
+     * step's prompt stays `sent`, and the runner's answer about the step
+     * settles the step.
      *
      * A delivered input is recorded on the row while a send still holds it.
      * The waiting send (`recordDelivery`) and this method both get the answer, and
@@ -1629,16 +1632,19 @@ const make = Effect.gen(function* () {
      * is unknown.
      *
      * - Any input but an agent step's prompt is handled as a refused one
-     *   (`recordRefusal`), with `reason`.
-     * - An agent step's prompt is cancelled, so it is never sent again, and
-     *   keeps when it was sent (`cancelUnanswered`). Sending it again could
+     *   (`recordRefusal`): `reason` is stored on it, as it goes back to
+     *   waiting or is cancelled.
+     * - An agent step's prompt is marked `sent` (`markSent`), so it is never
+     *   sent again, and `reason` is not stored. Sending the prompt again could
      *   run the step's turn twice, and that turn may push or comment. The
      *   step is not failed either: the runner may have taken the prompt, so
-     *   only the runner's answer about the step settles it.
+     *   only the runner's answer about the step settles it. A refusal that
+     *   arrives later changes nothing, so the step then fails as
+     *   `interrupted`, from that answer.
      *
-     * Returns the request for the step's result when it cancelled a step's
-     * prompt, so the caller can ask the runner how the step's turn ended, and
-     * `none` otherwise. Runs in its own transaction.
+     * Returns the request for the step's result when it marked a step's
+     * prompt `sent`, so the caller can ask the runner how the step's turn
+     * ended, and `none` otherwise. Runs in its own transaction.
      */
     recordNoAnswer: (
       row: StoredInput,
@@ -1656,12 +1662,8 @@ const make = Effect.gen(function* () {
           // started, so a step prompt without that session is a bug.
           if (Option.isNone(session)) return yield* Effect.die("a step prompt has no session");
           const key = buildStepKey(session.value, row.stepIteration);
-          const cancelled = yield* inputs.cancelUnanswered(
-            row.id,
-            row.sentAt,
-            STEP_PROMPT_UNANSWERED,
-          );
-          if (!cancelled) return Option.none();
+          const marked = yield* inputs.markSent(row.id, row.sentAt);
+          if (!marked) return Option.none();
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
           return Option.some(buildAgentStepResultRequest(key, session.value.workspaceId));
         }),
@@ -1976,8 +1978,10 @@ export const SessionServiceLayer: Layer.Layer<
 > = Layer.effect(SessionService)(make);
 
 /**
- * Cancels every input that was sent but unanswered when the controller
- * stopped (`inputRepository.cancelStranded`). It runs once at boot, after
+ * Ends every input that was sent but unanswered when the controller stopped.
+ * An agent step's prompt is marked `sent`
+ * (`inputRepository.markStrandedStepPromptsSent`), and any other input is
+ * cancelled (`inputRepository.cancelStranded`). It runs once at boot, after
  * migrations and before anything is placed on a runner. It is not part of
  * building `SessionServiceLayer`, because the boot builds every layer before
  * it runs migrations, and a query against a column a fresh database does not
@@ -1987,13 +1991,15 @@ export const SessionServiceLayer: Layer.Layer<
  * wake-up is not this domain's job: the sessions domain knows nothing about
  * subscriptions.
  */
-export const cancelStrandedInputs: Effect.Effect<
+export const endStrandedInputs: Effect.Effect<
   ReadonlyArray<LostWakeUp>,
   SqlError,
   SqlClient.SqlClient
-> = Effect.flatMap(inputRepository, (inputs) =>
-  inputs.cancelStranded(
+> = Effect.gen(function* () {
+  const inputs = yield* inputRepository;
+  yield* inputs.markStrandedStepPromptsSent();
+  return yield* inputs.cancelStranded(
     "the controller restarted while this input was being sent to the runner; " +
       "it is unknown whether the harness received it, so it was not sent again",
-  ),
-);
+  );
+});

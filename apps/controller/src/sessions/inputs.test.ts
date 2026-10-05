@@ -4,7 +4,9 @@
  * - `markDelivered`, `requeue` and `cancelWithReason` each change a row only
  *   while it still holds the claim of the send being answered;
  * - `claim` never claims an input of a session that has exited;
- * - `claimOldestUnlessOneIsOnTheWire` claims one input of an idle session at a time.
+ * - `claimOldestUnlessOneIsOnTheWire` claims one input of an idle session at a time;
+ * - an agent step's prompt marked `sent` is never sent again, and only a late
+ *   confirmation changes it, to `delivered`.
  *
  * The case they guard against: an input is sent, the send is given up and
  * the row goes back to waiting, and the row is sent again. A late answer
@@ -232,5 +234,70 @@ describe("claiming the oldest waiting input unless one is on the wire", () => {
     );
 
     expect(claimed).toEqual([undefined, undefined]);
+  });
+});
+
+describe("an agent step's prompt the runner never answered", () => {
+  /**
+   * Writes a session with one step prompt, sends it, and marks it `sent` the
+   * way a send that got no answer does. Runs `answer` with the prompt's id as
+   * the runner's late answer, and returns whether the prompt was marked
+   * `sent` and the row as it is afterwards.
+   */
+  const answerSentPrompt = (
+    answer: (
+      inputs: Effect.Success<typeof inputRepository>,
+      inputId: string,
+    ) => Effect.Effect<unknown, unknown>,
+  ): Promise<{ readonly marked: boolean; readonly row: StoredInput }> =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const inputs = yield* inputRepository;
+        const { sessionId } = yield* insertSessionWithInput;
+        const prompt = yield* inputs.insert({
+          sessionId,
+          source: "user",
+          actor: "run",
+          text: "implement the change",
+          at,
+          stepIteration: 1,
+        });
+        yield* inputs.claim(prompt.id, FIRST_SEND);
+        const marked = yield* inputs.markSent(prompt.id, FIRST_SEND);
+        yield* answer(inputs, prompt.id);
+        const row = yield* inputs.one(sessionId, prompt.id);
+        if (Option.isNone(row)) return yield* Effect.die("the input was just written");
+        return { marked, row: row.value };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+  it("is marked sent, and keeps when it was sent", async () => {
+    const { marked, row } = await answerSentPrompt(() => Effect.void);
+
+    expect(marked).toBe(true);
+    expect(row).toMatchObject({ status: "sent", sentAt: FIRST_SEND, reason: null });
+  });
+
+  it("is marked delivered by a late confirmation", async () => {
+    // The runner took the prompt after all, so the row says so.
+    const { row } = await answerSentPrompt((inputs, id) =>
+      inputs.markDelivered(id, FIRST_SEND, "opened", at),
+    );
+
+    expect(row).toMatchObject({ status: "delivered", delivery: "opened", sentAt: null });
+  });
+
+  it("is never claimed, put back to waiting or cancelled", async () => {
+    // A sent prompt is never sent again: the runner's answer about the step
+    // settles the step.
+    const { row } = await answerSentPrompt((inputs, id) =>
+      Effect.gen(function* () {
+        yield* inputs.requeue(id, FIRST_SEND, "the harness refused it");
+        yield* inputs.cancelWithReason(id, FIRST_SEND, "the session exited");
+        yield* inputs.claim(id, SECOND_SEND);
+      }),
+    );
+
+    expect(row).toMatchObject({ status: "sent", sentAt: FIRST_SEND, reason: null });
   });
 });

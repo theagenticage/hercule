@@ -244,17 +244,26 @@ const countStepInputs = (wires: ReadonlyArray<Wire>, key: StepKey): number =>
   ).length;
 
 /**
- * Waits until the only input of a step's session, its prompt, is no longer
- * waiting to be sent, while it still records when it was sent: the prompt
- * reached the runner or may have, so the controller leaves the step to the
- * runner's answer. Returns that input.
+ * Waits until the only input of a step's session, its prompt, is `sent`: it
+ * left the controller and the runner never confirmed it, so the controller
+ * never sends it again and leaves the step to the runner's answer. Returns
+ * that input.
  */
-const waitForPromptLeftToRunner = (arranged: Arranged, sessionId: string): Promise<Input> =>
-  waitUntil("stopped waiting for the runner's answer to the step's prompt", async () => {
+const waitForPromptSent = (arranged: Arranged, sessionId: string): Promise<Input> =>
+  waitUntil("gave up waiting for the runner to confirm the step's prompt", async () => {
     const inputs = await listInputs(arranged, sessionId);
     expect(inputs).toHaveLength(1);
     const prompt = inputs[0]!;
-    return prompt.status === "cancelled" && prompt.sentAt !== null ? prompt : undefined;
+    return prompt.status === "sent" ? prompt : undefined;
+  });
+
+/** Waits until the only input of a step's session, its prompt, is `delivered`, and returns it. */
+const waitForPromptDelivered = (arranged: Arranged, sessionId: string): Promise<Input> =>
+  waitUntil("recorded the runner's late confirmation of the step's prompt", async () => {
+    const inputs = await listInputs(arranged, sessionId);
+    expect(inputs).toHaveLength(1);
+    const prompt = inputs[0]!;
+    return prompt.status === "delivered" ? prompt : undefined;
   });
 
 /** Checks whether a frame is the request for a step key's result. */
@@ -940,7 +949,10 @@ describe("agent steps over the runner socket", () => {
           arranged.wire.close();
           await waitForRunnerGone(arranged);
           // The prompt has left the controller, so it is never sent again.
-          await waitForPromptLeftToRunner(arranged, sessionId);
+          // The input deadline is far longer than this test, so only the
+          // dropped connection can have ended the wait for the runner's
+          // answer.
+          await waitForPromptSent(arranged, sessionId);
 
           // The runner restarted too, so it holds no session. The step's turn
           // ended before the restart, and the runner kept its result.
@@ -970,7 +982,7 @@ describe("agent steps over the runner socket", () => {
           expect(countStepInputs([arranged.wire, back], key)).toBe(1);
           expect(listSessionStarts(back, sessionId)).toEqual([]);
         },
-        { eventRoutingInterval: Duration.millis(50) },
+        { inputDeadline: Duration.minutes(1), eventRoutingInterval: Duration.millis(50) },
       );
     },
     WAIT_DEADLINE_MS * 2,
@@ -983,7 +995,7 @@ describe("agent steps over the runner socket", () => {
         async (arranged) => {
           const { wire } = arranged;
           const player = createSessionPlayer();
-          // The runner takes the prompt but answers too late for the controller.
+          // The runner takes the prompt and never answers it.
           wire.answering(() => undefined);
           const agentId = await createAgent(arranged.harness.base, arranged.token);
           const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
@@ -1000,7 +1012,7 @@ describe("agent steps over the runner socket", () => {
           await waitForFrame(wire, "asked for the step's result", (frame) =>
             asksForResult(frame, key),
           );
-          await waitForPromptLeftToRunner(arranged, sessionId);
+          await waitForPromptSent(arranged, sessionId);
           player.runTurn(wire, sessionId, key, answerText("Shipped"));
 
           const ended = await waitForRunEnded(arranged, runId, "completed");
@@ -1008,6 +1020,119 @@ describe("agent steps over the runner socket", () => {
             status: "completed",
             output: { text: "Shipped" },
           });
+          expect(countStepInputs([wire], key)).toBe(1);
+        },
+        { inputDeadline: Duration.millis(200), eventRoutingInterval: Duration.millis(50) },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it.each([
+    { when: "before the step's turn starts", turnStartsFirst: false },
+    { when: "after the step's turn started", turnStartsFirst: true },
+  ])(
+    "marks a step's prompt delivered when the runner confirms it after the deadline, $when, and completes the step from the runner's result",
+    async ({ turnStartsFirst }) => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const player = createSessionPlayer();
+          // The runner takes the prompt, but confirms it later than the
+          // controller waits.
+          wire.answering(() => undefined);
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildImplementDefinition(agentId),
+          });
+          const key = buildStepKey(runId);
+          const sessionId = await waitForStepSessionId(arranged, key);
+          await waitForSessionStart(wire, sessionId);
+          player.reportStarted(wire, sessionId);
+          await waitForStepInput(wire, key);
+          if (turnStartsFirst) player.startTurn(wire, sessionId, key);
+
+          await waitForFrame(wire, "asked for the step's result", (frame) =>
+            asksForResult(frame, key),
+          );
+          await waitForPromptSent(arranged, sessionId);
+          wire.release("opened");
+
+          // The runner took the prompt after all, so the prompt is delivered.
+          expect(await waitForPromptDelivered(arranged, sessionId)).toMatchObject({
+            delivery: "opened",
+            sentAt: null,
+            reason: null,
+          });
+          await waitForSessionTo(
+            arranged,
+            sessionId,
+            "opened the turn",
+            (one) => one.status === "busy",
+          );
+          if (!turnStartsFirst) player.startTurn(wire, sessionId, key);
+          player.sendResult(wire, key, answerText("Shipped"));
+          player.endTurn(wire, sessionId, key);
+
+          const ended = await waitForRunEnded(arranged, runId, "completed");
+          expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
+            status: "completed",
+            output: { text: "Shipped" },
+          });
+          expect(countStepInputs([wire], key)).toBe(1);
+        },
+        { inputDeadline: Duration.millis(200), eventRoutingInterval: Duration.millis(50) },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "keeps a step's prompt sent when the runner refuses it after the deadline, and fails the step on the runner's interrupted answer",
+    async () => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const player = createSessionPlayer();
+          // The runner refuses the prompt, but later than the controller waits.
+          wire.answering(() => undefined);
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildImplementDefinition(agentId),
+          });
+          const key = buildStepKey(runId);
+          const sessionId = await waitForStepSessionId(arranged, key);
+          await waitForSessionStart(wire, sessionId);
+          player.reportStarted(wire, sessionId);
+          const sent = await waitForStepInput(wire, key);
+          await waitForFrame(wire, "asked for the step's result", (frame) =>
+            asksForResult(frame, key),
+          );
+          const prompt = await waitForPromptSent(arranged, sessionId);
+
+          wire.send({
+            _tag: "sessionInputResult",
+            requestId: sent.requestId,
+            ok: false,
+            message: "the harness is not ready for input",
+          });
+          // A runner that refused the prompt ran no turn for it, so it
+          // answers the request for the step's result with `interrupted`.
+          player.sendResult(wire, key, {
+            status: "failed",
+            code: "interrupted",
+            message: "The runner does not know this step.",
+          });
+
+          const ended = await waitForRunEnded(arranged, runId, "failed");
+          expect(ended).toMatchObject({ failureReason: "session-failed", failedStepId: IMPLEMENT });
+          expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
+            status: "failed",
+            error: { code: "interrupted", message: "The runner does not know this step." },
+          });
+          // The refusal came after the prompt was given up on, so it changes
+          // nothing, and the prompt is never sent again.
+          expect(await listInputs(arranged, sessionId)).toEqual([prompt]);
           expect(countStepInputs([wire], key)).toBe(1);
         },
         { inputDeadline: Duration.millis(200), eventRoutingInterval: Duration.millis(50) },
@@ -1055,7 +1180,7 @@ describe("agent steps over the runner socket", () => {
         await waitForStepInput(arranged.wire, key);
 
         await arranged.harness.reboot();
-        await waitForPromptLeftToRunner(arranged, sessionId);
+        await waitForPromptSent(arranged, sessionId);
 
         // The runner restarted as well, and holds no session.
         arranged.wire.close();

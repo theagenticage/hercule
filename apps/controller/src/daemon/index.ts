@@ -52,7 +52,7 @@
  *
  * ADR 0033 records this layout.
  */
-export { cancelStrandedInputsAndReportLostWakeUps } from "./boot";
+export { endStrandedInputsAndReportLostWakeUps } from "./boot";
 export {
   Enrichment,
   EnrichmentLayer,

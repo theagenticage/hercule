@@ -350,11 +350,11 @@ interface StoredInput {
   readonly source: string;
   readonly actor: string;
   readonly text: string;
-  readonly status: "queued" | "delivered" | "cancelled";
+  readonly status: "queued" | "sent" | "delivered" | "cancelled";
   readonly delivery: "opened" | "steered" | null;
   readonly createdAt: string;
   readonly deliveredAt: string | null;
-  /** Set while the frame is sent and unanswered; null once answered, or if never sent. */
+  /** When the input was sent, while the runner has not answered; null otherwise. */
   readonly sentAt: string | null;
   /** Why a queued row is not delivered yet; null once it is sent again. */
   readonly reason: string | null;

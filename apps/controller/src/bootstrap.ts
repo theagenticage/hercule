@@ -38,7 +38,7 @@ import {
 } from "./db";
 import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./connections";
 import {
-  cancelStrandedInputsAndReportLostWakeUps,
+  endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
   RunServiceReferenceLayer,
@@ -368,11 +368,12 @@ export const bootWith = <A, E>(
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
       // There is no way to ask whether the harness received an input that was
-      // in flight before this boot. So the input is cancelled rather than
-      // resent, which could deliver it twice, and the subscription records
-      // which wake-up was lost. This runs after the migrations and before
+      // in flight before this boot. So the input is never sent again, which
+      // could deliver it twice: an agent step's prompt is marked sent, any
+      // other input is cancelled, and the subscription records which
+      // wake-up was lost. This runs after the migrations and before
       // anything is placed on a runner.
-      yield* cancelStrandedInputsAndReportLostWakeUps;
+      yield* endStrandedInputsAndReportLostWakeUps;
       yield* seed;
 
       const identity = yield* ControllerIdentity;

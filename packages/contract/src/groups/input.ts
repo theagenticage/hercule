@@ -42,8 +42,20 @@ export const InputSource = Schema.Literals(INPUT_SOURCES);
 
 export type InputSource = Schema.Schema.Type<typeof InputSource>;
 
-/** `delivered` and `cancelled` are final. The queue is the set of rows still `queued`. */
-export const INPUT_STATUSES = ["queued", "delivered", "cancelled"] as const;
+/**
+ * The statuses of an input:
+ *
+ * - `queued`: the input waits to be sent, or is on its way to the runner. The
+ *   queue is the set of rows still `queued`.
+ * - `sent`: the input left the controller, and the runner never confirmed it.
+ *   Only an agent step's prompt ends here: it is never sent again, because
+ *   the runner may have run it, and the runner's answer about the step
+ *   settles the step. A confirmation that arrives later still turns it
+ *   `delivered`.
+ * - `delivered`: the runner took the input. Final.
+ * - `cancelled`: the input will never be sent. Final.
+ */
+export const INPUT_STATUSES = ["queued", "sent", "delivered", "cancelled"] as const;
 
 export const InputStatus = Schema.Literals(INPUT_STATUSES);
 
@@ -66,10 +78,8 @@ export const Input = Schema.Struct({
   createdAt: Timestamp,
   deliveredAt: Schema.NullOr(Timestamp),
   /**
-   * Set while the row has been sent to the runner and no reply has arrived;
-   * null otherwise. An agent step's prompt that got no reply keeps it after it
-   * is cancelled, as the record that it left the controller: such a prompt is
-   * never sent again.
+   * When the input was sent, while the runner has not answered: on a `queued`
+   * row on its way to the runner, and on a `sent` row. Null otherwise.
    */
   sentAt: Schema.NullOr(Timestamp),
   /** Why a delivery failed, on a row that is still queued or that the failure ended; null otherwise. */
