@@ -4,7 +4,7 @@
  *
  * - The header: the colleague's face in its hue and pose, its name, and its
  *   state.
- * - The Request it waits on, when it waits on the user, answered with the
+ * - The oldest Request it waits on, when it waits on the user, answered with the
  *   same dock and the same operations as the thread screen's.
  * - The facts: the room, the runner and the model.
  * - Open thread.

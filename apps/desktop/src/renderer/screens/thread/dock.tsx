@@ -71,8 +71,9 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
 };
 
 /**
- * Renders the Request the thread's session is waiting on, docked on top of
- * the composer, as the Bureau book's `.dock` draws it:
+ * Renders one Request the thread's session is waiting on, the oldest
+ * (`findOldestOpenRequest`), docked on top of the composer, as the Bureau
+ * book's `.dock` draws it:
  *
  * - the question: the thread's face in the waiting pose, then the card's
  *   title with what it asks about in `code`;

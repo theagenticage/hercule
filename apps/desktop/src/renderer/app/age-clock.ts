@@ -3,7 +3,7 @@
  * time since or until a moment. There are three kinds of such labels:
  *
  * - an age, such as a thread row's "20m" or the "10m" a thread has waited on
- *   its open Request (`useAgeLabel`), which changes minutes or hours apart
+ *   the user (`useAgeLabel`), which changes minutes or hours apart
  *   (`findNextAgeChange`);
  * - a duration, such as a live turn's "Working for 12s"
  *   (`useDurationText`), which changes every second under an hour
