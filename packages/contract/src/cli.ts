@@ -2642,7 +2642,7 @@ export const CLI = {
   },
   "session.respondToApprovalRequest": {
     command: "session respond-to-approval-request",
-    help: "Decides the approval a session is parked on with one of the four decisions. This is the only way to resolve an approval; free text never does. Read the open request first with `hercule session read`. A question is answered with `hercule session respond-to-question` instead.",
+    help: "Decides an approval one of a session's agents is parked on with one of the four decisions. This is the only way to resolve an approval; free text never does. Read the open Requests first with `hercule session read`. A question is answered with `hercule session respond-to-question` instead.",
     examples: [{ args: ["1f3a9c2e", "--request", "req_9c2e4f18", "--decision", "allow"] }],
     fields: {
       id: {
@@ -2652,7 +2652,7 @@ export const CLI = {
       },
       requestId: {
         flag: "request",
-        help: "The open request's own id, as `hercule session read` reports it.",
+        help: "The id of the open Request to answer, as `hercule session read` lists it.",
       },
       decision: {
         flag: "decision",
@@ -2661,14 +2661,14 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session has exited, its runner is no longer connected, or it is not waiting on an approval; or the harness has moved on and this is not the request it is waiting on now (read it again with `hercule session read`)",
+        "the session has exited, its runner is no longer connected, or it is not waiting on an approval; or the harness has moved on and this is not one of the Requests the session is waiting on (read them again with `hercule session read`)",
       validation:
         "the request does not offer that decision, or it is a question, which is answered with `hercule session respond-to-question` or turned down by stopping the turn with `hercule session interrupt`",
     },
   },
   "session.respondToQuestion": {
     command: "session respond-to-question",
-    help: "Answers the questions a session is parked on, all of them at once. Read the questions first with `hercule session read`. A question cannot be declined: to turn it down, stop the turn with `hercule session interrupt`, or answer in your own words.",
+    help: "Answers the questions one of a session's agents is parked on, all of them at once. Read the open Requests first with `hercule session read`. A question cannot be declined: to turn it down, stop the turn with `hercule session interrupt`, or answer in your own words.",
     examples: [
       {
         args: [
@@ -2688,7 +2688,7 @@ export const CLI = {
       },
       requestId: {
         flag: "request",
-        help: "The open request's own id, as `hercule session read` reports it.",
+        help: "The id of the open Request to answer, as `hercule session read` lists it.",
       },
       answers: {
         flag: "answers",
@@ -2697,7 +2697,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session has exited, its runner is no longer connected, or it is not waiting on a question; or the harness has moved on and this is not the request it is waiting on now (read it again with `hercule session read`)",
+        "the session has exited, its runner is no longer connected, or it is not waiting on a question; or the harness has moved on and this is not one of the Requests the session is waiting on (read them again with `hercule session read`)",
       validation:
         "the answers do not fit the questions: they name an unknown header, leave a question out, give several to a question that takes one, hold an empty answer, or are too long together; or the request is an approval, which is decided with `hercule session respond-to-approval-request`",
     },

@@ -145,7 +145,7 @@ export const parseSessionTopic = (
 ):
   | {
       readonly sessionId: string;
-      readonly subagentId?: string;
+      readonly subagentId?: SubagentId;
       readonly kind: SessionTopicKind;
     }
   | undefined => {
@@ -168,12 +168,16 @@ export const buildSessionTapTopic = (sessionId: string): SessionLiveTopic =>
   `session:${sessionId}:tap`;
 
 /** Builds the topic name of one subagent's durable transcript. */
-export const buildSubagentStreamTopic = (sessionId: string, subagentId: string): SessionLiveTopic =>
-  `session:${sessionId}:subagent:${subagentId}:stream`;
+export const buildSubagentStreamTopic = (
+  sessionId: string,
+  subagentId: SubagentId,
+): SessionLiveTopic => `session:${sessionId}:subagent:${subagentId}:stream`;
 
 /** Builds the topic name of one subagent's ephemeral token deltas. */
-export const buildSubagentTapTopic = (sessionId: string, subagentId: string): SessionLiveTopic =>
-  `session:${sessionId}:subagent:${subagentId}:tap`;
+export const buildSubagentTapTopic = (
+  sessionId: string,
+  subagentId: SubagentId,
+): SessionLiveTopic => `session:${sessionId}:subagent:${subagentId}:tap`;
 
 /** How a record changed, spelled as in the audit kinds. */
 export const InvalidateKind = Schema.Literals(["created", "updated", "deleted"]);
