@@ -13,7 +13,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration } from "effect";
-import type { ExitReason, SessionInput } from "@hercule/protocol";
+import type { ExitReason, FrameCarryingInput } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
 import {
   WAIT_DEADLINE_MS,
@@ -24,6 +24,8 @@ import {
   reportEvent,
   spawnSessionOrFail,
   waitForSession,
+  carriesInput,
+  reportTurnStarted,
   waitForStartFrames,
   waitUntil,
   withAgentFleet,
@@ -47,6 +49,7 @@ const reportExit = async (
   seq: number,
   reason: ExitReason,
 ): Promise<void> => {
+  const exitedBefore = (await readSession(arranged, sessionId)).exitedAt;
   reportEvent(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId,
@@ -54,11 +57,14 @@ const reportExit = async (
     _tag: "session.exited",
     reason,
   });
-  // The resume may already have moved the session on, so any status other
-  // than `busy` or `idle` shows the exit was applied.
+  // The status cannot show that the exit was applied: a session that keeps
+  // its input is resumed at once, and the fake runner answers the resumed
+  // start, so the session can be `busy` again before a poll sees it exited.
+  // The exit time stays on the session through a resume, and every exit sets
+  // it again, so a new exit time is the proof.
   await waitUntil("applied the exit", async () => {
     const found = await readSession(arranged, sessionId);
-    return found.status !== "busy" && found.status !== "idle" ? found : undefined;
+    return found.exitedAt !== null && found.exitedAt !== exitedBefore ? found : undefined;
   });
 };
 
@@ -78,13 +84,7 @@ const holdQueuedMessage = async (
   arranged: Arranged,
 ): Promise<{ session: Session; inputId: string }> => {
   const session = await startSession(arranged);
-  reportEvent(arranged.wire, 2, {
-    eventId: crypto.randomUUID(),
-    sessionId: session.id,
-    at,
-    _tag: "turn.started",
-    turnId: "t1",
-  });
+  reportTurnStarted(arranged, session.id, 2);
   await waitForSession(arranged, session.id, (one) => one.status === "busy");
   arranged.wire.answering(() => ({ message: "no steering now" }));
   await sendMessage(arranged, session.conversationId!, "again");
@@ -96,8 +96,8 @@ const holdQueuedMessage = async (
   return { session, inputId: queued.id };
 };
 
-/** Reports that the resumed process of the session started, with sequence number 1. */
-const reportResumed = (arranged: Arranged, sessionId: string): void =>
+/** Reports that the session's process started, with sequence number 1. */
+const reportStarted = (arranged: Arranged, sessionId: string): void =>
   reportEvent(arranged.wire, 1, {
     eventId: crypto.randomUUID(),
     sessionId,
@@ -106,16 +106,17 @@ const reportResumed = (arranged: Arranged, sessionId: string): void =>
     providerRefs: { nativeSessionId: "native-1" },
   });
 
-/** Waits long enough for several passes of the queued-input sweep to have run. */
-const letTheSweepRun = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 300));
-
-/** Returns the input frames for one input that the runner received after the session's `index`-th start frame. */
-const listInputFramesAfterStart = (
+/**
+ * Returns the frames that carried one input to the runner from the session's
+ * `index`-th start frame on, that start frame included: a start frame carries
+ * the session's first input, and a `sessionInput` carries each later one.
+ */
+const listFramesCarryingInputSinceStart = (
   arranged: Arranged,
   sessionId: string,
   index: number,
   inputId: string,
-): ReadonlyArray<SessionInput> => {
+): ReadonlyArray<FrameCarryingInput> => {
   const starts = arranged.wire.frames
     .map((frame, position) => ({ frame, position }))
     .filter(({ frame }) => frame._tag === "sessionStart" && frame.sessionId === sessionId);
@@ -123,17 +124,16 @@ const listInputFramesAfterStart = (
   return arranged.wire.frames
     .slice(from)
     .filter(
-      (frame): frame is SessionInput =>
-        frame._tag === "sessionInput" && frame.requestId === inputId,
+      (frame): frame is FrameCarryingInput => carriesInput(frame) && frame.requestId === inputId,
     );
 };
 
 /**
  * Checks that an exited session with a waiting input was resumed in place:
- * the runner receives a second start frame that resumes the native session,
- * and once the resumed process reports `session.started`, the input is sent
- * exactly once and delivered. For a conversation's session, it also checks
- * that no second session was made for the conversation.
+ * the runner receives a second start frame that resumes the native session
+ * and carries the input. The runner's answer to that start delivers the
+ * input, and no input frame sends it again. For a conversation's session, it
+ * also checks that no second session was made for the conversation.
  */
 const expectResumedAndRunOnce = async (
   arranged: Arranged,
@@ -142,18 +142,21 @@ const expectResumedAndRunOnce = async (
 ): Promise<void> => {
   const frames = await waitForStartFrames(arranged, session.id, 2);
   expect(frames[1]!.spec.continue).toEqual({ mode: "resume", nativeSessionId: "native-1" });
+  expect(frames[1]!.requestId).toBe(inputId);
   if (session.conversationId !== null) {
     expect(await listConversationSessions(arranged, session.conversationId)).toHaveLength(1);
   }
 
-  // Sequence numbers start again at 1 for each start of a session.
-  reportResumed(arranged, session.id);
   const delivered = await waitUntil("delivered the kept input", async () => {
     const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
     return row?.status === "delivered" ? row : undefined;
   });
   expect(delivered.text).toBe("again");
-  expect(listInputFramesAfterStart(arranged, session.id, 1, inputId)).toHaveLength(1);
+  // No send claims a delivered input, so the frames recorded up to now are
+  // every frame that will ever carry it.
+  expect(
+    listFramesCarryingInputSinceStart(arranged, session.id, 1, inputId).map((frame) => frame._tag),
+  ).toEqual(["sessionStart"]);
 };
 
 /**
@@ -218,26 +221,24 @@ describe("an exit of a conversation's session with input waiting", () => {
       // A second delivery attempt while the first input is still on the
       // wire: the owner's next message, and every sweep pass besides.
       await sendMessage(arranged, session.conversationId!, "and again");
-      await letTheSweepRun();
       // The session is resumed once, after the first send gave up.
       const frames = await waitForStartFrames(arranged, session.id, 2);
       expect(frames[1]!.spec.continue).toEqual({ mode: "resume", nativeSessionId: "native-1" });
-      reportResumed(arranged, session.id);
       const first = await waitUntil("delivered the input that was on the wire", async () => {
         const row = (await listInputs(arranged, session.id)).find((one) => one.id === sent.id);
         return row?.status === "delivered" ? row : undefined;
       });
       expect(first.text).toBe("again");
-      await letTheSweepRun();
 
       expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(2);
-      // Sent once to the process that crashed, and once to the resumed one.
+      // Sent once to the process that crashed, and once more on the start
+      // that resumed the session: the older input rides the start, ahead of
+      // the newer one.
       expect(
-        arranged.wire.frames.filter(
-          (frame) => frame._tag === "sessionInput" && frame.requestId === sent.id,
+        listFramesCarryingInputSinceStart(arranged, session.id, 0, sent.id).map(
+          (frame) => frame._tag,
         ),
-      ).toHaveLength(2);
-      expect(listInputFramesAfterStart(arranged, session.id, 1, sent.id)).toHaveLength(1);
+      ).toEqual(["sessionInput", "sessionStart"]);
       const second = (await listInputs(arranged, session.id)).find(
         (one) => one.text === "and again",
       );
@@ -250,21 +251,30 @@ describe("the crash-loop guard", () => {
   it("does not resume a session that exits before starting a turn, until a new message arrives", async () => {
     await withAgentFleet(async (arranged) => {
       const { session, inputId } = await holdQueuedMessage(arranged);
+      // The resumed process dies before it has started, so before any turn.
+      // A runner whose start fails refuses the input the start carries, and
+      // then reports the exit.
+      arranged.wire.answering(() => ({ message: "the harness crashed" }));
       await reportExit(arranged, session.id, 3, "crash");
       await waitForStartFrames(arranged, session.id, 2);
-      // The resumed process dies before it has started, so before any turn.
+      await waitUntil("put the refused start input back to waiting", async () => {
+        const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
+        return row?.sentAt === null && row.reason === "the harness crashed" ? row : undefined;
+      });
       await reportExit(arranged, session.id, 1, "crash");
-      await letTheSweepRun();
 
-      expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(2);
+      // A held session is exited and stays exited: only a resume sends a
+      // start, and the hold is what refuses the resume.
       const held = await waitForSession(arranged, session.id, (one) => one.resumeHeld);
       expect(held.status).toBe("exited");
+      expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(2);
       expect(
         (await listInputs(arranged, session.id)).find((one) => one.id === inputId)?.status,
       ).toBe("queued");
 
       // A new message lifts the hold: the session is resumed for every input
       // that waits.
+      arranged.wire.answering(() => "opened");
       await sendMessage(arranged, session.conversationId!, "are you there?");
       await waitForStartFrames(arranged, session.id, 3);
       expect((await readSession(arranged, session.id)).resumeHeld).toBe(false);
@@ -277,14 +287,8 @@ describe("an exit of a Thread with input waiting", () => {
   const holdQueuedThreadInput = async (arranged: Arranged) => {
     const thread = await spawnSessionOrFail(arranged, { prompt: "hello" });
     await waitForStartFrames(arranged, thread.id, 1);
-    reportResumed(arranged, thread.id);
-    reportEvent(arranged.wire, 2, {
-      eventId: crypto.randomUUID(),
-      sessionId: thread.id,
-      at,
-      _tag: "turn.started",
-      turnId: "t1",
-    });
+    reportStarted(arranged, thread.id);
+    reportTurnStarted(arranged, thread.id, 2);
     await waitForSession(arranged, thread.id, (one) => one.status === "busy");
     const input = await post(
       arranged.harness.base,

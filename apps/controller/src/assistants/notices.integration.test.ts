@@ -552,8 +552,18 @@ describe("a resumed session that exits before it starts a turn", () => {
       const { conversation, session } = await startAda(arranged);
       const next = await runTurn(arranged, session.id, 2, "t1", []);
       await reportExit(arranged, session.id, next, "idle_unload");
+      // A runner whose start fails refuses the input the start carries, and
+      // then reports the exit.
+      arranged.wire.answering(() => ({ message: "the harness crashed" }));
       await sendMessage(arranged, conversation.id, "are you there?");
       await waitForStartFrames(arranged, session.id, 2);
+      await waitUntil("recorded the refusal", async () => {
+        const found = (await listInputs(arranged, session.id)).find(
+          (one) => one.text === "are you there?",
+        );
+        return found?.reason === "the harness crashed" ? found : undefined;
+      });
+      arranged.wire.answering(() => "opened");
 
       // The resumed process numbers its events from 1 again.
       await reportExit(arranged, session.id, 1, "crash");

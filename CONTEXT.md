@@ -93,7 +93,12 @@ Delivering user input into a session's running turn, folding it into that turn i
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
-User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
+User input held by the controller for delivery when the session's running turn completes. A session's first input is held until the session starts, and the start carries it. Editable and cancelable until delivered, with two exceptions:
+
+- inputs to an assistant's conversation session are the owner's messages and go in unchanged;
+- a session's first input cannot be cancelled before the session starts: stop the session instead.
+
+A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -177,7 +182,7 @@ A conversation message the system writes in one of two forms: "<name> was interr
 _Avoid_: notification (Hercule's central message to its user), error message, alert
 
 **Idle Unload**:
-Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default). The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation. Nothing treats it as a special exit: it writes no notice because no turn runs at an idle unload. The owner sees the assistant as "asleep", the presence word for an exited session the next message resumes; that is a word on screen, not a name for the unload.
+Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default), counted from the end of its last turn, or from an input refused while no turn was open. The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation. Nothing treats it as a special exit: it writes no notice because no turn runs at an idle unload. The owner sees the assistant as "asleep", the presence word for an exited session the next message resumes; that is a word on screen, not a name for the unload.
 _Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:

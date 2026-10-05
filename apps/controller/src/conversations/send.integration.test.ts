@@ -101,6 +101,24 @@ describe("conversation.send to a conversation with no session", () => {
     });
   });
 
+  it("carries the first message on the session's start, and sends no input frame for it", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversation } = await readDefaultConversation(arranged);
+
+      await sendMessage(arranged, conversation.id, "hi");
+
+      const [session] = await waitForConversationSessions(arranged, conversation.id, 1);
+      const [frame] = await waitForStartFrames(arranged, session!.id, 1);
+      expect(frame!.input.text).toBe("hi");
+      await waitUntil("delivered the message", async () => {
+        const [row] = await listInputs(arranged, session!.id);
+        return row?.status === "delivered" ? true : undefined;
+      });
+      // No send claims a delivered input, so no input frame can carry it later.
+      expect(listInputFramesFor(arranged, session!.id)).toEqual([]);
+    });
+  });
+
   it("gives a Thread on the same controller no idle timeout", async () => {
     await withAgentFleet(async (arranged) => {
       const thread = await spawnSessionOrFail(arranged, { prompt: "hello" });
@@ -179,10 +197,6 @@ describe("conversation.send to a conversation with a current session", () => {
     await withAgentFleet(async (arranged) => {
       const { conversation } = await readDefaultConversation(arranged);
       const session = await startConversationSession(arranged, conversation.id, "hi");
-      await waitUntil(
-        "sent the first message's input frame",
-        () => listInputFramesFor(arranged, session.id)[0],
-      );
       await runTurn(arranged, session.id, 2, "t1", ["hello"]);
       // The runner never answers from here on. A send that waited for its
       // answer would not return.
@@ -191,9 +205,11 @@ describe("conversation.send to a conversation with a current session", () => {
       const response = await requestSend(arranged, conversation.id, "again");
 
       expect(response.status, await response.clone().text()).toBe(200);
+      // The first message rode the start frame, so this is the first input
+      // frame.
       const frame = await waitUntil(
         "sent the second message's input frame",
-        () => listInputFramesFor(arranged, session.id)[1],
+        () => listInputFramesFor(arranged, session.id)[0],
       );
       expect(frame.input.text).toBe("again");
       expect(await listConversationSessions(arranged, conversation.id)).toHaveLength(1);
@@ -231,6 +247,8 @@ describe("conversation.send to a conversation with a current session", () => {
   it("queues the message as the user's input on a starting session", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation } = await readDefaultConversation(arranged);
+      // The runner has not answered the start, so the session stays starting.
+      arranged.wire.answering(() => undefined);
       await sendMessage(arranged, conversation.id, "hi");
       const [session] = await waitForConversationSessions(arranged, conversation.id, 1);
       await waitForStartFrames(arranged, session!.id, 1);
@@ -283,13 +301,15 @@ describe("conversation.send to a conversation with a current session", () => {
 
       await sendMessage(arranged, conversation.id, "again");
 
+      const frames = await waitForStartFrames(arranged, session.id, 2);
+      // The fake runner answers the start at once, so the session may have
+      // moved on to `busy` already.
       const resumed = await waitForSession(
         arranged,
         session.id,
-        (one) => one.status === "starting",
+        (one) => one.status === "starting" || one.status === "busy",
       );
       expect(resumed.runnerId).toBe(arranged.runnerId);
-      const frames = await waitForStartFrames(arranged, session.id, 2);
       expect(frames[1]!.spec.continue).toEqual({ mode: "resume", nativeSessionId: "native-1" });
       expect(await listConversationSessions(arranged, conversation.id)).toHaveLength(1);
     });

@@ -38,8 +38,8 @@ import {
   type ControllerToRunner,
   type ProbeReport,
   type ProbeRequest,
+  type FrameCarryingInput,
   type SessionEvent,
-  type SessionInput,
   type SessionInputResult,
   type SessionsReport,
   type CredentialRequest,
@@ -71,7 +71,24 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
-export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | SessionInput;
+/**
+ * A frame the runner answers under its `requestId`, other than a frame that
+ * carries an input. Those go through `sendFrameCarryingInput`, whose answer
+ * is always a `SessionInputResult`.
+ */
+export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
+
+/**
+ * What came of sending a frame the runner answers:
+ *
+ * - `notSent`: the runner has no connection, so nothing was sent.
+ * - `sent`: the frame was sent. `answer` is the runner's answer, or `none`
+ *   when the connection ended or no answer came in time.
+ */
+export type SendOutcome<A> =
+  { readonly _tag: "notSent" } | { readonly _tag: "sent"; readonly answer: Option.Option<A> };
+
+const NOT_SENT: SendOutcome<never> = { _tag: "notSent" };
 
 /**
  * A frame a runner sent about the sessions it hosts, and which runner sent it.
@@ -247,12 +264,61 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Sends a frame and waits for the report under `key`, up to `deadline`.
+   * Returns `notSent`, sending nothing, when the runner has no connection.
+   * Otherwise returns `sent`, with the report, or with `none` when the
+   * connection ended or nothing came back in time.
+   *
+   * The wait is registered before the frame is sent, so a report that comes
+   * back at once is not missed. A timeout ends only this caller's wait: the
+   * frame may still be answered, and other callers waiting under the same key
+   * still get that report.
+   */
+  const sendAndAwaitReport = (
+    id: string,
+    key: string,
+    send: (held: Reachable) => Effect.Effect<void>,
+    deadline: Duration.Duration,
+  ): Effect.Effect<SendOutcome<Reported>> =>
+    Effect.suspend(() => {
+      const held = reachable.get(id);
+      if (held === undefined) return Effect.succeed(NOT_SENT);
+      // Registered and removed as a resource: the removal runs however the
+      // send or the wait ends, including an interruption between the two.
+      // Nothing else removes a caller's entry, and a leftover entry would
+      // grow the map for the life of the connection.
+      return Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const mine = Deferred.makeUnsafe<Option.Option<Reported>>();
+          const waiting = held.pending.get(key) ?? new Set();
+          waiting.add(mine);
+          held.pending.set(key, waiting);
+          return { mine, waiting };
+        }),
+        ({ mine }) =>
+          Effect.andThen(
+            send(held),
+            Effect.map(
+              Effect.timeoutOption(Deferred.await(mine), deadline),
+              (answer): SendOutcome<Reported> => ({ _tag: "sent", answer: Option.flatten(answer) }),
+            ),
+          ),
+        ({ mine, waiting }) =>
+          Effect.sync(() => {
+            waiting.delete(mine);
+            // Only if this set is still the one under the key. A report wakes
+            // callers by removing the key first, so a caller that arrives
+            // under the same key meanwhile has created a new set, and this
+            // release must not delete it.
+            if (waiting.size === 0 && held.pending.get(key) === waiting) held.pending.delete(key);
+          }),
+      );
+    });
+
+  /**
    * Sends a frame and waits for the report under `key`. Returns `none` when
    * the runner has no connection, the connection ended, or nothing came back
    * in time. Callers report all three the same way: the runner did not answer.
-   *
-   * A timeout ends only this caller's wait: the frame may still be answered,
-   * and other callers waiting under the same key still get that answer.
    */
   const askAndAwaitReport = (
     id: string,
@@ -260,31 +326,9 @@ const make = Effect.gen(function* () {
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
   ): Effect.Effect<Option.Option<Reported>> =>
-    Effect.suspend(() => {
-      const held = reachable.get(id);
-      if (held === undefined) return Effect.succeed(Option.none<Reported>());
-      const mine = Deferred.makeUnsafe<Option.Option<Reported>>();
-      const waiting = held.pending.get(key) ?? new Set();
-      waiting.add(mine);
-      held.pending.set(key, waiting);
-      return Effect.ensuring(
-        Effect.gen(function* () {
-          yield* send(held);
-          const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
-          return Option.getOrElse(answer, () => Option.none<Reported>());
-        }),
-        // Remove this caller's entry: nothing else will, and leaving it would
-        // grow the map for the life of the connection.
-        Effect.sync(() => {
-          waiting.delete(mine);
-          // Only if this set is still the one under the key. A report wakes
-          // callers by removing the key first, so a caller that arrives under
-          // the same key meanwhile has created a new set, and this finalizer
-          // must not delete it.
-          if (waiting.size === 0 && held.pending.get(key) === waiting) held.pending.delete(key);
-        }),
-      );
-    });
+    Effect.map(sendAndAwaitReport(id, key, send, deadline), (outcome) =>
+      outcome._tag === "sent" ? outcome.answer : Option.none(),
+    );
 
   /**
    * Sets the runner's connectivity, and records an audit entry when it
@@ -395,7 +439,9 @@ const make = Effect.gen(function* () {
     /**
      * Sends a request to the runner and waits for its answer, up to
      * `deadline`. Returns `none` when the runner has no connection, the
-     * connection ended, or no answer came in time.
+     * connection ended, or no answer came in time. With
+     * `Duration.infinity` the wait ends only on the answer or on the end of
+     * the connection, which ends every wait on it.
      */
     asked: (
       id: string,
@@ -407,6 +453,38 @@ const make = Effect.gen(function* () {
         // The facts report uses its own key, never a request id, so only an
         // answer can arrive under this key.
         Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
+      ),
+
+    /**
+     * Sends a frame that carries an input and waits for the runner's answer
+     * to that input, up to `deadline`. Returns `notSent`, sending nothing,
+     * when the runner has no connection, so the caller can undo the claim it
+     * made for this send. Otherwise returns `sent`, with the answer, or with
+     * `none` when the connection ended or no answer came in time. With
+     * `Duration.infinity` the wait ends only on the answer or on the end of
+     * the connection, which ends every wait on it.
+     */
+    sendFrameCarryingInput: (
+      id: string,
+      frame: FrameCarryingInput,
+      deadline: Duration.Duration,
+    ): Effect.Effect<SendOutcome<SessionInputResult>> =>
+      Effect.map(
+        sendAndAwaitReport(id, frame.requestId, (held) => held.ask(frame), deadline),
+        (outcome) =>
+          outcome._tag === "notSent"
+            ? outcome
+            : {
+                _tag: "sent",
+                // The request id is the input's id, and every send of the
+                // input uses it. So whatever arrives under it answers this
+                // input, though possibly an earlier send of it.
+                answer: Option.filter(
+                  outcome.answer,
+                  (reported): reported is SessionInputResult =>
+                    reported._tag === "sessionInputResult",
+                ),
+              },
       ),
 
     /**
@@ -425,15 +503,16 @@ const make = Effect.gen(function* () {
      * Checks whether this runner has an open connection right now. For a
      * caller deciding whether to start work only a connected runner can
      * finish, or whether to commit a change that a frame will then carry to
-     * the runner. A caller whose frame goes with no write uses `tell`, which
-     * finds out by trying.
+     * the runner. A caller with nothing to commit first finds out by trying:
+     * `tell` and `sendFrameCarryingInput` both report a missing connection.
      */
     holdsConnection: (id: string): Effect.Effect<boolean> => Effect.sync(() => reachable.has(id)),
 
     /**
-     * Sends one frame to a runner, without waiting for an answer. Returns
-     * `false` when the runner has no connection, which a caller reports as a
-     * session it could not place.
+     * Sends one frame to a runner, without waiting for an answer, and returns
+     * whether it was sent. Returns `false`, sending nothing, when the runner
+     * has no connection. A frame the runner answers goes through `asked` or
+     * `sendFrameCarryingInput` instead, which also wait for the answer.
      */
     tell: (id: string, frame: ControllerToRunner): Effect.Effect<boolean> =>
       Effect.suspend(() => {

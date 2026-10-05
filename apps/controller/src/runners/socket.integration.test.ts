@@ -512,6 +512,23 @@ describe("the hello exchange", () => {
     });
   });
 
+  it("refuses a runner on protocol version 1, whose start would drop the input it carries, and says to upgrade it", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+
+      const wire = await dial(harness.base, joined.credential);
+      wire.send(buildHello({ protocolVersion: 1 }));
+
+      const ending = await wire.closed();
+      expect(ending.reason).toContain("upgrade the runner");
+      expect(ending.reason).toContain(`version ${String(PROTOCOL_VERSION)}`);
+      expect(wire.frames).toEqual([]);
+      const row = await readRunner(harness.base, token, joined.runnerId);
+      expect(row.connectivity).toBe("offline");
+    });
+  });
+
   it("reports a version mismatch when a runner sends a hello it cannot decode", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
@@ -689,8 +706,10 @@ describe("the liveness check", () => {
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
-        // Ten intervals, which is five silence limits: a runner that answers
-        // stays online, and only a pong counts as an answer.
+        // Ten intervals, which is two silence limits: a runner that answers
+        // stays online, and only a pong counts as an answer. The limit is
+        // five intervals, so a pong that a busy machine delays by a few
+        // intervals still arrives in time.
         for (let beat = 0; beat < 10; beat++) {
           const ping = await wire.next();
           expect(ping._tag, JSON.stringify(ping)).toBe("ping");
@@ -704,7 +723,7 @@ describe("the liveness check", () => {
 
         wire.close();
       },
-      { pings: { ...FAST, silence: Duration.millis(80) } },
+      { pings: { ...FAST, silence: Duration.millis(200) } },
     );
   });
 

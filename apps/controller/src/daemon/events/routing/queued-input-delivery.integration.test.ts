@@ -9,12 +9,12 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
-  at,
   readSession,
+  listInputs,
   waitForSession,
-  reportEvent,
   waitForStartFrames,
   WAIT_DEADLINE_MS,
+  reportTurnCompleted,
 } from "../../../sessions/testing";
 import { post } from "../../../http/testing";
 import {
@@ -29,9 +29,9 @@ import {
   listFramesCarrying,
   spawnSubscriber,
   subscribeThread,
-  reportTurnCompleted,
   waitOutSeveralTicks,
   withPipeline,
+  listInputFrames,
 } from "../../testing";
 
 /** Long enough for a fleet, a session and several ticks. */
@@ -132,22 +132,17 @@ describe("the delivery of a queued input", () => {
       await emitManualEvent(arranged, [REF], "wake up");
 
       // The runner is told to start the session again, on its own native
-      // session.
+      // session, and the start carries the row, which opens the first turn.
       const starts = await waitForStartFrames(arranged, agent.session.id, 2);
       expect(starts[1]!.spec.continue).toMatchObject({ mode: "resume" });
       await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) => found.length >= 1);
-
-      // The resumed harness reports it has started, and the turn starts with
-      // the row.
-      reportEvent(arranged.wire, 1, {
-        eventId: crypto.randomUUID(),
-        sessionId: agent.session.id,
-        at,
-        _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-1" },
-      });
-      const frame = await waitForFrameCarrying(arranged, "wake up");
-      expect(frame.sessionId).toBe(agent.session.id);
+      const row = (await listInputs(arranged, agent.session.id)).find((one) =>
+        one.text.includes("wake up"),
+      );
+      expect(starts[1]!.requestId).toBe(row!.id);
+      expect(starts[1]!.input.text).toBe(row!.text);
+      await waitForSession(arranged, agent.session.id, (one) => one.status === "busy");
+      expect(listInputFrames(arranged).filter((frame) => frame.requestId === row!.id)).toEqual([]);
     });
   });
 

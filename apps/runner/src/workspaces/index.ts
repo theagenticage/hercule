@@ -6,6 +6,8 @@
  * The controller sends workspace ids and the runner works out the paths. The
  * registry on this runner, not the controller, records where each workspace is.
  */
+import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 import type { WorkspaceDispose, WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
 import { disposeWorkspace } from "./dispose";
 import { provisionWorkspace, reprovision } from "./provision";
@@ -53,6 +55,19 @@ export interface Workspaces {
    * ran in it. Returns undefined for an ephemeral workspace or an unknown id.
    */
   readonly reportAfterSession: (workspaceId: string) => Promise<WorkspaceReport | undefined>;
+  /**
+   * Runs `work` once no other work given here for the same workspace is
+   * running, and returns its result. Work for different workspaces runs side
+   * by side. Wrap every git command that writes to a workspace's checkouts:
+   * two git processes that write to one checkout at the same time collide on
+   * its `index.lock`, and one of them fails. A primary workspace is shared by
+   * every session and run that uses its repository on this runner, so a
+   * session's branch switch and a workspace step can meet there.
+   */
+  readonly runExclusively: <A, E, R>(
+    workspaceId: string,
+    work: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>;
 }
 
 /**
@@ -94,6 +109,15 @@ export const makeWorkspaces = (options: {
    * the provisioning's own error message.
    */
   const failedProvisionings = new Set<string>();
+  /**
+   * The lock of each workspace that has work running or waiting in
+   * `runExclusively`, with the number of callers holding or waiting for it.
+   * A lock is removed when its last caller is done, so the map does not grow
+   * with every workspace this runner has ever had. The count makes that safe:
+   * a lock is never removed while a caller still waits for it, which would
+   * let the next caller make a second lock and run beside the first.
+   */
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>();
   /**
    * Returns the registered workspace, or undefined if this runner does not have
    * it or its directories were removed from disk. A session cannot be placed in
@@ -150,5 +174,21 @@ export const makeWorkspaces = (options: {
         ? undefined
         : reprovision(substrate, entry);
     },
+    runExclusively: (workspaceId, work) =>
+      Effect.suspend(() => {
+        const entry = locks.get(workspaceId) ?? { lock: Semaphore.makeUnsafe(1), users: 0 };
+        locks.set(workspaceId, entry);
+        entry.users += 1;
+        return entry.lock
+          .withPermits(1)(work)
+          .pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                entry.users -= 1;
+                if (entry.users === 0) locks.delete(workspaceId);
+              }),
+            ),
+          );
+      }),
   };
 };

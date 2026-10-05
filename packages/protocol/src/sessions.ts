@@ -611,12 +611,24 @@ export const GitIdentity = Schema.Struct({ name: Fact, email: Fact });
 export type GitIdentity = Schema.Schema.Type<typeof GitIdentity>;
 
 /**
- * Starts one session. It carries the instance's decoded config, as a probe
- * does, because the runner holds no Hercule state and cannot look it up.
+ * Starts one session, or resumes it, and hands its harness the session's
+ * first input. It carries the instance's decoded config, as a probe does,
+ * because the runner holds no Hercule state and cannot look it up.
+ *
+ * The runner answers the input with a `SessionInputResult` under
+ * `requestId`, exactly as it answers a `SessionInput`. It answers on every
+ * path: a start that fails before the harness took the input answers it as
+ * refused. Carrying the input here, rather than in a second frame after
+ * `session.started`, means a session never sits idle waiting for its first
+ * turn (spec 06 section 4.2).
  */
 export const SessionStart = Schema.Struct({
   _tag: Schema.Literal("sessionStart"),
+  /** The id of the Queued Input row `input` came from, which the reply is matched by. */
+  requestId: Fact,
   sessionId: SessionId,
+  /** The input the session starts with: its oldest waiting Queued Input row. */
+  input: TurnInput,
   providerId: Fact,
   config: Schema.Json,
   /** The instance's credentials, which its config never holds; `{}` when none. */
@@ -671,6 +683,13 @@ export const SessionInput = Schema.Struct({
 });
 
 export type SessionInput = Schema.Schema.Type<typeof SessionInput>;
+
+/**
+ * A frame that carries one Queued Input to the runner: a `SessionInput`, or a
+ * `SessionStart` with the input the session starts with. The runner answers
+ * either one with a `SessionInputResult` under its `requestId`.
+ */
+export type FrameCarryingInput = SessionInput | SessionStart;
 
 /**
  * Ends the running turn as `interrupted`. There is no reply frame: the outcome

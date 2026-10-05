@@ -35,6 +35,7 @@ export interface Machine {
   readonly socketPath: string;
 }
 
+/** The context a session start resolved on this machine. */
 export interface Resolved {
   readonly ctx: ProviderRunnerContext;
   /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */
@@ -161,9 +162,14 @@ const placeSession = (
     if (branch !== undefined) {
       // Never force the switch: a forced switch can throw away the user's
       // uncommitted work, and losing that is worse than not starting the
-      // session.
-      const switched = yield* Effect.promise(() =>
-        switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
+      // session. The switch waits for any other git work in this workspace:
+      // two sessions that start in one primary at once, or a workspace step
+      // running there, would otherwise collide on git's `index.lock`.
+      const switched = yield* machine.workspaces.runExclusively(
+        workspaceId,
+        Effect.promise(() =>
+          switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
+        ),
       );
       if (!switched.ok) return yield* Effect.fail(switched.stderr);
     }

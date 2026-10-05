@@ -13,7 +13,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import {
   MAX_MESSAGE_LENGTH,
@@ -143,36 +142,15 @@ export const makeWorkspaceSteps = (options: {
    * recorded, and a push would be made that no run knows about.
    */
   const settled = new Set<string>();
-  /**
-   * One lock per workspace with a step queued or running. The steps of one
-   * workspace run one at a time, because two git processes in one checkout
-   * collide on `index.lock`. Steps of different workspaces run side by side.
-   */
-  const locks = new Map<string, Semaphore.Semaphore>();
   let sending: Send | undefined;
 
   const send = (frame: WorkspaceStepResult): Effect.Effect<void> =>
     sending === undefined ? Effect.void : Effect.ignoreCause(sending(frame));
 
-  /**
-   * Returns the lock of a workspace, and creates it when no step of that
-   * workspace holds one yet.
-   */
-  const ensureWorkspaceLock = (workspaceId: string): Semaphore.Semaphore => {
-    const known = locks.get(workspaceId);
-    if (known !== undefined) return known;
-    const made = Semaphore.makeUnsafe(1);
-    locks.set(workspaceId, made);
-    return made;
-  };
-
-  /** Forgets a step, and its workspace's lock once no step of that workspace is left. */
+  /** Forgets a step. */
   const releaseStep = (step: HeldStep): void => {
     const name = buildStepName(step.key);
     if (held.get(name) === step) held.delete(name);
-    if (![...held.values()].some((other) => other.workspaceId === step.workspaceId)) {
-      locks.delete(step.workspaceId);
-    }
   };
 
   /**
@@ -219,7 +197,8 @@ export const makeWorkspaceSteps = (options: {
       const { checkoutBranch } = frame;
       // A main workspace is shared, so something else may have switched its
       // checkout since the run's last step. The switch runs here, under the
-      // workspace's lock, so no other step's git runs in between.
+      // workspace's lock, so no other step's git, and no session's branch
+      // switch, runs in between.
       const switched =
         checkoutBranch === undefined ? Effect.void : switchCheckoutBranch(context, checkoutBranch);
       const ran = yield* switched.pipe(
@@ -270,8 +249,10 @@ export const makeWorkspaceSteps = (options: {
     });
 
   /**
-   * Runs a held step: waits for its workspace's lock, runs its action, then
-   * writes, forgets and sends its result. A step whose workspace failed to
+   * Runs a held step. It first waits for its workspace's lock, which the
+   * steps of the workspace share with the branch switches of its sessions, so
+   * two git processes never write to one checkout at once. Then it runs its
+   * action, and writes, forgets and sends its result. A step whose workspace failed to
    * provision is forgotten with no result. Never fails; a settle
    * interrupts it.
    */
@@ -280,8 +261,9 @@ export const makeWorkspaceSteps = (options: {
     action: WorkspaceAction,
     step: HeldStep,
   ): Effect.Effect<void> =>
-    ensureWorkspaceLock(step.workspaceId)
-      .withPermits(1)(
+    workspaces
+      .runExclusively(
+        step.workspaceId,
         Effect.suspend(() => {
           step.phase = "running";
           return runAction(frame, action);
