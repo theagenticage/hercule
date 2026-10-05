@@ -5,8 +5,11 @@
  * so the question is answered here rather than by SQL over `runs` in the
  * workspaces domain.
  *
- * Both kinds of workspace step count: a workspace action, and an agent step,
- * whose session works in the run's workspace while the step runs.
+ * Only a workspace action counts. An agent step's turn runs in a session,
+ * which asks for credentials with its own session token and is entitled only
+ * while it holds a lease on the workspace. A running agent step must never
+ * entitle the runner itself, or anything on that runner could ask in the
+ * workspace's name while the agent works.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -28,7 +31,8 @@ export const RunWorkspaceStepActivityLayer: Layer.Layer<
           records.some(
             (record) =>
               record.workspaceId === workspaceId &&
-              (record.kind === "agent" || runsInWorkspace(record.action)),
+              record.kind === "action" &&
+              runsInWorkspace(record.action),
           ),
         ),
     };

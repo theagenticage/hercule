@@ -798,6 +798,23 @@ describe("agent steps over the runner socket", () => {
           (one) => one.status === "busy",
         );
 
+        // The session asks for git credentials with its own token. The
+        // running agent step does not entitle the runner itself: a runner
+        // that was entitled would be told the repo has no Connection.
+        const requestId = crypto.randomUUID();
+        wire.send({
+          _tag: "credentialRequest",
+          requestId,
+          remote: "github.com/o/agent",
+          workspaceId,
+        });
+        const answer = await waitForFrame(
+          wire,
+          "answered the runner's credential request",
+          (frame) => frame._tag === "credentialAnswer" && frame.requestId === requestId,
+        );
+        expect(answer).toMatchObject({ error: "unauthorized" });
+
         // A runner that reconnects is asked for the result in the workspace's
         // directory, where it keeps the step's result file.
         wire.close();
