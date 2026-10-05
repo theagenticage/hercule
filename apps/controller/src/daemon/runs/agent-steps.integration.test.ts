@@ -482,9 +482,30 @@ describe("agent steps over the runner socket", () => {
     WAIT_DEADLINE_MS * 2,
   );
 
-  it(
-    "keeps the next iteration's waiting prompt when its runner restarts, and resumes the session in place for it",
-    async () => {
+  it.each([
+    {
+      exit: "its harness unloads while idle",
+      // The runner unloads the harness and reports the exit. It still holds
+      // the transcript, so the same connection takes the resume.
+      leave: (arranged: Arranged, player: SessionPlayer, sessionId: string): Promise<Wire> => {
+        player.report(arranged.wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+        return Promise.resolve(arranged.wire);
+      },
+    },
+    {
+      exit: "its runner restarts",
+      // The runner restarts before the turn ends, and holds no session.
+      leave: async (arranged: Arranged): Promise<Wire> => {
+        arranged.wire.close();
+        await waitForRunnerGone(arranged);
+        const back = await arranged.reconnect();
+        back.send({ _tag: "sessionsReport", sessions: [] });
+        return back;
+      },
+    },
+  ])(
+    "keeps the next iteration's waiting prompt when $exit, and resumes the session in place for it",
+    async ({ leave }) => {
       await withAgentStepFleet(async (arranged) => {
         const player = createSessionPlayer();
         const agentId = await createAgent(arranged.harness.base, arranged.token);
@@ -502,14 +523,12 @@ describe("agent steps over the runner socket", () => {
           (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
         );
 
-        // The runner restarts before the turn ends, and holds no session.
-        arranged.wire.close();
-        await waitForRunnerGone(arranged);
-        const back = await arranged.reconnect();
-        back.send({ _tag: "sessionsReport", sessions: [] });
+        const back = await leave(arranged, player, sessionId);
 
         // The session is resumed in place, and its prompt is sent to it.
-        const resumed = await waitForSessionStart(back, sessionId);
+        const resumed = await waitUntil("resumed the step's session", () =>
+          listSessionStarts(back, sessionId).find((frame) => frame.spec.continue !== undefined),
+        );
         expect(resumed.spec.continue).toEqual({
           nativeSessionId: `native-${sessionId}`,
           mode: "resume",
