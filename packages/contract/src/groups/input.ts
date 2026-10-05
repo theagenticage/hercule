@@ -65,7 +65,12 @@ export const Input = Schema.Struct({
   delivery: Schema.NullOr(Delivery),
   createdAt: Timestamp,
   deliveredAt: Schema.NullOr(Timestamp),
-  /** Set while the row has been sent to the runner and no reply has arrived; null otherwise. */
+  /**
+   * Set while the row has been sent to the runner and no reply has arrived;
+   * null otherwise. An agent step's prompt that got no reply keeps it after it
+   * is cancelled, as the record that it left the controller: such a prompt is
+   * never sent again.
+   */
   sentAt: Schema.NullOr(Timestamp),
   /** Why a delivery failed, on a row that is still queued or that the failure ended; null otherwise. */
   reason: Schema.NullOr(Schema.String),

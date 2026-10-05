@@ -22,8 +22,10 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  buildAgentStepResultRequest,
   SessionSpec,
   type AccessMode,
+  type AgentStepResultRequest,
   type ApprovalDecision,
   type Delivery,
   type ModelSelection,
@@ -337,6 +339,11 @@ const STEP_INPUT_FIXED =
   "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
   "it is sent when the session is next idle; to stop the step, cancel the run with run.cancel";
 
+/** Why a step prompt the runner never answered was cancelled, as `unanswered` cancels it. */
+const STEP_PROMPT_UNANSWERED =
+  "the runner did not answer this step prompt, so it is unknown whether the runner took it; " +
+  "it is not sent again, and the runner's report of the step's turn settles the step";
+
 /** Why a step prompt was cancelled when its run ended before the prompt was sent. */
 const STEP_RUN_ENDED = "the step's run ended before this prompt was sent";
 
@@ -610,6 +617,43 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Puts an input whose delivery failed back to waiting with `reason`,
+   * except when the session exited in the meantime and does not keep its
+   * input through that exit: then it is cancelled. The rule is the same as
+   * for the inputs not yet sent when the session exited
+   * (`keepsInputsOnExit`, `keepsStepPromptOnExit`). Joins the caller's
+   * transaction, and reads the session inside it, so the check cannot race
+   * the write that exits the session.
+   *
+   * Only for an input the runner did not take: when an agent step's prompt
+   * is cancelled here, `SessionObserver` is told, and the step fails. A
+   * step prompt that goes back to waiting on an exited session resumes it,
+   * like any kept input: the next delivery pass does that.
+   */
+  const requeueOrCancel = (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const now = yield* sessions.one(row.sessionId);
+      const dropped =
+        Option.isSome(now) &&
+        now.value.status === "exited" &&
+        !keepsInputsOnExit(now.value) &&
+        !keepsStepPromptOnExit(now.value);
+      if (dropped) {
+        yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+        if (row.stepIteration !== null) {
+          yield* observer.inputsDropped({
+            session: now.value,
+            refusal: reason,
+            droppedStepIterations: [row.stepIteration],
+          });
+        }
+      } else {
+        yield* inputs.requeue(row.id, row.sentAt, reason);
+      }
+      yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+    });
+
+  /**
    * Does the cleanup after sessions move to `exited`, whatever ended them.
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
@@ -623,8 +667,9 @@ const make = Effect.gen(function* () {
    *   window, and `orphan` when it cannot;
    * - withdraws the approval notification about the request it was waiting
    *   on;
-   * - tells `SessionObserver` that the session exited, and whether the
-   *   crash-loop guard now holds it back from a resume;
+   * - tells `SessionObserver` that the session exited, whether the
+   *   crash-loop guard now holds it back from a resume, and which agent
+   *   step prompts it cancelled before any runner saw them;
    * - forgets its token and ingest state, and announces it once.
    *
    * `ended` holds the rows as they were just before the end.
@@ -643,9 +688,7 @@ const make = Effect.gen(function* () {
         const keeps =
           Option.isSome(after) &&
           (keepsInputsOnExit(after.value) || keepsStepPromptOnExit(after.value));
-        if (!keeps) {
-          yield* inputs.cancelQueued(session.id, cancelReason);
-        }
+        const cancelled = keeps ? undefined : yield* inputs.cancelQueued(session.id, cancelReason);
         // For an exit the harness reported, `applyReport` has already
         // withdrawn the notification, so this call finds it resolved and does
         // nothing. For every other end, the notification is withdrawn here.
@@ -663,6 +706,7 @@ const make = Effect.gen(function* () {
           session,
           reason,
           resumeHeld: keeps && isResumeHeld(after.value),
+          droppedStepIterations: cancelled?.stepIterations ?? [],
         });
       }
       yield* forgetSessions(ended.map((session) => session.id));
@@ -1396,9 +1440,13 @@ const make = Effect.gen(function* () {
             sessionId,
             `the session could not be resumed: ${refusal}`,
           );
-          if (cancelled === 0) return;
+          if (cancelled.count === 0) return;
           yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
-          yield* observer.inputsDropped({ session, refusal });
+          yield* observer.inputsDropped({
+            session,
+            refusal,
+            droppedStepIterations: cancelled.stepIterations,
+          });
         }),
       ),
 
@@ -1549,38 +1597,63 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Handles an input whose delivery failed. It goes back to waiting with the
+     * Handles an input the runner refused. It goes back to waiting with the
      * reason, except when the session exited in the meantime and does not
-     * keep its input through that exit: then it is cancelled. The rule is the
-     * same as for the inputs not yet sent when the session exited
-     * (`keepsInputsOnExit`, `keepsStepPromptOnExit`). The session is read
-     * inside this transaction, so the check cannot race the write that exits
-     * the session.
-     *
-     * When an agent step's prompt is cancelled, `SessionObserver` is told, so
-     * the step's run does not wait for a turn that never comes. A step prompt
-     * that goes back to waiting on an exited session resumes it, like any
-     * kept input: the next delivery pass does that.
+     * keep its input through that exit: then it is cancelled (see
+     * `requeueOrCancel`). Runs in its own transaction.
      */
     undelivered: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+      withTransaction(sql, requeueOrCancel(row, reason)),
+
+    /**
+     * Handles an input the runner never answered: the connection dropped, or
+     * no answer came before the deadline. Whether the runner took the input
+     * is unknown.
+     *
+     * - Any input but an agent step's prompt is handled as a refused one
+     *   (`undelivered`), with `reason`.
+     * - An agent step's prompt is cancelled, so it is never sent again, and
+     *   keeps when it was sent (`cancelUnanswered`). Sending it again could
+     *   run the step's turn twice, and that turn may push or comment. The
+     *   step is not failed either: the runner may have taken the prompt, so
+     *   only the runner's answer about the step settles it.
+     *
+     * Returns the request for the step's result when it cancelled a step's
+     * prompt, so the caller can ask the runner how the step's turn ended, and
+     * `none` otherwise. Runs in its own transaction.
+     */
+    unanswered: (
+      row: StoredInput,
+      reason: string,
+    ): Effect.Effect<Option.Option<AgentStepResultRequest>, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const now = yield* sessions.one(row.sessionId);
-          const dropped =
-            Option.isSome(now) &&
-            now.value.status === "exited" &&
-            !keepsInputsOnExit(now.value) &&
-            !keepsStepPromptOnExit(now.value);
-          if (dropped) {
-            yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
-            if (row.stepIteration !== null) {
-              yield* observer.inputsDropped({ session: now.value, refusal: reason });
-            }
-          } else {
-            yield* inputs.requeue(row.id, row.sentAt, reason);
+          if (row.stepIteration === null) {
+            yield* requeueOrCancel(row, reason);
+            return Option.none();
           }
+          const session = yield* sessions.one(row.sessionId);
+          // Only an agent step creates a step prompt, in the session the step
+          // started, so a step prompt without that session is a bug.
+          if (Option.isNone(session)) return yield* Effect.die("a step prompt has no session");
+          const { runId, stepId, workspaceId } = session.value;
+          if (runId === null || stepId === null) {
+            return yield* Effect.die("a step prompt's session was not started by a step");
+          }
+          const cancelled = yield* inputs.cancelUnanswered(
+            row.id,
+            row.sentAt,
+            STEP_PROMPT_UNANSWERED,
+          );
+          if (!cancelled) return Option.none();
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+          return Option.some(
+            buildAgentStepResultRequest(
+              { runId, stepId, iteration: row.stepIteration },
+              workspaceId,
+            ),
+          );
         }),
       ),
 

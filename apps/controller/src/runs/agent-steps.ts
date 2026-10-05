@@ -30,7 +30,7 @@ import { afterCommit, nowIso, withTransaction } from "../db";
 import { renderTemplate } from "../expressions";
 import { isLoggedIn, providerRepository } from "../providers";
 import type { PlacementCandidate } from "../runners";
-import { inputRepository, type StoredSession } from "../sessions";
+import type { StoredSession } from "../sessions";
 import { RunExecutor } from "./executor";
 import { runRepository, type ExecutionFailureReason, type StoredRun } from "./repository";
 import { buildRunContext } from "./run-context";
@@ -171,7 +171,6 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
-    const inputs = yield* inputRepository;
     const executor = yield* RunExecutor;
     const agents = yield* agentRepository;
     const providers = yield* providerRepository;
@@ -272,23 +271,25 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
 
       /**
        * Fails the running agent step of `session` with `message` as the
-       * step's error, when the step's prompt was cancelled before a runner
-       * took it: no runner saw the prompt, so none will report its turn.
-       * Does nothing when the session runs no agent step, when its step has
-       * no record running in it, or when the prompt was not cancelled. Joins
-       * the caller's transaction as a savepoint.
+       * step's error, when the iteration of its running record is among
+       * `droppedIterations`: the step iterations whose prompts the sessions
+       * domain cancelled before they left the controller. No runner saw
+       * those prompts, so none will report their turns. Does nothing when
+       * the list is empty, when the session runs no agent step, or when its
+       * running record is for another iteration. Joins the caller's
+       * transaction as a savepoint.
        */
       failStepWithDroppedPrompt: (
         session: SessionOfStep,
+        droppedIterations: ReadonlyArray<number>,
         message: string,
       ): Effect.Effect<void, SqlError> =>
         withTransaction(
           sql,
           Effect.gen(function* () {
+            if (droppedIterations.length === 0) return;
             const step = yield* findRunningStepOfSession(session);
-            if (step === undefined) return;
-            const prompt = yield* inputs.readStepInput(session.id, step.record.iteration);
-            if (Option.isNone(prompt) || prompt.value.status !== "cancelled") return;
+            if (step === undefined || !droppedIterations.includes(step.record.iteration)) return;
             yield* failStepOfSession(step, message, yield* nowIso);
           }),
         ),

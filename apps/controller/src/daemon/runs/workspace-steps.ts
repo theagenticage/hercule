@@ -16,6 +16,7 @@ import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  buildAgentStepResultRequest,
   MAX_WORKSPACE_STEPS,
   type ActionStepStart,
   type WorkspaceStepKey,
@@ -67,14 +68,10 @@ const make = Effect.gen(function* () {
         // The step's prompt already reached the runner as an input of its
         // session, after the workspace's provision. This only asks again how
         // the step's turn ended.
-        return yield* connections.tell(step.runnerId, {
-          _tag: "workspaceStepStart",
-          kind: "agent",
-          runId: step.runId,
-          stepId: step.stepId,
-          iteration: step.iteration,
-          workspaceId: step.workspaceId,
-        });
+        return yield* connections.tell(
+          step.runnerId,
+          buildAgentStepResultRequest(step, step.workspaceId),
+        );
       }
       // The first workspace step of a run opens its workspace in the same
       // transaction, so the runner may not have the workspace yet. The

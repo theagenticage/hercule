@@ -48,7 +48,7 @@ describe("the adapters in this runner build", () => {
       send: (frame) => Effect.sync(() => void sent.push(frame)),
       // No session runs, so no agent step begins.
       workspaceSteps: {
-        beginAgentStep: () => Effect.succeed("begun"),
+        beginAgentStep: () => Effect.void,
         finishAgentStep: () => Effect.void,
         forgetAgentStep: () => undefined,
       },

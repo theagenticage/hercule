@@ -16,8 +16,14 @@
  *   remembering to call it;
  * - `inputsDropped` by the steps that give up on waiting input: the one
  *   that drops the input of a session that cannot be resumed, and the one
- *   that cancels the prompt of an agent step whose session exited before
- *   the runner took it.
+ *   that cancels an input the runner refused after its session exited for
+ *   good.
+ *
+ * `sessionExited` and `inputsDropped` both name the agent step prompts that
+ * were cancelled before any runner took them (`droppedStepIterations`). A
+ * step prompt that left the controller and was never answered is not among
+ * them: the runner may have taken it, so only the runner's answer about the
+ * step settles the step.
  *
  * So a failure in the implementation rolls the change back, and the
  * implementation must not wait on anything outside the database.
@@ -51,14 +57,29 @@ export interface SessionExit {
    * someone sends more.
    */
   readonly resumeHeld: boolean;
+  /**
+   * The iterations of the session's agent step whose prompts this exit
+   * cancelled before any runner took them. Empty for a session no agent
+   * step started, and for one that keeps its step prompt through the exit.
+   */
+  readonly droppedStepIterations: ReadonlyArray<number>;
 }
 
-/** Input that waited for an exited session and was cancelled, because the session cannot be resumed. */
+/**
+ * Input that waited for an exited session and was cancelled: the session
+ * cannot be resumed, or the runner refused the input after the session
+ * exited for good.
+ */
 export interface DroppedInputs {
   /** The exited session the input waited for. */
   readonly session: StoredSession;
-  /** The reason the resume was refused. */
+  /** The reason the input could not be delivered. */
   readonly refusal: string;
+  /**
+   * The iterations of the session's agent step whose prompts were among the
+   * cancelled input. No runner took them.
+   */
+  readonly droppedStepIterations: ReadonlyArray<number>;
 }
 
 /** The party told about what every session does. */

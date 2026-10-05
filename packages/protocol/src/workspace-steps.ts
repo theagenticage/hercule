@@ -98,7 +98,8 @@ export type ActionStepStart = Schema.Schema.Type<typeof ActionStepStart>;
  * step key. The controller sends the turn's prompt as the session's input,
  * not in this frame. This frame only asks how the turn ended, and it is sent
  * again whenever the controller cannot know whether the runner still owes
- * the answer, for example after either side restarts. The runner answers:
+ * the answer, for example after either side restarts, or when the runner did
+ * not answer the input that carried the prompt. The runner answers:
  *
  * - from the step's result file, when the turn has ended;
  * - when the turn ends, when it is still running;
@@ -117,6 +118,23 @@ export const AgentStepResultRequest = Schema.Struct({
 });
 
 export type AgentStepResultRequest = Schema.Schema.Type<typeof AgentStepResultRequest>;
+
+/**
+ * Builds the request for the result of the agent step `key`. `workspaceId` is
+ * the workspace the step's session works in, or `null` for a session with no
+ * workspace.
+ */
+export const buildAgentStepResultRequest = (
+  key: WorkspaceStepKey,
+  workspaceId: string | null,
+): AgentStepResultRequest => ({
+  _tag: "workspaceStepStart",
+  kind: "agent",
+  runId: key.runId,
+  stepId: key.stepId,
+  iteration: key.iteration,
+  workspaceId,
+});
 
 /**
  * Starts one workspace step, or asks for its result: a workspace action step

@@ -77,8 +77,10 @@ export const SessionObserverLayer: Layer.Layer<
     return combineSessionObservers([
       yield* makeAssistantSessionObserver,
       makeRunSessionObserver({
-        failStepWithDroppedPrompt: (session, message) =>
-          Effect.flatMap(reference.get, (runs) => runs.failStepWithDroppedPrompt(session, message)),
+        failStepWithDroppedPrompt: (session, droppedIterations, message) =>
+          Effect.flatMap(reference.get, (runs) =>
+            runs.failStepWithDroppedPrompt(session, droppedIterations, message),
+          ),
       }),
     ]);
   }),

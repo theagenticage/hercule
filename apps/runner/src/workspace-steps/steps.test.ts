@@ -635,15 +635,12 @@ const buildAgentStart = (workspaceId: string | null): AgentStepResultRequest => 
 
 const REVIEWED: WorkspaceStepOutcome = { status: "completed", output: { verdict: "approve" } };
 
-/**
- * Begins the agent step, with a turn that runs for as long as `running`
- * returns true. Returns whether the step was begun or already known.
- */
+/** Begins the agent step, with a turn that runs for as long as `running` returns true. */
 const beginAgentStep = (
   runner: Runner,
   frame: AgentStepResultRequest,
   running: () => boolean = () => true,
-): Promise<"begun" | "repeated"> =>
+): Promise<void> =>
   Effect.runPromise(runner.steps.beginAgentStep(frame, frame.workspaceId, Effect.sync(running)));
 
 const finishAgentStep = (
@@ -753,48 +750,29 @@ describe("an agent step", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(runner.steps.listInFlight()).toEqual([]);
     await finishAgentStep(runner, frame);
     // The settled step is not recorded again, even if its turn is begun again.
-    expect(await beginAgentStep(runner, frame)).toBe("repeated");
+    await beginAgentStep(runner, frame);
+    await finishAgentStep(runner, frame);
 
     expect(runner.sent).toEqual([]);
     expect(runner.steps.listInFlight()).toEqual([]);
     expect(existsSync(join(runner.storageDir, "step-results", ".no-workspace"))).toBe(false);
   });
 
-  it("is begun only once: begun again while its turn runs, it is left alone, and nothing is sent", async () => {
-    const runner = makeRunner();
-    const frame = buildAgentStart(createId());
-
-    expect(await beginAgentStep(runner, frame)).toBe("begun");
-    expect(await beginAgentStep(runner, frame)).toBe("repeated");
-
-    expect(runner.sent).toEqual([]);
-    await finishAgentStep(runner, frame);
-    expect(listResults(runner, frame)).toEqual([REVIEWED]);
-  });
-
-  it("is not begun again once its turn ended, and sends its saved result again instead", async () => {
+  it("sends nothing when it begins, even when this runner already holds a result for it", async () => {
     const runner = makeRunner();
     const frame = buildAgentStart(createId());
     await beginAgentStep(runner, frame);
     await finishAgentStep(runner, frame);
 
-    expect(await beginAgentStep(runner, frame)).toBe("repeated");
+    // The controller sends a step's input at most once, so beginning a step
+    // never answers for it: only the end of its turn, or a request for its
+    // result, sends one.
+    await beginAgentStep(runner, frame);
 
-    expect(listResults(runner, frame)).toEqual([REVIEWED, REVIEWED]);
-    expect(runner.steps.listInFlight()).toEqual([]);
-  });
-
-  it("is not begun again when its session ended unseen, and is answered interrupted instead", async () => {
-    const runner = makeRunner();
-    const frame = buildAgentStart(createId());
-    await beginAgentStep(runner, frame, () => false);
-
-    expect(await beginAgentStep(runner, frame)).toBe("repeated");
-
-    expect(listResults(runner, frame)).toEqual([
-      expect.objectContaining({ status: "failed", code: "interrupted" }),
+    expect(listResults(runner, frame)).toEqual([REVIEWED]);
+    expect(runner.steps.listInFlight()).toEqual([
+      { runId: frame.runId, stepId: "review", iteration: 1 },
     ]);
-    expect(runner.steps.listInFlight()).toEqual([]);
   });
 
   it("is forgotten without an answer when the harness refuses its input", async () => {

@@ -114,26 +114,18 @@ export interface WorkspaceSteps {
    * harness, so the turn cannot end before the step is recorded here.
    *
    * `isTurnRunning` checks whether the turn still runs in a session this
-   * runner hosts. A start sent again for the step waits for the turn only
+   * runner hosts. A request for the step's result waits for the turn only
    * while it returns true.
    *
-   * Returns `begun` when the step was recorded, and `repeated` when this
-   * runner already knows the step and records nothing. The controller sends
-   * a step's input again when the answer to the first one was lost. That
-   * input must not reach the harness, or the step would run a second turn,
-   * which could push or comment a second time. A known step is answered the
-   * way `start` answers a start of it:
-   *
-   * - a settled step, or one whose turn still runs, gets no answer;
-   * - a step whose turn ended has its saved result sent again;
-   * - a step recorded here whose turn no longer runs is answered with
-   *   `interrupted`.
+   * The controller sends a step's input at most once, because a second turn
+   * could push or comment a second time, so this does not look for a turn or
+   * a result the step already has. A settled step is not recorded.
    */
   readonly beginAgentStep: (
     key: WorkspaceStepKey,
     workspaceId: string | null,
     isTurnRunning: Effect.Effect<boolean>,
-  ) => Effect.Effect<"begun" | "repeated">;
+  ) => Effect.Effect<void>;
   /**
    * Saves how an agent step ended in its result file, forgets the step, then
    * sends the result. Does nothing for a step that is not recorded, because
@@ -551,10 +543,13 @@ export const makeWorkspaceSteps = (options: {
     listInFlight: () => [...held.values(), ...agentSteps.values()].map((step) => step.key),
 
     beginAgentStep: (key, workspaceId, isTurnRunning) =>
-      Effect.gen(function* () {
-        if (yield* answerKnownAgentStep(key, workspaceId)) return "repeated" as const;
-        agentSteps.set(buildStepName(key), { key: readKey(key), workspaceId, isTurnRunning });
-        return "begun" as const;
+      Effect.sync(() => {
+        const name = buildStepName(key);
+        // The settle can overtake the step's input when the run ends just as
+        // the input is sent. The controller owes the step nothing any more,
+        // so its turn's end must send nothing and write no result file.
+        if (settled.has(name)) return;
+        agentSteps.set(name, { key: readKey(key), workspaceId, isTurnRunning });
       }),
 
     finishAgentStep: (key, outcome) =>
