@@ -548,6 +548,72 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "keeps a prompt the runner refused because its session had just unloaded, and resumes the session in place for it",
+    async () => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const player = createSessionPlayer();
+          // The runner holds the prompt without answering, so it is still on
+          // the wire when the session unloads.
+          wire.answering(() => undefined);
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildImplementDefinition(agentId),
+          });
+          const key = buildStepKey(runId);
+          const sessionId = await waitForStepSessionId(arranged, key);
+          await waitForSessionStart(wire, sessionId);
+          player.reportStarted(wire, sessionId);
+          const sent = await waitForStepInput(wire, key);
+
+          // The harness unloads before it takes the prompt, and the runner
+          // then refuses the prompt, because the session is gone.
+          player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+          await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
+          wire.answering(() => "opened");
+          wire.send({
+            _tag: "sessionInputResult",
+            requestId: sent.requestId,
+            ok: false,
+            message: "that session is not running",
+          });
+
+          // The prompt goes back to waiting, and the session is resumed in
+          // place for it.
+          const resumed = await waitUntil("resumed the step's session", () =>
+            listSessionStarts(wire, sessionId).find((frame) => frame.spec.continue !== undefined),
+          );
+          expect(resumed.spec.continue).toEqual({
+            nativeSessionId: `native-${sessionId}`,
+            mode: "resume",
+          });
+          player.reportStarted(wire, sessionId);
+          await waitUntil("sent the step's prompt again", () => {
+            const prompts = listFrames<SessionInput>(wire, "sessionInput").filter((frame) =>
+              startsStepTurn(frame, key),
+            );
+            return prompts.length === 2 ? prompts : undefined;
+          });
+          player.runTurn(wire, sessionId, key, answerText("Shipped"));
+
+          const ended = await waitForRunEnded(arranged, runId, "completed");
+          expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
+            status: "completed",
+            sessionId,
+            output: { text: "Shipped" },
+          });
+          expect(await listInputs(arranged, sessionId)).toEqual([
+            expect.objectContaining({ status: "delivered", delivery: "opened" }),
+          ]);
+        },
+        { eventRoutingInterval: Duration.millis(50) },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "fails the run with session-failed when a session resumed for the step's prompt exits again before it starts a turn",
     async () => {
       await withAgentStepFleet(async (arranged) => {

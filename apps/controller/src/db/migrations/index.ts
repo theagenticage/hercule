@@ -52,6 +52,7 @@ import taskSortRanks from "./0041-task-sort-ranks";
 import connectionIngest from "./0042-connection-ingest";
 import connectionUseOnAssistant from "./0043-connection-use-on-assistant";
 import agentStepsAndSignalTriggers from "./0044-agent-steps-and-signal-triggers";
+import sessionExitReason from "./0045-session-exit-reason";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -98,6 +99,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [42, "connection-ingest", Effect.succeed(connectionIngest)],
   [43, "connection-use-on-assistant", Effect.succeed(connectionUseOnAssistant)],
   [44, "agent-steps-and-signal-triggers", Effect.succeed(agentStepsAndSignalTriggers)],
+  [45, "session-exit-reason", Effect.succeed(sessionExitReason)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

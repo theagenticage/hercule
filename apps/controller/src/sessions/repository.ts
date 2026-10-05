@@ -39,6 +39,7 @@ import {
   type Page,
 } from "../db";
 import { buildReadyClause } from "../workspaces";
+import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import type { StreamRow } from "./stream";
 
@@ -92,6 +93,12 @@ export interface StoredSession {
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
+  /**
+   * Why the session last exited, kept like `exitedAt` through a resume. It is
+   * `null` until the session first exits, and for a session that exited
+   * before the reason was stored (migration 0045).
+   */
+  readonly exitReason: SessionEndReason | null;
   readonly lastActivityAt: string;
   /**
    * Whether the crash-loop guard is armed: the session was resumed, and since
@@ -214,6 +221,7 @@ interface SessionRow {
   readonly created_at: string;
   readonly started_at: string | null;
   readonly exited_at: string | null;
+  readonly exit_reason: string | null;
   readonly last_activity_at: string;
   readonly crash_guard_armed: number;
   readonly input_waiting: number;
@@ -236,7 +244,7 @@ const buildColumnList = (): string =>
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
-  "open_request, created_at, started_at, exited_at, " +
+  "open_request, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
@@ -269,6 +277,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   createdAt: row.created_at,
   startedAt: row.started_at,
   exitedAt: row.exited_at,
+  exitReason: row.exit_reason as SessionEndReason | null,
   lastActivityAt: row.last_activity_at,
   crashGuardArmed: row.crash_guard_armed === 1,
   inputWaiting: row.input_waiting === 1,
@@ -745,6 +754,16 @@ const make = Effect.gen(function* () {
           open_request = NULL,
           stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                          WHERE session_id = sessions.id)
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Stores why the session exited. It decides nothing: the service writes
+     * it in the transaction that moves the session to `exited`.
+     */
+    setExitReason: (sessionId: string, reason: SessionEndReason): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET exit_reason = ${reason}
         WHERE id = ${uuidFromString(sessionId)}
       `),
 

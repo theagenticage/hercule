@@ -392,13 +392,14 @@ const keepsInputsOnExit = (
 
 /**
  * Checks whether an agent step's session keeps its waiting step prompt
- * through this exit, so the prompt resumes the session in place. `exited` is
- * the session as read after the exit. It keeps the prompt when all of these
- * hold:
+ * through its last exit, so the prompt resumes the session in place.
+ * `exited` is the session as read after the exit. It keeps the prompt when
+ * all of these hold:
  *
  * - an agent step started the session;
- * - the exit left the harness's native state behind (`idle_unload` or
- *   `runner_restart`), so the next turn continues the same transcript;
+ * - the exit left the harness's native state behind (`exitReason` is
+ *   `idle_unload` or `runner_restart`), so the next turn continues the same
+ *   transcript;
  * - the session can be resumed (`resumable`);
  * - the crash-loop guard is not armed: a session that was resumed for this
  *   prompt and exited before it started a turn would most likely fail the
@@ -411,11 +412,10 @@ const keepsInputsOnExit = (
  * for a run that has ended.
  */
 const keepsStepPromptOnExit = (
-  exited: Pick<StoredSession, "runId" | "resumable" | "crashGuardArmed">,
-  reason: SessionEndReason,
+  exited: Pick<StoredSession, "runId" | "exitReason" | "resumable" | "crashGuardArmed">,
 ): boolean =>
   exited.runId !== null &&
-  (reason === "idle_unload" || reason === "runner_restart") &&
+  (exited.exitReason === "idle_unload" || exited.exitReason === "runner_restart") &&
   exited.resumable &&
   !exited.crashGuardArmed;
 
@@ -614,6 +614,7 @@ const make = Effect.gen(function* () {
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
    *
+   * - stores `reason` on the row, where `keepsStepPromptOnExit` reads it;
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`,
    *   `keepsStepPromptOnExit`);
@@ -635,12 +636,13 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
+        yield* sessions.setExitReason(session.id, reason);
         // Read again after the exit: whether the session can be resumed is
         // computed only for an exited row.
         const after = yield* sessions.one(session.id);
         const keeps =
           Option.isSome(after) &&
-          (keepsInputsOnExit(after.value) || keepsStepPromptOnExit(after.value, reason));
+          (keepsInputsOnExit(after.value) || keepsStepPromptOnExit(after.value));
         if (!keeps) {
           yield* inputs.cancelQueued(session.id, cancelReason);
         }
@@ -1549,15 +1551,16 @@ const make = Effect.gen(function* () {
     /**
      * Handles an input whose delivery failed. It goes back to waiting with the
      * reason, except when the session exited in the meantime and does not
-     * keep its input (`keepsInputsOnExit`): then it is cancelled. The session
-     * is read inside this transaction, so the check cannot race the write
-     * that exits the session.
+     * keep its input through that exit: then it is cancelled. The rule is the
+     * same as for the inputs not yet sent when the session exited
+     * (`keepsInputsOnExit`, `keepsStepPromptOnExit`). The session is read
+     * inside this transaction, so the check cannot race the write that exits
+     * the session.
      *
-     * An agent step's prompt on an exited session is always cancelled here,
-     * even after an exit that would have kept it (`keepsStepPromptOnExit`),
-     * because the reason the session exited is not known here. Then
-     * `SessionObserver` is told, so the step's run does not wait for a turn
-     * that never comes.
+     * When an agent step's prompt is cancelled, `SessionObserver` is told, so
+     * the step's run does not wait for a turn that never comes. A step prompt
+     * that goes back to waiting on an exited session resumes it, like any
+     * kept input: the next delivery pass does that.
      */
     undelivered: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
       withTransaction(
@@ -1565,7 +1568,10 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const now = yield* sessions.one(row.sessionId);
           const dropped =
-            Option.isSome(now) && now.value.status === "exited" && !keepsInputsOnExit(now.value);
+            Option.isSome(now) &&
+            now.value.status === "exited" &&
+            !keepsInputsOnExit(now.value) &&
+            !keepsStepPromptOnExit(now.value);
           if (dropped) {
             yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
             if (row.stepIteration !== null) {
