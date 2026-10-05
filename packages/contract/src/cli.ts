@@ -56,6 +56,12 @@ export type FieldRow =
        * for a positional. A tail is eight characters or more. The command
        * line accepts a tail, and the request sent to the API carries the
        * full id.
+       *
+       * The list may be one read within a record, such as a session's
+       * subagents. The command then fills the list's path parameters with
+       * its own of the same names, so `transcript read <session-id>
+       * --subagent <tail>` matches the tail among that session's subagents
+       * only.
        */
       readonly resolves?: OperationId;
     }
@@ -2628,7 +2634,8 @@ export const CLI = {
       },
       subagentId: {
         flag: "subagent",
-        help: "The subagent, by its full id as `hercule session subagent list` prints it. Without it, all work in the session stops.",
+        help: "The subagent, by its full id as `hercule session subagent list` prints it, or a tail of eight or more characters. Without it, all work in the session stops.",
+        resolves: "session.querySubagents",
       },
     },
     errors: { invalid_state: "that session has exited, or its runner is no longer connected" },
@@ -2833,7 +2840,8 @@ export const CLI = {
       },
       subagentId: {
         flag: "subagent",
-        help: "The subagent, by its full id as `hercule session subagent list` prints it. Without it, the session's own agent's transcript is read.",
+        help: "The subagent, by its full id as `hercule session subagent list` prints it, or a tail of eight or more characters. Without it, the session's own agent's transcript is read.",
+        resolves: "session.querySubagents",
       },
     },
   },

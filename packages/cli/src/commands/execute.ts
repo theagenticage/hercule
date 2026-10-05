@@ -5,7 +5,8 @@
  *
  * - **Id tails** are resolved on the client, through the list operation the
  *   field's CLI row names, for positionals and flags alike. The API only ever
- *   receives full ids.
+ *   receives full ids. A list read within one record, such as a session's
+ *   subagents, is read with the command's own path parameters.
  * - **`--all`** follows `nextCursor` to the last page, so a caller who wants
  *   everything writes one flag instead of a loop.
  */
@@ -79,9 +80,17 @@ const readAll = async (
 /**
  * Returns the full id that the text given for a field refers to.
  *
- * A full id is returned as it is. Anything else is a tail: the list the
- * field's row names is read in full, and the ids that end with the tail are
- * the candidates. Fails with:
+ * A canonical id is returned as it is. Anything else is read against the list
+ * the field's row names, in full:
+ *
+ * - an id equal to the text is returned. Ids a harness chooses, such as a
+ *   subagent's, are not UUIDs and may be shorter than a tail;
+ * - otherwise the text is a tail, and the ids that end with it are the
+ *   candidates.
+ *
+ * A list addressed by path parameters (a session's subagents) is read with
+ * the command's own path parameters of the same names, `scope`, so the tail
+ * is matched within the record the command names. Fails with:
  *
  * - a `UsageError` when the text is too short to be a tail;
  * - a `not_found` `ApiError` when no id matches;
@@ -95,20 +104,27 @@ const resolveTail = async (
   command: Command,
   field: Field,
   text: string,
+  scope: Record<string, string | number>,
 ): Promise<string> => {
   if (CANONICAL_ID.test(text)) return text;
 
-  // Too short to be a tail, and not an id: the command line is wrong, so
-  // nothing is sent.
-  if (text.length < MIN_TAIL) {
-    throw new UsageError(
-      `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
-      command.spelling,
-    );
-  }
+  const tooShort = new UsageError(
+    `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
+    command.spelling,
+  );
+  // A Hercule id is always canonical, so short text is wrong on the command
+  // line, and nothing is sent.
+  if (field.holdsAnId && text.length < MIN_TAIL) throw tooShort;
 
   const listing = findCommandById(field.resolves!)!;
-  const noun = listing.words[0]!;
+  // The word before the verb names what is listed: `task list` lists tasks,
+  // `session subagent list` lists subagents.
+  const noun = listing.words.at(-2)!;
+  const inPath = listing.positionals.filter((one) => one.carriedIn === "path");
+  const params =
+    inPath.length === 0
+      ? undefined
+      : Object.fromEntries(inPath.map((one) => [one.name, scope[one.name]!]));
 
   // Sort by creation time, not by the list's default order. Keyset paging
   // skips no row only as long as the value each row is sorted by does not
@@ -119,19 +135,23 @@ const resolveTail = async (
   const stable = listing.sortFields.includes("createdAt")
     ? { sort: [{ field: "createdAt", direction: "asc" }] }
     : {};
-  const items = await readAll(client, listing, stable, undefined);
-  const matches = items
+  const ids = (await readAll(client, listing, stable, params))
     .map((item) => item["id"])
-    .filter((id): id is string => typeof id === "string" && id.endsWith(text));
+    .filter((id): id is string => typeof id === "string");
+  if (ids.includes(text)) return text;
+  if (text.length < MIN_TAIL) throw tooShort;
 
+  const matches = ids.filter((id) => id.endsWith(text));
   if (matches.length === 1) return matches[0]!;
   if (matches.length === 0) {
     throw new ApiError("not_found", `no ${noun} whose id ends with ${text}`);
   }
-  const tails = matches.map((id) => id.slice(-MIN_TAIL)).join(", ");
-  throw new ApiError("conflict", `${text} matches ${matches.length} ${noun} ids: ${tails}`, {
-    candidates: matches,
-  });
+  // Every match ends with the text, so only the whole ids tell them apart.
+  throw new ApiError(
+    "conflict",
+    `${text} matches ${matches.length} ${noun} ids: ${matches.join(", ")}`,
+    { candidates: matches },
+  );
 };
 
 /** Matches text that looks like an id tail, so a field that cannot resolve tails can reject it. */
@@ -160,13 +180,15 @@ const validateWrittenId = (command: Command, field: Field, text: string): string
  * and flags alike. A field whose row names a list operation may be given a
  * tail, and a tail that matches no id fails. A field whose row names none is
  * sent unchanged, unless it holds a Hercule id and the text looks like a tail
- * (see `validateWrittenId`).
+ * (see `validateWrittenId`). `scope` holds the command's resolved path
+ * parameters, for a list that is read within one record.
  */
 const resolveTails = async (
   client: HerculeClient,
   command: Command,
   fields: ReadonlyArray<Field>,
   values: Record<string, unknown>,
+  scope: Record<string, string | number>,
 ): Promise<Record<string, unknown>> => {
   const resolved = { ...values };
   for (const field of fields) {
@@ -177,7 +199,7 @@ const resolveTails = async (
     resolved[field.name] =
       field.resolves === undefined
         ? validateWrittenId(command, field, given)
-        : await resolveTail(client, command, field, given);
+        : await resolveTail(client, command, field, given, scope);
   }
   return resolved;
 };
@@ -210,7 +232,9 @@ export const execute = async (
     if (field.carriedIn === "payload") writtenPayload[field.name] = value;
     else writtenParams[field.name] = value;
   }
-  const params = (await resolveTails(client, command, inPath, writtenParams)) as Record<
+  // A path parameter is resolved through a list of its own, never one read
+  // within another record, so it needs no scope.
+  const params = (await resolveTails(client, command, inPath, writtenParams, {})) as Record<
     string,
     string | number
   >;
@@ -218,10 +242,14 @@ export const execute = async (
     ...command.payload,
     ...command.positionals.filter((field) => field.carriedIn === "payload"),
   ];
-  const payload = await resolveTails(client, command, payloadFields, writtenPayload);
-  const query: Record<string, unknown> = await resolveTails(client, command, command.query, {
-    ...args.query,
-  });
+  const payload = await resolveTails(client, command, payloadFields, writtenPayload, params);
+  const query: Record<string, unknown> = await resolveTails(
+    client,
+    command,
+    command.query,
+    { ...args.query },
+    params,
+  );
 
   // With `--all`, `--limit` is the page size, not a limit on the total: a
   // caller asking for everything gets everything.

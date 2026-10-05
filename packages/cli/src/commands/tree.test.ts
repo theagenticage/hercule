@@ -161,22 +161,46 @@ describe("a command's fields against the schema", () => {
     }
   });
 
-  it("resolves a tail only through a list operation that takes no positional argument", () => {
+  /**
+   * A list read within one record, such as a session's subagents, can only
+   * resolve a tail when the command names that same record: its route starts
+   * with the list's route up to the list's last path parameter. The command
+   * then fills the list's path parameters with its own of the same names.
+   */
+  it("resolves a tail through a list operation that is global, or read within the command's own record", () => {
     const targets = COMMANDS.flatMap((command) =>
       [...command.positionals, ...command.payload, ...command.query]
         .filter((field) => field.resolves !== undefined)
-        .map((field) => [readSpelling(command), field.name, field.resolves!] as const),
+        .map((field) => [command, field] as const),
     );
     expect(targets.length).toBeGreaterThan(0);
-    for (const [where, name, target] of targets) {
-      const listing = COMMANDS.find((command) => command.id === target);
-      expect(
-        listing,
-        `${where} <${name}> resolves through ${target}, which is not a command`,
-      ).toBeDefined();
+    let scoped = 0;
+    for (const [command, field] of targets) {
+      const where = `${readSpelling(command)} <${field.name}>`;
+      const target = field.resolves!;
+      const listing = COMMANDS.find((each) => each.id === target);
+      expect(listing, `${where} resolves through ${target}, which is not a command`).toBeDefined();
       expect(target.split(".")[1], `${target} is not a listing`).toMatch(/^query/);
-      expect(listing!.positionals, `${target} takes an argument of its own`).toEqual([]);
+      const listingParams = listPathParams(listing!.path);
+      expect(
+        listing!.positionals.map((one) => one.name),
+        `${target} takes an argument that is not a path parameter`,
+      ).toEqual(listingParams);
+      if (listingParams.length === 0) continue;
+      scoped += 1;
+      // The command's path parameters fill the list's, so the field must not
+      // be one of them, and the command must name the same record.
+      expect(field.carriedIn, `${where} is a path parameter`).not.toBe("path");
+      const recordRoute = listing!.path.slice(
+        0,
+        listing!.path.indexOf(`:${listingParams.at(-1)!}`) + listingParams.at(-1)!.length + 1,
+      );
+      expect(
+        command.path === recordRoute || command.path.startsWith(`${recordRoute}/`),
+        `${where} resolves through ${target}, which is read within ${recordRoute}, a record ${command.path} does not name`,
+      ).toBe(true);
     }
+    expect(scoped, "no field resolves through a list read within a record").toBeGreaterThan(0);
   });
 
   /**
@@ -278,6 +302,7 @@ describe("the placeholders a usage line shows", () => {
     "input cancel": "<session-id> <input-id>",
     "input steer": "<session-id> <input-id>",
     "transcript read": "<session-id>",
+    "session subagent list": "<session-id>",
     "assistant read": "<assistant-id>",
     "assistant update": "<assistant-id>",
     "assistant delete": "<assistant-id>",
