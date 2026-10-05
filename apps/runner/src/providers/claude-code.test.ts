@@ -811,7 +811,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     // Idle: nothing is sent to the harness, because a control request waits
-    // for a reply and the connection handles session frames one at a time.
+    // for a reply and the connection handles a session's frames one at a time.
     await Effect.runPromise(run.adapter.interrupt(SESSION));
     expect(run.interrupted()).toBe(0);
 

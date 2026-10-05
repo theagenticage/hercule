@@ -21,12 +21,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import {
-  SessionSpec,
-  type ControllerToRunner,
-  type ModelSelection,
-  type SessionInputResult,
-} from "@hercule/protocol";
+import { SessionSpec, type ControllerToRunner, type ModelSelection } from "@hercule/protocol";
 import {
   createDecodeValidationError,
   createInvalidStateError,
@@ -51,7 +46,7 @@ import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import type { PluginHost } from "../../plugins";
 import { providerRepository, resolvedInstance } from "../../providers";
-import { RunnerConnections, type RequestOutcome } from "../../runners";
+import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
   isResumeHeld,
@@ -116,8 +111,6 @@ const GONE = "that session's runner is no longer connected";
 const NOT_WAITING =
   "that input is no longer waiting: it was sent, delivered or cancelled in the meantime";
 
-const REFUSED = "that session's runner rejected the input";
-
 const NOT_BUSY = "only a busy session can be steered";
 
 /**
@@ -145,28 +138,10 @@ const NO_OPEN_REQUEST = "that session is not waiting on a request";
 const STALE_REQUEST = "that request is not the one this session is waiting on";
 
 /**
- * The message for an input the runner never answered: the runner is not
- * connected, or no reply came in time. Both cases look the same to the
- * caller. The row goes back to waiting, and the next change to idle, or a
- * manual steer, tries again. An agent step's prompt gets
- * `STEP_PROMPT_NOT_CONFIRMED` instead.
- */
-const NOT_DELIVERED =
-  "that session's runner did not take the input; it stays queued for the next turn";
-
-/**
- * The reason stored on an input whose frame never left the controller,
- * because the session's runner had no connection, and the message the send
- * fails with. The row goes back to waiting, an agent step's prompt too, and
- * the delivery pass sends it once the runner connects.
- */
-const NOT_SENT =
-  "that session's runner is not connected; the input stays queued and is sent when the runner connects";
-
-/**
- * The message for an agent step's prompt the runner never answered. The
- * prompt is marked `sent` and never sent again, because the runner may have
- * run it.
+ * The message `session.input`, `input.steer` and the flush fail with for an
+ * agent step's prompt the runner never answered. The prompt is marked `sent`
+ * and never sent again, because the runner may have run it, and the runner
+ * is asked for the step's result instead.
  */
 const STEP_PROMPT_NOT_CONFIRMED =
   "that session's runner did not confirm it took the step's prompt; the prompt is not sent again, " +
@@ -218,52 +193,23 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sends one stored input to the session's runner and waits for the runner's
-   * result. Returns `notSent` when the runner is not connected, so the frame
-   * never left the controller, and `unanswered` when the frame left but the
-   * runner did not reply in time (see `RunnerConnections.asked`). The caller
-   * has already claimed the row, and the wait happens outside any
-   * transaction.
-   */
-  const deliverTo = (
-    session: StoredSession,
-    row: StoredInput,
-  ): Effect.Effect<RequestOutcome<SessionInputResult>> =>
-    Effect.gen(function* () {
-      const deadline = yield* SessionInputDeadline;
-      const outcome = yield* connections.asked(
-        session.runnerId,
-        sessions.inputFrame(session, row),
-        deadline,
-      );
-      if (outcome._tag !== "answered") return outcome;
-      const answer = outcome.answer;
-      // A runner answers an input only with a result. Any other frame under
-      // the input's request id left the input unanswered.
-      return answer._tag === "sessionInputResult"
-        ? { _tag: "answered", answer }
-        : { _tag: "unanswered" };
-    });
-
-  /**
-   * Sends a row that is already claimed (its `sent_at` is set) and records the
-   * result.
+   * Sends a row that is already claimed (its `sent_at` is set), waits for the
+   * runner's result outside any transaction, and records it with
+   * `SessionService.recordInputAnswer`.
    *
    * - If the runner reports a delivery, it is recorded and returned.
-   * - If the runner rejects the input, the session service records that
-   *   (`recordNotTaken`), and this fails with an invalid state error with the
-   *   same reason.
-   * - If the runner is not connected, the frame never left the controller.
-   *   The session service puts the row back to waiting (`recordNotTaken`), an
-   *   agent step's prompt too, and this fails with an invalid state error.
-   *   The runner is asked nothing, because it never had the input.
-   * - If the frame left but the runner does not reply, the session service
-   *   records that (`recordNoAnswer`), and this fails with an invalid state
-   *   error. When the input was an agent step's prompt, it is not sent
-   *   again, and the runner is asked at once for the step's result instead.
+   * - If the runner refused the input, its runner was not connected, or an
+   *   ordinary input got no answer, the input goes back to waiting, and this
+   *   fails with an invalid state error with the reason.
+   * - If an agent step's prompt got no answer, the prompt is marked `sent`
+   *   and never sent again, the runner is asked for the step's result, and
+   *   this fails with an invalid state error. The runner's answer to that
+   *   request settles the step. When the runner is not connected, the
+   *   request is not sent, and the runner is asked again when it connects.
    *
    * The idle path, a steer and the flush all send inputs through this
-   * function, and nothing else does.
+   * function. The only other input that reaches a runner is the one a start
+   * carries, which dispatch sends and records the same way.
    *
    * The session, and so its model selection, is read here after the claim,
    * not earlier by the caller. Otherwise a `session.update` that lands
@@ -274,37 +220,21 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<SessionInputOutcome, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
       const session = yield* readSession(row.sessionId);
-      const outcome = yield* deliverTo(session, row);
-      if (outcome._tag === "notSent") {
-        yield* sessions.recordNotTaken(row, NOT_SENT);
-        return yield* Effect.fail(createInvalidStateError(NOT_SENT));
-      }
-      if (outcome._tag === "answered") {
-        const answer = outcome.answer;
-        if (answer.ok && answer.delivery !== undefined) {
-          yield* sessions.recordDelivery(row, answer.delivery, session.runnerId);
-          return { inputId: row.id, result: answer.delivery };
-        }
-        const reason = answer.message ?? REFUSED;
-        yield* sessions.recordNotTaken(row, reason);
-        return yield* Effect.fail(createInvalidStateError(reason));
-      }
-      const resultRequest = yield* sessions.recordNoAnswer(row, NOT_DELIVERED);
-      // The runner handles the frames of one connection one at a time, in the
-      // order they arrive. So when the input went out on the same connection,
-      // this request cannot overtake it. When the connection dropped and the
-      // runner is back on a new one, the runner may have no trace of the
-      // input, and then it answers `interrupted`, which fails the step. If
-      // the runner is gone, the request is not sent, and the runner is asked
-      // again when it connects.
-      if (Option.isSome(resultRequest)) {
-        yield* connections.tell(session.runnerId, resultRequest.value);
-      }
-      return yield* Effect.fail(
-        createInvalidStateError(
-          row.stepIteration === null ? NOT_DELIVERED : STEP_PROMPT_NOT_CONFIRMED,
-        ),
+      const sent = yield* connections.sendFrameCarryingInput(
+        session.runnerId,
+        sessions.inputFrame(session, row),
+        yield* SessionInputDeadline,
       );
+      const recorded = yield* sessions.recordInputAnswer(row, sent, session.runnerId);
+      switch (recorded._tag) {
+        case "delivered":
+          return { inputId: row.id, result: recorded.delivery };
+        case "notDelivered":
+          return yield* Effect.fail(createInvalidStateError(recorded.reason));
+        case "unconfirmed":
+          yield* connections.tell(session.runnerId, recorded.resultRequest);
+          return yield* Effect.fail(createInvalidStateError(STEP_PROMPT_NOT_CONFIRMED));
+      }
     });
 
   /**
@@ -417,9 +347,10 @@ const make = Effect.gen(function* () {
    *
    * - an idle session is sent its oldest queued input;
    * - an exited session whose transcript can still be resumed goes back on
-   *   the queue with a resume spec, and its inputs are sent when it becomes
-   *   idle after the restart. The session service decides whether it may be
-   *   resumed now; the crash-loop guard can hold it back;
+   *   the queue with a resume spec. The start frame carries its oldest
+   *   input, and the rest are sent one per turn after that. The session
+   *   service decides whether it may be resumed now; the crash-loop guard can
+   *   hold it back;
    * - an exited session that cannot be resumed is handed to the session
    *   service's `dropUnresumableInputs`, which decides what happens to its
    *   input;
@@ -509,6 +440,9 @@ const make = Effect.gen(function* () {
    * - An idle session will not change to idle again, so no flush would send
    *   its input. The row is stored already claimed, so a cancel or a flush
    *   never sees it as waiting, and the caller sends it.
+   * - An idle session that still has an input on the wire is treated like a
+   *   busy one: the input is stored waiting, and the flush at the end of the
+   *   turn that input opens sends it.
    * - A session with any other status gets the input queued.
    * - An exited session whose transcript can be resumed goes back on the
    *   queue, with a spec that holds its provider-native session id, and the
@@ -552,7 +486,7 @@ const make = Effect.gen(function* () {
                 : (now: StoredSession) => buildResumeSpec(now, modelSelection, nativeSessionId),
             text,
             at,
-            claimed: session.status === "idle",
+            claimWhenIdle: true,
           });
           return { session, row };
         }),
@@ -694,8 +628,8 @@ const make = Effect.gen(function* () {
    * - a session put back on the queue, by this input's resume or earlier, is
    *   dispatched;
    * - an idle or exited session gets `deliverQueuedInput`;
-   * - a starting session is left alone: the input is sent when it becomes
-   *   idle.
+   * - a starting session is left alone: its start carried its oldest
+   *   input, and this one is sent when that input's turn ends.
    *
    * A steer that fails leaves the input waiting, for the flush that follows
    * the turn's end, so its failure is logged, not returned. So is an input
@@ -726,8 +660,8 @@ const make = Effect.gen(function* () {
         case "queued":
           return yield* dispatch(session.runnerId);
         case "starting":
-          // The runner's `session.started` makes the session idle, and the
-          // flush on that change sends the oldest waiting input.
+          // The start already carried the session's oldest input. This one
+          // waits, and the flush at the end of that input's turn sends it.
           return;
         case "idle":
         case "exited":
@@ -743,7 +677,8 @@ const make = Effect.gen(function* () {
    *   is dispatched;
    * - an idle or exited session gets `deliverQueuedInput`;
    * - a starting or busy session is left alone: the prompt is sent when the
-   *   session is next idle.
+   *   running turn ends. A starting session's start carried its oldest
+   *   input, and that input's turn runs first.
    *
    * A step's prompt is never steered into a running turn. The runner takes
    * the next turn that completes after the prompt as the step's turn, so a
@@ -883,7 +818,7 @@ const make = Effect.gen(function* () {
               : (now: StoredSession) => buildConversationResumeSpec(now, nativeSessionId),
           text,
           at: yield* nowIso,
-          claimed: false,
+          claimWhenIdle: false,
         });
         return Option.some(deliverConversationInput(sessionId, stored.id));
       }),
@@ -897,7 +832,8 @@ const make = Effect.gen(function* () {
      *
      * - A session that has exited but can be resumed goes back on the queue
      *   in place, with a resume spec, in the same transaction.
-     * - Any other session gets the prompt when it is next idle.
+     * - Any other session gets the prompt when its running turn ends, or right
+     *   away when it is idle.
      *
      * Fails with `InvalidState`, and stores nothing, when the session has
      * exited and cannot be resumed. It checks no grant: the caller is the
@@ -924,7 +860,7 @@ const make = Effect.gen(function* () {
               : (now: StoredSession) => buildResumeSpec(now, now.modelSelection, nativeSessionId),
           text,
           at: yield* nowIso,
-          claimed: false,
+          claimWhenIdle: false,
           stepIteration: iteration,
         });
         return deliverStepInput(sessionId);
@@ -964,12 +900,13 @@ const make = Effect.gen(function* () {
      * (`storeInput`), so the result holds an input id the caller can edit or
      * cancel. Then, after the commit:
      *
-     * - an idle session is sent the input here;
-     * - a session with any other status keeps the input queued. Steering it
+     * - an idle session with no input on the wire is sent the input here;
+     * - a session with any other status, or an idle one whose earlier input
+     *   is still on the wire, keeps the input queued. Steering it
      *   into a running turn is what `input.steer` does;
      * - an exited session that this input resumed is dispatched, which places
-     *   it like a spawn. The input is sent when the runner's `session.started`
-     *   makes the session idle, like a spawn's prompt.
+     *   it like a spawn. The start frame carries the session's oldest
+     *   waiting input, like a spawn's prompt.
      *
      * The result always comes from the runner, never from the status the
      * controller read: only the adapter knows whether the input started a turn
@@ -981,7 +918,7 @@ const make = Effect.gen(function* () {
         // Outside the transaction: dispatch may send a frame to the runner,
         // and a transaction never waits on anything outside the database.
         if (session.status === "exited") yield* dispatch(session.runnerId);
-        if (session.status !== "idle") return { inputId: row.id, result: "queued" };
+        if (row.sentAt === null) return { inputId: row.id, result: "queued" };
         return yield* deliverClaimed(row);
       }),
 
@@ -995,11 +932,11 @@ const make = Effect.gen(function* () {
      * After the commit, a fiber of its own delivers the input as `input`
      * would:
      *
-     * - an idle session is sent the input, which was stored already claimed;
-     * - an exited session that this input resumed is dispatched, and the
-     *   input is sent when the session becomes idle;
-     * - a session with any other status keeps the input queued until it is
-     *   next idle.
+     * - an idle session with no input on the wire is sent the input, which
+     *   was stored already claimed;
+     * - an exited session that this input resumed is dispatched, and its
+     *   start carries the session's oldest waiting input;
+     * - any other session keeps the input queued until its turn ends.
      *
      * A failed delivery is logged, not returned, because the caller has
      * already returned. The input stays queued for the next flush.
@@ -1014,7 +951,7 @@ const make = Effect.gen(function* () {
               "Could not dispatch a session resumed for its input",
               dispatch(session.runnerId),
             );
-          } else if (session.status === "idle") {
+          } else if (row.sentAt !== null) {
             yield* forkAfterCommit("Could not deliver a session's input", sendClaimed(row));
           }
           return row;

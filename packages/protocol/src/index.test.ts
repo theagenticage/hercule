@@ -218,7 +218,9 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   { _tag: "loginCode", requestId: REQUEST_ID, instanceId: INSTANCE_ID, code: "the-pasted-code" },
   {
     _tag: "sessionStart",
+    requestId: "0199e0e7-0000-7000-8000-00000000000d",
     sessionId: SESSION_ID,
+    input: { text: "fix the login bug" },
     providerId: "claude-code",
     config: {},
     secrets: {},
@@ -280,14 +282,15 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     _tag: "workspaceStepStart",
     kind: "agent",
     ...STEP_KEY,
+    sessionId: SESSION_ID,
     workspaceId: null,
   },
   { _tag: "workspaceStepSettle", steps: [STEP_KEY] },
 ];
 
 describe("the protocol version", () => {
-  it("is 1", () => {
-    expect(PROTOCOL_VERSION).toBe(1);
+  it("is 2", () => {
+    expect(PROTOCOL_VERSION).toBe(2);
   });
 });
 

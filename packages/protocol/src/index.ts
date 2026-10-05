@@ -64,7 +64,7 @@ export {
   WorkspaceStepKey,
 };
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
  * The close code and reason the controller uses to end the connection of a

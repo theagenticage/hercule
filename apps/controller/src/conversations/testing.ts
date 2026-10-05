@@ -133,9 +133,9 @@ export const waitForMessages = (
 
 /**
  * Sends the first message of a conversation that has no session, and starts the
- * session it places: the runner receives the start frame and reports
- * `session.started` with `nativeSessionId`. Waits until the runner has
- * answered the message's input, and returns the session, which is then
+ * session it places: the runner receives the start frame, which carries the
+ * message, and reports `session.started` with `nativeSessionId`. Waits until
+ * the runner has answered the message, and returns the session, which is then
  * `busy`: the fake runner answers `opened` and reports no turn events, so the
  * message's turn runs until the caller reports its end. The first event the
  * runner reported has sequence number 1, so the caller's next event is 2.

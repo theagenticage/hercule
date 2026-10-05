@@ -341,9 +341,12 @@ const createScriptRoot = async (...packages: ReadonlyArray<string>): Promise<str
 
 describe("the vendor SDK's per-platform CLI packages", () => {
   it("are not installed, and dep-lint reports that for this repository", async () => {
-    const { stdout } = await run("bun", ["run", join(root, "scripts/dep-lint.ts")], { cwd: root });
+    // The store check runs on this repository whichever entrypoint is linted.
+    // Linting the clean fixture skips bundling every real entrypoint, which
+    // `pnpm dep-lint` already does and which is most of a full run's time:
+    // under a parallel test run on CI, a full run outlasted the 5 s timeout.
+    const { stdout } = await runDepLint("runner", "clean.ts");
 
-    expect(stdout).toContain("is clean");
     expect(stdout).toContain("no per-platform CLI package");
   });
 

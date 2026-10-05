@@ -10,8 +10,11 @@
  * This package must not import controller code, so the stub is `Bun.serve`
  * with an Ed25519 key pair generated here.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Logger, Schema } from "effect";
+import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
 import {
   AGENT_STEPS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
@@ -19,24 +22,37 @@ import {
   RunnerToController,
   encodeChallengeBytes,
   type ControllerHello,
+  type ExitReason,
   MAX_WORKSPACE_STEPS,
+  type Ping,
   type RunnerFacts,
   type ProbeReport,
   type ProbeRequest,
+  type ProviderEvent,
   type RunnerFactsReport,
   type RunnerFactsRequest,
   type RunnerHello,
   type RunnerToController as RunnerMessage,
+  type SessionBinding,
+  type SessionInput,
+  type SessionInputResult,
+  type SessionStart,
+  type SessionStop,
+  type WorkspaceStepResult,
+  type WorkspaceStepStart,
 } from "@hercule/protocol";
 import {
   ControllerNotRecognised,
   connect,
   ProtocolMismatch,
   PROOF_DEADLINE,
+  type ConnectOptions,
   type ControllerPin,
 } from "./socket";
 import { makeCredentialRelay } from "./credentials";
+import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
+import { makeSupervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
 
@@ -264,7 +280,7 @@ const DEADLINE = Duration.millis(500);
  */
 const PATIENT = Duration.minutes(1);
 
-/** No test here starts a session, so none of these directories is ever created. */
+/** Only the session tests start a session, and they use directories of their own, so none of these is ever created. */
 const PROVIDERS_DIR = "/nonexistent/hercule-runner-providers";
 const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
 const STORAGE_DIR = "/nonexistent/hercule-runner-storage";
@@ -301,31 +317,31 @@ const collectLogLines = Logger.layer([
   Logger.map(Logger.formatLogFmt, (line) => logged.push(line)),
 ]);
 
-/** Runs one connection until it ends, and returns how it ended. */
-const runConnection = (
-  pin: ControllerPin,
-  probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS),
-  proofDeadline: Duration.Duration = PATIENT,
-  workspaceSteps: WorkspaceSteps = IDLE_STEPS,
-  providerLogins: Logins = IDLE_LOGINS,
-) =>
+/**
+ * Runs one connection until it ends, and returns how it ended. `overrides`
+ * replaces the defaults: a machine whose facts never change, a proof deadline
+ * that cannot fire, and no steps, logins or sessions.
+ */
+const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOptions, "pin">> = {}) =>
   Effect.runPromise(
     Effect.result(
       connect({
         pin,
         facts: FACTS,
-        probe,
+        probe: Effect.succeed(FACTS),
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
         workspaces,
-        workspaceSteps,
+        workspaceSteps: IDLE_STEPS,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
-        providerLogins,
+        providerLogins: IDLE_LOGINS,
+        sessions: makeSupervising([]),
         binDir: BIN_DIR,
         herculeTool: HERCULE_TOOL,
-        proofDeadline,
+        proofDeadline: PATIENT,
+        ...overrides,
       }),
     ).pipe(Effect.provide(collectLogLines)),
   );
@@ -413,7 +429,7 @@ describe("which controller a runner accepts", () => {
     // firing.
     const stub = await stubController(undefined, { greet: false, ping: true });
 
-    const outcome = await runConnection(buildPin(stub), Effect.succeed(FACTS), DEADLINE);
+    const outcome = await runConnection(buildPin(stub), { proofDeadline: DEADLINE });
 
     expect(readFailure(outcome)).toBeInstanceOf(ControllerNotRecognised);
     // The runner sent nothing but its own hello while it waited: a peer that
@@ -464,8 +480,8 @@ describe("which controller a runner accepts", () => {
       nonce: "AAAA",
       signature: "AAAA",
     });
-    // The runner handles frames one at a time, in arrival order, and a runner
-    // that had rejected its controller would respond to nothing. So a pong to
+    // Frames pass the runner's frame lock one at a time, in arrival order,
+    // and a runner that had rejected its controller would respond to nothing. So a pong to
     // a ping sent after that hello proves the runner kept the connection.
     // Waiting for the pong is better than waiting a fixed time, which can only
     // show that the runner has not stopped yet.
@@ -528,11 +544,9 @@ describe("which controller a runner accepts", () => {
     let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
     // The other test with the short deadline: it checks that the deadline
     // does not fire once the proof has arrived.
-    const pending = runConnection(buildPin(stub), Effect.succeed(FACTS), DEADLINE).then(
-      (outcome) => {
-        settled = outcome;
-      },
-    );
+    const pending = runConnection(buildPin(stub), { proofDeadline: DEADLINE }).then((outcome) => {
+      settled = outcome;
+    });
 
     await stub.connected();
     // Wait from the proof, not from the connect: the frames after the hello
@@ -577,7 +591,7 @@ describe("a runner with workspace steps in flight", () => {
     // test checks that the connection reports whatever steps are in flight.
     const steps: WorkspaceSteps = { ...IDLE_STEPS, listInFlight: () => inFlight };
 
-    const pending = runConnection(buildPin(stub), Effect.succeed(FACTS), PATIENT, steps);
+    const pending = runConnection(buildPin(stub), { workspaceSteps: steps });
 
     await stub.connected();
     await waitUntilProven(stub);
@@ -616,13 +630,7 @@ describe("reporting the end of a device login", () => {
     }));
     const counted = countAttaches();
 
-    const pending = runConnection(
-      buildPin(stub),
-      Effect.succeed(FACTS),
-      PATIENT,
-      IDLE_STEPS,
-      counted.logins,
-    );
+    const pending = runConnection(buildPin(stub), { providerLogins: counted.logins });
 
     await stub.connected();
     // The logins are attached while the hello is handled, before the proof
@@ -638,13 +646,7 @@ describe("reporting the end of a device login", () => {
     const stub = await stubController();
     const counted = countAttaches();
 
-    const pending = runConnection(
-      buildPin(stub),
-      Effect.succeed(FACTS),
-      PATIENT,
-      IDLE_STEPS,
-      counted.logins,
-    );
+    const pending = runConnection(buildPin(stub), { providerLogins: counted.logins });
 
     await stub.connected();
     await waitUntilProven(stub);
@@ -732,9 +734,11 @@ describe("a controller requesting the machine's facts", () => {
     };
     const stub = await stubController();
     let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
-    const pending = runConnection(buildPin(stub), Effect.succeed(grown)).then((outcome) => {
-      settled = outcome;
-    });
+    const pending = runConnection(buildPin(stub), { probe: Effect.succeed(grown) }).then(
+      (outcome) => {
+        settled = outcome;
+      },
+    );
 
     await stub.connected();
     await waitUntilProven(stub);
@@ -792,5 +796,614 @@ describe("a controller asking a runner to probe a provider it has no adapter for
     stub.hangUp();
     await pending;
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+/**
+ * Tests how the connection orders session frames. A session's frames run one
+ * at a time, in arrival order, and every other frame goes on beside them. The
+ * adapter is a fake whose steps the test can hold open, so a frame can arrive
+ * while a start is held at a chosen point.
+ */
+describe("session frames on one connection", () => {
+  const PROVIDER = "fake";
+  const SESSION_A = "0199e0e7-0000-7000-8000-0000000000a1";
+  const SESSION_B = "0199e0e7-0000-7000-8000-0000000000b1";
+
+  /** A point a step of the fake adapter waits at until the test opens it. */
+  interface Gate {
+    /** Whether a step has reached the gate. */
+    readonly reached: () => boolean;
+    readonly open: () => void;
+    /** Marks the gate reached, and waits until it is open. */
+    readonly pass: Effect.Effect<void>;
+  }
+
+  const createGate = (): Gate => {
+    let reached = false;
+    let open: () => void = () => {};
+    const opened = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return {
+      reached: () => reached,
+      open: () => open(),
+      pass: Effect.suspend(() => {
+        reached = true;
+        return Effect.promise(() => opened);
+      }),
+    };
+  };
+
+  /** A fake adapter that records what it is given, with gates the test can hold its steps at. */
+  interface Fake {
+    readonly adapter: ProviderAdapter;
+    /** The text of every input handed to a harness, with its session, in order. */
+    readonly inputs: Array<readonly [string, string]>;
+    /** Every stop the adapter was asked for, with its reason. */
+    readonly stops: Array<readonly [string, ExitReason]>;
+    /** The id of the turn each input opened, in order. */
+    readonly turns: Array<string>;
+    /** The gate each session's `startSession` waits at, if it has one. */
+    readonly startGates: Map<string, Gate>;
+    /** A gate the first `listSessions` call waits at. That call is the start's own check, before the session has an entry. */
+    listGate: Gate | undefined;
+    /**
+     * A gate the harness of the next `stopSession` call waits at before it
+     * exits. `stopSession` itself returns at once, as Claude Code's does, so
+     * the supervisor learns the harness is gone only from its exit event.
+     */
+    stopGate: Gate | undefined;
+    /** Publishes an event as if the harness had reported it. */
+    readonly emit: (event: ProviderEvent) => void;
+  }
+
+  const createFake = (): Fake => {
+    const held = new Map<string, SessionBinding>();
+    const events = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+    const fake: Fake = {
+      inputs: [],
+      turns: [],
+      stops: [],
+      startGates: new Map(),
+      listGate: undefined,
+      stopGate: undefined,
+      emit: (event) => PubSub.publishUnsafe(events, event),
+      adapter: {
+        providerId: PROVIDER,
+        binaryName: "fake-harness",
+        events: Stream.fromPubSub(events),
+        probe: () => Effect.die("not probed here"),
+        listSessions: Effect.suspend(() => {
+          const gate = fake.listGate;
+          fake.listGate = undefined;
+          return Effect.andThen(
+            gate?.pass ?? Effect.void,
+            Effect.sync(() => [...held.values()]),
+          );
+        }),
+        startSession: (sessionId) =>
+          Effect.andThen(
+            fake.startGates.get(sessionId)?.pass ?? Effect.void,
+            Effect.sync(() => {
+              const binding = { sessionId, nativeSessionId: sessionId, instanceId: INSTANCE };
+              held.set(sessionId, binding);
+              return binding;
+            }),
+          ),
+        sendInput: (sessionId, input) =>
+          Effect.sync(() => {
+            const turnId = crypto.randomUUID();
+            fake.inputs.push([sessionId, input.text]);
+            fake.turns.push(turnId);
+            return { turnId, delivery: "opened" as const };
+          }),
+        interrupt: () => Effect.void,
+        respondToApprovalRequest: () => Effect.void,
+        respondToQuestion: () => Effect.void,
+        stopSession: (sessionId, reason) =>
+          Effect.suspend(() => {
+            fake.stops.push([sessionId, reason]);
+            const gate = fake.stopGate;
+            fake.stopGate = undefined;
+            const exit = Effect.andThen(
+              gate?.pass ?? Effect.void,
+              Effect.sync(() => {
+                held.delete(sessionId);
+                PubSub.publishUnsafe(events, {
+                  _tag: "session.exited",
+                  eventId: crypto.randomUUID(),
+                  sessionId,
+                  at: new Date().toISOString(),
+                  reason,
+                });
+              }),
+            );
+            return Effect.asVoid(Effect.forkDetach(exit));
+          }),
+      },
+    };
+    return fake;
+  };
+
+  const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
+
+  /** Builds a start. A second start of the same session needs a request id of its own. */
+  const buildStart = (
+    sessionId: string,
+    requestId = `${sessionId.slice(0, -2)}f0`,
+  ): SessionStart => ({
+    _tag: "sessionStart",
+    requestId,
+    sessionId,
+    input: { text: `start ${sessionId}` },
+    providerId: PROVIDER,
+    config: {},
+    secrets: {},
+    spec: {
+      instanceId: INSTANCE,
+      workspaceId: null,
+      modelSelection: { model: "fast", options: {} },
+      accessMode: "approval-required",
+      timeouts: { inactivityMs: 30 * 60 * 1000, absoluteMs: 8 * 60 * 60 * 1000 },
+    },
+    token: "a-session-token",
+  });
+
+  const buildStop = (sessionId: string): SessionStop => ({ _tag: "sessionStop", sessionId });
+
+  const PING: Ping = { _tag: "ping" };
+
+  const listInputResults = (stub: Stub): ReadonlyArray<SessionInputResult> =>
+    stub.received.filter(
+      (frame): frame is SessionInputResult => frame._tag === "sessionInputResult",
+    );
+
+  const listStepResults = (stub: Stub): ReadonlyArray<WorkspaceStepResult> =>
+    stub.received.filter(
+      (frame): frame is WorkspaceStepResult => frame._tag === "workspaceStepResult",
+    );
+
+  const STEP = { runId: "0199e0e7-0000-7000-8000-0000000000d1", stepId: "review", iteration: 1 };
+
+  /** The input that carries the agent step's prompt to session A. */
+  const STEP_INPUT: SessionInput = {
+    _tag: "sessionInput",
+    requestId: "0199e0e7-0000-7000-8000-0000000000c2",
+    sessionId: SESSION_A,
+    input: { text: "Review the change.", step: STEP },
+  };
+
+  /** The controller's request for the agent step's result. */
+  const STEP_RESULT_REQUEST: WorkspaceStepStart = {
+    _tag: "workspaceStepStart",
+    kind: "agent",
+    ...STEP,
+    sessionId: SESSION_A,
+    workspaceId: null,
+  };
+
+  /** Ends a turn of session A the way the harness reports it. */
+  const completeTurn = (fake: Fake, turnId: string): void =>
+    fake.emit({
+      _tag: "turn.completed",
+      eventId: crypto.randomUUID(),
+      sessionId: SESSION_A,
+      at: new Date().toISOString(),
+      turnId,
+      state: "completed",
+    });
+
+  /**
+   * Sends a start of session A whose harness is held at `gate`, then the
+   * step's input, which waits in the session's lane behind the start. The
+   * step is not recorded until the start lets the input through.
+   */
+  const sendWaitingStepInput = async (stub: Stub, fake: Fake, gate: Gate): Promise<void> => {
+    fake.startGates.set(SESSION_A, gate);
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    stub.say(STEP_INPUT);
+  };
+
+  const countPongs = (stub: Stub): number =>
+    stub.received.filter((frame) => frame._tag === "pong").length;
+
+  /**
+   * Sends a ping and waits for its pong. The frame loop handles frames in
+   * arrival order, so the pong shows that every frame sent before the ping
+   * has been taken in.
+   */
+  const pingAndWaitForPong = async (stub: Stub): Promise<void> => {
+    const before = countPongs(stub);
+    stub.say(PING);
+    await waitUntil(() => countPongs(stub) > before);
+  };
+
+  /**
+   * Connects a runner whose sessions run on `fake`, with directories and
+   * workspace steps of its own, and waits for the proof.
+   */
+  const connectWithSessions = async (
+    fake: Fake,
+  ): Promise<{ readonly stub: Stub; readonly pending: Promise<unknown> }> => {
+    const root = mkdtempSync(joinPath(tmpdir(), "hercule-socket-sessions-"));
+    roots.push(root);
+    const stub = await stubController();
+    const storageDir = joinPath(root, "storage");
+    const pending = runConnection(buildPin(stub), {
+      providersDir: joinPath(root, "providers"),
+      scratchDir: joinPath(root, "scratch"),
+      sessions: makeSupervising([fake.adapter]),
+      workspaceSteps: makeWorkspaceSteps({
+        storageDir,
+        workspaces,
+        socketPath: joinPath(storageDir, "daemon.sock"),
+        baseEnv: {},
+      }),
+    });
+    await stub.connected();
+    await waitUntilProven(stub);
+    return { stub, pending };
+  };
+
+  const roots: Array<string> = [];
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  it("answers a ping while a start waits on its harness", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    fake.startGates.set(SESSION_A, gate);
+    const { stub, pending } = await connectWithSessions(fake);
+
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    // The controller drops a runner that does not answer pings for a minute,
+    // and a slow harness can hold a start that long.
+    await pingAndWaitForPong(stub);
+
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 1);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("starts two sessions at the same time", async () => {
+    const fake = createFake();
+    const gates = [createGate(), createGate()] as const;
+    fake.startGates.set(SESSION_A, gates[0]);
+    fake.startGates.set(SESSION_B, gates[1]);
+    const { stub, pending } = await connectWithSessions(fake);
+
+    stub.say(buildStart(SESSION_A));
+    stub.say(buildStart(SESSION_B));
+    // Both harnesses are asked for while neither has started.
+    await waitUntil(() => gates[0].reached() && gates[1].reached());
+
+    for (const gate of gates) gate.open();
+    await waitUntil(() => listInputResults(stub).length === 2);
+    expect(listInputResults(stub).every((result) => result.ok)).toBe(true);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("holds input for a session until its start has handed over the start's input", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    fake.startGates.set(SESSION_A, gate);
+    const { stub, pending } = await connectWithSessions(fake);
+    const input: SessionInput = {
+      _tag: "sessionInput",
+      requestId: "0199e0e7-0000-7000-8000-0000000000c1",
+      sessionId: SESSION_A,
+      input: { text: "and then this" },
+    };
+
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    stub.say(input);
+    await pingAndWaitForPong(stub);
+    // The input has arrived, and waits behind the start: handled now, it would
+    // be refused, because the session is not running yet.
+    expect(fake.inputs).toEqual([]);
+    expect(listInputResults(stub)).toEqual([]);
+
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 2);
+    expect(fake.inputs).toEqual([
+      [SESSION_A, `start ${SESSION_A}`],
+      [SESSION_A, "and then this"],
+    ]);
+    expect(listInputResults(stub).map((result) => [result.requestId, result.ok])).toEqual([
+      [buildStart(SESSION_A).requestId, true],
+      [input.requestId, true],
+    ]);
+    stub.hangUp();
+    await pending;
+  });
+
+  /**
+   * The two points of a start a stop can arrive at:
+   *
+   * - before the session has an entry, while the start checks the adapter.
+   *   No harness is spawned, and the start reports the exit itself.
+   * - after, while the harness starts. The harness is stopped once it is up,
+   *   and the adapter reports the exit.
+   */
+  const STOP_POINTS: ReadonlyArray<{
+    readonly point: string;
+    readonly holdStart: (fake: Fake, gate: Gate) => void;
+    readonly spawned: boolean;
+  }> = [
+    {
+      point: "while the start checks the adapter, before the session has an entry",
+      holdStart: (fake, gate) => {
+        fake.listGate = gate;
+      },
+      spawned: false,
+    },
+    {
+      point: "while the harness starts",
+      holdStart: (fake, gate) => {
+        fake.startGates.set(SESSION_A, gate);
+      },
+      spawned: true,
+    },
+  ];
+
+  for (const { point, holdStart, spawned } of STOP_POINTS) {
+    it(`refuses the start's input and ends the session as stopped when a stop arrives ${point}`, async () => {
+      const fake = createFake();
+      const gate = createGate();
+      const { stub, pending } = await connectWithSessions(fake);
+      // Held only once connected: the connection asks the adapter for its
+      // sessions when it reports them to the controller.
+      holdStart(fake, gate);
+
+      stub.say(buildStart(SESSION_A));
+      await waitUntil(gate.reached);
+      stub.say(buildStop(SESSION_A));
+      // The pong shows the stop has been taken in before the start goes on.
+      await pingAndWaitForPong(stub);
+      gate.open();
+
+      await waitUntil(() => listInputResults(stub).length === 1);
+      expect(listInputResults(stub)[0]).toMatchObject({
+        requestId: buildStart(SESSION_A).requestId,
+        ok: false,
+      });
+      expect(listInputResults(stub)[0]?.message).toContain(
+        "was stopped before its input was handed over",
+      );
+      expect(fake.inputs).toEqual([]);
+      expect(fake.stops).toEqual(spawned ? [[SESSION_A, "stopped"]] : []);
+      await waitUntil(() =>
+        stub.received.some(
+          (frame) =>
+            frame._tag === "sessionEvent" &&
+            frame.event._tag === "session.exited" &&
+            frame.event.reason === "stopped",
+        ),
+      );
+      stub.hangUp();
+      await pending;
+    });
+  }
+
+  it("keeps the order of frames that arrive in one burst", async () => {
+    const fake = createFake();
+    const { stub, pending } = await connectWithSessions(fake);
+    // Sessions whose ids differ before the last two digits, so each start
+    // gets a request id of its own.
+    const sessions = Array.from(
+      { length: 20 },
+      (_, at) => `0199e0e7-0000-7000-8000-000000${at.toString(16).padStart(2, "0")}0001`,
+    );
+    const buildInput = (sessionId: string): SessionInput => ({
+      _tag: "sessionInput",
+      requestId: `${sessionId.slice(0, -2)}c1`,
+      sessionId,
+      input: { text: "and then this" },
+    });
+
+    // Sent with nothing awaited in between, so the frames reach the runner
+    // back to back. Each input must join its session's lane after the start,
+    // or it would be refused because the session is not running yet.
+    for (const sessionId of sessions) {
+      stub.say(buildStart(sessionId));
+      stub.say(buildInput(sessionId));
+    }
+
+    await waitUntil(() => listInputResults(stub).length === sessions.length * 2);
+    expect(listInputResults(stub).filter((result) => !result.ok)).toEqual([]);
+    for (const sessionId of sessions) {
+      expect(fake.inputs.filter(([id]) => id === sessionId)).toEqual([
+        [sessionId, `start ${sessionId}`],
+        [sessionId, "and then this"],
+      ]);
+    }
+    stub.hangUp();
+    await pending;
+  });
+
+  it("starts a session sent right after a stop of the same id once the old harness is gone", async () => {
+    const fake = createFake();
+    const { stub, pending } = await connectWithSessions(fake);
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(() => listInputResults(stub).length === 1);
+    const stopping = createGate();
+    fake.stopGate = stopping;
+    const again = buildStart(SESSION_A, "0199e0e7-0000-7000-8000-0000000000f2");
+
+    stub.say(buildStop(SESSION_A));
+    await waitUntil(stopping.reached);
+    stub.say(again);
+    await pingAndWaitForPong(stub);
+    // The adapter still lists the old harness while it stops it, so the new
+    // start waits for the old harness to be gone instead of being refused as
+    // a duplicate of a running session.
+    expect(listInputResults(stub)).toHaveLength(1);
+
+    stopping.open();
+    await waitUntil(() => listInputResults(stub).length === 2);
+    expect(listInputResults(stub)[1]).toMatchObject({ requestId: again.requestId, ok: true });
+    expect(fake.inputs).toEqual([
+      [SESSION_A, `start ${SESSION_A}`],
+      [SESSION_A, `start ${SESSION_A}`],
+    ]);
+    expect(fake.stops).toEqual([[SESSION_A, "stopped"]]);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("refuses the input of a start that waits behind an earlier frame when a stop arrives", async () => {
+    const fake = createFake();
+    const { stub, pending } = await connectWithSessions(fake);
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(() => listInputResults(stub).length === 1);
+    const stopping = createGate();
+    fake.stopGate = stopping;
+    const again = buildStart(SESSION_A, "0199e0e7-0000-7000-8000-0000000000f2");
+
+    // The second start waits for the old harness, which the adapter holds
+    // open while it stops it. The second stop reaches the second start while
+    // that start is still waiting.
+    stub.say(buildStop(SESSION_A));
+    await waitUntil(stopping.reached);
+    stub.say(again);
+    stub.say(buildStop(SESSION_A));
+    await pingAndWaitForPong(stub);
+    stopping.open();
+
+    await waitUntil(() => listInputResults(stub).length === 2);
+    expect(listInputResults(stub)[1]).toMatchObject({ requestId: again.requestId, ok: false });
+    expect(listInputResults(stub)[1]?.message).toContain(
+      "was stopped before its input was handed over",
+    );
+    expect(fake.inputs).toEqual([[SESSION_A, `start ${SESSION_A}`]]);
+    // The second stop reached the old harness too. The second start spawned
+    // no harness, so nothing else was stopped.
+    expect(fake.stops.at(-1)).toEqual([SESSION_A, "stopped"]);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("does not stop a later start of the same id because of an earlier stop", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    fake.startGates.set(SESSION_A, gate);
+    const { stub, pending } = await connectWithSessions(fake);
+    const again = buildStart(SESSION_A, "0199e0e7-0000-7000-8000-0000000000f2");
+
+    // The stop reaches the first start while its harness starts. The second
+    // start arrives after the stop, so the stop is not meant for it.
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    stub.say(buildStop(SESSION_A));
+    stub.say(again);
+    await pingAndWaitForPong(stub);
+    gate.open();
+
+    await waitUntil(() => listInputResults(stub).length === 2);
+    expect(listInputResults(stub).map((result) => [result.requestId, result.ok])).toEqual([
+      [buildStart(SESSION_A).requestId, false],
+      [again.requestId, true],
+    ]);
+    expect(fake.inputs).toEqual([[SESSION_A, `start ${SESSION_A}`]]);
+    expect(fake.stops).toEqual([[SESSION_A, "stopped"]]);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("answers a request for an agent step's result only after the step's input, which waits behind the session's start", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    const { stub, pending } = await connectWithSessions(fake);
+    await sendWaitingStepInput(stub, fake, gate);
+
+    stub.say(STEP_RESULT_REQUEST);
+    await pingAndWaitForPong(stub);
+    // Handled now, the request would find no record of the step and answer
+    // `interrupted` for a turn that is about to run.
+    expect(listStepResults(stub)).toEqual([]);
+
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 2);
+    expect(listInputResults(stub)[1]).toMatchObject({ requestId: STEP_INPUT.requestId, ok: true });
+    completeTurn(fake, fake.turns[1]!);
+    await waitUntil(() => listStepResults(stub).length > 0);
+    // The request may still be waiting when the turn ends, and is then
+    // answered from the step's result file. Either way, every answer is the
+    // turn's own result.
+    for (const result of listStepResults(stub)) {
+      expect(result).toEqual({
+        _tag: "workspaceStepResult",
+        ...STEP,
+        outcome: { status: "completed", output: { text: "", exitStatus: "completed" } },
+      });
+    }
+    stub.hangUp();
+    await pending;
+  });
+
+  it("answers repeated requests for an agent step's result with the same result", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    const { stub, pending } = await connectWithSessions(fake);
+    await sendWaitingStepInput(stub, fake, gate);
+
+    // Asked twice while the input waits, as the controller does when both
+    // an unanswered input and a reconnect make it ask.
+    stub.say(STEP_RESULT_REQUEST);
+    stub.say(STEP_RESULT_REQUEST);
+    await pingAndWaitForPong(stub);
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 2);
+    completeTurn(fake, fake.turns[1]!);
+    await waitUntil(() => listStepResults(stub).length > 0);
+
+    // Asked again after the turn ended: the result file answers.
+    stub.say(STEP_RESULT_REQUEST);
+    await waitUntil(() => listStepResults(stub).length > 1);
+    await pingAndWaitForPong(stub);
+    const [first, ...repeated] = listStepResults(stub);
+    expect(first?.outcome.status).toBe("completed");
+    for (const result of repeated) expect(result).toEqual(first);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("starts an action step at once while a session's frames wait", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    fake.startGates.set(SESSION_A, gate);
+    const { stub, pending } = await connectWithSessions(fake);
+
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    // An action this runner does not implement is answered as the frame is
+    // handled, so the answer shows the frame did not wait for the session.
+    stub.say({
+      _tag: "workspaceStepStart",
+      kind: "action",
+      ...STEP,
+      workspaceId: "0199e0e7-0000-7000-8000-0000000000e1",
+      action: "no.such-action",
+      input: {},
+    });
+    await waitUntil(() => listStepResults(stub).length === 1);
+    expect(listStepResults(stub)[0]?.outcome).toMatchObject({
+      status: "failed",
+      code: "unsupported_action",
+    });
+    expect(listInputResults(stub)).toEqual([]);
+
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 1);
+    stub.hangUp();
+    await pending;
   });
 });

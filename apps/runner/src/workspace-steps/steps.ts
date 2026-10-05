@@ -18,7 +18,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import {
   type ActionStepStart,
@@ -79,16 +78,23 @@ export interface WorkspaceSteps {
    * An action this runner does not implement is answered at once with
    * `unsupported_action`.
    *
-   * For an agent step the frame only asks for the result, because a session
-   * input started the step's turn. Such a step is:
+   * For an agent step the frame only asks for the result, because the
+   * step's input, carried by a session start or a session input, started the
+   * step's turn. Such a step is:
    *
    * - ignored once settled, like an action step;
    * - left alone while its turn still runs, because the turn's end answers it;
    * - answered from its result file once the turn has ended;
    * - otherwise answered at once with `interrupted`, because this runner has
    *   no record of the turn: the runner restarted, the session ended while
-   *   the runner was disconnected and could not see it end, or the step's
-   *   input never reached this runner.
+   *   the runner was disconnected and could not see it end, the harness
+   *   refused the step's input, or the input never reached this runner.
+   *
+   * The connection passes a request for an agent step's result on only
+   * after every earlier frame of the step's session, so the request never
+   * overtakes the step's input and finds no record of a turn that is about
+   * to run. Answering it only reads what is recorded and sends, so it never
+   * holds up the session's later frames.
    */
   readonly start: (frame: WorkspaceStepStart) => Effect.Effect<void>;
   /**
@@ -144,7 +150,8 @@ export interface WorkspaceSteps {
   /**
    * Forgets an agent step and sends no answer. The supervisor calls this when
    * the harness refuses the step's input: no turn ran, and the controller
-   * delivers the input again later.
+   * decides what happens to the input. A request for the step's result that
+   * comes after the refusal is answered with `interrupted`.
    */
   readonly forgetAgentStep: (key: WorkspaceStepKey) => void;
 }
@@ -232,45 +239,10 @@ export const makeWorkspaceSteps = (options: {
    * recorded, and a push would be made that no run knows about.
    */
   const settled = new Set<string>();
-  /**
-   * One lock per workspace that has a step waiting for its lock or holding
-   * it. The steps of one workspace run one at a time, because two git
-   * processes in one checkout collide on `index.lock`. Steps of different
-   * workspaces run side by side.
-   *
-   * `users` counts the steps that wait for the lock or hold it.
-   */
-  const locks = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>();
   let sending: Send | undefined;
 
   const send = (frame: WorkspaceStepResult): Effect.Effect<void> =>
     sending === undefined ? Effect.void : Effect.ignoreCause(sending(frame));
-
-  /**
-   * Waits for the lock of a workspace, then runs `effect` while holding it.
-   * Creates the lock when nothing uses it yet, and forgets it once nothing
-   * waits for it or holds it. A lock forgotten while something still waited
-   * for it would let the next step create a second lock, and the two would
-   * run git side by side.
-   */
-  const holdWorkspaceLock = <A, E>(
-    workspaceId: string,
-    effect: Effect.Effect<A, E>,
-  ): Effect.Effect<A, E> =>
-    Effect.acquireUseRelease(
-      Effect.sync(() => {
-        const lock = locks.get(workspaceId) ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 };
-        lock.users += 1;
-        locks.set(workspaceId, lock);
-        return lock;
-      }),
-      (lock) => lock.semaphore.withPermits(1)(effect),
-      (lock) =>
-        Effect.sync(() => {
-          lock.users -= 1;
-          if (lock.users === 0) locks.delete(workspaceId);
-        }),
-    );
 
   /** Forgets a step. */
   const releaseStep = (step: HeldStep): void => {
@@ -322,7 +294,8 @@ export const makeWorkspaceSteps = (options: {
       const { checkoutBranch } = frame;
       // The controller sets the branch only on a run's first workspace step,
       // to start the run on its workflow's branch. The switch runs here,
-      // under the workspace's lock, so no other step's git runs in between.
+      // under the workspace's lock, so no other step's git, and no session's
+      // branch switch, runs in between.
       const switched =
         checkoutBranch === undefined ? Effect.void : switchCheckoutBranch(context, checkoutBranch);
       const ran = yield* switched.pipe(
@@ -390,8 +363,10 @@ export const makeWorkspaceSteps = (options: {
     });
 
   /**
-   * Runs a held step: waits for its workspace's lock, runs its action, then
-   * writes, forgets and sends its result. A step whose workspace failed to
+   * Runs a held step. It first waits for its workspace's lock, which the
+   * steps of the workspace share with the branch switches of its sessions, so
+   * two git processes never write to one checkout at once. Then it runs its
+   * action, and writes, forgets and sends its result. A step whose workspace failed to
    * provision is forgotten with no result. Never fails; a settle
    * interrupts it.
    */
@@ -400,19 +375,21 @@ export const makeWorkspaceSteps = (options: {
     action: WorkspaceAction,
     step: HeldStep,
   ): Effect.Effect<void> =>
-    holdWorkspaceLock(
-      step.workspaceId,
-      Effect.suspend(() => {
-        step.phase = "running";
-        return runAction(frame, action);
-      }),
-    ).pipe(
-      Effect.flatMap((outcome) =>
-        outcome === undefined
-          ? Effect.sync(() => releaseStep(step))
-          : Effect.uninterruptible(finishStep(step, outcome)),
-      ),
-    );
+    workspaces
+      .runExclusively(
+        step.workspaceId,
+        Effect.suspend(() => {
+          step.phase = "running";
+          return runAction(frame, action);
+        }),
+      )
+      .pipe(
+        Effect.flatMap((outcome) =>
+          outcome === undefined
+            ? Effect.sync(() => releaseStep(step))
+            : Effect.uninterruptible(finishStep(step, outcome)),
+        ),
+      );
 
   /**
    * Stops one held step, then forgets it. A running step is answered with

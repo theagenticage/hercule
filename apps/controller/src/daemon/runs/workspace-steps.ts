@@ -65,12 +65,12 @@ const make = Effect.gen(function* () {
       // rebuilt from the rows at that moment.
       if (!(yield* connections.holdsConnection(step.runnerId))) return;
       if (step.kind === "agent") {
-        // The step's prompt already reached the runner as an input of its
+        // The step's prompt already left the controller as an input of its
         // session, after the workspace's provision. This only asks again how
         // the step's turn ended.
         return yield* connections.tell(
           step.runnerId,
-          buildAgentStepResultRequest(step, step.workspaceId),
+          buildAgentStepResultRequest(step, step.sessionId, step.workspaceId),
         );
       }
       // The first workspace step of a run opens its workspace in the same

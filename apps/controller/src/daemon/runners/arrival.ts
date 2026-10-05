@@ -7,8 +7,8 @@
  *    has no step running in it;
  * 2. every workspace step still running on it: a workspace action again,
  *    after the provision of its workspace when that workspace is still
- *    provisioning, and for an agent step whose prompt the runner already
- *    took, a request for the step's result;
+ *    provisioning, and for an agent step whose prompt is `sent` or
+ *    `delivered`, a request for the step's result;
  * 3. a stop for every session on it whose run ended while it was away;
  * 4. then the runs waiting for a runner are woken, because this one may be
  *    able to take them.

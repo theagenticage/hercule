@@ -93,11 +93,10 @@ export const buildConversationTimeouts = (
 
 /**
  * How long a workflow run's step session may sit idle before its runner
- * unloads it. The runner counts it from the session's start as well as from
- * the end of each turn, so it is no grace period for a prompt on its way: a
- * resumed session whose prompt takes longer than this to arrive unloads
- * before its turn, and its step fails. Issue #431 removes that race by making
- * a session start carry its first input.
+ * unloads it. The runner counts it from the end of each turn, or from an
+ * input it refused while no turn was open. A resume carries the step's
+ * prompt as its first input, so a resumed session is never unloaded while
+ * its prompt is on the way.
  */
 const STEP_SESSION_IDLE_UNLOAD_MS = 5_000;
 

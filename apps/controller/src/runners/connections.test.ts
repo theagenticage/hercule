@@ -10,7 +10,7 @@
  * rather than over the socket, because it is about the previous run.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect, Layer, Option } from "effect";
+import { Duration, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   RunnerConnectivity,
@@ -19,6 +19,12 @@ import type {
   RunnerWatermark,
 } from "@hercule/contract";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import {
+  PROTOCOL_VERSION,
+  type ControllerToRunner,
+  type SessionInput,
+  type SessionInputResult,
+} from "@hercule/protocol";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -193,7 +199,7 @@ describe("a draining runner whose socket drops", () => {
         const connection = mintConnection();
         yield* connections.greeted(runner!.id, connection, HELD, {
           binaryVersion: "0.1.0",
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           negotiatedCapabilities: [],
           facts: FACTS,
         });
@@ -222,14 +228,14 @@ describe("a report from a connection the runner has replaced", () => {
         const newer = mintConnection();
         yield* connections.greeted(runner!.id, older, HELD, {
           binaryVersion: "0.1.0",
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           negotiatedCapabilities: [],
           facts: FACTS,
         });
         // The runner connected again, and the row now follows the newer connection.
         yield* connections.greeted(runner!.id, newer, HELD, {
           binaryVersion: "0.1.0",
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           negotiatedCapabilities: [],
           facts: { ...FACTS, docker: true },
         });
@@ -249,39 +255,75 @@ describe("a report from a connection the runner has replaced", () => {
   });
 });
 
-describe("a request to a runner", () => {
-  const INSTALL = {
-    _tag: "installRequest",
-    requestId: "install-1",
-    providerId: "claude-code",
-  } as const;
+/** A frame that carries an input, as a send of that input writes it. */
+const INPUT_FRAME: SessionInput = {
+  _tag: "sessionInput",
+  requestId: "input-1",
+  sessionId: "session-1",
+  input: { text: "hello" },
+};
 
-  const HELLO = {
-    binaryVersion: "0.1.0",
-    protocolVersion: 1,
-    negotiatedCapabilities: [],
-    facts: FACTS,
-  };
+describe("sendFrameCarryingInput", () => {
+  it("returns notSent for a runner with no connection", async () => {
+    const sent = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        return yield* connections.sendFrameCarryingInput(
+          crypto.randomUUID(),
+          INPUT_FRAME,
+          Duration.infinity,
+        );
+      }).pipe(Effect.provide(layer)),
+    );
 
-  it("is not sent when the runner has no connection", async () => {
-    const outcome = await Effect.runPromise(
+    expect(sent).toEqual({ _tag: "notSent" });
+  });
+
+  it("writes the frame, then returns the runner's answer to it", async () => {
+    const result = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
         const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
-        return yield* connections.asked(runner!.id, INSTALL, Duration.seconds(5));
-      }).pipe(Effect.provide(layer), Effect.orDie),
+        const written: Array<ControllerToRunner> = [];
+        const connection = mintConnection();
+        yield* connections.greeted(
+          runner!.id,
+          connection,
+          { ...HELD, ask: (frame) => Effect.sync(() => written.push(frame)) },
+          {
+            binaryVersion: "0.1.0",
+            protocolVersion: PROTOCOL_VERSION,
+            negotiatedCapabilities: [],
+            facts: FACTS,
+          },
+        );
+
+        const sending = yield* Effect.forkChild(
+          connections.sendFrameCarryingInput(runner!.id, INPUT_FRAME, Duration.infinity),
+        );
+        while (written.length === 0) yield* Effect.yieldNow;
+        const answer: SessionInputResult = {
+          _tag: "sessionInputResult",
+          requestId: INPUT_FRAME.requestId,
+          ok: true,
+          delivery: "opened",
+        };
+        yield* connections.reportedAnswer(runner!.id, connection, answer);
+        return { written, sent: yield* Fiber.join(sending), answer };
+      }).pipe(Effect.provide(layer)),
     );
 
-    expect(outcome).toEqual({ _tag: "notSent" });
+    expect(result.written).toEqual([INPUT_FRAME]);
+    expect(result.sent).toEqual({ _tag: "sent", answer: Option.some(result.answer) });
   });
 
-  it("is unanswered when it was written and the connection then ended", async () => {
-    const { outcome, written } = await Effect.runPromise(
+  it("returns sent with no answer when the connection ends after the write", async () => {
+    const { sent, written } = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
         const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
         const connection = mintConnection();
-        const written: Array<string> = [];
+        const written: Array<ControllerToRunner> = [];
         yield* connections.greeted(
           runner!.id,
           connection,
@@ -290,54 +332,30 @@ describe("a request to a runner", () => {
             // The connection closes right after the write, before any answer.
             ask: (frame) =>
               Effect.andThen(
-                Effect.sync(() => written.push(frame._tag)),
+                Effect.sync(() => written.push(frame)),
                 Effect.asVoid(
                   Effect.forkDetach(connections.ended(runner!.id, connection, "unreachable")),
                 ),
               ),
           },
-          HELLO,
-        );
-        const outcome = yield* connections.asked(runner!.id, INSTALL, Duration.seconds(5));
-        return { outcome, written };
-      }).pipe(Effect.provide(layer), Effect.orDie),
-    );
-
-    expect(written).toEqual(["installRequest"]);
-    expect(outcome).toEqual({ _tag: "unanswered" });
-  });
-
-  it("is answered with what the runner reported under its id", async () => {
-    const outcome = await Effect.runPromise(
-      Effect.gen(function* () {
-        const connections = yield* RunnerConnections;
-        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
-        const connection = mintConnection();
-        yield* connections.greeted(
-          runner!.id,
-          connection,
           {
-            ...HELD,
-            ask: () =>
-              Effect.asVoid(
-                Effect.forkDetach(
-                  connections.reportedAnswer(runner!.id, connection, {
-                    _tag: "installResult",
-                    requestId: INSTALL.requestId,
-                    ok: true,
-                  }),
-                ),
-              ),
+            binaryVersion: "0.1.0",
+            protocolVersion: PROTOCOL_VERSION,
+            negotiatedCapabilities: [],
+            facts: FACTS,
           },
-          HELLO,
         );
-        return yield* connections.asked(runner!.id, INSTALL, Duration.seconds(5));
-      }).pipe(Effect.provide(layer), Effect.orDie),
+        const sent = yield* connections.sendFrameCarryingInput(
+          runner!.id,
+          INPUT_FRAME,
+          Duration.infinity,
+        );
+        return { sent, written };
+      }).pipe(Effect.provide(layer)),
     );
 
-    expect(outcome).toEqual({
-      _tag: "answered",
-      answer: { _tag: "installResult", requestId: INSTALL.requestId, ok: true },
-    });
+    // The runner may have the input, so the caller must not treat it as never sent.
+    expect(written).toEqual([INPUT_FRAME]);
+    expect(sent).toEqual({ _tag: "sent", answer: Option.none() });
   });
 });

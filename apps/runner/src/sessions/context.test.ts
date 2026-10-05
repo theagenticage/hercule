@@ -70,7 +70,9 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
 
 const buildSessionStart = (overrides: Partial<SessionStart> = {}): SessionStart => ({
   _tag: "sessionStart",
+  requestId: "0199e0e7-0000-7000-8000-0000000000fc",
   sessionId: SESSION,
+  input: { text: "hi" },
   providerId: "claude-code",
   config: {},
   secrets: {},
@@ -356,6 +358,34 @@ describe("a session that has a workspace", () => {
 
     expect(outcome._tag).toBe("Success");
     expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
+  });
+
+  it("starts two sessions in one primary at once, and both switch without colliding", async () => {
+    const remote = makeRemote();
+    addBranch(remote, "release");
+    addBranch(remote, "hotfix");
+    const machine = buildMachine();
+    const workspaceId = createId();
+    await machine.workspaces.provision(
+      buildProvisionFrame({
+        workspaceId,
+        kind: "primary",
+        checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+      }),
+    );
+    const spec = { ...buildSessionStart().spec, workspaceId };
+
+    const outcomes = await Promise.all([
+      resolveAsync(buildSessionStart({ spec, checkoutBranch: "release" }), machine),
+      resolveAsync(
+        buildSessionStart({ sessionId: createId(), spec, checkoutBranch: "hotfix" }),
+        machine,
+      ),
+    ]);
+
+    // Run side by side, one of the two git processes would find the other's
+    // `index.lock` and fail.
+    expect(outcomes.map((outcome) => outcome._tag)).toEqual(["Success", "Success"]);
   });
 
   it("fails with git's error message when the branch cannot be switched to", async () => {

@@ -19,6 +19,7 @@ import {
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
+import { sessions } from "./sessions";
 import { HERCULE_SKILL } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
@@ -199,6 +200,7 @@ export const runDaemon = (
             socketPath,
             credentials,
             providerLogins,
+            sessions,
             binDir,
             herculeTool,
           }),

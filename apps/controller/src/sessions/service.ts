@@ -40,6 +40,7 @@ import {
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
+  type TurnInput,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
 import {
@@ -82,6 +83,7 @@ import { AuditLog } from "../events";
 import { Notifier } from "../notifications";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
+import type { SendOutcome } from "../runners";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
 import {
   APPROVAL_ANSWER_IDS,
@@ -197,10 +199,15 @@ export interface CreateRequest {
   readonly at: string;
 }
 
-/** A session claimed for starting, and the complete frame that starts it. */
+/**
+ * A session claimed for starting, the complete frame that starts it, and the
+ * input the frame carries, claimed with it.
+ */
 export interface StartRequest {
   readonly sessionId: string;
   readonly frame: SessionStart;
+  /** The session's oldest waiting input, claimed (`sentAt` set) in the same transaction. */
+  readonly input: StoredInput;
 }
 
 /**
@@ -243,10 +250,17 @@ export interface TakeInputRequest<E> {
   readonly text: string;
   readonly at: string;
   /**
-   * Claims the row in the insert, for an input sent to an idle session. The
-   * input is sent as soon as it exists, so nothing else may claim it.
+   * Claims the row in the insert when the session is idle and has no input on
+   * the wire, for a caller that sends a claimed row itself once the write is
+   * committed. The stored row's `sentAt` shows whether it was claimed. An
+   * idle session will not change to idle again, so no flush would send the
+   * input, and a claimed row is one nothing else sends or cancels.
+   *
+   * An idle session with an input on the wire is treated like a busy one: the
+   * runner takes one input per turn boundary, so the new input waits, and the
+   * flush at the end of that input's turn sends it.
    */
-  readonly claimed: boolean;
+  readonly claimWhenIdle: boolean;
   /** The agent step iteration this input is the prompt for; `undefined` for any other input. */
   readonly stepIteration?: number;
 }
@@ -265,7 +279,29 @@ export interface AppliedReport {
    * runs.
    */
   readonly exitedHoldingInput?: true;
+  /**
+   * The input claimed because the session's turn ended, which the caller
+   * sends after the commit. The claim is in the same transaction as the
+   * change to idle, so no delivery pass can read the session as idle and
+   * claim an input of its own first.
+   */
+  readonly claimedInput?: StoredInput;
 }
+
+/**
+ * What `recordInputAnswer` recorded for an input that was sent to a runner:
+ *
+ * - `delivered`: the delivery the runner reported;
+ * - `notDelivered`: the reason the input went back to waiting, or was
+ *   cancelled because its session exited or its step's run ended;
+ * - `unconfirmed`: the input is an agent step's prompt that got no answer,
+ *   so it is marked `sent` and never sent again. `resultRequest` asks the
+ *   runner how the step's turn ended; the caller tells it to the runner.
+ */
+export type RecordedInputAnswer =
+  | { readonly _tag: "delivered"; readonly delivery: Delivery }
+  | { readonly _tag: "notDelivered"; readonly reason: string }
+  | { readonly _tag: "unconfirmed"; readonly resultRequest: AgentStepResultRequest };
 
 /** Converts a page to the contract's shape, where a missing cursor is an absent key, not `null`. */
 const toPageOutput = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: string } => ({
@@ -292,6 +328,38 @@ const INPUT_DIRECTION: SortDirection = "asc";
 const NO_SUCH_INPUT = "no such input on that session";
 
 const ALREADY_SENT = "that input has already been sent to the runner";
+
+/**
+ * The refusal of `input.cancel` on the input a session's start carries: the
+ * oldest waiting input while the session is `queued`, and the input on the
+ * wire while it is `starting`. A start always carries an input, so without it
+ * the session would start with nothing to do.
+ */
+const FIRST_INPUT_NOT_CANCELLABLE =
+  "this input is what the session starts with, so it cannot be cancelled; stop the session instead";
+
+/** The reason stored on an input the runner refused without giving one. */
+const REFUSED = "that session's runner rejected the input";
+
+/**
+ * The reason stored on an input whose frame left the controller but got no
+ * answer: the connection ended before the runner answered, or no answer
+ * came in time. Both look the same to the caller. The row goes back to
+ * waiting, whether it was sent on its own or carried by a start, and the
+ * next send of the session's input tries again. An agent step's prompt is
+ * never handled this way, because the runner may have run it.
+ */
+const NOT_DELIVERED =
+  "that session's runner did not take the input, so it is waiting to be sent again";
+
+/**
+ * The reason stored on an input whose frame never left the controller,
+ * because the session's runner had no connection. The row goes back to
+ * waiting, an agent step's prompt too, and the next send of the session's
+ * input tries again once the runner connects.
+ */
+const NOT_SENT =
+  "that session's runner is not connected; the input stays queued and is sent when the runner connects";
 
 /**
  * The refusal of a second answer to one request. The runner still reports
@@ -337,7 +405,7 @@ const CONVERSATION_INPUT_FIXED =
  */
 const STEP_INPUT_FIXED =
   "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
-  "it is sent when the session is next idle; to stop the step, cancel the run with run.cancel";
+  "it is sent when the session starts or its current turn ends; to stop the step, cancel the run with run.cancel";
 
 /**
  * Why a step prompt was cancelled when its run ended before a runner took
@@ -376,6 +444,25 @@ const buildStepKey = (
   }
   return { runId: session.runId, stepId: session.stepId, iteration };
 };
+
+/**
+ * Builds what a frame carries to the runner for one stored input: its text,
+ * the session's current model selection, and, for an agent step's prompt,
+ * the step's key, so the runner knows the turn the prompt starts is the
+ * step's and reports its result. A `sessionInput` and a `sessionStart` carry
+ * the same shape.
+ *
+ * Throws, as a defect, on a step prompt whose session was started by no step
+ * (`buildStepKey`).
+ */
+const buildTurnInput = (
+  session: Pick<StoredSession, "id" | "runId" | "stepId" | "modelSelection">,
+  row: StoredInput,
+): TurnInput => ({
+  text: row.text,
+  modelSelection: session.modelSelection,
+  ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
+});
 
 /**
  * Returns the provider-native session id from a `session.started` event, if
@@ -434,7 +521,7 @@ const keepsInputsOnExit = (
  * other exit, such as a stop or a timeout, ends the step's session for good.
  * When the step's run ends, the run cancels the prompts it still has waiting
  * (`cancelStepPromptsOfEndedRun`), and a prompt the runner refuses after
- * that is cancelled rather than put back to waiting (`requeueOrCancel`). So
+ * that is cancelled rather than put back to waiting (`returnUndeliveredInput`). So
  * a kept prompt never resumes a session for a run that has ended.
  */
 const keepsStepPromptOnExit = (
@@ -636,61 +723,6 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Puts an input whose delivery failed back to waiting with `reason`,
-   * except in two cases, where it is cancelled instead:
-   *
-   * - The input is an agent step's prompt and the step's run has ended. The
-   *   run's end cancelled the step's prompts still waiting
-   *   (`cancelStepPromptsOfEndedRun`), but not this one, because it was on
-   *   the wire. Put back to waiting, it could resume the session for a turn
-   *   the run no longer wants. It is cancelled with `STEP_RUN_ENDED`, and
-   *   `SessionObserver` is not told, because the run's end already settled
-   *   the step.
-   * - The session exited in the meantime and does not keep its input
-   *   through that exit. The rule is the same as for the inputs not yet sent
-   *   when the session exited (`keepsInputsOnExit`, `keepsStepPromptOnExit`).
-   *
-   * Joins the caller's transaction, and reads the session and its run inside
-   * it, so the checks cannot race the write that exits the session or ends
-   * the run.
-   *
-   * The caller must know the runner did not take the input: the runner
-   * refused it, the frame never left the controller, or the input is an
-   * ordinary one the runner never answered. An agent step's prompt the
-   * runner never answered never comes here, because the runner may have run
-   * it (`recordNoAnswer`).
-   *
-   * When an agent step's prompt is cancelled because its session exited,
-   * `SessionObserver` is told, and the step fails. A step prompt that goes
-   * back to waiting on an exited session resumes it, like any kept input:
-   * the next delivery pass does that.
-   */
-  const requeueOrCancel = (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      const now = yield* sessions.one(row.sessionId);
-      const dropped =
-        Option.isSome(now) &&
-        now.value.status === "exited" &&
-        !keepsInputsOnExit(now.value) &&
-        !keepsStepPromptOnExit(now.value);
-      if (row.stepIteration !== null && (yield* sessions.belongsToEndedRun(row.sessionId))) {
-        yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
-      } else if (dropped) {
-        yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
-        if (row.stepIteration !== null) {
-          yield* observer.inputsDropped({
-            session: now.value,
-            refusal: reason,
-            droppedStepIterations: [row.stepIteration],
-          });
-        }
-      } else {
-        yield* inputs.requeue(row.id, row.sentAt, reason);
-      }
-      yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
-    });
-
-  /**
    * Does the cleanup after sessions move to `exited`, whatever ended them.
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
@@ -793,25 +825,156 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Moves an `idle` session to `busy`, because an input the runner received
-   * opened a turn. Returns whether the session moved. Leaves the session
-   * alone when it is in any other status, or when another runner holds it
-   * now. Runs inside the caller's transaction.
+   * Moves an `idle` or `starting` session to `busy`, because an input the
+   * runner received opened a turn. Leaves the session alone when it is in
+   * any other status, or when another runner holds it now. Runs inside the
+   * caller's transaction.
+   *
+   * A `starting` session moves too, because the input its start carried can
+   * open a turn before the controller folds the runner's `session.started`:
+   * the answer to the input is read as soon as it arrives, while
+   * `session.started` waits in the ingest queue behind every other session's
+   * events.
    *
    * From that answer until the turn ends, a turn is running, even before the
    * runner reports `turn.started`. So an exit in between is an exit during a
    * turn, and the owner is told.
    */
-  const openTurn = (runnerId: string, sessionId: string): Effect.Effect<boolean, SqlError> =>
+  const openTurn = (runnerId: string, sessionId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       const found = yield* sessions.one(sessionId);
-      if (Option.isNone(found)) return false;
+      if (Option.isNone(found)) return;
       const session = found.value;
-      if (session.runnerId !== runnerId || session.status !== "idle") return false;
+      if (session.runnerId !== runnerId) return;
+      if (session.status !== "idle" && session.status !== "starting") return;
       yield* sessions.moved(session.id, "busy", yield* nowIso);
       // A turn opened, so the process did work: the crash-loop guard no
       // longer applies to it, as when `turn.started` moves it to `busy`.
       yield* sessions.setCrashGuardArmed(session.id, false);
+    });
+
+  /**
+   * Records the delivery the runner reported for an input it received, as
+   * the send that waited for the answer. Part of `recordInputAnswer`. The row
+   * changes only while it still holds this send's claim (`row.sentAt`).
+   *
+   * An input that opened a turn also moves the session held by `runnerId` to
+   * `busy` (`openTurn`), in the same transaction. The same answer reaches
+   * `applyInputResult` on another fiber, and it can get there later. If only
+   * that method moved the session, the session would for a moment read
+   * `idle` with no input sent and unanswered, and the next delivery pass
+   * would send a second input into the turn that just opened.
+   */
+  const recordDelivery = (
+    row: StoredInput,
+    delivery: Delivery,
+    runnerId: string,
+  ): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const recorded = yield* inputs.markDelivered(row.id, row.sentAt, delivery, yield* nowIso);
+        // Only the first to record the answer moves the session. When
+        // `applyInputResult` recorded it already, the turn may have ended
+        // since, and moving the session now would leave it `busy` for good.
+        if (recorded && delivery === "opened") yield* openTurn(runnerId, row.sessionId);
+        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+      }),
+    );
+
+  /**
+   * Puts an input the runner did not take back to waiting with `reason`, so
+   * the next send of the session's input tries again. Part of
+   * `recordInputAnswer`. The input is cancelled instead in two cases:
+   *
+   * - The input is an agent step's prompt and the step's run has ended. The
+   *   run's end cancelled the step's prompts still waiting
+   *   (`cancelStepPromptsOfEndedRun`), but not this one, because it was on
+   *   the wire. Put back to waiting, it could resume the session for a turn
+   *   the run no longer wants. It is cancelled with `STEP_RUN_ENDED`, and
+   *   `SessionObserver` is not told, because the run's end already settled
+   *   the step.
+   * - The session exited in the meantime and does not keep its input
+   *   through that exit. The rule is the same as for the inputs not yet sent
+   *   when the session exited (`keepsInputsOnExit`, `keepsStepPromptOnExit`).
+   *   When the input is an agent step's prompt, `SessionObserver` is told,
+   *   and the step fails.
+   *
+   * The session and its run are read inside this transaction, so the checks
+   * cannot race the write that exits the session or ends the run. A step
+   * prompt that goes back to waiting on an exited session resumes it, like
+   * any kept input: the next delivery pass does that.
+   *
+   * The caller must know the runner did not run the input: the runner
+   * refused it, the frame never left the controller, or the input is an
+   * ordinary one the runner never answered. A step prompt the runner never
+   * answered never comes here, because the runner may have run it.
+   */
+  const returnUndeliveredInput = (
+    row: StoredInput,
+    reason: string,
+  ): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const now = yield* sessions.one(row.sessionId);
+        const dropped =
+          Option.isSome(now) &&
+          now.value.status === "exited" &&
+          !keepsInputsOnExit(now.value) &&
+          !keepsStepPromptOnExit(now.value);
+        if (row.stepIteration !== null && (yield* sessions.belongsToEndedRun(row.sessionId))) {
+          yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
+        } else if (dropped) {
+          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+          if (row.stepIteration !== null) {
+            yield* observer.inputsDropped({
+              session: now.value,
+              refusal: reason,
+              droppedStepIterations: [row.stepIteration],
+            });
+          }
+        } else {
+          yield* inputs.requeue(row.id, row.sentAt, reason);
+        }
+        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+      }),
+    );
+
+  /**
+   * The queued sessions dispatch skipped for having no input, and has logged
+   * a warning about. Each is logged once per controller run, not on every
+   * dispatch pass. A session is added only when the pass that logged it
+   * commits, so a pass that rolls back logs it again on the next pass.
+   */
+  const warnedInputlessSessions = new Set<string>();
+
+  /**
+   * Moves a resumed session that is still `queued` back to the exit it was
+   * resumed from, and returns whether it did. Dispatch calls this for a
+   * queued session with no waiting input, which a resumed process would have
+   * nothing to do with. Returns `false`, changing nothing, for a session that
+   * never exited.
+   *
+   * The row goes back as `sessions.undoResume` describes. The workspace lease
+   * is released again from the original exit time, as `endSessions` releases
+   * it, so the workspace is kept for the same window as before the resume.
+   * Nothing exited, so `SessionObserver` is not told and no exit is written
+   * to the stream. Joins the caller's transaction.
+   */
+  const undoResume = (sessionId: string): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      if (!(yield* sessions.undoResume(sessionId))) return false;
+      // Read after the undo: `resumable` holds only for an exited session.
+      const after = yield* sessions.one(sessionId);
+      if (Option.isSome(after) && after.value.workspaceId !== null) {
+        yield* workspaces.release(
+          { kind: "session", id: sessionId },
+          after.value.resumable ? "idle" : "orphan",
+          after.value.exitedAt ?? (yield* nowIso),
+        );
+      }
+      yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
       return true;
     });
 
@@ -951,8 +1114,8 @@ const make = Effect.gen(function* () {
           at: open.at,
         });
         // The prompt is stored as an ordinary input, waiting with the
-        // session. It is sent when the harness starts, and a controller that
-        // restarts in between still has it.
+        // session. The frame that starts the session carries it, and a
+        // controller that restarts in between still has it.
         yield* inputs.insert({
           sessionId: open.id,
           source: "user",
@@ -977,14 +1140,24 @@ const make = Effect.gen(function* () {
     /**
      * Moves up to `room` of this runner's oldest queued sessions to
      * `starting`, and returns the complete start frame for each: the token,
-     * the spec, the GitHub account it pushes as, when a Connection is set, and
-     * the `userMaterial` flag that lets a Thread on the local runner see User
-     * Material.
+     * the spec, the input the session starts with, the GitHub account it
+     * pushes as, when a Connection is set, and the `userMaterial` flag that
+     * lets a Thread on the local runner see User Material.
+     *
+     * The input is the session's oldest waiting input. It is claimed in the
+     * same write, exactly as an input sent on its own is, so the runner's
+     * answer to it is recorded the same way, and a controller restart before
+     * that answer cancels it like any other input on the wire.
+     *
+     * A queued session with no waiting input is not started. A resumed one is
+     * moved back to the exit it was resumed from (`undoResume`); one that
+     * never ran stays queued.
+     *
      * Joins the caller's transaction and reads what the frames need inside it,
      * which is fine because a database read and a decrypt do not wait on a
      * runner. The daemon sends the frames only after that transaction commits.
      */
-    starting: (
+    claimStarts: (
       runnerId: string,
       room: number,
       needs: StartNeeds,
@@ -994,6 +1167,7 @@ const make = Effect.gen(function* () {
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const keyless: Array<string> = [];
+        const inputless: Array<string> = [];
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
         // room is for sessions that can start, not for specs that cannot.
@@ -1025,6 +1199,22 @@ const make = Effect.gen(function* () {
               keyless.push(row.id);
               continue;
             }
+            // A start always carries an input. Every path that queues a
+            // session stores its input first, and the input a queued session
+            // starts with cannot be cancelled, so only data stored by an
+            // older build can lack one. A resumed session goes back to the
+            // exit it was resumed from, and resumes again at its next input.
+            // A session that never ran has no exit to go back to, so it stays
+            // queued, where a user can see it and stop it. This is the last
+            // check that skips a row, so no row is claimed for a session that
+            // is then skipped.
+            const waiting = yield* inputs.oldestWaiting(row.id);
+            if (Option.isNone(waiting)) {
+              if (!(yield* undoResume(row.id)) && !warnedInputlessSessions.has(row.id)) {
+                inputless.push(row.id);
+              }
+              continue;
+            }
             // The session's own token for the public API. It is created for
             // this start and its hash is stored in the same update that marks
             // the session as starting, so the token is valid exactly while the
@@ -1033,6 +1223,9 @@ const make = Effect.gen(function* () {
             // held.
             const token = mintToken();
             yield* sessions.started(row.id, hashToken(token), at);
+            // The row was read in this transaction, and nothing else writes
+            // between that read and this claim.
+            const input = Option.getOrThrow(yield* inputs.claim(waiting.value.id, at));
             yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
             // The account's token is read now rather than stored: the only
             // place it is written is the frame that carries it to the runner.
@@ -1042,9 +1235,17 @@ const make = Effect.gen(function* () {
                 : yield* needs.readGithubAccount(row.githubConnectionId);
             claimed.push({
               sessionId: row.id,
+              input,
               frame: {
                 _tag: "sessionStart",
+                requestId: input.id,
                 sessionId: row.id,
+                // Built as for an input sent on its own (`inputFrame`), so a
+                // step prompt carries its step's key here too. The model
+                // selection is the session's current one: a `session.update`
+                // while the session was queued changes it, and the spec does
+                // not.
+                input: buildTurnInput(row, input),
                 providerId: row.providerId,
                 config: row.config as Schema.Json,
                 secrets: secrets.value,
@@ -1080,6 +1281,20 @@ const make = Effect.gen(function* () {
             keyless,
           );
         }
+        // Logged once per session, not on every pass, because such a row
+        // is skipped on every pass until a user stops it. The sessions are
+        // marked as logged only once the transaction commits: one that rolls
+        // back may end before this log, and the next pass must log them then.
+        if (inputless.length > 0) {
+          yield* Effect.logWarning(
+            "skipped queued sessions that never ran and have no waiting input to start with; " +
+              "they stay queued",
+            inputless,
+          );
+          yield* afterCommit(() => {
+            for (const id of inputless) warnedInputlessSessions.add(id);
+          });
+        }
         return claimed;
       }),
 
@@ -1107,11 +1322,7 @@ const make = Effect.gen(function* () {
       _tag: "sessionInput",
       requestId: row.id,
       sessionId: row.sessionId,
-      input: {
-        text: row.text,
-        modelSelection: session.modelSelection,
-        ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
-      },
+      input: buildTurnInput(session, row),
     }),
 
     /**
@@ -1222,14 +1433,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Puts a session back on the queue when no runner accepted its start frame.
-     * Runs in its own transaction, because the one that claimed the row
-     * committed before the frame was sent.
+     * Puts a session back on the queue when its start frame could not be
+     * sent, because the runner was not connected, and puts the input the
+     * frame carried back to waiting. The input never left the controller, so
+     * no reason is stored on it. Runs in its own transaction, because the one
+     * that claimed the rows committed before the frame was sent.
      */
-    requeue: (sessionId: string): Effect.Effect<void, SqlError> =>
+    requeue: (start: StartRequest): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
+          const { sessionId, input } = start;
+          yield* inputs.requeue(input.id, input.sentAt, null);
           // The update also clears the token hash. The token was sent on a
           // frame nobody accepted, so nothing holds it, and no one may call the
           // API as a queued session. The cache is cleared after the commit,
@@ -1367,7 +1582,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Stores one user input and the model selection the session runs under
-     * from then on. For an exited session, it also puts the session back on
+     * from then on, and returns the stored row, claimed or not
+     * (`claimWhenIdle`). For an exited session, it also puts the session back on
      * the queue with its resume spec, when `resume` allows it; otherwise the
      * input waits, and a later resume sends it. Joins the caller's
      * transaction, so when the caller fails, for example on an invalid model
@@ -1376,13 +1592,17 @@ const make = Effect.gen(function* () {
     takeInput: <E = never>(taking: TakeInputRequest<E>): Effect.Effect<StoredInput, E | SqlError> =>
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
+        const claimed =
+          taking.claimWhenIdle &&
+          Option.exists(yield* sessions.one(taking.sessionId), (now) => now.status === "idle") &&
+          !(yield* inputs.holdsInputOnTheWire(taking.sessionId));
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
           source: "user",
           actor: yield* currentStamp,
           text: taking.text,
           at: taking.at,
-          ...(taking.claimed ? { sentAt: taking.at } : {}),
+          ...(claimed ? { sentAt: taking.at } : {}),
           ...(taking.stepIteration === undefined ? {} : { stepIteration: taking.stepIteration }),
         });
         // Someone is asking again, so the session may be resumed for every
@@ -1524,27 +1744,6 @@ const make = Effect.gen(function* () {
       Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
 
     /**
-     * Claims the oldest input still waiting on a session that just changed to
-     * idle. Returns `none` when no input is waiting. The caller runs this in
-     * the transaction that moves the session to idle.
-     *
-     * An input sent and still unanswered does not block this claim. It was
-     * sent before the turn that just ended, so that turn already took it,
-     * and the runner can take one new input now.
-     *
-     * Running in the same transaction matters: no other caller can read the
-     * session as idle before this row is claimed. Otherwise a delivery pass
-     * could claim the oldest row first, and this claim would take the next
-     * one, which puts two inputs on the wire at once.
-     */
-    claimOldest: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.gen(function* () {
-        const next = yield* inputs.oldestWaiting(sessionId);
-        if (Option.isNone(next)) return Option.none();
-        return yield* inputs.claim(next.value.id, yield* nowIso);
-      }),
-
-    /**
      * Claims the oldest input still waiting on an idle session, for a
      * delivery pass that finds the session idle. Returns `none` when no input
      * is waiting, when the session is not `idle`, or when another input of
@@ -1557,56 +1756,112 @@ const make = Effect.gen(function* () {
       Effect.flatMap(nowIso, (at) => inputs.claimOldestUnlessOneIsOnTheWire(sessionId, at)),
 
     /**
-     * Records the delivery the runner reported for an input it received, as
-     * the send that waited for the answer. The row changes only while it
-     * still holds this send's claim (`row.sentAt`).
+     * Records the outcome of a send that carried an input to a runner: a
+     * `sessionInput`, or a `sessionStart` that carried the input. This is the
+     * one place an answer to a sent input is recorded. `sent` is the outcome
+     * as `RunnerConnections.sendFrameCarryingInput` returns it.
      *
-     * An input that opened a turn also moves the `idle` session held by
-     * `runnerId` to `busy`, in the same transaction. The same answer reaches
-     * `applyInputResult` on another fiber, and it can get there later. If
-     * only that method moved the session, the session would for a moment
-     * read `idle` with no input sent and unanswered, and the next delivery
-     * pass would send a second input into the turn that just opened.
+     * - The runner took the input: the delivery is recorded
+     *   (`recordDelivery`), and `delivered` is returned.
+     * - The runner refused the input, or the frame never left the controller
+     *   because the runner had no connection: the runner cannot have run the
+     *   input. It goes back to waiting (`returnUndeliveredInput`), and
+     *   `notDelivered` is returned with the reason: the runner's own message,
+     *   a generic refusal when it gave none, or `NOT_SENT`.
+     * - The frame left but no answer came, because the connection ended or
+     *   the wait ran out: whether the runner took the input is unknown. An
+     *   ordinary input is handled as a refused one, with `NOT_DELIVERED`.
+     *   An agent step's prompt is marked `sent` instead, with no reason
+     *   stored, and `unconfirmed` is returned with the request for the
+     *   step's result.
+     *
+     * A step prompt is never sent twice, because the runner may have run it
+     * and that turn may push or comment. Nor is the step failed: only the
+     * runner's answer settles it. The caller tells the result request to the
+     * runner right away. The runner handles it only after the prompt, so it
+     * answers how the turn the prompt started ended, or that the step was
+     * interrupted when it refused the prompt or lost it in a restart. When
+     * the runner is not connected, nothing is sent, and the runner is asked
+     * again when it connects.
+     *
+     * A caller that has to fail on `notDelivered` or `unconfirmed` builds its
+     * own error; dispatch does not fail at all.
      */
-    recordDelivery: (
+    recordInputAnswer: (
       row: StoredInput,
-      delivery: Delivery,
+      sent: SendOutcome<SessionInputResult>,
       runnerId: string,
-    ): Effect.Effect<void, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const recorded = yield* inputs.markDelivered(row.id, row.sentAt, delivery, yield* nowIso);
-          // Only the first to record the answer moves the session. When
-          // `applyInputResult` recorded it already, the turn may have ended
-          // since, and moving the session now would leave it `busy` for good.
-          if (recorded && delivery === "opened") yield* openTurn(runnerId, row.sessionId);
-          yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
-        }),
-      ),
+    ): Effect.Effect<RecordedInputAnswer, SqlError> =>
+      Effect.gen(function* () {
+        if (sent._tag === "notSent") {
+          yield* returnUndeliveredInput(row, NOT_SENT);
+          return { _tag: "notDelivered", reason: NOT_SENT } as const;
+        }
+        if (Option.isNone(sent.answer)) {
+          const iteration = row.stepIteration;
+          if (iteration === null) {
+            yield* returnUndeliveredInput(row, NOT_DELIVERED);
+            return { _tag: "notDelivered", reason: NOT_DELIVERED } as const;
+          }
+          return yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              if (yield* inputs.markSent(row.id, row.sentAt)) {
+                yield* announce({
+                  _tag: "record",
+                  topic: "session",
+                  id: row.sessionId,
+                  kind: "updated",
+                });
+              }
+              const session = Option.getOrThrow(yield* sessions.one(row.sessionId));
+              return {
+                _tag: "unconfirmed",
+                resultRequest: buildAgentStepResultRequest(
+                  buildStepKey(session, iteration),
+                  session.id,
+                  session.workspaceId,
+                ),
+              } as const;
+            }),
+          );
+        }
+        const answer = sent.answer.value;
+        if (answer.ok && answer.delivery !== undefined) {
+          yield* recordDelivery(row, answer.delivery, runnerId);
+          return { _tag: "delivered", delivery: answer.delivery } as const;
+        }
+        const reason = answer.message ?? REFUSED;
+        yield* returnUndeliveredInput(row, reason);
+        return { _tag: "notDelivered", reason } as const;
+      }),
 
     /**
      * Applies a runner's result for one input, in order with the session's
-     * events. A refused input changes nothing here. The send that waits for
-     * the result puts it back to waiting. When that send stopped waiting, it
-     * already handled the input as unanswered (`recordNoAnswer`): an agent
-     * step's prompt stays `sent`, and the runner's answer about the step
-     * settles the step.
+     * events. The input came in a `sessionInput` or in a `sessionStart`.
      *
-     * A delivered input is recorded on the row while a send still holds it.
-     * The waiting send (`recordDelivery`) and this method both get the answer, and
-     * whichever runs first records it. Once it is recorded here, a waiting
-     * send that runs after the turn ended cannot move the session back to
-     * `busy`.
+     * A delivered input is recorded on the row while a send still holds it,
+     * or while it is an agent step's prompt marked `sent` because its send
+     * got no answer in time. The waiting send (`recordDelivery`) and this
+     * method both get the answer, and whichever runs first records it. Only
+     * the one that records it moves the session: an input that opened a turn
+     * moves an `idle` or `starting` session to `busy` (`openTurn`). Once it
+     * is recorded here, a waiting send that runs after the turn ended cannot
+     * move the session back to `busy`.
      *
-     * An input that opened a turn moves an `idle` session to `busy`, even
-     * when the send gave up waiting before the answer came, because the
-     * runner did open a turn. The session is left alone when:
+     * A refused input changes nothing here: the send that waits for the
+     * result puts it back to waiting. A step prompt marked `sent` stays
+     * `sent`: its send already asked the runner for the step's result, and
+     * the runner answers that the step was interrupted.
      *
-     * - it is already `busy`: the runner reported `turn.started` before this
-     *   result, or the waiting send recorded the answer first;
-     * - it is in any other status but `idle`, such as `exited`;
-     * - another runner holds it now, so the result is stale.
+     * Nothing changes when:
+     *
+     * - the input is no longer on the wire: the waiting send recorded the
+     *   answer first, or gave up waiting and put the input back. A turn the
+     *   runner opened anyway still moves the session, through `turn.started`;
+     * - the session is held by another runner than the one that answered. A
+     *   runner may answer only for its own sessions, so the answer is logged
+     *   and dropped.
      */
     applyInputResult: (
       runnerId: string,
@@ -1617,77 +1872,24 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           if (!result.ok || result.delivery === undefined) return;
           const found = yield* inputs.read(result.requestId);
-          if (Option.isNone(found)) return;
+          if (Option.isNone(found) || found.value.sentAt === null) return;
           const row = found.value;
-          const recorded =
-            row.sentAt !== null &&
-            (yield* inputs.markDelivered(row.id, row.sentAt, result.delivery, yield* nowIso));
-          const moved = result.delivery === "opened" && (yield* openTurn(runnerId, row.sessionId));
-          if (recorded || moved) {
-            yield* announce({
-              _tag: "record",
-              topic: "session",
-              id: row.sessionId,
-              kind: "updated",
-            });
-          }
-        }),
-      ),
-
-    /**
-     * Handles a claimed input the runner did not take: the runner refused it,
-     * or its frame never left the controller because the runner had no
-     * connection. Either way the runner cannot have run it. It goes back to
-     * waiting with `reason`, and is sent again on the next delivery. It is
-     * cancelled instead when the session exited in the meantime and does not
-     * keep its input through that exit, or when it is an agent step's prompt
-     * whose run has ended (see `requeueOrCancel`). Runs in its own
-     * transaction.
-     */
-    recordNotTaken: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
-      withTransaction(sql, requeueOrCancel(row, reason)),
-
-    /**
-     * Handles an input the runner never answered: the frame left the
-     * controller, but the connection dropped or no answer came before the
-     * deadline. Whether the runner took the input is unknown. An input whose
-     * frame never left goes to `recordNotTaken` instead.
-     *
-     * - Any input but an agent step's prompt is handled as a refused one
-     *   (`recordNotTaken`): `reason` is stored on it, as it goes back to
-     *   waiting or is cancelled.
-     * - An agent step's prompt is marked `sent` (`markSent`), so it is never
-     *   sent again, and `reason` is not stored. Sending the prompt again could
-     *   run the step's turn twice, and that turn may push or comment. The
-     *   step is not failed either: the runner may have taken the prompt, so
-     *   only the runner's answer about the step settles it. A refusal that
-     *   arrives later changes nothing, so the step then fails as
-     *   `interrupted`, from that answer.
-     *
-     * Returns the request for the step's result when it marked a step's
-     * prompt `sent`, so the caller can ask the runner how the step's turn
-     * ended, and `none` otherwise. Runs in its own transaction.
-     */
-    recordNoAnswer: (
-      row: StoredInput,
-      reason: string,
-    ): Effect.Effect<Option.Option<AgentStepResultRequest>, SqlError> =>
-      withTransaction(
-        sql,
-        Effect.gen(function* () {
-          if (row.stepIteration === null) {
-            yield* requeueOrCancel(row, reason);
-            return Option.none();
-          }
           const session = yield* sessions.one(row.sessionId);
-          // Only an agent step creates a step prompt, in the session the step
-          // started, so a step prompt without that session is a bug.
-          if (Option.isNone(session)) return yield* Effect.die("a step prompt has no session");
-          const key = buildStepKey(session.value, row.stepIteration);
-          const marked = yield* inputs.markSent(row.id, row.sentAt);
-          if (!marked) return Option.none();
+          if (Option.isNone(session) || session.value.runnerId !== runnerId) {
+            return yield* Effect.logWarning(
+              "dropped a runner's answer for an input of a session it does not hold",
+              { runnerId, inputId: row.id, sessionId: row.sessionId },
+            );
+          }
+          const recorded = yield* inputs.markDelivered(
+            row.id,
+            row.sentAt,
+            result.delivery,
+            yield* nowIso,
+          );
+          if (!recorded) return;
+          if (result.delivery === "opened") yield* openTurn(runnerId, row.sessionId);
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
-          return Option.some(buildAgentStepResultRequest(key, session.value.workspaceId));
         }),
       ),
 
@@ -1797,7 +1999,8 @@ const make = Effect.gen(function* () {
      * cause commit together (spec 04, Truth model). Joins the caller's
      * transaction, so the caller's other writes for the report commit with it.
      * Returns what is left to do after the commit, because that affects more
-     * than this session's rows.
+     * than this session's rows: an input claimed because a turn ended, which
+     * the caller sends, and whether the session exited holding input.
      *
      * The session is read again here, inside the transaction, and every
      * decision about its status and its open request is made from that read.
@@ -1851,11 +2054,21 @@ const make = Effect.gen(function* () {
         }
         // `exited` is final, so a stray event after it is still recorded but
         // never brings the session back to life. Spec 06 §4.1 owns the rule.
+        //
+        // `session.started` moves only a `starting` session to `idle`. The
+        // answer to the input the start carried is read as soon as it
+        // arrives, while this event waits in the ingest queue, so that answer
+        // may already have opened a turn and moved the session to `busy`. A
+        // late `session.started` must not end that turn.
         const moved =
-          folded.status === undefined || folded.status === before || before === "exited"
+          folded.status === undefined ||
+          folded.status === before ||
+          before === "exited" ||
+          (event._tag === "session.started" && before !== "starting")
             ? undefined
             : folded.status;
         let exitedHoldingInput = false;
+        let claimedInput: StoredInput | undefined;
         if (moved !== undefined) {
           yield* sessions.moved(id, moved, at);
           // A turn started, so the resumed process did work: the crash-loop
@@ -1869,6 +2082,21 @@ const make = Effect.gen(function* () {
             exitedHoldingInput = Option.isSome(yield* inputs.oldestWaiting(id));
           } else {
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+          }
+          // Only a session whose turn ended is sent one. A session that
+          // becomes idle because its harness started had its oldest input
+          // carried by the start, and that input's turn may not have opened
+          // yet. Sending the next input now would put it into that turn, so
+          // two queued inputs would run as one turn.
+          //
+          // An input sent and still unanswered does not block this claim. It
+          // was sent before the turn that just ended, so that turn already
+          // took it, and the runner can take one new input now.
+          if (moved === "idle" && event._tag === "turn.completed") {
+            const next = yield* inputs.oldestWaiting(id);
+            if (Option.isSome(next)) {
+              claimedInput = Option.getOrUndefined(yield* inputs.claim(next.value.id, at));
+            }
           }
         } else {
           // No announce: most events do not change the status, and a refetch
@@ -1897,6 +2125,7 @@ const make = Effect.gen(function* () {
         return {
           moved,
           ...(exitedHoldingInput ? { exitedHoldingInput: true as const } : {}),
+          ...(claimedInput === undefined ? {} : { claimedInput }),
         };
       }),
 
@@ -1925,6 +2154,11 @@ const make = Effect.gen(function* () {
      * the changed input. Fails with `InvalidState` when the input was already
      * sent, delivered or cancelled, or when the session answers an
      * assistant's conversation.
+     *
+     * The input a `queued` session will start with can be changed: it is
+     * still waiting, and dispatch sends whatever text it holds when it claims
+     * it. Once the start claims it, it is on the wire and refused like any
+     * other sent input.
      */
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
@@ -1947,9 +2181,20 @@ const make = Effect.gen(function* () {
 
     /**
      * Cancels an input still waiting on its session, and returns the
-     * cancelled input. Fails with `InvalidState` when the input was already
-     * sent, delivered or cancelled, or when the session answers an
-     * assistant's conversation.
+     * cancelled input. Fails with `InvalidState` when:
+     *
+     * - the input was already sent, delivered or cancelled;
+     * - the session answers an assistant's conversation;
+     * - the input is the one the session's start carries
+     *   (`FIRST_INPUT_NOT_CANCELLABLE`). While the session is `queued`, that
+     *   is its oldest waiting input, the one dispatch will claim. While it is
+     *   `starting`, it is the input on the wire. A start always carries an
+     *   input, so a session with that input cancelled would start with
+     *   nothing to do. The user stops the session instead.
+     *
+     * An input the runner refused and put back to waiting while the session
+     * is `starting` is an ordinary waiting input, and can be cancelled: the
+     * start already went out, so the session no longer needs it.
      */
     cancelInput: (
       sessionId: Id,
@@ -1961,6 +2206,20 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Read inside the transaction, so a dispatch that starts the
+            // session meanwhile cannot slip between this check and the cancel.
+            const session = yield* readSession(sessionId);
+            const carriedByStart =
+              session.status === "queued"
+                ? Option.exists(yield* inputs.oldestWaiting(sessionId), (row) => row.id === inputId)
+                : session.status === "starting" &&
+                  Option.exists(
+                    yield* inputs.one(sessionId, inputId),
+                    (row) => row.status === "queued" && row.sentAt !== null,
+                  );
+            if (carriedByStart) {
+              return yield* Effect.fail(createInvalidStateError(FIRST_INPUT_NOT_CANCELLABLE));
+            }
             const row = yield* queuedInput(sessionId, inputId);
             yield* inputs.cancel(inputId);
             yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });

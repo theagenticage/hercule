@@ -49,7 +49,10 @@ const spec = {
 
 const start = {
   _tag: "sessionStart",
+  /** The id of the Queued Input row the session starts with. */
+  requestId: "0199e0e7-0000-7000-8000-00000000000d",
   sessionId: SESSION_ID,
+  input: { text: "fix the login bug" },
   providerId: "claude-code",
   config: {},
   /** `{}` rather than absent, for an instance with no credential stored. */
@@ -411,6 +414,25 @@ describe("what the controller sends for a session", () => {
         "Failure",
       );
     }
+  });
+
+  it("requires the input every start hands its harness, with the id it is answered under", () => {
+    // A start with no input would leave a session running with nothing to do,
+    // and a start whose input has no id could never be answered.
+    expect(decode(SessionStart, omitKey(start, "input"))._tag).toBe("Failure");
+    expect(decode(SessionStart, omitKey(start, "requestId"))._tag).toBe("Failure");
+  });
+
+  it("keeps the step key on the input a start carries", () => {
+    // The first prompt of an agent step's session rides on its start, so the
+    // runner learns the turn is the step's from the start's input.
+    const step = {
+      runId: "0199e0e7-0000-7000-8000-000000000001",
+      stepId: "implement",
+      iteration: 1,
+    };
+    const stepStart = { ...start, input: { ...start.input, step } };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(stepStart))).toEqual(stepStart);
   });
 
   it("requires a non-empty session token on every start", () => {

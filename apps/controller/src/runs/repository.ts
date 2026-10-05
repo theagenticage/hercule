@@ -144,8 +144,14 @@ export type PinnedRunningStep = {
     }
   | {
       readonly kind: "agent";
-      /** Whether the step's prompt for this iteration is a queued input not yet sent to the runner. */
-      readonly promptWaiting: boolean;
+      /** The session the step's turn runs in. */
+      readonly sessionId: string;
+      /**
+       * Whether the step's prompt for this iteration is still `queued`: waiting
+       * to be sent, or on its way to the runner with a send waiting for the
+       * answer.
+       */
+      readonly promptQueued: boolean;
     }
 );
 
@@ -963,7 +969,7 @@ const make = Effect.gen(function* () {
           readonly action: string | null;
           readonly input: string | null;
           readonly session_id: Uint8Array | null;
-          readonly prompt_waiting: number;
+          readonly prompt_queued: number;
           readonly checkout_branch: string | null;
         }>`
           SELECT s.run_id, r.workspace_id, s.step_id, s.iteration, s.input, s.session_id,
@@ -973,8 +979,8 @@ const make = Effect.gen(function* () {
                  EXISTS (SELECT 1 FROM session_inputs AS prompt
                          WHERE prompt.session_id = s.session_id
                            AND prompt.step_iteration = s.iteration
-                           AND prompt.status = 'queued' AND prompt.sent_at IS NULL)
-                   AS prompt_waiting
+                           AND prompt.status = 'queued')
+                   AS prompt_queued
           FROM runs r
             JOIN run_steps s ON s.run_id = r.id
             JOIN json_each(r.plan, '$.steps') AS step
@@ -996,7 +1002,8 @@ const make = Effect.gen(function* () {
                 {
                   ...record,
                   kind: "agent",
-                  promptWaiting: row.prompt_waiting === 1,
+                  sessionId: uuidToString(row.session_id),
+                  promptQueued: row.prompt_queued === 1,
                 },
               ];
             }

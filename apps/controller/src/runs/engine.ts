@@ -1395,8 +1395,10 @@ export const makeRunEngine = Effect.gen(function* () {
      * - an action step is sent with the input stored on its record, so it
      *   runs with the same input as the first time;
      * - an agent step is sent as a request for its result, but only once its
-     *   prompt has left the controller. A prompt still waiting is delivered
-     *   to the session as usual, and the runner reports the turn it starts.
+     *   prompt is `sent` or `delivered`. A prompt still `queued` is skipped:
+     *   one still waiting is delivered to the session as usual, and the
+     *   runner reports the turn it starts; one on its way has a send waiting
+     *   for the answer, which asks for the result itself if no answer comes.
      */
     listOwedWorkspaceSteps: (
       runnerId: string,
@@ -1405,7 +1407,7 @@ export const makeRunEngine = Effect.gen(function* () {
         records.flatMap((record): ReadonlyArray<WorkspaceStepToStart> => {
           const { runId, stepId, iteration, workspaceId } = record;
           if (record.kind === "agent") {
-            return record.promptWaiting
+            return record.promptQueued
               ? []
               : [
                   {
@@ -1414,6 +1416,7 @@ export const makeRunEngine = Effect.gen(function* () {
                     stepId,
                     iteration,
                     runnerId,
+                    sessionId: record.sessionId,
                     workspaceId,
                   },
                 ];

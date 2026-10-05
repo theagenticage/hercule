@@ -13,7 +13,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, StorageId, WorkspaceStepKey } from "./primitives";
+import { Fact, SessionId, StorageId, WorkspaceStepKey } from "./primitives";
 import { GitIdentity, MAX_MESSAGE_LENGTH } from "./sessions";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
@@ -103,13 +103,20 @@ export type ActionStepStart = Schema.Schema.Type<typeof ActionStepStart>;
  *
  * - from the step's result file, when the turn has ended;
  * - when the turn ends, when it is still running;
- * - at once with a failed `interrupted` outcome otherwise, because the turn
- *   was lost when the runner restarted.
+ * - at once with a failed `interrupted` outcome otherwise: the runner
+ *   restarted and lost the turn, or the harness refused the step's input, so
+ *   no turn ran.
  */
 export const AgentStepResultRequest = Schema.Struct({
   _tag: Schema.Literal("workspaceStepStart"),
   kind: Schema.Literal("agent"),
   ...WorkspaceStepKey.fields,
+  /**
+   * The session the step's turn runs in. The runner handles the request only
+   * after every frame of that session it received earlier, so the request
+   * never overtakes the input that carries the step's prompt.
+   */
+  sessionId: SessionId,
   /**
    * The run's workspace, which names the directory the step's result file is
    * kept in. `null` for a run with no workspace.
@@ -120,12 +127,13 @@ export const AgentStepResultRequest = Schema.Struct({
 export type AgentStepResultRequest = Schema.Schema.Type<typeof AgentStepResultRequest>;
 
 /**
- * Builds the request for the result of the agent step `key`. `workspaceId` is
- * the workspace the step's session works in, or `null` for a session with no
- * workspace.
+ * Builds the request for the result of the agent step `key`, whose turn runs
+ * in the session `sessionId`. `workspaceId` is the workspace that session
+ * works in, or `null` for a session with no workspace.
  */
 export const buildAgentStepResultRequest = (
   key: WorkspaceStepKey,
+  sessionId: string,
   workspaceId: string | null,
 ): AgentStepResultRequest => ({
   _tag: "workspaceStepStart",
@@ -133,6 +141,7 @@ export const buildAgentStepResultRequest = (
   runId: key.runId,
   stepId: key.stepId,
   iteration: key.iteration,
+  sessionId,
   workspaceId,
 });
 

@@ -36,7 +36,12 @@ export {
   type SessionRows,
   type StoredSession,
 } from "./repository";
-export { endStrandedInputs, SessionService, SessionServiceLayer } from "./service";
+export {
+  endStrandedInputs,
+  SessionService,
+  SessionServiceLayer,
+  type StartRequest,
+} from "./service";
 export {
   readAssistantTexts,
   readTranscriptHead,
