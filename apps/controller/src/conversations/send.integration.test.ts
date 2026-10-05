@@ -101,6 +101,24 @@ describe("conversation.send to a conversation with no session", () => {
     });
   });
 
+  it("carries the first message on the session's start, and sends no input frame for it", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversation } = await readDefaultConversation(arranged);
+
+      await sendMessage(arranged, conversation.id, "hi");
+
+      const [session] = await waitForConversationSessions(arranged, conversation.id, 1);
+      const [frame] = await waitForStartFrames(arranged, session!.id, 1);
+      expect(frame!.input.text).toBe("hi");
+      await waitUntil("delivered the message", async () => {
+        const [row] = await listInputs(arranged, session!.id);
+        return row?.status === "delivered" ? true : undefined;
+      });
+      // No send claims a delivered input, so no input frame can carry it later.
+      expect(listInputFramesFor(arranged, session!.id)).toEqual([]);
+    });
+  });
+
   it("gives a Thread on the same controller no idle timeout", async () => {
     await withAgentFleet(async (arranged) => {
       const thread = await spawnSessionOrFail(arranged, { prompt: "hello" });

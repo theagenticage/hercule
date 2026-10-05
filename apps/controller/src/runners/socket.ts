@@ -97,9 +97,10 @@ const CAPABILITIES: ReadonlyArray<string> = [
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
+// A WebSocket close reason holds at most 123 bytes, so this one is kept short.
 const WRONG_VERSION =
-  `this controller speaks runner protocol version ${String(PROTOCOL_VERSION)}, and the runner ` +
-  `speaks another; upgrade the runner to a build that speaks version ${String(PROTOCOL_VERSION)}`;
+  `this controller uses runner protocol version ${String(PROTOCOL_VERSION)} and the runner does ` +
+  `not; upgrade the runner to a build that uses version ${String(PROTOCOL_VERSION)}`;
 const GREETED_ALREADY = "this connection has already said hello";
 
 /** The RFC 6455 protocol error close code. The other close codes used here are defined in the protocol package. */
@@ -185,8 +186,11 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             facts: hello.facts,
           },
         );
-        greeted = true;
         yield* write(encodeFrameText(answer));
+        // Set after the answer is written, so the ping loop never sends a
+        // ping ahead of it. Frames are handled one at a time, so no other
+        // frame reads this in between.
+        greeted = true;
         // After the answer, because the runner drops every frame that arrives
         // before the controller's hello. A probe sweep announced earlier could
         // have its first probe dropped.
@@ -295,7 +299,11 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
         if ((yield* Clock.currentTimeMillis) - lastHeard > Duration.toMillis(pings.silence)) {
           return yield* write(new Socket.CloseEvent(GOING_AWAY_CLOSE_CODE, SILENT));
         }
-        yield* write(encodeFrameText({ _tag: "ping" }));
+        // The runner drops every frame that arrives before the controller's
+        // hello, so a ping is sent only once the hello is answered. The
+        // silence limit applies from the start, so a connection that never
+        // says hello is still closed.
+        if (greeted) yield* write(encodeFrameText({ _tag: "ping" }));
       }
     });
 

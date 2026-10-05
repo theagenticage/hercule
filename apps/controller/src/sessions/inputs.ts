@@ -301,27 +301,16 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Returns the oldest input still waiting to be sent, which is the next one a flush sends. */
+    /**
+     * Returns the session's oldest input that is queued and not yet sent, or
+     * `none` when there is none. It is the next input any send claims: a
+     * start, a flush at the end of a turn, or a resume.
+     */
     oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
-          ORDER BY created_at, id LIMIT 1
-        `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
-      ),
-
-    /**
-     * Returns the oldest input of a session that is still `queued`, sent or
-     * not. While the session has not started, that is the input its start
-     * carries, or will carry.
-     */
-    oldestQueued: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.map(
-        sql<InputRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
-          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
           ORDER BY created_at, id LIMIT 1
         `,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
@@ -424,29 +413,24 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Puts an input whose delivery failed back to waiting, and stores the
-     * reason. The next time the session goes idle, or a user steers by hand,
-     * the input is sent again. Until then, a caller sees the reason.
+     * Puts a claimed input back to waiting, so the next send claims it again.
+     * `reason` is stored for a reader to see why the input was not delivered.
+     * It is `null` when nothing failed that a reader needs to know about, such
+     * as a frame that never left the controller because the runner was not
+     * connected.
      *
-     * `sentAt` is when the failed send claimed the row. The row changes only
-     * while it still holds that claim: a row that was put back to waiting in
-     * the meantime may have been sent again, and that newer send must not be
-     * undone.
+     * `sentAt` is when the send being undone claimed the row. The row changes
+     * only while it still holds that claim: a row that was put back to waiting
+     * in the meantime may have been sent again, and that newer send must not
+     * be undone.
      */
-    requeue: (id: string, sentAt: string | null, reason: string): Effect.Effect<void, SqlError> =>
+    requeue: (
+      id: string,
+      sentAt: string | null,
+      reason: string | null,
+    ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
-      `),
-
-    /**
-     * Puts a claimed input back to waiting, with no reason, because its frame
-     * never left the controller: the runner was not connected. Nothing failed
-     * that a reader needs to know about. `sentAt` works as for `requeue`.
-     */
-    releaseClaim: (id: string, sentAt: string | null): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET sent_at = NULL, reason = NULL
         WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
       `),
 

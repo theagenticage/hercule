@@ -35,6 +35,7 @@ export interface Machine {
   readonly socketPath: string;
 }
 
+/** The context a session start resolved on this machine. */
 export interface Resolved {
   readonly ctx: ProviderRunnerContext;
   /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */

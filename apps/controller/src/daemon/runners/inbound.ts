@@ -16,7 +16,6 @@
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -25,7 +24,7 @@ import { withTransaction } from "../../db";
 import { ProviderProbes } from "../../providers";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
-import { SessionService, type StoredInput } from "../../sessions";
+import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 import { Dispatch, Live } from "../sessions";
@@ -158,33 +157,16 @@ const make = Effect.gen(function* () {
       // whether or not the write succeeds.
       const report = yield* sessions.foldReport(traffic.runnerId, seq, event);
       if (report === undefined) return;
-      const { applied, claimed } = yield* withTransaction(
+      const applied = yield* withTransaction(
         sql,
-        Effect.gen(function* () {
-          const applied = yield* sessions.applyReport(traffic.runnerId, event, report);
-          // A session whose turn ended can take its oldest queued input. The
-          // input is claimed in the same transaction as the change to idle,
-          // so no delivery pass can read the session as idle and claim an
-          // input of its own first.
-          //
-          // Only the end of a turn sends one. A session that becomes idle
-          // because its harness started has had its oldest input carried by
-          // the start, and that input's turn may not have opened yet.
-          // Sending the next input now would put it into that turn, so two
-          // queued inputs would run as one turn.
-          const claimed =
-            applied.moved === "idle" && event._tag === "turn.completed"
-              ? yield* sessions.claimOldest(event.sessionId)
-              : Option.none<StoredInput>();
-          return { applied, claimed };
-        }),
+        sessions.applyReport(traffic.runnerId, event, report),
       );
       // The claimed input is sent after the commit, because the send waits on
       // the runner. A session that exited has freed a slot on its runner.
-      if (Option.isSome(claimed)) {
+      if (applied.claimedInput !== undefined) {
         yield* forkAndAbsorbFailures(
           "Sending a session's queued input failed",
-          sendClaimed(claimed.value),
+          sendClaimed(applied.claimedInput),
         );
       }
       if (applied.moved === "exited") {

@@ -694,7 +694,8 @@ const make = Effect.gen(function* () {
     /**
      * Moves an exited session back to `queued`, with the spec its resumed
      * harness starts with, for dispatch to place. This is the only way out of
-     * `exited`, and the one exception to the rule in `moved`.
+     * `exited`, and the one exception to the rule in `moved`. `undoResume`
+     * below is its inverse.
      *
      * It decides nothing: whether the session may be resumed is the service's
      * check, made in the same transaction just before this write.
@@ -720,6 +721,29 @@ const make = Effect.gen(function* () {
                          WHERE session_id = sessions.id)
         WHERE id = ${uuidFromString(sessionId)}
       `),
+
+    /**
+     * Moves a resumed session that is still `queued` back to `exited`, and
+     * returns whether it did. Only the status changes: the row keeps the exit
+     * time of the exit the resume began from, so the session reads as that
+     * exit again, not as a new one. A queued row holds no token hash and no
+     * open request, so nothing else needs clearing.
+     *
+     * A row that never exited is left alone and returns `false`: it is a
+     * first start, and there is no exit to go back to. Like `resume`, it
+     * decides nothing; the service checks in the same transaction that no
+     * input is waiting.
+     */
+    undoResume: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET status = 'exited'
+          WHERE id = ${uuidFromString(sessionId)} AND status = 'queued'
+            AND exited_at IS NOT NULL
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Stores whether the session's crash-loop guard is armed. It decides

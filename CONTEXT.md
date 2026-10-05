@@ -93,7 +93,12 @@ Delivering user input into a session's running turn, folding it into that turn i
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
-User input held by the controller for delivery when the session's running turn completes. A session's first input is held until the session starts, and the start carries it. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged, and except for a session's first input, which cannot be cancelled before the session starts: stop the session instead. A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
+User input held by the controller for delivery when the session's running turn completes. A session's first input is held until the session starts, and the start carries it. Editable and cancelable until delivered, with two exceptions:
+
+- inputs to an assistant's conversation session are the owner's messages and go in unchanged;
+- a session's first input cannot be cancelled before the session starts: stop the session instead.
+
+A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:

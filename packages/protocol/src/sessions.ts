@@ -685,6 +685,13 @@ export const SessionInput = Schema.Struct({
 export type SessionInput = Schema.Schema.Type<typeof SessionInput>;
 
 /**
+ * A frame that carries one Queued Input to the runner: a `SessionInput`, or a
+ * `SessionStart` with the input the session starts with. The runner answers
+ * either one with a `SessionInputResult` under its `requestId`.
+ */
+export type FrameCarryingInput = SessionInput | SessionStart;
+
+/**
  * Ends the running turn as `interrupted`. There is no reply frame: the outcome
  * arrives in the session's own stream as `turn.completed`, so a reply would
  * add nothing.

@@ -17,7 +17,12 @@
  */
 import { expect } from "vitest";
 import { Duration, Effect } from "effect";
-import type { ModelDescriptor, RunnerFacts, SessionInput } from "@hercule/protocol";
+import type {
+  FrameCarryingInput,
+  ModelDescriptor,
+  RunnerFacts,
+  SessionInput,
+} from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
 import { get, post, type ServerHarness } from "../http/testing";
@@ -36,7 +41,9 @@ import {
   withFleet as sharedWithFleet,
   type SpawnedThread,
   type Arranged,
-  type InputCarrier,
+  carriesInput,
+  reportTurnCompleted,
+  reportTurnStarted,
 } from "../sessions/testing";
 
 /** The tick interval in tests: short enough to wait several ticks without a long sleep. */
@@ -172,25 +179,6 @@ export const exitSession = async (
   reportExit(arranged, thread.session.id, seq);
   await waitForSession(arranged, thread.session.id, (one) => one.status === "exited");
 };
-
-export const reportTurnStarted = (arranged: Arranged, sessionId: string, seq: number): void =>
-  reportEvent(arranged.wire, seq, {
-    eventId: crypto.randomUUID(),
-    sessionId,
-    at,
-    _tag: "turn.started",
-    turnId: `t${String(seq)}`,
-  });
-
-export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: number): void =>
-  reportEvent(arranged.wire, seq, {
-    eventId: crypto.randomUUID(),
-    sessionId,
-    at,
-    _tag: "turn.completed",
-    turnId: `t${String(seq - 1)}`,
-    state: "completed",
-  });
 
 /**
  * Reports the end of the turn that the session's prompt opened, at sequence
@@ -406,13 +394,14 @@ export const listInputFrames = (arranged: Arranged): ReadonlyArray<SessionInput>
  * `text`. A resume carries its input on the start frame, so a start frame
  * counts as well as an input frame.
  */
-export const listFramesCarrying = (arranged: Arranged, text: string): ReadonlyArray<InputCarrier> =>
-  arranged.wire.frames
-    .filter(
-      (frame): frame is InputCarrier =>
-        frame._tag === "sessionInput" || frame._tag === "sessionStart",
-    )
-    .filter((frame) => frame.input.text.includes(text));
+export const listFramesCarrying = (
+  arranged: Arranged,
+  text: string,
+): ReadonlyArray<FrameCarryingInput> =>
+  arranged.wire.frames.filter(carriesInput).filter((frame) => frame.input.text.includes(text));
 
-export const waitForFrameCarrying = (arranged: Arranged, text: string): Promise<InputCarrier> =>
+export const waitForFrameCarrying = (
+  arranged: Arranged,
+  text: string,
+): Promise<FrameCarryingInput> =>
   waitUntil(`sent a frame carrying ${text}`, () => listFramesCarrying(arranged, text)[0]);

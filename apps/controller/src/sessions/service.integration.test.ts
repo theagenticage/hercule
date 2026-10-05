@@ -120,6 +120,19 @@ const run = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof layer>>) =>
 
 const at = "2026-09-07T10:00:00.000Z";
 
+/** Returns a layer whose logger appends each logged message to `logged`, its parts joined by spaces. */
+const captureLogs = (logged: Array<string>) =>
+  Layer.succeed(
+    Logger.CurrentLoggers,
+    new Set<Logger.Logger<unknown, unknown>>([
+      {
+        log: (entry: { readonly message: ReadonlyArray<unknown> }): void => {
+          logged.push(entry.message.map(String).join(" "));
+        },
+      } as unknown as Logger.Logger<unknown, unknown>,
+    ]),
+  );
+
 /** Returns a new canonical v7 id, the only id format the database accepts. */
 const mintId = () => uuidToString(mintUuid());
 
@@ -277,7 +290,7 @@ const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({
 const ALICE = { name: "alice", email: "alice@users.noreply.github.com" };
 
 /**
- * Calls `starting` the way the controller daemon does: inside the caller's
+ * Calls `claimStarts` the way the controller daemon does: inside the caller's
  * transaction. Without `options.localRunnerId` the controller has no local
  * runner.
  */
@@ -292,7 +305,7 @@ const claimStarting = (
     const sessions = yield* SessionService;
     return yield* withTransaction(
       sql,
-      sessions.starting(runnerId, room, {
+      sessions.claimStarts(runnerId, room, {
         readGithubAccount,
         readSecrets: NO_SECRETS,
         localRunnerId: options.localRunnerId,
@@ -317,7 +330,7 @@ const readTokenHash = (sessionId: string) =>
 const mapFramesBySession = (claimed: ReadonlyArray<StartRequest>): Map<string, SessionStart> =>
   new Map(claimed.map((claim) => [claim.sessionId, claim.frame] as const));
 
-describe("SessionService.starting", () => {
+describe("SessionService.claimStarts", () => {
   it("returns one complete sessionStart frame per session it moved to starting", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -345,7 +358,10 @@ describe("SessionService.starting", () => {
           specPlain,
           onBranchAfter: yield* Effect.map(rows.one(onBranch), Option.getOrUndefined),
           plainAfter: yield* Effect.map(rows.one(plain), Option.getOrUndefined),
-          onBranchInput: yield* Effect.map(inputs.oldestQueued(onBranch), Option.getOrUndefined),
+          onBranchInput: yield* Effect.map(
+            inputs.read(claimed.find((claim) => claim.sessionId === onBranch)!.input.id),
+            Option.getOrUndefined,
+          ),
         };
       }),
     );
@@ -388,35 +404,83 @@ describe("SessionService.starting", () => {
     );
   });
 
-  it("skips a queued session that has no waiting input to start with, and leaves it queued", async () => {
+  it("skips a queued session that never ran and has no waiting input, leaves it queued, and warns once", async () => {
     // A row queued before a start carried its first input. A start without
     // an input would open no turn, so the session is left for a person to
     // see, not started empty.
-    const result = await run(
-      Effect.gen(function* () {
-        const rows = yield* sessionRepository;
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const runnerId = mintId();
-        const legacy = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-          withoutInput: true,
-        });
-        const current = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-        });
-        const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
-        return {
-          claimed: claimed.map((claim) => claim.sessionId),
-          current,
-          legacyAfter: yield* Effect.map(rows.one(legacy), Option.getOrUndefined),
-        };
-      }),
+    const logged: Array<string> = [];
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const rows = yield* sessionRepository;
+          const instanceId = yield* insertInstance("an-adapter", {});
+          const runnerId = mintId();
+          const legacy = yield* insertQueuedSession(runnerId, {
+            instanceId,
+            spec: buildSpec(instanceId, "clever"),
+            withoutInput: true,
+          });
+          const current = yield* insertQueuedSession(runnerId, {
+            instanceId,
+            spec: buildSpec(instanceId, "clever"),
+          });
+          const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+          // Every later dispatch pass reads the row again.
+          yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+          return {
+            claimed: claimed.map((claim) => claim.sessionId),
+            current,
+            legacy,
+            legacyAfter: yield* Effect.map(rows.one(legacy), Option.getOrUndefined),
+          };
+        }),
+        layer.pipe(Layer.provideMerge(captureLogs(logged))),
+      ),
     );
 
     expect(result.claimed).toEqual([result.current]);
     expect(result.legacyAfter?.status).toBe("queued");
+    const warnings = logged.filter((line) => line.includes("never ran"));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(result.legacy);
+  });
+
+  it("moves a resumed session with no waiting input back to the exit it was resumed from", async () => {
+    // A resume queues a session for the input that woke it. If that input
+    // is gone by the time dispatch reads the row, the resumed process would
+    // have nothing to do, so the session goes back to being exited.
+    const exitedAt = "2026-09-07T09:00:00.000Z";
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sessionRepository;
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const runnerId = mintId();
+        const spec = JSON.stringify(encodeSpec(buildSpec(instanceId, "clever")));
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec: buildSpec(instanceId, "clever"),
+          withoutInput: true,
+        });
+        yield* rows.moved(sessionId, "exited", exitedAt);
+        yield* rows.resume(sessionId, spec, at);
+
+        const claimed = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
+        const stream = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count FROM session_stream WHERE session_id = ${uuidFromString(sessionId)}
+        `;
+        return {
+          claimed,
+          after: Option.getOrThrow(yield* rows.one(sessionId)),
+          streamRows: stream[0]!.count,
+        };
+      }),
+    );
+
+    expect(result.claimed).toEqual([]);
+    expect(result.after).toMatchObject({ status: "exited", exitedAt });
+    // Nothing exited again, so no exit was written to the stream.
+    expect(result.streamRows).toBe(0);
   });
 
   it("creates a new token and stores only its hash on the row", async () => {
@@ -658,18 +722,7 @@ describe("SessionService.starting", () => {
     const hold = Effect.runSync(Deferred.make<void>());
     const logged: Array<string> = [];
     const stack = buildGatedCredentialStack(entered, hold).pipe(
-      Layer.provideMerge(
-        Layer.succeed(
-          Logger.CurrentLoggers,
-          new Set<Logger.Logger<unknown, unknown>>([
-            {
-              log: (entry: { readonly message: ReadonlyArray<string> }): void => {
-                logged.push(entry.message.join(" "));
-              },
-            } as unknown as Logger.Logger<unknown, unknown>,
-          ]),
-        ),
-      ),
+      Layer.provideMerge(captureLogs(logged)),
     );
     const result = await Effect.runPromise(
       Effect.provide(
@@ -716,7 +769,7 @@ describe("SessionService.starting", () => {
           });
           const claim = withTransaction(
             sql,
-            sessions.starting(runnerId, 1, {
+            sessions.claimStarts(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
               readSecrets: NO_SECRETS,
               localRunnerId: undefined,
@@ -1097,6 +1150,36 @@ describe("an answer that an input opened a turn", () => {
     expect(result.applied.status).toBe("busy");
     expect(result.applied.input).toMatchObject({ status: "delivered", delivery: "opened" });
     expect(result.status).toBe("idle");
+  });
+});
+
+describe("an answer from a runner that does not hold the session", () => {
+  it("records nothing, and logs that it was dropped", async () => {
+    // Only the runner that holds a session can deliver its inputs. An answer
+    // from any other runner must not mark the input delivered or open a turn.
+    const logged: Array<string> = [];
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sessions = yield* SessionService;
+          const inputs = yield* inputRepository;
+          const row = yield* insertIdleSessionWithSentInput(mintId());
+
+          yield* sessions.applyInputResult(mintId(), openedAnswer(row.id));
+
+          return {
+            sentAt: row.sentAt,
+            status: yield* readStatus(row.sessionId),
+            input: Option.getOrThrow(yield* inputs.read(row.id)),
+          };
+        }),
+        layer.pipe(Layer.provideMerge(captureLogs(logged))),
+      ),
+    );
+
+    expect(result.status).toBe("idle");
+    expect(result.input).toMatchObject({ status: "queued", sentAt: result.sentAt });
+    expect(logged.filter((line) => line.includes("does not hold"))).toHaveLength(1);
   });
 });
 

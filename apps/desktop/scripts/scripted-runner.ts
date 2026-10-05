@@ -57,6 +57,7 @@ import type {
   RunnerToController,
   SessionBinding,
   SessionInput,
+  SessionStart,
   TurnState,
 } from "../../../packages/protocol/src/index";
 
@@ -609,10 +610,7 @@ export async function enlistScriptedRunner(
    * turn when the session is idle, or as steered into the running turn. Both
    * a session input and the input a session start carries arrive here.
    */
-  const deliverInput = (
-    session: HostedSession,
-    frame: Pick<SessionInput, "requestId" | "sessionId" | "input">,
-  ): void => {
+  const deliverInput = (session: HostedSession, frame: SessionInput | SessionStart): void => {
     const running = session.turnId !== undefined;
     send({
       _tag: "sessionInputResult",

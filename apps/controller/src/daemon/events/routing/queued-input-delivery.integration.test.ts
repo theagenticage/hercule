@@ -14,6 +14,7 @@ import {
   waitForSession,
   waitForStartFrames,
   WAIT_DEADLINE_MS,
+  reportTurnCompleted,
 } from "../../../sessions/testing";
 import { post } from "../../../http/testing";
 import {
@@ -28,7 +29,6 @@ import {
   listFramesCarrying,
   spawnSubscriber,
   subscribeThread,
-  reportTurnCompleted,
   waitOutSeveralTicks,
   withPipeline,
   listInputFrames,

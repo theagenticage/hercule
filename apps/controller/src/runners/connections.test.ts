@@ -10,7 +10,7 @@
  * rather than over the socket, because it is about the previous run.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { Duration, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   RunnerConnectivity,
@@ -19,7 +19,12 @@ import type {
   RunnerWatermark,
 } from "@hercule/contract";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { PROTOCOL_VERSION } from "@hercule/protocol";
+import {
+  PROTOCOL_VERSION,
+  type ControllerToRunner,
+  type SessionInput,
+  type SessionInputResult,
+} from "@hercule/protocol";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -247,5 +252,72 @@ describe("a report from a connection the runner has replaced", () => {
     const one = Option.getOrThrow(row);
     expect(one.facts?.docker, "the newer connection's hello still stands").toBe(true);
     expect(one.watermark, "a stale watermark is not a reading of this machine").toBeNull();
+  });
+});
+
+/** A frame that carries an input, as a send of that input writes it. */
+const INPUT_FRAME: SessionInput = {
+  _tag: "sessionInput",
+  requestId: "input-1",
+  sessionId: "session-1",
+  input: { text: "hello" },
+};
+
+describe("sendFrameCarryingInput", () => {
+  it("returns none, and writes nothing, for a runner with no connection", async () => {
+    const sent = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        return yield* connections.sendFrameCarryingInput(
+          crypto.randomUUID(),
+          INPUT_FRAME,
+          Duration.infinity,
+        );
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(Option.isNone(sent)).toBe(true);
+  });
+
+  it("writes the frame before it returns, and the wait it returns ends with the runner's answer", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const written: Array<ControllerToRunner> = [];
+        const connection = mintConnection();
+        yield* connections.greeted(
+          runner!.id,
+          connection,
+          { ...HELD, ask: (frame) => Effect.sync(() => written.push(frame)) },
+          {
+            binaryVersion: "0.1.0",
+            protocolVersion: PROTOCOL_VERSION,
+            negotiatedCapabilities: [],
+            facts: FACTS,
+          },
+        );
+
+        const sent = yield* connections.sendFrameCarryingInput(
+          runner!.id,
+          INPUT_FRAME,
+          Duration.infinity,
+        );
+        const writtenBeforeTheWait = [...written];
+        const answer: SessionInputResult = {
+          _tag: "sessionInputResult",
+          requestId: INPUT_FRAME.requestId,
+          ok: true,
+          delivery: "opened",
+        };
+        const waiting = yield* Effect.forkChild(Option.getOrThrow(sent));
+        yield* Effect.yieldNow;
+        yield* connections.reportedAnswer(runner!.id, connection, answer);
+        return { writtenBeforeTheWait, answered: yield* Fiber.join(waiting), answer };
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.writtenBeforeTheWait).toEqual([INPUT_FRAME]);
+    expect(result.answered).toEqual(Option.some(result.answer));
   });
 });

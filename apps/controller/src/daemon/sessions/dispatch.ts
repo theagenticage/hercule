@@ -23,7 +23,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { InvalidState } from "@hercule/contract";
 import { withTransaction } from "../../db";
 import { PluginHost } from "../../plugins";
 import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
@@ -59,27 +58,21 @@ const make = Effect.gen(function* () {
    * a cold harness, a large checkout. The wait still ends when the connection
    * does, so a runner that stops answering pings ends it, and the answer is
    * then recorded as missing, as for any input on the wire. A refused or
-   * missing answer puts the input back to waiting with the reason; a
-   * delivery pass sends it again once the session is idle.
+   * missing answer puts the input back to waiting with the reason, for the
+   * next send of the session's input.
    */
   const sendStart = (runnerId: string, start: StartRequest): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      if (!(yield* connections.holdsConnection(runnerId))) return yield* sessions.requeue(start);
-      const answer = yield* connections.asked(runnerId, start.frame, Duration.infinity);
-      yield* sessions
-        .recordInputAnswer(
-          start.input,
-          Option.filter(answer, (one) => one._tag === "sessionInputResult"),
-          runnerId,
-        )
-        .pipe(
-          // The refusal is recorded on the input, where its reader sees it.
-          // Nobody waits on this start to be told.
-          Effect.catchIf(
-            (error): error is InvalidState => error instanceof InvalidState,
-            () => Effect.void,
-          ),
-        );
+      const sent = yield* connections.sendFrameCarryingInput(
+        runnerId,
+        start.frame,
+        Duration.infinity,
+      );
+      if (Option.isNone(sent)) return yield* sessions.requeue(start);
+      // The result needs no handling here: a refusal is recorded on the
+      // input, where its reader sees it, and nobody waits on this start to
+      // be told.
+      yield* sessions.recordInputAnswer(start.input, yield* sent.value, runnerId);
     });
 
   return {
@@ -109,7 +102,7 @@ const make = Effect.gen(function* () {
             }
             const room = runner.maxConcurrentSessions - (yield* runners.runningSessions(runnerId));
             if (room <= 0) return [];
-            return yield* sessions.starting(runnerId, room, {
+            return yield* sessions.claimStarts(runnerId, room, {
               readGithubAccount: accounts.readGithubAccount,
               readSecrets: (instanceId, providerId) =>
                 Effect.flatMap(host.providers(), (registered) =>
@@ -124,7 +117,7 @@ const make = Effect.gen(function* () {
         for (const start of ready) {
           runInBackground(
             absorbFailures(
-              "Recording the answer to a session's start failed",
+              "Sending a session's start, or recording the answer to it, failed",
               sendStart(runnerId, start),
             ),
           );

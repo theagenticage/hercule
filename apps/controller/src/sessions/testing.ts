@@ -20,13 +20,13 @@ import {
   PROTOCOL_VERSION,
   type ControllerToRunner as ControllerMessage,
   type Delivery,
+  type FrameCarryingInput,
   type JoinAnswer,
   type ModelDescriptor,
   type ProbeRequest,
   type RunnerFacts,
   type RunnerToController as RunnerMessage,
   type ProviderEvent,
-  type SessionInput,
   type SessionStart,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
@@ -85,11 +85,9 @@ type Answer = Delivery | { readonly message: string };
 
 type Answered = Answer | undefined;
 
-/**
- * A frame that carries an input the runner answers: a `sessionInput`, or the
- * `sessionStart` that carries a session's first input.
- */
-export type InputCarrier = SessionInput | SessionStart;
+/** Checks whether a frame sent to a runner carries an input the runner answers. */
+export const carriesInput = (frame: ControllerMessage): frame is FrameCarryingInput =>
+  frame._tag === "sessionInput" || frame._tag === "sessionStart";
 
 /** A fake runner's end of the socket. It answers pings and probes by itself. */
 export interface Wire {
@@ -101,7 +99,7 @@ export interface Wire {
    * carries: with a delivery, with an error message, or with `undefined` to
    * leave the frame unanswered, like a runner that has stopped responding.
    */
-  readonly answering: (delivery: (frame: InputCarrier) => Answered) => void;
+  readonly answering: (delivery: (frame: FrameCarryingInput) => Answered) => void;
   /**
    * Answers every input this runner has left unanswered so far, with a
    * delivery or with a refusal.
@@ -154,10 +152,10 @@ const dial = (
       headers: { authorization: `Bearer ${credential}` },
     });
     const frames: Array<ControllerMessage> = [];
-    let decideDelivery: (frame: InputCarrier) => Answered = () => "opened";
-    const withheld: Array<InputCarrier> = [];
+    let decideDelivery: (frame: FrameCarryingInput) => Answered = () => "opened";
+    const withheld: Array<FrameCarryingInput> = [];
     const writeMessage = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
-    const writeAnswer = (frame: InputCarrier, answer: Answer): void =>
+    const writeAnswer = (frame: FrameCarryingInput, answer: Answer): void =>
       writeMessage(
         typeof answer === "string"
           ? { _tag: "sessionInputResult", requestId: frame.requestId, ok: true, delivery: answer }
@@ -167,7 +165,7 @@ const dial = (
       const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);
       frames.push(frame);
       if (frame._tag === "ping") writeMessage({ _tag: "pong" });
-      if (frame._tag === "sessionInput" || frame._tag === "sessionStart") {
+      if (carriesInput(frame)) {
         const answer = decideDelivery(frame);
         if (answer === undefined) withheld.push(frame);
         else writeAnswer(frame, answer);
@@ -475,6 +473,31 @@ export const withAgentFleet = (
 
 /** The timestamp on every event a test reports. */
 export const at = "2026-09-07T10:00:00.000Z";
+
+/** Reports that a turn started on the session, as turn `t<seq>`, at sequence number `seq`. */
+export const reportTurnStarted = (arranged: Arranged, sessionId: string, seq: number): void =>
+  reportEvent(arranged.wire, seq, {
+    eventId: crypto.randomUUID(),
+    sessionId,
+    at,
+    _tag: "turn.started",
+    turnId: `t${String(seq)}`,
+  });
+
+/**
+ * Reports that the session's turn completed, at sequence number `seq`. The
+ * turn is `t<seq - 1>`: the one `reportTurnStarted` opened at the sequence
+ * number before.
+ */
+export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: number): void =>
+  reportEvent(arranged.wire, seq, {
+    eventId: crypto.randomUUID(),
+    sessionId,
+    at,
+    _tag: "turn.completed",
+    turnId: `t${String(seq - 1)}`,
+    state: "completed",
+  });
 
 /** Returns one of the controller's built-in profiles, by name. */
 export const readProfileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {

@@ -431,14 +431,67 @@ describe("the input a start carries", () => {
     );
 
     expectStartInputRefused(sent, "the harness is not ready for input");
-    // Sorted, because the two are sent independently: `session.started`
-    // through the relay, and the error by the start itself.
+    // The order of these two events on the session's stream is not
+    // guaranteed. `session.started` comes through the relay and the error is
+    // sent by the start itself, and each is numbered when it is sent. The
+    // order is harmless for the controller: a `runtime.error` changes no
+    // session status, so it is recorded the same way before or after
+    // `session.started`, and the controller learns of the refusal from the
+    // `sessionInputResult`, not from either event.
     const events = listSessionEvents(sent).map((frame) => frame.event._tag);
-    expect([...events].sort()).toEqual(["runtime.error", "session.started"]);
+    expect(events).toHaveLength(2);
+    expect(events).toEqual(expect.arrayContaining(["runtime.error", "session.started"]));
     // The controller's usual rule for a refused input applies to a session
     // that is still running, so the runner must not end it.
     const reports = sent.filter((frame) => frame._tag === "sessionsReport");
     expect(reports[0]?.sessions.map((binding) => binding.sessionId)).toEqual([SESSION]);
+  });
+});
+
+describe("a start interrupted while its harness is starting", () => {
+  it("still hands the harness its input and answers it", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    // Hold the adapter's `startSession` open, so the interrupt arrives once
+    // the harness is being started.
+    let gateEntered = false;
+    let resumeGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      resumeGate = resolve;
+    });
+    const original = fake.adapter.startSession;
+    Object.assign(fake.adapter, {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) => {
+        gateEntered = true;
+        return Effect.andThen(
+          Effect.promise(() => gate),
+          original(sessionId, spec, ctx),
+        );
+      },
+    });
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(supervisor.start(START));
+        yield* waitUntil("the harness was asked to start", () => gateEntered);
+        // Interrupt the start the way a dropped socket does. The interrupt
+        // waits for the start to finish, so it runs in its own fiber, which
+        // is let run before the gate opens.
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(starting));
+        yield* Effect.yieldNow;
+        resumeGate();
+        yield* Fiber.join(interrupting);
+      }),
+    );
+
+    // Without the input, the harness would sit with no turn and no idle wait.
+    expect(fake.inputs).toEqual([START_INPUT]);
+    expect(listInputResults(sent)).toEqual([
+      { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },
+    ]);
   });
 });
 
@@ -1338,7 +1391,7 @@ describe("a session that sits idle between turns", () => {
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
 
-  it("is not unloaded before the turn its start input opens, however late that turn is reported", async () => {
+  it("is not unloaded while its start input's turn is reported late, and is unloaded idleMs after that turn completes", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
