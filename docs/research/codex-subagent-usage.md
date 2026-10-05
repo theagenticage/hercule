@@ -16,7 +16,7 @@ HERCULE_CODEX_TEST_BINARY=/absolute/path/to/codex \
   apps/runner/src/providers/codex/adapter.integration.test.ts
 ```
 
-The binary override is optional; without it, the tests use `codex` on `PATH`. Tests skip when no binary is available. `HERCULE_CODEX_EVIDENCE_DIR=/absolute/path/to/existing/directory` saves sanitized timestamped provider events and approval decisions for the concurrent-approval cases. The trace excludes raw payloads, credentials and user material.
+The binary override is optional; without it, the tests use `codex` on `PATH`. Tests skip when no binary is available.
 
 ## Native forks start at zero
 

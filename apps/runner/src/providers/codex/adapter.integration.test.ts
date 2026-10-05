@@ -339,36 +339,16 @@ describe.skipIf(binary === undefined)(
           },
         });
         const seen: Array<ProviderEvent> = [];
-        const trace: Array<Record<string, unknown>> = [];
-        const record = (entry: Record<string, unknown>) => trace.push({ at: Date.now(), ...entry });
         const subscriber = Effect.runFork(
-          Stream.runForEach(adapter.events, (event) =>
-            Effect.sync(() => {
-              seen.push(event);
-              record({
-                kind: event._tag,
-                ...("subagentId" in event ? { subagentId: event.subagentId } : {}),
-                ...("turnId" in event ? { turnId: event.turnId } : {}),
-                ...(event._tag === "request.opened" ? { requestId: event.request.requestId } : {}),
-                ...(event._tag === "request.resolved" ? { requestId: event.requestId } : {}),
-                ...(event._tag === "session.usage.updated" ? { usage: event.usage } : {}),
-                ...(event._tag === "turn.completed" ? { state: event.state } : {}),
-                ...(event._tag === "turn.started" ? { model: event.model } : {}),
-                ...(event._tag === "subagent.started"
-                  ? { description: event.description, parentSubagentId: event.parentSubagentId }
-                  : {}),
-                ...(event._tag === "item.started" || event._tag === "item.completed"
-                  ? { itemKind: event.kind }
-                  : {}),
-              });
-            }),
-          ),
+          Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
         );
         const waitUntil = async (predicate: () => boolean) => {
           const deadline = Date.now() + 20_000;
           while (!predicate()) {
             if (Date.now() >= deadline)
-              throw new Error(`Codex fixture deadline: ${JSON.stringify(trace)}`);
+              throw new Error(
+                `Codex fixture deadline: ${seen.map((event) => event._tag).join(", ")}`,
+              );
             await new Promise((resolve) => setTimeout(resolve, 20));
           }
         };
@@ -454,11 +434,6 @@ describe.skipIf(binary === undefined)(
                 event.kind === "command_execution",
             ),
           ).toHaveLength(2);
-          record({
-            kind: "approval-decision",
-            requestId: second!.request.requestId,
-            decision: "allow",
-          });
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, second!.request.requestId, "allow"),
           );
@@ -470,11 +445,6 @@ describe.skipIf(binary === undefined)(
                 event._tag === "request.resolved" && event.requestId === first!.request.requestId,
             ),
           ).toBe(false);
-          record({
-            kind: "approval-decision",
-            requestId: first!.request.requestId,
-            decision: "allow",
-          });
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, first!.request.requestId, "allow"),
           );
@@ -500,13 +470,6 @@ describe.skipIf(binary === undefined)(
           await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
           await Effect.runPromise(Fiber.interrupt(subscriber));
           await model.stop();
-          const evidenceDir = process.env["HERCULE_CODEX_EVIDENCE_DIR"];
-          if (evidenceDir !== undefined) {
-            writeFileSync(
-              join(evidenceDir, `provider-events-${version}.json`),
-              JSON.stringify(trace, null, 2),
-            );
-          }
         }
       },
       45_000,
