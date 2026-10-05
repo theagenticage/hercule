@@ -59,6 +59,11 @@ describe("buildApprovalNotification", () => {
     expect(buildApprovalNotification(SESSION, asked)?.body).toMatch(
       /^Asked by a subagent\n\nThe session/,
     );
+    // A description is the parent agent's text, so it cannot format the body.
+    const hostile = "# Fix [it](https://x.example) `now` *please*";
+    expect(buildApprovalNotification(SESSION, asked, hostile)?.body?.split("\n\n")[0]).toBe(
+      String.raw`Asked by \# Fix \[it\]\(https\:\/\/x\.example\) \`now\` \*please\*`,
+    );
     // The main agent's own Request names no asker, whatever is passed.
     expect(buildApprovalNotification(SESSION, COMMAND, "ignored")?.body).toMatch(/^The session/);
   });

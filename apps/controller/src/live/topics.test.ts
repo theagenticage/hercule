@@ -60,7 +60,7 @@ describe("the pace of record changes", () => {
     ]);
   });
 
-  it("sends a session change caused by usage alone a second later, and any other at once", async () => {
+  it("sends a session change caused by usage alone a second later, and other changes within the short window", async () => {
     const [afterShortWindow, afterLongWindow] = await run(
       Effect.gen(function* () {
         const topics = yield* LiveTopics;

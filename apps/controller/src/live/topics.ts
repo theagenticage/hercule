@@ -59,6 +59,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
+import type { SubagentId } from "@hercule/protocol";
 import { AfterCommit, type Change } from "../db";
 import { readEventsAfter, readLogHead } from "../events";
 import { agentExists, readTranscriptHead, readTranscriptRowsAfter } from "../sessions";
@@ -127,13 +128,13 @@ const NO_SUCH_SUBAGENT = "no such subagent on that session";
  * Builds the topic of one agent's transcript: the session's own agent's when
  * `subagentId` is `undefined`, otherwise that subagent's.
  */
-const buildAgentStreamTopic = (sessionId: string, subagentId: string | undefined): LiveTopic =>
+const buildAgentStreamTopic = (sessionId: string, subagentId: SubagentId | undefined): LiveTopic =>
   subagentId === undefined
     ? buildSessionStreamTopic(sessionId)
     : buildSubagentStreamTopic(sessionId, subagentId);
 
 /** Builds the topic of one agent's token taps, the same way as `buildAgentStreamTopic`. */
-const buildAgentTapTopic = (sessionId: string, subagentId: string | undefined): LiveTopic =>
+const buildAgentTapTopic = (sessionId: string, subagentId: SubagentId | undefined): LiveTopic =>
   subagentId === undefined
     ? buildSessionTapTopic(sessionId)
     : buildSubagentTapTopic(sessionId, subagentId);
@@ -318,7 +319,7 @@ const make = Effect.gen(function* () {
 
   const buildTranscriptSource = (
     sessionId: string,
-    subagentId: string | undefined,
+    subagentId: SubagentId | undefined,
   ): LogSource<TranscriptRow> => ({
     after: (position, limit) =>
       readTranscriptRowsAfter(sql, sessionId, subagentId, position, limit),
@@ -394,7 +395,7 @@ const make = Effect.gen(function* () {
    */
   const requireAgent = (
     sessionId: string,
-    subagentId: string | undefined,
+    subagentId: SubagentId | undefined,
   ): Effect.Effect<void, NotFound | Internal> =>
     Effect.flatMap(
       Effect.mapError(agentExists(sql, sessionId, subagentId), () =>
@@ -429,7 +430,7 @@ const make = Effect.gen(function* () {
      */
     followSession: (
       sessionId: string,
-      subagentId: string | undefined,
+      subagentId: SubagentId | undefined,
       after: number | undefined,
     ): Effect.Effect<LiveQueue, Validation | NotFound | Internal, Scope.Scope> =>
       Effect.gen(function* () {
@@ -448,7 +449,7 @@ const make = Effect.gen(function* () {
      */
     tapSession: (
       sessionId: string,
-      subagentId: string | undefined,
+      subagentId: SubagentId | undefined,
     ): Effect.Effect<LiveQueue, NotFound | Internal, Scope.Scope> =>
       Effect.gen(function* () {
         yield* requireAgent(sessionId, subagentId);
