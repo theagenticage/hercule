@@ -46,11 +46,13 @@ describe("computeSubagentAfter", () => {
       parentSubagentId: "p1",
       itemId: "item-1",
       description: "Review the diff",
+      agentType: "reviewer",
     });
     expect(introduced).toMatchObject({
       parentSubagentId: "p1",
       itemId: "item-1",
       description: "Review the diff",
+      agentType: "reviewer",
     });
     // A resumed process that knows less, or names it otherwise, changes nothing.
     const again = computeSubagentAfter(introduced, {
@@ -58,6 +60,7 @@ describe("computeSubagentAfter", () => {
       _tag: "subagent.started",
       subagentId: "a1",
       description: "Something else",
+      agentType: "Explore",
     });
     expect(again).toBe(introduced);
   });

@@ -199,6 +199,8 @@ export type ScriptStep =
       readonly subagentId: string;
       /** The short task name the parent gives the subagent. */
       readonly description: string;
+      /** The harness's name for the kind of agent, as Claude's `subagent_type`. */
+      readonly agentType?: string;
       /** The prompt the parent gives the subagent: its first turn's user message. */
       readonly brief: string;
       readonly steps: ReadonlyArray<ScriptStep>;
@@ -662,6 +664,7 @@ export async function enlistScriptedRunner(
       ...(parent.subagentId === undefined ? {} : { parentSubagentId: parent.subagentId }),
       itemId,
       description: step.description,
+      ...(step.agentType === undefined ? {} : { agentType: step.agentType }),
     });
     openTurn(session, subagent);
     reportUserMessage(session, subagent, step.brief, false);

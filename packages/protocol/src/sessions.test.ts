@@ -78,6 +78,7 @@ const events: ReadonlyArray<Event> = [
     parentSubagentId: "agent-a",
     itemId: "toolu_1",
     description: "Find the flaky test",
+    agentType: "Explore",
   },
   { _tag: "turn.started", ...baseFields, subagentId: "agent-b", turnId: "t1", model: "sonnet" },
   {

@@ -16,7 +16,6 @@
  * - Token Usage adds up across a resume, for the session and for a subagent.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
 import type {
   ProviderEvent,
   SessionInterrupt as SessionInterruptFrame,
@@ -513,6 +512,7 @@ describe("session.querySubagents", () => {
           subagentId: "a1",
           itemId: "call-1",
           description: "Review the diff",
+          agentType: "reviewer",
         },
         { ...buildBase(id, "a1"), _tag: "turn.started", turnId: "s1", model: "sonnet" },
         {
@@ -547,13 +547,6 @@ describe("session.querySubagents", () => {
       ]);
       await waitForSubagent(arranged, id, "a1", (one) => one.status === "completed");
       await waitForSubagent(arranged, id, "a2", (one) => one.activity !== undefined);
-      // No event names a subagent's type yet, so it is written straight to the row.
-      await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql`UPDATE session_subagents SET agent_type = 'reviewer'
-            WHERE subagent_id = 'a1'`,
-        ),
-      );
 
       const first = await listSubagents(arranged, id, "?limit=1");
       expect(first.items).toEqual([

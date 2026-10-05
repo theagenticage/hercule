@@ -216,6 +216,7 @@ const applyEvent = (
         parentSubagentId: record.parentSubagentId ?? event.parentSubagentId,
         itemId: record.itemId ?? event.itemId,
         description: record.description ?? event.description,
+        agentType: record.agentType ?? event.agentType,
       };
     default:
       break;

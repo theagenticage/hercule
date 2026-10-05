@@ -626,12 +626,15 @@ const RequestResolvedWithAnswers = defineEvent("request.resolved", {
  *
  * - `itemId` is the `subagent` item that started it, in its parent's transcript.
  * - `description` is the short task name the parent gave it.
+ * - `agentType` is the harness's name for the kind of agent: Claude's
+ *   `subagent_type`, Codex's role.
  */
 const SubagentStarted = defineEvent("subagent.started", {
   subagentId: SubagentId,
   parentSubagentId: Schema.optionalKey(SubagentId),
   itemId: Schema.optionalKey(Fact),
   description: Schema.optionalKey(Message),
+  agentType: Schema.optionalKey(Fact),
 });
 
 /**
