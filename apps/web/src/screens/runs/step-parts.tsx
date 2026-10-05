@@ -69,7 +69,7 @@ export function StepCells({ line }: { readonly line: StepLine }): JSX.Element {
  */
 export function StepErrorLine({ error }: { readonly error: StepError }): JSX.Element {
   return (
-    <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">
+    <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-pretty text-muted">
       <span className="font-mono text-fail">{error.code}</span>
       {` · ${error.message}`}
     </p>
