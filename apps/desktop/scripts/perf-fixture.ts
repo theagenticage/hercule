@@ -273,7 +273,7 @@ export async function runWithThreadFixture<T>(
         openRequests.clear();
         await waitForThreads(
           listThreads,
-          (threads) => threads.every((thread) => thread.openRequest === null),
+          (threads) => threads.every((thread) => thread.openRequests.length === 0),
           "no Request open",
         );
         // The nudged thread is busy again, so every launch starts from the same states.
@@ -317,7 +317,7 @@ export async function runWithThreadFixture<T>(
           openRequests.set(id, runnerBySessionId.get(id)!.openRequest(id, "command_approval"));
           await waitForThreads(
             listThreads,
-            (threads) => threads.find((thread) => thread.id === id)?.openRequest !== null,
+            (threads) => (threads.find((thread) => thread.id === id)?.openRequests.length ?? 0) > 0,
             `a Request open on ${id}`,
           );
         }
@@ -457,7 +457,7 @@ async function waitForCensus(
   const countStatus = (threads: readonly Session[], status: Session["status"]) =>
     threads.filter((thread) => thread.status === status).length;
   const countWaiting = (threads: readonly Session[]) =>
-    threads.filter((thread) => thread.openRequest !== null).length;
+    threads.filter((thread) => thread.openRequests.length > 0).length;
   const holds = (threads: readonly Session[]) =>
     countStatus(threads, "busy") === expected.busy &&
     countStatus(threads, "idle") === expected.idle &&
