@@ -35,7 +35,7 @@ const REQUEST: OpenRequest = {
 
 /** Returns a thread on moss with id and title `id` that waits on `REQUEST`. */
 const buildAsking = (id: string): Session =>
-  buildSession({ id, title: id, runnerId: MOSS.id, status: "busy", openRequest: REQUEST });
+  buildSession({ id, title: id, runnerId: MOSS.id, status: "busy", openRequests: [REQUEST] });
 
 const WORLD = buildWorld({
   sessions: [

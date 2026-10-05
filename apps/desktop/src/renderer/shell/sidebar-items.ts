@@ -266,8 +266,9 @@ const buildWaitingContents = (
     },
   ];
   for (const row of waiting.rows) {
-    const request = sessions.get(row.id)?.openRequest ?? null;
-    if (request === null) continue;
+    // A thread with several open Requests shows the oldest.
+    const request = sessions.get(row.id)?.openRequests[0];
+    if (request === undefined) continue;
     contents.push({
       kind: "waiting-row",
       key: `waiting:${row.id}`,

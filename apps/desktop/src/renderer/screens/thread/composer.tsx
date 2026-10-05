@@ -163,6 +163,9 @@ export function ThreadComposer({
   const fields = buildComposerFields(catalogs, config, "active");
   const readOnly = findResumeBlockedReason(session);
   const busy = session.status === "busy";
+  // Several Requests can be open at once; the dock shows the oldest, the one
+  // the agents have waited on longest.
+  const oldestRequest = session.openRequests[0];
   const workspaceLabel = buildThreadWorkspaceLabel(session, workspaces);
   const placeholder = buildComposerPlaceholder({
     readOnly,
@@ -198,7 +201,7 @@ export function ThreadComposer({
     },
   });
   const interrupt = useMutation({
-    mutationFn: () => client.session.interrupt({ params: { id: sessionId } }),
+    mutationFn: () => client.session.interrupt({ params: { id: sessionId }, payload: {} }),
     // The response is not written into the cache. It is the session as the
     // controller read it before the interrupt, still busy, so writing it
     // could bring back a Stop the live `session` push has already cleared.
@@ -266,11 +269,11 @@ export function ThreadComposer({
         <div className="fold">
           <QueuedInputs sessionId={sessionId} />
         </div>
-        {session.openRequest === null ? null : (
+        {oldestRequest === undefined ? null : (
           <RequestDock
-            key={session.openRequest.requestId}
+            key={oldestRequest.requestId}
             sessionId={sessionId}
-            request={session.openRequest}
+            request={oldestRequest}
           />
         )}
         <div className="composer-card">

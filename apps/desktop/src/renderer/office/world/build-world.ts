@@ -47,6 +47,8 @@ function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): Offic
 
 /** Returns the colleague the Office draws for a seated thread in `pose`. */
 function buildColleague(session: Session, pose: SeatedPose): Colleague {
+  // A thread with several open Requests shows the oldest.
+  const oldestRequest = session.openRequests[0] ?? null;
   return {
     id: session.id,
     name: session.title,
@@ -57,10 +59,8 @@ function buildColleague(session: Session, pose: SeatedPose): Colleague {
     runnerId: session.runnerId,
     model: session.modelSelection.model,
     request:
-      session.openRequest === null
-        ? null
-        : buildOfficeRequest(session.openRequest, session.lastActivityAt),
-    openRequest: session.openRequest,
+      oldestRequest === null ? null : buildOfficeRequest(oldestRequest, session.lastActivityAt),
+    oldestRequest,
   };
 }
 

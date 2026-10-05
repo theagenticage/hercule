@@ -437,9 +437,10 @@ describe("the threads waiting on the user", () => {
       detail: { command: "pnpm test" },
     };
     let threads = SIDEBAR_FIXTURE.threads;
-    const setFlakyRequest = (openRequest: OpenRequest | null): void => {
+    const setFlakyRequest = (request: OpenRequest | null): void => {
+      const openRequests = request === null ? [] : [request];
       threads = threads.map((thread) =>
-        thread.id === FIXTURE_THREAD_IDS.flaky ? { ...thread, openRequest } : thread,
+        thread.id === FIXTURE_THREAD_IDS.flaky ? { ...thread, openRequests } : thread,
       );
     };
     const { fake, live } = await startShell({

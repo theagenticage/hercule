@@ -71,7 +71,7 @@ const FIX_SESSION = buildSpecimenSession({
   requestedAccessMode: "auto-accept-edits",
   accessMode: "auto-accept-edits",
   workspaceId: FIX_WORKSPACE.id,
-  openRequest: PUSH_REQUEST,
+  openRequests: [PUSH_REQUEST],
 });
 
 /** The moment the Fix thread's turn started: 2026-09-29 09:02 UTC. */

@@ -86,7 +86,7 @@ const startSidebar = async ({
 const PLAIN_THREAD = SIDEBAR_FIXTURE.threads[4]!;
 
 /** The command approval "Write the retry runbook" waits on. */
-const APPROVAL = SIDEBAR_FIXTURE.threads[0]!.openRequest;
+const APPROVAL = SIDEBAR_FIXTURE.threads[0]!.openRequests[0]!;
 
 /**
  * Returns `count` threads titled "Thread 1" to "Thread <count>", the last the
@@ -457,7 +457,7 @@ describe("the sidebar", () => {
     const [arrived] = buildThreads(1, {
       title: "Pin the lockfile",
       status: "busy",
-      openRequest: APPROVAL,
+      openRequests: [APPROVAL],
       projectId: SIDEBAR_FIXTURE.projects[0]!.id,
       workspaceId: primary!.id,
       lastActivityAt: "2026-09-10T09:06:00.000Z",
@@ -477,7 +477,7 @@ describe("the sidebar", () => {
   });
 
   it("shows the 3 newest waiting threads, and shows the rest in place from the more row, focusing the first of them", async () => {
-    const waiting = buildThreads(5, { status: "busy", openRequest: APPROVAL });
+    const waiting = buildThreads(5, { status: "busy", openRequests: [APPROVAL] });
     const { nav } = await startSidebar({ records: { ...NO_SIDEBAR_RECORDS, threads: waiting } });
 
     const listWaitingRows = () =>
@@ -540,7 +540,7 @@ describe("the sidebar", () => {
   it("moves focus to Waiting on you when the focused waiting row is answered", async () => {
     let threads: readonly Session[] = [
       ...SIDEBAR_FIXTURE.threads,
-      { ...buildThreads(1)[0]!, status: "busy", openRequest: APPROVAL },
+      { ...buildThreads(1)[0]!, status: "busy", openRequests: [APPROVAL] },
     ];
     const { nav, live } = await startSidebar({ readThreads: () => threads });
     await waitFor(() => {
@@ -555,7 +555,7 @@ describe("the sidebar", () => {
     expect(readFocusedKey()).toBe(`waiting:${FIXTURE_THREAD_IDS.runbook}`);
 
     threads = threads.map((session) =>
-      session.id === FIXTURE_THREAD_IDS.runbook ? { ...session, openRequest: null } : session,
+      session.id === FIXTURE_THREAD_IDS.runbook ? { ...session, openRequests: [] } : session,
     );
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.runbook]);

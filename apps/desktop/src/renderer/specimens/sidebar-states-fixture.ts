@@ -266,13 +266,15 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
     status: "busy",
     minutesAgo: 1,
     model: GPT,
-    openRequest: {
-      requestId: "rq-payout-report",
-      itemId: "it-payout-report",
-      kind: "command_approval",
-      decisions: ["allow", "deny"],
-      detail: { command: "pnpm run payouts:dry-run --month 2026-09" },
-    },
+    openRequests: [
+      {
+        requestId: "rq-payout-report",
+        itemId: "it-payout-report",
+        kind: "command_approval",
+        decisions: ["allow", "deny"],
+        detail: { command: "pnpm run payouts:dry-run --month 2026-09" },
+      },
+    ],
   }),
   buildSpecimenSession({
     id: "s-refund-webhooks",
@@ -289,13 +291,15 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
     status: "busy",
     minutesAgo: 4,
     model: CLAUDE_SONNET,
-    openRequest: {
-      requestId: "rq-adyen-reconcile",
-      itemId: "it-adyen-reconcile",
-      kind: "file_change_approval",
-      decisions: ["allow", "deny"],
-      detail: { paths: ["src/reconcile/adyen.ts"] },
-    },
+    openRequests: [
+      {
+        requestId: "rq-adyen-reconcile",
+        itemId: "it-adyen-reconcile",
+        kind: "file_change_approval",
+        decisions: ["allow", "deny"],
+        detail: { paths: ["src/reconcile/adyen.ts"] },
+      },
+    ],
   }),
   buildSpecimenSession({
     id: "s-invoice-backfill",
@@ -312,24 +316,26 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
     status: "busy",
     minutesAgo: 11,
     model: GPT,
-    openRequest: {
-      requestId: "rq-ideal-research",
-      itemId: "it-ideal-research",
-      kind: "question",
-      detail: {
-        questions: [
-          {
-            question: "Which iDEAL issuers should the sandbox list?",
-            header: "Issuers",
-            options: [
-              { label: "All of them", description: "Every issuer the iDEAL directory lists." },
-              { label: "The five largest", description: "ING, Rabobank, ABN AMRO, SNS and ASN." },
-            ],
-            multiSelect: false,
-          },
-        ],
+    openRequests: [
+      {
+        requestId: "rq-ideal-research",
+        itemId: "it-ideal-research",
+        kind: "question",
+        detail: {
+          questions: [
+            {
+              question: "Which iDEAL issuers should the sandbox list?",
+              header: "Issuers",
+              options: [
+                { label: "All of them", description: "Every issuer the iDEAL directory lists." },
+                { label: "The five largest", description: "ING, Rabobank, ABN AMRO, SNS and ASN." },
+              ],
+              multiSelect: false,
+            },
+          ],
+        },
       },
-    },
+    ],
   }),
   buildSpecimenSession({
     id: "s-psd3-draft",
@@ -364,13 +370,15 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
     status: "busy",
     minutesAgo: 3,
     model: CLAUDE_SONNET,
-    openRequest: {
-      requestId: "rq-playwright-flake",
-      itemId: "it-playwright-flake",
-      kind: "tool_approval",
-      decisions: ["allow", "deny"],
-      detail: { toolName: "WebFetch" },
-    },
+    openRequests: [
+      {
+        requestId: "rq-playwright-flake",
+        itemId: "it-playwright-flake",
+        kind: "tool_approval",
+        decisions: ["allow", "deny"],
+        detail: { toolName: "WebFetch" },
+      },
+    ],
   }),
   buildSpecimenSession({
     id: "s-incident-notes",
@@ -378,13 +386,15 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
     status: "busy",
     minutesAgo: 8,
     model: CLAUDE_SONNET,
-    openRequest: {
-      requestId: "rq-incident-notes",
-      itemId: "it-incident-notes",
-      kind: "file_read_approval",
-      decisions: ["allow", "deny"],
-      detail: { paths: ["notes/2026-09-27-incident.md", "notes/2026-09-28-incident.md"] },
-    },
+    openRequests: [
+      {
+        requestId: "rq-incident-notes",
+        itemId: "it-incident-notes",
+        kind: "file_read_approval",
+        decisions: ["allow", "deny"],
+        detail: { paths: ["notes/2026-09-27-incident.md", "notes/2026-09-28-incident.md"] },
+      },
+    ],
   }),
   buildSpecimenSession({
     id: "s-auditor-reply",

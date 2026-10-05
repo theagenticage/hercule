@@ -29,7 +29,7 @@ const buildThread = (id: string, over: Partial<Session> = {}): Session =>
 
 /** Returns a thread that has waited on `REQUEST` since `lastActivityAt`. */
 const buildAsking = (id: string, lastActivityAt: string): Session =>
-  buildThread(id, { status: "busy", openRequest: REQUEST, lastActivityAt });
+  buildThread(id, { status: "busy", openRequests: [REQUEST], lastActivityAt });
 
 // Desks are in creation order, then by id, so s-a's desk comes first. s-b
 // started waiting first, so it queues first.

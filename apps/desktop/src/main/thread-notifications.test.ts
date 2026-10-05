@@ -123,24 +123,26 @@ const PARKED_ON_QUESTION: Session = {
   nativeSessionId: null,
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
-  openRequest: {
-    requestId: "request-4",
-    itemId: "tool-1",
-    kind: "question",
-    detail: {
-      questions: [
-        {
-          question: "Which storage should drafts use?",
-          header: "Storage",
-          options: [
-            { label: "localStorage", description: "" },
-            { label: "IndexedDB", description: "" },
-          ],
-          multiSelect: false,
-        },
-      ],
+  openRequests: [
+    {
+      requestId: "request-4",
+      itemId: "tool-1",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Which storage should drafts use?",
+            header: "Storage",
+            options: [
+              { label: "localStorage", description: "" },
+              { label: "IndexedDB", description: "" },
+            ],
+            multiSelect: false,
+          },
+        ],
+      },
     },
-  },
+  ],
   createdAt: "2026-10-01T09:00:00.000Z",
   startedAt: "2026-10-01T09:00:01.000Z",
   exitedAt: null,

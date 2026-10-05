@@ -94,7 +94,7 @@ export function DossierCard({
   if (shown === null) return <section className="office-card glass" data-open={false} inert />;
 
   const colleague = applyColleagueState(shown, states);
-  const { pose, request, openRequest } = colleague;
+  const { pose, request, oldestRequest } = colleague;
   const waiting = listColleaguesInPose(world, states, "waiting");
   const runner = world.runners.find((each) => each.id === colleague.runnerId);
   const roomId = office?.homes.get(colleague.id)?.roomId;
@@ -127,7 +127,7 @@ export function DossierCard({
         </button>
       </header>
 
-      {request === null || openRequest === null ? null : (
+      {request === null || oldestRequest === null ? null : (
         <div className="office-card-request">
           <RequestHead
             waitingSince={request.waitingSince}
@@ -135,7 +135,11 @@ export function DossierCard({
             queueLength={waiting.length}
             counting={open}
           />
-          <RequestDock key={openRequest.requestId} sessionId={colleague.id} request={openRequest} />
+          <RequestDock
+            key={oldestRequest.requestId}
+            sessionId={colleague.id}
+            request={oldestRequest}
+          />
         </div>
       )}
 

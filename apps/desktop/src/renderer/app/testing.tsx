@@ -409,7 +409,7 @@ const FIXTURE_THREADS = {
     id: FIXTURE_THREAD_IDS.runbook,
     title: "Write the retry runbook",
     status: "busy",
-    openRequest: APPROVAL_REQUEST,
+    openRequests: [APPROVAL_REQUEST],
     projectId: WORLD.WEBSHOP_PROJECT.id,
     workspaceId: WORLD.THREAD_3F1.id,
     lastActivityAt: "2026-09-10T09:05:00.000Z",
