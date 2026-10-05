@@ -33,7 +33,11 @@ const EXIT_REASON_TEXTS: Record<ExitReason, string> = {
   workspace_failed: "its workspace could not be made",
 };
 
-/** Returns `text`, followed by `detail` after a colon when there is one, and ends it with a period. */
+/**
+ * Returns `text` followed by a colon and `detail`, or `text` with a period
+ * when there is no detail. No period is added after a detail: it is the
+ * harness's own text, which may already end in punctuation.
+ */
 const appendDetail = (text: string, detail: string | undefined): string =>
   (detail === undefined || detail === "" ? `${text}.` : `${text}: ${detail}`).slice(
     0,

@@ -260,11 +260,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       Effect.gen(function* () {
         const held = live.get(sessionId);
         if (held === undefined) return;
-        const still = yield* held.adapter.listSessions;
-        if (still.some((binding) => binding.sessionId === sessionId)) return;
+        const bindings = yield* held.adapter.listSessions;
+        if (bindings.some((binding) => binding.sessionId === sessionId)) return;
         // Compare by identity again after the wait above. A new start for this
         // id may have replaced the entry while this call waited on the
-        // adapter, before the adapter registered the new session, so `still`
+        // adapter, before the adapter registered the new session, so `bindings`
         // only describes the session this exit belongs to.
         if (live.get(sessionId) !== held) return;
         live.delete(sessionId);
@@ -422,8 +422,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 // The exit of an earlier run under the same id must not end
                 // the step of the run that replaced it. Only the adapter can
                 // tell the two apart, as in `releaseSession`.
-                const still = yield* held.adapter.listSessions;
-                if (still.some((binding) => binding.sessionId === event.sessionId)) break;
+                const bindings = yield* held.adapter.listSessions;
+                if (bindings.some((binding) => binding.sessionId === event.sessionId)) break;
                 yield* finishStepTurn(held, step, event);
                 break;
               }
