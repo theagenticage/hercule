@@ -93,7 +93,7 @@ Delivering user input into a session's running turn, folding it into that turn i
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
-User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
+User input held by the controller for delivery when the session's running turn completes. Editable and cancelable until delivered, except on an assistant's conversation session, whose inputs are the owner's messages and go in unchanged. A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
