@@ -22,6 +22,7 @@ import * as Result from "effect/Result";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import type { Run, StepError, WorkflowDefinition } from "@hercule/contract";
+import type { WorkspaceStepFailureCode } from "@hercule/protocol";
 import { buildRunActor, CurrentActor } from "../actor";
 import { agentRepository } from "../agents";
 import { renderTemplate } from "../expressions";
@@ -59,32 +60,54 @@ const findPreviousStepSession = (run: Run, step: AgentStep): string | undefined 
 
 /**
  * Decides the reason a run fails with when one of its agent steps failed
- * with `code`, a code the runner or the engine wrote:
+ * with `code`, a code the runner reported:
  *
  * - `schema_failure`: the turn's output did not match the step's
  *   `outputSchema`, so the run fails with `schema-failure`;
  * - `session_failed`, or `interrupted` because the runner restarted while
  *   the turn ran: the session ended before the turn did, so the run fails
  *   with `session-failed`;
- * - any other code fails the run with `step-failed`.
+ * - any other code fails the run with `step-failed`. Those codes belong to
+ *   workspace actions, and a runner sends none of them for an agent step.
  */
-export const decideAgentStepFailureReason = (code: string): ExecutionFailureReason => {
+export const decideAgentStepFailureReason = (
+  code: WorkspaceStepFailureCode,
+): ExecutionFailureReason => {
   switch (code) {
     case "schema_failure":
       return "schema-failure";
     case "session_failed":
     case "interrupted":
       return "session-failed";
-    default:
+    case "action_failed":
+    case "timeout":
+    case "unsupported_action":
       return "step-failed";
   }
 };
 
-/** Where a run's step is to run, as the engine's placement decides it (see `engine.ts`). */
-type StepPlacement =
+/** A step record, or its run, that ended in the transaction that tried to start it. */
+export const ENDED = { _tag: "ended" } as const;
+
+/** A step record that stays pending, because no runner can take its run now. */
+export const WAITS_FOR_RUNNER = { _tag: "waitsForRunner" } as const;
+
+/**
+ * Where a workspace step of a run is to run, or why it does not start now:
+ *
+ * - `placed`: on this runner, in this workspace of the run, or in none for a
+ *   run whose plan has no workspace;
+ * - `ended`: the step and its run have failed;
+ * - `waitsForRunner`: no runner can take the run now, and the step stays
+ *   pending.
+ *
+ * The run engine decides it (`placeWorkspaceStep` in `engine.ts`), for an
+ * action step and for an agent step alike.
+ */
+export type WorkspaceStepPlacement =
   | { readonly _tag: "placed"; readonly runnerId: string; readonly workspaceId: string | null }
-  | { readonly _tag: "ended" }
-  | { readonly _tag: "waitsForRunner" };
+  | typeof ENDED
+  | typeof WAITS_FOR_RUNNER;
 
 /**
  * What starting an agent step did:
@@ -97,8 +120,8 @@ type StepPlacement =
  */
 export type AgentStepStartOutcome =
   | { readonly _tag: "sessionOpened"; readonly send: OpenedStepSession["send"] }
-  | { readonly _tag: "ended" }
-  | { readonly _tag: "waitsForRunner" };
+  | typeof ENDED
+  | typeof WAITS_FOR_RUNNER;
 
 /** What starting an agent step needs from the run engine. */
 interface AgentStepNeeds {
@@ -110,12 +133,15 @@ interface AgentStepNeeds {
     failureReason: ExecutionFailureReason,
     at: string,
   ) => Effect.Effect<void, SqlError>;
-  /** Pins the run to a runner, and opens its workspace there when its plan has one, unless the run is pinned already. */
+  /**
+   * Pins the run to a runner, unless it is pinned already, and opens the
+   * run's workspace there when its plan has one.
+   */
   readonly placeOnRunner: (
     run: Run,
     record: StepRecordKey,
     at: string,
-  ) => Effect.Effect<StepPlacement, SqlError>;
+  ) => Effect.Effect<WorkspaceStepPlacement, SqlError>;
 }
 
 /**
@@ -130,14 +156,15 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
     const workspaceSteps = yield* WorkspaceSteps;
 
     /**
-     * Returns the ids of the runners signed in to an Agent's provider
-     * instance, or `undefined` when the Agent no longer exists. Placing the
-     * step's session refuses a deleted Agent, with a message that says so.
+     * Returns the Agent's name and the ids of the runners that can host it:
+     * those signed in to the Agent's provider instance. Returns `undefined`
+     * when the Agent no longer exists. Placing the step's session refuses a
+     * deleted Agent, with a message that says so.
      */
-    const listSignedInRunners = (
+    const listAgentHosts = (
       agentId: string,
     ): Effect.Effect<
-      { readonly name: string; readonly runnerIds: ReadonlySet<string> } | undefined,
+      { readonly agentName: string; readonly runnerIds: ReadonlySet<string> } | undefined,
       SqlError
     > =>
       Effect.gen(function* () {
@@ -146,12 +173,12 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
         // The controller wrote every snapshot row itself, so one that does
         // not decode is a bug.
         const snapshots = yield* Effect.catchTag(
-          providers.snapshotsOf(agent.value.instanceId),
+          providers.listSnapshots(agent.value.instanceId),
           "SchemaError",
           Effect.die,
         );
         return {
-          name: agent.value.name,
+          agentName: agent.value.name,
           runnerIds: new Set(snapshots.filter(isLoggedIn).map((snapshot) => snapshot.runnerId)),
         };
       });
@@ -181,8 +208,8 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
           const agentIds = [
             ...new Set(plan.steps.flatMap((step) => (step.kind === "agent" ? [step.agent] : []))),
           ];
-          const hosts = (yield* Effect.forEach(agentIds, listSignedInRunners)).filter(
-            (signedIn) => signedIn !== undefined,
+          const hosts = (yield* Effect.forEach(agentIds, listAgentHosts)).filter(
+            (agentHosts) => agentHosts !== undefined,
           );
           const hosting = candidates.filter((candidate) =>
             hosts.every(({ runnerIds }) => runnerIds.has(candidate.id)),
@@ -193,7 +220,9 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
           const hostedByNone = hosts.filter(({ runnerIds }) =>
             candidates.every((candidate) => !runnerIds.has(candidate.id)),
           );
-          const named = (hostedByNone.length > 0 ? hostedByNone : hosts).map(({ name }) => name);
+          const named = (hostedByNone.length > 0 ? hostedByNone : hosts).map(
+            ({ agentName }) => agentName,
+          );
           return {
             _tag: "noHost",
             message: `No runner that can take this run is signed in to the provider of ${named.join(" and ")}; sign a runner in, then start the run again.`,
@@ -230,7 +259,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
               "expression-error",
               at,
             );
-            return { _tag: "ended" } satisfies AgentStepStartOutcome;
+            return ENDED satisfies AgentStepStartOutcome;
           }
           // A prompt that is exactly one expression renders to the
           // expression's value, which is text only when the value is.
@@ -263,7 +292,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
               "session-failed",
               at,
             );
-            return { _tag: "ended" } satisfies AgentStepStartOutcome;
+            return ENDED satisfies AgentStepStartOutcome;
           }
           yield* runs.startStep(run.id, record, { sessionId: opened.success.sessionId }, at);
           return {

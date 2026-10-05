@@ -108,7 +108,8 @@ export interface EngineStepError extends StepError {
 /**
  * Identifies one step record of a run: its step and its iteration. It also
  * carries when the record started, if it has, because ending the record
- * needs that time.
+ * needs that time. Unlike `WorkspaceStepKey`, the key a runner is sent, it
+ * does not name the run: the caller already holds the run.
  */
 export interface StepRecordKey {
   readonly stepId: string;

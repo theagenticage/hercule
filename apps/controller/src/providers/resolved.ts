@@ -72,7 +72,7 @@ export const resolvedInstance: Effect.Effect<
       }
       return {
         definition,
-        snapshots: yield* instances.snapshotsOf(instanceId),
+        snapshots: yield* instances.listSnapshots(instanceId),
       };
     });
 });

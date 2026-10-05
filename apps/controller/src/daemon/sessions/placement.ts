@@ -723,9 +723,11 @@ const make = Effect.gen(function* () {
       | Schema.SchemaError
     > =>
       Effect.gen(function* () {
+        // The session is stamped with the current actor, so a session placed
+        // by anyone but the step's own run would be attributed wrongly.
         const actor = yield* CurrentActor;
-        if (actor._tag !== "run") {
-          return yield* Effect.die("an agent step's session is placed only by its run");
+        if (actor._tag !== "run" || actor.runId !== request.step.runId) {
+          return yield* Effect.die("an agent step's session is placed only by its own run");
         }
         const { agent } = yield* readAgentWithProfileOrFail(request.agentId);
         const requestedAccessMode = request.accessMode ?? agent.accessMode;

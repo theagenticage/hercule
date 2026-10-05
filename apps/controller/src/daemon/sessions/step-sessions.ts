@@ -10,6 +10,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
@@ -66,7 +67,10 @@ export const makeStepSessions = Effect.gen(function* () {
   const writeStepSession = (
     request: StepSessionToOpen,
   ): Effect.Effect<
-    { readonly sessionId: string; readonly send: Effect.Effect<void, unknown> },
+    {
+      readonly sessionId: string;
+      readonly send: Effect.Effect<void, SessionRefusal | SqlError>;
+    },
     SessionRefusal | SqlError
   > =>
     Effect.gen(function* () {
@@ -118,7 +122,7 @@ export const makeStepSessions = Effect.gen(function* () {
         // A savepoint, so that a refusal leaves no row behind in the caller's
         // transaction, which goes on to fail the step.
         const written = yield* Effect.result(withTransaction(sql, writeStepSession(request)));
-        if (written._tag === "Failure") {
+        if (Result.isFailure(written)) {
           const refusal = written.failure;
           if (isSqlError(refusal)) return yield* Effect.fail(refusal);
           return yield* Effect.fail(

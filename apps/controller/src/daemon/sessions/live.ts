@@ -190,7 +190,7 @@ const make = Effect.gen(function* () {
       const model = given.model ?? session.modelSelection.model;
       const picks = given.options ?? {};
       if (Object.keys(picks).length > 0) {
-        const snapshots = yield* instances.snapshotsOf(session.instanceId);
+        const snapshots = yield* instances.listSnapshots(session.instanceId);
         const snapshot = snapshots.find((one) => one.runnerId === session.runnerId);
         yield* validateOptions(snapshot?.models ?? [], model, picks);
       }

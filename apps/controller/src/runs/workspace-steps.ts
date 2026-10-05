@@ -60,7 +60,7 @@ export interface ActionStepToStart extends WorkspaceStepKey {
  * session the turn runs in, and the run's workspace, which names where the
  * runner keeps the step's result.
  */
-export interface AgentStepToStart extends WorkspaceStepKey {
+export interface AgentStepResultToRequest extends WorkspaceStepKey {
   readonly kind: "agent";
   /** The runner the step's run is pinned to. */
   readonly runnerId: string;
@@ -70,7 +70,7 @@ export interface AgentStepToStart extends WorkspaceStepKey {
 }
 
 /** A workspace step to hand to its runner (see `WorkspaceSteps.start`). */
-export type WorkspaceStepToStart = ActionStepToStart | AgentStepToStart;
+export type WorkspaceStepToStart = ActionStepToStart | AgentStepResultToRequest;
 
 /** The session one iteration of an agent step is to run in (see `WorkspaceSteps.openSession`). */
 export interface StepSessionToOpen {

@@ -670,20 +670,20 @@ export const renderTemplates = (
 /**
  * Evaluates a trigger's mapping against an event's context (`event`), and
  * returns each name with the JSON value of its expression. A start trigger
- * maps the run's inputs and a signal trigger maps its outputs; `mapped` says
- * which, for the error message. Fails with `ExpressionError` for the first
+ * maps the run's inputs and a signal trigger maps its outputs; `mappingTarget`
+ * says which, for the error message. Fails with `ExpressionError` for the first
  * expression that cannot be evaluated or returns a value with no JSON form;
  * the message names the input or the output.
  */
 export const evaluateMapping = (
   mapping: Readonly<Record<string, string>>,
   context: EvaluationContext,
-  mapped: "input" | "output",
+  mappingTarget: "input" | "output",
 ): Effect.Effect<Record<string, unknown>, ExpressionError> =>
   Effect.map(
     Effect.forEach(Object.entries(mapping), ([name, source]) =>
       Effect.gen(function* () {
-        const describeSite = (): string => `The expression for the ${mapped} ${name}`;
+        const describeSite = (): string => `The expression for the ${mappingTarget} ${name}`;
         const value = yield* Effect.mapError(
           evaluateExpression(source, context),
           (error) => new ExpressionError({ message: `${describeSite()}: ${error.message}` }),

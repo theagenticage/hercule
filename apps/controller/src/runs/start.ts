@@ -344,8 +344,9 @@ export const makeRunStart = (
      * Writes the run `readRunToWrite` returns: checks that it can run (see
      * `checkRunnable`), that a runner can run it (see `checkCapableRunner`),
      * checks how deep the run is nested, and writes the run, its entry step
-     * records and a subscription for each of its signal triggers. Returns the run's id at once, without
-     * waiting for any step. Fails, starting no run, with:
+     * records and a subscription for each of its signal triggers. Returns
+     * the run's id at once, without waiting for any step. Fails, starting no
+     * run, with:
      *
      * - `Validation` when `checkRunnable` or `checkCapableRunner` refuses the run;
      * - `CapExceeded` when the run is nested too deep;

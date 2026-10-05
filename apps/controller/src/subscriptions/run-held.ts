@@ -64,8 +64,8 @@ const make = Effect.gen(function* () {
 });
 
 /**
- * Builds the run-held subscription writes. Each method joins the caller's
- * transaction.
+ * Builds the operations on run-held subscriptions: opening and ending them,
+ * and listing a run's live ones. Each method joins the caller's transaction.
  */
 export const runHeldSubscriptions: Effect.Effect<
   Effect.Success<typeof make>,

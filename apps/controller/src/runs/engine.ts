@@ -93,8 +93,9 @@
  * run its steps started, directly or further down, in one transaction. Then
  * the Run Executor stops their executions, the workspace steps that were
  * running are settled with their runners, which stop them, and the runs'
- * sessions are stopped. A plugin's action in flight sees its signal abort. An action that returns after the cancel cannot end its step
- * record any more, so the run stays cancelled and no later step starts.
+ * sessions are stopped. A plugin's action in flight sees its signal abort.
+ * An action that returns after the cancel cannot end its step record any
+ * more, so the run stays cancelled and no later step starts.
  *
  * If executing a run fails for a reason of the controller's own, such as a
  * database error or a bug, the run fails with `controller-error` rather than
@@ -141,7 +142,14 @@ import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { runHeldSubscriptions } from "../subscriptions";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
-import { decideAgentStepFailureReason, findAgentStep, makeAgentSteps } from "./agent-steps";
+import {
+  decideAgentStepFailureReason,
+  ENDED,
+  findAgentStep,
+  makeAgentSteps,
+  WAITS_FOR_RUNNER,
+  type WorkspaceStepPlacement,
+} from "./agent-steps";
 import { RunExecutor } from "./executor";
 import {
   runRepository,
@@ -220,24 +228,6 @@ type StartedRecord =
       readonly workspaceStep?: ActionStepToStart;
     }
   | { readonly _tag: "sessionOpened"; readonly send: OpenedStepSession["send"] }
-  | typeof ENDED
-  | typeof WAITS_FOR_RUNNER;
-
-const ENDED = { _tag: "ended" } as const;
-
-const WAITS_FOR_RUNNER = { _tag: "waitsForRunner" } as const;
-
-/**
- * Where a workspace step of a run is to run, or why it does not start now:
- *
- * - `placed`: on this runner, in this workspace of the run, or in none for a
- *   run whose plan has no workspace;
- * - `ended`: the step and its run have failed;
- * - `waitsForRunner`: no runner can take the run now, and the step stays
- *   pending.
- */
-type WorkspaceStepPlacement =
-  | { readonly _tag: "placed"; readonly runnerId: string; readonly workspaceId: string | null }
   | typeof ENDED
   | typeof WAITS_FOR_RUNNER;
 
@@ -1485,9 +1475,9 @@ export const makeRunEngine = Effect.gen(function* () {
       }),
 
     /**
-     * Hands every running run that has a workspace but no runner yet to the
-     * Run Executor, because a runner may now be able to take it. The
-     * controller daemon calls this:
+     * Hands every running run that is not pinned to a runner yet, and whose
+     * plan has a workspace or an agent step, to the Run Executor, because a
+     * runner may now be able to take it. The controller daemon calls this:
      *
      * - when a runner connects;
      * - when a connected runner may have become placeable, because it was
