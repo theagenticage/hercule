@@ -717,7 +717,10 @@ describe("the frame builders on SessionService", () => {
     const frame = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
-        return sessions.inputFrame({ runId: null, stepId: null, modelSelection }, row);
+        return sessions.inputFrame(
+          { id: row.sessionId, runId: null, stepId: null, modelSelection },
+          row,
+        );
       }),
     );
 
@@ -749,7 +752,10 @@ describe("the frame builders on SessionService", () => {
     const frame = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
-        return sessions.inputFrame({ runId, stepId: "implement", modelSelection }, row);
+        return sessions.inputFrame(
+          { id: row.sessionId, runId, stepId: "implement", modelSelection },
+          row,
+        );
       }),
     );
 
@@ -758,6 +764,38 @@ describe("the frame builders on SessionService", () => {
       modelSelection,
       step: { runId, stepId: "implement", iteration: 2 },
     });
+  });
+
+  it("inputFrame fails with a defect on a step prompt whose session no step started", async () => {
+    const row: StoredInput = {
+      id: mintId(),
+      sessionId: mintId(),
+      source: "user",
+      actor: "run:0199e0e7-0000-7000-8000-000000000001",
+      text: "implement the change",
+      status: "queued",
+      delivery: null,
+      createdAt: at,
+      deliveredAt: null,
+      sentAt: null,
+      reason: null,
+      stepIteration: 2,
+    };
+    const modelSelection: ModelSelection = { model: "fast", options: {} };
+
+    // Sending the prompt without its step key would run a turn whose result
+    // no runner reports, so the run would wait for it for ever.
+    await expect(
+      run(
+        Effect.gen(function* () {
+          const sessions = yield* SessionService;
+          return sessions.inputFrame(
+            { id: row.sessionId, runId: null, stepId: null, modelSelection },
+            row,
+          );
+        }),
+      ),
+    ).rejects.toThrow("holds the prompt of an agent step, but no step started it");
   });
 
   it("interrupting returns exactly the sessionInterrupt frame", async () => {

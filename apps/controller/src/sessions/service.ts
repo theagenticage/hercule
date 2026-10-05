@@ -360,6 +360,26 @@ const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
 
 /**
+ * Builds the step key of an agent step's prompt: the run and the step its
+ * session was started by, and the prompt's `iteration`.
+ *
+ * Throws when the session was started by no step. Only an agent step creates
+ * a step prompt, in the session it started, so that is a bug. Inside an
+ * effect the throw is a defect.
+ */
+const buildStepKey = (
+  session: Pick<StoredSession, "id" | "runId" | "stepId">,
+  iteration: number,
+): WorkspaceStepKey => {
+  if (session.runId === null || session.stepId === null) {
+    throw new Error(
+      `session ${session.id} holds the prompt of an agent step, but no step started it`,
+    );
+  }
+  return { runId: session.runId, stepId: session.stepId, iteration };
+};
+
+/**
  * Returns the provider-native session id from a `session.started` event, if
  * it has one. The key is the same as `SessionBinding`'s field, because it is
  * the same value. When the event has none, the id stays null until the next
@@ -1059,10 +1079,12 @@ const make = Effect.gen(function* () {
      * turn, and a harness accepts a model change only at the start of a turn.
      *
      * The prompt of an agent step carries the step's key, so the runner knows
-     * the turn it starts is the step's and reports its result.
+     * the turn it starts is the step's and reports its result. Throws, as a
+     * defect, on a step prompt whose session was started by no step
+     * (`buildStepKey`).
      */
     inputFrame: (
-      session: Pick<StoredSession, "runId" | "stepId" | "modelSelection">,
+      session: Pick<StoredSession, "id" | "runId" | "stepId" | "modelSelection">,
       row: StoredInput,
     ): SessionInput => ({
       _tag: "sessionInput",
@@ -1071,11 +1093,7 @@ const make = Effect.gen(function* () {
       input: {
         text: row.text,
         modelSelection: session.modelSelection,
-        ...(row.stepIteration === null || session.runId === null || session.stepId === null
-          ? {}
-          : {
-              step: { runId: session.runId, stepId: session.stepId, iteration: row.stepIteration },
-            }),
+        ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
       },
     }),
 
@@ -1637,10 +1655,7 @@ const make = Effect.gen(function* () {
           // Only an agent step creates a step prompt, in the session the step
           // started, so a step prompt without that session is a bug.
           if (Option.isNone(session)) return yield* Effect.die("a step prompt has no session");
-          const { runId, stepId, workspaceId } = session.value;
-          if (runId === null || stepId === null) {
-            return yield* Effect.die("a step prompt's session was not started by a step");
-          }
+          const key = buildStepKey(session.value, row.stepIteration);
           const cancelled = yield* inputs.cancelUnanswered(
             row.id,
             row.sentAt,
@@ -1648,12 +1663,7 @@ const make = Effect.gen(function* () {
           );
           if (!cancelled) return Option.none();
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
-          return Option.some(
-            buildAgentStepResultRequest(
-              { runId, stepId, iteration: row.stepIteration },
-              workspaceId,
-            ),
-          );
+          return Option.some(buildAgentStepResultRequest(key, session.value.workspaceId));
         }),
       ),
 
