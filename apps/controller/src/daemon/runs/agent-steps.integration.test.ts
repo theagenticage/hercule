@@ -353,6 +353,40 @@ const startStepSession = async (
   return sessionId;
 };
 
+/**
+ * Plays a runner whose idle step session unloads just as the next prompt
+ * reaches it, the way a real runner unloads: only after the turn has ended.
+ *
+ * 1. The runner ends the turn of `ended`, and holds the prompt of `next`
+ *    that the controller then sends, without answering it.
+ * 2. The idle session unloads.
+ * 3. The runner refuses the held prompt, because the session is gone.
+ *
+ * The prompt then waits again, and the controller resumes the session in
+ * place for it. Later inputs are answered `opened`.
+ */
+const unloadSessionBeforePromptAnswered = async (
+  arranged: Arranged,
+  player: SessionPlayer,
+  sessionId: string,
+  ended: StepKey,
+  next: StepKey,
+): Promise<void> => {
+  const { wire } = arranged;
+  wire.answering(() => undefined);
+  player.endTurn(wire, sessionId, ended);
+  const sent = await waitForStepInput(wire, next);
+  player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+  await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
+  wire.answering(() => "opened");
+  wire.send({
+    _tag: "sessionInputResult",
+    requestId: sent.requestId,
+    ok: false,
+    message: "that session is not running",
+  });
+};
+
 /** Checks that a request was refused with `invalid_state` and the message of a fixed step input. */
 const expectStepInputFixed = async (response: Response): Promise<void> => {
   expect(response.status, await response.clone().text()).toBe(409);
@@ -547,11 +581,18 @@ describe("agent steps over the runner socket", () => {
   it.each([
     {
       exit: "its harness unloads while idle",
-      // The runner unloads the harness and reports the exit. It still holds
-      // the transcript, so the same connection takes the resume.
-      leave: (arranged: Arranged, player: SessionPlayer, sessionId: string): Promise<Wire> => {
-        player.report(arranged.wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
-        return Promise.resolve(arranged.wire);
+      // The turn ends, and the runner unloads the idle harness as the
+      // prompt arrives. It still holds the transcript, so the same
+      // connection takes the resume.
+      leave: async (
+        arranged: Arranged,
+        player: SessionPlayer,
+        sessionId: string,
+        ended: StepKey,
+        next: StepKey,
+      ): Promise<Wire> => {
+        await unloadSessionBeforePromptAnswered(arranged, player, sessionId, ended, next);
+        return arranged.wire;
       },
     },
     {
@@ -585,7 +626,7 @@ describe("agent steps over the runner socket", () => {
           (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
         );
 
-        const back = await leave(arranged, player, sessionId);
+        const back = await leave(arranged, player, sessionId, first, second);
 
         // The session is resumed in place, and its prompt is sent to it.
         const resumed = await waitUntil("resumed the step's session", () =>
@@ -596,7 +637,12 @@ describe("agent steps over the runner socket", () => {
           mode: "resume",
         });
         player.reportStarted(back, sessionId);
-        await waitForStepInput(back, second);
+        await waitForSessionTo(
+          arranged,
+          sessionId,
+          "opened the second iteration's turn",
+          (one) => one.status === "busy",
+        );
         player.runTurn(back, sessionId, second, completeWith({ done: true }));
 
         const ended = await waitForRunEnded(arranged, runId, "completed");
@@ -689,10 +735,13 @@ describe("agent steps over the runner socket", () => {
         const sessionId = await startStepSession(arranged, player, first);
         player.startTurn(wire, sessionId, first);
         player.sendResult(wire, first, completeWith({ done: false }));
-        await waitUntil("queued the second iteration's prompt", async () =>
-          (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
+        await unloadSessionBeforePromptAnswered(
+          arranged,
+          player,
+          sessionId,
+          first,
+          buildStepKey(runId, 2),
         );
-        player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
         await waitUntil("resumed the step's session", () =>
           listSessionStarts(wire, sessionId).find((frame) => frame.spec.continue !== undefined),
         );
@@ -1613,23 +1662,9 @@ describe("agent steps over the runner socket", () => {
         const second = buildStepKey(runId, 2);
         const sessionId = await startStepSession(arranged, player, first);
         expect(listSessionStarts(wire, sessionId)[0]?.checkoutBranch).toBe("release");
-        // The runner holds the second iteration's prompt without answering,
-        // so the prompt is still on the wire when the idle session unloads.
-        wire.answering(() => undefined);
-        player.runTurn(wire, sessionId, first, completeWith({ done: false }));
-        const sent = await waitForStepInput(wire, second);
-        player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
-        await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
-
-        // The runner refuses the prompt, because the session is gone, so the
-        // session is resumed in place for it.
-        wire.answering(() => "opened");
-        wire.send({
-          _tag: "sessionInputResult",
-          requestId: sent.requestId,
-          ok: false,
-          message: "that session is not running",
-        });
+        player.startTurn(wire, sessionId, first);
+        player.sendResult(wire, first, completeWith({ done: false }));
+        await unloadSessionBeforePromptAnswered(arranged, player, sessionId, first, second);
         const resumed = await waitUntil("resumed the step's session", () =>
           listSessionStarts(wire, sessionId).find((frame) => frame.spec.continue !== undefined),
         );
