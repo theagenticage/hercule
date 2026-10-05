@@ -157,7 +157,11 @@ function SidePane(): JSX.Element {
     );
   };
   return (
-    <aside className="proto-pane" style={{ width: s.paneWidth }} aria-label="Side pane">
+    <aside
+      className={`proto-pane is-${s.paneTone}`}
+      style={{ width: s.paneWidth }}
+      aria-label="Side pane"
+    >
       <ResizeHandle />
       <header className="proto-pane-head">
         <div className="proto-tabs" role="tablist">

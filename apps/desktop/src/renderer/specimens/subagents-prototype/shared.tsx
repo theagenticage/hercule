@@ -67,6 +67,14 @@ export const TALLIES: readonly Tally[] = ["header", "composer", "off"];
 export type Takeover = "tag" | "crumb" | "band" | "frame" | "wash" | "gradient";
 export const TAKEOVERS: readonly Takeover[] = ["tag", "crumb", "band", "frame", "wash", "gradient"];
 
+/** Which surface colour the side pane is drawn on: the sidebar's, the main pane's, or a step below it. */
+export type PaneTone = "sidebar" | "main" | "sunken";
+export const PANE_TONES: readonly PaneTone[] = ["sidebar", "main", "sunken"];
+
+/** Which theme the page is drawn in: Whitehaven (light) or Orient Express (dark). The shell page reads it from `?theme=` too. */
+export type Theme = "whitehaven" | "orient-express";
+export const THEMES: readonly Theme[] = ["whitehaven", "orient-express"];
+
 /** What the side pane can show. Only the Subagents surface is drawn; the rest are stubs. */
 export type SurfaceKind = "browser" | "terminal" | "files" | "diff" | "pull-request" | "subagents";
 
@@ -103,6 +111,9 @@ interface ProtoState {
   readonly tally: Tally;
   readonly takeover: Takeover;
   readonly hue: Hue | null;
+  /** The side pane's background, and the page's theme. */
+  readonly paneTone: PaneTone;
+  readonly theme: Theme;
 }
 
 let state: ProtoState = {
@@ -117,9 +128,11 @@ let state: ProtoState = {
   surfaces: ["subagents"],
   surface: "subagents",
   picker: false,
-  tally: pick(TALLIES, params.get("tally"), "header"),
-  takeover: pick(TAKEOVERS, params.get("takeover"), "band"),
+  tally: pick(TALLIES, params.get("tally"), "composer"),
+  takeover: pick(TAKEOVERS, params.get("takeover"), "crumb"),
   hue: HUES.find((each) => each === params.get("hue")) ?? null,
+  paneTone: pick(PANE_TONES, params.get("pane"), "sidebar"),
+  theme: pick(THEMES, params.get("theme"), "whitehaven"),
 };
 const listeners = new Set<() => void>();
 let cache: { queryClient: QueryClient; client: HerculeClient } | null = null;
@@ -149,6 +162,9 @@ const writeKnobs = (): void => {
   next.set("tally", state.tally);
   next.set("takeover", state.takeover);
   next.set("hue", state.hue ?? "own");
+  next.set("pane", state.paneTone);
+  next.set("theme", state.theme);
+  document.documentElement.dataset.theme = state.theme;
   history.replaceState(null, "", `?${next.toString()}`);
 };
 
@@ -649,7 +665,7 @@ const TAKEOVER_NAMES: Record<Takeover, string> = {
 
 /**
  * Renders the floating card that switches variant and state, and in D the
- * knobs: tally, page, hue. In D, ← and → step the page level, ↑ and ↓ the hue.
+ * knobs: theme, tally, page, hue, pane. In D, ← and → step the page level, ↑ and ↓ the hue.
  */
 export function Switcher(): JSX.Element {
   const s = useProto();
@@ -715,6 +731,21 @@ export function Switcher(): JSX.Element {
           ))}
         </span>
       </span>
+      <span className="proto-knob">
+        <span>Theme</span>
+        <span className="seg">
+          {THEMES.map((each) => (
+            <button
+              key={each}
+              type="button"
+              aria-pressed={s.theme === each}
+              onClick={() => update({ theme: each })}
+            >
+              {each === "whitehaven" ? "Light" : "Dark"}
+            </button>
+          ))}
+        </span>
+      </span>
       {VARIANT === "D" ? (
         <>
           <span className="proto-knob">
@@ -772,6 +803,21 @@ export function Switcher(): JSX.Element {
                   style={each === null ? undefined : { "--hue": `var(--hue-${each})` }}
                   onClick={() => update({ hue: each })}
                 />
+              ))}
+            </span>
+          </span>
+          <span className="proto-knob">
+            <span>Pane</span>
+            <span className="seg">
+              {PANE_TONES.map((each) => (
+                <button
+                  key={each}
+                  type="button"
+                  aria-pressed={s.paneTone === each}
+                  onClick={() => update({ paneTone: each })}
+                >
+                  {each === "sidebar" ? "Sidebar" : each === "main" ? "Main" : "Sunken"}
+                </button>
               ))}
             </span>
           </span>

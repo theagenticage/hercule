@@ -497,6 +497,12 @@
   background: var(--bg);
   box-shadow: -1px 0 0 var(--line-soft);
 }
+.proto-pane.is-main {
+  background: var(--surface);
+}
+.proto-pane.is-sunken {
+  background: var(--sunken);
+}
 .proto-b-panel.is-wide {
   width: 460px;
 }
