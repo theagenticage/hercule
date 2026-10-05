@@ -77,7 +77,7 @@ const make = Effect.gen(function* () {
     instance: StoredInstance,
   ): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError> =>
     Effect.gen(function* () {
-      const answer = yield* connections.asked(
+      const outcome = yield* connections.asked(
         runnerId,
         {
           _tag: "probeRequest",
@@ -96,8 +96,12 @@ const make = Effect.gen(function* () {
         },
         yield* ProviderProbeDeadline,
       );
-      if (Option.isNone(answer) || answer.value._tag !== "probeReport") return Option.none();
-      const result = answer.value.result;
+      // A runner that was not connected and one that did not answer both
+      // leave the instance unprobed on it.
+      if (outcome._tag !== "answered" || outcome.answer._tag !== "probeReport") {
+        return Option.none();
+      }
+      const result = outcome.answer.result;
       return yield* withTransaction(
         sql,
         Effect.gen(function* () {

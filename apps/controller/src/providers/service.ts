@@ -313,19 +313,17 @@ const make = Effect.gen(function* () {
     deadline: Duration.Duration,
   ): Effect.Effect<LoginAnswer, InvalidState> =>
     Effect.gen(function* () {
-      const answer = yield* connections.asked(runnerId, request, deadline);
-      const login = Option.filter(answer, isLoginAnswer);
-      return yield* Option.match(login, {
-        // Disconnected, gone or silent all mean the same to the user: the
-        // runner did not answer.
-        onNone: () =>
-          Effect.fail(
-            createInvalidStateError(
-              `that runner did not answer the login within ${Duration.format(deadline)}`,
-            ),
+      const outcome = yield* connections.asked(runnerId, request, deadline);
+      // Disconnected, gone or silent all mean the same to the user: the
+      // runner did not answer.
+      if (outcome._tag !== "answered" || !isLoginAnswer(outcome.answer)) {
+        return yield* Effect.fail(
+          createInvalidStateError(
+            `that runner did not answer the login within ${Duration.format(deadline)}`,
           ),
-        onSome: Effect.succeed,
-      });
+        );
+      }
+      return outcome.answer;
     });
 
   return {
@@ -504,20 +502,20 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         yield* validateRunnerCanDrive(runnerId, providerId, "providerId");
-        const answer = yield* connections.asked(
+        const outcome = yield* connections.asked(
           runnerId,
           { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },
           HARNESS_INSTALL_DEADLINE,
         );
-        if (Option.isNone(answer) || answer.value._tag !== "installResult") {
+        if (outcome._tag !== "answered" || outcome.answer._tag !== "installResult") {
           const waited = Duration.format(HARNESS_INSTALL_DEADLINE);
           return yield* Effect.fail(
             createInvalidStateError(`that runner did not finish the install within ${waited}`),
           );
         }
-        if (!answer.value.ok) {
+        if (!outcome.answer.ok) {
           return yield* Effect.fail(
-            createInvalidStateError(answer.value.message ?? "the install failed"),
+            createInvalidStateError(outcome.answer.message ?? "the install failed"),
           );
         }
         yield* Effect.forkDetach(probes.sweepRunner(runnerId));

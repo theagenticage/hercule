@@ -131,6 +131,25 @@ export type Answer =
   ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult | SessionInputResult;
 
 /**
+ * How a request to a runner ended:
+ *
+ * - `notSent`: the runner had no connection, so the frame never left the
+ *   controller and the runner cannot have acted on it.
+ * - `unanswered`: the frame was handed to the runner's connection, but no
+ *   answer came back: the connection ended or the deadline passed. The
+ *   runner may have acted on it.
+ * - `answered`: the runner's answer.
+ */
+export type RequestOutcome<A> =
+  | { readonly _tag: "notSent" }
+  | { readonly _tag: "unanswered" }
+  | { readonly _tag: "answered"; readonly answer: A };
+
+const NOT_SENT = { _tag: "notSent" } as const;
+
+const UNANSWERED = { _tag: "unanswered" } as const;
+
+/**
  * The key callers of `refreshedFacts` wait under. The facts report has no
  * request id, so it needs a key that no request id can be. The empty string
  * works, because a `RequestId` has at least one character. A word would not
@@ -247,9 +266,14 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Sends a frame and waits for the report under `key`. Returns `none` when
-   * the runner has no connection, the connection ended, or nothing came back
-   * in time. Callers report all three the same way: the runner did not answer.
+   * Sends a frame and waits for the report under `key`, up to `deadline`.
+   * Returns `notSent` when the runner has no connection, `unanswered` when
+   * the connection ended or nothing came back in time, and `answered` with
+   * the report otherwise.
+   *
+   * A frame counts as sent once the runner's connection was found, even when
+   * the write then fails. A failed write means the socket is closing, and
+   * part of the frame may already have left, so the runner may have it.
    *
    * A timeout ends only this caller's wait: the frame may still be answered,
    * and other callers waiting under the same key still get that answer.
@@ -259,10 +283,10 @@ const make = Effect.gen(function* () {
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
-  ): Effect.Effect<Option.Option<Reported>> =>
+  ): Effect.Effect<RequestOutcome<Reported>> =>
     Effect.suspend(() => {
       const held = reachable.get(id);
-      if (held === undefined) return Effect.succeed(Option.none<Reported>());
+      if (held === undefined) return Effect.succeed<RequestOutcome<Reported>>(NOT_SENT);
       const mine = Deferred.makeUnsafe<Option.Option<Reported>>();
       const waiting = held.pending.get(key) ?? new Set();
       waiting.add(mine);
@@ -271,7 +295,11 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* send(held);
           const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
-          return Option.getOrElse(answer, () => Option.none<Reported>());
+          const reported = Option.flatten(answer);
+          return Option.match(reported, {
+            onNone: (): RequestOutcome<Reported> => UNANSWERED,
+            onSome: (one): RequestOutcome<Reported> => ({ _tag: "answered", answer: one }),
+          });
         }),
         // Remove this caller's entry: nothing else will, and leaving it would
         // grow the map for the life of the connection.
@@ -383,30 +411,41 @@ const make = Effect.gen(function* () {
         // Every call sends a request: another caller's wait does not prove a
         // request is still in flight, and skipping it could make the button
         // do nothing.
-        const answer = yield* askAndAwaitReport(
+        const outcome = yield* askAndAwaitReport(
           id,
           FACTS_KEY,
           (held) => held.askForFacts,
           deadline,
         );
-        return Option.isSome(answer);
+        return outcome._tag === "answered";
       }),
 
     /**
      * Sends a request to the runner and waits for its answer, up to
-     * `deadline`. Returns `none` when the runner has no connection, the
-     * connection ended, or no answer came in time.
+     * `deadline`. Returns `notSent` when the runner has no connection, so the
+     * frame never left the controller; `unanswered` when the frame was handed
+     * to the connection but the connection ended or no answer came in time;
+     * and `answered` with the runner's answer otherwise.
+     *
+     * A frame whose write fails counts as sent, not `notSent`: a failed write
+     * means the socket is closing, and part of the frame may already have
+     * reached the runner. A caller that must never repeat what the runner may
+     * have done relies on this.
      */
     asked: (
       id: string,
       request: Request,
       deadline: Duration.Duration,
-    ): Effect.Effect<Option.Option<Answer>> =>
+    ): Effect.Effect<RequestOutcome<Answer>> =>
       Effect.map(
         askAndAwaitReport(id, request.requestId, (held) => held.ask(request), deadline),
         // The facts report uses its own key, never a request id, so only an
         // answer can arrive under this key.
-        Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
+        (outcome): RequestOutcome<Answer> => {
+          if (outcome._tag !== "answered") return outcome;
+          const answer = outcome.answer;
+          return answer._tag === "factsReported" ? UNANSWERED : { _tag: "answered", answer };
+        },
       ),
 
     /**

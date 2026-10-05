@@ -8,6 +8,8 @@
 import { describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import type { Input, Run, Session } from "@hercule/contract";
 import {
   buildWorkspaceActionCapability,
@@ -18,7 +20,10 @@ import {
   type SessionStart,
   type WorkspaceStepOutcome,
 } from "@hercule/protocol";
+import { nowIso } from "../../db";
 import { send } from "../../http/testing";
+import { inputRepository } from "../../sessions";
+import { Live } from "../sessions";
 import { WORKSPACE_ACTION_IDS } from "../../plugins";
 import { buildProviderDefinition, createPluginFixture } from "../../plugins/testing";
 import {
@@ -80,6 +85,10 @@ const completeWith = (
 /** What a runner reports for a step turn with no output schema that answered `text`. */
 const answerText = (text: string): WorkspaceStepOutcome =>
   completeWith({ text, exitStatus: "completed" });
+
+/** The reason stored on an input that was not sent because its runner was not connected. */
+const PROMPT_NOT_SENT =
+  "that session's runner is not connected; the input stays queued and is sent when the runner connects";
 
 /** The message of a step input that the user may not change, cancel or steer. */
 const STEP_INPUT_FIXED =
@@ -1040,6 +1049,83 @@ describe("agent steps over the runner socket", () => {
           expect(listSessionStarts(back, sessionId)).toEqual([]);
         },
         { inputDeadline: Duration.minutes(1), eventRoutingInterval: Duration.millis(50) },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "keeps a step's prompt queued when its runner is gone before the prompt leaves the controller, and sends it once the runner is back",
+    async () => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const player = createSessionPlayer();
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildImplementDefinition(agentId),
+          });
+          const key = buildStepKey(runId);
+          const sessionId = await waitForStepSessionId(arranged, key);
+          await waitForSessionStart(arranged.wire, sessionId);
+
+          // The session goes idle and its runner drops before the prompt is
+          // sent. Over the socket, the change to idle sends the prompt before
+          // a close can land, so the idle status is written by hand once the
+          // runner is gone.
+          arranged.wire.close();
+          await waitForRunnerGone(arranged);
+          await Effect.runPromise(
+            Effect.orDie(arranged.harness.sql`
+              UPDATE sessions SET status = 'idle'
+              WHERE id = unhex(replace(${sessionId}, '-', ''))
+            `),
+          );
+          // A delivery checks for a connection before it claims the prompt.
+          // This claims and sends without that check, as a delivery does
+          // when the connection drops between the check and the send.
+          const exit = await arranged.harness.runWithLiveSessions(
+            Effect.gen(function* () {
+              const inputs = yield* inputRepository;
+              const live = yield* Live;
+              const claimed = yield* inputs.claimOldestUnlessOneIsOnTheWire(
+                sessionId,
+                yield* nowIso,
+              );
+              yield* live.sendClaimed(Option.getOrThrow(claimed));
+            }),
+          );
+          expect(Exit.isSuccess(exit)).toBe(true);
+          // The prompt never left the controller, so it waits to be sent.
+          expect(await listInputs(arranged, sessionId)).toMatchObject([
+            { status: "queued", sentAt: null, reason: PROMPT_NOT_SENT },
+          ]);
+
+          const back = await arranged.reconnect();
+          back.send({
+            _tag: "sessionsReport",
+            sessions: [
+              {
+                sessionId,
+                nativeSessionId: `native-${sessionId}`,
+                instanceId: findInstanceId(arranged, "test-provider"),
+              },
+            ],
+          });
+          // The delivery pass sends the prompt on the new connection.
+          await waitForStepInput(back, key);
+          player.runTurn(back, sessionId, key, answerText("Shipped"));
+
+          const ended = await waitForRunEnded(arranged, runId, "completed");
+          expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
+            status: "completed",
+            sessionId,
+            output: { text: "Shipped" },
+          });
+          expect(countStepInputs([arranged.wire, back], key)).toBe(1);
+          // The runner was never asked for a result of a prompt it never had.
+          expect(back.frames.filter((frame) => asksForResult(frame, key))).toEqual([]);
+        },
+        { eventRoutingInterval: Duration.millis(50) },
       );
     },
     WAIT_DEADLINE_MS * 2,

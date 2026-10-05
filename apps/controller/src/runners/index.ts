@@ -24,6 +24,7 @@ export {
   type Answer,
   type Connection,
   type FleetTraffic,
+  type RequestOutcome,
   type SessionTraffic,
 } from "./connections";
 export { buildOnlineClause, runnerRepository, type PlacementCandidate } from "./repository";

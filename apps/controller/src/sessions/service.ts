@@ -641,9 +641,10 @@ const make = Effect.gen(function* () {
    * the write that exits the session.
    *
    * The caller must know the runner did not take the input: the runner
-   * refused it, or the input is an ordinary one the runner never answered.
-   * An agent step's prompt the runner never answered never comes here,
-   * because the runner may have run it (`recordNoAnswer`).
+   * refused it, the frame never left the controller, or the input is an
+   * ordinary one the runner never answered. An agent step's prompt the
+   * runner never answered never comes here, because the runner may have run
+   * it (`recordNoAnswer`).
    *
    * When an agent step's prompt is cancelled here, `SessionObserver` is
    * told, and the step fails. A step prompt that goes back to waiting on an
@@ -1627,9 +1628,21 @@ const make = Effect.gen(function* () {
       withTransaction(sql, requeueOrCancel(row, reason)),
 
     /**
-     * Handles an input the runner never answered: the connection dropped, or
-     * no answer came before the deadline. Whether the runner took the input
-     * is unknown.
+     * Handles a claimed input whose frame never left the controller, because
+     * the runner had no connection. The runner cannot have taken it, so it is
+     * handled like a refused input, an agent step's prompt too: it goes back
+     * to waiting with `reason`, and is sent when the runner connects, unless
+     * the session exited in the meantime and does not keep it (see
+     * `requeueOrCancel`). Runs in its own transaction.
+     */
+    recordNotSent: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+      withTransaction(sql, requeueOrCancel(row, reason)),
+
+    /**
+     * Handles an input the runner never answered: the frame left the
+     * controller, but the connection dropped or no answer came before the
+     * deadline. Whether the runner took the input is unknown. An input whose
+     * frame never left goes to `recordNotSent` instead.
      *
      * - Any input but an agent step's prompt is handled as a refused one
      *   (`recordRefusal`): `reason` is stored on it, as it goes back to

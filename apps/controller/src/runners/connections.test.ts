@@ -10,7 +10,7 @@
  * rather than over the socket, because it is about the previous run.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { Duration, Effect, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   RunnerConnectivity,
@@ -246,5 +246,98 @@ describe("a report from a connection the runner has replaced", () => {
     const one = Option.getOrThrow(row);
     expect(one.facts?.docker, "the newer connection's hello still stands").toBe(true);
     expect(one.watermark, "a stale watermark is not a reading of this machine").toBeNull();
+  });
+});
+
+describe("a request to a runner", () => {
+  const INSTALL = {
+    _tag: "installRequest",
+    requestId: "install-1",
+    providerId: "claude-code",
+  } as const;
+
+  const HELLO = {
+    binaryVersion: "0.1.0",
+    protocolVersion: 1,
+    negotiatedCapabilities: [],
+    facts: FACTS,
+  };
+
+  it("is not sent when the runner has no connection", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        return yield* connections.asked(runner!.id, INSTALL, Duration.seconds(5));
+      }).pipe(Effect.provide(layer), Effect.orDie),
+    );
+
+    expect(outcome).toEqual({ _tag: "notSent" });
+  });
+
+  it("is unanswered when it was written and the connection then ended", async () => {
+    const { outcome, written } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const connection = mintConnection();
+        const written: Array<string> = [];
+        yield* connections.greeted(
+          runner!.id,
+          connection,
+          {
+            ...HELD,
+            // The connection closes right after the write, before any answer.
+            ask: (frame) =>
+              Effect.andThen(
+                Effect.sync(() => written.push(frame._tag)),
+                Effect.asVoid(
+                  Effect.forkDetach(connections.ended(runner!.id, connection, "unreachable")),
+                ),
+              ),
+          },
+          HELLO,
+        );
+        const outcome = yield* connections.asked(runner!.id, INSTALL, Duration.seconds(5));
+        return { outcome, written };
+      }).pipe(Effect.provide(layer), Effect.orDie),
+    );
+
+    expect(written).toEqual(["installRequest"]);
+    expect(outcome).toEqual({ _tag: "unanswered" });
+  });
+
+  it("is answered with what the runner reported under its id", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const connection = mintConnection();
+        yield* connections.greeted(
+          runner!.id,
+          connection,
+          {
+            ...HELD,
+            ask: () =>
+              Effect.asVoid(
+                Effect.forkDetach(
+                  connections.reportedAnswer(runner!.id, connection, {
+                    _tag: "installResult",
+                    requestId: INSTALL.requestId,
+                    ok: true,
+                  }),
+                ),
+              ),
+          },
+          HELLO,
+        );
+        return yield* connections.asked(runner!.id, INSTALL, Duration.seconds(5));
+      }).pipe(Effect.provide(layer), Effect.orDie),
+    );
+
+    expect(outcome).toEqual({
+      _tag: "answered",
+      answer: { _tag: "installResult", requestId: INSTALL.requestId, ok: true },
+    });
   });
 });

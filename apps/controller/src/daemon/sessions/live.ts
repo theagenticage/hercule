@@ -51,7 +51,7 @@ import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import type { PluginHost } from "../../plugins";
 import { providerRepository, resolvedInstance } from "../../providers";
-import { RunnerConnections } from "../../runners";
+import { RunnerConnections, type RequestOutcome } from "../../runners";
 import {
   buildContinuingSpec,
   isResumeHeld,
@@ -155,6 +155,15 @@ const NOT_DELIVERED =
   "that session's runner did not take the input; it stays queued for the next turn";
 
 /**
+ * The reason stored on an input whose frame never left the controller,
+ * because the session's runner had no connection, and the message the send
+ * fails with. The row goes back to waiting, an agent step's prompt too, and
+ * the delivery pass sends it once the runner connects.
+ */
+const NOT_SENT =
+  "that session's runner is not connected; the input stays queued and is sent when the runner connects";
+
+/**
  * The message for an agent step's prompt the runner never answered. The
  * prompt is marked `sent` and never sent again, because the runner may have
  * run it.
@@ -210,25 +219,30 @@ const make = Effect.gen(function* () {
 
   /**
    * Sends one stored input to the session's runner and waits for the runner's
-   * result. Returns `none` when the runner is not connected or does not reply
-   * in time. The caller has already claimed the row, and the wait happens
-   * outside any transaction.
+   * result. Returns `notSent` when the runner is not connected, so the frame
+   * never left the controller, and `unanswered` when the frame left but the
+   * runner did not reply in time (see `RunnerConnections.asked`). The caller
+   * has already claimed the row, and the wait happens outside any
+   * transaction.
    */
   const deliverTo = (
     session: StoredSession,
     row: StoredInput,
-  ): Effect.Effect<Option.Option<SessionInputResult>> =>
+  ): Effect.Effect<RequestOutcome<SessionInputResult>> =>
     Effect.gen(function* () {
       const deadline = yield* SessionInputDeadline;
-      const answer = yield* connections.asked(
+      const outcome = yield* connections.asked(
         session.runnerId,
         sessions.inputFrame(session, row),
         deadline,
       );
-      return Option.filter(
-        answer,
-        (one): one is SessionInputResult => one._tag === "sessionInputResult",
-      );
+      if (outcome._tag !== "answered") return outcome;
+      const answer = outcome.answer;
+      // A runner answers an input only with a result. Any other frame under
+      // the input's request id left the input unanswered.
+      return answer._tag === "sessionInputResult"
+        ? { _tag: "answered", answer }
+        : { _tag: "unanswered" };
     });
 
   /**
@@ -239,10 +253,14 @@ const make = Effect.gen(function* () {
    * - If the runner rejects the input, the session service records that
    *   (`recordRefusal`), and this fails with an invalid state error with the
    *   same reason.
-   * - If the runner does not reply, the session service records that
-   *   (`recordNoAnswer`), and this fails with an invalid state error. When the
-   *   input was an agent step's prompt, it is not sent again, and the runner
-   *   is asked at once for the step's result instead.
+   * - If the runner is not connected, the frame never left the controller.
+   *   The session service puts the row back to waiting (`recordNotSent`), an
+   *   agent step's prompt too, and this fails with an invalid state error.
+   *   The runner is asked nothing, because it never had the input.
+   * - If the frame left but the runner does not reply, the session service
+   *   records that (`recordNoAnswer`), and this fails with an invalid state
+   *   error. When the input was an agent step's prompt, it is not sent
+   *   again, and the runner is asked at once for the step's result instead.
    *
    * The idle path, a steer and the flush all send inputs through this
    * function, and nothing else does.
@@ -256,14 +274,18 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<SessionInputOutcome, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
       const session = yield* readSession(row.sessionId);
-      const answer = yield* deliverTo(session, row);
-      const delivery = Option.isSome(answer) && answer.value.ok ? answer.value.delivery : undefined;
-      if (delivery !== undefined) {
-        yield* sessions.recordDelivery(row, delivery, session.runnerId);
-        return { inputId: row.id, result: delivery };
+      const outcome = yield* deliverTo(session, row);
+      if (outcome._tag === "notSent") {
+        yield* sessions.recordNotSent(row, NOT_SENT);
+        return yield* Effect.fail(createInvalidStateError(NOT_SENT));
       }
-      if (Option.isSome(answer)) {
-        const reason = answer.value.message ?? REFUSED;
+      if (outcome._tag === "answered") {
+        const answer = outcome.answer;
+        if (answer.ok && answer.delivery !== undefined) {
+          yield* sessions.recordDelivery(row, answer.delivery, session.runnerId);
+          return { inputId: row.id, result: answer.delivery };
+        }
+        const reason = answer.message ?? REFUSED;
         yield* sessions.recordRefusal(row, reason);
         return yield* Effect.fail(createInvalidStateError(reason));
       }
