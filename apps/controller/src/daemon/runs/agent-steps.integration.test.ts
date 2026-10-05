@@ -548,6 +548,48 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "fails the run with session-failed when a session resumed for the step's prompt exits again before it starts a turn",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildLoopDefinition(agentId),
+        });
+        const first = buildStepKey(runId, 1);
+        const sessionId = await startStepSession(arranged, player, first);
+        player.startTurn(wire, sessionId, first);
+        player.sendResult(wire, first, completeWith({ done: false }));
+        await waitUntil("queued the second iteration's prompt", async () =>
+          (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
+        );
+        player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+        await waitUntil("resumed the step's session", () =>
+          listSessionStarts(wire, sessionId).find((frame) => frame.spec.continue !== undefined),
+        );
+
+        // The resumed process exits before it starts a turn. The same exit
+        // kept the prompt the first time, but now the crash-loop guard is
+        // armed, so the prompt is cancelled and the step fails.
+        player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+        const ended = await waitForRunEnded(arranged, runId, "failed");
+        expect(ended).toMatchObject({ failureReason: "session-failed", failedStepId: IMPLEMENT });
+        expect(findStepRecords(ended, IMPLEMENT)[1]).toMatchObject({
+          iteration: 2,
+          status: "failed",
+          error: {
+            code: "session_failed",
+            message: "The step's session exited (idle_unload) before it took the step's prompt.",
+          },
+        });
+        expect(listSessionStarts(wire, sessionId)).toHaveLength(2);
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "cancels the prompt an exited session kept when its run is cancelled, so the session is not resumed for it",
     async () => {
       await withAgentStepFleet(
