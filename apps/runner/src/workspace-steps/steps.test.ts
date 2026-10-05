@@ -635,12 +635,15 @@ const buildAgentStart = (workspaceId: string | null): AgentStepResultRequest => 
 
 const REVIEWED: WorkspaceStepOutcome = { status: "completed", output: { verdict: "approve" } };
 
-/** Begins the agent step, with a turn that runs for as long as `running` returns true. */
+/**
+ * Begins the agent step, with a turn that runs for as long as `running`
+ * returns true. Returns whether the step was recorded.
+ */
 const beginAgentStep = (
   runner: Runner,
   frame: AgentStepResultRequest,
   running: () => boolean = () => true,
-): Promise<void> =>
+): Promise<boolean> =>
   Effect.runPromise(runner.steps.beginAgentStep(frame, frame.workspaceId, Effect.sync(running)));
 
 const finishAgentStep = (
@@ -661,7 +664,7 @@ describe("an agent step", { timeout: TEST_TIMEOUT_MS }, () => {
   it("sends its result when its turn ends, and answers a start sent again from its result file", async () => {
     const runner = makeRunner();
     const frame = buildAgentStart(createId());
-    await beginAgentStep(runner, frame);
+    expect(await beginAgentStep(runner, frame)).toBe(true);
     expect(runner.steps.listInFlight()).toEqual([
       { runId: frame.runId, stepId: "review", iteration: 1 },
     ]);
@@ -749,8 +752,9 @@ describe("an agent step", { timeout: TEST_TIMEOUT_MS }, () => {
     await settleSteps(runner, frame);
     expect(runner.steps.listInFlight()).toEqual([]);
     await finishAgentStep(runner, frame);
-    // The settled step is not recorded again, even if its turn is begun again.
-    await beginAgentStep(runner, frame);
+    // The settled step is not recorded again, and the supervisor is told so,
+    // so it does not run the step's prompt.
+    expect(await beginAgentStep(runner, frame)).toBe(false);
     await finishAgentStep(runner, frame);
 
     expect(runner.sent).toEqual([]);

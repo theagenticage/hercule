@@ -820,6 +820,63 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "cancels a step's prompt the runner refused because the step's settle overtook it, once the run's stop ends the session",
+    async () => {
+      await withAgentStepFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const player = createSessionPlayer();
+          // The runner holds the prompt without answering, so the run is
+          // cancelled while the prompt is on its way.
+          wire.answering(() => undefined);
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: buildImplementDefinition(agentId),
+          });
+          const key = buildStepKey(runId);
+          const sessionId = await waitForStepSessionId(arranged, key);
+          await waitForSessionStart(wire, sessionId);
+          player.reportStarted(wire, sessionId);
+          const sent = await waitForStepInput(wire, key);
+
+          const response = await requestCancel(arranged.harness.base, arranged.token, runId);
+          expect(response.status, await response.clone().text()).toBe(200);
+          await waitForFrame(wire, "settled the step", (frame) => settlesStep(frame, key));
+          await waitForFrame(wire, "stopped the run's session", (frame) =>
+            stopsSession(frame, sessionId),
+          );
+          // The settle reached the runner before the prompt did, so the runner
+          // refuses the prompt and runs no turn, then the stop ends the session.
+          wire.send({
+            _tag: "sessionInputResult",
+            requestId: sent.requestId,
+            ok: false,
+            message:
+              "the step ended before its prompt reached the harness, so the prompt was not run",
+          });
+          await waitUntil("put the refused prompt back to wait", async () =>
+            (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
+          );
+          player.report(wire, sessionId, { _tag: "session.exited", reason: "stopped" });
+
+          await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
+          expect(await listInputs(arranged, sessionId)).toEqual([
+            expect.objectContaining({ status: "cancelled" }),
+          ]);
+          const ended = await waitForRunEnded(arranged, runId, "cancelled");
+          expect(findStepRecords(ended, IMPLEMENT)[0]?.status).toBe("cancelled");
+          expect(countStepInputs([wire], key)).toBe(1);
+        },
+        // No delivery pass runs between the refusal and the exit, so the
+        // prompt is not sent again in between: a real runner would refuse it
+        // again anyway.
+        { eventRoutingInterval: Duration.hours(1) },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "runs each iteration of a fresh-session step in a new session, and stops them all when the run is cancelled",
     async () => {
       await withAgentStepFleet(async (arranged) => {

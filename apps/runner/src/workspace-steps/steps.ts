@@ -119,13 +119,19 @@ export interface WorkspaceSteps {
    *
    * The controller sends a step's input at most once, because a second turn
    * could push or comment a second time, so this does not look for a turn or
-   * a result the step already has. A settled step is not recorded.
+   * a result the step already has.
+   *
+   * Returns true when the step was recorded. Returns false, and records
+   * nothing, when the step was already settled: the settle can overtake the
+   * step's input when the run ends just as the input is sent. The caller must
+   * then not run the step's turn, because a turn of a run that has ended
+   * could still push or comment.
    */
   readonly beginAgentStep: (
     key: WorkspaceStepKey,
     workspaceId: string | null,
     isTurnRunning: Effect.Effect<boolean>,
-  ) => Effect.Effect<void>;
+  ) => Effect.Effect<boolean>;
   /**
    * Saves how an agent step ended in its result file, forgets the step, then
    * sends the result. Does nothing for a step that is not recorded, because
@@ -545,11 +551,9 @@ export const makeWorkspaceSteps = (options: {
     beginAgentStep: (key, workspaceId, isTurnRunning) =>
       Effect.sync(() => {
         const name = buildStepName(key);
-        // The settle can overtake the step's input when the run ends just as
-        // the input is sent. The controller owes the step nothing any more,
-        // so its turn's end must send nothing and write no result file.
-        if (settled.has(name)) return;
+        if (settled.has(name)) return false;
         agentSteps.set(name, { key: readKey(key), workspaceId, isTurnRunning });
+        return true;
       }),
 
     finishAgentStep: (key, outcome) =>

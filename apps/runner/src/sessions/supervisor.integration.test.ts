@@ -1963,7 +1963,7 @@ describe("an agent step's turn", () => {
     expect(listStepResults(sent)).toHaveLength(1);
   });
 
-  it("runs the turn of a step settled before its input arrived, but sends no result for it", async () => {
+  it("refuses the input of a step settled before its input arrived, so no turn runs for it", async () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
@@ -1976,13 +1976,21 @@ describe("an agent step's turn", () => {
         // settle arrived first. Stopping the session is the controller's call.
         yield* steps.settle({ _tag: "workspaceStepSettle", steps: [STEP] });
         yield* supervisor.input(STEP_INPUT);
-        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
-        // Read past the turn's end, so a result would already be sent.
+        // Read past anything the refusal sent.
         yield* awaitMarker(fake);
       }),
     );
 
-    expect(fake.inputs).toHaveLength(1);
+    // A turn of a run that has ended could still push or comment.
+    expect(fake.inputs).toEqual([]);
+    expect(listInputResults(sent)).toEqual([
+      {
+        _tag: "sessionInputResult",
+        requestId: REQUEST,
+        ok: false,
+        message: "the step ended before its prompt reached the harness, so the prompt was not run",
+      },
+    ]);
     expect(listStepResults(sent)).toEqual([]);
     expect(steps.listInFlight()).toEqual([]);
   });

@@ -61,6 +61,14 @@ interface RunningStep {
   readonly texts: Map<string, { readonly turnId: string; text: string }>;
 }
 
+/**
+ * Why the runner refuses the input of an agent step the controller has
+ * already settled. A turn of a run that has ended could still push or
+ * comment, so the input never reaches the harness.
+ */
+const SETTLED_STEP_REFUSAL =
+  "the step ended before its prompt reached the harness, so the prompt was not run";
+
 /** Checks whether a turn that ended is the step's turn. */
 const isStepTurn = (step: RunningStep, turnId: string): boolean =>
   step.turnId === undefined || step.turnId === turnId;
@@ -683,7 +691,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
        *
        * An input that carries a step key also begins that agent step. How the
        * turn the input went to ends becomes the step's result, which is saved
-       * and sent before the event that ended the turn.
+       * and sent before the event that ended the turn. The input of a step
+       * the controller has already settled is refused, and never reaches the
+       * harness.
        */
       input: (frame: SessionInput): Effect.Effect<void> => {
         const sendInputResult = (result: Omit<SessionInputResult, "_tag" | "requestId">) =>
@@ -703,11 +713,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const step: RunningStep | undefined =
           stepKey === undefined ? undefined : { key: stepKey, turnId: undefined, texts: new Map() };
         // Recorded before the input reaches the harness, so the turn cannot
-        // end before its step is known.
-        const beginStep: Effect.Effect<void> =
+        // end before its step is known. Returns false for a step that was
+        // already settled, whose input must not reach the harness.
+        const beginStep: Effect.Effect<boolean> =
           step === undefined
-            ? Effect.void
-            : Effect.andThen(
+            ? Effect.succeed(true)
+            : Effect.tap(
                 connection.workspaceSteps.beginAgentStep(
                   step.key,
                   held.workspaceId,
@@ -719,9 +730,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                       bindings.some((binding) => binding.sessionId === frame.sessionId),
                   ),
                 ),
-                Effect.sync(() => {
-                  held.step = step;
-                }),
+                (recorded) =>
+                  Effect.sync(() => {
+                    if (recorded) held.step = step;
+                  }),
               );
         // Input the harness refused opens no turn, so a session that was idle
         // before it is still idle and gets its wait back. A refused step input
@@ -755,7 +767,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.catch(refuseHeldInput),
           Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
         );
-        return Effect.andThen(beginStep, deliverInput);
+        // The controller puts a refused prompt back to wait. The stop it sends
+        // when the step's run ends makes the session exit, and that exit
+        // cancels the prompt.
+        return Effect.flatMap(beginStep, (recorded) =>
+          recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
+        );
       },
 
       /** Idempotent: a session this runner does not hold has no turn to end. */
