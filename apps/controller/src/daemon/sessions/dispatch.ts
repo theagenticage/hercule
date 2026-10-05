@@ -68,11 +68,11 @@ const make = Effect.gen(function* () {
         start.frame,
         Duration.infinity,
       );
-      if (Option.isNone(sent)) return yield* sessions.requeue(start);
+      if (sent._tag === "notSent") return yield* sessions.requeue(start);
       // The result needs no handling here: a refusal is recorded on the
       // input, where its reader sees it, and nobody waits on this start to
       // be told.
-      yield* sessions.recordInputAnswer(start.input, yield* sent.value, runnerId);
+      yield* sessions.recordInputAnswer(start.input, sent.answer, runnerId);
     });
 
   return {

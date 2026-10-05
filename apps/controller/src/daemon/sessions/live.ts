@@ -203,7 +203,7 @@ const make = Effect.gen(function* () {
         sessions.inputFrame(row, session.modelSelection),
         yield* SessionInputDeadline,
       );
-      return Option.isSome(sent) ? yield* sent.value : Option.none();
+      return sent._tag === "sent" ? sent.answer : Option.none();
     });
 
   /**

@@ -39,7 +39,7 @@ import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
-import { githubAccounts, WorkspaceServiceLayer } from "../workspaces";
+import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import type { GithubAccount } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
@@ -454,33 +454,86 @@ describe("SessionService.claimStarts", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const rows = yield* sessionRepository;
+        const workspaces = yield* WorkspaceService;
         const instanceId = yield* insertInstance("an-adapter", {});
+        // A runner that is not retired, a ready workspace on it and a known
+        // transcript: everything the session needs to read as resumable.
         const runnerId = mintId();
+        yield* sql`
+          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                               credential_hash, created_at, updated_at)
+          VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                  'a hash', ${at}, ${at})
+        `;
+        const workspaceId = mintId();
+        yield* sql`
+          INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+          VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(runnerId)}, 'ephemeral',
+                  'ready', ${at})
+        `;
         const spec = JSON.stringify(encodeSpec(buildSpec(instanceId, "clever")));
         const sessionId = yield* insertQueuedSession(runnerId, {
           instanceId,
           spec: buildSpec(instanceId, "clever"),
           withoutInput: true,
         });
+        yield* sql`
+          UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
+          WHERE id = ${uuidFromString(sessionId)}
+        `;
+        yield* rows.bind(sessionId, runnerId, instanceId, "native-1");
+        const holder = { kind: "session", id: sessionId } as const;
+        yield* workspaces.acquire(holder, workspaceId, exitedAt);
         yield* rows.moved(sessionId, "exited", exitedAt);
+        yield* workspaces.release(holder, "idle", exitedAt);
+        // What a resume writes: the row back on the queue, the lease taken
+        // again, and the crash-loop guard armed.
         yield* rows.resume(sessionId, spec, at);
+        yield* workspaces.acquire(holder, workspaceId, at);
+        yield* rows.setCrashGuardArmed(sessionId, true);
 
         const claimed = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
         const stream = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM session_stream WHERE session_id = ${uuidFromString(sessionId)}
         `;
+        const leases = yield* sql<{
+          readonly released_at: string | null;
+          readonly retention: string | null;
+          readonly kept_until: string | null;
+        }>`
+          SELECT released_at, retention, kept_until FROM workspace_leases
+          WHERE holder_id = ${uuidFromString(sessionId)}
+        `;
         return {
           claimed,
           after: Option.getOrThrow(yield* rows.one(sessionId)),
           streamRows: stream[0]!.count,
+          leases,
         };
       }),
     );
 
     expect(result.claimed).toEqual([]);
-    expect(result.after).toMatchObject({ status: "exited", exitedAt });
+    expect(result.after).toMatchObject({
+      status: "exited",
+      exitedAt,
+      resumable: true,
+      // The resume armed the guard and moved the last activity on. Both go
+      // back to what they were at the exit.
+      crashGuardArmed: false,
+      lastActivityAt: exitedAt,
+    });
     // Nothing exited again, so no exit was written to the stream.
     expect(result.streamRows).toBe(0);
+    // The session can still be resumed, so the workspace is kept for the
+    // idle window of thirty days, counted from the original exit.
+    expect(result.leases).toEqual([
+      {
+        released_at: exitedAt,
+        retention: "idle",
+        kept_until: new Date(Date.parse(exitedAt) + 30 * 24 * 3_600_000).toISOString(),
+      },
+    ]);
   });
 
   it("creates a new token and stores only its hash on the row", async () => {

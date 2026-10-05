@@ -79,6 +79,18 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
 export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
 
 /**
+ * What came of sending a frame the runner answers:
+ *
+ * - `notSent`: the runner has no connection, so nothing was sent.
+ * - `sent`: the frame was sent. `answer` is the runner's answer, or `none`
+ *   when the connection ended or no answer came in time.
+ */
+export type SendOutcome<A> =
+  { readonly _tag: "notSent" } | { readonly _tag: "sent"; readonly answer: Option.Option<A> };
+
+const NOT_SENT: SendOutcome<never> = { _tag: "notSent" };
+
+/**
  * A frame a runner sent about the sessions it hosts, and which runner sent it.
  * The connections do not interpret it: the sessions domain decides what a
  * session event means, and if this domain knew that, the runners domain would
@@ -252,46 +264,54 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Sends a frame, and returns the wait for the report under `key`. Returns
-   * `none`, sending nothing, when the runner has no connection.
+   * Sends a frame and waits for the report under `key`, up to `deadline`.
+   * Returns `notSent`, sending nothing, when the runner has no connection.
+   * Otherwise returns `sent`, with the report, or with `none` when the
+   * connection ended or nothing came back in time.
    *
-   * The wait is registered before the frame is sent, so an answer that comes
-   * back at once is not missed. The caller must run the returned wait: it
-   * also removes the registration when it ends. The wait returns `none` when
-   * the connection ended or nothing came back in time. A timeout ends only
-   * this caller's wait: the frame may still be answered, and other callers
-   * waiting under the same key still get that answer.
+   * The wait is registered before the frame is sent, so a report that comes
+   * back at once is not missed. A timeout ends only this caller's wait: the
+   * frame may still be answered, and other callers waiting under the same key
+   * still get that report.
    */
   const sendAndAwaitReport = (
     id: string,
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
-  ): Effect.Effect<Option.Option<Effect.Effect<Option.Option<Reported>>>> =>
+  ): Effect.Effect<SendOutcome<Reported>> =>
     Effect.suspend(() => {
       const held = reachable.get(id);
-      if (held === undefined) return Effect.succeed(Option.none());
-      const mine = Deferred.makeUnsafe<Option.Option<Reported>>();
-      const waiting = held.pending.get(key) ?? new Set();
-      waiting.add(mine);
-      held.pending.set(key, waiting);
-      // Remove this caller's entry: nothing else will, and leaving it would
+      if (held === undefined) return Effect.succeed(NOT_SENT);
+      // Registered and removed as a resource: the removal runs however the
+      // send or the wait ends, including an interruption between the two.
+      // Nothing else removes a caller's entry, and a leftover entry would
       // grow the map for the life of the connection.
-      const unregister = Effect.sync(() => {
-        waiting.delete(mine);
-        // Only if this set is still the one under the key. A report wakes
-        // callers by removing the key first, so a caller that arrives under
-        // the same key meanwhile has created a new set, and this finalizer
-        // must not delete it.
-        if (waiting.size === 0 && held.pending.get(key) === waiting) held.pending.delete(key);
-      });
-      const wait = Effect.ensuring(
-        Effect.map(Effect.timeoutOption(Deferred.await(mine), deadline), Option.flatten),
-        unregister,
-      );
-      return Effect.as(
-        Effect.onInterrupt(send(held), () => unregister),
-        Option.some(wait),
+      return Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const mine = Deferred.makeUnsafe<Option.Option<Reported>>();
+          const waiting = held.pending.get(key) ?? new Set();
+          waiting.add(mine);
+          held.pending.set(key, waiting);
+          return { mine, waiting };
+        }),
+        ({ mine }) =>
+          Effect.andThen(
+            send(held),
+            Effect.map(
+              Effect.timeoutOption(Deferred.await(mine), deadline),
+              (answer): SendOutcome<Reported> => ({ _tag: "sent", answer: Option.flatten(answer) }),
+            ),
+          ),
+        ({ mine, waiting }) =>
+          Effect.sync(() => {
+            waiting.delete(mine);
+            // Only if this set is still the one under the key. A report wakes
+            // callers by removing the key first, so a caller that arrives
+            // under the same key meanwhile has created a new set, and this
+            // release must not delete it.
+            if (waiting.size === 0 && held.pending.get(key) === waiting) held.pending.delete(key);
+          }),
       );
     });
 
@@ -306,12 +326,8 @@ const make = Effect.gen(function* () {
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
   ): Effect.Effect<Option.Option<Reported>> =>
-    Effect.flatMap(
-      sendAndAwaitReport(id, key, send, deadline),
-      Option.match({
-        onNone: () => Effect.succeed(Option.none<Reported>()),
-        onSome: (wait) => wait,
-      }),
+    Effect.map(sendAndAwaitReport(id, key, send, deadline), (outcome) =>
+      outcome._tag === "sent" ? outcome.answer : Option.none(),
     );
 
   /**
@@ -440,33 +456,35 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Sends a frame that carries an input, and returns the wait for the
-     * runner's answer to that input, up to `deadline`. Returns `none`,
-     * sending nothing, when the runner has no connection, so the caller can
-     * undo the claim it made for this send.
-     *
-     * The caller must run the returned wait, which also cleans up after it.
-     * The wait returns `none` when the connection ended or no answer came in
-     * time. With `Duration.infinity` it ends only on the answer or on the end
-     * of the connection, which ends every wait on it.
+     * Sends a frame that carries an input and waits for the runner's answer
+     * to that input, up to `deadline`. Returns `notSent`, sending nothing,
+     * when the runner has no connection, so the caller can undo the claim it
+     * made for this send. Otherwise returns `sent`, with the answer, or with
+     * `none` when the connection ended or no answer came in time. With
+     * `Duration.infinity` the wait ends only on the answer or on the end of
+     * the connection, which ends every wait on it.
      */
     sendFrameCarryingInput: (
       id: string,
       frame: FrameCarryingInput,
       deadline: Duration.Duration,
-    ): Effect.Effect<Option.Option<Effect.Effect<Option.Option<SessionInputResult>>>> =>
+    ): Effect.Effect<SendOutcome<SessionInputResult>> =>
       Effect.map(
         sendAndAwaitReport(id, frame.requestId, (held) => held.ask(frame), deadline),
-        Option.map((wait) =>
-          Effect.map(
-            wait,
-            // Request ids are unique, so only the answer to this input can
-            // arrive under its id.
-            Option.filter(
-              (reported): reported is SessionInputResult => reported._tag === "sessionInputResult",
-            ),
-          ),
-        ),
+        (outcome) =>
+          outcome._tag === "notSent"
+            ? outcome
+            : {
+                _tag: "sent",
+                // The request id is the input's id, and every send of the
+                // input uses it. So whatever arrives under it answers this
+                // input, though possibly an earlier send of it.
+                answer: Option.filter(
+                  outcome.answer,
+                  (reported): reported is SessionInputResult =>
+                    reported._tag === "sessionInputResult",
+                ),
+              },
       ),
 
     /**

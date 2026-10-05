@@ -724,10 +724,22 @@ const make = Effect.gen(function* () {
 
     /**
      * Moves a resumed session that is still `queued` back to `exited`, and
-     * returns whether it did. Only the status changes: the row keeps the exit
-     * time of the exit the resume began from, so the session reads as that
-     * exit again, not as a new one. A queued row holds no token hash and no
-     * open request, so nothing else needs clearing.
+     * returns whether it did. The row keeps the exit time of the exit the
+     * resume began from, so the session reads as that exit again, not as a
+     * new one. It also undoes what the resume wrote:
+     *
+     * - the crash-loop guard is disarmed. The service resumes a session only
+     *   while the guard does not hold it, and a resume arms it, so before the
+     *   resume it was disarmed.
+     * - `last_activity_at` goes back to the exit time, which the exit wrote to
+     *   it. One later time is lost: an event the runner reported after the
+     *   exit is still recorded and moves `last_activity_at` on. That loss is
+     *   harmless: for an exited session the time is only shown and sorted
+     *   by, and `endOnLostRunners` reads it only for running sessions.
+     *
+     * The spec and the stream offset the resume wrote stay: the next resume
+     * writes both again. A queued row holds no token hash and no open
+     * request, so neither needs clearing.
      *
      * A row that never exited is left alone and returns `false`: it is a
      * first start, and there is no exit to go back to. Like `resume`, it
@@ -737,7 +749,10 @@ const make = Effect.gen(function* () {
     undoResume: (sessionId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
-          UPDATE sessions SET status = 'exited'
+          UPDATE sessions SET
+            status = 'exited',
+            crash_guard_armed = 0,
+            last_activity_at = exited_at
           WHERE id = ${uuidFromString(sessionId)} AND status = 'queued'
             AND exited_at IS NOT NULL
           RETURNING id

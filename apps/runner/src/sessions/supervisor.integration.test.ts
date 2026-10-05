@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Fiber, PubSub, Stream } from "effect";
+import { Duration, Effect, Exit, Fiber, PubSub, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
@@ -471,23 +471,25 @@ describe("a start interrupted while its harness is starting", () => {
       },
     });
 
-    await runWithRelay(
+    const exit = await runWithRelay(
       fake,
       supervisor,
       Effect.gen(function* () {
         const starting = yield* Effect.forkChild(supervisor.start(START));
         yield* waitUntil("the harness was asked to start", () => gateEntered);
         // Interrupt the start the way a dropped socket does. The interrupt
-        // waits for the start to finish, so it runs in its own fiber, which
-        // is let run before the gate opens.
-        const interrupting = yield* Effect.forkChild(Fiber.interrupt(starting));
-        yield* Effect.yieldNow;
+        // waits for the start to finish, so it runs in its own fiber. That
+        // fiber starts at once, so the interrupt is requested before the
+        // gate opens, while the harness is still starting.
+        yield* Effect.forkChild(Fiber.interrupt(starting), { startImmediately: true });
         resumeGate();
-        yield* Fiber.join(interrupting);
+        return yield* Fiber.await(starting);
       }),
     );
 
-    // Without the input, the harness would sit with no turn and no idle wait.
+    // The start received the interrupt, and still finished first. Without
+    // the input, the harness would sit with no turn and no idle wait.
+    expect(Exit.hasInterrupts(exit)).toBe(true);
     expect(fake.inputs).toEqual([START_INPUT]);
     expect(listInputResults(sent)).toEqual([
       { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },

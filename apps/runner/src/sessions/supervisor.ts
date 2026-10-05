@@ -731,6 +731,19 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // answered, the start runs to the end: a harness that was started but
       // never handed its input would have no turn and no idle wait, and
       // nothing would ever stop it.
+      //
+      // So tearing down a dropped connection, which interrupts the start and
+      // waits for it, waits for this part too. That wait is bounded by the
+      // deadline each adapter puts on its requests to the harness:
+      //
+      // - Codex: `RPC_DEADLINE`, 30 seconds per app-server request. A start
+      //   makes two (the handshake and opening the thread). Its input makes
+      //   one or two more (a steer, then a new turn), and each of those is
+      //   retried up to three times while Codex reports it is overloaded.
+      // - pi: `RPC_DEADLINE`, 5 seconds per command.
+      // - Claude Code: `CONTROL_DEADLINE`, 5 seconds, for a change of model
+      //   before the input. Its start and the input itself do not wait on
+      //   the harness.
       start: (frame: SessionStart): Effect.Effect<void> =>
         Effect.uninterruptibleMask((restore) =>
           restore(prepareStart(frame)).pipe(

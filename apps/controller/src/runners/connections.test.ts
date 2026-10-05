@@ -264,7 +264,7 @@ const INPUT_FRAME: SessionInput = {
 };
 
 describe("sendFrameCarryingInput", () => {
-  it("returns none, and writes nothing, for a runner with no connection", async () => {
+  it("returns notSent for a runner with no connection", async () => {
     const sent = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
@@ -276,10 +276,10 @@ describe("sendFrameCarryingInput", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(Option.isNone(sent)).toBe(true);
+    expect(sent).toEqual({ _tag: "notSent" });
   });
 
-  it("writes the frame before it returns, and the wait it returns ends with the runner's answer", async () => {
+  it("writes the frame, then returns the runner's answer to it", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
@@ -298,26 +298,22 @@ describe("sendFrameCarryingInput", () => {
           },
         );
 
-        const sent = yield* connections.sendFrameCarryingInput(
-          runner!.id,
-          INPUT_FRAME,
-          Duration.infinity,
+        const sending = yield* Effect.forkChild(
+          connections.sendFrameCarryingInput(runner!.id, INPUT_FRAME, Duration.infinity),
         );
-        const writtenBeforeTheWait = [...written];
+        while (written.length === 0) yield* Effect.yieldNow;
         const answer: SessionInputResult = {
           _tag: "sessionInputResult",
           requestId: INPUT_FRAME.requestId,
           ok: true,
           delivery: "opened",
         };
-        const waiting = yield* Effect.forkChild(Option.getOrThrow(sent));
-        yield* Effect.yieldNow;
         yield* connections.reportedAnswer(runner!.id, connection, answer);
-        return { writtenBeforeTheWait, answered: yield* Fiber.join(waiting), answer };
+        return { written, sent: yield* Fiber.join(sending), answer };
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(result.writtenBeforeTheWait).toEqual([INPUT_FRAME]);
-    expect(result.answered).toEqual(Option.some(result.answer));
+    expect(result.written).toEqual([INPUT_FRAME]);
+    expect(result.sent).toEqual({ _tag: "sent", answer: Option.some(result.answer) });
   });
 });

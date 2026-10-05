@@ -775,7 +775,8 @@ const make = Effect.gen(function* () {
   /**
    * The queued sessions dispatch skipped for having no input, and has logged
    * a warning about. Each is logged once per controller run, not on every
-   * dispatch pass.
+   * dispatch pass. A session is added only when the pass that logged it
+   * commits, so a pass that rolls back logs it again on the next pass.
    */
   const warnedInputlessSessions = new Set<string>();
 
@@ -786,25 +787,22 @@ const make = Effect.gen(function* () {
    * nothing to do with. Returns `false`, changing nothing, for a session that
    * never exited.
    *
-   * Only the status and the workspace lease go back. The lease is released
-   * again from the original exit time, so the workspace is kept for the same
-   * window as before the resume. Nothing exited, so `SessionObserver` is not
-   * told and no exit is written to the stream. The spec and the stream offset
-   * the resume wrote stay: the next resume writes both again. Joins the
-   * caller's transaction.
+   * The row goes back as `sessions.undoResume` describes. The workspace lease
+   * is released again from the original exit time, as `endSessions` releases
+   * it, so the workspace is kept for the same window as before the resume.
+   * Nothing exited, so `SessionObserver` is not told and no exit is written
+   * to the stream. Joins the caller's transaction.
    */
   const undoResume = (sessionId: string): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
-      const found = yield* sessions.one(sessionId);
-      if (Option.isNone(found)) return false;
-      const { exitedAt, workspaceId, resumable } = found.value;
-      if (exitedAt === null) return false;
       if (!(yield* sessions.undoResume(sessionId))) return false;
-      if (workspaceId !== null) {
+      // Read after the undo: `resumable` holds only for an exited session.
+      const after = yield* sessions.one(sessionId);
+      if (Option.isSome(after) && after.value.workspaceId !== null) {
         yield* workspaces.release(
           { kind: "session", id: sessionId },
-          resumable ? "idle" : "orphan",
-          exitedAt,
+          after.value.resumable ? "idle" : "orphan",
+          after.value.exitedAt ?? (yield* nowIso),
         );
       }
       yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
@@ -1040,7 +1038,6 @@ const make = Effect.gen(function* () {
             const waiting = yield* inputs.oldestWaiting(row.id);
             if (Option.isNone(waiting)) {
               if (!(yield* undoResume(row.id)) && !warnedInputlessSessions.has(row.id)) {
-                warnedInputlessSessions.add(row.id);
                 inputless.push(row.id);
               }
               continue;
@@ -1110,13 +1107,18 @@ const make = Effect.gen(function* () {
           );
         }
         // Logged once per session, not on every pass, because such a row
-        // is skipped on every pass until a user stops it.
+        // is skipped on every pass until a user stops it. The sessions are
+        // marked as logged only once the transaction commits: one that rolls
+        // back may end before this log, and the next pass must log them then.
         if (inputless.length > 0) {
           yield* Effect.logWarning(
             "skipped queued sessions that never ran and have no waiting input to start with; " +
               "they stay queued",
             inputless,
           );
+          yield* afterCommit(() => {
+            for (const id of inputless) warnedInputlessSessions.add(id);
+          });
         }
         return claimed;
       }),
