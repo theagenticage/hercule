@@ -51,6 +51,18 @@ describe("buildApprovalNotification", () => {
     });
   });
 
+  it("starts the body with the subagent that asked, or with a subagent when it has no description", () => {
+    const asked = { ...COMMAND, subagentId: "a1" };
+    expect(buildApprovalNotification(SESSION, asked, "Review the diff")?.body).toMatch(
+      /^Asked by Review the diff\n\nThe session "Fix the login" is waiting/,
+    );
+    expect(buildApprovalNotification(SESSION, asked)?.body).toMatch(
+      /^Asked by a subagent\n\nThe session/,
+    );
+    // The main agent's own Request names no asker, whatever is passed.
+    expect(buildApprovalNotification(SESSION, COMMAND, "ignored")?.body).toMatch(/^The session/);
+  });
+
   it("offers only the decisions the request accepts, in the request's order", () => {
     const notification = buildApprovalNotification(SESSION, {
       ...COMMAND,
@@ -173,13 +185,6 @@ describe("buildWithdrawReason", () => {
     expect(buildWithdrawReason({ ...base, _tag: "session.exited", reason: "stopped" })).toBe(
       "The session ended before the request was answered.",
     );
-    expect(
-      buildWithdrawReason({
-        ...base,
-        _tag: "request.opened",
-        request: { ...COMMAND, requestId: "r2" },
-      }),
-    ).toBe("The harness asked something else before this request was answered.");
   });
 });
 

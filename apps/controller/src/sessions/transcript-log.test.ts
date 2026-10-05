@@ -20,8 +20,11 @@ const at = "2026-09-07T10:00:00.000Z";
 /** Returns a new canonical v7 id, the only id format the database accepts. */
 const mintId = () => uuidToString(mintUuid());
 
-/** One stream row to store, without the fields every event shares. */
-type Row =
+/**
+ * One stream row to store, without the fields every event shares, and the
+ * subagent it belongs to, if any.
+ */
+type Row = { readonly subagentId?: string } & (
   | { readonly _tag: "turn.started"; readonly turnId: string }
   | { readonly _tag: "turn.completed"; readonly turnId: string }
   | { readonly _tag: "item.started"; readonly turnId: string; readonly itemId: string }
@@ -30,7 +33,8 @@ type Row =
       readonly turnId: string;
       readonly itemId: string;
       readonly delta: string;
-    };
+    }
+);
 
 /** Builds the full provider event for one stored row. */
 const buildEvent = (sessionId: string, row: Row): ProviderEvent => {
@@ -49,9 +53,15 @@ const buildEvent = (sessionId: string, row: Row): ProviderEvent => {
 
 /**
  * Writes a session with `rows` as its stream, in order, then reads the
- * assistant text of `turnId`, or of one item of it when `itemId` is given.
+ * assistant text of `turnId`, or of one item of it when `itemId` is given,
+ * from the transcript of the session's own agent or of `subagentId`.
  */
-const readTexts = (rows: ReadonlyArray<Row>, turnId: string, itemId?: string) =>
+const readTexts = (
+  rows: ReadonlyArray<Row>,
+  turnId: string,
+  itemId?: string,
+  subagentId?: string,
+) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -83,7 +93,7 @@ const readTexts = (rows: ReadonlyArray<Row>, turnId: string, itemId?: string) =>
           event: buildEvent(sessionId, row),
         });
       }
-      return yield* readAssistantTexts(sql, sessionId, turnId, itemId);
+      return yield* readAssistantTexts(sql, sessionId, subagentId, turnId, itemId);
     }).pipe(Effect.provide(TestDatabase), Effect.orDie),
   );
 
@@ -162,5 +172,35 @@ describe("reading one item's assistant text", () => {
     );
 
     expect(texts).toEqual([]);
+  });
+});
+
+describe("reading one agent's assistant text", () => {
+  /** A main turn with a subagent's whole turn written in the middle of it. */
+  const INTERLEAVED: ReadonlyArray<Row> = [
+    { _tag: "turn.started", turnId: "t1" },
+    { _tag: "item.started", turnId: "t1", itemId: "a" },
+    { _tag: "content.delta", turnId: "t1", itemId: "a", delta: "main " },
+    { _tag: "turn.started", turnId: "s1", subagentId: "sub" },
+    { _tag: "item.started", turnId: "s1", itemId: "x", subagentId: "sub" },
+    {
+      _tag: "content.delta",
+      turnId: "s1",
+      itemId: "x",
+      delta: "from the subagent",
+      subagentId: "sub",
+    },
+    { _tag: "turn.completed", turnId: "s1", subagentId: "sub" },
+    { _tag: "content.delta", turnId: "t1", itemId: "a", delta: "reply" },
+  ];
+
+  it("reads the session's own agent past a subagent's turn, without its text", async () => {
+    expect(await readTexts(INTERLEAVED, "t1")).toEqual([{ itemId: "a", text: "main reply" }]);
+  });
+
+  it("reads a subagent's turn from its own rows only", async () => {
+    expect(await readTexts(INTERLEAVED, "s1", undefined, "sub")).toEqual([
+      { itemId: "x", text: "from the subagent" },
+    ]);
   });
 });

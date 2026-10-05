@@ -18,10 +18,11 @@ import {
   APPROVAL_ANSWER_LABELS,
   describeApprovalAnswer,
   type NotificationSubject,
+  type SessionRequest,
 } from "@hercule/contract";
-import type { ApprovalDecision, ApprovalRequest, OpenRequest } from "@hercule/protocol";
+import type { ApprovalDecision, ApprovalRequest } from "@hercule/protocol";
 import type { CoreAction, CoreNotification } from "../notifications";
-import type { RequestEvent } from "./stream";
+import type { RequestClosingEvent } from "./stream";
 
 /**
  * The id of the approval notification's answer that sends each decision. Ids
@@ -157,6 +158,11 @@ const buildRequestTitleAndDetail = (
  * Builds the approval notification for a request a session waits on, or
  * returns `undefined` for a `question` request, which raises none.
  *
+ * A Request a subagent asked starts its body with "Asked by" and the
+ * subagent's description, `askerDescription`, or "Asked by a subagent" when
+ * it has none. A session can wait on several Requests at once, and this line
+ * tells their notifications apart.
+ *
  * The answers are the decisions the request accepts, in the request's order.
  * Each answer has the same label and the same sentence under it as the
  * permission card in the session view, so an answer reads the same wherever
@@ -166,14 +172,18 @@ const buildRequestTitleAndDetail = (
  */
 export const buildApprovalNotification = (
   session: { readonly id: string; readonly title: string },
-  request: OpenRequest,
+  request: SessionRequest,
+  askerDescription?: string,
 ): CoreNotification | undefined => {
   if (request.kind === "question") return undefined;
   const described = buildRequestTitleAndDetail(request);
+  const asker =
+    request.subagentId === undefined ? "" : `Asked by ${askerDescription ?? "a subagent"}\n\n`;
   const waiting =
-    session.title === ""
+    asker +
+    (session.title === ""
       ? "A session is waiting for your answer."
-      : `The session "${session.title}" is waiting for your answer.`;
+      : `The session "${session.title}" is waiting for your answer.`);
   const actions = request.decisions.map((decision): CoreAction => ({
     id: APPROVAL_ANSWER_IDS[decision],
     label: APPROVAL_ANSWER_LABELS[decision],
@@ -197,17 +207,16 @@ export const buildApprovalNotification = (
 
 /**
  * Returns why an approval notification is withdrawn when a reported event
- * closes or replaces the request it asks about.
+ * closes the request it asks about. A new request never closes an older one:
+ * a session can wait on several at once.
  *
  * An answer given through the controller has already resolved the
  * notification by the time the harness reports the request as resolved. So
  * the `request.resolved` reason is used only when the harness settled the
  * request some other way.
  */
-export const buildWithdrawReason = (event: RequestEvent): string => {
+export const buildWithdrawReason = (event: RequestClosingEvent): string => {
   switch (event._tag) {
-    case "request.opened":
-      return "The harness asked something else before this request was answered.";
     case "request.resolved":
       return "The harness settled the request without this answer.";
     case "turn.completed":

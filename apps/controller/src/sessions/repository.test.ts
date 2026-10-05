@@ -85,7 +85,13 @@ const walkTranscript = (sessionId: string, limit: number) =>
     let cursor: string | undefined;
     let pages = 0;
     for (;;) {
-      const page = yield* sessions.transcript({ sessionId, limit, cursor, direction: "asc" });
+      const page = yield* sessions.transcript({
+        sessionId,
+        subagentId: undefined,
+        limit,
+        cursor,
+        direction: "asc",
+      });
       items.push(...page.items);
       pages += 1;
       if (page.nextCursor === undefined) return { items, pages };
@@ -134,6 +140,7 @@ describe("paging through a transcript", () => {
         yield* fillStream(sessionId, 3);
         return yield* sessions.transcript({
           sessionId,
+          subagentId: undefined,
           limit: 3,
           cursor: undefined,
           direction: "asc",
@@ -155,6 +162,7 @@ describe("paging through a transcript", () => {
         yield* fillStream(theirs, 4);
         const page = yield* sessions.transcript({
           sessionId: mine,
+          subagentId: undefined,
           limit: 50,
           cursor: undefined,
           direction: "asc",
@@ -174,12 +182,14 @@ describe("paging through a transcript", () => {
         yield* fillStream(sessionId, 4);
         const forwards = yield* sessions.transcript({
           sessionId,
+          subagentId: undefined,
           limit: 2,
           cursor: undefined,
           direction: "asc",
         });
         return yield* sessions.transcript({
           sessionId,
+          subagentId: undefined,
           limit: 2,
           cursor: forwards.nextCursor,
           direction: "desc",
@@ -200,6 +210,7 @@ describe("paging through a transcript", () => {
         yield* fillStream(theirs, 6);
         const theirPage = yield* sessions.transcript({
           sessionId: theirs,
+          subagentId: undefined,
           limit: 4,
           cursor: undefined,
           direction: "asc",
@@ -208,6 +219,7 @@ describe("paging through a transcript", () => {
         // nothing here. Used as is, it would skip this session's first four rows.
         return yield* sessions.transcript({
           sessionId: mine,
+          subagentId: undefined,
           limit: 4,
           cursor: theirPage.nextCursor,
           direction: "asc",
@@ -236,6 +248,7 @@ describe("paging through a transcript", () => {
         yield* sessions.append(sessionId, { seq: 1, at, event });
         const page = yield* sessions.transcript({
           sessionId,
+          subagentId: undefined,
           limit: 50,
           cursor: undefined,
           direction: "asc",
