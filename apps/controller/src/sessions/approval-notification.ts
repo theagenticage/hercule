@@ -105,28 +105,26 @@ const formatCodeBlock = (text: string): string => {
 };
 
 /**
- * Escapes every ASCII punctuation character in text with a backslash, so the
- * text renders as itself in markdown. Used for text an agent wrote, such as a
- * subagent's description: without it, the text could add a link, an image,
- * emphasis or code to the notification. Markdown drops each backslash when
- * it renders the text, so the reader sees the text unchanged.
+ * Formats one line of text as markdown inline code, so it renders as itself.
+ * Used for paths and for text an agent wrote, such as a subagent's
+ * description: inline code cannot add a link, an image or emphasis, and it
+ * still reads well where the body is shown as plain text, as in the CLI.
+ *
+ * The spaces inside the fence keep text that starts or ends with a backtick
+ * apart from the fence; markdown drops them when it renders the text.
  */
-const escapeMarkdown = (text: string): string =>
-  text.replace(/[!-/:-@[-`{-~]/g, (character) => `\\${character}`);
+const formatInlineCode = (text: string): string => {
+  const fence = buildFence(text, 1);
+  return `${fence} ${text} ${fence}`;
+};
 
 /**
  * Formats paths as a markdown list, one path per line, each as inline code.
  * Lists at most `MAX_LISTED_PATHS` paths, and ends with a line that counts
  * the rest.
- *
- * The spaces inside the fence keep a path that starts or ends with a backtick
- * apart from the fence; markdown drops them when it renders the path.
  */
 const formatPathList = (paths: ReadonlyArray<string>): string => {
-  const lines = paths.slice(0, MAX_LISTED_PATHS).map((path) => {
-    const fence = buildFence(path, 1);
-    return `- ${fence} ${path} ${fence}`;
-  });
+  const lines = paths.slice(0, MAX_LISTED_PATHS).map((path) => `- ${formatInlineCode(path)}`);
   const unlisted = paths.length - lines.length;
   return unlisted === 0
     ? lines.join("\n")
@@ -172,7 +170,7 @@ const buildRequestTitleAndDetail = (
  * subagent's description, `askerDescription`, or "Asked by a subagent" when
  * it has none. A session can wait on several Requests at once, and this line
  * tells their notifications apart. The description is the parent agent's
- * text, so it is escaped and cannot format the body.
+ * text, so it is shown as inline code and cannot format the body.
  *
  * The answers are the decisions the request accepts, in the request's order.
  * Each answer has the same label and the same sentence under it as the
@@ -191,7 +189,7 @@ export const buildApprovalNotification = (
   const asker =
     request.subagentId === undefined
       ? ""
-      : `Asked by ${askerDescription === undefined ? "a subagent" : escapeMarkdown(askerDescription)}\n\n`;
+      : `Asked by ${askerDescription === undefined ? "a subagent" : formatInlineCode(askerDescription)}\n\n`;
   const waiting =
     asker +
     (session.title === ""

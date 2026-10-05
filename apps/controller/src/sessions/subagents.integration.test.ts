@@ -389,7 +389,7 @@ describe("the open Requests of several agents", () => {
             (subject) => subject.kind === "request" && subject.requestId === requestId,
           ),
         )?.body;
-      expect(bodyFor("sub-req")).toMatch(/^Asked by Review the diff\n\n/);
+      expect(bodyFor("sub-req")).toMatch(/^Asked by ` Review the diff `\n\n/);
       expect(bodyFor("main-req") ?? "").not.toContain("Asked by");
     });
   });
