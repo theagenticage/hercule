@@ -33,6 +33,7 @@ import {
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
+  type SubagentId,
 } from "@hercule/protocol";
 import { describeMissingAdapter, type ProviderAdapter } from "../providers";
 import { now, describeCause } from "../report";
@@ -56,14 +57,22 @@ interface Live {
    * `lastEventAt`. Undefined while the session is not watched.
    */
   inactivity: Fiber.Fiber<void> | undefined;
-  /** Whether a turn is open. Between turns the harness is idle, so it cannot be stuck. */
-  turnOpen: boolean;
   /**
-   * Whether the session is parked on an open request. A session waiting for
-   * its user is not stuck, however long it waits, so it is not watched. This is
-   * a flag rather than a count because a session has at most one open request.
+   * The ids of the turns that are open, of the session's own agent and of its
+   * subagents alike. Between turns the harness is idle, so it cannot be stuck.
+   * This is a set of turn ids, not a flag, because a subagent can run after
+   * the session's own turn has ended, and one agent's `turn.completed` must
+   * not close another agent's turn (spec 03 section 6.2).
    */
-  parked: boolean;
+  readonly openTurns: Set<string>;
+  /**
+   * The Requests the session is parked on, by request id, each with the
+   * subagent that asked it, or `undefined` when the session's own agent did.
+   * A session waiting for its user is not stuck, however long it waits, so it
+   * is not watched while any Request is open. Several agents can each be
+   * parked at once (spec 06 section 13.3).
+   */
+  readonly parks: Map<string, SubagentId | undefined>;
   /**
    * The fiber that stops the session at its spec's absolute deadline. It is
    * interrupted when this entry is torn down. Undefined before the fiber is
@@ -78,9 +87,10 @@ interface Live {
   readonly idleMs: number | undefined;
   /**
    * The fiber that stops the session once it has sat `idleMs` with no open
-   * turn. It is forked when a turn completes and when the harness refuses
-   * input while no turn is open, and interrupted by the next input, turn or
-   * open request. Undefined whenever no such wait is running.
+   * turn of any agent. It is forked when the last open turn completes and
+   * when the harness refuses input while no turn is open, and interrupted by
+   * the next input, turn or open request of any agent. Undefined whenever no
+   * such wait is running.
    */
   idle: Fiber.Fiber<void> | undefined;
   /**
@@ -126,6 +136,12 @@ interface ArrivedStart {
   /** The reason of the first stop that arrived for this session since the start arrived. */
   pendingStop: ExitReason | undefined;
 }
+
+/**
+ * Checks that no agent of the session has a turn open or waits on its user,
+ * which is when the idle wait may run.
+ */
+const isIdle = (held: Live): boolean => held.openTurns.size === 0 && held.parks.size === 0;
 
 /** What a connection gives the supervisor while the connection is up. */
 export interface Connection {
@@ -372,9 +388,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
 
     /**
      * Starts the wait that stops an idle session with `idle_unload` after
-     * `idleMs`. It is called whenever the session is left with no open turn:
+     * `idleMs`. It is called whenever the session is left with no open turn
+     * of any agent:
      *
-     * - when a turn completes;
+     * - when the last open turn completes;
      * - when the harness refuses input to a session with no open turn,
      *   including the input its start carried.
      *
@@ -453,37 +470,41 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           if (held !== undefined) {
             switch (event._tag) {
               case "turn.started":
-                held.turnOpen = true;
-                // A turn the harness opened on its own also ends the idle
-                // wait, not only an input frame.
+                held.openTurns.add(event.turnId);
+                // A turn the harness opened on its own, or a subagent's turn,
+                // also ends the idle wait, not only an input frame.
                 yield* cancelIdleUnload(held);
                 break;
               case "turn.completed":
-                held.turnOpen = false;
-                // A request cannot outlive its turn. The controller also clears
-                // it on this event, and a `parked` flag left set here would
-                // stop every later turn from being watched.
-                held.parked = false;
-                yield* armIdleUnload(held, event.sessionId);
+                held.openTurns.delete(event.turnId);
+                // A Request cannot outlive its agent's turn. The controller
+                // also closes them on this event, and a park left here would
+                // stop every later turn from being watched. Only this agent's
+                // parks close: another agent may still wait on its user.
+                for (const [requestId, asker] of held.parks) {
+                  if (asker === event.subagentId) held.parks.delete(requestId);
+                }
+                if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
                 break;
               case "request.opened":
-                held.parked = true;
+                held.parks.set(event.request.requestId, event.subagentId);
                 // A session waiting on its user is in use, however long the
                 // user takes to answer.
                 yield* cancelIdleUnload(held);
                 break;
               case "request.resolved":
-                held.parked = false;
+                held.parks.delete(event.requestId);
                 break;
               default:
                 break;
             }
-            // A session is watched exactly while a turn is open and it is not
-            // waiting on its user. The watch is brought in line with the two
-            // flags after every event, instead of being started and stopped in
-            // each case above, so a fiber from an earlier state can never be
-            // left behind to stop a session that is not stuck.
-            if (held.turnOpen && !held.parked) {
+            // A session is watched exactly while a turn of any agent is open
+            // and no agent waits on its user. The watch is brought in line
+            // with the open turns and parks after every event, instead of
+            // being started and stopped in each case above, so a fiber from an
+            // earlier state can never be left behind to stop a session that is
+            // not stuck.
+            if (held.openTurns.size > 0 && held.parks.size === 0) {
               held.lastEventAt = yield* Clock.currentTimeMillis;
               if (held.inactivity === undefined) {
                 held.inactivity = yield* Effect.forkDetach(watchInactivity(held, event.sessionId));
@@ -589,9 +610,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       const refuseHeldInput = (message: string): Effect.Effect<void> =>
         Effect.andThen(
           refuseInput(frame, message),
-          Effect.suspend(() =>
-            held.turnOpen || held.parked ? Effect.void : armIdleUnload(held, frame.sessionId),
-          ),
+          Effect.suspend(() => (isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void)),
         );
       return held.adapter.sendInput(frame.sessionId, frame.input).pipe(
         Effect.flatMap((sent) =>
@@ -765,8 +784,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // together with `inactivity`, on the event that starts the watch.
           lastEventAt: 0,
           inactivity: undefined,
-          turnOpen: false,
-          parked: false,
+          openTurns: new Set(),
+          parks: new Map(),
           absolute: undefined,
           idleMs: frame.spec.timeouts.idleMs,
           idle: undefined,
@@ -963,10 +982,17 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           return Effect.andThen(cancelIdleUnload(held), sendInputAndAnswer(held, frame));
         }),
 
-      /** Idempotent: a session this runner does not hold has no turn to end. */
+      /**
+       * Passes the interrupt to the adapter, with the subagent it names, if
+       * any. The adapter stops the subagents below that one itself, because
+       * only the adapter knows them. Idempotent: a session this runner does not
+       * hold has no turn to end.
+       */
       interrupt: (frame: SessionInterrupt): Effect.Effect<void> =>
         Effect.suspend(
-          () => live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId) ?? Effect.void,
+          () =>
+            live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId, frame.subagentId) ??
+            Effect.void,
         ),
 
       /**

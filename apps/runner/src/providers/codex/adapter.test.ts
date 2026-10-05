@@ -472,6 +472,23 @@ describe("what an input does to a Codex session", () => {
   });
 });
 
+describe("an interrupt that names a subagent", () => {
+  it("does nothing, because the adapter reports no subagents yet", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
+
+    // The user asked to stop one subagent, not the session's own turn.
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "child-thread"));
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
+      { threadId: THREAD, turnId: TURN },
+    ]);
+  });
+});
+
 describe("an app-server that stops replying to a control request", () => {
   it("stops waiting for the interrupt after the timeout, rather than holding up every session on the machine", async () => {
     const { adapter, ctx, seen } = createDriving({ "turn/interrupt": SILENT });

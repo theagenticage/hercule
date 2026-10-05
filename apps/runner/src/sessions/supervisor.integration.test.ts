@@ -44,6 +44,8 @@ const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
 const START_REQUEST = "0199e0e7-0000-7000-8000-0000000000fa";
 /** The input every start in these tests carries. */
 const START_INPUT: TurnInput = { text: "begin" };
+/** A subagent of the session, as a harness names it. */
+const SUBAGENT = "agent-1";
 /** The adapter's own id for the open request an answer refers to. The controller does not create one. */
 const PARK = "0199e0e7-0000-7000-8000-0000000000fb";
 
@@ -96,7 +98,8 @@ interface Fake {
   /** How many markers have reached a relay. A count above zero proves a relay is listening. */
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
-  readonly interrupted: Array<string>;
+  /** Every `interrupt` call, with the subagent it named, if any. */
+  readonly interrupted: Array<{ readonly sessionId: string; readonly subagentId?: string }>;
   /** The arguments of every `respondToApprovalRequest` and `respondToQuestion` call. */
   readonly answered: Array<readonly [string, string, RequestResolution]>;
   /** Every `stopSession` call, with the reason its caller gave. */
@@ -118,7 +121,7 @@ const createFake = (): Fake => {
   let heard = 0;
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
-  const interrupted: Array<string> = [];
+  const interrupted: Array<{ readonly sessionId: string; readonly subagentId?: string }> = [];
   const answered: Array<readonly [string, string, RequestResolution]> = [];
   const stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }> = [];
   const held = new Map<string, SessionBinding>();
@@ -173,7 +176,13 @@ const createFake = (): Fake => {
           inputs.push(input);
           return Effect.succeed({ turnId: TURN, delivery: "opened" });
         }),
-      interrupt: (sessionId) => Effect.sync(() => void interrupted.push(sessionId)),
+      interrupt: (sessionId, subagentId) =>
+        Effect.sync(
+          () =>
+            void interrupted.push(
+              subagentId === undefined ? { sessionId } : { sessionId, subagentId },
+            ),
+        ),
       /**
        * No session in this fake is really parked: the tests emit request events
        * directly, so there is no harness to pass an answer to. The arguments are
@@ -910,7 +919,29 @@ describe("what the runner sends back for input, interrupts and answers", () => {
       }),
     );
 
-    expect(fake.interrupted).toEqual([SESSION]);
+    expect(fake.interrupted).toEqual([{ sessionId: SESSION }]);
+  });
+
+  it("passes the subagent an interrupt names to the adapter", async () => {
+    const fake = createFake();
+    const { supervisor } = buildConnection(fake);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.interrupt({
+          _tag: "sessionInterrupt",
+          sessionId: SESSION,
+          subagentId: SUBAGENT,
+        });
+      }),
+    );
+
+    // The adapter, not the runner, stops the subagents below this one: only
+    // the adapter knows them.
+    expect(fake.interrupted).toEqual([{ sessionId: SESSION, subagentId: SUBAGENT }]);
   });
 
   it("passes a decision to the adapter for a session it holds, and ignores one it does not", async () => {
@@ -1002,16 +1033,24 @@ const awaitForwarded = (
 ): Effect.Effect<void> =>
   waitOnWallClock(`sent ${String(count)} events`, () => listSessionEvents(sent).length >= count);
 
-const emitTurnStarted = (fake: Fake, turnId: string): void =>
+/**
+ * Returns the field that attributes an event to `subagentId`, or no field for
+ * the session's own agent.
+ */
+const attributeTo = (subagentId: string | undefined) =>
+  subagentId === undefined ? {} : { subagentId };
+
+const emitTurnStarted = (fake: Fake, turnId: string, subagentId?: string): void =>
   fake.emit({
     _tag: "turn.started",
     eventId: `e-${turnId}-started`,
     sessionId: SESSION,
     at,
     turnId,
+    ...attributeTo(subagentId),
   });
 
-const emitTurnCompleted = (fake: Fake, turnId: string): void =>
+const emitTurnCompleted = (fake: Fake, turnId: string, subagentId?: string): void =>
   fake.emit({
     _tag: "turn.completed",
     eventId: `e-${turnId}-done`,
@@ -1019,6 +1058,7 @@ const emitTurnCompleted = (fake: Fake, turnId: string): void =>
     at,
     turnId,
     state: "completed",
+    ...attributeTo(subagentId),
   });
 
 const emitDelta = (fake: Fake, id: string): void =>
@@ -1156,12 +1196,13 @@ describe("a harness that goes silent mid-turn", () => {
  * its user, not stuck, so the inactivity clock must not run while the request
  * is open.
  */
-const emitRequestOpened = (fake: Fake, requestId: string): void =>
+const emitRequestOpened = (fake: Fake, requestId: string, subagentId?: string): void =>
   fake.emit({
     _tag: "request.opened",
     eventId: `e-${requestId}-opened`,
     sessionId: SESSION,
     at,
+    ...attributeTo(subagentId),
     request: {
       requestId,
       itemId: "i-1",
@@ -1171,7 +1212,7 @@ const emitRequestOpened = (fake: Fake, requestId: string): void =>
     },
   });
 
-const emitRequestResolved = (fake: Fake, requestId: string): void =>
+const emitRequestResolved = (fake: Fake, requestId: string, subagentId?: string): void =>
   fake.emit({
     _tag: "request.resolved",
     eventId: `e-${requestId}-resolved`,
@@ -1179,42 +1220,190 @@ const emitRequestResolved = (fake: Fake, requestId: string): void =>
     at,
     requestId,
     decision: "allow",
+    ...attributeTo(subagentId),
   });
 
-/** The four events that decide whether the inactivity clock runs. */
-type Step = "turn.started" | "request.opened" | "request.resolved" | "turn.completed";
+/**
+ * One of the four events that decide whether the inactivity clock runs: its
+ * tag, the turn or request id it carries, and the subagent it belongs to,
+ * when it is not the session's own agent's.
+ */
+type Step = readonly [
+  tag: "turn.started" | "request.opened" | "request.resolved" | "turn.completed",
+  id: string,
+  subagentId?: string,
+];
 
-const emitStep = (fake: Fake, which: Step, nth: number): void => {
-  if (which === "turn.started") return emitTurnStarted(fake, `t-${String(nth)}`);
-  if (which === "turn.completed") return emitTurnCompleted(fake, `t-${String(nth)}`);
-  if (which === "request.opened") return emitRequestOpened(fake, `r-${String(nth)}`);
-  return emitRequestResolved(fake, `r-${String(nth)}`);
+const emitStep = (fake: Fake, [tag, id, subagentId]: Step): void => {
+  if (tag === "turn.started") return emitTurnStarted(fake, id, subagentId);
+  if (tag === "turn.completed") return emitTurnCompleted(fake, id, subagentId);
+  if (tag === "request.opened") return emitRequestOpened(fake, id, subagentId);
+  return emitRequestResolved(fake, id, subagentId);
 };
+
+/** Describes a step for a test name, such as `request.opened r-1 (agent-1)`. */
+const describeStep = ([tag, id, subagentId]: Step): string =>
+  subagentId === undefined ? `${tag} ${id}` : `${tag} ${id} (${subagentId})`;
 
 describe("a session parked on an open request", () => {
   /**
    * Listed by hand rather than generated: the repo has no property-testing
-   * library, and whether the clock runs depends on only two flags, so the
-   * sequences that flip each flag are few enough to list.
+   * library, and whether the clock runs depends only on the open turns and
+   * the open Requests, so the sequences that change either are few enough to
+   * list.
    */
   const SEQUENCES: ReadonlyArray<readonly [ReadonlyArray<Step>, boolean]> = [
-    [["turn.started"], true],
-    [["turn.started", "request.opened"], false],
-    [["turn.started", "request.opened", "request.resolved"], true],
-    [["turn.started", "request.opened", "turn.completed"], false],
+    [[["turn.started", "t-1"]], true],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+      ],
+      false,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["request.resolved", "r-1"],
+      ],
+      true,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["turn.completed", "t-1"],
+      ],
+      false,
+    ],
     // The clock that the open request stopped is gone, not leaked: the next
     // turn is watched as usual and the session is stopped once.
-    [["turn.started", "request.opened", "turn.completed", "turn.started"], true],
-    [["turn.started", "request.opened", "request.resolved", "turn.completed"], false],
-    [["turn.started", "turn.completed", "turn.started"], true],
-    // A session has at most one open request, so a second open replaces the
-    // first, and one resolution closes it.
-    [["turn.started", "request.opened", "request.opened", "request.resolved"], true],
-    [["turn.started", "request.opened", "request.resolved", "request.opened"], false],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["turn.completed", "t-1"],
+        ["turn.started", "t-2"],
+      ],
+      true,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["request.resolved", "r-1"],
+        ["turn.completed", "t-1"],
+      ],
+      false,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["turn.completed", "t-1"],
+        ["turn.started", "t-2"],
+      ],
+      true,
+    ],
+    // Every Request is reported at once and closes on its own, so one
+    // resolution leaves the other Request open.
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["request.opened", "r-2"],
+        ["request.resolved", "r-1"],
+      ],
+      false,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["request.opened", "r-2"],
+        ["request.resolved", "r-1"],
+        ["request.resolved", "r-2"],
+      ],
+      true,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["request.resolved", "r-1"],
+        ["request.opened", "r-2"],
+      ],
+      false,
+    ],
+    // One agent's turn ending does not close another agent's turn.
+    [
+      [
+        ["turn.started", "t-1"],
+        ["turn.started", "t-2", SUBAGENT],
+        ["turn.completed", "t-1"],
+      ],
+      true,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["turn.started", "t-2", SUBAGENT],
+        ["turn.completed", "t-2", SUBAGENT],
+      ],
+      true,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["turn.started", "t-2", SUBAGENT],
+        ["turn.completed", "t-1"],
+        ["turn.completed", "t-2", SUBAGENT],
+      ],
+      false,
+    ],
+    // A subagent waiting on its user pauses the clock like the session's own
+    // agent does, and its Request closes with its own turn only.
+    [
+      [
+        ["turn.started", "t-1"],
+        ["turn.started", "t-2", SUBAGENT],
+        ["request.opened", "r-1", SUBAGENT],
+      ],
+      false,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["turn.started", "t-2", SUBAGENT],
+        ["request.opened", "r-1", SUBAGENT],
+        ["turn.completed", "t-1"],
+      ],
+      false,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["turn.started", "t-2", SUBAGENT],
+        ["request.opened", "r-1", SUBAGENT],
+        ["turn.completed", "t-2", SUBAGENT],
+      ],
+      true,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["request.opened", "r-1"],
+        ["turn.started", "t-2", SUBAGENT],
+        ["request.opened", "r-2", SUBAGENT],
+        ["turn.completed", "t-2", SUBAGENT],
+      ],
+      false,
+    ],
   ];
 
   for (const [sequence, armed] of SEQUENCES) {
-    it(`is ${armed ? "watched" : "left alone"} after ${sequence.join(" -> ")}`, async () => {
+    const steps = sequence.map(describeStep).join(" -> ");
+    it(`is ${armed ? "watched" : "left alone"} after ${steps}`, async () => {
       const fake = createFake();
       const { supervisor, sent } = buildConnection(fake);
 
@@ -1227,11 +1416,10 @@ describe("a session parked on an open request", () => {
           // the clock and sends the event in one step, so once the frame is
           // seen, the clock is already set.
           let count = 1;
-          for (const which of sequence) {
+          for (const step of sequence) {
             count += 1;
-            const nth = count;
-            yield* Effect.sync(() => emitStep(fake, which, nth));
-            yield* awaitForwarded(sent, nth);
+            yield* Effect.sync(() => emitStep(fake, step));
+            yield* awaitForwarded(sent, count);
           }
 
           yield* TestClock.adjust(INACTIVITY_MS);
@@ -1600,6 +1788,65 @@ describe("a session that sits idle between turns", () => {
 
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is not unloaded while a subagent's turn is open after the session's own turn ended", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2", SUBAGENT));
+        yield* awaitForwarded(sent, 3);
+        // A background subagent goes on working after the session's own turn.
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 4);
+
+        yield* TestClock.adjust(IDLE_MS * 2);
+        expect(fake.stops).toEqual([]);
+
+        // The wait starts once the last open turn of any agent has ended.
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2", SUBAGENT));
+        yield* awaitForwarded(sent, 5);
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is kept by a subagent's turn that starts while it waits", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* awaitForwarded(sent, 1);
+
+        // A subagent wakes by itself, for example when its background shell
+        // finishes, with no input from the user.
+        yield* TestClock.adjust(IDLE_MS / 2);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1", SUBAGENT));
+        yield* awaitForwarded(sent, 2);
+        yield* TestClock.adjust(IDLE_MS);
+        expect(fake.stops).toEqual([]);
+      }),
+    );
+
+    expect(fake.stops).toEqual([]);
   });
 
   it("is never unloaded when its spec has no idleMs", async () => {

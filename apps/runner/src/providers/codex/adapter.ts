@@ -27,6 +27,7 @@ import type {
   SendResult,
   SessionBinding,
   SessionSpec,
+  SubagentId,
   TurnInput,
 } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
@@ -942,8 +943,13 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         return sent;
       }),
 
-    interrupt: (sessionId: string): Effect.Effect<void> =>
+    interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
+        // This adapter reports no subagents yet, so no subagent id can name
+        // work it runs, and stopping the session's own turn instead would stop
+        // work the user did not ask to stop. Stopping a subagent is built
+        // together with reporting them (#437).
+        if (subagentId !== undefined) return Effect.void;
         const held = sessions.get(sessionId);
         // No event is emitted here: the turn completing as `interrupted`
         // reports the interrupt.

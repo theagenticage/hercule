@@ -823,6 +823,19 @@ describe("a Claude Code session", () => {
     expect(run.interrupted()).toBe(1);
   });
 
+  it("does nothing for an interrupt that names a subagent, because it reports no subagents yet", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+
+    // The user asked to stop one subagent, not the session's own turn.
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-1"));
+    expect(run.interrupted()).toBe(0);
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(run.interrupted()).toBe(1);
+  });
+
   it("resumes the given native session under its existing id", async () => {
     const run = createDriving();
     const carried = {

@@ -13,6 +13,7 @@ import type {
   SendResult,
   SessionBinding,
   SessionSpec,
+  SubagentId,
   TurnInput,
 } from "@hercule/protocol";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
@@ -143,11 +144,17 @@ export interface ProviderAdapter {
   readonly sendInput: (sessionId: string, input: TurnInput) => Effect.Effect<SendResult, string>;
 
   /**
-   * Ends the running turn. The only report is the turn completing as
-   * `interrupted` on `events`. Does nothing for a session this adapter does
-   * not hold.
+   * Stops work in a session. The only report is each stopped turn completing
+   * as `interrupted` on `events`, and each Request of a stopped agent
+   * resolving as `cancel`. Does nothing for a session this adapter does not
+   * hold.
+   *
+   * - Without `subagentId`, it stops all work: the turn of the session's own
+   *   agent and every running subagent.
+   * - With `subagentId`, it stops that subagent and every subagent below it
+   *   (spec 06 section 13.4).
    */
-  readonly interrupt: (sessionId: string) => Effect.Effect<void>;
+  readonly interrupt: (sessionId: string, subagentId?: SubagentId) => Effect.Effect<void>;
 
   /**
    * Decides the approval the session is parked on, by the id the adapter gave
