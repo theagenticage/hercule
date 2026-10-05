@@ -216,8 +216,14 @@ const HttpUrl = Schema.String.check(
   ),
 );
 
-/** A menu item the page carries out: Sign Out, New Thread, Office, or Send. */
-export const MenuCommand = Schema.Literals(["signOut", "newThread", "openOffice", "send"]);
+/** A menu item the page carries out: Sign Out, New Thread, Office, Settings, or Send. */
+export const MenuCommand = Schema.Literals([
+  "signOut",
+  "newThread",
+  "openOffice",
+  "openSettings",
+  "send",
+]);
 export type MenuCommand = typeof MenuCommand.Type;
 
 /** A thread the Go menu lists: the session it opens, and the title its item shows. */
@@ -441,7 +447,7 @@ export interface MainToRendererIpcChannel {
 export const MAIN_TO_RENDERER_IPC_CHANNELS = {
   /**
    * Asks the renderer to carry out a menu item the user chose: Sign Out, New
-   * Thread, or Send.
+   * Thread, Office, Settings, or Send.
    */
   "menu.command": {
     payload: MenuCommand,

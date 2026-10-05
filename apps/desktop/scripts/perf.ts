@@ -15,9 +15,13 @@
  * 1. Through Playwright, to sign in on the sign-in screen, as a user does
  *    once. The app saves the token with the mock keychain, so the run never
  *    touches the real Keychain.
- * 2. Four measured launches: with 40 threads, with 40 threads and one row
- *    that shows minutes, and, after spawning 460 more, with 500 threads, the
- *    last time with a thread of 500 transcript rows open (see step 3).
+ * 2. Five measured launches: with 40 threads, with 40 threads and one row
+ *    that shows minutes, with 40 threads and Settings › Profile open (see
+ *    `openSettingsSection`), and, after spawning 460 more, with 500 threads,
+ *    the last time with a thread of 500 transcript rows open (see step 3).
+ *    Spec 17 §What Settings costs asks for Settings' memory and idle to be
+ *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
+ *    launch.
  *    Before each of them the fixture restarts the controller with every idle
  *    thread's last activity set hours back. Then the script starts the app
  *    through Playwright, signed in, to warm it up (see `warmUpApp`), and
@@ -35,10 +39,10 @@
  *      `measureNudges`);
  *    - the launch times: how long from spawn until the window was shown,
  *      and until each step that leads up to it.
- * 3. For the fourth launch, the fixture first plays turns into one idle
+ * 3. For the last measured launch, the fixture first plays turns into one idle
  *    thread until its transcript holds 500 rows. The script opens that
  *    thread once, through Playwright, so the app opens it again at every
- *    later launch (see `openThreadOnce`). The fourth launch's first screen is
+ *    later launch (see `openThreadOnce`). That launch's first screen is
  *    then the thread with its whole transcript, so its `first-screen` mark
  *    is when the transcript painted, and its memory is read with the thread
  *    open.
@@ -180,8 +184,17 @@ const BUDGET = {
   streamingTaskMs: 50,
 } as const;
 
-/** How many rows the transcript of the thread the fourth launch opens holds at least. */
+/** How many rows the transcript of the thread the last measured launch opens holds at least. */
 const LONG_THREAD_ROWS = 500;
+
+/**
+ * The sections of Settings that get a measured launch each, with the section
+ * open, by the name that the section's row in the Settings list and its
+ * header title show.
+ */
+const SETTINGS_SECTIONS = ["Profile"] as const;
+
+type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 /** How long the measured turn streams (see `measureStreaming`). */
 const STREAM_MS = 10_000;
@@ -482,9 +495,14 @@ interface PlainLaunch {
  *   page.
  *
  * With `opensThread`, the app is expected to open the last open thread, so
- * the first screen is that thread's transcript.
+ * the first screen is that thread's transcript. With a `settingsSection`,
+ * the script opens that section of Settings once the first screen is up (see
+ * `openSettingsSection`). The launch times are then still the first
+ * screen's, and the memory, the age labels, the idle samples and the nudges
+ * are read with the section open.
  *
- * Fails when the app does not open its page within 10 s, when the window is
+ * Fails when the app does not open its page within 10 s, when the section of
+ * Settings has not rendered by the time memory is read, when the window is
  * not visible while it is sampled, when main showed the window without its
  * first screen, when the first screen is not the shell, or not the thread's
  * transcript when `opensThread` is set, or when the app does not quit
@@ -494,6 +512,7 @@ async function measurePlainLaunch(
   userDataDir: string,
   fixture: ThreadFixture,
   opensThread: boolean,
+  settingsSection: SettingsSection | null,
 ): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
   const app = await launchPlainApp(userDataDir);
@@ -505,6 +524,14 @@ async function measurePlainLaunch(
     const sleepUntil = (msAfterOpen: number) =>
       sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
 
+    if (settingsSection !== null) {
+      await openSettingsSection(
+        inspectorUrl,
+        pageSocketUrl,
+        settingsSection,
+        pageOpenedAt + MEMORY_READ_AT_MS,
+      );
+    }
     await sleepUntil(MEMORY_READ_AT_MS);
     const memory = await readProcessMemory(app.process.pid!);
     const rendererPid = memory.find((sample) => sample.label === "Tab")?.pid;
@@ -600,6 +627,67 @@ async function measurePlainLaunch(
   }
   assertExitedCleanly(app.process);
   return measured;
+}
+
+/**
+ * Opens the section of Settings named `section` in the app's page, which
+ * `pageSocketUrl` connects to, and returns once the section has rendered:
+ * the main pane shows a heading that reads `section`. Fails when that has
+ * not happened by `deadline`, in milliseconds since the epoch.
+ *
+ * Once the page shows the shell, main sends the page the `openSettings` menu
+ * command, through main's inspector at `inspectorUrl`. Unlike the menu, main
+ * sends the command without showing the window: the window is already shown,
+ * and showing it again would take the keyboard focus. That command opens the
+ * section opened last, so the script then clicks the section's row in the
+ * page.
+ *
+ * One connection to the page serves every check, and it is closed before
+ * the function returns, so nothing stays attached while memory is read.
+ */
+async function openSettingsSection(
+  inspectorUrl: string,
+  pageSocketUrl: string,
+  section: SettingsSection,
+  deadline: number,
+): Promise<void> {
+  const page = await connectInspector(pageSocketUrl);
+  try {
+    const waitInPage = (expression: string, timeoutMessage: string) =>
+      pollUntil(
+        async () =>
+          (await page.evaluate("Runtime.evaluate", { expression, returnByValue: true })) === true
+            ? true
+            : undefined,
+        { timeoutMs: Math.max(0, deadline - Date.now()), intervalMs: 100, timeoutMessage },
+      );
+    const sectionName = JSON.stringify(section);
+    // The shell listens for menu commands from the moment it is on screen.
+    await waitInPage(
+      `performance.getEntriesByName("first-screen").length > 0 && document.querySelector("main") !== null`,
+      "the app did not show the shell before memory was read",
+    );
+    await evaluateInMain(
+      inspectorUrl,
+      `require("electron").BrowserWindow.getAllWindows()[0].webContents.send("menu.command", "openSettings")`,
+    );
+    await waitInPage(
+      `(() => {
+        const row = [...document.querySelectorAll("main a")].find(
+          (link) => link.textContent.trim() === ${sectionName},
+        );
+        row?.click();
+        return row !== undefined;
+      })()`,
+      `Settings did not open with a row for ${section} before memory was read`,
+    );
+    await waitInPage(
+      `[...document.querySelectorAll("main h1")].some((heading) => heading.textContent.trim() === ${sectionName})`,
+      `Settings › ${section} did not render before memory was read`,
+    );
+  } finally {
+    page.close();
+  }
 }
 
 /**
@@ -1269,7 +1357,13 @@ const { launches, streaming, longThread } = await runWithThreadFixture(async (fi
       name: string,
       threadCount: number,
       twoMinuteRow: boolean,
-      openThread: LongThread | null,
+      {
+        openThread = null,
+        settingsSection = null,
+      }: {
+        readonly openThread?: LongThread | null;
+        readonly settingsSection?: SettingsSection | null;
+      } = {},
     ) => {
       await fixture.prepareLaunch({ twoMinuteRow });
       if (openThread !== null) await openThreadOnce(userDataDir, openThread.title);
@@ -1280,19 +1374,24 @@ const { launches, streaming, longThread } = await runWithThreadFixture(async (fi
         twoMinuteRow,
         openThread,
         loadAtSpawn: loadavg()[0]!,
-        ...(await measurePlainLaunch(userDataDir, fixture, openThread !== null)),
+        ...(await measurePlainLaunch(userDataDir, fixture, openThread !== null, settingsSection)),
       });
     };
-    await measure("40 threads, run 1", 40, false, null);
-    await measure("40 threads, run 2", 40, true, null);
+    await measure("40 threads, run 1", 40, false);
+    await measure("40 threads, run 2", 40, true);
+    for (const section of SETTINGS_SECTIONS) {
+      await measure(`40 threads, Settings › ${section} open`, 40, false, {
+        settingsSection: section,
+      });
+    }
     await fixture.growTo(500);
-    await measure("500 threads, run 1", 500, false, null);
+    await measure("500 threads, run 1", 500, false);
     const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
     await measure(
       `500 threads, a thread of ${String(thread.rowCount)} transcript rows open`,
       500,
       false,
-      thread,
+      { openThread: thread },
     );
     return {
       launches: measured,

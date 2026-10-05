@@ -110,6 +110,12 @@
   height: 22px;
   border-radius: var(--r-xs);
 }
+/* Not in the book. An icon button whose screen is open, such as the Office
+   or Settings, drawn as a selected row. */
+.icon-btn.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
 
 /* ---------- Answers ---------- */
 /* The ledger: each answer on its own line with what the click does. Buttons
@@ -370,6 +376,27 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 .field > input::placeholder {
   color: var(--faint);
+}
+/* A select drawn as the book's select field: the value, then a chevron at
+   the right edge. The select itself is invisible and covers the whole field,
+   chevron included, so a click anywhere on the field opens it. */
+.field--select::after {
+  content: "";
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--faint);
+  border-bottom: 1.5px solid var(--faint);
+  transform: translateY(-2px) rotate(45deg);
+  pointer-events: none;
+}
+/* The negative margins reach the field's edges: its 11px padding on the
+   left, and on the right its padding, the 8px gap and the 7px chevron. */
+.field--select > select {
+  margin: 0 -26px 0 -11px;
+  padding: 0 26px 0 11px;
+  appearance: none;
+  cursor: default;
 }
 .field:has(> input, > select):focus-within {
   outline: 2px solid var(--focus);

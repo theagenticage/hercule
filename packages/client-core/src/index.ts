@@ -54,6 +54,7 @@ export {
   describeGitHubSignInEnding,
   describeGitHubSignInFailure,
   waitForDeviceFlow,
+  connectionNeedsAttention,
   describeFeedName,
   describeFeedInterval,
   buildFeedIntervalsDraft,
@@ -91,6 +92,7 @@ export {
   type RunnerDraft,
 } from "./runner-edit";
 export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
+export { formatRunnerLabel } from "./runner-label";
 export {
   describeFailureReason,
   describeRunOrigin,
@@ -381,6 +383,7 @@ export {
   FALLBACK_TIMEZONE,
   isSupportedTimezone,
   listSupportedTimezones,
+  listTimezoneChoices,
 } from "./timezone";
 export { createTokenStore, type TokenStore } from "./token-store";
 export {

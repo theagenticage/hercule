@@ -12,13 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import {
-  GITHUB_CONNECTION_TYPE,
-  type Connection,
-  type ProviderInstance,
-  type Runner,
-  type Task,
-} from "@hercule/contract";
+import type { ProviderInstance, Runner, Task } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
 import {
@@ -27,6 +21,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  FIXTURE_GITHUB_CONNECTION,
   FIXTURE_INSTANCE,
   holdAnswer,
   renderApp,
@@ -58,21 +53,6 @@ const CART_TASK: Task = {
   createdAt: "2026-09-10T08:00:00.000Z",
   updatedAt: "2026-09-10T08:00:00.000Z",
   statusChangedAt: "2026-09-10T08:00:00.000Z",
-};
-
-/** A GitHub Connection, for the starters' line about what fills Intake. */
-const GITHUB_CONNECTION: Connection = {
-  id: "01a06d02-7800-7000-8000-000000000001",
-  type: GITHUB_CONNECTION_TYPE,
-  label: "rogier",
-  displayName: "rogier",
-  status: "connected",
-  labels: [],
-  config: {},
-  feedIntervals: {},
-  credentials: [],
-  createdAt: "2026-09-05T09:00:00.000Z",
-  updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
 /**
@@ -440,7 +420,7 @@ describe("the new-thread screen", () => {
   it("offers knowledge-work starters in a project without a repository, and says Triage reads GitHub once it is connected", async () => {
     await openDraft(`/?project=${WEBSHOP.id}`, {
       "GET /api/v1/resources": { body: { items: [] } },
-      "GET /api/v1/connections": { body: { items: [GITHUB_CONNECTION] } },
+      "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
     });
 
     const starters = await screen.findByRole("region", { name: "Or start from one of these" });

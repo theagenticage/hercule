@@ -9,12 +9,13 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { REMOTE_REFUSAL } from "@hercule/client-core";
-import { GITHUB_CONNECTION_TYPE, type Connection, type Project } from "@hercule/contract";
+import type { Connection, Project } from "@hercule/contract";
 import type { FolderPickOutcome } from "../../../ipc/contract";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  FIXTURE_GITHUB_CONNECTION,
   FIXTURE_THREAD_IDS,
   renderApp,
   SIDEBAR_FIXTURE,
@@ -25,20 +26,6 @@ import {
 
 const [WEBSHOP] = SIDEBAR_FIXTURE.projects;
 const [WEBSHOP_REPO] = SIDEBAR_FIXTURE.resources;
-
-const GITHUB: Connection = {
-  id: "01a06d02-7700-7000-8000-000000000001",
-  type: GITHUB_CONNECTION_TYPE,
-  label: "rogier",
-  displayName: "rogier",
-  status: "connected",
-  labels: [],
-  config: {},
-  feedIntervals: {},
-  credentials: [],
-  createdAt: "2026-09-05T09:00:00.000Z",
-  updatedAt: "2026-09-05T09:00:00.000Z",
-};
 
 /** The project the controller creates. */
 const SHOP: Project = { ...WEBSHOP!, id: "01a06d02-7000-7000-8000-0000000000aa", name: "shop" };
@@ -68,7 +55,7 @@ const readWrites = (calls: readonly Call[]): readonly Call[] =>
  */
 const pickFolder = async ({
   folder,
-  connections = [GITHUB],
+  connections = [FIXTURE_GITHUB_CONNECTION],
   handlers = {},
 }: {
   readonly folder: FolderPickOutcome;
@@ -129,7 +116,7 @@ describe("the New project dialog", () => {
       {
         kind: "repo",
         remote: REMOTE,
-        connectionId: GITHUB.id,
+        connectionId: FIXTURE_GITHUB_CONNECTION.id,
         setupCommand: "pnpm install",
         projectIds: [SHOP.id],
       },
@@ -192,7 +179,12 @@ describe("the New project dialog", () => {
 
     await expectDraftInShop(router);
     expect(readCalls(calls, "POST", "/api/v1/resources").map((call) => call.body)).toEqual([
-      { kind: "repo", remote: REMOTE, connectionId: GITHUB.id, projectIds: [SHOP.id] },
+      {
+        kind: "repo",
+        remote: REMOTE,
+        connectionId: FIXTURE_GITHUB_CONNECTION.id,
+        projectIds: [SHOP.id],
+      },
     ]);
   });
 

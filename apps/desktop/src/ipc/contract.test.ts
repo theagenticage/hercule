@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { RENDERER_TO_MAIN_IPC_CHANNELS, type RendererToMainIpcChannelName } from "./contract";
+import {
+  MenuCommand,
+  RENDERER_TO_MAIN_IPC_CHANNELS,
+  type RendererToMainIpcChannelName,
+} from "./contract";
 
 /** Builds the Go menu's list of `length` threads. */
 const buildGoMenuThreads = (length: number) =>
@@ -51,5 +55,20 @@ describe("the requests of the renderer-to-main channels", () => {
     const decode = Schema.decodeUnknownSync(RENDERER_TO_MAIN_IPC_CHANNELS[name].request);
     expect(decode(valid)).toEqual(valid);
     expect(() => decode(invalid)).toThrow();
+  });
+});
+
+describe("the menu commands", () => {
+  const decode = Schema.decodeUnknownSync(MenuCommand);
+
+  it.each(["signOut", "newThread", "openOffice", "openSettings", "send"])(
+    "decodes %s",
+    (command) => {
+      expect(decode(command)).toBe(command);
+    },
+  );
+
+  it("refuses a command no menu item sends", () => {
+    expect(() => decode("openPreferences")).toThrow();
   });
 });

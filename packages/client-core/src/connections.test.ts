@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Connection, PluginDetail } from "@hercule/contract";
+import { ConnectionStatus, type Connection, type PluginDetail } from "@hercule/contract";
 import { buildErrorBody, createApiStub, type Answer, type Handler } from "./api-stub";
 import { createClient } from "./client";
 import {
@@ -9,6 +9,7 @@ import {
   showsPluginName,
   buildTopicsUpdate,
   buildRedirectUri,
+  connectionNeedsAttention,
   listSetupFlows,
   decideDeviceFlowStep,
   describeDeviceFlowWait,
@@ -27,6 +28,15 @@ import {
   type DeviceFlowStep,
 } from "./connections";
 import { ApiError, readErrorMessage } from "./errors";
+
+describe("connectionNeedsAttention", () => {
+  it("is true only for a Connection in error or waiting to be signed in again", () => {
+    const needsAttention: ReadonlyArray<ConnectionStatus> = ["error", "needs-reauth"];
+    for (const status of ConnectionStatus.literals) {
+      expect(connectionNeedsAttention({ status }), status).toBe(needsAttention.includes(status));
+    }
+  });
+});
 
 describe("showsAccountBesideLabel", () => {
   const connection = {

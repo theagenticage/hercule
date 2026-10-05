@@ -194,18 +194,22 @@ export async function readAlertText(page: Page): Promise<string | null> {
 }
 
 /**
- * Signs in on the sign-in screen as `USERNAME`, and returns the token the
+ * Signs in on the sign-in screen as `username`, and returns the token the
  * controller at `controllerUrl` issued, read from the `auth.login` response
  * the page received. Returns once the response has arrived; the caller waits
  * for the screen it expects next.
  */
-export async function signInAndReadToken(page: Page, controllerUrl: string): Promise<string> {
+export async function signInAndReadToken(
+  page: Page,
+  controllerUrl: string,
+  username: string = USERNAME,
+): Promise<string> {
   const response = page.waitForResponse(
     (candidate) =>
       candidate.url() === `${controllerUrl}/api/v1/auth/login` &&
       candidate.request().method() === "POST",
   );
-  await signIn(page, { username: USERNAME, password: PASSWORD });
+  await signIn(page, { username, password: PASSWORD });
   const { token } = (await (await response).json()) as { token: string };
   return token;
 }
@@ -213,8 +217,9 @@ export async function signInAndReadToken(page: Page, controllerUrl: string): Pro
 /**
  * Starts a controller for the current test from the compiled binary,
  * `./hercule`, in a scratch Hercule Home, never the user's own. With
- * `setUp: true`, it also completes first-run setup as `USERNAME`, so the app
- * can sign in; otherwise setup is still pending.
+ * `setUp: true`, it also completes first-run setup as `username`, or as
+ * `USERNAME` when it is not given, so the app can sign in; otherwise setup
+ * is still pending.
  *
  * The controller is stopped, and its home deleted, when the test finishes.
  * Fails when the binary has not been built, when the controller does not
@@ -222,11 +227,12 @@ export async function signInAndReadToken(page: Page, controllerUrl: string): Pro
  */
 export async function startControllerForTest(options: {
   readonly setUp: boolean;
+  readonly username?: string | undefined;
 }): Promise<Controller> {
   const { home, remove } = createTemporaryHome();
   onTestFinished(remove);
   const controller = options.setUp
-    ? await startSetUpController({ home })
+    ? await startSetUpController({ home, username: options.username })
     : await startController({ home, binary: findCompiledBinary() });
   onTestFinished(async () => {
     await controller.stop();
@@ -281,12 +287,12 @@ export async function arrangeFleet(): Promise<ArrangedFleet> {
 }
 
 /**
- * Starts the app with the controller at `url` saved, signs in, and returns
- * the app once the sidebar's thread list is on screen.
+ * Starts the app with the controller at `url` saved, signs in as `username`,
+ * and returns the app once the sidebar's thread list is on screen.
  */
-export async function openSignedIn(url: string): Promise<LaunchedApp> {
+export async function openSignedIn(url: string, username: string = USERNAME): Promise<LaunchedApp> {
   const launched = await launchWithSavedController(url);
-  await signInAndReadToken(launched.page, url);
+  await signInAndReadToken(launched.page, url, username);
   await launched.page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
   return launched;
 }

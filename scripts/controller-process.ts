@@ -288,13 +288,15 @@ export const PASSWORD = "correct horse battery staple";
 
 /**
  * Takes a fresh controller through first run, the way an operator does: reads
- * the setup URL it wrote into its home, and passes that token to the CLI. The
- * caller checks the exit code, because some suites expect this to fail.
+ * the setup URL it wrote into its home, and passes that token to the CLI.
+ * The user is `username`, or `USERNAME` when it is not given. The caller
+ * checks the exit code, because some suites expect this to fail.
  */
 export async function completeSetup(options: {
   readonly home: string;
   readonly url: string;
   readonly binary?: string | undefined;
+  readonly username?: string | undefined;
 }): Promise<Ran> {
   const setupUrl = readFileSync(join(options.home, "setup-url"), "utf8").trim();
   const token = new URL(setupUrl).searchParams.get("token");
@@ -306,7 +308,7 @@ export async function completeSetup(options: {
       "--setup-token",
       token,
       "--username",
-      USERNAME,
+      options.username ?? USERNAME,
       "--password-stdin",
       "--timezone",
       "Europe/Amsterdam",
@@ -323,17 +325,23 @@ export async function completeSetup(options: {
 
 /**
  * Starts a controller from the compiled binary against `home`, completes
- * first-run setup as `USERNAME`, and returns the controller once a client can
- * sign in to it. Fails when there is no compiled binary, when the controller
+ * first-run setup as `username` (`USERNAME` when it is not given), and
+ * returns the controller once a client can sign in to it. Fails when there is no compiled binary, when the controller
  * does not start, or when setup fails; a controller that started is stopped
  * before a failed setup is reported.
  */
 export async function startSetUpController(options: {
   readonly home: string;
+  readonly username?: string | undefined;
 }): Promise<Controller> {
   const binary = findCompiledBinary();
   const controller = await startController({ home: options.home, binary });
-  const setup = await completeSetup({ home: options.home, url: controller.url, binary });
+  const setup = await completeSetup({
+    home: options.home,
+    url: controller.url,
+    binary,
+    username: options.username,
+  });
   if (setup.code !== 0) {
     await controller.stop();
     throw new Error(`setup failed with exit code ${String(setup.code)}:\n${setup.stderr}`);

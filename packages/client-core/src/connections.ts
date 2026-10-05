@@ -33,6 +33,14 @@ export const filterGitHubConnections = (
   connections.filter((connection) => connection.type === GITHUB_CONNECTION_TYPE);
 
 /**
+ * Checks whether the Connection needs the user to act: its status is `error`
+ * or `needs-reauth`. A `connected` or `disabled` Connection needs nothing.
+ */
+export function connectionNeedsAttention(connection: Pick<Connection, "status">): boolean {
+  return connection.status === "error" || connection.status === "needs-reauth";
+}
+
+/**
  * Checks whether a screen shows the connection's account beside its name.
  * The account is shown only when it adds something the name does not:
  *

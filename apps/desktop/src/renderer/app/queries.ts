@@ -5,7 +5,13 @@
  * key the same reads the same way, and a live push lists the keys the cache
  * uses.
  */
-import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  queryOptions,
+  type EnsureQueryDataOptions,
+  type QueryClient,
+  type QueryKey,
+} from "@tanstack/react-query";
 import {
   ApiError,
   detectLocalRunner,
@@ -167,11 +173,11 @@ export const providersQuery = (client: HerculeClient) =>
   });
 
 /**
- * The options of a read that no live topic covers and that only a Draft
- * Thread uses: the settings and the permission profiles. Such a read is
- * fetched again each time the new-thread screen opens, so a change made
- * elsewhere, such as a default model set in the web app, reaches the next
- * Draft Thread. The screen's loader decides that, see `readOnOpen`.
+ * The options of a read that no live topic covers: the settings, the
+ * permission profiles and the controller's record. Such a read is fetched again each time a screen that
+ * shows it opens, so a change made elsewhere, such as a default model set in
+ * the web app, reaches the next Draft Thread and the next opening of
+ * Settings > Profile. The screen's loader decides that, see `readOnOpen`.
  *
  * Nothing else fetches it: it never goes stale on its own, so a component
  * that starts reading it, such as the sidebar's draft row, finds it fresh.
@@ -199,6 +205,27 @@ export const profilesQuery = (client: HerculeClient) =>
     queryFn: () => readEveryPage((page) => client.profile.query({ query: page })),
     ...READ_ON_OPEN_OPTIONS,
   });
+
+/**
+ * Reads `options` once for this opening of a screen, and returns its data.
+ *
+ * The first time, there is nothing to show, so the screen waits for the
+ * read. After that, the data read last is returned at once and the read runs
+ * in the background, so opening the screen waits on the controller only the
+ * first time. The data never goes stale on its own, so marking it out of
+ * date here is what makes it read again. A component that starts reading it
+ * while that read runs joins it rather than sending a second one.
+ *
+ * A screen's loader calls it for each read that no live push keeps current.
+ * Fails when the read fails and no earlier data is cached.
+ */
+export const readOnOpen = <Data>(
+  queryClient: QueryClient,
+  options: EnsureQueryDataOptions<Data, Error, Data, QueryKey>,
+): Promise<Data> => {
+  void queryClient.invalidateQueries({ queryKey: options.queryKey, refetchType: "none" });
+  return queryClient.ensureQueryData({ ...options, revalidateIfStale: true });
+};
 
 /**
  * Finds which of `runners` runs on this Mac, and returns its id, or `null`
@@ -267,15 +294,22 @@ export const startTasksQuery = (client: HerculeClient, projectId: string) =>
 /**
  * Reads the controller's own record. Its `localRunnerId` is the runner on the
  * controller's machine, or `null` when no runner runs there.
+ *
+ * No live topic covers it, so Settings > System reads it with `readOnOpen`:
+ * its default runner can change from the CLI while the app runs.
  */
 export const controllerQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.controller(),
     queryFn: () => client.controller.read(),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...READ_ON_OPEN_OPTIONS,
   });
 
-/** Reads every Connection, for the first run's GitHub step. */
+/**
+ * Reads every Connection: for the first run's GitHub step, the default
+ * GitHub account on Settings > Profile, and the dot on the Settings list's
+ * Connections row.
+ */
 export const connectionsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.connections(),
@@ -291,7 +325,7 @@ export const assistantsQuery = (client: HerculeClient) =>
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** Reads the signed-in user's name, for the sidebar's foot. */
+/** Reads the signed-in user's name, for the sidebar's foot and Settings > Profile. */
 export const userQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.user(),

@@ -5,7 +5,20 @@ import {
   FALLBACK_TIMEZONE,
   isSupportedTimezone,
   listSupportedTimezones,
+  listTimezoneChoices,
 } from "./timezone";
+
+describe("listTimezoneChoices", () => {
+  it("returns the supported list itself when it holds the stored zone", () => {
+    assert.strictEqual(listTimezoneChoices("Europe/Amsterdam"), listSupportedTimezones());
+  });
+
+  it("puts a stored zone the list does not hold first, and keeps every supported zone", () => {
+    const zones = listSupportedTimezones();
+    assert.notInclude(zones, "US/Pacific");
+    assert.deepEqual(listTimezoneChoices("US/Pacific"), ["US/Pacific", ...zones]);
+  });
+});
 
 describe("listSupportedTimezones and isSupportedTimezone", () => {
   it("lists zones the runtime's formatter accepts", () => {

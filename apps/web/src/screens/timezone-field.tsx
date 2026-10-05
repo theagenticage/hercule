@@ -1,9 +1,6 @@
 import type { JSX } from "react";
-import { listSupportedTimezones } from "@hercule/client-core";
+import { listTimezoneChoices } from "@hercule/client-core";
 import { Select } from "@hercule/ui";
-
-/** The supported zones do not change during a page load, so they are listed once. */
-const ZONES = listSupportedTimezones();
 
 /**
  * The timezone control, shared by the onboarding step and Settings > Profile.
@@ -21,7 +18,7 @@ export function TimezoneField({
   readonly value: string;
   readonly onChange: (timezone: string) => void;
 }): JSX.Element {
-  const zones = ZONES.includes(value) ? ZONES : [value, ...ZONES];
+  const zones = listTimezoneChoices(value);
   return (
     <Select
       id="timezone"

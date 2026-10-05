@@ -24,6 +24,7 @@ import { PlusIcon } from "../icons/plus";
 import { Mark } from "../marks";
 import { AgeLabel } from "../screens/age-label";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
+import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 import { ITEM_HEIGHTS, type RowEnd, type SectionKey } from "./sidebar-items";
 
 /** What every item takes from the list: its key in the list, and the space above it. */
@@ -32,13 +33,6 @@ interface Placement {
   /** The space between this item and the one above it, in pixels. */
   readonly leading: number;
 }
-
-/**
- * The classes a thread's link adds while its thread is open. The router also
- * sets `aria-current="page"` on it then, so a thread listed twice is marked
- * in both places.
- */
-const SELECTED = { className: "is-on" } as const;
 
 /** Renders the Waiting on you heading, with the count of every waiting thread. */
 export const WaitingHeader = memo(function WaitingHeader({
@@ -67,7 +61,8 @@ export const WaitingHeader = memo(function WaitingHeader({
  * opens the thread in the Office's drawer; otherwise it opens the thread on
  * its own screen, because an asleep or away thread has no colleague to
  * select. The other props are the link's own. Either way the router marks the
- * link as the current page while its thread is open.
+ * link as the current page while its thread is open, so a thread listed
+ * twice is marked in both places.
  */
 function ThreadLink({
   sessionId,
@@ -84,9 +79,19 @@ function ThreadLink({
   readonly "data-key": string;
 }): JSX.Element {
   return officeOpen && isSeatedPose(pose) ? (
-    <Link to="/office" search={{ session: sessionId }} activeProps={SELECTED} {...props} />
+    <Link
+      to="/office"
+      search={{ session: sessionId }}
+      activeProps={SELECTED_LINK_PROPS}
+      {...props}
+    />
   ) : (
-    <Link to="/threads/$sessionId" params={{ sessionId }} activeProps={SELECTED} {...props} />
+    <Link
+      to="/threads/$sessionId"
+      params={{ sessionId }}
+      activeProps={SELECTED_LINK_PROPS}
+      {...props}
+    />
   );
 }
 

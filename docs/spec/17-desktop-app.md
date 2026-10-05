@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office).
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings).
 
 ## Scope of the first milestone
 
@@ -28,7 +28,7 @@ The first milestone is threads, in a native shell:
 - connecting to a controller, and signing in and out
 - the native behaviour below: the window, the menu and shortcuts, the dock badge and notifications
 
-Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule face and its screens, assistants, All sessions, Settings, the desktop app as installer, and Windows and Linux.
+Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule face and its screens, assistants, All sessions, ~~Settings,~~ the desktop app as installer, and Windows and Linux.
 
 *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run moves into v1: from "the app is installed" to a first thread, with no browser and no terminal ([The first run](#the-first-run)). It brings three pieces with it:
 
@@ -39,6 +39,8 @@ Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule
 ~~The live Office stays post-v1, and so does the app installing or updating Hercule's binary.~~ The app installing or updating Hercule's binary stays post-v1 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332): the live Office no longer does)*. `install.sh` still puts the binary and the app on the Mac ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §1); the app only runs that binary.
 
 *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The Office moves into v1: the user's threads as colleagues at work in a 3D Bureau office, quiet enough that no fan spins ([The Office](#the-office)). The first run's room stays the still 2D drawing it is.
+
+*(Amended 2026-10-04, [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402).)* Settings moves into v1, as a port of the web app's Settings drawn in Bureau, with an Appearance page the web app does not have ([Settings](#settings)). Providers stays out until the provider remodel ([#406](https://github.com/theagenticage/hercule/issues/406)).
 
 ## Architecture
 
@@ -401,11 +403,15 @@ The first milestone's channels. *(Amended 2026-09-30, [#275](https://github.com/
 | ~~`notification.show` / `notification.close`~~ | ~~renderer → main~~ | ~~a thread's notification, keyed by session id~~ |
 | `waitingThreads.set` | renderer → main | every thread waiting on the user, for the dock badge and the threads' notifications |
 | `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser. ~~Not built yet: it arrives with the draft's Log in button, which is its first caller.~~ Built with the first run *(2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. A link the user clicks already opens in the default browser without it (see [Security baseline](#security-baseline)) |
+| `appearance.read` | renderer → main | *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* the Appearance kept in the settings file, answered synchronously from main's memory. `theme-init.js` calls it once per page load, before the first paint |
+| `appearance.save` | renderer → main | *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* saves the Appearance to the settings file, and repaints the window's background for the theme in use |
 | `firstScreen.report` | renderer → main | the frame that draws the first screen, fonts included, has reached the window, so main can show the window (see [Native behaviour](#native-behaviour)) |
 | `thread.open` | main → renderer | a notification click or a Go menu item asks for a thread |
-| `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread or Send |
+| `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread, Send or Settings… |
 
 A new channel is added to the contract, and to this table, in the same change.
+
+*(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* [Settings](#settings) adds `appearance.read` and `appearance.save`, and the `openSettings` command on `menu.command`. `appearance.read` is the contract's only synchronous channel, because the page needs its theme before it paints.
 
 ## Native behaviour
 
@@ -416,15 +422,16 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - `trafficLightPosition: { x: 19, y: 16 }` puts the native lights where the Bureau pages draw them: centres at 26, 46 and 66 pt from the left, 24 pt from the top. The renderer draws no lights of its own.
   - The top 52 pt of the window drags it, across its full width. The shell draws this as one strip over the top of the window that paints nothing and is not a compositing layer; the sidebar's top strip and the thread's chrome row both sit inside it. Each control placed in the band is marked `no-drag`, so it takes clicks.
 - **No flash:**
-  - The window is created hidden, with `backgroundColor` set to `--bg` of the current appearance: `#f4f3f0` for Whitehaven and `#1a1310` for Orient Express. These are the sRGB values Chromium draws for the `oklch` tokens, and a unit test derives them from `tokens.css`.
+  - The window is created hidden, with `backgroundColor` set to `--bg` of the current appearance: `#f4f3f0` for Whitehaven and `#1a1310` for Orient Express. These are the sRGB values Chromium draws for the `oklch` tokens, and a unit test derives them from `tokens.css`. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* The colour is `--bg` of the theme in use, any of Bureau's five ([Settings](#settings) › Appearance).
   - It is shown when the frame that draws its first screen, fonts included, has reached the window, or 3 seconds after its page first painted, whichever is first. It is also shown at once when its page fails to load or its renderer exits. Showing on `ready-to-show` would show an empty page for a few frames: `ready-to-show` fires when the bare HTML first paints, 50 to 80 ms before the first screen has painted.
   - The 3-second limit means a renderer that fails before it reports still gets its window. It sits well above the "connecting" screen's 1-second delay, because that delay starts only once the renderer's code has loaded and its router has started, and fonts and a few frames follow it. So a healthy renderer shows its window by reporting, even on a slow Mac's cold launch. A crash or a failed load does not wait for the limit.
   - The renderer reports its first screen through the IPC contract once the frame that draws it has been presented: it times a sentinel element that draws nothing with Element Timing, whose entry arrives only once its frame has been presented, or has failed to present. A frame that fails to present is rare; the window then shows a frame early, and the screen appears with the next frame. Two animation frames are not enough, because the second can run before the first frame has reached the window. The "connecting" screen reports too, so a slow controller does not keep the window hidden.
-  - When the appearance changes, main updates the background colour.
-- **Theme follows the system, live:** Whitehaven when macOS is light, Orient Express when it is dark, through `prefers-color-scheme`. Bureau's other three themes, and a glass setting, arrive with Settings.
+  - When the appearance changes, main updates the background colour. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* So does a change on the Appearance page.
+- **Theme follows the system, live:** Whitehaven when macOS is light, Orient Express when it is dark, through `prefers-color-scheme`. ~~Bureau's other three themes, and a glass setting, arrive with Settings.~~ *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* These are the defaults. Appearance picks the day and the night theme, or one theme that does not follow the system, and the glass level ([Settings](#settings)).
 - **Accessibility settings:**
   - Reduce transparency sets `--glass-level` to 0, which removes the blur completely.
   - Reduce motion stops every animation.
+  - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each is on when macOS's setting is on or the Appearance page's is. The app's toggle can add the setting, never remove macOS's.
 - **Window size:**
   - The first launch opens a 1440 × 900 pt window, the size of the Bureau pages, centred on the display. On a smaller display it fills the work area.
   - The window cannot be made smaller than 800 × 500 pt. Below a width of 776 an empty thread's composer no longer fits the main pane, and below a height of 440 its start cards no longer fit.
@@ -433,6 +440,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
 - **The last open thread reopens at launch.** *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* The app reopens what was open when it quit:
   - The renderer stores the open thread's id per controller URL. Opening a thread stores it; leaving it for a screen that is not a thread removes it, so a quit on the new-thread screen launches on the new-thread screen.
   - When the stored thread is gone at launch, the id is removed and the new-thread screen shows, because the user did not ask for that thread this time. A gone thread the user opens during use shows "This thread was not found." with a link to start a new thread.
+  - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* With Appearance's Open on set to The office, a launch opens the Office instead.
 - **Menu:**
   - The standard app, Edit and Window menus, so text editing shortcuts work in every field.
   - The menus, in order: the app menu, File, Edit, Go, Thread, Window. The development build adds View, with Reload and Toggle Developer Tools, after Edit.
@@ -442,6 +450,8 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - Go › the first nine threads of the sidebar, `⌘1` to `⌘9`, in sidebar order. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* Each thread is listed once, by its title: a waiting thread is listed where "Waiting on you" shows it, and a thread a "more" row hides is not listed. With no thread, and while signed out, Go holds one dimmed "No Threads".
   - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says. Choosing a thread in Go with the mouse closes the picker.
   - Sign Out, in the app menu.
+  - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings… `⌘,`, in the app menu under About, opens [Settings](#settings).
+  - *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* File › New Thread, Go › Office and Settings… are dimmed while signed out, as Sign Out is, because only the shell carries them out: on the connect and sign-in screens, choosing one would do nothing.
 - **Dock badge:** the number of threads waiting on you. A thread waits on you while its session has an open Request (`Session.openRequest`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
   - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* macOS shows an app's dock badge only once the user has allowed the app to notify. The app asks when the user signs in, so the badge can show from the first waiting thread.
 - **Notifications:**
@@ -536,7 +546,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - The book's "paused" count is left out, because no thread is paused yet.
   - Every count shows at 0. The waiting count takes `--you-ink` only above 0, because the attention hue means something needs the user.
 - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **New thread, Search and Office share one row** at the sidebar's top. The book draws New thread and Search as two rows, and puts the office's row in the Hercule face's Work section. The desktop has only the Threads face, and the Office belongs to both faces, so its way in sits in the part of the sidebar both faces share. New thread keeps its label and `⌘N`. Search (`⌘K`, still inert) and Office (`⌘⇧O`) are icon buttons, each with a tooltip that gives its name and shortcut. The Office button shows as pressed while the Office is open.
-- **Search `⌘K`, the hide-sidebar button and Settings are drawn and inert** until their slices build them, like the composer's `+` and voice buttons: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered.
+- **Search `⌘K`, the hide-sidebar button ~~and Settings~~ are drawn and inert** until their slices build them, like the composer's `+` and voice buttons: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* The foot's Settings button opens [Settings](#settings), and shows as pressed while Settings is open.
 - **The thread list reads every page** of `session.query`, so no thread is left out. The web app reads the first 500.
 
 **The thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread surface and the book's session pages, with these differences:
@@ -698,6 +708,173 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
 - the book's "Office: List | Floor" switch, because the List is All sessions, which is post-v1;
 - assistants and the sessions of workflow runs, because the app lists only threads.
 
+## Settings
+
+*(Added 2026-10-04, [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402), for [Desktop Settings: a quick port, and a new model for providers (#401)](https://github.com/theagenticage/hercule/issues/401).)* Settings is a port. It brings the web app's Settings to the desktop, drawn in Bureau, with the Appearance page added. It adds no operation to the public API. The one new piece of state is the Appearance, which main keeps in its settings file.
+
+- **The pixel reference** is the book's three settings pages: `desktop/settings-appearance.html`, `desktop/settings-assistants.html` and `desktop/settings-connections.html`.
+- **The book does not draw the other sections:** Profile, Threads, Machines, Plugins and System. Their content is the web screen's ([./14-web-app.md](./14-web-app.md) §V1 screen inventory). They are drawn only from the pieces the three pages use: `set-sec` with its heading and lead, `set-row` with `set-label`, the segmented control, the toggle, the select field, the table rows of the Connections page, and the tabs of the Assistants page.
+- **What a section shows is what the contract holds.** Where the book draws something no operation reads or writes, the section leaves it out and says so below. A row is never drawn with data the app does not have.
+- **The renderer imports no web code.** It never imports `@hercule/ui` or `apps/web`. What the web screens interpret, such as thread defaults, provider rows, assistant forms and config fields, is already in `@hercule/client-core`, and the desktop calls the same functions. A web helper that is still in `apps/web` moves to `client-core`, with its test, in the slice that first needs it on the desktop.
+
+### The frame
+
+The frame is the book's: the app's sidebar stays, and the main pane holds the Settings list beside one centred column.
+
+- **Three columns.** The sidebar is the Threads face, unchanged, 272px. The main pane holds the book's `.settings` grid: the Settings list, 216px, then the section's body, whose column is at most 760px wide and is centred.
+  - The book draws the sidebar on its Hercule face, with a Settings row selected. The desktop has only the Threads face ([Scope](#scope-of-the-first-milestone)), so the sidebar shows the threads, and the foot's Settings button shows as pressed while Settings is open, as the Office button does for the Office.
+  - *(Decided 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* The Settings list does not replace the sidebar, as [#401](https://github.com/theagenticage/hercule/issues/401) first proposed. The book's frame keeps the threads one click away, and nothing on the sidebar moves when Settings opens.
+- **The way in:**
+  - the sidebar foot's Settings button, which is no longer inert;
+  - the app menu's Settings… `⌘,`, under About, as macOS places it. It sends `openSettings` on `menu.command`.
+  - Both open the section last opened while the app runs, and Appearance the first time, as the book's foot button links to it. The section is not kept across launches.
+- **The way back** is the sidebar: a thread, New thread or the Office leaves Settings. Settings has no close button and no back button, because the sidebar never left.
+- **The header** is the book's `.bar`: the crumb "Settings /", the section's name as the title, and on the right either the section's primary button ("New assistant", "Add a Connection", "Add a machine") or, on Appearance, "Saved on this Mac". The other sections have nothing on the right.
+- **The Settings list** is the book's, in its order:
+  - You: Profile, Appearance, Threads
+  - Crew: Assistants, Connections, Providers, Machines
+  - Safety: Identities, Permission profiles, Secrets, Bounds
+  - System: Plugins, System
+  - The open section's row is selected. Connections carries the book's red dot while a Connection's status is `error` or `needs-reauth`.
+- **Rows that lead nowhere yet are drawn and inert:** Providers, Identities, Permission profiles, Secrets and Bounds. They show their hover state, do nothing when pressed and carry `aria-disabled`, like the sidebar's Search. Each has a tooltip: "Not built yet". They are drawn rather than hidden so the list keeps the shape the book gives it, and does not change shape when they are built. *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* A section whose slice has not been built yet is drawn inert the same way, and its slice makes its row lead to it. The Connections row shows its dot while inert.
+  - Providers comes with the provider remodel ([Write the provider remodel into the specs, CONTEXT.md and an ADR, and its build tickets (#406)](https://github.com/theagenticage/hercule/issues/406)). Until then, a runner's providers are logged in to from Machines.
+  - Identities, Permission profiles and Bounds are empty states in the web app too. Secrets is left out of this port: the secrets a section needs, such as a Connection's token or a provider's key, are set from that section.
+- **A narrow window.** At the window's smallest width, 800, the body column is about 230px. While the body is narrower than 520px, a `set-row` stacks its control under its label, and a table drops to one column per row. Nothing clips and nothing scrolls sideways. This is a container query on the body, so the sidebar and the list keep their widths.
+- **Saving.** A control saves when it changes, because the book draws no Save button. A text field saves when it loses focus, or on `⌘↵`. A failed save puts the field back to the saved value and shows the error, in `--fail`, under its row.
+- **Routes.** Settings is the layout route `/settings`, a child of the shell, with one child route per section: `/settings/appearance`, `/settings/assistants` and so on. Each is a chunk of its own (rule 6), and none is on the bundle check's list of first-screen routes. Each section's loader prefetches what it reads, and the section subscribes to its live topics only while it is open.
+
+### Appearance
+
+Appearance draws every control on the book's page. Every control is saved on this Mac, in main's settings file.
+
+| Control | Choices | Default | What it changes |
+|---|---|---|---|
+| Theme | Whitehaven, Styles, Orient Express, Nile, End House | - | the theme in use while Follow the system is off |
+| Follow the system | on or off, with a day theme (Whitehaven or Styles) and a night theme (Orient Express, Nile or End House) | on, Whitehaven by day, Orient Express by night | switches with macOS's appearance between the day and the night theme |
+| Density | Comfortable or Compact | Comfortable | the sidebar's thread rows, see below |
+| Text size | four steps | the second | the size of text everywhere except titles, see below |
+| Glass | 0 to 100% | 40% | `--glass-level` |
+| Reduce transparency | on or off | off | every glass surface solid, whatever the Glass level |
+| Open on | Threads or The office | Threads | what the app shows at launch |
+| Reduce motion | on or off | off | every animation stopped, as macOS's Reduce motion stops them |
+| Marks | on or off | on | the source marks on rows |
+
+- **The theme cards.** The card of the theme in use is pressed. Picking a card turns Follow the system off and uses that theme. With Follow the system on, the two selects pick the day and the night theme. A day theme is light and a night theme is dark, so the window's frame always matches macOS's.
+- **Density** is saved on this Mac, like every other row. It is a choice about how one client draws its rows, and the desktop and the web draw them differently, so a user may want a different density in each.
+  - Compact draws each thread row in the sidebar on one line: its face, its title, its mark and its age. Waiting on you keeps its second line, because the open Request is what the user acts on.
+  - The book's line, "Compact fits 30% more rows in Intake and the roster", names screens the desktop does not have. The desktop's line is "Compact draws each thread on one line, so more fit in the sidebar."
+  - The desktop neither reads nor writes `ui.threadRows`, the user setting the web's Threads › Display row saves on the controller ([./14-web-app.md](./14-web-app.md) §V1 screen inventory, Settings > Threads). That setting stays the web's own.
+- **Text size** has four steps. Each step moves the text tokens `--t-11` to `--t-16` by one pixel: the second step is the tokens as they are, the first is one pixel smaller, and the third and fourth are one and two pixels larger. The title tokens, `--t-18`, `--t-20` and `--t-num`, do not change, as the book's line says: "Transcripts follow; titles stay modest." Rows grow with their text; none has a fixed height that clips it.
+- **Glass and Reduce transparency.** The page's `--glass-level` is the Glass level.
+  - Reduce transparency, the app's or macOS's, sets the level to 0 and the filter to `none`, as the Office does. A Glass level of 0 sets the filter to `none` too (rule 5).
+  - The app's toggle and macOS's setting both count: either one makes the glass solid. While macOS's is on, the app's toggle shows as on and is disabled, because turning it off would change nothing. Reduce motion works the same way.
+  - `tokens.css` stays the book's file. The renderer never writes `--glass-level` itself: an inline value on the root element would beat the Office's rule, which is not `!important`. It sets a custom property of its own on the root, and a `:root` rule in `base.css` derives `--glass-level` from it. The Office's rule and the Reduce transparency rules are more specific or `!important`, so both still win.
+- **Reduce motion** stops what macOS's Reduce motion stops: the CSS animations and transitions, the Office's colleagues (which then stand still) and the first run's room. One renderer function answers whether the app should hold still, from both settings. Every place that reads `prefers-reduced-motion` today calls it instead.
+- **Open on.** With Threads, a launch opens the last open thread or the new-thread screen ([Native behaviour](#native-behaviour)). With The office, a launch opens the Office, with no thread in its drawer. The stored last thread is kept, not removed, so switching back to Threads still reopens it. A first run, the connect screen and sign-in come first either way.
+- **Marks** shows or hides the source marks: the mark of the system a row's work came from, such as GitHub on a start card. Today only the draft's start cards draw one. A row that later draws a source mark follows the same setting.
+
+**How the Appearance reaches the window before its first paint.** Main reads the settings file at launch, before it creates the window, so main knows the Appearance before any page exists. Main holds the Appearance though the renderer holds it too, an exception to rule 7, for the reason it holds the window state: it paints the window's background before a renderer exists.
+
+- Main creates the window with the `backgroundColor` of the theme in use: Follow the system's day or night theme by `nativeTheme`, else the chosen theme. Each of the five themes has its exact sRGB `--bg` in `window-background.ts` and in `base.css`, and the unit test that derives them from `tokens.css` covers all five.
+- `public/theme-init.js` reads the Appearance through the bridge's `appearance.read`, a synchronous call, and sets `data-theme`, the text size, Reduce transparency and Reduce motion on the root element before the first paint. It still listens to `prefers-color-scheme` and switches between the day and the night theme.
+  - `appearance.read` is the IPC contract's only synchronous channel. It has to be: the page must know its theme before it paints, and an asynchronous answer arrives after. Main answers it from memory, without touching the disk. A page that reloads, as it does after the controller URL changes, reads the current Appearance again.
+- A change made on the Appearance page applies in the renderer at once, in one frame, with no transition (rule 2), and is sent to main with `appearance.save`. Main writes the file and repaints the window's background. The renderer holds the only window, so main sends nothing back.
+
+### The sections
+
+Each section lists what it reads and writes through the contract, its live topics, and where it differs from the web screen and the book.
+
+**Profile.** Not drawn by the book.
+
+- Reads `user.read`, `settings.read` and `connection.query`. Writes `settings.update` (`user.timezone` and `github.defaultConnectionId`) and `auth.logout`. Live topic: `connection`.
+- Shows the user's avatar and name, the time zone, the default GitHub account, and Sign out.
+- Same as the web screen. Sign out is also in the app menu, as it is today.
+- *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* **The time zone's hint differs from the web screen's:** "Schedules run in this zone, such as a workflow's cron trigger and an assistant's heartbeat. This app shows times in your Mac's time zone." The web's hint says every time on screen is read in this zone, but the desktop shows times in the Mac's time zone (see "Messages carry their own time" under [Design system](#design-system)), because the Mac's clock follows the user when they travel. The setting decides when schedules run on the controller.
+
+**Threads.** Not drawn by the book.
+
+- Reads `settings.read`, `runner.query`, `provider.query` and `profile.query`. Writes `settings.update` (`thread.instanceId`, `thread.model`, `thread.accessMode`, `thread.profileId`, `thread.workspace`). Live topic: `provider`.
+- The defaults a new thread starts with: provider instance and model, access mode and permission profile, and the workspace a thread opens in.
+- Differs from the web screen: no Display row. The desktop's density is Density on Appearance, saved on this Mac.
+
+**Assistants.** The book's `settings-assistants.html`.
+
+- Reads `assistant.query`, `provider.query` and `profile.query`. Writes `assistant.create`, `assistant.update` and `assistant.delete`. Live topics: `assistant` and `provider`.
+- The book's tabs, one per assistant, with its face and name, and New assistant in the header.
+- The book's profile block: the large face and the name.
+- How it works:
+  - the web form's fields: name, persona (`systemPrompt`), provider instance and model, permission profile, access mode, and reply mode (Turn end or Segments);
+  - disallowed tools, as the book's chips with Add, and an × on each chip;
+  - the delete move, at the foot of the section, with a confirmation.
+- **Heartbeat,** as the book draws it: the toggle, the lead, "Every `<n>` h from `<hh:mm>` to `<hh:mm>` in Web chat", and the day's timeline with a tick at each beat and a "now" line. Under it, the prompt the heartbeat sends.
+  - The contract stores the schedule as a five-field cron expression. Two `client-core` functions, each with its own tests, convert between the two:
+    - one that reads a cron expression as an interval and a window of hours, or answers that it is not one;
+    - one that builds the cron expression from an interval and a window.
+  - A schedule that is not an interval and a window, set from the CLI for one, shows as its cron expression, with the line "Set outside the app. Choosing an interval here replaces it."
+  - The target is always Web chat, because `target` has no other value yet. The select is drawn with one choice.
+- **Rotation,** as the book draws it: "At `<n>`% of the context or `<n>`k tokens, and daily at `<hh:mm>`", from `contextFraction`, `maxContextTokens` and `dailyAt`.
+- Differs from the web screen: disallowed tools, heartbeat and rotation are new, because the web screen has no fields for them.
+- **Left out of the book's page,** because no operation reads or writes them, or the desktop has no screen for them:
+  - the role beside each name ("personal", "ops"), because an assistant has no role;
+  - the line under the name, "personal assistant · working in Web chat", and Open Conversation, because the desktop has no conversation screen;
+  - the context bar and Start fresh under Rotation;
+  - Where the assistant listens, its channel bindings;
+  - the Memory and Reminders column. Without it, the body is the one centred column.
+
+**Connections.** The book's `settings-connections.html`.
+
+- Reads `connection.query` and `plugin.query` (for the Connection types). Writes `connection.create`, `connection.update`, `connection.delete`, `connection.setCredentials`, `connection.startOAuth`, `connection.startDeviceFlow` and `connection.pollDeviceFlow`. Live topic: `connection`.
+- One section, "Connections", in the book's table: each row has the type's mark (a generic mark for a type with none), "`<type>` · `<label>`" with the account name under it, its health, and `⋯` with Reconnect, Configure and Delete.
+  - Health is the status as one word, as the book draws "healthy": `connected` reads "healthy", `needs-reauth` "needs sign-in", `disabled` "disabled", and `error` shows its `statusDetail` in `--fail`.
+- Add a Connection, in the header, lists the types the plugins declare and runs their setup:
+  - pasted credentials;
+  - the device flow, as the first run's GitHub step runs it;
+  - OAuth: the app calls `connection.startOAuth` with the controller's origin, the origin the web app sends, so the redirect the provider has registered still matches. It opens the authorization URL in the default browser with `link.open`. The browser ends on the web app's Connections page, which shows the outcome. The app shows "Finish in your browser" with Cancel, and the new Connection arrives on the `connection` topic. A failed flow creates no Connection, so the browser is where a failure shows.
+- Same as the web screen in what it does; the web draws it as rows, the desktop as the book's table.
+- **Left out of the book's page,** because no operation reads them: the stats strip (events in 24 hours, sources, channels, reconnecting), the Default Topic column ([#324](https://github.com/theagenticage/hercule/issues/324) removed it from the web), the Last 24 hours and Events columns, and the Channels section with its bound assistants. With no channel plugin and no binding operation, every Connection is drawn in the one table, so the book's split into event sources and channels is left out too.
+
+**Machines.** Not drawn by the book. It is the web's Fleet list and runner page in one section.
+
+- Reads `runner.query`, `runner.read`, `provider.query`, `session.query` (the runner's queue) and `runner.queryJoinTokens`. Writes `runner.update`, `runner.drain`, `runner.undrain`, `runner.refreshFacts`, `runner.retire`, `runner.installHarness`, `runner.probe`, `provider.login`, `provider.submitLoginCode`, `secret.set`, `runner.createJoinToken` and `runner.revokeJoinToken`. Live topics: `runner`, `provider` and `session`.
+- One tab per runner, as Assistants has one per assistant, with its name and whether it is online.
+- For the selected runner:
+  - its facts and version;
+  - its sessions against its capacity, as `describeCapacity` describes them;
+  - its name and capacity, edited in place;
+  - its provider rows: one `ProviderLogin` per provider instance, the row the first run and the draft's Log in already use, with Install, Log in, Enter key and Probe now;
+  - Drain or Undrain, Refresh facts, and Retire with the question `buildRetireQuestion` builds.
+- Add a machine, in the header, shows the join command and the open join tokens, each with Revoke.
+- Differs from the web screen: the list and the runner page are one section with tabs, not two screens.
+
+**Plugins.** Not drawn by the book.
+
+- Reads `plugin.query`. Writes `plugin.enable`, `plugin.disable`, `plugin.retry`, `plugin.resetState` and `plugin.configure`. Live topic: `plugin`.
+- One `set-sec` per plugin: its name and status, what it contributes, its settings as fields built from its config schema by `client-core`'s config fields, and its moves.
+- Same as the web screen.
+
+**System.** Not drawn by the book.
+
+- Reads `controller.read`: the controller's version and id, the default runner and the local runner. Writes nothing.
+- The web screen's text, the access-mode fallback chain, read-only.
+- Differs from the web screen: it shows `controller.read`, which the web screen does not. `controller.update` is not used, as in the web app.
+
+### What Settings costs
+
+The rules apply as everywhere ([Rules](#rules)); the costs below are what each slice measures and records in [Measured](#measured).
+
+| Cost | Expected | Measured by |
+|---|---|---|
+| Processes | none added | the perf script's process count |
+| The first screen's JavaScript | grows only by the foot button's handler, the `openSettings` command, the `/settings` route stub and `theme-init.js`'s reading of the Appearance | `pnpm build:desktop`'s bundle check, before and after |
+| Settings' chunks | one per section, loaded the first time it opens. Appearance, the largest, draws five theme previews from components the first screen already holds | the bundle check's table, which lists every chunk |
+| Memory | within the app's memory row with any section open: Settings holds one section's reads at a time | the perf script, with Appearance and then Machines open |
+| Idle | the idle row, with any section open: no timer, no polling, and no animation; the heartbeat timeline's "now" line moves only when the section is opened again | the perf script's idle sample, with Machines open |
+| Launch | `appearance.read` adds one synchronous message, answered from memory, before the first paint | the perf script's launch steps, before and after |
+| A change of theme or text size | one frame that restyles the page; the Office redraws once, from its existing watch on `data-theme` | the Performance panel, once, recorded in [Measured](#measured) |
+| Dragging the Glass slider | a restyle per input event while the user drags, nothing after | the Performance panel, once |
+
+Settings does not open a live topic the shell does not already need, except while a section that reads it is open.
+
 ## Performance
 
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
@@ -814,7 +991,7 @@ These rules keep the budgets:
    - Animations change only `transform` and `opacity`, and only of an HTML element. Chromium runs such an animation on the compositor thread alone. When the animated element is an SVG element, even an outer `<svg>`, the renderer's main thread also runs style, layout and paint on every frame: 120 times a second on a 120 Hz display. So the working pose's paws are each drawn in an `<svg>` of their own, inside a `<span>` that moves.
    - Transitions answer a user action, last at most `--dur-3`, and change only paint properties: color, background, border-color, box-shadow, opacity and transform. A transition of a layout property, such as `width`, `padding` or `grid-template-rows`, runs layout on every frame. Bureau's composer transitions some of these; slice 6 ports the composer without them, and uses a transform if its growth animates.
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
-   - Reduce motion turns every animation off. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
+   - Reduce motion turns every animation off. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* macOS's Reduce motion or the Appearance page's. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
    - The renderer drops the open thread's `session:<id>:tap` subscription. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
@@ -827,7 +1004,7 @@ These rules keep the budgets:
      - GitHub's device flow: the protocol requires the client to ask, so the renderer calls `connection.pollDeviceFlow` at the interval GitHub gives, until the flow is done, expires or is denied.
      - The connect check after `hercule service install`: main checks every half second for at most 30 seconds, because the controller announces nothing while it starts.
      - A provider's login does not poll: its end arrives on the `provider` live topic.
-5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0 (the Office, below, also sets it while it is open), and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy.
+5. **Glass is limited.** It is allowed only on Bureau's glass surfaces: the header pills, the composer, popovers and name tags. The level is one token, `--glass-level`, and at 0 there is no blur at all. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* At 0 the filter is `none`, not a blur of 0 pixels: Chromium draws a zero blur at the full cost of a real one. Reduce transparency is the one setting that sets the level to 0 (the Office, below, also sets it while it is open), and the app's `base.css` sets the filter to `none` with it, because `tokens.css` stays the book's copy. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* The level is Appearance's Glass level, 40% unless the user moves it, and a level of 0 sets the filter to `none` too. Reduce transparency and the Office still win over it.
    - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Glass over the Office costs far more than glass over a still page. On the reference machine, the Office's glass (its top bar, room labels and panels) costs the GPU process about 19 points of one core at 30 frames a second. Two causes add up:
      - the page under a blur changes with every frame the Office draws, so the blur is drawn again each time;
      - by Chromium's source, one `backdrop-filter` anywhere in the window turns off macOS's own compositing of the window's layers (Core Animation), so the GPU process composites every layer of the window for each frame the Office draws. This cause was read from the source. A later measurement found the GPU process woke as often with glass on the top bar alone as with all of the glass, so the compositing does change. But the cost follows how much is blurred: glass on the top bar alone cost the GPU process about 4 points, a quarter of what all of the glass cost with v1's settings (14). That was one session, with the camera at rest.
@@ -836,7 +1013,7 @@ These rules keep the budgets:
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Everything the first screen imports statically is built into one chunk, the first-screen chunk. Split into files, the first screen costs more bytes: each file is compressed apart, and the files import and export names from each other, which the minifier cannot shorten across a file boundary. One chunk measured 7.4 kB smaller gzipped (see [Measured](#measured)). The app's files are read from the local disk, so splitting buys no caching in return.
-   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads.
+   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too.
    - App code imports each icon from its own module, never from the icons folder's list of every icon, and eslint enforces it. The bundler places a module by what imports it, so an icon only a lazy screen draws then loads with that screen.
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
 7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
@@ -1223,6 +1400,22 @@ The rows below were read on the prototype's page, not in the app, because the me
 - **Standing still was read with the battery reported as discharging** by an override in the measuring script, not on a Mac running on battery.
 - **`apps/desktop/scripts/perf.ts` read CPU from `percentCPUUsage`** until this change, a share of the whole machine. It now reports a share of one core ([Measuring](#measuring)).
 
+**Settings: the frame, Profile and System,** measured 2026-10-05 with `pnpm build:desktop`'s size checks and `apps/desktop/scripts/perf.ts`, on `main` at 959696a8 (Before) and on this change (After), for [#410](https://github.com/theagenticage/hercule/issues/410). Settings adds no process, no timer, no polling and no live topic: Profile reads what the shell already holds, and System reads the controller's record once each time it opens.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Processes | none added | 4 | 4 |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, a guide | 297.8 kB in 7 chunks, of 20 built | **298.4 kB** in 8 chunks, of 26 built |
+| Settings' chunks, gzipped, none on the first screen | one per section | - | the frame and the list 2.1 kB, Profile 1.7 kB, System 1.3 kB, and three chunks they share: the Connection helpers 1.0 kB, the setting row 0.4 kB and the time zones 0.3 kB |
+| Main's startup, minified | 160 kB | 156.1 kB | 156.2 kB |
+| Memory with Profile open, 40 threads | summed 220 MB, renderer 100 MB | - | **217.2 MB** summed: browser 51.9, GPU 105.5, network utility 7.5, renderer 52.3 |
+| Idle with Profile open, window visible | the idle row | - | renderer 0.6% of a core and 1 wakeup a second, GPU process 0% and 0; hidden, 1 a second each |
+| Launch, spawn to window shown | 500 ms | - | 378 ms; Settings is not on the launch path |
+
+- **The first screen grows by 0.6 kB:** the foot's Settings link, the `openSettings` command, the shell's handler for it and the route tree's entries for Settings. Each section is its own chunk and loads the first time it opens.
+- **Memory and idle were read with Profile open, not Appearance and Machines** as [What Settings costs](#what-settings-costs) asks, because those sections are not built yet. Their slices read them. With Profile open the app reads within the memory row, where the new-thread screen of the same launch setup reads 690 MB with its composer focused: Profile focuses no field, so the GPU process holds 105.5 MB against 586 MB.
+- **The one-minute load average was 8.4** at the Settings launch, from other programs on the machine.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
@@ -1274,6 +1467,35 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
    - the first measurement, recorded in [Measured](#measured)
 10. **The Office's life.** *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Printer rage, the tache on four of eight looks, and the Office's own details on the colleagues.
 
+*(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 build [Settings](#settings). Slice 11 comes first, and slice 13 needs slice 12 and slice 16 needs slice 15; the others can be built in any order after slice 11. Each slice records its costs in [Measured](#measured), as [What Settings costs](#what-settings-costs) lists them.
+
+11. **Settings' frame, with Profile and System.**
+    - the `/settings` layout route and one child route per section, each a chunk of its own
+    - the header, the Settings list with its inert rows and the Connections dot, and the narrow-window stacking
+    - the way in: the foot's Settings button, pressed while Settings is open, and Settings… `⌘,` with the `openSettings` command
+    - saving on change, and a failed save shown under its row
+    - Profile and System, the two smallest sections
+12. **Appearance: themes and glass.**
+    - the Appearance in main's settings file, `appearance.read` and `appearance.save`
+    - `theme-init.js` applying the stored Appearance before the first paint
+    - the five themes' `--bg` in `window-background.ts` and `base.css`, and main's window background for the theme in use
+    - the page's Theme cards, Follow the system with its day and night theme, Glass with its demo, and Reduce transparency
+13. **Appearance: density, text size, start and motion, marks.**
+    - Density, saved on this Mac, and the sidebar's one-line rows
+    - Text size, through the text tokens
+    - Open on, Reduce motion, and Marks on the start cards
+    - the Bureau comparison of the Appearance page
+14. **Threads.** The thread defaults.
+15. **Assistants: the web's form.** The tabs, the profile block, the web form's fields, New assistant and delete.
+16. **Assistants: disallowed tools, heartbeat and rotation.**
+    - the disallowed tools' chips
+    - Heartbeat with its timeline and prompt, and the two `client-core` functions that read and build its cron expression
+    - Rotation
+    - the Bureau comparison of the Assistants page
+17. **Connections.** The table, its moves, Add a Connection with the three setups, and the Bureau comparison of the Connections page.
+18. **Machines.** The runner tabs, a runner's facts, queue, edit and moves, its provider rows, and Add a machine.
+19. **Plugins.**
+
 ## Testing
 
 - **Unit tests** sit next to the code they test (AGENTS.md §Source layout). They cover:
@@ -1305,6 +1527,12 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **The Office's tests:**
   - `decideOfficeSeating` has unit tests for the rooms and their order, the desks inside a room, the queue and the Lounge, and the threads left out;
   - an end-to-end test opens the Office from the sidebar's button and from `⌘⇧O`, and checks that a hidden window draws no frames.
+- *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* **Settings' tests:**
+  - `pnpm compare:bureau` compares the main pane of each of the book's three settings pages with the app's section, item by item, then pixel for pixel, in Whitehaven and Orient Express: Appearance, Assistants and Connections. The book's sidebar is not compared there, because it is the Hercule face; the sidebar is compared against `session-active.html` as before. As for the thread, the book's page is edited where the app leaves something out or draws other words ([Settings](#settings)): the Assistants page loses the role, the line under the name, Open Conversation, the context bar, Start fresh, the bindings and the Memory and Reminders column; the Connections page loses the stats strip, three columns and the Channels section; the Appearance page takes the desktop's Density line.
+  - The book's `settings-assistants.html` draws its sidebar's and its Settings list's group headings larger than its two other settings pages do. Slice 16 finds the cause. If the page is at fault, the slice fixes the book's page, as design tickets edit the book, and says so in its pull request.
+  - `pnpm --filter @hercule/desktop capture:settings` captures every section in all five themes, and Appearance at each text size and density, for a check by eye. It writes them to `apps/desktop/out/settings/`. The sections the book does not draw are checked this way.
+  - Unit tests cover the heartbeat's two `client-core` functions, main's Appearance in the settings file, `theme-init.js` with a stored Appearance (one theme, and the day and night themes as macOS changes), and the window background of all five themes.
+  - An end-to-end test opens Settings from the foot button and from `⌘,`, checks that the inert rows do nothing, changes the theme and the glass level, relaunches, and checks that the window's first frame already has the chosen theme. A second checks that Open on The office launches into the Office.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.
 
 ## Post-v1
@@ -1313,7 +1541,8 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
 
 - **The Hercule face and its screens:** Intake, Check-in, Tasks, Runs, Workflows, Fleet, Connections and Notifications. Bureau adds the office to them.
 - **Assistants,** with the book's stored look (Spec change 3) and a run that wears its workflow's face (Spec change 4).
-- **All sessions and Settings,** including Appearance: Bureau's five themes, System, and the glass level.
+- **All sessions ~~and Settings,~~ ~~including Appearance: Bureau's five themes, System, and the glass level~~.** *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings is slices 11 to 19, except its Providers section, which comes with the provider remodel ([#406](https://github.com/theagenticage/hercule/issues/406)).
+- *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* **Settings' Identities, Permission profiles, Secrets and Bounds,** drawn inert until then. **On Assistants:** memory, reminders, channel bindings and Start fresh, once operations read and write them. **On Connections:** the event counts and the Channels section, once operations read them.
 - **The desktop app as installer:** it ~~runs and~~ installs and upgrades ~~a local controller~~ Hercule's binary ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §Post-v1). Starting a local controller with the binary already there is in v1, as part of [the first run](#the-first-run) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
 - ~~*(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **The live Office.** The first run's still room grows into the Office: live updates, the other wings, filing cabinets and capsules in Triage's tube.~~ *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332): the live Office is slice 9.)* **The Office Map system:** growth by wings built as the fleet grows, more maps, importing a map, maps of a code base, colleagues that go where their work takes them, and more activities ([#336](https://github.com/theagenticage/hercule/issues/336)). Event flow and the tubes ([#331](https://github.com/theagenticage/hercule/issues/331)). The first run's room drawn as a still view of the 3D Office.
 - **The idle blink, back.** Bureau's idle blink returns once research shows how to draw it within the idle budget. Bureau draws it as an animation that repeats every 7.2 seconds on the SVG group of each face's eyes. The eyes move for only about 0.2 seconds of that, but Chromium draws frames for the whole 7.2 seconds. And because an SVG group is animated on the renderer's main thread, the renderer wakes for every frame. Techniques to measure:
@@ -1332,6 +1561,7 @@ Tickets:
 - [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275)
 - [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313)
 - [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332), with its research ([#333](https://github.com/theagenticage/hercule/issues/333)) and scope ([#334](https://github.com/theagenticage/hercule/issues/334))
+- [Desktop Settings: a quick port, and a new model for providers (#401)](https://github.com/theagenticage/hercule/issues/401) and [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402)
 - [Web app architecture: observability-first, desktop-shell-ready (#19)](https://github.com/theagenticage/hercule/issues/19)
 
 ADRs:
