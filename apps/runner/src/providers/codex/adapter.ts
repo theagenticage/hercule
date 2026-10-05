@@ -119,12 +119,12 @@ interface Held {
   /** The turn the adapter believes is running. While it is set, an input steers that turn. */
   turnId: string | undefined;
   /**
-   * The request the session is parked on, and the requests that arrived while
-   * it was open. A session has at most one open request. If a second one were
-   * opened before the first was resolved, it would replace the first, and the
-   * first would vanish from every surface with no way to answer it. Codex
-   * waits for both, so the second waits here and is opened once the first is
-   * resolved.
+   * The request this adapter has reported for the session, and the requests
+   * that arrived while it was open. Codex can send a second request before
+   * the first is resolved, and waits for both. This adapter still reports one
+   * request at a time, so the second waits here and is reported once the
+   * first is resolved. Reporting every request at once, each with its asking
+   * subagent, is the Codex subagents ticket (#437, spec 06 section 13.3).
    */
   open: Park | undefined;
   readonly waiting: Array<Park>;

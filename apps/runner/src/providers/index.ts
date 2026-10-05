@@ -157,8 +157,8 @@ export interface ProviderAdapter {
   readonly interrupt: (sessionId: string, subagentId?: SubagentId) => Effect.Effect<void>;
 
   /**
-   * Decides the approval the session is parked on, by the id the adapter gave
-   * it. The harness resumes, and `request.resolved` follows on `events` as the
+   * Decides one approval an agent of the session is parked on, by the id the
+   * adapter gave it. That agent resumes, and `request.resolved` follows on `events` as the
    * only report. Does nothing when the adapter is not holding that approval:
    * it was never opened here, it was already decided, it is a question, or it
    * does not offer this decision.
@@ -170,8 +170,8 @@ export interface ProviderAdapter {
   ) => Effect.Effect<void>;
 
   /**
-   * Answers the questions the session is parked on, by the id the adapter gave
-   * the request. The harness resumes, and `request.resolved` follows on
+   * Answers the questions one agent of the session is parked on, by the id the
+   * adapter gave the request. That agent resumes, and `request.resolved` follows on
    * `events`, with the answers, as the only report. Does nothing when the
    * adapter is not holding that question: it was never opened here, it was
    * already answered, or it is an approval.

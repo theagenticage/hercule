@@ -711,9 +711,8 @@ describe("a second request Codex sends before the first is resolved", () => {
     run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
     await settle();
 
-    // A session has one open request. Opening the second now would remove the
-    // first from every surface with no way to resolve it, and Codex is
-    // waiting for both.
+    // The adapter reports one request at a time and holds the second back,
+    // while Codex waits for both. Each is answered under its own id.
     const first = await awaitOpenedRequest(run);
     expect(first.request.detail).toEqual({ command: "rm -rf build" });
     expect(run.answered).toEqual([]);

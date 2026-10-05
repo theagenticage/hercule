@@ -262,8 +262,9 @@ export const ItemStatus = Schema.Literals(["completed", "failed", "declined"]);
 export type ItemStatus = Schema.Schema.Type<typeof ItemStatus>;
 
 /**
- * The four answers a parked session can be given. `allow_always` keeps a rule
- * for the rest of the session; `cancel` denies the request and ends the turn.
+ * The four answers an approval can be given. `allow_always` keeps a rule for
+ * the rest of the session; `cancel` denies the request and ends the turn of
+ * the agent that asked it.
  */
 export const ApprovalDecision = Schema.Literals(["allow", "allow_always", "deny", "cancel"]);
 
@@ -295,7 +296,7 @@ const defineOpenRequestFields = <const K extends string, F extends Schema.Struct
   detail: Schema.Struct(detail),
 });
 
-/** An approval a harness parked a session on, and the decisions it accepts. */
+/** An approval one agent of a session is parked on, and the decisions it accepts. */
 const defineApprovalRequest = <const K extends string, F extends Schema.Struct.Fields>(
   kind: K,
   detail: F,
@@ -339,7 +340,7 @@ const Question = Schema.Struct({
 });
 
 /**
- * Questions a harness parked a session on. A harness asks one to four
+ * Questions one agent of a session is parked on. A harness asks one to four
  * questions at a time, so the request holds a list. It accepts answers only,
  * never a decision. To turn the questions down, the user stops the turn, and
  * the request resolves as `cancel`.
@@ -407,8 +408,9 @@ export const QuestionAnswers = Schema.Record(
 export type QuestionAnswers = Schema.Schema.Type<typeof QuestionAnswers>;
 
 /**
- * The request a session is parked on, as the database row and the API hold it.
- * `request.opened` carries the same five shapes.
+ * A Request one agent of a session is parked on, as the database row and the
+ * API hold it. `request.opened` carries the same five shapes. A session can
+ * have several open at once, one or more per agent (spec 06 section 13.3).
  */
 export const OpenRequest = Schema.Union([
   CommandApproval,
@@ -589,16 +591,17 @@ const RuntimeError = defineEvent("runtime.error", {
 });
 
 /**
- * The session is parked: nothing more happens on this turn until a decision
- * arrives. The request is nested rather than spread across the event, so the
+ * An agent of the session is parked: nothing more happens on that agent's
+ * turn until a decision arrives. The request is nested rather than spread across the event, so the
  * row and the API hold exactly what arrived, whatever fields the event
  * envelope gains later.
  */
 const RequestOpened = defineEvent("request.opened", { ...attribution, request: OpenRequest });
 
 /**
- * The session is no longer parked, whatever ended it: the user's decision, an
- * interrupted turn, or the harness withdrawing the question.
+ * The agent is no longer parked on this Request, whatever ended it: the
+ * user's decision, an interrupted turn, or the harness withdrawing the
+ * question.
  */
 const RequestResolved = defineEvent("request.resolved", {
   ...attribution,
@@ -607,7 +610,8 @@ const RequestResolved = defineEvent("request.resolved", {
 });
 
 /**
- * The session is no longer parked because the user answered its question. It
+ * The agent is no longer parked on this Request, because the user answered
+ * its question. It
  * carries the answers rather than a decision, so the stream holds what the
  * user said.
  */
@@ -781,9 +785,9 @@ export const SessionInterrupt = Schema.Struct({
 export type SessionInterrupt = Schema.Schema.Type<typeof SessionInterrupt>;
 
 /**
- * Decides the approval the session is parked on. `requestId` is the adapter's
- * own id, sent back: the controller does not create ids for requests it did
- * not open. Like `SessionInterrupt`, there is no reply frame: the result
+ * Decides one approval an agent of the session is parked on. `requestId` is
+ * the adapter's own id, sent back: the controller does not create ids for
+ * requests it did not open. Like `SessionInterrupt`, there is no reply frame: the result
  * arrives in the session's own stream as `request.resolved`.
  */
 export const SessionRespondToApprovalRequest = Schema.Struct({
@@ -798,7 +802,7 @@ export type SessionRespondToApprovalRequest = Schema.Schema.Type<
 >;
 
 /**
- * Answers the questions the session is parked on. Like
+ * Answers the questions one agent of the session is parked on. Like
  * `SessionRespondToApprovalRequest`, there is no reply frame: the result
  * arrives in the session's own stream as `request.resolved`, with the
  * answers.

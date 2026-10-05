@@ -281,7 +281,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 3", () => {
+  it("is 3, the version that added subagents", () => {
     expect(PROTOCOL_VERSION).toBe(3);
   });
 });

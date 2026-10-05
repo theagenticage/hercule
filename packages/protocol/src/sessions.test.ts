@@ -542,7 +542,7 @@ describe("what the controller sends for a session", () => {
   });
 });
 
-describe("the frames that answer a parked session", () => {
+describe("the frames that answer a Request an agent is parked on", () => {
   it("decodes a frame that answers a question with answers keyed by header", () => {
     // A single-select question is answered with one string, a multi-select
     // question with a list.

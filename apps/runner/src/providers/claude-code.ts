@@ -724,9 +724,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           settle(buildPermissionResult("deny", []));
           return;
         }
-        // One request at a time. A second request would replace the card the
-        // user is looking at, so the second request is denied, with a message
-        // that tells the model to ask again once the first is answered.
+        // This adapter still holds one request at a time, so a second request
+        // is denied, with a message that tells the model to ask again once
+        // the first is answered. Reporting every request at once, each with
+        // its asking subagent, is the Claude subagents ticket (#436, spec 06
+        // section 13.3).
         if (held.park !== undefined) {
           settle({
             behavior: "deny",

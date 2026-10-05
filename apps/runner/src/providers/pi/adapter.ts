@@ -511,7 +511,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       sendDecision(held, dialog.id, "deny");
       warn(
         sessionId,
-        "pi asked for a second approval while the first was still open. Hercule handles one approval at a time, so the second was denied; pi can ask again later.",
+        "pi asked for a second approval while the first was still open. The pi adapter handles one approval at a time, so the second was denied; pi can ask again later.",
       );
       return;
     }
