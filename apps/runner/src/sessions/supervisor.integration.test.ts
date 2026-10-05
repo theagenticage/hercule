@@ -230,31 +230,27 @@ const buildConnection = (fake: Fake) => {
   const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
   const sent: Array<RunnerToController> = [];
-  const workspaces = makeWorkspaces({ storageDir: join(under, "storage") });
-  const socketPath = join(under, "daemon.sock");
-  const baseEnv = { PATH: "/usr/bin" };
-  // The real workspace steps, sending on the same list as the supervisor, so
-  // a test sees an agent step's result and the session's events in the order
-  // they would reach the controller.
-  const steps = makeWorkspaceSteps({
-    storageDir: join(under, "storage"),
-    workspaces,
-    socketPath,
-    baseEnv,
-  });
   const machine: Machine = {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
     binDir: join(under, "bin"),
     herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
-    baseEnv,
+    baseEnv: { PATH: "/usr/bin" },
     findBinary: (name) => `/usr/local/bin/${name}`,
-    workspaces,
-    socketPath,
-    runUnderWorkspaceLock: steps.runUnderWorkspaceLock,
+    workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
+    socketPath: join(under, "daemon.sock"),
   };
   const send = (frame: RunnerToController) => Effect.sync(() => void sent.push(frame));
+  // The real workspace steps, sending on the same list as the supervisor, so
+  // a test sees an agent step's result and the session's events in the order
+  // they would reach the controller.
+  const steps = makeWorkspaceSteps({
+    storageDir: join(under, "storage"),
+    workspaces: machine.workspaces,
+    socketPath: machine.socketPath,
+    baseEnv: machine.baseEnv,
+  });
   const scope = Effect.runSync(Scope.make());
   attachments.push(scope);
   Effect.runSync(steps.attachConnection(send).pipe(Scope.provide(scope)));

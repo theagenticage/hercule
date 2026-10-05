@@ -52,14 +52,7 @@ const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
 
 export const RUNNER_PING_INTERVAL: Duration.Duration = Duration.seconds(15);
 
-/**
- * Four missed intervals: one lost pong is a hiccup, four in a row means the runner is gone.
- *
- * The runner handles one connection's frames one at a time, so a pong waits
- * for whatever frame is ahead of it. Any wait inside a frame handler must stay
- * well under this limit, such as the runner's `BRANCH_SWITCH_WAIT` of 20
- * seconds for a session start.
- */
+/** Four missed intervals: one lost pong is a hiccup, four in a row means the runner is gone. */
 export const RUNNER_SILENCE_LIMIT: Duration.Duration = Duration.seconds(60);
 
 /** The ping interval and silence limit. Tests pass shorter values they can wait for. */

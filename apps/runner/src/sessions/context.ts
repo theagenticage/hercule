@@ -6,15 +6,12 @@
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import type { SessionStart } from "@hercule/protocol";
 import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 import { provisionUserMaterial } from "../user-material";
-import type { WorkspaceSteps } from "../workspace-steps";
 
 /** The facts about this machine that a session's context is built from. */
 export interface Machine {
@@ -36,8 +33,6 @@ export interface Machine {
   readonly workspaces: Workspaces;
   /** The socket the git credential helper connects to when it asks this runner for credentials. */
   readonly socketPath: string;
-  /** Runs work under the lock a workspace's action steps take, so their git and the work never overlap. */
-  readonly runUnderWorkspaceLock: WorkspaceSteps["runUnderWorkspaceLock"];
 }
 
 export interface Resolved {
@@ -129,22 +124,9 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
   });
 
 /**
- * How long a session start waits for an action step of its workspace to end
- * before it gives up switching the workspace's branch. The connection handles
- * a session start before its next frame, pings included, and the controller
- * gives up on a runner that has not answered a ping for 60 seconds
- * (`RUNNER_SILENCE_LIMIT` in the controller). An action step may run for ten
- * minutes, so waiting for it without a bound could make the controller end
- * every session on this runner.
- */
-const BRANCH_SWITCH_WAIT = Duration.seconds(20);
-
-/**
  * Returns the directory a session runs in, and its scratch directory if it has
  * one. Fails with a message when the workspace is not on this runner, when git
- * cannot switch to the requested branch, when an action step holds the
- * workspace for longer than `BRANCH_SWITCH_WAIT`, or when the filesystem
- * fails.
+ * cannot switch to the requested branch, or when the filesystem fails.
  *
  * A session without a workspace gets an empty scratch directory, not the
  * runner's own cwd, because every harness reads instruction files out of its
@@ -179,25 +161,17 @@ const placeSession = (
     if (branch !== undefined) {
       // Never force the switch: a forced switch can throw away the user's
       // uncommitted work, and losing that is worse than not starting the
-      // session. The switch takes the workspace's lock, so an action step's
-      // git cannot run in the checkout halfway through it. Uninterruptible,
-      // because an interrupted wait for git would let go of the lock while
-      // git still runs.
-      const switched = yield* machine.runUnderWorkspaceLock(
-        workspaceId,
-        BRANCH_SWITCH_WAIT,
-        Effect.uninterruptible(
-          Effect.promise(() =>
-            switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
-          ),
-        ),
+      // session.
+      //
+      // The switch does not wait for the lock that the workspace's action
+      // steps take. The runner handles a connection's frames one at a time,
+      // so a wait here would hold up every other frame. If a step's git runs
+      // in the checkout at the same moment, git's own index lock makes one of
+      // the two fail with an error (spec 07 section 4.4).
+      const switched = yield* Effect.promise(() =>
+        switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
       );
-      if (Option.isNone(switched)) {
-        return yield* Effect.fail(
-          `A workflow step held workspace ${workspaceId} for longer than ${Duration.format(BRANCH_SWITCH_WAIT)}, so the session could not switch it to branch ${branch}. Start the session again once the step has ended.`,
-        );
-      }
-      if (!switched.value.ok) return yield* Effect.fail(switched.value.stderr);
+      if (!switched.ok) return yield* Effect.fail(switched.stderr);
     }
     return { cwd: workspace.cwd, scratch: undefined };
   });

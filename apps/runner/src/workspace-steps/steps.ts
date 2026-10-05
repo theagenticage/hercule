@@ -147,21 +147,6 @@ export interface WorkspaceSteps {
    * delivers the input again later.
    */
   readonly forgetAgentStep: (key: WorkspaceStepKey) => void;
-  /**
-   * Runs `effect` while holding the lock of a workspace, so that no action
-   * step of that workspace runs git at the same time. A session start uses
-   * it to switch the workspace's branch.
-   *
-   * Waits at most `maxWait` for the lock. Returns none, and runs nothing,
-   * when the lock is still held after that. `maxWait` bounds only the wait:
-   * once `effect` has begun, it runs to its end. Fails with the error of
-   * `effect`.
-   */
-  readonly runUnderWorkspaceLock: <A, E>(
-    workspaceId: string,
-    maxWait: Duration.Duration,
-    effect: Effect.Effect<A, E>,
-  ) => Effect.Effect<Option.Option<A>, E>;
 }
 
 /** An action step this runner has started and not yet finished. */
@@ -248,12 +233,12 @@ export const makeWorkspaceSteps = (options: {
    */
   const settled = new Set<string>();
   /**
-   * One lock per workspace that has a step, or a session start's branch
-   * switch, waiting for its lock or holding it. The git work of one workspace
-   * runs one at a time, because two git processes in one checkout collide on
-   * `index.lock`. Steps of different workspaces run side by side.
+   * One lock per workspace that has a step waiting for its lock or holding
+   * it. The steps of one workspace run one at a time, because two git
+   * processes in one checkout collide on `index.lock`. Steps of different
+   * workspaces run side by side.
    *
-   * `users` counts what waits for the lock or holds it.
+   * `users` counts the steps that wait for the lock or hold it.
    */
   const locks = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>();
   let sending: Send | undefined;
@@ -597,25 +582,5 @@ export const makeWorkspaceSteps = (options: {
     forgetAgentStep: (key) => {
       agentSteps.delete(buildStepName(key));
     },
-
-    runUnderWorkspaceLock: (workspaceId, maxWait, effect) =>
-      Effect.suspend(() => {
-        let began = false;
-        const run = holdWorkspaceLock(
-          workspaceId,
-          Effect.suspend(() => {
-            began = true;
-            return Effect.asSome(effect);
-          }),
-        );
-        // Gives up only while the lock is still awaited. Once `effect` has
-        // begun, this never ends, so the race waits for `effect` instead of
-        // interrupting it halfway.
-        const giveUp = Effect.andThen(
-          Effect.sleep(maxWait),
-          Effect.suspend(() => (began ? Effect.never : Effect.succeedNone)),
-        );
-        return Effect.raceFirst(run, giveUp);
-      }),
   };
 };
