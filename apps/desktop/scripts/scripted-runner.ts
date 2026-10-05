@@ -729,7 +729,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 2 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 3 satisfies typeof PROTOCOL_VERSION,
             capabilities: [],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
