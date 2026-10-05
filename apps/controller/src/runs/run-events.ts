@@ -4,17 +4,11 @@
  * raises. The run engine writes them from the single place a run ends
  * (`writeRunEnding` in `engine.ts`), in the transaction that ends it.
  */
-import type {
-  EventId,
-  FailureReason,
-  NotificationSubject,
-  Run,
-  StepRecord,
-} from "@hercule/contract";
+import type { EventId, FailureReason, NotificationSubject, StepRecord } from "@hercule/contract";
 import type { PlatformEvent } from "../events";
 import type { CoreNotification, UnlessRaised } from "../notifications";
 import { TRIGGER_NOTIFICATION_QUIET_PERIOD } from "../workflows";
-import type { RunOutcome } from "./repository";
+import type { RunOutcome, StoredRun } from "./repository";
 
 /**
  * Builds the platform event for a run that ends with `outcome` at `at`,
@@ -23,7 +17,7 @@ import type { RunOutcome } from "./repository";
  * event has no `startedAt`.
  */
 export const buildRunEndedEvent = (
-  run: Run,
+  run: StoredRun,
   outcome: RunOutcome,
   at: string,
   actor: PlatformEvent["actor"],
@@ -78,6 +72,8 @@ const FAILURE_SENTENCES: Record<FailureReason, string> = {
   "iteration-limit": "An edge was followed as often as its limit allows.",
   "controller-error": "The controller could not carry out the run. Its log has the details.",
   "workspace-failed": "The run's workspace could not be set up.",
+  "schema-failure": "An agent step's turn ended without a value that matches its output schema.",
+  "session-failed": "An agent step's session failed before its turn ended.",
 };
 
 /** The outcome of a run that failed. */
@@ -88,7 +84,7 @@ type FailedOutcome = Extract<RunOutcome, { readonly status: "failed" }>;
  * the error of the step record that failed, or else the sentence for the
  * failure reason.
  */
-const describeRunFailure = (run: Run, outcome: FailedOutcome): string => {
+const describeRunFailure = (run: StoredRun, outcome: FailedOutcome): string => {
   if (outcome.failureReason === "validation-error") {
     return `The run could not start. ${outcome.failureMessage}`;
   }
@@ -109,7 +105,7 @@ const describeRunFailure = (run: Run, outcome: FailedOutcome): string => {
  * Builds the notification subject of the start trigger that started `run`,
  * or returns `undefined` for a run that no trigger started.
  */
-const buildStartingTriggerSubject = (run: Run): NotificationSubject | undefined =>
+const buildStartingTriggerSubject = (run: StoredRun): NotificationSubject | undefined =>
   run.origin.kind === "trigger" && run.workflowId !== null
     ? { kind: "trigger", workflowId: run.workflowId, triggerId: run.origin.triggerId }
     : undefined;
@@ -122,7 +118,7 @@ const buildStartingTriggerSubject = (run: Run): NotificationSubject | undefined 
  * one did, so the notification is listed with each.
  */
 export const buildRunFailedNotification = (
-  run: Run,
+  run: StoredRun,
   outcome: FailedOutcome,
   eventId: EventId,
 ): CoreNotification => {
@@ -153,7 +149,7 @@ export const buildRunFailedNotification = (
  * event. Each run still fails where the user can see it.
  */
 export const decideRunFailedUnlessRaised = (
-  run: Run,
+  run: StoredRun,
   outcome: FailedOutcome,
 ): UnlessRaised | undefined => {
   const trigger = buildStartingTriggerSubject(run);

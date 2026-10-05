@@ -78,7 +78,12 @@ export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
 
 export const Session = Schema.Struct({
   id: Id,
-  /** The opening prompt's first non-empty line, capped at 80 characters; set once and never rewritten. */
+  /**
+   * The session's title, capped at 80 characters, set once and never
+   * rewritten. For an agent step's session it is the run's workflow name and
+   * the step's id, as `<workflow name> · <step id>`. For any other session it
+   * is the opening prompt's first non-empty line.
+   */
   title: Schema.String,
   status: SessionStatus,
   /**
@@ -110,6 +115,13 @@ export const Session = Schema.Struct({
    * session. Kept after the conversation is deleted, as a record of origin.
    */
   conversationId: Schema.NullOr(Id),
+  /**
+   * The run whose agent step started this session; `null` for any other
+   * session. Kept after the run ends, as a record of origin.
+   */
+  runId: Schema.NullOr(Id),
+  /** The id, in that run's plan, of the agent step this session runs; `null` when `runId` is. */
+  stepId: Schema.NullOr(Schema.String),
   instanceId: Id,
   /** The runner the session started on. A session never moves to another runner. */
   runnerId: Id,
@@ -473,6 +485,8 @@ export const SessionFilter = Schema.Struct({
   permissionProfileId: Schema.optionalKey(Id),
   /** Only the sessions of this conversation. */
   conversationId: Schema.optionalKey(Id),
+  /** Only the sessions this run's agent steps started. */
+  runId: Schema.optionalKey(Id),
   /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
 });

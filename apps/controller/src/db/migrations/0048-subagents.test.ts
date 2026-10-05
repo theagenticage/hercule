@@ -17,7 +17,7 @@ import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
 /** The migrations before the one under test. */
-const BEFORE = migrations.filter(([id]) => id < 44);
+const BEFORE = migrations.filter(([id]) => id < 48);
 
 const at = "2026-10-01T00:00:00.000Z";
 

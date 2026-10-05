@@ -4,14 +4,16 @@
  *
  * A real fleet is needed because the credential under test is a session token,
  * and a session token is only ever minted in a start frame on the runner
- * socket.
+ * socket. The subscriptions a run holds for its signal triggers are the
+ * exception: only the user reads and cancels them here, so no fleet is
+ * started for them.
  *
  * What the event router does with a stored subscription is not here: this
  * suite runs no router.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import { del, get, post, readErrorBody } from "../http/testing";
+import { del, get, post, readErrorBody, type ServerHarness } from "../http/testing";
 import {
   spawnThreadWithGrants,
   spawnThreadUnder,
@@ -24,14 +26,17 @@ import {
   buildCreateStep,
   buildHeldAction,
   buildHeldStep,
+  buildLabelSignal,
   insertPendingRun,
+  LABEL_INPUT,
   RUN_WATCHER_GRANTS,
   startHeldRun,
   startRun,
+  startSentWorkflow,
   waitForRunToFinish,
   withRunFleet,
 } from "../runs/testing";
-import { createWorkflowOrFail } from "../workflows/testing";
+import { createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 
 /** Starting the fleet is the slow part of each case; the timeout allows three waits. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
@@ -109,10 +114,10 @@ interface EndRow {
  * subscription at all, and these tests are about the row the event router
  * reads.
  */
-const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRow>> =>
+const readEndRow = (harness: ServerHarness, id: string): Promise<ReadonlyArray<EndRow>> =>
   Effect.runPromise(
     Effect.orDie(
-      arranged.harness.sql<EndRow>`
+      harness.sql<EndRow>`
         SELECT ended_at, ended_reason, ended_actor FROM subscriptions
         WHERE id = unhex(replace(${id}, '-', ''))`,
     ),
@@ -414,7 +419,7 @@ describe("subscription.cancel", () => {
       const response = await cancelSubscription(arranged, subscriptionId, agent.token);
       expect(response.status, await response.clone().text()).toBe(200);
 
-      const rows = await readEndRow(arranged, subscriptionId);
+      const rows = await readEndRow(arranged.harness, subscriptionId);
       expect(rows).toHaveLength(1);
       expect(rows[0]!.ended_at).not.toBeNull();
       expect(rows[0]!.ended_reason).toBe("cancelled");
@@ -504,7 +509,43 @@ describe("whose subscription a session may cancel", () => {
       expect(await listPage(arranged, agent.token)).toEqual([]);
       // The user's stamp, not the holder's: the row records who ended the
       // subscription, not who was waiting on it.
-      expect((await readEndRow(arranged, subscriptionId))[0]!.ended_actor).toBe("user");
+      expect((await readEndRow(arranged.harness, subscriptionId))[0]!.ended_actor).toBe("user");
+    });
+  });
+});
+
+describe("a subscription a run holds", () => {
+  it("is listed for the run's holder, and refuses a cancel with invalid_state and stays live", async () => {
+    // The user is the only caller here, so no fleet is needed.
+    await withSetUpController(async ({ harness, base, token }) => {
+      const runId = await startSentWorkflow(base, token, {
+        definition: {
+          name: "Wait for a label",
+          inputs: [LABEL_INPUT],
+          triggers: [buildLabelSignal()],
+          steps: [buildCreateStep("open"), buildCreateStep("follow_up")],
+          edges: [{ from: "labeled", to: "follow_up" }],
+        },
+        inputs: { label: "triage" },
+      });
+      const listed = await get(base, `/api/v1/subscriptions?holder=run:${runId}`, token);
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      const { items } = (await listed.json()) as { items: ReadonlyArray<Subscription> };
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        target: { kind: "signal", triggerId: "labeled" },
+        holder: { kind: "run", id: runId },
+      });
+
+      const response = await del(base, `/api/v1/subscriptions/${items[0]!.id}`, token);
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(409);
+      expect(refused.code).toBe("invalid_state");
+      expect(refused.message).toContain("cancel the run instead");
+      expect(await readEndRow(harness, items[0]!.id)).toEqual([
+        { ended_at: null, ended_reason: null, ended_actor: null },
+      ]);
     });
   });
 });

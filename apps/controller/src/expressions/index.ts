@@ -33,9 +33,16 @@ import { Environment } from "@marcbachmann/cel-js";
  * usable answer. One type, because a caller does the same thing with every
  * case: refuse the save, or read the failure as a no-match and store the
  * message as the subscription's health.
+ *
+ * `isUnresolvedReference` is true when an evaluation failed only because the
+ * expression read a key that the context does not have, such as a step that
+ * has not run yet. A signal trigger's correlation is read against a run that
+ * is still running, so for it that case means "no match yet" and not a broken
+ * expression.
  */
 export class ExpressionError extends Schema.TaggedError<ExpressionError>()("ExpressionError", {
   message: Schema.String,
+  isUnresolvedReference: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 /**
@@ -205,6 +212,13 @@ const readSummary = (failure: unknown): string => {
   const summary = (failure as { readonly summary?: unknown } | null)?.summary;
   return shortenLibraryMessage(typeof summary === "string" ? summary : String(failure));
 };
+
+/**
+ * Returns whether an evaluator error is a read of a key the context does not
+ * have. The evaluator marks that error with the code `no_such_key`.
+ */
+const isMissingKeyFailure = (failure: unknown): boolean =>
+  (failure as { readonly code?: unknown } | null)?.code === "no_such_key";
 
 /** The summary the evaluator writes when a source is over a structural limit. */
 const OVER_LIMIT = /^Exceeded (\w+) \((\d+)\)/;
@@ -456,6 +470,7 @@ export const evaluateExpression = (
       catch: (failure) =>
         new ExpressionError({
           message: `that expression could not be evaluated: ${readSummary(failure)}`,
+          ...(isMissingKeyFailure(failure) ? { isUnresolvedReference: true } : {}),
         }),
     });
     const elapsed = performance.now() - startedAt;
@@ -653,20 +668,22 @@ export const renderTemplates = (
 };
 
 /**
- * Evaluates a start trigger's input mapping against an event's context
- * (`event`), and returns each input name with the JSON value of its
- * expression. Fails with `ExpressionError` for the first expression that
- * cannot be evaluated or returns a value with no JSON form; the message names
- * the input.
+ * Evaluates a trigger's mapping against an event's context (`event`), and
+ * returns each name with the JSON value of its expression. A start trigger
+ * maps the run's inputs and a signal trigger maps its outputs; `mappingTarget`
+ * says which, for the error message. Fails with `ExpressionError` for the first
+ * expression that cannot be evaluated or returns a value with no JSON form;
+ * the message names the input or the output.
  */
 export const evaluateMapping = (
   mapping: Readonly<Record<string, string>>,
   context: EvaluationContext,
+  mappingTarget: "input" | "output",
 ): Effect.Effect<Record<string, unknown>, ExpressionError> =>
   Effect.map(
     Effect.forEach(Object.entries(mapping), ([name, source]) =>
       Effect.gen(function* () {
-        const describeSite = (): string => `The expression for the input ${name}`;
+        const describeSite = (): string => `The expression for the ${mappingTarget} ${name}`;
         const value = yield* Effect.mapError(
           evaluateExpression(source, context),
           (error) => new ExpressionError({ message: `${describeSite()}: ${error.message}` }),

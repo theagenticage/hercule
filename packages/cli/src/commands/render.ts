@@ -7,10 +7,14 @@
  * tail the CLI accepts back as an argument.
  */
 import {
+  describeInputStatus,
   describeRunOrigin,
   describeStepDuration,
   findFailedEdge,
+  findStepLineKind,
   formatAge,
+  formatElapsed,
+  measureElapsed,
   describeResolution,
   describeTriggerOn,
   formatDescribeLine,
@@ -24,6 +28,7 @@ import {
   truncateText,
   formatIssue,
   isSchedule,
+  type Input,
   type Notification,
   type OpenRequest,
   type OperationId,
@@ -452,6 +457,13 @@ const renderTriggerList = (triggers: ReadonlyArray<Trigger>): ReadonlyArray<stri
 };
 
 /**
+ * Returns the lines of `input list`: the generic table, with each status in
+ * the words `describeInputStatus` gives it.
+ */
+const renderInputList = (inputs: ReadonlyArray<Input>): ReadonlyArray<string> =>
+  renderTable(inputs.map((input) => ({ ...input, status: describeInputStatus(input.status) })));
+
+/**
  * Returns the lines printed after `run start` and `run rerun`: the new run's
  * full id, and the command that subscribes to it. A caller who started a run
  * usually wants to know when it ends, and the subscription wakes it when the
@@ -517,13 +529,7 @@ const summarizeSubagent = (subagent: Subagent, now: number): Record<string, unkn
   // How long it ran, like a step's row in `run read`. A subagent lives within
   // one session's turn, so the time since it started would read "now" for
   // nearly every row.
-  took: describeStepDuration(
-    {
-      startedAt: subagent.startedAt,
-      ...(subagent.endedAt === undefined ? {} : { finishedAt: subagent.endedAt }),
-    },
-    now,
-  ),
+  took: formatElapsed(measureElapsed(subagent.startedAt, subagent.endedAt, now) ?? 0),
   description: subagent.description,
   activity: subagent.activity,
   result: subagent.result,
@@ -654,17 +660,22 @@ const renderRunOutput = (run: Run): ReadonlyArray<string> => {
 /**
  * Returns the table of a run's step records, one row per record. The
  * iteration column shows only when a step has more than one record, so a run
- * with no loops reads as before.
+ * with no loops reads as before. A signal's record has no duration, as on the
+ * run's page.
  */
-const renderStepTable = (steps: Run["steps"], now: number): ReadonlyArray<string> => {
-  const stepIds = new Set(steps.map((record) => record.stepId));
-  const hasRepeats = stepIds.size < steps.length;
+const renderStepTable = (run: Run, now: number): ReadonlyArray<string> => {
+  const stepIds = new Set(run.steps.map((record) => record.stepId));
+  const hasRepeats = stepIds.size < run.steps.length;
   return renderTable(
-    steps.map((record) => ({
+    run.steps.map((record) => ({
       step: record.stepId,
       ...(hasRepeats ? { iteration: record.iteration } : {}),
       status: record.status,
-      took: describeStepDuration(readTimestamps(record), now),
+      took: describeStepDuration(
+        readTimestamps(record),
+        findStepLineKind(run.plan, record.stepId),
+        now,
+      ),
       error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
     })),
   );
@@ -698,7 +709,7 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderRunOutput(run),
   "",
   "steps",
-  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run.steps, now)),
+  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run, now)),
 ];
 
 /**
@@ -796,6 +807,7 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
     renderTable((items as unknown as ReadonlyArray<Session>).map(summarizeSession)),
   "session.querySubagents": (items) =>
     renderSubagentList(items as unknown as ReadonlyArray<Subagent>),
+  "input.query": (items) => renderInputList(items as unknown as ReadonlyArray<Input>),
 };
 
 /**

@@ -1,10 +1,18 @@
 /**
  * The result file of each finished workspace step: how the step ended, kept
  * on disk so a start the controller sends again is answered with the same
- * result instead of running the action twice.
+ * result. Action steps and agent steps share this store:
+ *
+ * - for an action step, the file makes sure the action never runs twice;
+ * - for an agent step, the file keeps the result of a turn that ended while
+ *   the result could not reach the controller.
  *
  * The files live at `<storage>/step-results/<workspaceId>/<step>.json`,
- * outside every checkout, so a commit can never pick one up. They are deleted:
+ * outside every checkout, so a commit can never pick one up. An agent step
+ * whose session has no workspace keeps its file in
+ * `<storage>/step-results/.no-workspace/` instead. That name contains a dot,
+ * which a workspace id may not, so it can never be the directory of a real
+ * workspace. The files are deleted:
  *
  * - all at once, when their workspace is disposed;
  * - one by one, when a settle for the step arrives. The controller settles
@@ -16,7 +24,8 @@
  * sent: a result can be lost with the connection, and the controller then
  * asks again on reconnect. So a file stays until that settle arrives, or
  * until its workspace is disposed. The settle matters most for a primary,
- * which is never disposed.
+ * which is never disposed, and for a step with no workspace, which nothing
+ * else ever deletes.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -30,6 +39,13 @@ const decodeOutcome = Schema.decodeUnknownResult(WorkspaceStepOutcome);
 const encodeOutcome = Schema.encodeSync(WorkspaceStepOutcome);
 
 /**
+ * The directory, under the step results root, of the steps that ran with no
+ * workspace. A workspace id is a storage id, made only of letters, digits,
+ * `-` and `_`, so a name with a dot never collides with one.
+ */
+const NO_WORKSPACE_DIR = ".no-workspace";
+
+/**
  * Returns the step key as one name, `<runId>-<stepId>-<iteration>`. Run ids
  * are UUIDs, which all have the same length, so two different keys never give
  * the same name.
@@ -37,8 +53,17 @@ const encodeOutcome = Schema.encodeSync(WorkspaceStepOutcome);
 export const buildStepName = (key: WorkspaceStepKey): string =>
   `${key.runId}-${key.stepId}-${String(key.iteration)}`;
 
-const buildResultPath = (storageDir: string, workspaceId: string, key: WorkspaceStepKey): string =>
-  joinPath(buildStepResultsDir(storageDir, workspaceId), `${buildStepName(key)}.json`);
+/** Returns the directory of the step result files of one workspace, or of the steps with none. */
+const buildResultsDir = (storageDir: string, workspaceId: string | null): string =>
+  workspaceId === null
+    ? joinPath(buildStepResultsRoot(storageDir), NO_WORKSPACE_DIR)
+    : buildStepResultsDir(storageDir, workspaceId);
+
+const buildResultPath = (
+  storageDir: string,
+  workspaceId: string | null,
+  key: WorkspaceStepKey,
+): string => joinPath(buildResultsDir(storageDir, workspaceId), `${buildStepName(key)}.json`);
 
 /**
  * Returns how the step ended, or undefined when it has no readable result
@@ -47,7 +72,7 @@ const buildResultPath = (storageDir: string, workspaceId: string, key: Workspace
  */
 export const readStepResult = (
   storageDir: string,
-  workspaceId: string,
+  workspaceId: string | null,
   key: WorkspaceStepKey,
 ): WorkspaceStepOutcome | undefined => {
   let parsed: unknown;
@@ -67,12 +92,12 @@ export const readStepResult = (
  */
 export const writeStepResult = (
   storageDir: string,
-  workspaceId: string,
+  workspaceId: string | null,
   key: WorkspaceStepKey,
   outcome: WorkspaceStepOutcome,
 ): void => {
   const path = buildResultPath(storageDir, workspaceId, key);
-  mkdirSync(buildStepResultsDir(storageDir, workspaceId), { recursive: true, mode: 0o700 });
+  mkdirSync(buildResultsDir(storageDir, workspaceId), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporary, JSON.stringify(encodeOutcome(outcome)), { mode: 0o600, flag: "wx" });
@@ -85,17 +110,19 @@ export const writeStepResult = (
 
 /**
  * Deletes the step's result file, whichever workspace it is in. A settle names
- * only the step, not its workspace, so every workspace's directory is looked
- * in. Does nothing when there is no such file.
+ * only the step, not its workspace, so every directory under the root is
+ * looked in, the one for steps with no workspace included. Does nothing when
+ * there is no such file.
  */
 export const deleteStepResult = (storageDir: string, key: WorkspaceStepKey): void => {
-  let workspaceIds: ReadonlyArray<string>;
+  const root = buildStepResultsRoot(storageDir);
+  let directories: ReadonlyArray<string>;
   try {
-    workspaceIds = readdirSync(buildStepResultsRoot(storageDir));
+    directories = readdirSync(root);
   } catch {
     return;
   }
-  for (const workspaceId of workspaceIds) {
-    rmSync(buildResultPath(storageDir, workspaceId, key), { force: true });
+  for (const directory of directories) {
+    rmSync(joinPath(root, directory, `${buildStepName(key)}.json`), { force: true });
   }
 };

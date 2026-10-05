@@ -24,7 +24,7 @@ import { describe, expect, it } from "vitest";
 import { Duration } from "effect";
 import type { Run } from "@hercule/contract";
 import { del, post } from "../../http/testing";
-import { readRun, startSentWorkflow, waitForRun } from "../../runs/testing";
+import { readRun, startSentWorkflow, waitForRunTo } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS, type Arranged } from "../../sessions/testing";
 import {
   ageLeases,
@@ -92,8 +92,9 @@ const finishCommit = (
   });
 };
 
-const waitForRunTo = (arranged: Arranged, runId: string, status: Run["status"]): Promise<Run> =>
-  waitForRun(arranged.harness.base, arranged.token, runId, status, (run) => run.status === status);
+/** Waits until a run's status is `status`, and returns the run. */
+const waitForRunStatus = (arranged: Arranged, runId: string, status: Run["status"]): Promise<Run> =>
+  waitForRunTo(arranged, runId, status, (run) => run.status === status);
 
 const cancelRun = async (arranged: Arranged, runId: string, body: unknown): Promise<Run> => {
   const response = await post(
@@ -159,7 +160,7 @@ describe("the sweep on the workspaces of runs", () => {
             status: "completed",
             output: { sha: "abc123", branch: `hercule/run-${completing}`, committed: true },
           });
-          const completed = await waitForRunTo(arranged, completing, "completed");
+          const completed = await waitForRunStatus(arranged, completing, "completed");
           expect(completed).not.toHaveProperty("workspaceKeptUntil");
 
           // Once a sweep has deleted the completed run's workspace, the
@@ -219,7 +220,7 @@ describe("the sweep on the workspaces of runs", () => {
             code: "action_failed",
             message: "nothing to commit",
           });
-          const failed = await waitForRunTo(arranged, failing, "failed");
+          const failed = await waitForRunStatus(arranged, failing, "failed");
 
           const keeping = await startCommitRun(arranged, repoId);
           const keptWorkspace = await readyWorkspaceOf(arranged, keeping);
@@ -271,7 +272,7 @@ describe("the sweep on the workspaces of runs", () => {
             code: "action_failed",
             message: "nothing to commit",
           });
-          await waitForRunTo(arranged, failing, "failed");
+          await waitForRunStatus(arranged, failing, "failed");
 
           // A thread opened in the failed run's workspace, to look at what it left.
           const thread = await spawnThread(arranged, { kind: "existing", workspaceId }, 1);

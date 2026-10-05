@@ -30,6 +30,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
 import { VERSION } from "@hercule/home/version";
 import {
+  AGENT_STEPS_CAPABILITY,
   ControllerToRunner,
   PeerVersion,
   PROTOCOL_VERSION,
@@ -65,7 +66,8 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import type { Supervising } from "./sessions";
 import { reportWatermark } from "./watermark";
-import { WORKSPACE_ACTION_IDS, type WorkspaceSteps } from "./workspace-actions";
+import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
+import type { WorkspaceSteps } from "./workspace-steps";
 import type { Workspaces } from "./workspaces";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -78,10 +80,13 @@ const NONCE_BYTES = 16;
  * - one for each workspace action its build implements. The controller pins a
  *   run only to a runner that lists every workspace action in the run's plan.
  * - `LOGIN_ENDED_CAPABILITY`: this runner reports the end of a device login.
+ * - `AGENT_STEPS_CAPABILITY`: this runner runs an agent step's turn, sends
+ *   how it ended, and answers a start sent again for the step.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
+  AGENT_STEPS_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -345,11 +350,12 @@ export const connect = (
       };
     };
 
-    // The connection gives the supervisor a way to send frames and the paths
-    // this machine resolved. The sessions themselves belong to the process,
-    // not to this connection.
+    // The connection gives the supervisor a way to send frames, the paths
+    // this machine resolved and the workspace steps. The sessions themselves
+    // belong to the process, not to this connection.
     const supervisor = options.sessions.forConnection({
       send: (frame) => write(encodeFrameText(frame)),
+      workspaceSteps: options.workspaceSteps,
       machine: {
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
@@ -692,8 +698,16 @@ export const connect = (
             // A git process is waiting for this response. Nothing is kept after
             // it is delivered.
             return yield* Effect.sync(() => options.credentials.deliver(message));
-          // A step runs in a fiber of its own, so these return at once.
           case "workspaceStepStart":
+            // A request for an agent step's result waits in its session's
+            // lane, behind the session start or input that carries the step's
+            // prompt, so it is answered only once the harness has taken or
+            // refused that prompt. It never overtakes the prompt.
+            if (message.kind === "agent") {
+              return queueSessionWork(message.sessionId, options.workspaceSteps.start(message));
+            }
+            // An action step runs in a fiber of its own, so this returns at
+            // once.
             return yield* options.workspaceSteps.start(message);
           case "workspaceStepSettle":
             return yield* options.workspaceSteps.settle(message);

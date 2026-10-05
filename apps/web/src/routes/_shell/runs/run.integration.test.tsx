@@ -11,11 +11,17 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describeActor, toIdTail } from "@hercule/client-core";
-import { buildCheckout, buildRunner, buildWorkspace } from "@hercule/client-core/threads/testing";
+import {
+  buildCheckout,
+  buildRunner,
+  buildSession,
+  buildWorkspace,
+} from "@hercule/client-core/threads/testing";
 import type {
   Run,
   RunSummary,
   RunnerDetail,
+  Session,
   StepStatus,
   WorkflowDefinition,
   Workspace,
@@ -118,6 +124,7 @@ const RUNNING_RUN: Run = {
   plan: PLAN,
   inputs: { title: "Fix login" },
   origin: { kind: "manual", actor: "user" },
+  subscriptions: [],
   status: "running",
   steps: [
     CREATE_DONE,
@@ -317,6 +324,110 @@ const EDGE_EXPRESSION_ERROR_RUN: Run = {
   edgeTraversals: [0, 1, 1, 0, 0, 0, 0],
 };
 
+const AGENT_ID = "0199c0ff-8888-7000-8000-000000000001";
+const IMPLEMENT_SESSION_ID = "0199c0ff-9999-7000-8000-00000000a11c";
+
+/** The correlation of both signal triggers: the pull request `open_pr` opened. */
+const ON_THE_PULL_REQUEST = {
+  event: "event.payload.prNumber",
+  run: "steps.open_pr.output.prNumber",
+} as const;
+
+/**
+ * A plan with an agent step and two signal triggers: the agent step
+ * `implement` makes a change, and `open_pr` opens a pull request for it.
+ * When the checks on that pull request fail, `checks_failed` sends the run
+ * back to `implement`; when it merges, `pr_merged` leads to `done`, which
+ * ends the run.
+ */
+const SIGNAL_PLAN: WorkflowDefinition = {
+  name: WORKFLOW_NAME,
+  triggers: [
+    {
+      id: "checks_failed",
+      kind: "signal",
+      on: { kind: "github.pr.checks-completed", connectionId: "any" },
+      correlation: ON_THE_PULL_REQUEST,
+    },
+    {
+      id: "pr_merged",
+      kind: "signal",
+      on: { kind: "github.pr.merged", connectionId: "any" },
+      correlation: ON_THE_PULL_REQUEST,
+    },
+  ],
+  steps: [
+    { id: "implement", kind: "agent", agent: AGENT_ID, prompt: "Fix the login bug.", entry: true },
+    { id: "open_pr", kind: "action", action: "github.pr.open" },
+    { id: "done", kind: "action", action: "task.update", terminal: true },
+  ],
+  edges: [
+    { from: "implement", to: "open_pr" },
+    { from: "checks_failed", to: "implement", maxTraversals: 3 },
+    { from: "pr_merged", to: "done" },
+  ],
+};
+
+/** What `checks_failed` holds each time it fires: the checks' verdict on the pull request. */
+const CHECKS_FAILED_OUTPUT = { conclusion: "failure", prNumber: 42 };
+
+/** Returns the records of `implement` then `open_pr` running for the `iteration`th time. */
+const listImplementRecords = (iteration: number) => {
+  const from = 100 * (iteration - 1);
+  return [
+    { ...completeStep("implement", iteration, from, from + 60), sessionId: IMPLEMENT_SESSION_ID },
+    { ...completeStep("open_pr", iteration, from + 61, from + 62), output: { prNumber: 42 } },
+  ];
+};
+
+/** Returns the record of `checks_failed` firing for the `iteration`th time. */
+const fireChecksFailed = (iteration: number) =>
+  ({
+    stepId: "checks_failed",
+    iteration,
+    status: "completed",
+    startedAt: addSeconds(T0, 100 * iteration - 10),
+    finishedAt: addSeconds(T0, 100 * iteration - 10),
+    output: CHECKS_FAILED_OUTPUT,
+  }) as const;
+
+/**
+ * The signal run after the checks failed twice: `implement` and `open_pr`
+ * ran three times, and nothing runs now. The run waits for the checks to
+ * fail again or for the pull request to merge.
+ */
+const SIGNAL_WAITING_RUN: Run = {
+  ...RUNNING_RUN,
+  id: "0199c0ff-2222-7000-8000-000000000021",
+  plan: SIGNAL_PLAN,
+  inputs: {},
+  steps: [
+    ...listImplementRecords(1),
+    fireChecksFailed(1),
+    ...listImplementRecords(2),
+    fireChecksFailed(2),
+    ...listImplementRecords(3),
+  ],
+  edgeTraversals: [3, 2, 0],
+};
+
+/**
+ * The session `implement` drives, across all three of its records. The
+ * builder's placeholder ids are replaced, because the client decodes the
+ * session list, and an id must be a UUID.
+ */
+const IMPLEMENT_SESSION = buildSession({
+  id: IMPLEMENT_SESSION_ID,
+  permissionProfileId: "0199c0ff-aaaa-7000-8000-000000000001",
+  instanceId: "0199c0ff-bbbb-7000-8000-000000000001",
+  runnerId: "0199c0ff-cccc-7000-8000-000000000001",
+  title: `${WORKFLOW_NAME} · implement`,
+  status: "idle",
+  agentId: AGENT_ID,
+  runId: SIGNAL_WAITING_RUN.id,
+  stepId: "implement",
+});
+
 /* ------------------------------------------------------------------------ */
 /* The stub controller.                                                      */
 /* ------------------------------------------------------------------------ */
@@ -349,23 +460,29 @@ const WORKFLOW_DELETED = {
  * read only to learn whether it still exists.
  * - `reruns` are the runs that re-ran it, newest first, which the run list
  *   returns for `originalRunId`. By default there are none.
+ * - `sessions` are the sessions its agent steps started, which the session
+ *   list returns for `runId`. By default there are none.
  * - `overrides` replaces the handler of a route, or adds a route.
  *
  * Returns the app, the stubbed API, and `hold`, which replaces the run the
- * controller holds from now on, and `holdReruns`, which replaces its re-runs.
+ * controller holds from now on, `holdReruns`, which replaces its re-runs, and
+ * `holdSessions`, which replaces its sessions.
  */
 const openRunPage = async (
   run: Run,
   {
     reruns = [],
+    sessions = [],
     overrides = {},
   }: {
     readonly reruns?: readonly RunSummary[];
+    readonly sessions?: readonly Session[];
     readonly overrides?: Readonly<Record<string, Handler>>;
   } = {},
 ) => {
   let held = run;
   let heldReruns = reruns;
+  let heldSessions = sessions;
   const api = stubApi({
     "GET /api/v1/setup": { body: { complete: true } },
     "GET /api/v1/settings": {
@@ -388,6 +505,11 @@ const openRunPage = async (
         items: new URLSearchParams(call.search).get("originalRunId") === held.id ? heldReruns : [],
       },
     }),
+    "GET /api/v1/sessions": (call) => ({
+      body: {
+        items: new URLSearchParams(call.search).get("runId") === held.id ? heldSessions : [],
+      },
+    }),
     ...overrides,
   });
   const app = await renderApp({ path: `/runs/${run.id}`, api: api.fetch, token: "held" });
@@ -399,6 +521,9 @@ const openRunPage = async (
     },
     holdReruns: (next: readonly RunSummary[]): void => {
       heldReruns = next;
+    },
+    holdSessions: (next: readonly Session[]): void => {
+      heldSessions = next;
     },
   };
 };
@@ -586,6 +711,11 @@ describe("A run's page > the steps", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
     const start = getStepRow("start");
     expect(readStatusWords(start)).toEqual(["failed"]);
     expect(readPageText(start)).toContain(STEP_ERROR_MESSAGE);
+    // Only the error's code takes the fail hue; its sentence stays muted.
+    expect(within(start).getByText("not_found").className).toContain("text-fail");
+    expect(within(start).getByText(new RegExp(STEP_ERROR_MESSAGE)).className).not.toContain(
+      "text-fail",
+    );
   });
 
   it("shows a step's output only once its row is expanded", async () => {
@@ -810,6 +940,185 @@ describe("A run's page > routing in the steps", { timeout: GRAPH_TEST_TIMEOUT_MS
       expect(getStepsRegion().querySelector('svg[data-mark="skipped"]')).not.toBeNull();
     });
     expect(readPageText(getStepsRegion()).toLowerCase()).toMatch(/\bskipped\b/);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Agent steps and signal triggers.                                         */
+/* ------------------------------------------------------------------------ */
+
+describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
+  /** Returns the links to a session's thread inside `element`. */
+  const listSessionLinks = (element: HTMLElement): readonly HTMLElement[] =>
+    within(element)
+      .queryAllByRole("link")
+      .filter((link) => link.getAttribute("href")?.startsWith("/threads/") === true);
+  /** The tail of the id of the session `implement` drives, which names the session on its line. */
+  const SESSION_TAIL = toIdTail(IMPLEMENT_SESSION_ID);
+
+  it("links each record of an agent step to its session, named by the tail of its id, with its status on the newest record", async () => {
+    await openRunPage(SIGNAL_WAITING_RUN, { sessions: [{ ...IMPLEMENT_SESSION, status: "busy" }] });
+    await findPageHeader();
+
+    const rows = listStepRows("implement");
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(readPageText(row)).toContain("Agent step");
+      const [link, ...others] = listSessionLinks(row);
+      expect(others).toEqual([]);
+      expect(link?.textContent).toBe(SESSION_TAIL);
+      expect(link?.getAttribute("href")).toBe(`/threads/${IMPLEMENT_SESSION_ID}`);
+    }
+    // The status is the session's now, so a record that has ended does not read "busy".
+    const [first, second, newest] = rows;
+    expect(readPageText(first)).toContain(`Session ${SESSION_TAIL}`);
+    expect(readPageText(first)).not.toContain(`Session ${SESSION_TAIL} ·`);
+    expect(readPageText(second)).not.toContain(`Session ${SESSION_TAIL} ·`);
+    expect(readPageText(newest)).toContain(`Session ${SESSION_TAIL} · busy`);
+    // An action step's row and a signal's row have no session.
+    expect(listSessionLinks(listStepRows("open_pr")[0]!)).toEqual([]);
+    expect(listSessionLinks(listStepRows("checks_failed")[0]!)).toEqual([]);
+  });
+
+  it("shows the same session line on the timeline", async () => {
+    const user = userEvent.setup();
+    await openRunPage(SIGNAL_WAITING_RUN, { sessions: [IMPLEMENT_SESSION] });
+    await findPageHeader();
+
+    await user.click(screen.getByRole("radio", { name: "Timeline" }));
+
+    await waitFor(() => {
+      expect(listSessionLinks(getStepsRegion())).toHaveLength(3);
+    });
+    expect(readPageText(getStepsRegion())).toContain(`Session ${SESSION_TAIL} · idle`);
+  });
+
+  it("links a session it has not read, with no status", async () => {
+    await openRunPage(SIGNAL_WAITING_RUN);
+    await findPageHeader();
+
+    const row = listStepRows("implement").at(-1)!;
+    const [link] = listSessionLinks(row);
+    expect(link?.textContent).toBe(SESSION_TAIL);
+    expect(link?.getAttribute("href")).toBe(`/threads/${IMPLEMENT_SESSION_ID}`);
+    expect(readPageText(row)).not.toContain(`Session ${SESSION_TAIL} ·`);
+  });
+
+  it("says a queued session is queued, and that it waits for its runner to free a session slot", async () => {
+    const runnerId = IMPLEMENT_SESSION.runnerId;
+    await openRunPage(SIGNAL_WAITING_RUN, {
+      sessions: [{ ...IMPLEMENT_SESSION, status: "queued" }],
+      overrides: {
+        [`GET /api/v1/runners/${runnerId}`]: {
+          body: {
+            ...buildRunner(runnerId, "mac-mini"),
+            negotiatedCapabilities: null,
+            protocolVersion: null,
+          } satisfies RunnerDetail,
+        },
+      },
+    });
+    await findPageHeader();
+
+    const row = listStepRows("implement").at(-1)!;
+    expect(readPageText(row)).toContain(`Session ${SESSION_TAIL} · queued`);
+    await waitFor(() => {
+      expect(readPageText(row)).toContain("Waiting for runner mac-mini to free a session slot");
+    });
+    // An earlier record of the session has ended, so it does not wait.
+    expect(readPageText(listStepRows("implement")[0])).not.toContain("Waiting for runner");
+  });
+
+  it("updates the session line live when the session changes", async () => {
+    const { live, holdSessions } = await openRunPage(SIGNAL_WAITING_RUN, {
+      sessions: [IMPLEMENT_SESSION],
+    });
+    await findPageHeader();
+
+    holdSessions([{ ...IMPLEMENT_SESSION, status: "busy" }]);
+    await waitFor(() => {
+      expect(live.topics()).toContain("session");
+    });
+    act(() => {
+      live.push("session", { _tag: "invalidate", ids: [IMPLEMENT_SESSION_ID], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(readPageText(listStepRows("implement").at(-1))).toContain(
+        `Session ${SESSION_TAIL} · busy`,
+      );
+    });
+  });
+
+  it("says which signals a running run with nothing left to run waits on, only their ids in the live hue", async () => {
+    await openRunPage(SIGNAL_WAITING_RUN, { sessions: [IMPLEMENT_SESSION] });
+
+    const header = await findPageHeader();
+    expect(readPageText(header)).toMatch(
+      /running [^·]+·waiting on checks_failed or pr_merged·started by/,
+    );
+    for (const signalId of ["checks_failed", "pr_merged"]) {
+      expect(within(header).getByText(signalId).className).toContain("text-live");
+    }
+    // The words around the ids stay in the header's own colour.
+    expect(within(header).getByText(/waiting on/).className).not.toContain("text-live");
+  });
+
+  it("says nothing of signals while a step still runs, or once the run has ended", async () => {
+    const running: Run = {
+      ...SIGNAL_WAITING_RUN,
+      steps: [
+        ...SIGNAL_WAITING_RUN.steps.slice(0, -1),
+        {
+          stepId: "open_pr",
+          iteration: 3,
+          status: "running",
+          startedAt: addSeconds(T0, 261),
+        },
+      ],
+    };
+    const { hold, live } = await openRunPage(running);
+    expect(readPageText(await findPageHeader())).not.toContain("waiting on");
+
+    hold({ ...SIGNAL_WAITING_RUN, status: "cancelled", finishedAt: addSeconds(T0, 300) });
+    await pushRunChange(live, SIGNAL_WAITING_RUN.id);
+    await waitFor(() => {
+      expect(readPageText(screen.getByRole("main"))).toMatch(/cancelled after/);
+    });
+    expect(readPageText(await findPageHeader())).not.toContain("waiting on");
+  });
+
+  it("shows each time a signal fired as a row labelled Signal that opens to what it holds", async () => {
+    const user = userEvent.setup();
+    await openRunPage(SIGNAL_WAITING_RUN, { sessions: [IMPLEMENT_SESSION] });
+    await findPageHeader();
+
+    const rows = listStepRows("checks_failed");
+    expect(rows).toHaveLength(2);
+    expect(readPageText(rows[0])).toContain("Signal");
+    expect(readStatusWords(rows[0]!)).toEqual(["completed"]);
+    // A signal fires at one moment, so its row shows no duration.
+    expect(readPageText(rows[0])).not.toMatch(/\dms\b/);
+    // A signal that has not fired has no row: it is not a step the run failed to reach.
+    expect(listStepRows("pr_merged")).toEqual([]);
+
+    expect(readPageText(rows[0])).not.toContain("failure");
+    await user.click(within(rows[0]!).getByRole("button", { expanded: false }));
+
+    await waitFor(() => {
+      expect(readPageText(listStepRows("checks_failed")[0])).toContain("failure");
+    });
+  });
+
+  it("counts on the graph how often a signal fired", async () => {
+    await openRunPage(SIGNAL_WAITING_RUN, { sessions: [IMPLEMENT_SESSION] });
+
+    const graph = await findRunGraph();
+    await waitFor(() => {
+      expect(readPageText(getGraphCard(graph, "implement"))).toMatch(/×\s?3/);
+    });
+    expect(readPageText(graph)).toMatch(/checks_failed\s?×\s?2/);
+    expect(readPageText(graph)).not.toMatch(/pr_merged\s?×/);
   });
 });
 
@@ -1110,6 +1419,7 @@ describe("A run's page > a run a trigger started", () => {
     plan: PLAN,
     inputs: {},
     origin: { kind: "trigger", triggerId: "on_issue", eventId: 43 },
+    subscriptions: [],
     status: "failed",
     failureReason: "validation-error",
     failureMessage: "The input title is required, and the trigger's mapping gave it no value.",

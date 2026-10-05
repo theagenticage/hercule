@@ -6,7 +6,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Schema } from "effect";
-import { SubscriptionTargetFromShorthand } from "./subscription";
+import {
+  SubscriptionCreateInput,
+  SubscriptionHolderFromShorthand,
+  SubscriptionTargetFromShorthand,
+} from "./subscription";
 
 const decode = (input: string): Exit.Exit<unknown, unknown> =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(SubscriptionTargetFromShorthand)(input));
@@ -58,5 +62,35 @@ describe("SubscriptionTargetFromShorthand", () => {
 
   it("rejects a run target whose id is not a run id, because runs exist and their ids are UUIDs", () => {
     expect(readRefusal("run:r_3")).toMatch(/UUID[\s\S]*runId/);
+  });
+});
+
+describe("SubscriptionTarget as subscription.create reads it", () => {
+  it("refuses a signal trigger target, because only a run opens a subscription on its own signal trigger", () => {
+    const create = Effect.runSyncExit(
+      Schema.decodeUnknownEffect(SubscriptionCreateInput)({
+        target: { kind: "signal", triggerId: "approved" },
+      }),
+    );
+    expect(Exit.isFailure(create)).toBe(true);
+    expect(readRefusal("signal:approved")).toContain("not a valid Subscription Target");
+  });
+});
+
+describe("SubscriptionHolderFromShorthand", () => {
+  const decodeHolder = (input: string): Exit.Exit<unknown, unknown> =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(SubscriptionHolderFromShorthand)(input));
+
+  it("decodes a session holder and a run holder", () => {
+    expect(decodeHolder(`session:${RUN_ID}`)).toEqual(
+      Exit.succeed({ kind: "session", id: RUN_ID }),
+    );
+    expect(decodeHolder(`run:${RUN_ID}`)).toEqual(Exit.succeed({ kind: "run", id: RUN_ID }));
+  });
+
+  it("refuses any other prefix, and names both forms it takes", () => {
+    const exit = decodeHolder(`agent:${RUN_ID}`);
+    if (Exit.isSuccess(exit)) throw new Error("agent: decoded as a holder");
+    expect(Cause.pretty(exit.cause)).toContain("write session:<session id> or run:<run id>");
   });
 });

@@ -509,6 +509,18 @@ describe("what the controller sends for a session", () => {
     expect(decode(SessionStart, omitKey(start, "requestId"))._tag).toBe("Failure");
   });
 
+  it("keeps the step key on the input a start carries", () => {
+    // The first prompt of an agent step's session rides on its start, so the
+    // runner learns the turn is the step's from the start's input.
+    const step = {
+      runId: "0199e0e7-0000-7000-8000-000000000001",
+      stepId: "implement",
+      iteration: 1,
+    };
+    const stepStart = { ...start, input: { ...start.input, step } };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(stepStart))).toEqual(stepStart);
+  });
+
   it("requires a non-empty session token on every start", () => {
     // The token is the session's own credential on the public API, and the
     // frame is the only place its plaintext ever appears: a start without one

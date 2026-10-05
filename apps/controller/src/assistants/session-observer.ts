@@ -25,14 +25,12 @@
  * with the session that wrote it, and a notice with the system.
  */
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderEvent } from "@hercule/protocol";
 import type { AssistantReply } from "@hercule/contract";
 import { buildSessionStamp } from "../actor";
-import type { ConversationMessages } from "../conversations";
 import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
 import {
   buildInterruptedText,
@@ -42,7 +40,11 @@ import {
   makeNoticeWriter,
 } from "./notices";
 
-const make = Effect.gen(function* () {
+/**
+ * Builds the assistants domain's observer. It is exported so boot can combine
+ * it with the other domains' observers (see `combineSessionObservers`).
+ */
+export const makeAssistantSessionObserver = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const { conversationMessages, readAnsweredConversation, appendNotice } = yield* makeNoticeWriter;
 
@@ -176,14 +178,3 @@ const make = Effect.gen(function* () {
       }),
   });
 });
-
-/**
- * Provides the sessions domain's `SessionObserver`: an assistant's sessions
- * write their replies and notices into its conversation. Boot provides it to
- * the session service.
- */
-export const AssistantSessionObserverLayer: Layer.Layer<
-  SessionObserver,
-  never,
-  SqlClient.SqlClient | ConversationMessages
-> = Layer.effect(SessionObserver)(make);

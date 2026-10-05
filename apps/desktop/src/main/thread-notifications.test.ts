@@ -114,6 +114,8 @@ const PARKED_ON_QUESTION: Session = {
   permissionProfileId: "profile-1",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: "instance-1",
   runnerId: "runner-1",
   workspaceId: null,

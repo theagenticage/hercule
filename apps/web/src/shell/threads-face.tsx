@@ -63,6 +63,8 @@ export function ThreadsFace({
 }): JSX.Element {
   useLiveInvalidation(live, queryClient, "session");
   useLiveInvalidation(live, queryClient, "assistant");
+  // A row on a runner that goes offline ends in "offline" instead of its age.
+  useLiveInvalidation(live, queryClient, "runner");
   // Ages are computed from a clock that ticks every minute, not from the time
   // of the last refetch, so "2m" becomes "3m" without new data.
   const now = useMinuteClock();
@@ -316,6 +318,7 @@ function WorkspaceLane({
           key={row.id}
           mark={row.mark}
           title={row.title}
+          end={row.end}
           age={formatAge(row.activityAt, now)}
           secondLine={row.secondLine}
           sessionId={row.id}

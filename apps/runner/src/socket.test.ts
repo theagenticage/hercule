@@ -16,6 +16,7 @@ import { join as joinPath } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
 import {
+  AGENT_STEPS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
   RunnerToController,
@@ -37,6 +38,8 @@ import {
   type SessionInputResult,
   type SessionStart,
   type SessionStop,
+  type WorkspaceStepResult,
+  type WorkspaceStepStart,
 } from "@hercule/protocol";
 import {
   ControllerNotRecognised,
@@ -50,7 +53,7 @@ import { makeCredentialRelay } from "./credentials";
 import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
 import { makeSupervising } from "./sessions/supervisor";
-import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-actions";
+import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
 
 /** This machine's facts. These tests are not about the probe. */
@@ -555,13 +558,14 @@ describe("which controller a runner accepts", () => {
     await delay(Duration.toMillis(DEADLINE) * 4);
     expect(settled, "the runner ended a connection it should have kept").toBeUndefined();
     // The hello lists the workspace actions this build implements, so the
-    // controller pins a run that commits only to a runner that can, and the
-    // frame that reports the end of a device login.
+    // controller pins a run that commits only to a runner that can, the frame
+    // that reports the end of a device login, and agent steps.
     expect(stub.received[0]).toMatchObject({
       _tag: "runnerHello",
       capabilities: expect.arrayContaining([
         "action:git.commit",
         LOGIN_ENDED_CAPABILITY,
+        AGENT_STEPS_CAPABILITY,
       ]) as unknown,
     });
 
@@ -838,6 +842,8 @@ describe("session frames on one connection", () => {
     readonly inputs: Array<readonly [string, string]>;
     /** Every stop the adapter was asked for, with its reason. */
     readonly stops: Array<readonly [string, ExitReason]>;
+    /** The id of the turn each input opened, in order. */
+    readonly turns: Array<string>;
     /** The gate each session's `startSession` waits at, if it has one. */
     readonly startGates: Map<string, Gate>;
     /** A gate the first `listSessions` call waits at. That call is the start's own check, before the session has an entry. */
@@ -848,6 +854,8 @@ describe("session frames on one connection", () => {
      * the supervisor learns the harness is gone only from its exit event.
      */
     stopGate: Gate | undefined;
+    /** Publishes an event as if the harness had reported it. */
+    readonly emit: (event: ProviderEvent) => void;
   }
 
   const createFake = (): Fake => {
@@ -855,10 +863,12 @@ describe("session frames on one connection", () => {
     const events = Effect.runSync(PubSub.unbounded<ProviderEvent>());
     const fake: Fake = {
       inputs: [],
+      turns: [],
       stops: [],
       startGates: new Map(),
       listGate: undefined,
       stopGate: undefined,
+      emit: (event) => PubSub.publishUnsafe(events, event),
       adapter: {
         providerId: PROVIDER,
         binaryName: "fake-harness",
@@ -883,8 +893,10 @@ describe("session frames on one connection", () => {
           ),
         sendInput: (sessionId, input) =>
           Effect.sync(() => {
+            const turnId = crypto.randomUUID();
             fake.inputs.push([sessionId, input.text]);
-            return { turnId: crypto.randomUUID(), delivery: "opened" as const };
+            fake.turns.push(turnId);
+            return { turnId, delivery: "opened" as const };
           }),
         interrupt: () => Effect.void,
         respondToApprovalRequest: () => Effect.void,
@@ -947,6 +959,53 @@ describe("session frames on one connection", () => {
       (frame): frame is SessionInputResult => frame._tag === "sessionInputResult",
     );
 
+  const listStepResults = (stub: Stub): ReadonlyArray<WorkspaceStepResult> =>
+    stub.received.filter(
+      (frame): frame is WorkspaceStepResult => frame._tag === "workspaceStepResult",
+    );
+
+  const STEP = { runId: "0199e0e7-0000-7000-8000-0000000000d1", stepId: "review", iteration: 1 };
+
+  /** The input that carries the agent step's prompt to session A. */
+  const STEP_INPUT: SessionInput = {
+    _tag: "sessionInput",
+    requestId: "0199e0e7-0000-7000-8000-0000000000c2",
+    sessionId: SESSION_A,
+    input: { text: "Review the change.", step: STEP },
+  };
+
+  /** The controller's request for the agent step's result. */
+  const STEP_RESULT_REQUEST: WorkspaceStepStart = {
+    _tag: "workspaceStepStart",
+    kind: "agent",
+    ...STEP,
+    sessionId: SESSION_A,
+    workspaceId: null,
+  };
+
+  /** Ends a turn of session A the way the harness reports it. */
+  const completeTurn = (fake: Fake, turnId: string): void =>
+    fake.emit({
+      _tag: "turn.completed",
+      eventId: crypto.randomUUID(),
+      sessionId: SESSION_A,
+      at: new Date().toISOString(),
+      turnId,
+      state: "completed",
+    });
+
+  /**
+   * Sends a start of session A whose harness is held at `gate`, then the
+   * step's input, which waits in the session's lane behind the start. The
+   * step is not recorded until the start lets the input through.
+   */
+  const sendWaitingStepInput = async (stub: Stub, fake: Fake, gate: Gate): Promise<void> => {
+    fake.startGates.set(SESSION_A, gate);
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    stub.say(STEP_INPUT);
+  };
+
   const countPongs = (stub: Stub): number =>
     stub.received.filter((frame) => frame._tag === "pong").length;
 
@@ -961,17 +1020,27 @@ describe("session frames on one connection", () => {
     await waitUntil(() => countPongs(stub) > before);
   };
 
-  /** Connects a runner whose sessions run on `fake`, with directories of its own, and waits for the proof. */
+  /**
+   * Connects a runner whose sessions run on `fake`, with directories and
+   * workspace steps of its own, and waits for the proof.
+   */
   const connectWithSessions = async (
     fake: Fake,
   ): Promise<{ readonly stub: Stub; readonly pending: Promise<unknown> }> => {
     const root = mkdtempSync(joinPath(tmpdir(), "hercule-socket-sessions-"));
     roots.push(root);
     const stub = await stubController();
+    const storageDir = joinPath(root, "storage");
     const pending = runConnection(buildPin(stub), {
       providersDir: joinPath(root, "providers"),
       scratchDir: joinPath(root, "scratch"),
       sessions: makeSupervising([fake.adapter]),
+      workspaceSteps: makeWorkspaceSteps({
+        storageDir,
+        workspaces,
+        socketPath: joinPath(storageDir, "daemon.sock"),
+        baseEnv: {},
+      }),
     });
     await stub.connected();
     await waitUntilProven(stub);
@@ -1245,6 +1314,95 @@ describe("session frames on one connection", () => {
     ]);
     expect(fake.inputs).toEqual([[SESSION_A, `start ${SESSION_A}`]]);
     expect(fake.stops).toEqual([[SESSION_A, "stopped"]]);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("answers a request for an agent step's result only after the step's input, which waits behind the session's start", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    const { stub, pending } = await connectWithSessions(fake);
+    await sendWaitingStepInput(stub, fake, gate);
+
+    stub.say(STEP_RESULT_REQUEST);
+    await pingAndWaitForPong(stub);
+    // Handled now, the request would find no record of the step and answer
+    // `interrupted` for a turn that is about to run.
+    expect(listStepResults(stub)).toEqual([]);
+
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 2);
+    expect(listInputResults(stub)[1]).toMatchObject({ requestId: STEP_INPUT.requestId, ok: true });
+    completeTurn(fake, fake.turns[1]!);
+    await waitUntil(() => listStepResults(stub).length > 0);
+    // The request may still be waiting when the turn ends, and is then
+    // answered from the step's result file. Either way, every answer is the
+    // turn's own result.
+    for (const result of listStepResults(stub)) {
+      expect(result).toEqual({
+        _tag: "workspaceStepResult",
+        ...STEP,
+        outcome: { status: "completed", output: { text: "", exitStatus: "completed" } },
+      });
+    }
+    stub.hangUp();
+    await pending;
+  });
+
+  it("answers repeated requests for an agent step's result with the same result", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    const { stub, pending } = await connectWithSessions(fake);
+    await sendWaitingStepInput(stub, fake, gate);
+
+    // Asked twice while the input waits, as the controller does when both
+    // an unanswered input and a reconnect make it ask.
+    stub.say(STEP_RESULT_REQUEST);
+    stub.say(STEP_RESULT_REQUEST);
+    await pingAndWaitForPong(stub);
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 2);
+    completeTurn(fake, fake.turns[1]!);
+    await waitUntil(() => listStepResults(stub).length > 0);
+
+    // Asked again after the turn ended: the result file answers.
+    stub.say(STEP_RESULT_REQUEST);
+    await waitUntil(() => listStepResults(stub).length > 1);
+    await pingAndWaitForPong(stub);
+    const [first, ...repeated] = listStepResults(stub);
+    expect(first?.outcome.status).toBe("completed");
+    for (const result of repeated) expect(result).toEqual(first);
+    stub.hangUp();
+    await pending;
+  });
+
+  it("starts an action step at once while a session's frames wait", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    fake.startGates.set(SESSION_A, gate);
+    const { stub, pending } = await connectWithSessions(fake);
+
+    stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    // An action this runner does not implement is answered as the frame is
+    // handled, so the answer shows the frame did not wait for the session.
+    stub.say({
+      _tag: "workspaceStepStart",
+      kind: "action",
+      ...STEP,
+      workspaceId: "0199e0e7-0000-7000-8000-0000000000e1",
+      action: "no.such-action",
+      input: {},
+    });
+    await waitUntil(() => listStepResults(stub).length === 1);
+    expect(listStepResults(stub)[0]?.outcome).toMatchObject({
+      status: "failed",
+      code: "unsupported_action",
+    });
+    expect(listInputResults(stub)).toEqual([]);
+
+    gate.open();
+    await waitUntil(() => listInputResults(stub).length === 1);
     stub.hangUp();
     await pending;
   });

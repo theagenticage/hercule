@@ -42,7 +42,7 @@ import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
-  cancelStrandedInputsAndReportLostWakeUps,
+  endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   EventRoutingInterval,
   IngestExecutorLayer,
@@ -52,6 +52,8 @@ import {
   RunFibers,
   SchedulerInterval,
   SessionInputDeadline,
+  RunServiceReferenceLayer,
+  SessionObserverLayer,
   WorkspaceSweepInterval,
 } from "../daemon";
 import { CurrentActor, type Actor } from "../actor";
@@ -81,7 +83,6 @@ import {
   ProviderServiceLayer,
 } from "../providers";
 import { SessionServiceLayer } from "../sessions";
-import { AssistantSessionObserverLayer } from "../assistants";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
@@ -125,10 +126,11 @@ const buildServices = (home: string) =>
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        // Observed by the assistants domain, as in the real boot, so a
-        // session's replies and notices reach its conversation.
+        // Observed by the assistants and runs domains, as in the real boot,
+        // so a session's replies and notices reach its conversation, and an
+        // agent step whose turn no runner will report fails.
         SessionServiceLayer.pipe(
-          Layer.provide(AssistantSessionObserverLayer),
+          Layer.provide(SessionObserverLayer),
           Layer.provide(ConversationMessagesLayer),
         ),
         // As in the real boot: a Connection's delete asks the resources and
@@ -137,10 +139,12 @@ const buildServices = (home: string) =>
         ResourceServiceLayer,
       ).pipe(
         // As in the real boot: sessions take and release workspace leases,
-        // and the workspace service asks the runs domain whether a workspace
-        // step is running.
+        // the workspace service asks the runs domain whether a workspace
+        // step is running, and the observer reaches the run service through
+        // the one `RunServiceReference` the operation layers set.
         Layer.provideMerge(WorkspaceServiceLayer),
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
+        Layer.provideMerge(RunServiceReferenceLayer),
       ),
     ),
     // One connection map and one probe driver: the socket route and every
@@ -371,7 +375,7 @@ export const withServer = (
         // controller would have. Kept as one effect because `reboot` runs them
         // again.
         const bootSteps = Effect.gen(function* () {
-          yield* cancelStrandedInputsAndReportLostWakeUps;
+          yield* endStrandedInputsAndReportLostWakeUps;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
           yield* seed;
           yield* Effect.flatMap(PluginHost, (host) =>

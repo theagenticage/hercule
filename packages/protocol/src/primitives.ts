@@ -102,3 +102,19 @@ const SecretName = Schema.String.check(
 export const InstanceSecrets = Schema.Record(SecretName, Schema.String);
 
 export type InstanceSecrets = Schema.Schema.Type<typeof InstanceSecrets>;
+
+/**
+ * Identifies one step record of a run: the run, the step's id in the run's
+ * plan, and the iteration of that step. The run id and the step id are storage
+ * ids because the runner names the step's result file after them, so neither
+ * may escape the directory that file goes in. This is the key on the wire,
+ * and names the run; the controller's run engine names a record within a run
+ * it already holds with its own `StepRecordKey`, which has no run id.
+ */
+export const WorkspaceStepKey = Schema.Struct({
+  runId: StorageId,
+  stepId: StorageId,
+  iteration: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
+
+export type WorkspaceStepKey = Schema.Schema.Type<typeof WorkspaceStepKey>;

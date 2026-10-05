@@ -34,10 +34,19 @@ export interface StoredInput {
   readonly delivery: Delivery | null;
   readonly createdAt: string;
   readonly deliveredAt: string | null;
-  /** Set while the input has been sent to the runner and not yet answered; null otherwise. */
+  /**
+   * When the input was sent, while the runner has not answered: on a `queued`
+   * row on its way to the runner, and on a `sent` row. Null otherwise.
+   */
   readonly sentAt: string | null;
   /** Why a delivery failed, on a row still queued or cancelled because of it; null otherwise. */
   readonly reason: string | null;
+  /**
+   * The iteration of the agent step this input is the prompt for; null for
+   * any input that is not a step's prompt. The step's run and step id are on
+   * the session.
+   */
+  readonly stepIteration: number | null;
 }
 
 export interface NewInput {
@@ -52,6 +61,16 @@ export interface NewInput {
    * the row before this transaction commits.
    */
   readonly sentAt?: string;
+  /** Set for the prompt of an agent step's iteration; see `StoredInput.stepIteration`. */
+  readonly stepIteration?: number;
+}
+
+/** What `cancelQueued` cancelled. */
+export interface CancelledInputs {
+  /** How many inputs were cancelled. */
+  readonly count: number;
+  /** The iteration of each agent step prompt among them, which no runner ever saw. */
+  readonly stepIterations: ReadonlyArray<number>;
 }
 
 /** A wake-up that was sent, never acknowledged, and cannot be stored again. */
@@ -90,10 +109,12 @@ interface InputRow {
   readonly delivered_at: string | null;
   readonly sent_at: string | null;
   readonly reason: string | null;
+  readonly step_iteration: number | null;
 }
 
 const COLUMNS =
-  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason";
+  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
+  "step_iteration";
 
 const toInput = (row: InputRow): StoredInput => ({
   id: uuidToString(row.id),
@@ -107,6 +128,7 @@ const toInput = (row: InputRow): StoredInput => ({
   deliveredAt: row.delivered_at,
   sentAt: row.sent_at,
   reason: row.reason,
+  stepIteration: row.step_iteration,
 });
 
 /**
@@ -127,10 +149,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         const sentAt = input.sentAt ?? null;
+        const stepIteration = input.stepIteration ?? null;
         yield* sql`
-          INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at, sent_at)
+          INSERT INTO session_inputs
+            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, 'queued', ${input.at}, ${sentAt})
+                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration})
         `;
         return {
           id: uuidToString(id),
@@ -144,6 +168,7 @@ const make = Effect.gen(function* () {
           deliveredAt: null,
           sentAt,
           reason: null,
+          stepIteration,
         };
       }),
 
@@ -183,6 +208,7 @@ const make = Effect.gen(function* () {
           deliveredAt: null,
           sentAt: null,
           reason: null,
+          stepIteration: null,
         });
       }),
 
@@ -220,7 +246,8 @@ const make = Effect.gen(function* () {
      * A session that already has an input sent and unanswered is left out.
      * The runner takes one input per turn boundary, so a second input sent
      * before the first one's turn has started would have to be held by the
-     * runner.
+     * runner. A step prompt marked `sent` does not count as unanswered here
+     * (see `holdsInputOnTheWire`).
      */
     listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
@@ -244,6 +271,11 @@ const make = Effect.gen(function* () {
      * the first one's turn has started would have to be held by the runner, so
      * a caller with an input still out sends nothing more until the runner
      * reports what happened to it.
+     *
+     * Only a `queued` row with `sentAt` set counts. A step prompt marked
+     * `sent` no longer counts, even though the runner may still hold it, so
+     * another input can be sent after it. An ordinary input put back to
+     * waiting after no answer came leaves the same gap.
      */
     holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -317,7 +349,8 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Marks an input as sent, just before its frame goes out to the runner.
+     * Claims an input for one send, just before its frame goes out to the
+     * runner: the row stays `queued` and records when it was sent.
      * Returns the row as the update found it, not a copy read earlier, which
      * an edit in between could have changed. Returns `none` when the input was
      * already sent, already answered, or already cancelled. A second caller
@@ -348,7 +381,8 @@ const make = Effect.gen(function* () {
      * does for one input. Returns the claimed row, or `none` when:
      *
      * - no input is waiting;
-     * - another input of the session is already sent and unanswered;
+     * - another input of the session is already sent and unanswered, where a
+     *   step prompt marked `sent` does not count (see `holdsInputOnTheWire`);
      * - the session is not `idle`.
      *
      * The runner takes one input per turn. A second input sent before the
@@ -385,8 +419,10 @@ const make = Effect.gen(function* () {
 
     /**
      * Records the delivery the runner reported for this input. Only a row
-     * still `queued` changes, because a caller may have cancelled it while the
-     * frame was in flight.
+     * still `queued` or `sent` changes, because a caller may have cancelled it
+     * while the frame was in flight. A `sent` row is an agent step's prompt
+     * the controller stopped waiting for, and a late confirmation is still
+     * true: the runner took the prompt.
      *
      * `sentAt` is when the send being answered claimed the row, and works as
      * for `requeue`: the row changes only while it still holds that claim. A
@@ -396,7 +432,7 @@ const make = Effect.gen(function* () {
      * Returns whether the row changed, so the caller knows whether it was the
      * one that recorded the delivery.
      */
-    delivered: (
+    markDelivered: (
       id: string,
       sentAt: string | null,
       delivery: Delivery,
@@ -406,7 +442,8 @@ const make = Effect.gen(function* () {
         sql<{ readonly id: Uint8Array }>`
           UPDATE session_inputs SET status = 'delivered', delivery = ${delivery},
                                     delivered_at = ${at}, sent_at = NULL
-          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+          WHERE id = ${uuidFromString(id)} AND status IN ('queued', 'sent')
+            AND sent_at IS ${sentAt}
           RETURNING id
         `,
         (rows) => rows.length > 0,
@@ -464,19 +501,60 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Cancels every input of a session that is still waiting, because nothing
-     * waits on a harness that has exited, and returns how many were
-     * cancelled. An input already sent is left alone: the runner has its
-     * text, so recording it as cancelled would be wrong.
+     * Marks an agent step's prompt the runner never answered as `sent`, and
+     * keeps when it was sent. The prompt left the controller and the runner
+     * may have run it, so it is never sent again. Returns whether the row
+     * changed. `sentAt` works as for `requeue`: the row changes only while it
+     * still holds the unanswered send's claim.
      */
-    cancelQueued: (sessionId: string, reason?: string): Effect.Effect<number, SqlError> =>
+    markSent: (id: string, sentAt: string | null): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
-          UPDATE session_inputs SET status = 'cancelled', reason = COALESCE(${reason ?? null}, reason)
-          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+          UPDATE session_inputs SET status = 'sent', reason = NULL
+          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
           RETURNING id
         `,
-        (rows) => rows.length,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Cancels the agent step prompts not yet sent to any session of a run,
+     * exited sessions included, storing `reason` on them. Returns the ids of
+     * the sessions that had one.
+     */
+    cancelStepPromptsOfRun: (
+      runId: string,
+      reason: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
+          WHERE status = 'queued' AND sent_at IS NULL AND step_iteration IS NOT NULL
+            AND session_id IN (SELECT id FROM sessions WHERE run_id = ${uuidFromString(runId)})
+          RETURNING session_id
+        `,
+        (rows) => [...new Set(rows.map((row) => uuidToString(row.session_id)))],
+      ),
+
+    /**
+     * Cancels every input of a session that is still waiting, because nothing
+     * waits on a harness that has exited, and returns what it cancelled. An
+     * input already sent is left alone: the runner has its text, so
+     * recording it as cancelled would be wrong.
+     */
+    cancelQueued: (sessionId: string, reason?: string): Effect.Effect<CancelledInputs, SqlError> =>
+      Effect.map(
+        sql<{ readonly step_iteration: number | null }>`
+          UPDATE session_inputs SET status = 'cancelled', reason = COALESCE(${reason ?? null}, reason)
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+          RETURNING step_iteration
+        `,
+        (rows) => ({
+          count: rows.length,
+          stepIterations: rows.flatMap((row) =>
+            row.step_iteration === null ? [] : [row.step_iteration],
+          ),
+        }),
       ),
 
     /**
@@ -506,7 +584,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Cancels every input that was sent but unanswered when the controller
-     * restarted. Nobody knows whether the harness received it before the
+     * restarted, except an agent step's prompt (`markStrandedStepPromptsSent`).
+     * Nobody knows whether the harness received the input before the
      * connection dropped, so it is neither marked delivered nor sent again:
      * sending it again could deliver the message twice.
      *
@@ -522,7 +601,7 @@ const make = Effect.gen(function* () {
           readonly event_id: number | null;
         }>`
           UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-          WHERE status = 'queued' AND sent_at IS NOT NULL
+          WHERE status = 'queued' AND sent_at IS NOT NULL AND step_iteration IS NULL
           RETURNING subscription_id, event_id
         `,
         (rows) =>
@@ -532,6 +611,18 @@ const make = Effect.gen(function* () {
               : [{ subscriptionId: uuidToString(row.subscription_id), eventId: row.event_id }],
           ),
       ),
+
+    /**
+     * Marks `sent` every agent step's prompt that was sent but unanswered when
+     * the controller restarted, as `markSent` does for one prompt. The runner
+     * may have run the prompt, so it is never sent again, and the runner's
+     * answer about the step settles the step.
+     */
+    markStrandedStepPromptsSent: (): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'sent', reason = NULL
+        WHERE status = 'queued' AND sent_at IS NOT NULL AND step_iteration IS NOT NULL
+      `),
   };
 });
 

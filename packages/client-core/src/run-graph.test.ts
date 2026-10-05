@@ -41,6 +41,7 @@ const RUN_FIELDS = {
   workflowId: null,
   inputs: {},
   origin: { kind: "manual", actor: "user" },
+  subscriptions: [],
   createdAt: START,
 } as const;
 
@@ -146,6 +147,71 @@ const DEMO_ITERATION_LIMIT: Run = {
   finishedAt: at(500),
   steps: loopRecords(4),
   edgeTraversals: [0, 1, 4, 3, 0, 0, 0],
+};
+
+const IMPLEMENT_SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f00005e55";
+
+/**
+ * A plan with an agent step and a signal trigger: `implement` drives an
+ * Agent's session and `open_pr` opens a pull request. When the checks fail,
+ * `checks_failed` sends the run back to `implement`, or on to `escalate`
+ * once the checks have failed often enough; after the pull request is
+ * opened, `notify` runs only when asked to.
+ *
+ * The edges by index: 0 implement>open_pr, 1 checks_failed>implement (max 3),
+ * 2 checks_failed>escalate, 3 open_pr>notify.
+ */
+const SIGNAL_PLAN: Run["plan"] = {
+  name: "Implement and open a pull request",
+  triggers: [
+    {
+      id: "checks_failed",
+      kind: "signal",
+      on: { kind: "github.checks.failed", connectionId: "any" },
+      correlation: { event: "event.payload.prNumber", run: "steps.open_pr.output.prNumber" },
+    },
+  ],
+  steps: [
+    {
+      id: "implement",
+      kind: "agent",
+      agent: "01a06d02-c111-7a0e-8b3d-9c1f00000a01",
+      prompt: "Implement the fix.",
+    },
+    { id: "open_pr", kind: "action", action: "github.pr.open" },
+    { id: "escalate", kind: "action", action: "task.create" },
+    { id: "notify", kind: "action", action: "task.update" },
+  ],
+  edges: [
+    { from: "implement", to: "open_pr" },
+    { from: "checks_failed", to: "implement", maxTraversals: 3 },
+    {
+      from: "checks_failed",
+      to: "escalate",
+      condition: "steps.checks_failed.output.count > 3",
+    },
+    { from: "open_pr", to: "notify", condition: "inputs.notify" },
+  ],
+};
+
+/**
+ * The signal run once the checks failed once: `implement` and `open_pr` ran
+ * twice, and the run now waits for the checks to fail again. The session of
+ * `implement` carried on across both of its records.
+ */
+const SIGNAL_WAITING: Run = {
+  ...RUN_FIELDS,
+  plan: SIGNAL_PLAN,
+  status: "running",
+  startedAt: START,
+  steps: [
+    { ...complete("implement", 1, 0, 100), sessionId: IMPLEMENT_SESSION_ID },
+    complete("open_pr", 1, 110, 120),
+    complete("checks_failed", 1, 300, 300),
+    { ...complete("implement", 2, 310, 400), sessionId: IMPLEMENT_SESSION_ID },
+    complete("open_pr", 2, 410, 420),
+  ],
+  edgeTraversals: [2, 1, 0, 0],
 };
 
 /** Returns a step's node of the graph of `run`. */
@@ -429,6 +495,45 @@ describe("buildRunGraph", () => {
     };
     assert.isTrue(buildRunGraph(failed).edges.every((edge) => !edge.isFailedEdge));
   });
+
+  it("keeps the edges a signal can still lead to open while the run is live, even after it fired", () => {
+    assert.deepStrictEqual(listEdgeTravel(SIGNAL_WAITING), [
+      "implement>open_pr fired",
+      "checks_failed>implement fired",
+      // The signal fired, but it can fire again with a higher count.
+      "checks_failed>escalate notYet",
+      // `open_pr` finished, but the signal can send the run through it again.
+      "open_pr>notify notYet",
+    ]);
+    const cancelled: Run = {
+      ...SIGNAL_WAITING,
+      status: "cancelled",
+      finishedAt: at(500),
+    };
+    assert.deepStrictEqual(listEdgeTravel(cancelled).slice(2), [
+      "checks_failed>escalate notTaken",
+      "open_pr>notify notTaken",
+    ]);
+  });
+
+  it("counts how often a signal fired on its card, and gives it no state", () => {
+    const fired = (count: number): Run => ({
+      ...SIGNAL_WAITING,
+      steps: Array.from({ length: count }, (_, index) =>
+        complete("checks_failed", index + 1, index, index),
+      ),
+    });
+    assert.deepStrictEqual(
+      [1, 2].map((count) => {
+        const node = findNode(fired(count), "checks_failed");
+        return [node?.progress, node?.iterationCount, node?.iterationLabel];
+      }),
+      [
+        [undefined, 1, undefined],
+        [undefined, 2, "×2"],
+      ],
+    );
+  });
 });
 
 describe("buildStepLines", () => {
@@ -487,6 +592,45 @@ describe("buildStepLines", () => {
     ]);
   });
 
+  it("tells action steps, agent steps and signals apart, and carries an agent step's session", () => {
+    const lines = buildStepLines(SIGNAL_WAITING);
+    assert.deepStrictEqual(
+      lines.map((line) => [line.key, line.kind, line.action, line.session]),
+      [
+        // Only the newest record that drives the session is marked as newest.
+        ["implement#1", "agent", undefined, { id: IMPLEMENT_SESSION_ID, isNewestRecord: false }],
+        ["open_pr#1", "action", "github.pr.open", undefined],
+        ["checks_failed#1", "signal", undefined, undefined],
+        ["implement#2", "agent", undefined, { id: IMPLEMENT_SESSION_ID, isNewestRecord: true }],
+        ["open_pr#2", "action", "github.pr.open", undefined],
+        // The steps the run has not reached. A signal that has not fired has no line.
+        ["escalate", "action", "task.create", undefined],
+        ["notify", "action", "task.update", undefined],
+      ],
+    );
+  });
+
+  it("gives a signal's line the output the signal delivered, to open like a step's", () => {
+    const delivered = { prNumber: 42, failed: ["lint"] };
+    const [line] = buildStepLines({
+      plan: SIGNAL_PLAN,
+      steps: [
+        {
+          stepId: "checks_failed",
+          iteration: 1,
+          status: "completed",
+          startedAt: at(300),
+          finishedAt: at(300),
+          output: delivered,
+        },
+      ],
+    });
+    assert.deepStrictEqual(
+      [line?.kind, line?.state, line?.output],
+      ["signal", "completed", delivered],
+    );
+  });
+
   it("shows a skipped step as skipped, finished but never started, with no output", () => {
     const skipped = buildStepLines(DEMO_COMPLETED).find((line) => line.stepId === "escalate");
     assert.deepStrictEqual(
@@ -503,6 +647,7 @@ describe("buildTimeline", () => {
     plan: PLAN,
     inputs: {},
     origin: { kind: "manual", actor: "user" },
+    subscriptions: [],
     steps: STEPS,
     // `create` went to `label` and to `query`; `query` has not run yet.
     edgeTraversals: [1, 1, 0],

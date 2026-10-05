@@ -445,7 +445,12 @@ const AgentStep = closedStruct({
   options: Schema.optionalKey(ModelSelection.fields.options),
   /** Overrides the Agent's access mode. */
   accessMode: Schema.optionalKey(AccessMode),
-  /** Each iteration starts a new session instead of the next turn of the same session. */
+  /**
+   * Each iteration starts a new session instead of the next turn of the same
+   * session. Either way, the session's process is stopped a few seconds after
+   * each turn, so a background process the agent started, such as a dev
+   * server, does not survive into the next iteration; only the workspace does.
+   */
   freshSession: Schema.optionalKey(Schema.Boolean),
   /** The schema each turn's output must match. It sets the type of `steps.<id>.output`. */
   outputSchema: Schema.optionalKey(OutputSchema),

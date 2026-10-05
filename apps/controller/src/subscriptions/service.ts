@@ -1,10 +1,12 @@
 /**
  * The subscription operations: `subscription.create`, `query` and `cancel`.
  *
- * A subscription is held by the session that registered it. The holder is
- * taken from the credential and never from the payload, so an agent cannot
- * make another session wait on something, and a user credential - which is
- * nobody's session - cannot register one at all.
+ * A subscription created here is held by the session that registered it. The
+ * holder is taken from the credential and never from the payload, so an agent
+ * cannot make another session wait on something, and a user credential -
+ * which is nobody's session - cannot register one at all. A run holds the
+ * subscriptions of its signal triggers; those are opened and ended with the
+ * run (see `run-held.ts`), and `cancel` refuses them.
  *
  * What is stored is the target as it was written and the condition it expands
  * into. The condition is validated before it is stored. A condition the
@@ -12,7 +14,7 @@
  * only inside the event router, long after the caller has gone.
  *
  * `subscription.query` returns live subscriptions only: it is used to see what
- * a session is still waiting for, and to find the id to cancel.
+ * a session or a run is still waiting for, and to find the id to cancel.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
@@ -21,6 +23,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -40,7 +43,6 @@ import {
   type RunStatus,
   type SortDirection,
   type Subscription,
-  type SubscriptionHealth,
   type SubscriptionTarget,
   type Unauthenticated,
   type Validation,
@@ -54,9 +56,10 @@ import {
   withTransaction,
 } from "../db";
 import { validateExpression } from "../expressions";
-import { isUnfinished, RunService } from "../runs";
+import { composeRecord } from "./records";
+import { subscriptionRepository } from "./repository";
+import { RunTargets } from "./run-targets";
 import { expandTarget } from "./targets";
-import { subscriptionRepository, type StoredSubscription } from "./repository";
 
 const QueryInput = Schema.Struct({
   holder: Schema.optionalKey(SubscriptionHolder),
@@ -128,31 +131,14 @@ const NEEDS_A_HOLDER = "a subscription listing needs a holder";
 
 const NEEDS_A_HOLDER_REPAIR =
   "a user credential has no subscriptions of its own; " +
-  "name the holder whose subscriptions to list, as holder=session:<id>";
+  "name the holder whose subscriptions to list, as holder=session:<id> or holder=run:<id>";
 
 const NO_SUCH_SUBSCRIPTION = "no live subscription has that id";
 
-/** Returns the subscription's health: `ok` unless an evaluation error is recorded. */
-const readHealth = (stored: StoredSubscription): SubscriptionHealth =>
-  stored.healthErrorMessage === null || stored.healthErrorAt === null
-    ? { state: "ok" }
-    : { state: "error", message: stored.healthErrorMessage, at: stored.healthErrorAt };
-
-/** Returns the wake-up that a restart cancelled, or null if there is none. */
-const readLostWakeUp = (stored: StoredSubscription): Subscription["lostWakeUp"] =>
-  stored.lostWakeUpEventId === null || stored.lostWakeUpAt === null
-    ? null
-    : { eventId: stored.lostWakeUpEventId, at: stored.lostWakeUpAt };
-
-const composeRecord = (stored: StoredSubscription): Subscription => ({
-  id: stored.id,
-  target: stored.target,
-  condition: stored.condition,
-  holder: stored.holder,
-  health: readHealth(stored),
-  lostWakeUp: readLostWakeUp(stored),
-  createdAt: stored.createdAt,
-});
+/** Why `cancel` refuses a subscription that a run holds, and what to do instead. */
+const RUN_HELD_CANCEL_REFUSAL =
+  "a run holds this subscription for one of its signal triggers, and it ends when its run ends; " +
+  "cancel the run instead";
 
 /** The errors every operation here can fail with before it does its work. */
 type CommonError = Unauthenticated | Forbidden | Validation | SqlError;
@@ -160,7 +146,7 @@ type CommonError = Unauthenticated | Forbidden | Validation | SqlError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const subscriptions = yield* subscriptionRepository;
-  const runs = yield* RunService;
+  const runTargets = yield* RunTargets;
 
   return {
     /**
@@ -209,9 +195,11 @@ const make = Effect.gen(function* () {
             // run cannot end, and emit its one event, between the check and
             // the write.
             if (target.kind === "run") {
-              const run = yield* runs.read(target.runId);
-              if (!isUnfinished(run.status)) {
-                return yield* Effect.fail(createInvalidStateError(buildEndedRunReason(run.status)));
+              const endedStatus = yield* runTargets.readEndedStatus(target.runId);
+              if (endedStatus !== undefined) {
+                return yield* Effect.fail(
+                  createInvalidStateError(buildEndedRunReason(endedStatus)),
+                );
               }
             }
             const at = yield* nowIso;
@@ -280,27 +268,40 @@ const make = Effect.gen(function* () {
      *
      * So a caller learns nothing about what it may not reach, and in each case
      * there is nothing left for it to cancel.
+     *
+     * A subscription a run holds fails with `InvalidState`: it ends when its
+     * run ends, and cancelling it alone would leave the run waiting for a
+     * signal that can no longer arrive. Only the user meets this error,
+     * because no session holds such a subscription.
      */
     cancel: (
       id: Id,
-    ): Effect.Effect<Record<string, never>, Exclude<CommonError | NotFound, Validation>> =>
+    ): Effect.Effect<
+      Record<string, never>,
+      Exclude<CommonError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.cancel");
-        const heldBy =
-          actor._tag === "session"
-            ? ({ kind: "session", id: actor.sessionId } as const)
-            : undefined;
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const ended = yield* subscriptions.end({
+            const live = yield* subscriptions.readLive(id);
+            if (
+              Option.isNone(live) ||
+              (actor._tag === "session" &&
+                (live.value.holder.kind !== "session" || live.value.holder.id !== actor.sessionId))
+            ) {
+              return yield* Effect.fail(createNotFoundError(NO_SUCH_SUBSCRIPTION));
+            }
+            if (live.value.holder.kind === "run") {
+              return yield* Effect.fail(createInvalidStateError(RUN_HELD_CANCEL_REFUSAL));
+            }
+            yield* subscriptions.end({
               id,
               at: yield* nowIso,
               reason: CANCELLED,
               actor: yield* currentStamp,
-              ...(heldBy === undefined ? {} : { heldBy }),
             });
-            if (!ended) return yield* Effect.fail(createNotFoundError(NO_SUCH_SUBSCRIPTION));
           }),
         );
         return {};
@@ -317,5 +318,5 @@ export class SubscriptionService extends Context.Service<
 export const SubscriptionServiceLayer: Layer.Layer<
   SubscriptionService,
   never,
-  SqlClient.SqlClient | RunService
+  SqlClient.SqlClient | RunTargets
 > = Layer.effect(SubscriptionService)(make);

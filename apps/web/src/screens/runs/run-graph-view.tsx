@@ -3,6 +3,7 @@
  * - a step card holds its state mark in its leading slot and its duration at
  *   its end, ticking while the step runs, and `×3` after its id when the run
  *   came to it three times;
+ * - a signal trigger's card shows `×2` after its id when it fired twice;
  * - a skipped step is a flat card; a step the run has not reached is a
  *   dashed, flat card;
  * - an edge the run went along is solid, and the dashes of an edge into the
@@ -91,15 +92,15 @@ const describeRunEdgeBadge = (edge: RunGraphEdge): EdgeBadge | undefined =>
     : { text: edge.traversalBadge, ...(edge.isOverLimit ? { className: "text-fail" } : {}) };
 
 /**
- * Returns the width of what a step card holds beside its kind label and id:
- * its mark, its duration, and its iteration count when it has one. A
+ * Returns the width of what a node's card holds beside its kind label and id:
+ * a step card's mark and duration, and the count of how often the run came to
+ * the step, or how often a signal trigger fired, when it has one. A start
  * trigger's card holds none of them.
  */
 const measureRunCardSlots = (node: RunGraphNode): number => {
-  if (node.progress === undefined) return 0;
   const label = node.iterationLabel;
   const countWidth = label === undefined ? 0 : COUNT_GAP + measureMonoText(label, COUNT_FONT_SIZE);
-  return MARK_SLOT + DURATION_SLOT + countWidth;
+  return node.progress === undefined ? countWidth : MARK_SLOT + DURATION_SLOT + countWidth;
 };
 
 /**
@@ -158,10 +159,14 @@ export function RunGraphView({
   );
 }
 
-/** Renders a node of a run's plan: a step with its progress, or a trigger as the workflow draws it. */
+/**
+ * Renders a node of a run's plan: a step with its progress, or a trigger as
+ * the workflow draws it, with `×2` after a signal trigger's id when it fired
+ * twice.
+ */
 function RunNodeCard({ node }: { readonly node: RunGraphNode }): JSX.Element {
   return node.progress === undefined ? (
-    <WorkflowNodeCard node={node} />
+    <WorkflowNodeCard node={node} note={node.iterationLabel} />
   ) : (
     <RunStepCard node={node} progress={node.progress} />
   );
@@ -195,7 +200,12 @@ function RunStepCard({
   const { state } = progress;
   const isUnreached = state === "unreached";
   const isFlat = isUnreached || state === "skipped";
-  const duration = describeStepDuration(progress, run.now);
+  // A card with progress is a step's: a signal trigger's card has none.
+  const duration = describeStepDuration(
+    progress,
+    node.kind === "agent" ? "agent" : "action",
+    run.now,
+  );
   return (
     <div
       role="group"

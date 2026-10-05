@@ -5,5 +5,5 @@
  */
 export type { WorkspaceAction, WorkspaceActionContext } from "./action";
 export { WorkspaceActionFailed } from "./action";
+export { STOP_GRACE, switchCheckoutBranch } from "./git";
 export { WORKSPACE_ACTION_IDS, findWorkspaceAction } from "./registry";
-export { ACTION_DEADLINE, makeWorkspaceSteps, type WorkspaceSteps } from "./steps";

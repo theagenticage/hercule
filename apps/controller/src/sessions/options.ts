@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hercule/protocol";
 import { createValidationError, type Validation } from "@hercule/contract";
 import type { ScopeSettings } from "../settings";
+import type { StoredSession } from "./repository";
 
 /** The model options a caller picked, as the row and the wire store them. */
 export type ModelOptions = ModelSelection["options"];
@@ -80,7 +81,8 @@ const DEFAULT_IDLE_UNLOAD_MINUTES = 15;
  * starts with: the two every session has, plus the idle unload. A
  * conversation session sits idle between the owner's messages for hours, and
  * unloading its process saves the runner's memory; the next message resumes
- * it. No other session is unloaded, because nothing would resume it.
+ * it. A Thread is never unloaded, because unloading its process would also
+ * end any background process it started, such as a dev server.
  */
 export const buildConversationTimeouts = (
   controller: ScopeSettings<"controller">,
@@ -90,14 +92,46 @@ export const buildConversationTimeouts = (
 });
 
 /**
+ * How long a workflow run's step session may sit idle before its runner
+ * unloads it. The runner counts it from the end of each turn, or from an
+ * input it refused while no turn was open. A resume carries the step's
+ * prompt as its first input, so a resumed session is never unloaded while
+ * its prompt is on the way.
+ */
+const STEP_SESSION_IDLE_UNLOAD_MS = 5_000;
+
+/**
+ * Returns the timeouts a session that runs a workflow run's agent step starts
+ * with: the two every session has, plus an idle unload of five seconds.
+ *
+ * Once the step's turn ends, the run may not prompt the session again for
+ * days, or ever: the next iteration may wait on a signal, or never come. An
+ * idle session still counts against its runner's session cap, so without the
+ * unload a later step of the same run could wait forever for the slot a
+ * finished step holds, and the process would keep its memory all that time.
+ * The next iteration's prompt resumes the unloaded session in place. Any
+ * background process the agent left running ends with the unload.
+ */
+export const buildStepSessionTimeouts = (
+  controller: ScopeSettings<"controller">,
+): SessionSpec["timeouts"] => ({
+  ...buildTimeouts(controller),
+  idleMs: STEP_SESSION_IDLE_UNLOAD_MS,
+});
+
+/**
  * Builds the spec sent to a runner for a session that continues a
  * provider-native session, either resumed in place or forked. Returns the
  * parent's spec with three changes: the model selection the parent ended on,
  * `continuation`, which names the native session to continue from and, for a
- * resume, the subagents the controller has records of, and the timeouts from
- * the current settings. `conversationId` is the conversation the continuing session
- * answers, or `null` when it answers none; a session that answers a
- * conversation gets the idle unload too.
+ * resume, the subagents the controller has records of, and the timeouts from the current
+ * settings. `session` holds the conversation the continuing session answers
+ * and the run it runs a step of, each `null` when there is none. They decide
+ * the timeouts:
+ *
+ * - a session that answers a conversation gets the conversation timeouts;
+ * - a session that runs a step gets the step session timeouts;
+ * - any other session gets the two every session has.
  *
  * It copies the parent's whole spec rather than picking named fields, so
  * everything an Agent gave the parent also reaches the continuation: the
@@ -112,11 +146,15 @@ export const buildContinuingSpec = (
   controller: ScopeSettings<"controller">,
   modelSelection: ModelSelection,
   continuation: NonNullable<SessionSpec["continue"]>,
-  conversationId: string | null,
+  session: Pick<StoredSession, "conversationId" | "runId">,
 ): SessionSpec => ({
   ...parent,
   modelSelection,
   continue: continuation,
   timeouts:
-    conversationId === null ? buildTimeouts(controller) : buildConversationTimeouts(controller),
+    session.conversationId !== null
+      ? buildConversationTimeouts(controller)
+      : session.runId !== null
+        ? buildStepSessionTimeouts(controller)
+        : buildTimeouts(controller),
 });

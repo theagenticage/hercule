@@ -11,6 +11,7 @@ const RUNNING: Run = {
   plan: { name: "Commit the fix", steps: [{ id: "commit", kind: "action", action: "git.commit" }] },
   inputs: {},
   origin: { kind: "manual", actor: "user" },
+  subscriptions: [],
   status: "running",
   steps: [{ stepId: "commit", iteration: 1, status: "running", startedAt: "2026-09-25T10:00:00Z" }],
   edgeTraversals: [],

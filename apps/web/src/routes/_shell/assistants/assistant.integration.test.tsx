@@ -80,6 +80,8 @@ const buildConversationSession = (overrides: Partial<Session>): Session => ({
   permissionProfileId: ADA.permissionProfileId,
   agentId: ADA.id,
   conversationId: WEB.id,
+  runId: null,
+  stepId: null,
   instanceId: ADA.instanceId,
   runnerId: "01a06d02-3000-7000-8000-000000000001",
   workspaceId: null,

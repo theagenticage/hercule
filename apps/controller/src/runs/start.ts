@@ -32,7 +32,6 @@ import {
   type InvalidState,
   type Issue,
   type NotFound,
-  type Run,
   type RunOrigin,
   type RunStarted,
   type Unauthenticated,
@@ -45,14 +44,15 @@ import { afterCommit, nowIso, withTransaction } from "../db";
 import { CONNECTION_PARAM, PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
+import { runHeldSubscriptions } from "../subscriptions";
 import {
   readConnectionInputName,
   workflowRepository,
   WorkflowService,
   type PendingTriggerEffect,
 } from "../workflows";
-import { runRepository, type RunOutcome } from "./repository";
-import { describeMissingCapableRunner, listWorkspaceActionIds } from "./runner-capabilities";
+import { runRepository, type RunOutcome, type StoredRun } from "./repository";
+import { describeMissingCapableRunner, listRequiredCapabilities } from "./runner-capabilities";
 import { isUnfinished } from "./step-records";
 
 /**
@@ -64,8 +64,6 @@ const DEFAULT_RUN_NESTING_LIMIT = 5;
 
 const decodeStartInput = Schema.decodeUnknownEffect(RunStartInput);
 const decodeRerunInput = Schema.decodeUnknownEffect(RunRerunInput);
-
-type PlanStep = WorkflowDefinition["steps"][number];
 
 /** The refusal of a `run.start` that names no workflow, or more than one. */
 const ONE_WORKFLOW =
@@ -89,7 +87,7 @@ const REPLAY_HINT = "Replay the original run's plan instead.";
  * with where the run's plan and inputs came from.
  */
 interface RefusalMessages {
-  /** The message when the plan does not validate or has an element runs cannot execute yet. */
+  /** The message when the plan does not validate or a step names a disabled Connection. */
   readonly unrunnablePlan: string;
   /** The message when the inputs do not match the plan's declarations. */
   readonly invalidInputs: string;
@@ -130,36 +128,6 @@ const RESTAMP_REFUSALS: RefusalMessages = {
 const REPLAY_REFUSALS: RefusalMessages = {
   unrunnablePlan: "the original run's plan cannot run any more",
   invalidInputs: "the original run's inputs no longer match its plan",
-};
-
-/**
- * Returns an issue for each element of a definition that runs cannot execute
- * yet, each at its path. Such a workflow can be saved, but starting a run of
- * it is refused: a run that ignored a step or a trigger it cannot execute
- * would do something the author did not write.
- */
-const listUnsupportedElements = (definition: WorkflowDefinition): ReadonlyArray<Issue> => {
-  const triggerIssues = (definition.triggers ?? []).flatMap((trigger, index) =>
-    trigger.kind === "signal"
-      ? [
-          {
-            path: ["triggers", String(index)],
-            message:
-              "Runs cannot wait for signal triggers yet. Remove the signal trigger to run this workflow.",
-          },
-        ]
-      : [],
-  );
-  const stepIssues = definition.steps.flatMap((step: PlanStep, index): ReadonlyArray<Issue> => {
-    if (step.kind !== "agent") return [];
-    return [
-      {
-        path: ["steps", String(index), "kind"],
-        message: "Runs cannot run agent steps yet. Only action steps can run.",
-      },
-    ];
-  });
-  return [...triggerIssues, ...stepIssues];
 };
 
 /**
@@ -240,6 +208,7 @@ export const makeRunStart = (
     const settings = yield* Settings;
     const runners = yield* runnerRepository;
     const connections = yield* connectionRepository;
+    const runHeld = yield* runHeldSubscriptions;
 
     /**
      * Checks that a run started by a step of another run is not nested
@@ -323,8 +292,8 @@ export const makeRunStart = (
     /**
      * Checks that `plan` can run with `unresolvedInputs`, and returns the
      * inputs with their defaults applied. It validates the plan again,
-     * refuses what runs cannot execute yet and steps that name a disabled
-     * Connection, and resolves the inputs. Fails with `Validation` when any
+     * refuses steps that name a disabled Connection, and resolves the
+     * inputs. Fails with `Validation` when any
      * check fails, with the message from `refusals` where it has one.
      */
     const checkRunnable = (
@@ -333,13 +302,10 @@ export const makeRunStart = (
       refusals: RefusalMessages,
     ): Effect.Effect<Record<string, unknown>, Validation | SqlError> =>
       Effect.gen(function* () {
-        // What runs cannot do yet is checked only on a valid definition:
-        // an action that does not exist is reported once, as unknown.
+        // Disabled Connections are checked only on a valid definition: an
+        // action that does not exist is reported once, as unknown.
         const invalid = (yield* workflows.validateDefinition(plan)).errors;
-        const problems =
-          invalid.length > 0
-            ? invalid
-            : [...listUnsupportedElements(plan), ...(yield* listDisabledConnectionIssues(plan))];
+        const problems = invalid.length > 0 ? invalid : yield* listDisabledConnectionIssues(plan);
         if (problems.length > 0) {
           return yield* Effect.fail(createValidationError(problems, refusals.unrunnablePlan));
         }
@@ -361,7 +327,7 @@ export const makeRunStart = (
     ): Effect.Effect<void, Validation | SqlError> =>
       Effect.gen(function* () {
         const missingRunner = describeMissingCapableRunner(
-          listWorkspaceActionIds(plan),
+          listRequiredCapabilities(plan),
           yield* runners.listPlacementCandidates(),
         );
         if (missingRunner === undefined) return;
@@ -376,9 +342,10 @@ export const makeRunStart = (
     /**
      * Writes the run `readRunToWrite` returns: checks that it can run (see
      * `checkRunnable`), that a runner can run it (see `checkCapableRunner`),
-     * checks how deep the run is nested, and writes the run
-     * and its entry step records. Returns the run's id at once, without
-     * waiting for any step. Fails, starting no run, with:
+     * checks how deep the run is nested, and writes the run, its entry step
+     * records and a subscription for each of its signal triggers. Returns
+     * the run's id at once, without waiting for any step. Fails, starting no
+     * run, with:
      *
      * - `Validation` when `checkRunnable` or `checkCapableRunner` refuses the run;
      * - `CapExceeded` when the run is nested too deep;
@@ -399,6 +366,7 @@ export const makeRunStart = (
           const resolvedInputs = yield* checkRunnable(plan, inputs, refusals);
           yield* checkCapableRunner(plan);
           yield* checkNesting(origin);
+          const at = yield* nowIso;
           const runId = yield* runs.insert(
             {
               workflowId,
@@ -408,8 +376,9 @@ export const makeRunStart = (
               entryStepIds: listEntrySteps(plan).map((step) => step.id),
               ...(originalRunId === undefined ? {} : { originalRunId }),
             },
-            yield* nowIso,
+            at,
           );
+          yield* runHeld.open(runId, plan, at);
           // After the commit, so the execution reads the rows this
           // transaction wrote. It runs even if the caller disconnects after
           // the commit, so a run that exists always starts. A run started by
@@ -444,8 +413,8 @@ export const makeRunStart = (
      * Fails with:
      *
      * - `Validation`, starting no run, when the request names no workflow or
-     *   more than one, the workflow does not validate or has an element runs
-     *   cannot execute yet, no runner that is not retired offers every
+     *   more than one, the workflow does not validate or a step names a
+     *   disabled Connection, no runner that is not retired offers every
      *   workspace action the workflow uses, or the inputs do not match its
      *   declarations;
      * - `NotFound` for an unknown `workflowId`;
@@ -508,7 +477,9 @@ export const makeRunStart = (
      * ended. Fails with `NotFound` when no run has the id, and with
      * `InvalidState` when the run is still pending or running.
      */
-    const readEndedRun = (id: string): Effect.Effect<Run, NotFound | InvalidState | SqlError> =>
+    const readEndedRun = (
+      id: string,
+    ): Effect.Effect<StoredRun, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const found = yield* runs.read(id);
         if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError("no such run"));
@@ -609,7 +580,8 @@ export const makeRunStart = (
      *
      * Nobody is waiting on this start to refuse it, so a run that cannot
      * start is still written, and fails at once with `validation-error` and
-     * a message that says what did not validate. The failure raises its
+     * a message that says what did not validate, and opens no subscription
+     * for its signal triggers. The failure raises its
      * notification like any failed run, so the user learns that the
      * trigger's runs are failing. The checks are those of `run.start`,
      * except two:
@@ -667,6 +639,8 @@ export const makeRunStart = (
             at,
           );
         } else {
+          // Only a run that starts listens for its signal triggers.
+          yield* runHeld.open(runId, plan, at);
           yield* afterCommit(() => executeInBackground(runId));
         }
         return runId;

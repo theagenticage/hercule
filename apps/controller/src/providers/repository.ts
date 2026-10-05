@@ -189,7 +189,7 @@ const make = Effect.gen(function* () {
         (rows) => Effect.forEach(rows, toSnapshot),
       ),
 
-    snapshotsOf: (
+    listSnapshots: (
       instanceId: string,
     ): Effect.Effect<ReadonlyArray<StoredSnapshot>, SqlError | Schema.SchemaError> =>
       Effect.flatMap(

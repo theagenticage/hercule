@@ -1,6 +1,6 @@
 /**
- * Subscriptions: a session's standing claim on something that has not happened
- * yet.
+ * Subscriptions: a session's or a run's standing claim on something that has
+ * not happened yet.
  *
  * A session gives a Subscription Target - an External Ref, a run, a session or
  * a Permission Request - and the controller stores the CEL condition that
@@ -9,9 +9,16 @@
  * the target; the event router evaluates the condition. The condition is
  * returned too, so the holder can see what it is really waiting for.
  *
- * The holder is always the session that asked. It is taken from the credential
- * and never from the payload, so a subscription cannot be planted on another
- * session.
+ * The holder of a subscription a session registers is always that session. It
+ * is taken from the credential and never from the payload, so a subscription
+ * cannot be planted on another session.
+ *
+ * A run holds one subscription for each signal trigger of its plan. The run
+ * opens them when it is written and they end when it ends, so nobody creates
+ * or cancels one through the API. Their target names the signal trigger, a
+ * kind of target `subscription.create` never accepts. An event that satisfies
+ * the condition of one fires the trigger in the run, rather than becoming
+ * Queued Input.
  *
  * A target and a holder are both written as one token, `<kind>:<id>`, because
  * that is how an agent types them into a terminal. The codecs below do all of
@@ -140,18 +147,40 @@ export const SubscriptionTargetFromShorthand = Schema.String.check(
  */
 export const SubscriptionTarget = markShorthand(TargetValue, SubscriptionTargetFromShorthand);
 
-/** Who holds a subscription. Only a session can; v1 has no other kind of holder. */
-export const SubscriptionHolder = Schema.Struct({
-  kind: Schema.Literal("session"),
-  id: Id,
+/**
+ * What a run-held subscription waits on: the signal trigger of the run's plan
+ * it was opened for, by the trigger's id. Only the run opens such a
+ * subscription, so `subscription.create` never accepts this kind of target.
+ */
+export const SignalTriggerTarget = Schema.Struct({
+  kind: Schema.Literal("signal"),
+  triggerId: Schema.String,
 });
+
+export type SignalTriggerTarget = Schema.Schema.Type<typeof SignalTriggerTarget>;
+
+/**
+ * Who holds a subscription: a session that registered it, or a run that
+ * opened it for one of its signal triggers.
+ */
+export const SubscriptionHolder = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("session"), id: Id }),
+  Schema.Struct({ kind: Schema.Literal("run"), id: Id }),
+]);
 
 export type SubscriptionHolder = Schema.Schema.Type<typeof SubscriptionHolder>;
 
-const HOLDER_FORM = "write session:<session id>";
+const HOLDER_FORM = "write session:<session id> or run:<run id>";
 
-const parseHolderShorthand = (text: string): SubscriptionHolder | undefined =>
-  text.startsWith("session:") ? { kind: "session", id: text.slice("session:".length) } : undefined;
+/**
+ * Parses one token into a holder. Returns `undefined` when the token starts
+ * with neither prefix; the id itself is checked by the holder schema.
+ */
+const parseHolderShorthand = (text: string): SubscriptionHolder | undefined => {
+  if (text.startsWith("session:")) return { kind: "session", id: text.slice("session:".length) };
+  if (text.startsWith("run:")) return { kind: "run", id: text.slice("run:".length) };
+  return undefined;
+};
 
 /**
  * A holder as a query string carries it, in the same `<kind>:<id>` shorthand a
@@ -203,7 +232,8 @@ export type SubscriptionHealth = Schema.Schema.Type<typeof SubscriptionHealth>;
 
 export const Subscription = Schema.Struct({
   id: Id,
-  target: SubscriptionTarget,
+  /** What a session-held subscription waits on, or the signal trigger a run-held one serves. */
+  target: Schema.Union([SubscriptionTarget, SignalTriggerTarget]),
   /** The CEL source the target expanded into, which is what the event router reads. */
   condition: Schema.String,
   holder: SubscriptionHolder,
@@ -250,7 +280,7 @@ export const subscription = HttpApiGroup.make("subscription")
     HttpApiEndpoint.delete("cancel", "/subscriptions/:id", {
       params: { id: Id },
       success: Schema.Struct({}),
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

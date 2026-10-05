@@ -264,7 +264,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const known = yield* definitions;
       const stored = yield* instances.one(id);
-      const snapshots = yield* instances.snapshotsOf(id);
+      const snapshots = yield* instances.listSnapshots(id);
       const held = yield* secrets.refs(OWNER_KIND, [id]);
       const found = Option.flatMap(stored, (row) =>
         Option.map(Option.fromNullishOr(known.get(row.providerId)), (definition) =>

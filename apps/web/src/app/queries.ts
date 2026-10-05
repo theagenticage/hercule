@@ -284,6 +284,18 @@ export const runnerSessionsQuery = (client: HerculeClient, runnerId: string) =>
   });
 
 /**
+ * Reads the sessions one run's agent steps started, for the run's page, which
+ * names each step's session under its row. A run starts at most one session
+ * each time an agent step runs, far fewer than a page holds, so the query
+ * does not page.
+ */
+export const runSessionsQuery = (client: HerculeClient, runId: string) =>
+  queryOptions({
+    queryKey: queryKeys.sessions({ runId }),
+    queryFn: () => client.session.query({ query: { runId, limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
  * Reads the permission profiles, for the profile fields in Settings > Threads
  * and Settings > Assistants.
  * Profiles have no live topic, so only this browser's own writes update them.

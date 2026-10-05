@@ -51,7 +51,11 @@ import connectionAccountId from "./0040-connection-account-id";
 import taskSortRanks from "./0041-task-sort-ranks";
 import connectionIngest from "./0042-connection-ingest";
 import connectionUseOnAssistant from "./0043-connection-use-on-assistant";
-import subagents from "./0044-subagents";
+import agentStepsAndSignalTriggers from "./0044-agent-steps-and-signal-triggers";
+import sessionExitReason from "./0045-session-exit-reason";
+import stepCheckoutBranch from "./0046-step-checkout-branch";
+import inputSentStatus from "./0047-input-sent-status";
+import subagents from "./0048-subagents";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -97,7 +101,11 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [41, "task-sort-ranks", Effect.succeed(taskSortRanks)],
   [42, "connection-ingest", Effect.succeed(connectionIngest)],
   [43, "connection-use-on-assistant", Effect.succeed(connectionUseOnAssistant)],
-  [44, "subagents", Effect.succeed(subagents)],
+  [44, "agent-steps-and-signal-triggers", Effect.succeed(agentStepsAndSignalTriggers)],
+  [45, "session-exit-reason", Effect.succeed(sessionExitReason)],
+  [46, "step-checkout-branch", Effect.succeed(stepCheckoutBranch)],
+  [47, "input-sent-status", Effect.succeed(inputSentStatus)],
+  [48, "subagents", Effect.succeed(subagents)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

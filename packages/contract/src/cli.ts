@@ -1045,7 +1045,7 @@ export const CLI = {
 
   "subscription.query": {
     command: "subscription list",
-    help: "Lists what a session is waiting on. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own. Only live subscriptions are listed; a cancelled one no longer appears.",
+    help: "Lists what a session or a run is waiting on. A run waits on the events its signal triggers fire on. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own. Only live subscriptions are listed; a cancelled one no longer appears.",
     examples: [
       { args: [] },
       { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
@@ -1053,13 +1053,13 @@ export const CLI = {
     fields: {
       holder: {
         flag: "holder",
-        help: "Whose subscriptions to list, written session:<session id> with the full id. Without it, a session token lists its own; a user credential must give one.",
+        help: "Whose subscriptions to list, written session:<session id> or run:<run id> with the full id. Without it, a session token lists its own; a user credential must give one.",
       },
     },
   },
   "subscription.create": {
     command: "subscription create",
-    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can hold a subscription, and the calling session becomes the holder.",
+    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can create a subscription, and the calling session becomes the holder.",
     examples: [
       { args: ["github:pr:o/r#87"] },
       { args: ["gmail:thread:19b2c"] },
@@ -1095,6 +1095,8 @@ export const CLI = {
     errors: {
       not_found:
         "nothing to end: no subscription has that id, or it has ended already, or another session holds it; the three cases fail the same way",
+      invalid_state:
+        "a run holds the subscription for one of its signal triggers, and it ends when the run ends: cancel the run with `hercule run cancel` instead",
     },
   },
 
@@ -2449,6 +2451,11 @@ export const CLI = {
         help: "Only the sessions of this conversation, by its id or a tail of eight or more characters; find it with `hercule conversation list`.",
         resolves: "conversation.query",
       },
+      runId: {
+        flag: "run",
+        help: "Only the sessions this run's agent steps started, by the run's id or a tail of eight or more characters; find it with `hercule run list`.",
+        resolves: "run.query",
+      },
       permissionProfileId: {
         flag: "profile",
         help: "Only the sessions carrying this Permission Profile, by its id or a tail of eight or more characters; use it to find which sessions stop a profile from being deleted.",
@@ -2746,7 +2753,7 @@ export const CLI = {
 
   "input.query": {
     command: "input list",
-    help: "Lists every input a session was given, oldest first, whatever became of each. The rows still queued are the ones `hercule input update`, `hercule input cancel` and `hercule input steer` can act on.",
+    help: "Lists every input a session was given, oldest first, and what became of each. A status is `queued`, `delivered`, `cancelled`, or `sent, not confirmed`: a workflow step's prompt that left the controller and that the runner never confirmed. Such a prompt is never sent again, and the runner's report of the step settles the step. The rows still queued are the ones `hercule input update`, `hercule input cancel` and `hercule input steer` can act on.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {

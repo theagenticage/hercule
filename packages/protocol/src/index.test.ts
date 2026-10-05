@@ -270,12 +270,20 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
   {
     _tag: "workspaceStepStart",
+    kind: "action",
     ...STEP_KEY,
     workspaceId: WORKSPACE_ID,
     action: "git.commit",
     input: { message: "Fix the login form" },
     resourceId: RESOURCE_ID,
     gitIdentity: { name: "octocat", email: "octocat@users.noreply.github.com" },
+  },
+  {
+    _tag: "workspaceStepStart",
+    kind: "agent",
+    ...STEP_KEY,
+    sessionId: SESSION_ID,
+    workspaceId: null,
   },
   { _tag: "workspaceStepSettle", steps: [STEP_KEY] },
 ];
@@ -368,6 +376,27 @@ describe("the controller-to-runner catalogue", () => {
 
   it("has exactly the members the round-trip cases cover", () => {
     expect(listTags(ControllerToRunner)).toEqual(controllerMessages.map((message) => message._tag));
+  });
+
+  it("reads an action step's start with no kind, as a controller built before agent steps sends it", () => {
+    const withoutKind: Record<string, unknown> = {
+      ...controllerMessages.find((message) => "kind" in message && message.kind === "action"),
+    };
+    delete withoutKind.kind;
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(withoutKind))).toEqual(
+      withoutKind,
+    );
+  });
+
+  it("round-trips the input that starts an agent step's turn, with its step key", () => {
+    const input = {
+      _tag: "sessionInput",
+      requestId: REQUEST_ID,
+      sessionId: SESSION_ID,
+      input: { text: "Review the change", step: STEP_KEY },
+    } as const;
+    const encoded = Schema.encodeSync(ControllerToRunner)(input);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(encoded))).toEqual(input);
   });
 
   it("rejects a tag outside the union, including one from the other direction", () => {

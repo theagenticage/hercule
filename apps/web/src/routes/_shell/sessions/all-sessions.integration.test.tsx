@@ -1,10 +1,12 @@
 /**
  * Tests All sessions (`/sessions`) against a stubbed controller: the headline
- * sentence, the lanes and their rows.
+ * sentence, the lanes and their rows, and the fold that holds the sessions
+ * workflow runs started.
  */
-import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
-import type { Session } from "@hercule/contract";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { Runner, Session } from "@hercule/contract";
 import { buildHeadline } from "@hercule/client-core";
 import { readPageText, renderApp, stubApi, type Handler } from "../../../app/testing";
 
@@ -52,6 +54,22 @@ const buildClaudeCodeInstance = () => ({
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
+/** The runner every session here runs on. It is online, so a queued session waits for a free slot. */
+const MOSS: Runner = {
+  id: "01a06d02-beff-7037-9f5b-042822015952",
+  name: "moss",
+  connectivity: "online",
+  lifecycle: "active",
+  reserved: false,
+  version: "0.4.2",
+  labels: [],
+  facts: null,
+  watermark: null,
+  maxConcurrentSessions: 4,
+  diskWatermarkBytes: 10 * 1024 ** 3,
+  lastSeenAt: "2026-09-08T11:59:00.000Z",
+};
+
 const BASE_SESSION: Session = {
   id: "01a06d02-2000-7000-8000-000000000001",
   title: "Fix the login bug",
@@ -61,8 +79,10 @@ const BASE_SESSION: Session = {
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   agentId: null,
   conversationId: null,
+  runId: null,
+  stepId: null,
   instanceId: CLAUDE_ID,
-  runnerId: "01a06d02-beff-7037-9f5b-042822015952",
+  runnerId: MOSS.id,
   workspaceId: null,
   projectId: null,
   requestedAccessMode: "approval-required",
@@ -128,6 +148,52 @@ const ANSWERING: readonly Session[] = [
 ];
 
 /**
+ * Sessions three workflow runs' agent steps started:
+ *
+ * - one working, created on the day of `NOW`;
+ * - one ended, created the day before;
+ * - one queued for a free session slot, created on the day of `NOW`.
+ */
+const FROM_WORKFLOWS: readonly Session[] = [
+  buildSession({
+    id: "01a06d02-2000-7000-8000-000000000021",
+    title: "Fix and ship a pull request · implement",
+    status: "busy",
+    agentId: "01a06d02-a000-7000-8000-000000000021",
+    runId: "01a06d02-e000-7000-8000-00011f3a9c2e",
+    stepId: "implement",
+    createdAt: "2026-09-08T10:00:00.000Z",
+    lastActivityAt: "2026-09-08T11:58:00.000Z",
+  }),
+  buildSession({
+    id: "01a06d02-2000-7000-8000-000000000022",
+    title: "Review the nightly build · review",
+    status: "exited",
+    agentId: "01a06d02-a000-7000-8000-000000000022",
+    runId: "01a06d02-e000-7000-8000-00024e5f6a7b",
+    stepId: "review",
+    createdAt: "2026-09-07T08:00:00.000Z",
+    lastActivityAt: "2026-09-07T08:30:00.000Z",
+    exitedAt: "2026-09-07T08:30:00.000Z",
+  }),
+  buildSession({
+    id: "01a06d02-2000-7000-8000-000000000023",
+    title: "Triage new issues · triage",
+    status: "queued",
+    agentId: "01a06d02-a000-7000-8000-000000000023",
+    runId: "01a06d02-e000-7000-8000-0003a1b2c3d4",
+    stepId: "triage",
+    createdAt: "2026-09-08T11:59:00.000Z",
+    startedAt: null,
+    lastActivityAt: "2026-09-08T11:59:00.000Z",
+  }),
+];
+
+/** Returns the button that opens and closes the fold of sessions workflows started. */
+const getFoldButton = (): HTMLElement =>
+  screen.getByRole("button", { name: /sessions started by workflows/i });
+
+/**
  * Returns the lane on the screen whose heading is `label`, or null when the
  * screen has no such lane. The sidebar is skipped, because it can show the
  * same word.
@@ -151,6 +217,7 @@ const buildController = (
   },
   "GET /api/v1/sessions": { body: { items: sessions } },
   "GET /api/v1/providers": { body: [buildClaudeCodeInstance()] },
+  "GET /api/v1/runners": { body: { items: [MOSS] } },
   // The sidebar's Assistants group reads this; no test here has an assistant.
   "GET /api/v1/assistants": { body: { items: [] } },
   ...extra,
@@ -164,6 +231,11 @@ const openApp = async (
   const app = await renderApp({ path: "/sessions", api: api.fetch, token: "held" });
   return { ...app, api };
 };
+
+// The fold keeps its open state in session storage, which outlives a test.
+beforeEach(() => {
+  window.sessionStorage.clear();
+});
 
 describe("All sessions", () => {
   it("shows the headline sentence for three sessions in three statuses", async () => {
@@ -247,5 +319,115 @@ describe("All sessions", () => {
     expect(screen.queryByText("Settled")).toBeNull();
     expect(screen.queryByText("Waiting on you")).toBeNull();
     expect(screen.queryByText("Assistants")).toBeNull();
+  });
+});
+
+describe("All sessions' fold of the sessions workflows started", () => {
+  it("leaves workflow sessions out of the headline and the lanes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      await openApp([...THREE_STATUSES, ...FROM_WORKFLOWS]);
+
+      // The working workflow session would make it "2 running", and the
+      // ended one "2 settled".
+      expect(screen.getByText("1 running · 1 idle · 1 settled this week")).toBeDefined();
+      const lanes = ["Running", "Idle", "Settled"].map((label) => readPageText(findLane(label)));
+      for (const session of FROM_WORKFLOWS) {
+        for (const lane of lanes) expect(lane).not.toContain(session.title);
+      }
+      // Nor does the sidebar's list of threads show them.
+      const sidebar = readPageText(screen.getByRole("navigation", { name: "Threads" }));
+      for (const session of FROM_WORKFLOWS) expect(sidebar).not.toContain(session.title);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows No threads active this week when every session is a step session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      await openApp(FROM_WORKFLOWS);
+
+      expect(screen.getByText("No threads active this week")).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts closed, showing how many there are, how many run or wait and how many started today", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      await openApp([...THREE_STATUSES, ...FROM_WORKFLOWS]);
+
+      const button = getFoldButton();
+      expect(button.getAttribute("aria-expanded")).toBe("false");
+      expect(readPageText(button)).toContain("show 3 · 1 running · 1 queued · 2 today");
+      for (const session of FROM_WORKFLOWS) expect(screen.queryByText(session.title)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens to list each session with the run that started it, linked to its thread", async () => {
+    // Only the clock is faked: the click and the render after it still wait
+    // on real timers, which a fully faked timer queue would never run.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    try {
+      const user = userEvent.setup();
+      await openApp([...THREE_STATUSES, ...FROM_WORKFLOWS]);
+
+      await user.click(getFoldButton());
+
+      const button = getFoldButton();
+      expect(button.getAttribute("aria-expanded")).toBe("true");
+      expect(readPageText(button)).toContain("hide 3 · 1 running · 1 queued · 2 today");
+      const fold = button.closest("section")!;
+      const implement = within(fold).getByRole("link", {
+        name: /Fix and ship a pull request · implement/,
+      });
+      expect(implement.getAttribute("href")).toBe(`/threads/${FROM_WORKFLOWS[0]!.id}`);
+      expect(readPageText(implement)).toContain("run 1f3a9c2e");
+      // The title already names the step, so the second line does not repeat it.
+      expect(readPageText(implement)).not.toContain("step implement");
+      const review = within(fold).getByRole("link", { name: /Review the nightly build · review/ });
+      expect(readPageText(review)).toContain("run 4e5f6a7b");
+      // A queued session ends in "queued" where the others show their age.
+      const triage = within(fold).getByRole("link", { name: /Triage new issues · triage/ });
+      expect(readPageText(triage)).toContain("run a1b2c3d4");
+      expect(readPageText(triage)).toContain("queued");
+      expect(readPageText(implement)).toContain("2m");
+      // The threads in the lanes stay out of the fold.
+      expect(readPageText(fold)).not.toContain(BUSY.title);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays open across page loads in the same browser session once opened", async () => {
+    const user = userEvent.setup();
+    const first = await openApp(FROM_WORKFLOWS);
+
+    await user.click(getFoldButton());
+    // Unmount the first render to stand in for a page reload.
+    first.unmount();
+    await openApp(FROM_WORKFLOWS);
+
+    expect(getFoldButton().getAttribute("aria-expanded")).toBe("true");
+    expect(
+      screen
+        .getAllByText("Fix and ship a pull request · implement")
+        .filter((el) => el.closest("nav") === null),
+    ).toHaveLength(1);
+  });
+
+  it("is absent when no workflow run has started a session", async () => {
+    await openApp(THREE_STATUSES);
+
+    await screen.findByText("Running");
+    expect(screen.queryByRole("button", { name: /sessions started by workflows/i })).toBeNull();
   });
 });

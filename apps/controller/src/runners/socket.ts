@@ -29,6 +29,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
 import { createInternalError, createUnauthenticatedError } from "@hercule/contract";
 import {
+  AGENT_STEPS_CAPABILITY,
   ControllerToRunner,
   GOING_AWAY_CLOSE_CODE,
   PeerVersion,
@@ -90,10 +91,14 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   actions the runner implements and this controller knows, which is what run
  *   pinning checks.
  * - `LOGIN_ENDED_CAPABILITY`: this controller reads the `loginEnded` frame.
+ * - `AGENT_STEPS_CAPABILITY`: this controller sends a step key on a turn's
+ *   input and asks for an agent step's result. Run pinning places a run with
+ *   an agent step only on a runner that negotiated it.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
+  AGENT_STEPS_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";

@@ -1,7 +1,9 @@
 /**
  * How a run and its steps are described on screen: who started the run, the
  * words for its status and its failure, how long it and its steps took, and
- * how it can be re-run and which runs re-ran it.
+ * how it can be re-run and which runs re-ran it. It also lists the signals a
+ * running run with nothing to do waits on, and which session an agent step's
+ * record drove.
  *
  * The rules live here with a test rather than inside a component, so the run
  * list and a run's page use the same words for a run's status and failure.
@@ -16,6 +18,8 @@ import type {
   RunOrigin,
   RunStatus,
   Runner,
+  Session,
+  SessionStatus,
   StepStatus,
   TriggerEvent,
   WorkflowAction,
@@ -223,6 +227,21 @@ const buildActorOriginReading = (
   howStarted: string | undefined,
 ): RunOriginReading => ({ kind: "actor", label: starter.label, link: starter.link, howStarted });
 
+/**
+ * What a step line is a line of: an action step, an agent step, or a signal
+ * trigger, which has a record each time it fires.
+ */
+export type StepLineKind = "action" | "agent" | "signal";
+
+/**
+ * Returns what the step record with `stepId` is a record of, from the run's
+ * plan: an action step, an agent step, or a signal trigger. A run writes
+ * records only for its plan's steps and its signal triggers, so an id that
+ * names no step of the plan is a signal trigger's.
+ */
+export const findStepLineKind = (plan: Pick<Run["plan"], "steps">, stepId: string): StepLineKind =>
+  plan.steps.find((step) => step.id === stepId)?.kind ?? "signal";
+
 /** When a run or a step record started and finished. Each is absent until it has happened. */
 export interface Timestamps {
   readonly startedAt?: string;
@@ -305,12 +324,22 @@ export const formatElapsed = (ms: number): string => {
 };
 
 /**
- * Returns how long a step ran, or has run up to `now` while it runs, such as
- * `40ms` or `1m 15s`, or an empty string for a step that has not started. The
- * web app and the CLI both show a step's duration with it, so the two never
- * disagree about the same step record.
+ * Returns how long a step record of `kind` ran, or has run up to `now` while
+ * it runs, such as `40ms` or `1m 15s`, or an empty string for a step that has
+ * not started. The web app and the CLI both show a step's duration with it,
+ * so the two never disagree about the same step record.
+ *
+ * A signal's record also returns an empty string: a signal fires at one
+ * moment, so the time between its record's start and end is how long the
+ * controller took to note it, not anything the signal did. The kind is a
+ * required argument so that no caller can forget it.
  */
-export const describeStepDuration = (times: Timestamps, now: number): string => {
+export const describeStepDuration = (
+  times: Timestamps,
+  kind: StepLineKind,
+  now: number,
+): string => {
+  if (kind === "signal") return "";
   const elapsed = measureElapsed(times.startedAt, times.finishedAt, now);
   return elapsed === undefined ? "" : formatElapsed(elapsed);
 };
@@ -346,7 +375,10 @@ export const describeRunStatus = (run: TimedRun, now: number): string => {
  * "iteration limit" for an edge the run was to follow more often than its
  * `maxTraversals` allows, "controller error" for a run the controller
  * could not carry out, or "workspace failed" for a run whose workspace could
- * not be set up or was lost with its runner.
+ * not be set up or was lost with its runner. For an agent step it returns
+ * "schema failure" for a turn that ended without a value matching the step's
+ * output schema, and "session failed" for a turn or session that failed
+ * before the turn ended.
  */
 export const describeFailureReason = (reason: FailureReason): string => {
   switch (reason) {
@@ -362,6 +394,10 @@ export const describeFailureReason = (reason: FailureReason): string => {
       return "controller error";
     case "workspace-failed":
       return "workspace failed";
+    case "schema-failure":
+      return "schema failure";
+    case "session-failed":
+      return "session failed";
   }
 };
 
@@ -420,9 +456,9 @@ export const describeStepState = (state: WorkState, runStatus: RunStatus): strin
 /** The steps of a run that wait for a runner, and the line each of them shows. */
 export interface RunnerWait {
   /**
-   * The ids of the steps that wait: the running workspace steps of a run
-   * whose runner is offline, or the pending workspace steps of a run that no
-   * runner has taken yet.
+   * The ids of the steps that wait: the running agent steps and workspace
+   * steps of a run whose runner is offline, or the pending workspace steps of
+   * a run that no runner has taken yet.
    */
   readonly stepIds: ReadonlySet<string>;
   /**
@@ -434,16 +470,17 @@ export interface RunnerWait {
 
 /**
  * Returns which steps of a running run wait for a runner, and the line they
- * show, with times in `timezone`. A step waits only when its action runs in
- * the workspace, which `actions`, the action catalog, tells. A step that runs
- * on the controller, or whose action is no longer in the catalog, never
- * waits. There are two waits:
+ * show, with times in `timezone`. An action step waits only when its action
+ * runs in the workspace, which `actions`, the action catalog, tells. An
+ * action step that runs on the controller, or whose action is no longer in
+ * the catalog, never waits. There are two waits:
  *
  * - The run is pinned to a runner that is not online. Its running workspace
- *   steps wait for that runner without limit, because every workspace step
- *   of a run runs on the runner the run is pinned to. The line is "Waiting
- *   for runner mac-mini to reconnect (offline since 25 Sep 14:02)"; the part
- *   in brackets is left out when the runner has never been seen.
+ *   steps and agent steps wait for that runner without limit, because both
+ *   run on the runner the run is pinned to: an agent step's session does.
+ *   The line is "Waiting for runner mac-mini to reconnect (offline since
+ *   25 Sep 14:02)"; the part in brackets is left out when the runner has
+ *   never been seen.
  * - The run is not pinned to a runner yet. Its first workspace step stays
  *   pending until a runner that can run every workspace action of the plan
  *   is online and free to take the run. The line names those actions:
@@ -463,19 +500,25 @@ export const describeRunnerWait = (
   const workspaceActionIds = new Set(
     actions.filter((action) => action.runsIn === "workspace").map((action) => action.id),
   );
-  const listWorkspaceStepIds = (status: StepStatus): ReadonlySet<string> =>
+  /** Returns the ids of the plan's steps with a record in `status` that `waitsFor` accepts. */
+  const listWaitingStepIds = (
+    status: StepStatus,
+    waitsFor: (step: Run["plan"]["steps"][number]) => boolean,
+  ): ReadonlySet<string> =>
     new Set(
       run.steps
         .filter((record) => record.status === status)
         .map((record) => record.stepId)
         .filter((stepId) => {
           const step = run.plan.steps.find((each) => each.id === stepId);
-          return step?.kind === "action" && workspaceActionIds.has(step.action);
+          return step !== undefined && waitsFor(step);
         }),
     );
+  const isWorkspaceAction = (step: Run["plan"]["steps"][number]): boolean =>
+    step.kind === "action" && workspaceActionIds.has(step.action);
 
   if (run.runnerId === undefined) {
-    const stepIds = listWorkspaceStepIds("pending");
+    const stepIds = listWaitingStepIds("pending", isWorkspaceAction);
     if (stepIds.size === 0) return undefined;
     const planActionIds = new Set(
       run.plan.steps.flatMap((step) =>
@@ -490,10 +533,108 @@ export const describeRunnerWait = (
 
   if (runner === undefined || runner.id !== run.runnerId) return undefined;
   if (runner.connectivity === "online") return undefined;
-  const stepIds = listWorkspaceStepIds("running");
+  const stepIds = listWaitingStepIds(
+    "running",
+    (step) => step.kind === "agent" || isWorkspaceAction(step),
+  );
   if (stepIds.size === 0) return undefined;
   const waiting = `Waiting for runner ${runner.name} to reconnect`;
   const since =
     runner.lastSeenAt === null ? undefined : formatStamp(new Date(runner.lastSeenAt), timezone);
   return { stepIds, text: since === undefined ? waiting : `${waiting} (offline since ${since})` };
+};
+
+/**
+ * Returns the ids of the signal triggers a run waits on, in the plan's order,
+ * or an empty list when the run waits on none. A run waits on its signals
+ * when all of these hold:
+ *
+ * - it is `running`;
+ * - none of its step records is running or pending;
+ * - its plan has signal triggers.
+ *
+ * A run has no status of its own for this wait: it stays `running` until it
+ * ends, because each signal trigger can fire again while the run lives. A
+ * signal that just fired has a pending record until the run takes it up, so
+ * for that moment the run does not wait. See spec 07 §7.2.
+ */
+export const listAwaitedSignals = (
+  run: Pick<Run, "status" | "plan" | "steps">,
+): ReadonlyArray<string> => {
+  if (run.status !== "running") return [];
+  const isBusy = run.steps.some(
+    (record) => record.status === "running" || record.status === "pending",
+  );
+  if (isBusy) return [];
+  return (run.plan.triggers ?? [])
+    .filter((trigger) => trigger.kind === "signal")
+    .map((trigger) => trigger.id);
+};
+
+/**
+ * The session an agent step's record drives, and whether the record is the
+ * newest of the run's records that drive it. A step that runs again in the
+ * same session, such as one a signal sends back to, has several records that
+ * drive one session.
+ */
+export interface StepRecordSession {
+  readonly id: string;
+  /** Whether no record created after this one drives the same session. */
+  readonly isNewestRecord: boolean;
+}
+
+/** The session an agent step's record drove, as the line under the record shows it. */
+export interface StepSessionReading {
+  readonly sessionId: string;
+  /**
+   * The session's status, or `undefined` while the session has not been
+   * read, and on every record but the newest that drives the session.
+   */
+  readonly status: SessionStatus | undefined;
+  /**
+   * Why a queued session has not started, such as "Waiting for runner atlas
+   * to free a session slot", or `undefined` for a session that is not queued
+   * and on every record but the newest that drives the session.
+   */
+  readonly wait: string | undefined;
+}
+
+/**
+ * Returns how the lines under an agent step's record show `recordSession`,
+ * the session the record drove, looked up by its id in `sessions`, the run's
+ * sessions. The line names the session by the tail of its id, not by its
+ * title: a step session's title, such as "Fix and ship a pull request ·
+ * implement", only repeats the workflow and the step the run's page already
+ * shows.
+ *
+ * - Only the newest record that drives the session shows the session's
+ *   status and wait. The status is the session's now, not the record's: an
+ *   earlier record that completed would read "busy" while a later record
+ *   runs in the same session.
+ * - A session missing from `sessions`, such as one that started after they
+ *   were last read, has no status.
+ * - A queued session on an online `runner` waits for the runner to free one
+ *   of its session slots, because the runner already runs as many sessions as
+ *   it may. A queued session on a runner that is not online waits for the
+ *   runner to reconnect instead; `describeRunnerWait` writes that line, so
+ *   this reading has no wait then. Neither has one while the runner is
+ *   unknown.
+ */
+export const describeStepSession = (
+  recordSession: StepRecordSession,
+  sessions: readonly Session[],
+  runner: Runner | undefined,
+): StepSessionReading => {
+  const session = recordSession.isNewestRecord
+    ? sessions.find((each) => each.id === recordSession.id)
+    : undefined;
+  const isWaitingForSlot =
+    session?.status === "queued" &&
+    runner?.id === session.runnerId &&
+    runner.connectivity === "online";
+  return {
+    sessionId: recordSession.id,
+    status: session?.status,
+    wait: isWaitingForSlot ? `Waiting for runner ${runner.name} to free a session slot` : undefined,
+  };
 };

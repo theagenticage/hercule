@@ -15,7 +15,7 @@ One named thing the public API can do (`task.create`, `session.spawn`), the same
 _Avoid_: endpoint, command (bare), method
 
 **Subscription Target**:
-What a session-held subscription waits on: a run, a session, an External Ref, or a Permission Request. The shorthand an agent types (`run:r_3`).
+What a session-held subscription waits on: a run, a session, an External Ref, or a Permission Request. The shorthand an agent types (`run:r_3`). A run-held subscription's target is the signal trigger it serves, which no session can register.
 _Avoid_: filter, topic
 
 ### Work
@@ -98,7 +98,7 @@ User input held by the controller for delivery when the session's running turn c
 - inputs to an assistant's conversation session are the owner's messages and go in unchanged;
 - a session's first input cannot be cancelled before the session starts: stop the session instead.
 
-A conversation's session keeps its queued input through any exit and is resumed for it; any other session, a Thread included, has it cancelled at any exit.
+A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -182,7 +182,7 @@ A conversation message the system writes in one of two forms: "<name> was interr
 _Avoid_: notification (Hercule's central message to its user), error message, alert
 
 **Idle Unload**:
-Stopping the process of an assistant's conversation session after it has sat idle for `session.idleUnloadMinutes` (15 by default), counted from the end of its last turn, or from an input refused while no turn was open. The session exits with reason `idle_unload`, keeps any input still waiting, and the next input resumes it in place under its own id. Frees the machine without changing anything the assistant remembers or writing a notice; not a rotation. Nothing treats it as a special exit: it writes no notice because no turn runs at an idle unload. The owner sees the assistant as "asleep", the presence word for an exited session the next message resumes; that is a word on screen, not a name for the unload.
+Stopping the process of a session after it has sat idle for a while: an assistant's conversation session after `session.idleUnloadMinutes` (15 by default), and an agent step's session after five seconds, so a finished step frees its runner slot for the run's next step. The wait is counted from the end of the session's last turn, or from an input refused while no turn was open. A Thread is never unloaded. The session exits with reason `idle_unload`, and the next input resumes it in place under its own id. An assistant's conversation session keeps any input still waiting, as it does at every exit. An agent step's session keeps only its waiting step prompt, unless the crash-loop guard holds the session. That makes the idle unload a special exit for it: any exit other than an idle unload or a runner restart cancels the step prompt and fails the step. Frees the machine without changing anything the session remembers, but ends any background process the session started, such as a dev server; not a rotation. It writes no notice, because no turn runs at an idle unload. An assistant's owner sees the assistant as "asleep", the presence word for an exited conversation session the next message resumes; that is a word on screen, not a name for the unload.
 _Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:
@@ -377,7 +377,7 @@ The one consumer of the event log. It walks the events past its own durable curs
 _Avoid_: matcher, dispatcher, event bus
 
 **Routing Table**:
-The routes one kind of destination owns: one per live subscription, or one per active start trigger of an enabled workflow. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
+The routes one kind of destination owns: one per live session-held subscription, one per live run-held subscription, or one per active start trigger of an enabled workflow. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
 
 **Delivery**:
 The downstream consumer of one kind of row. It reads its own rows, whoever wrote them, and acts on the ones that can act now; idempotent, so a crash between a write and its delivery loses nothing.
@@ -419,7 +419,7 @@ One entry of a run into a step, numbered 1, 2, 3 in the order the run came to it
 _Avoid_: retry (a run never retries a step), turn (a turn belongs to a session)
 
 **Step Record**:
-What one step, or one signal trigger, did in one iteration of a run: its status, times, output or error. Created `pending`, then `running` and `completed`, `failed` or `cancelled`, or `skipped`. Its status only moves forward: a step that runs again gets a new record.
+What one step, or one signal trigger, did in one iteration of a run: its status, times, output or error. Created `pending`, then `running` and `completed`, `failed` or `cancelled`, or `skipped`. Its status only moves forward: a step that runs again gets a new record. A signal trigger's record is written `pending` by the Event Router when an event matches, and the run marks it `completed` as it fires the trigger's edges.
 _Avoid_: step run, step instance
 
 **Workflow Action**:
@@ -439,11 +439,11 @@ A Workflow Action that runs on the run's runner, in the run's workspace, such as
 _Avoid_: runner action, remote action, exec
 
 **Workspace Step**:
-A step whose work happens in the run's workspace on a runner: in v1, an action step that calls a Workspace Action. The controller sends it to the run's runner and the runner reports how it ended.
+A step whose work happens on the run's runner: an action step that calls a Workspace Action, or an agent step, whose session runs there. The run is pinned to its runner when its first workspace step starts, and the runner reports how each workspace step ended.
 _Avoid_: remote step, runner step
 
 **Step Key**:
-The triple `(runId, stepId, iteration)` that names one iteration of a step. Every delivery of a Workspace Step and of its outcome is idempotent by it, so either side can send it again after a restart.
+The triple `(runId, stepId, iteration)` that names one iteration of a step. Every delivery of a Workspace Step and of its outcome is idempotent by it, so either side can send it again after a restart. An agent step's prompt is the exception: it is never sent again once it may have reached the harness, because a second turn could repeat what the first one did. The runner sends the step's result when the turn ends. When the prompt goes unanswered, the controller asks the runner for the result at once, or when the runner reconnects. The request waits behind the prompt on the runner, so it never overtakes it.
 _Avoid_: step id (bare, which names the step, not the iteration)
 
 **Entry Step**:

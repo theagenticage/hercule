@@ -36,6 +36,7 @@ const RUNNING_RUN: Run = {
   origin: ORIGIN,
   steps: [],
   edgeTraversals: [],
+  subscriptions: [],
   createdAt: CREATED_AT,
   status: "running",
   startedAt: STARTED_AT,
@@ -50,6 +51,7 @@ const PENDING_RUN: Run = {
   origin: ORIGIN,
   steps: [],
   edgeTraversals: [],
+  subscriptions: [],
   createdAt: CREATED_AT,
   status: "pending",
 };

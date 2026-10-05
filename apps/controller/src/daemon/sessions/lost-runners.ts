@@ -8,7 +8,9 @@
  * The rule itself is `SessionService.endOnLostRunners`. This module reads
  * which runners are connected from the runners domain, and runs the rule once
  * when the controller starts and then on an interval, because the rule
- * depends on how much time has passed.
+ * depends on how much time has passed. No runner will report the turn of an
+ * agent step whose session the sweep ended, so the sweep fails those steps
+ * too.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -17,6 +19,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../../db";
 import { runnerRepository } from "../../runners";
+import { RunService } from "../../runs";
 import { SessionService } from "../../sessions";
 import { absorbFailures } from "../absorbing";
 
@@ -49,15 +52,24 @@ export const LostRunnerSweepInterval = Context.Reference<Duration.Duration>(
 export const sweepSessionsOnLostRunners: Effect.Effect<
   never,
   SqlError,
-  SessionService | SqlClient.SqlClient
+  SessionService | RunService | SqlClient.SqlClient
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
+  const runs = yield* RunService;
   const runners = yield* runnerRepository;
   const interval = yield* LostRunnerSweepInterval;
   const pass = withTransaction(
     sql,
-    Effect.flatMap(runners.connected(), (connected) => sessions.endOnLostRunners(connected)),
+    Effect.gen(function* () {
+      const ended = yield* sessions.endOnLostRunners(yield* runners.connected());
+      // No runner will report the turn of an agent step whose session ended
+      // here, so the step fails in the same transaction.
+      yield* runs.failStepsOfEndedSessions(
+        ended,
+        "The step's session ended because its runner was not heard from for longer than the session's absolute timeout.",
+      );
+    }),
   );
   while (true) {
     yield* absorbFailures("Ending sessions on lost runners failed", pass);

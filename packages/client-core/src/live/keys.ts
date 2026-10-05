@@ -53,6 +53,7 @@ export const queryKeys = {
    *
    * - one runner's sessions, for its page;
    * - one conversation's sessions, for its activity row;
+   * - one run's sessions, the ones its agent steps started, for the run's page;
    * - `{ thread: true }`, every Thread and no Agent's session, for the
    *   desktop app's sidebar.
    *
@@ -63,6 +64,7 @@ export const queryKeys = {
     filter?:
       | { readonly runnerId: string }
       | { readonly conversationId: string }
+      | { readonly runId: string }
       | { readonly thread: true },
   ): LiveQueryKey => (filter === undefined ? ["sessions"] : ["sessions", filter]),
   /** Not a live topic: profiles change only through this browser's own writes. */

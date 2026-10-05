@@ -18,6 +18,7 @@ import {
   MAX_FACT_LENGTH,
   Sequenced,
   SessionId,
+  WorkspaceStepKey,
 } from "./primitives";
 
 /**
@@ -196,6 +197,12 @@ export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 export const TurnInput = Schema.Struct({
   text: Schema.String,
   modelSelection: Schema.optionalKey(ModelSelection),
+  /**
+   * The agent step this input runs, set only on the input that starts an
+   * agent step's turn. The runner reports how that turn ends as the step's
+   * result, under this key, instead of only as session events.
+   */
+  step: Schema.optionalKey(WorkspaceStepKey),
 });
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;
