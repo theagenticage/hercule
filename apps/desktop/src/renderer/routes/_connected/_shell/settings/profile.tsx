@@ -68,7 +68,7 @@ function Profile(): JSX.Element {
   );
 }
 
-/** Renders the time zone row: the zone every time on screen is shown in. */
+/** Renders the time zone row: the zone the controller runs schedules in. */
 function TimezoneRow(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
@@ -80,7 +80,7 @@ function TimezoneRow(): JSX.Element {
   return (
     <SettingRow
       label="Time zone"
-      hint="Schedules, ages and every time on screen are read in this zone."
+      hint="Schedules run in this zone, such as a workflow's cron trigger and an assistant's heartbeat. This app shows times in your Mac's time zone."
       error={timezone.error}
       control={(labels) => (
         <span className="field field--select">

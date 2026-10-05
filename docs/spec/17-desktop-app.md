@@ -789,6 +789,7 @@ Each section lists what it reads and writes through the contract, its live topic
 - Reads `user.read`, `settings.read` and `connection.query`. Writes `settings.update` (`user.timezone` and `github.defaultConnectionId`) and `auth.logout`. Live topic: `connection`.
 - Shows the user's avatar and name, the time zone, the default GitHub account, and Sign out.
 - Same as the web screen. Sign out is also in the app menu, as it is today.
+- *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* **The time zone's hint differs from the web screen's:** "Schedules run in this zone, such as a workflow's cron trigger and an assistant's heartbeat. This app shows times in your Mac's time zone." The web's hint says every time on screen is read in this zone, but the desktop shows times in the Mac's time zone (see "Messages carry their own time" under [Design system](#design-system)), because the Mac's clock follows the user when they travel. The setting decides when schedules run on the controller.
 
 **Threads.** Not drawn by the book.
 
