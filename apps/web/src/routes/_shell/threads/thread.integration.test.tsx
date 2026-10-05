@@ -2184,6 +2184,62 @@ describe("Thread: input queue", () => {
   });
 });
 
+/**
+ * Opens `fixture`, a busy session, clicks Stop, and checks that Stop stays
+ * gone when the interrupt's answer arrives after the live connection has
+ * already reported the session idle.
+ *
+ * The controller answers `session.interrupt` with the session as it read it
+ * before the interrupt, still busy. The app must not write that answer into
+ * the cache, or the late answer would bring Stop back on an idle session.
+ * `extra` adds the routes the screen needs besides the session's own.
+ */
+const checkLateInterruptAnswerKeepsStopGone = async (
+  fixture: Session,
+  extra: Readonly<Record<string, Handler>> = {},
+) => {
+  const user = userEvent.setup();
+  let current = fixture;
+  let answerInterrupt: (answer: { body: unknown }) => void = () => {};
+  const { api, live } = await openApp(fixture, buildTwoCompletedTurns(), {
+    ...extra,
+    [`GET /api/v1/sessions/${fixture.id}`]: () => ({ body: current }),
+    [`POST /api/v1/sessions/${fixture.id}/interrupt`]: () =>
+      new Promise((resolve) => {
+        answerInterrupt = resolve;
+      }),
+  });
+
+  await user.click(await screen.findByRole("button", { name: /^stop$/i }));
+  await waitFor(() => {
+    expect(
+      api.calls.some(
+        (call) =>
+          call.method === "POST" && call.path === `/api/v1/sessions/${fixture.id}/interrupt`,
+      ),
+    ).toBe(true);
+  });
+
+  current = { ...fixture, status: "idle" };
+  await waitFor(() => {
+    expect(live.topics()).toContain("session");
+  });
+  act(() => {
+    live.push("session", { _tag: "invalidate", ids: [fixture.id], kind: "updated" });
+  });
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+  });
+
+  await act(async () => {
+    answerInterrupt({ body: fixture });
+    // A real wait, not microtasks: the answer passes through `fetch`, the
+    // client's decoding and React Query before it could reach the cache.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+};
+
 describe("Thread: stop control", () => {
   it("shows Stop on a busy thread and calls POST /sessions/:id/interrupt", async () => {
     const user = userEvent.setup();
@@ -2201,6 +2257,10 @@ describe("Thread: stop control", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it("keeps Stop gone when the interrupt answers after the session went idle", async () => {
+    await checkLateInterruptAnswerKeepsStopGone(buildSession({ status: "busy" }));
   });
 
   it("has no Stop control on an idle thread", async () => {
@@ -3575,6 +3635,13 @@ describe("Thread: the session view of an assistant's session", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
     });
+  });
+
+  it("keeps Stop gone when the interrupt answers after the session went idle", async () => {
+    await checkLateInterruptAnswerKeepsStopGone(
+      buildAssistantSession({ status: "busy" }),
+      ASSISTANT_ROUTES,
+    );
   });
 
   it("has no Stop control while the session is idle", async () => {

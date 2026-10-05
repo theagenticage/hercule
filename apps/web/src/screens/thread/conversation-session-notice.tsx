@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import { buildButtonClassName } from "@hercule/ui";
 import { answeredAssistantQuery } from "../../app/queries";
 import { StopButton } from "../composer/controls";
@@ -31,13 +31,12 @@ export function ConversationSessionNotice({
   readonly assistantId: string;
   readonly busy: boolean;
 }): JSX.Element {
-  const queryClient = useQueryClient();
   const assistant = useSuspenseQuery(answeredAssistantQuery(client, assistantId)).data;
   const interrupt = useMutation({
     mutationFn: () => client.session.interrupt({ params: { id: sessionId }, payload: {} }),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKeys.session(updated.id), updated);
-    },
+    // The response is not written into the cache. It is the session as the
+    // controller read it before the interrupt, still busy, so writing it
+    // could bring back a Stop the live `session` push has already cleared.
   });
 
   return (
