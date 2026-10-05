@@ -132,18 +132,18 @@
   cursor: default;
 }
 
-/* The floating bar that switches variant and state. */
+/* The floating card of knobs: variant, state, and in D tally, page and hue.
+   It sits over the sidebar's foot, faded until the pointer is on it. */
 .proto-switcher {
   position: fixed;
   z-index: 100;
   left: 8px;
   bottom: 64px;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 34px;
-  padding: 0 4px 0 6px;
-  border-radius: 10px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 8px 10px;
+  border-radius: 12px;
   background: var(--ink);
   color: var(--surface);
   font-size: var(--t-12);
@@ -154,17 +154,17 @@
 .proto-switcher:hover {
   opacity: 1;
 }
+.proto-knob {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.proto-knob > span:first-child {
+  width: 44px;
+  color: color-mix(in oklab, var(--surface) 55%, transparent);
+}
 .proto-switcher .icon-btn {
   color: inherit;
-}
-.proto-switcher-name {
-  text-align: center;
-  white-space: nowrap;
-}
-.proto-switcher-sep {
-  width: 1px;
-  height: 18px;
-  background: color-mix(in oklab, var(--surface) 25%, transparent);
 }
 .proto-switcher .seg {
   background: color-mix(in oklab, var(--surface) 12%, transparent);
@@ -172,11 +172,52 @@
 }
 .proto-switcher .seg button {
   height: 22px;
+  padding: 0 8px;
   color: color-mix(in oklab, var(--surface) 70%, transparent);
   font-size: var(--t-12);
 }
 .proto-switcher .seg button[aria-pressed="true"] {
   color: var(--ink);
+}
+.proto-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.proto-stepper b {
+  min-width: 82px;
+  text-align: center;
+  font-weight: var(--w-medium);
+}
+.proto-stepper small {
+  color: color-mix(in oklab, var(--surface) 55%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.proto-hues {
+  display: inline-flex;
+  gap: 5px;
+}
+.proto-hues button {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: oklch(0.72 0.13 var(--hue));
+}
+/* "Own": each subagent keeps its signature hue. */
+.proto-hues button.is-own {
+  background: conic-gradient(
+    oklch(0.72 0.13 52),
+    oklch(0.72 0.13 166),
+    oklch(0.72 0.13 240),
+    oklch(0.72 0.13 312),
+    oklch(0.72 0.13 52)
+  );
+}
+.proto-hues button[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 2px var(--ink),
+    0 0 0 3.5px var(--surface);
 }
 
 /* ------------------------------------------- A: the inline tree */
@@ -389,22 +430,39 @@
   color: var(--fail-ink);
 }
 
-/* C: the page is tinted in the subagent's hue, from the top, and its tab
-   says "subagent", so it can never pass for a thread. */
-.proto-page.is-strong {
-  background: linear-gradient(to bottom, var(--who-tint), var(--surface) 140px);
+/* How loudly a subagent's page says it is not a thread, quietest first.
+   Every level tags the breadcrumb "subagent"; each louder level adds:
+   - crumb: the breadcrumb's last tab tinted in the subagent's hue;
+   - band: a 3px band in the hue across the page's top edge;
+   - frame: a 2px frame in the hue around the whole page, in place of the band;
+   - wash: the band, and the whole page faintly tinted;
+   - gradient: the band, and a tint that fades out down the page (round 1's C). */
+.proto-page:is(.is-crumb, .is-band, .is-frame, .is-wash, .is-gradient) .proto-crumb-here {
+  background: var(--who-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 55%, transparent);
 }
-.proto-page.is-strong::before {
+.proto-page:is(.is-band, .is-wash, .is-gradient)::before {
   content: "";
   position: absolute;
   z-index: 6;
   inset: 0 0 auto;
   height: 3px;
   background: var(--who);
+  pointer-events: none;
 }
-.proto-page.is-strong .proto-crumb-here {
-  background: var(--who-tint);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 55%, transparent);
+.proto-page.is-frame::before {
+  content: "";
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px var(--who);
+  pointer-events: none;
+}
+.proto-page.is-wash {
+  background: color-mix(in oklab, var(--who-tint) 45%, var(--surface));
+}
+.proto-page.is-gradient {
+  background: linear-gradient(to bottom, var(--who-tint), var(--surface) 140px);
 }
 .proto-tag {
   padding: 1px 6px;
@@ -664,4 +722,317 @@
   gap: 7px;
   color: var(--muted);
   font-weight: var(--w-medium);
+}
+
+/* ------------------------------------------ D: the side pane */
+
+.proto-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.proto-split-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The pane is not about subagents: its chrome is tabs of surfaces, and the
+   Subagents surface is one of them. */
+.proto-pane {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  box-shadow: -1px 0 0 var(--line-soft);
+}
+.proto-pane-handle {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+}
+.proto-pane-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background var(--dur-1);
+}
+.proto-pane-handle:hover::after,
+.proto-pane-handle:active::after {
+  background: var(--accent);
+}
+.proto-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin: 10px 10px 6px 10px;
+  -webkit-app-region: no-drag;
+}
+.proto-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.proto-tab {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.proto-tab:hover {
+  background: var(--hover);
+}
+.proto-tab.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.proto-tab > button:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 9px;
+  white-space: nowrap;
+}
+.proto-tab-close {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  border-radius: 5px;
+  color: var(--faint);
+  opacity: 0;
+}
+.proto-tab:hover .proto-tab-close,
+.proto-tab.is-on .proto-tab-close {
+  opacity: 1;
+}
+.proto-tab-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.proto-picker-wrap {
+  position: relative;
+  margin-left: 2px;
+}
+.proto-picker {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 220px;
+  padding: 4px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-3);
+  outline: none;
+}
+.proto-picker h4 {
+  margin: 6px 8px 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.proto-picker button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-align: left;
+}
+.proto-picker button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.proto-picker button span {
+  flex: 1;
+}
+.proto-stub {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.proto-stub b {
+  color: var(--muted);
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+}
+
+/* The Subagents surface. */
+.proto-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.proto-surface-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 16px;
+}
+.proto-surface-section {
+  margin: 8px 0 4px 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.proto-sub-tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The rail that ties nested rows to the face of the subagent that started them. */
+.proto-sub-tree.is-nested {
+  position: relative;
+}
+.proto-sub-tree.is-nested::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  bottom: 22px;
+  left: var(--rail-x);
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.proto-sub-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  cursor: default;
+  transition: background var(--dur-1);
+}
+.proto-sub-row:hover {
+  background: var(--hover);
+}
+.proto-sub-row.is-on {
+  background: var(--selected);
+}
+.proto-sub-row > .cr,
+.proto-sub-row > svg {
+  flex: none;
+  margin-top: 1px;
+}
+.proto-sub-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+.proto-sub-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.proto-sub-top .proto-name {
+  flex: 0 1 auto;
+}
+.proto-sub-type {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--t-11);
+  line-height: 1.6;
+}
+.proto-sub-end {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.proto-sub-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.proto-sub-line.is-waiting {
+  color: var(--you-ink);
+}
+.proto-sub-line.is-failed {
+  color: var(--fail-ink);
+}
+.proto-sub-meta {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: var(--t-11);
+}
+.proto-sub-row .proto-stop {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  background: var(--raised);
+  box-shadow: var(--shadow-1);
+}
+.proto-sub-row:hover .proto-stop {
+  opacity: 1;
+}
+.proto-surface-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 18px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tally above the composer sits at the column's right, like a chip on the composer's lip. */
+.proto-tally.is-composer {
+  align-self: flex-end;
+  margin-bottom: 8px;
 }

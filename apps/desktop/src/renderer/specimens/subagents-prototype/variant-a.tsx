@@ -5,7 +5,7 @@
  * tree from anywhere; a chip above the composer stops what still runs. A
  * subagent opens as a page of its own, with a breadcrumb back to its parent.
  */
-import { useState, type JSX } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { buildLook, Face } from "../../faces";
 import { Mark } from "../../marks";
 import { StopIcon } from "../../icons/stop";
@@ -34,6 +34,7 @@ import {
   SubagentMark,
   SubagentName,
   SubagentTranscript,
+  type Takeover,
   update,
   useProto,
 } from "./shared";
@@ -209,7 +210,7 @@ export function VariantAThread(): JSX.Element {
   const subagents = listSubagents(s);
   const sub = subagents.find((each) => each.id === s.open);
   if (sub !== undefined)
-    return <SubagentPage sub={sub} strong={false} spawn={(id) => <SpawnGroup parentId={id} />} />;
+    return <SubagentPage sub={sub} takeover={null} spawn={(id) => <SpawnGroup parentId={id} />} />;
   return (
     <PrototypeThread
       hideSubagentItems
@@ -234,17 +235,23 @@ export function VariantAThread(): JSX.Element {
  * Renders a subagent as a page of its own: a breadcrumb from the thread down
  * to it, the brief its parent gave it, its transcript, and a status bar in
  * place of the composer. `spawn` draws the subagents it started, where it
- * started them. With `strong`, the page is tinted in the subagent's hue, so
- * it can never pass for a thread (variant C).
+ * started them. `takeover` says how loudly the page is drawn in the
+ * subagent's hue, so it can never pass for a thread; `null` is not at all
+ * (variant A). `headerExtra` is drawn at the header's end, and `aboveStatus`
+ * on top of the status bar.
  */
 export function SubagentPage({
   sub,
-  strong,
+  takeover,
   spawn,
+  headerExtra,
+  aboveStatus,
 }: {
   readonly sub: ProtoSubagent;
-  readonly strong: boolean;
+  readonly takeover: Takeover | null;
   readonly spawn: (parentId: string) => JSX.Element;
+  readonly headerExtra?: ReactNode;
+  readonly aboveStatus?: ReactNode;
 }): JSX.Element {
   const s = useProto();
   const subagents = listSubagents(s);
@@ -255,7 +262,10 @@ export function SubagentPage({
   const parentName = parent === undefined ? "the main agent" : nameSubagent(parent);
   const brief = buildCustomBlock(`brief:${sub.id}`, 150, () => <Brief sub={sub} parent={parent} />);
   return (
-    <div className={`proto-page${strong ? " is-strong" : ""}`} style={hueStyle(sub.id)}>
+    <div
+      className={`proto-page${takeover === null ? "" : ` is-${takeover}`}`}
+      style={hueStyle(sub.id, s)}
+    >
       <header className="top">
         <nav className="pill proto-crumbs" aria-label="Subagent of">
           <button type="button" className="ptab" onClick={() => open(null)}>
@@ -274,53 +284,61 @@ export function SubagentPage({
             <span className="ptab is-on proto-crumb-here">
               <SubagentMark sub={sub} waiting={waiting} />
               <span className="ptab-title">{nameSubagent(sub)}</span>
-              {strong ? <small className="proto-tag">subagent</small> : null}
+              {takeover === null ? null : <small className="proto-tag">subagent</small>}
             </span>
           </span>
         </nav>
         <span className="spacer" />
+        {headerExtra}
       </header>
       <SubagentTranscript
         sub={sub}
         brief={brief}
         spawn={buildCustomBlock(`spawn:${sub.id}`, 140, () => spawn(sub.id))}
         bottom={
-          <div className="composer-card proto-status">
-            <SubagentFace sub={sub} size={26} waiting={waiting} />
-            <span className="proto-status-text">
-              <b className={`is-${waiting ? "waiting" : sub.status}`}>
-                {sub.status === "running"
-                  ? waiting
-                    ? "Waiting on you"
-                    : `Working for ${measureSubagent(sub)}`
-                  : sub.status === "completed"
-                    ? `Done in ${measureSubagent(sub)}`
-                    : sub.status === "failed"
-                      ? `Failed after ${measureSubagent(sub)}`
-                      : `Stopped after ${measureSubagent(sub)}`}
-              </b>
-              <span>
-                Subagent of {parentName} · {(sub.tokens / 1000).toFixed(1)}k tokens · takes no
-                messages
+          <>
+            {aboveStatus}
+            <div className="composer-card proto-status">
+              <SubagentFace sub={sub} size={26} waiting={waiting} />
+              <span className="proto-status-text">
+                <b className={`is-${waiting ? "waiting" : sub.status}`}>
+                  {sub.status === "running"
+                    ? waiting
+                      ? "Waiting on you"
+                      : `Working for ${measureSubagent(sub)}`
+                    : sub.status === "completed"
+                      ? `Done in ${measureSubagent(sub)}`
+                      : sub.status === "failed"
+                        ? `Failed after ${measureSubagent(sub)}`
+                        : `Stopped after ${measureSubagent(sub)}`}
+                </b>
+                <span>
+                  Subagent of {parentName} · {(sub.tokens / 1000).toFixed(1)}k tokens · takes no
+                  messages
+                </span>
               </span>
-            </span>
-            <button type="button" className="btn btn--sm" onClick={() => open(parent?.id ?? null)}>
-              Open parent
-            </button>
-            {sub.status === "running" ? (
               <button
                 type="button"
-                className="btn btn--sm proto-stop"
-                onClick={() => {
-                  stopSubagent(sub.id);
-                }}
-                title={below > 0 ? `Also stops its ${String(below)} subagents` : undefined}
+                className="btn btn--sm"
+                onClick={() => open(parent?.id ?? null)}
               >
-                <StopIcon size={12} />
-                {below > 0 ? `Stop with ${String(below)} below` : "Stop"}
+                Open parent
               </button>
-            ) : null}
-          </div>
+              {sub.status === "running" ? (
+                <button
+                  type="button"
+                  className="btn btn--sm proto-stop"
+                  onClick={() => {
+                    stopSubagent(sub.id);
+                  }}
+                  title={below > 0 ? `Also stops its ${String(below)} subagents` : undefined}
+                >
+                  <StopIcon size={12} />
+                  {below > 0 ? `Stop with ${String(below)} below` : "Stop"}
+                </button>
+              ) : null}
+            </div>
+          </>
         }
       />
     </div>

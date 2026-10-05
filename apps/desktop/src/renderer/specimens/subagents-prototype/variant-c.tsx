@@ -88,7 +88,7 @@ if (VARIANT === "C")
     sessionId === THREAD_ID ? <SidebarNest /> : null;
 
 /** Renders the spawn point: one link per subagent `parentId` started here. `null` is the main agent. */
-function SpawnLinks({ parentId }: { readonly parentId: string | null }): JSX.Element {
+export function SpawnLinks({ parentId }: { readonly parentId: string | null }): JSX.Element {
   const s = useProto();
   const subagents = listSubagents(s);
   return (
@@ -145,7 +145,9 @@ export function VariantCThread(): JSX.Element {
   const s = useProto();
   const sub = listSubagents(s).find((each) => each.id === s.open);
   if (sub !== undefined)
-    return <SubagentPage sub={sub} strong spawn={(id) => <SpawnLinks parentId={id} />} />;
+    return (
+      <SubagentPage sub={sub} takeover="gradient" spawn={(id) => <SpawnLinks parentId={id} />} />
+    );
   return (
     <PrototypeThread
       hideSubagentItems

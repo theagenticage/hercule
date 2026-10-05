@@ -1,9 +1,10 @@
 /**
  * PROTOTYPE (#354), throwaway. How the desktop app shows a session's
- * subagents: three variants on the real shell, drawn from fixture records.
+ * subagents: variants on the real shell, drawn from fixture records. Round 1
+ * compared A, B and C; round 1.5 is D, the side pane, with knobs.
  *
- * Open /specimens/subagents-prototype/index.html?variant=A|B|C&state=busy|idle
- * on the renderer's dev server. ← and → switch variant.
+ * Open /specimens/subagents-prototype/index.html?variant=A|B|C|D&state=busy|idle
+ * on the renderer's dev server. In D, ← and → step the page level, ↑ and ↓ the hue.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
@@ -16,9 +17,15 @@ import { attachCache, SCENARIO, Switcher, VARIANT } from "./shared";
 import { VariantAThread } from "./variant-a";
 import { VariantBThread } from "./variant-b";
 import { VariantCThread } from "./variant-c";
+import { VariantDThread } from "./variant-d";
 import "./prototype.css";
 
-const Variant = { A: VariantAThread, B: VariantBThread, C: VariantCThread }[VARIANT];
+const Variant = {
+  A: VariantAThread,
+  B: VariantBThread,
+  C: VariantCThread,
+  D: VariantDThread,
+}[VARIANT];
 
 await mountPrototypeThreadSpecimen(
   {

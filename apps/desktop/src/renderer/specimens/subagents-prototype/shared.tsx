@@ -24,7 +24,7 @@ import {
   threadsQuery,
   transcriptQuery,
 } from "../../app/queries";
-import { buildLook, Face } from "../../faces";
+import { buildLook, Face, HUES, type Hue } from "../../faces";
 import { Mark } from "../../marks";
 import { StopIcon } from "../../icons/stop";
 import { ChevronRightIcon } from "../../icons/chevron-right";
@@ -49,17 +49,35 @@ import {
 
 // ---------------------------------------------------------------- the store
 
-export type VariantKey = "A" | "B" | "C";
+export type VariantKey = "A" | "B" | "C" | "D";
 
+/** Round 1 compared A, B and C; round 1.5 is D alone, with knobs. A, B and C stay reachable by URL. */
 export const VARIANTS: readonly { readonly key: VariantKey; readonly name: string }[] = [
   { key: "A", name: "Inline tree" },
   { key: "B", name: "Side panel" },
   { key: "C", name: "Sidebar nest" },
+  { key: "D", name: "Side pane" },
 ];
 
+/** Where D draws the tally that opens the Subagents surface. */
+export type Tally = "header" | "composer" | "off";
+export const TALLIES: readonly Tally[] = ["header", "composer", "off"];
+
+/** How strongly a subagent's page says it is not a thread, from quietest to loudest. */
+export type Takeover = "tag" | "crumb" | "band" | "frame" | "wash" | "gradient";
+export const TAKEOVERS: readonly Takeover[] = ["tag", "crumb", "band", "frame", "wash", "gradient"];
+
+/** What the side pane can show. Only the Subagents surface is drawn; the rest are stubs. */
+export type SurfaceKind = "browser" | "terminal" | "files" | "diff" | "pull-request" | "subagents";
+
 const params = new URLSearchParams(location.search);
-export const VARIANT: VariantKey =
-  (["A", "B", "C"] as const).find((key) => key === params.get("variant")) ?? "A";
+const pick = <T extends string>(options: readonly T[], value: string | null, fallback: T): T =>
+  options.find((each) => each === value) ?? fallback;
+export const VARIANT: VariantKey = pick(
+  VARIANTS.map((each) => each.key),
+  params.get("variant"),
+  "D",
+);
 export const SCENARIO: Scenario = buildScenario(params.get("state") === "idle" ? "idle" : "busy");
 
 interface ProtoState {
@@ -75,6 +93,16 @@ interface ProtoState {
   readonly stopped: ReadonlySet<string>;
   /** True once the user stopped the whole session. */
   readonly sessionStopped: boolean;
+  /** D: whether the side pane is shown, how wide, its tabs, the shown tab, and whether "+" is open. */
+  readonly pane: boolean;
+  readonly paneWidth: number;
+  readonly surfaces: readonly SurfaceKind[];
+  readonly surface: SurfaceKind;
+  readonly picker: boolean;
+  /** D's knobs: where the tally sits, how loud a subagent's page is, and a hue that overrides the open subagent's own. */
+  readonly tally: Tally;
+  readonly takeover: Takeover;
+  readonly hue: Hue | null;
 }
 
 let state: ProtoState = {
@@ -84,6 +112,14 @@ let state: ProtoState = {
   requestIndex: 0,
   stopped: new Set(),
   sessionStopped: false,
+  pane: true,
+  paneWidth: 420,
+  surfaces: ["subagents"],
+  surface: "subagents",
+  picker: false,
+  tally: pick(TALLIES, params.get("tally"), "header"),
+  takeover: pick(TAKEOVERS, params.get("takeover"), "band"),
+  hue: HUES.find((each) => each === params.get("hue")) ?? null,
 };
 const listeners = new Set<() => void>();
 let cache: { queryClient: QueryClient; client: HerculeClient } | null = null;
@@ -99,11 +135,21 @@ export const useProto = (): ProtoState => useSyncExternalStore(subscribe, () => 
 /** Changes the view state and writes the Request the dock shows into the session's cache entry. */
 export const update = (change: Partial<ProtoState>): void => {
   state = { ...state, ...change };
+  writeKnobs();
   const requests = listOpenRequests(state);
   if (state.requestIndex >= requests.length)
     state = { ...state, requestIndex: Math.max(0, requests.length - 1) };
   syncSession();
   for (const listener of listeners) listener();
+};
+
+/** Writes D's knobs into the address, so a link keeps them. */
+const writeKnobs = (): void => {
+  const next = new URLSearchParams(location.search);
+  next.set("tally", state.tally);
+  next.set("takeover", state.takeover);
+  next.set("hue", state.hue ?? "own");
+  history.replaceState(null, "", `?${next.toString()}`);
 };
 
 /** Keeps the cached session in step with the prototype: its status and the Request on the dock. */
@@ -263,8 +309,16 @@ export function SubagentFace({
   readonly size: number;
   readonly waiting: boolean;
 }): JSX.Element {
+  const s = useProto();
   const pose = decideSubagentPose(sub, waiting);
-  return <Face look={buildLook(sub.id)} pose={pose} size={size} animated={pose === "working"} />;
+  return (
+    <Face
+      look={buildLook(seedSubagent(s, sub.id))}
+      pose={pose}
+      size={size}
+      animated={pose === "working"}
+    />
+  );
 }
 
 /** Renders the subagent's mark, or nothing for a stopped one, whose word says it. */
@@ -279,9 +333,25 @@ export function SubagentMark({
   return pose === "idle" ? null : <Mark state={pose} />;
 }
 
+/**
+ * Returns the seed the subagent's face and hue are drawn from: its id, or,
+ * for the open subagent while the hue knob is set, a seed whose look has the
+ * knob's hue. The transcript draws its faces from a seed too, so changing the
+ * seed, not the look, keeps every face of the page in one hue. The face's
+ * shape and wardrobe change with it. It takes the view state as an argument,
+ * so React Compiler draws a caller again when the knob changes.
+ */
+export const seedSubagent = (s: ProtoState, id: string): string => {
+  const hue = s.hue;
+  if (hue === null || s.open !== id || buildLook(id).hue === hue) return id;
+  for (let at = 0; ; at += 1) {
+    if (buildLook(`${id}~${String(at)}`).hue === hue) return `${id}~${String(at)}`;
+  }
+};
+
 /** Sets `--hue` to the subagent's signature hue, so `--who-ink` and `--who-tint` follow it. */
-export const hueStyle = (id: string): Record<string, string> => ({
-  "--hue": `var(--hue-${buildLook(id).hue})`,
+export const hueStyle = (id: string, s: ProtoState = state): Record<string, string> => ({
+  "--hue": `var(--hue-${buildLook(seedSubagent(s, id)).hue})`,
 });
 
 export const stopSubagent = (id: string): void => {
@@ -529,7 +599,7 @@ export function SubagentTranscript({
     <>
       <Transcript
         key={sub.id}
-        sessionId={sub.id}
+        sessionId={seedSubagent(s, sub.id)}
         blocks={buildSubagentBlocks(s, sub, brief, spawn)}
         pose={decideSubagentPose(sub, waiting)}
         describeAgent={() => `${nameSubagent(sub)} · Sonnet 5`}
@@ -544,7 +614,7 @@ export function SubagentTranscript({
               key={request.request.requestId}
               sessionId={THREAD_ID}
               request={request.request}
-              faceSeed={sub.id}
+              faceSeed={seedSubagent(s, sub.id)}
             />
           )}
           {bottom}
@@ -568,62 +638,145 @@ export const buildCustomBlock = (
 
 // --------------------------------------------------------------- the switcher
 
-/** Renders the floating bar that switches variant and state, and takes ← and → to switch variant. */
+const TAKEOVER_NAMES: Record<Takeover, string> = {
+  tag: "Tag",
+  crumb: "Tinted crumb",
+  band: "Top band",
+  frame: "Frame",
+  wash: "Flat wash",
+  gradient: "Gradient",
+};
+
+/**
+ * Renders the floating card that switches variant and state, and in D the
+ * knobs: tally, page, hue. In D, ← and → step the page level, ↑ and ↓ the hue.
+ */
 export function Switcher(): JSX.Element {
+  const s = useProto();
   const go = (variant: VariantKey, scenario = SCENARIO.state): void => {
     const next = new URLSearchParams(location.search);
     next.set("variant", variant);
     next.set("state", scenario);
-    location.search = next.toString();
+    location.assign(`?${next.toString()}`);
   };
-  const index = VARIANTS.findIndex((each) => each.key === VARIANT);
-  const step = (by: number): void =>
-    go(VARIANTS[(index + by + VARIANTS.length) % VARIANTS.length]!.key);
+  const level = TAKEOVERS.indexOf(s.takeover);
+  const hues = [null, ...HUES];
+  // The window's key listener keeps its first closure, so these read the store, not `s`.
+  const stepTakeover = (by: number): void => {
+    const at = TAKEOVERS.indexOf(state.takeover);
+    update({ takeover: TAKEOVERS[(at + by + TAKEOVERS.length) % TAKEOVERS.length]! });
+  };
+  const stepHue = (by: number): void => {
+    const at = hues.indexOf(state.hue);
+    update({ hue: hues[(at + by + hues.length) % hues.length]! });
+  };
   useWindowKeys((event) => {
     if (
-      event.target instanceof HTMLElement &&
-      event.target.closest("input, textarea, [contenteditable]") !== null
+      VARIANT !== "D" ||
+      (event.target instanceof HTMLElement &&
+        event.target.closest("input, textarea, [contenteditable]") !== null)
     )
       return;
-    if (event.key === "ArrowLeft") step(-1);
-    if (event.key === "ArrowRight") step(1);
+    if (event.key === "ArrowLeft") stepTakeover(-1);
+    if (event.key === "ArrowRight") stepTakeover(1);
+    if (event.key === "ArrowUp") stepHue(-1);
+    if (event.key === "ArrowDown") stepHue(1);
   });
   return (
-    <div className="proto-switcher" role="toolbar" aria-label="Prototype variants">
-      <button
-        type="button"
-        className="icon-btn icon-btn--sm"
-        aria-label="Previous variant"
-        onClick={() => step(-1)}
-      >
-        <span className="proto-flip">
-          <ChevronRightIcon size={12} />
+    <div className="proto-switcher" role="toolbar" aria-label="Prototype knobs">
+      <span className="proto-knob">
+        <span>Variant</span>
+        <span className="seg">
+          {VARIANTS.map((each) => (
+            <button
+              key={each.key}
+              type="button"
+              title={each.name}
+              aria-pressed={VARIANT === each.key}
+              onClick={() => go(each.key)}
+            >
+              {each.key}
+            </button>
+          ))}
         </span>
-      </button>
-      <span className="proto-switcher-name">
-        <b>{VARIANT}</b> {VARIANTS[index]!.name}
       </span>
-      <button
-        type="button"
-        className="icon-btn icon-btn--sm"
-        aria-label="Next variant"
-        onClick={() => step(1)}
-      >
-        <ChevronRightIcon size={12} />
-      </button>
-      <span className="proto-switcher-sep" />
-      <span className="seg">
-        {(["busy", "idle"] as const).map((each) => (
-          <button
-            key={each}
-            type="button"
-            aria-pressed={SCENARIO.state === each}
-            onClick={() => go(VARIANT, each)}
-          >
-            {each === "busy" ? "Working" : "Idle"}
-          </button>
-        ))}
+      <span className="proto-knob">
+        <span>State</span>
+        <span className="seg">
+          {(["busy", "idle"] as const).map((each) => (
+            <button
+              key={each}
+              type="button"
+              aria-pressed={SCENARIO.state === each}
+              onClick={() => go(VARIANT, each)}
+            >
+              {each === "busy" ? "Working" : "Idle"}
+            </button>
+          ))}
+        </span>
       </span>
+      {VARIANT === "D" ? (
+        <>
+          <span className="proto-knob">
+            <span>Tally</span>
+            <span className="seg">
+              {TALLIES.map((each) => (
+                <button
+                  key={each}
+                  type="button"
+                  aria-pressed={s.tally === each}
+                  onClick={() => update({ tally: each })}
+                >
+                  {each === "header" ? "Header" : each === "composer" ? "Composer" : "Off"}
+                </button>
+              ))}
+            </span>
+          </span>
+          <span className="proto-knob">
+            <span>Page</span>
+            <span className="proto-stepper">
+              <button
+                type="button"
+                className="icon-btn icon-btn--sm"
+                aria-label="Quieter page"
+                onClick={() => stepTakeover(-1)}
+              >
+                <span className="proto-flip">
+                  <ChevronRightIcon size={12} />
+                </span>
+              </button>
+              <b>{TAKEOVER_NAMES[s.takeover]}</b>
+              <small>
+                {level + 1}/{TAKEOVERS.length}
+              </small>
+              <button
+                type="button"
+                className="icon-btn icon-btn--sm"
+                aria-label="Louder page"
+                onClick={() => stepTakeover(1)}
+              >
+                <ChevronRightIcon size={12} />
+              </button>
+            </span>
+          </span>
+          <span className="proto-knob">
+            <span>Hue</span>
+            <span className="proto-hues">
+              {hues.map((each) => (
+                <button
+                  key={each ?? "own"}
+                  type="button"
+                  title={each ?? "The subagent's own hue"}
+                  aria-pressed={s.hue === each}
+                  className={each === null ? "is-own" : undefined}
+                  style={each === null ? undefined : { "--hue": `var(--hue-${each})` }}
+                  onClick={() => update({ hue: each })}
+                />
+              ))}
+            </span>
+          </span>
+        </>
+      ) : null}
     </div>
   );
 }
