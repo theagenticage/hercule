@@ -145,7 +145,9 @@ function HeaderChip(): JSX.Element {
       >
         {running.length > 0 ? <Mark state={waiting ? "waiting" : "working"} /> : null}
         <span>{running.length > 0 ? `${String(running.length)} running` : "Subagents"}</span>
-        <small>{subagents.length} subagents</small>
+        <small>
+          {running.length > 0 ? `${String(subagents.length)} subagents` : subagents.length}
+        </small>
       </button>
       {s.popover ? (
         <div className="proto-a-popover">
