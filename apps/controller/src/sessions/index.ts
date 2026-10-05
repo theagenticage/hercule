@@ -42,9 +42,10 @@ export {
   SessionServiceLayer,
   type StartRequest,
 } from "./service";
+export { attributeEvent } from "./stream";
 export {
+  agentExists,
   readAssistantTexts,
   readTranscriptHead,
-  sessionExists,
   readTranscriptRowsAfter,
 } from "./transcript-log";

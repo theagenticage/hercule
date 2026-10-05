@@ -50,7 +50,7 @@ describe("buildWorld", () => {
       id: "s-waiting",
       status: "busy",
       runnerId: MOSS.id,
-      openRequest: REQUEST,
+      openRequests: [REQUEST],
     });
 
     expect(build([working, idle, waiting]).lounge).toEqual(["s-idle"]);
@@ -59,7 +59,13 @@ describe("buildWorld", () => {
   it("queues the threads with an open Request, the longest waiting first", () => {
     /** Returns a thread that has waited on `REQUEST` since `lastActivityAt`. */
     const buildAsking = (id: string, lastActivityAt: string): Session =>
-      buildSession({ id, status: "busy", runnerId: MOSS.id, openRequest: REQUEST, lastActivityAt });
+      buildSession({
+        id,
+        status: "busy",
+        runnerId: MOSS.id,
+        openRequests: [REQUEST],
+        lastActivityAt,
+      });
 
     const world = build([
       buildAsking("s-later", "2026-09-10T09:59:40.000Z"),
@@ -75,7 +81,7 @@ describe("computeDeskKey", () => {
   it("keeps the key when a thread only changes pose, so the Office does not rebuild", () => {
     const before = build([working, idle]);
     const after = build([
-      { ...working, openRequest: REQUEST },
+      { ...working, openRequests: [REQUEST] },
       { ...idle, status: "busy" },
     ]);
 
@@ -98,7 +104,7 @@ describe("isSameColleagueState", () => {
     id: "s-asking",
     status: "busy",
     runnerId: MOSS.id,
-    openRequest: REQUEST,
+    openRequests: [REQUEST],
     lastActivityAt: "2026-10-04T09:00:00.000Z",
   });
   /** Returns the colleague the world draws for `session`. */

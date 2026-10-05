@@ -15,8 +15,9 @@ import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/co
 import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@hercule/ui";
 
 /**
- * Renders the permission card: the request the session is parked on, docked
- * onto the composer. The card always appears in the same place and is never
+ * Renders the permission card: one Request the session's agents are parked
+ * on, docked onto the composer. The thread screen passes the oldest
+ * (`findOldestOpenRequest`). The card always appears in the same place and is never
  * repeated in the transcript. Its answers form the same ledger as a
  * decision's answers in the notification center.
  *

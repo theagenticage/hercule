@@ -61,6 +61,7 @@
  */
 import {
   buildApprovalCard,
+  buildSessionAgentState,
   buildThreadBlocks,
   describeAgent,
   formatDescribeLine,
@@ -84,7 +85,7 @@ function buildElement(tag: string, className: string, text: string): HTMLElement
   return element;
 }
 
-const blocks = buildThreadBlocks(FIX_THREAD.transcript, FIX_THREAD.session);
+const blocks = buildThreadBlocks(FIX_THREAD.transcript, buildSessionAgentState(FIX_THREAD.session));
 const workBlocks = blocks.filter((block): block is WorkBlock => block.kind === "work");
 const agentBlocks = blocks.filter((block): block is AgentBlock => block.kind === "agent");
 const instance = SPECIMEN_INSTANCES.find(({ id }) => id === FIX_THREAD.session.instanceId);

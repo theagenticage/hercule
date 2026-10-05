@@ -60,8 +60,11 @@ export interface Colleague {
   readonly model: string | null;
   /** The request as the Office's tag and queue show it, or null. */
   readonly request: OfficeRequest | null;
-  /** The thread's open Request, which the dossier card answers, or null. */
-  readonly openRequest: OpenRequest | null;
+  /**
+   * The oldest of the thread's open Requests, which the dossier card
+   * answers, or null when nothing waits on the user.
+   */
+  readonly oldestRequest: OpenRequest | null;
 }
 
 /** One room of threads: a project's, or the one the threads with no project share. */

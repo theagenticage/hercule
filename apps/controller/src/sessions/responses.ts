@@ -1,6 +1,6 @@
 /**
- * Checks an answer to the request a session is parked on against that
- * request, before anything reaches the runner. An answer the harness cannot
+ * Checks an answer to one of the Requests a session is parked on against
+ * that Request, before anything reaches the runner. An answer the harness cannot
  * use would be replaced or dropped there without the user knowing, so every
  * mismatch is refused here instead.
  */

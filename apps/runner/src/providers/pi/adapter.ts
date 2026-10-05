@@ -26,6 +26,7 @@ import type {
   SendResult,
   SessionBinding,
   SessionSpec,
+  SubagentId,
   TurnInput,
 } from "@hercule/protocol";
 import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
@@ -510,7 +511,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       sendDecision(held, dialog.id, "deny");
       warn(
         sessionId,
-        "pi asked for a second approval while the first was still open. Hercule handles one approval at a time, so the second was denied; pi can ask again later.",
+        "pi asked for a second approval while the first was still open. The pi adapter handles one approval at a time, so the second was denied; pi can ask again later.",
       );
       return;
     }
@@ -902,8 +903,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         return { turnId, delivery: steered ? "steered" : "opened" };
       }),
 
-    interrupt: (sessionId: string): Effect.Effect<void> =>
+    interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
+        // This adapter reports no subagents yet, so no subagent id can name
+        // work it runs, and stopping the session's own turn instead would stop
+        // work the user did not ask to stop. Stopping a subagent is built
+        // together with reporting them (#438).
+        if (subagentId !== undefined) return Effect.void;
         const held = sessions.get(sessionId);
         if (held === undefined) return Effect.void;
         // Cancel the open approval first. Nobody denied the call; its turn was

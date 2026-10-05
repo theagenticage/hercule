@@ -39,7 +39,7 @@ const thread = (id: string, minutes: number, over: Partial<Session> = {}): Sessi
 
 /** Returns a thread waiting on a command approval. */
 const waiting = (id: string, minutes: number, over: Partial<Session> = {}): Session =>
-  thread(id, minutes, { status: "busy", openRequest: APPROVAL, ...over });
+  thread(id, minutes, { status: "busy", openRequests: [APPROVAL], ...over });
 
 /**
  * Returns the sidebar for `threads`, in the fixture's projects, workspaces and
@@ -419,7 +419,7 @@ describe("pickFocusFallback", () => {
   it("picks the section's more row when a row leaves a capped section", () => {
     const before = buildItems({ threads: FIVE_WAITING });
     const answered = FIVE_WAITING.map((session) =>
-      session.id === "s-5" ? { ...session, openRequest: null } : session,
+      session.id === "s-5" ? { ...session, openRequests: [] } : session,
     );
     const after = buildItems({ threads: answered });
 
@@ -429,7 +429,7 @@ describe("pickFocusFallback", () => {
   it("picks the section's header when a row leaves a section with no more row", () => {
     const threads = [waiting("s-a", 2), waiting("s-b", 1)];
     const before = buildItems({ threads });
-    const after = buildItems({ threads: [threads[0]!, { ...threads[1]!, openRequest: null }] });
+    const after = buildItems({ threads: [threads[0]!, { ...threads[1]!, openRequests: [] }] });
 
     expect(pickFocusFallback("waiting:s-b", before, after)).toBe("header:waiting");
   });

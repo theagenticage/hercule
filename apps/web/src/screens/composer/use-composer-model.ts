@@ -136,10 +136,10 @@ export function useComposerModel(
     onSettled: releaseSend,
   });
   const interrupt = useMutation({
-    mutationFn: (id: string) => client.session.interrupt({ params: { id } }),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(queryKeys.session(updated.id), updated);
-    },
+    mutationFn: (id: string) => client.session.interrupt({ params: { id }, payload: {} }),
+    // The response is not written into the cache. It is the session as the
+    // controller read it before the interrupt, still busy, so writing it
+    // could bring back a Stop the live `session` push has already cleared.
   });
   const readOnly = session === null ? null : findResumeBlockedReason(session);
   const busy = session?.status === "busy";

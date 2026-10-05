@@ -5,6 +5,7 @@ import {
   MAX_MESSAGE_LENGTH,
   ProviderEvent,
   SessionBinding,
+  SessionInterrupt,
   SessionRespondToQuestion,
   SessionSpec,
   SessionStart,
@@ -19,7 +20,8 @@ const decode = (
     | typeof SessionSpec
     | typeof SessionBinding
     | typeof SessionStart
-    | typeof SessionStop,
+    | typeof SessionStop
+    | typeof SessionInterrupt,
   input: unknown,
 ) => Effect.runSyncExit(Schema.decodeUnknownEffect(schema)(input));
 
@@ -69,7 +71,16 @@ const start = {
 const events: ReadonlyArray<Event> = [
   { _tag: "session.started", ...baseFields, providerRefs: { threadId: "abc" } },
   { _tag: "session.exited", ...baseFields, reason: "process_exit" },
-  { _tag: "turn.started", ...baseFields, turnId: "t1", model: "sonnet" },
+  {
+    _tag: "subagent.started",
+    ...baseFields,
+    subagentId: "agent-b",
+    parentSubagentId: "agent-a",
+    itemId: "toolu_1",
+    description: "Find the flaky test",
+    agentType: "Explore",
+  },
+  { _tag: "turn.started", ...baseFields, subagentId: "agent-b", turnId: "t1", model: "sonnet" },
   {
     _tag: "turn.completed",
     ...baseFields,
@@ -99,6 +110,7 @@ const events: ReadonlyArray<Event> = [
   {
     _tag: "session.usage.updated",
     ...baseFields,
+    subagentId: "agent-b",
     usage: { inputTokens: 1, outputTokens: 2, cacheWriteTokens: 3 },
   },
   { _tag: "runtime.warning", ...baseFields, message: "retrying after a 529" },
@@ -358,6 +370,66 @@ describe("the normalized event taxonomy", () => {
   });
 });
 
+/** One event of each tag that an agent causes, so each can be given a `subagentId`. */
+const AGENT_EVENTS = events.filter(
+  (event) => !["session.started", "session.exited", "subagent.started"].includes(event._tag),
+);
+
+describe("an event's subagent", () => {
+  it.each(AGENT_EVENTS)("names the subagent a $_tag belongs to", (event) => {
+    const attributed = { ...event, subagentId: "agent-b" };
+    const decoded = Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(attributed));
+    expect(decoded).toEqual(attributed);
+  });
+
+  it.each(AGENT_EVENTS)("belongs to the session's own agent when a $_tag names none", (event) => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(ProviderEvent)(omitKey(event, "subagentId")),
+    );
+    expect("subagentId" in decoded).toBe(false);
+  });
+
+  it("never attributes the start or the exit of the session's process to a subagent", () => {
+    // Both events belong to the process, not to one agent: the field is not
+    // part of their shape, so it is dropped on decode.
+    for (const event of [events[0], events[1]]) {
+      const decoded = Effect.runSync(
+        Schema.decodeUnknownEffect(ProviderEvent)({ ...event, subagentId: "agent-b" }),
+      );
+      expect("subagentId" in decoded, event?._tag).toBe(false);
+    }
+  });
+
+  it("introduces a subagent with its id alone, every other field being optional", () => {
+    const minimal = { _tag: "subagent.started", ...baseFields, subagentId: "agent-b" };
+    expect(decode(ProviderEvent, minimal)._tag).toBe("Success");
+    expect(decode(ProviderEvent, omitKey(minimal, "subagentId"))._tag).toBe("Failure");
+  });
+
+  it("refuses a subagent id with a colon, which would make its live topic ambiguous", () => {
+    const turn = { _tag: "turn.started", ...baseFields, turnId: "t1" };
+    expect(decode(ProviderEvent, { ...turn, subagentId: "a:b" })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, { ...turn, subagentId: "" })._tag).toBe("Failure");
+    const started = { _tag: "subagent.started", ...baseFields, subagentId: "agent-b" };
+    expect(decode(ProviderEvent, { ...started, subagentId: "a:b" })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, { ...started, parentSubagentId: "a:b" })._tag).toBe("Failure");
+  });
+});
+
+describe("stopping a subagent", () => {
+  const interrupt = { _tag: "sessionInterrupt", sessionId: SESSION_ID } as const;
+
+  it("stops all work in the session without a subagent id, and one subagent with it", () => {
+    for (const frame of [interrupt, { ...interrupt, subagentId: "agent-b" }]) {
+      expect(Effect.runSync(Schema.decodeUnknownEffect(SessionInterrupt)(frame))).toEqual(frame);
+    }
+  });
+
+  it("refuses a subagent id with a colon", () => {
+    expect(decode(SessionInterrupt, { ...interrupt, subagentId: "a:b" })._tag).toBe("Failure");
+  });
+});
+
 describe("what the controller sends for a session", () => {
   it("round-trips a spec, a binding and an input", () => {
     expect(Effect.runSync(Schema.encodeEffect(SessionSpec)(spec))).toEqual(spec);
@@ -393,6 +465,20 @@ describe("what the controller sends for a session", () => {
         "Success",
       );
     }
+  });
+
+  it("carries the session's known subagents on a resume, each with its item when known", () => {
+    const resumed = {
+      ...spec,
+      continue: {
+        nativeSessionId: "native-1",
+        mode: "resume",
+        subagents: [{ subagentId: "agent-a", itemId: "toolu_1" }, { subagentId: "agent-b" }],
+      },
+    } as const;
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(resumed))).toEqual(resumed);
+    const forked = { ...spec, continue: { nativeSessionId: "native-1", mode: "fork" } } as const;
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(forked))).toEqual(forked);
   });
 
   it("accepts a session without a workspace as an explicit null, never as an absent key", () => {
@@ -468,7 +554,7 @@ describe("what the controller sends for a session", () => {
   });
 });
 
-describe("the frames that answer a parked session", () => {
+describe("the frames that answer a Request an agent is parked on", () => {
   it("decodes a frame that answers a question with answers keyed by header", () => {
     // A single-select question is answered with one string, a multi-select
     // question with a list.

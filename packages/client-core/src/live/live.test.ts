@@ -841,6 +841,24 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(threads.slice(0, listPrefix?.length), listPrefix);
   });
 
+  it("maps a subagent push to the subagent lists of the sessions it names", () => {
+    assert.deepStrictEqual(buildQueryKeys("subagent", ["s1", "s2"]), [
+      queryKeys.subagents("s1"),
+      queryKeys.subagents("s2"),
+    ]);
+
+    // A push with no ids means any session's subagents may have changed.
+    assert.deepStrictEqual(buildQueryKeys("subagent", []), [["subagents"]]);
+  });
+
+  it("keys each agent's transcript of a session apart, under the session's prefix", () => {
+    const own = queryKeys.transcript("s1");
+    const subagent = queryKeys.transcript("s1", "agent-1");
+
+    assert.deepStrictEqual(own, ["transcript", "s1", null]);
+    assert.deepStrictEqual(subagent, ["transcript", "s1", "agent-1"]);
+  });
+
   it("maps an assistant push to the assistant list and the page of each assistant in it", () => {
     assert.deepStrictEqual(buildQueryKeys("assistant", ["a1"]), [
       queryKeys.assistants(),

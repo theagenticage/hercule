@@ -403,6 +403,11 @@ const TABLE = {
 
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },
   "session.read": { requires: "session.read", method: "GET", path: "/api/v1/sessions/:id" },
+  "session.querySubagents": {
+    requires: "session.read",
+    method: "GET",
+    path: "/api/v1/sessions/:id/subagents",
+  },
   "session.spawn": { requires: "session.spawn", method: "POST", path: "/api/v1/sessions" },
   "session.update": {
     requires: "session.steer",

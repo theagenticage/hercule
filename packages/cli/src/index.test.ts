@@ -268,6 +268,7 @@ describe("hercule session --help", () => {
   const VERBS = [
     "list",
     "read",
+    "subagent list",
     "spawn",
     "update",
     "input",
@@ -278,7 +279,7 @@ describe("hercule session --help", () => {
     "continue",
   ];
 
-  it("lists the ten verbs, each with the grant it needs", async () => {
+  it("lists the eleven verbs, the nested subagent list among them, each with the grant it needs", async () => {
     const out = await runHelp("session");
     for (const verb of VERBS) {
       const line = out.find((each) => startsWithWord(each, verb));
@@ -1034,7 +1035,7 @@ describe("hercule session spawn --agent", () => {
     nativeSessionId: null,
     modelSelection: { model: "claude-haiku-4-5", options: {} },
     parentSessionId: null,
-    openRequest: null,
+    openRequests: [],
     createdAt: "2026-09-19T10:01:00.000Z",
     startedAt: null,
     exitedAt: null,

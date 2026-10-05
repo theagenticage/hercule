@@ -41,6 +41,7 @@ import {
   type SendResult,
   type SessionBinding,
   type SessionSpec,
+  type SubagentId,
   type TurnInput,
 } from "@hercule/protocol";
 import {
@@ -724,9 +725,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           settle(buildPermissionResult("deny", []));
           return;
         }
-        // One request at a time. A second request would replace the card the
-        // user is looking at, so the second request is denied, with a message
-        // that tells the model to ask again once the first is answered.
+        // This adapter still holds one request at a time, so a second request
+        // is denied, with a message that tells the model to ask again once
+        // the first is answered. Reporting every request at once, each with
+        // its asking subagent, is the Claude subagents ticket (#436, spec 06
+        // section 13.3).
         if (held.park !== undefined) {
           settle({
             behavior: "deny",
@@ -1008,8 +1011,13 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         return { turnId, delivery: steered ? "steered" : "opened" };
       }),
 
-    interrupt: (sessionId: string): Effect.Effect<void> =>
+    interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
+        // This adapter reports no subagents yet, so no subagent id can name
+        // work it runs, and stopping the session's own turn instead would stop
+        // work the user did not ask to stop. Stopping a subagent is built
+        // together with reporting them (#436).
+        if (subagentId !== undefined) return Effect.void;
         const held = live.get(sessionId);
         // No turn is running, so do not send the harness a control request: it
         // would wait on the harness and hold up the connection's other frames.

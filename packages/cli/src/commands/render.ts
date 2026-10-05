@@ -13,10 +13,15 @@ import {
   findFailedEdge,
   findStepLineKind,
   formatAge,
+  formatElapsed,
+  measureElapsed,
   describeResolution,
   describeTriggerOn,
   formatDescribeLine,
+  formatRequestQuestion,
+  countUsedTokens,
   readJsonObject,
+  readStringList,
   readTimestamps,
 } from "@hercule/client-core";
 import {
@@ -25,11 +30,16 @@ import {
   isSchedule,
   type Input,
   type Notification,
+  type OpenRequest,
+  type OperationId,
   type Resolution,
   type Run,
   type RunStarted,
+  type Session,
+  type SessionRequest,
   type RunSummary,
   type StructuredResult,
+  type Subagent,
   type Trigger,
   type Workflow,
   type WorkflowAction,
@@ -47,6 +57,14 @@ const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
  * the CLI accepts.
  */
 const TAIL = 8;
+
+/**
+ * Returns the tail of a subagent's id that the CLI prints, which `--subagent`
+ * accepts back. A subagent's id is the harness's own, not a Hercule id, so
+ * `formatCell` would print it whole; an id no longer than a tail is printed
+ * whole.
+ */
+const formatSubagentId = (id: string): string => id.slice(-TAIL);
 
 /**
  * The characters a terminal acts on rather than prints:
@@ -114,16 +132,23 @@ const keepOnOneLine = (text: string): string => {
   return firstLine.replaceAll("\t", " ");
 };
 
-const renderTable = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
-  renderTableColumns(rows, listColumns(rows));
+/**
+ * Returns rows as a table with a column for every key of any row. `formatValue`
+ * formats each cell; by default an id is shortened to its tail.
+ */
+const renderTable = (
+  rows: ReadonlyArray<Record<string, unknown>>,
+  formatValue: (item: unknown) => string = formatCell,
+): ReadonlyArray<string> => renderTableColumns(rows, listColumns(rows), formatValue);
 
 /** Same as `renderTable`, but prints only `columns`, in their order. */
 const renderTableColumns = (
   rows: ReadonlyArray<Record<string, unknown>>,
   columns: ReadonlyArray<string>,
+  formatValue: (item: unknown) => string = formatCell,
 ): ReadonlyArray<string> => {
   if (rows.length === 0) return ["no results"];
-  const body = rows.map((row) => columns.map((column) => keepOnOneLine(formatCell(row[column]))));
+  const body = rows.map((row) => columns.map((column) => keepOnOneLine(formatValue(row[column]))));
   const widths = columns.map((column, index) =>
     Math.max(column.length, ...body.map((row) => row[index]!.length)),
   );
@@ -184,7 +209,7 @@ const renderKeyValues = (
  * JSON is hard to read.
  */
 const formatKeepingIds = (item: unknown): string => {
-  if (typeof item === "string") return item;
+  if (typeof item === "string") return removeTerminalControls(item);
   if (!Array.isArray(item)) return formatCell(item);
   return item.some((element) => typeof element === "object" && element !== null)
     ? JSON.stringify(item, null, 2)
@@ -251,12 +276,77 @@ const describeResult = (structuredResult: unknown): string => {
   }
 };
 
+/**
+ * Checks whether a transcript line shows a field of its event. Besides the
+ * noise above, the line leaves out `subagentId`, the subagent an event belongs
+ * to: a transcript read holds the rows of one agent, so the field would repeat
+ * on every line. On `subagent.started` it is kept, because there it names the
+ * new subagent, which a reader can pass to `--subagent`.
+ */
+const showsTranscriptField = (tag: unknown, key: string): boolean =>
+  !TRANSCRIPT_NOISE.has(key) &&
+  key !== "structuredResult" &&
+  (key !== "subagentId" || tag === "subagent.started");
+
+/**
+ * Returns the fields a `request.opened` line shows in place of the request's
+ * JSON: the request's whole id, which `--request` takes, its kind, and what
+ * it asks, such as "Run rm -rf build?". The JSON would be cut off before the
+ * part a reader needs; `--json` prints all of it.
+ */
+const listRequestFields = (request: OpenRequest): ReadonlyArray<string> => [
+  `requestId=${removeTerminalControls(request.requestId)}`,
+  `kind=${request.kind}`,
+  `asks=${abbreviateValue(formatRequestQuestion(request))}`,
+];
+
+/**
+ * Returns the fields a line about a `subagent` item shows in place of its
+ * detail's JSON:
+ *
+ * - `subagentIds`: the whole ids of the subagents the item started, which a
+ *   reader passes to `--subagent`;
+ * - `description`: the task its parent gave the subagent.
+ *
+ * Each adapter shapes the detail its own way, so a field the detail does not
+ * have is left out, and a detail with neither field is shown as JSON.
+ */
+const listSubagentItemFields = (detail: unknown): ReadonlyArray<string> => {
+  const fields = readJsonObject(detail) ?? {};
+  const subagentIds = readStringList(fields["subagentIds"]) ?? [];
+  const description = readJsonObject(fields["input"])?.["description"] ?? fields["description"];
+  const shown = [
+    ...(subagentIds.length === 0
+      ? []
+      : [`subagentIds=${subagentIds.map(removeTerminalControls).join(",")}`]),
+    ...(typeof description === "string" ? [`description=${abbreviateValue(description)}`] : []),
+  ];
+  return shown.length === 0 ? [`detail=${abbreviateValue(detail)}`] : shown;
+};
+
+/**
+ * Returns the `key=value` text of one field of a transcript line. A request
+ * and a subagent item's detail become several fields, so the list may hold
+ * more than one.
+ */
+const listTranscriptFields = (
+  event: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): ReadonlyArray<string> => {
+  if (key === "request" && event["_tag"] === "request.opened") {
+    return listRequestFields(value as OpenRequest);
+  }
+  if (key === "detail" && event["kind"] === "subagent") return listSubagentItemFields(value);
+  return [`${key}=${abbreviateValue(value)}`];
+};
+
 /** Formats one transcript row as `<position>  <at>  <tag>  <the event's own fields>`. */
 const renderTranscriptLine = (row: Record<string, unknown>): string => {
   const event = (row["event"] ?? {}) as Record<string, unknown>;
   const fields = Object.entries(event)
-    .filter(([key]) => !TRANSCRIPT_NOISE.has(key) && key !== "structuredResult")
-    .map(([key, value]) => `${key}=${abbreviateValue(value)}`);
+    .filter(([key]) => showsTranscriptField(event["_tag"], key))
+    .flatMap(([key, value]) => listTranscriptFields(event, key, value));
   // Put the result right after the turn's state, not where the event happens
   // to have it. The result is what the reader looks for, and after the usage
   // figures it would wrap off a 120-column terminal.
@@ -414,6 +504,103 @@ const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
 const renderRunList = (runs: ReadonlyArray<RunSummary>): ReadonlyArray<string> => {
   const now = new Date();
   return renderTable(runs.map((run) => summarizeRun(run, now)));
+};
+
+/**
+ * Returns a subagent as a row of `session subagent list`: its id and the id
+ * of the subagent that started it, both as tails, its status, what it is, how
+ * much it has done, how long it ran or has been running, and what it was
+ * asked, is doing, or returned.
+ *
+ * Every row has every column, so the header is the same on every call. A
+ * value the harness never reported is an empty cell, never 0.
+ */
+const summarizeSubagent = (subagent: Subagent, now: number): Record<string, unknown> => ({
+  id: formatSubagentId(subagent.id),
+  parent:
+    subagent.parentSubagentId === undefined
+      ? undefined
+      : formatSubagentId(subagent.parentSubagentId),
+  status: subagent.status,
+  agentType: subagent.agentType,
+  model: subagent.model,
+  toolCalls: subagent.toolCalls,
+  tokens: subagent.usage === undefined ? undefined : countUsedTokens(subagent.usage),
+  // How long it ran, like a step's row in `run read`. A subagent lives within
+  // one session's turn, so the time since it started would read "now" for
+  // nearly every row.
+  took: formatElapsed(measureElapsed(subagent.startedAt, subagent.endedAt, now) ?? 0),
+  description: subagent.description,
+  activity: subagent.activity,
+  result: subagent.result,
+});
+
+/** Returns the rows of `session subagent list` as a table. */
+const renderSubagentList = (subagents: ReadonlyArray<Subagent>): ReadonlyArray<string> => {
+  const now = Date.now();
+  return renderTable(subagents.map((subagent) => summarizeSubagent(subagent, now)));
+};
+
+/**
+ * Describes the agent that asked an open Request: "own agent" for the
+ * session's own agent, or "subagent" and the tail of the subagent's id.
+ */
+const describeAsker = (request: SessionRequest): string =>
+  request.subagentId === undefined
+    ? "own agent"
+    : `subagent ${formatSubagentId(request.subagentId)}`;
+
+/**
+ * Returns an open Request as a row of a session's `open requests` table: its
+ * whole id, which `--request` takes, its kind, the agent that asked it, the
+ * decisions an approval accepts, and what it asks, such as "Run rm -rf
+ * build?". What it asks comes last, because it is the longest.
+ */
+const summarizeOpenRequest = (request: SessionRequest): Record<string, unknown> => ({
+  requestId: request.requestId,
+  kind: request.kind,
+  askedBy: describeAsker(request),
+  decisions: request.kind === "question" ? "" : request.decisions.join(","),
+  asks: formatRequestQuestion(request),
+});
+
+/**
+ * Returns a session as a row of `session list`: every field, but with the
+ * open Requests as a count and the Token Usage as the tokens used, so the
+ * row is not stretched by two JSON objects. `session read` prints both in
+ * full.
+ */
+const summarizeSession = ({
+  openRequests,
+  usage,
+  ...fields
+}: Session): Record<string, unknown> => ({
+  ...fields,
+  openRequests: openRequests.length,
+  tokens: usage === undefined ? undefined : countUsedTokens(usage),
+});
+
+/**
+ * Returns the lines printed for a session: its fields as key-value lines,
+ * then its open Requests as a table under their own heading, left out when
+ * there are none. Every operation that returns a session prints it this way.
+ *
+ * The table keeps each request id whole, because `--request` takes only a
+ * whole id; a request id the harness chose may look like a Hercule id, which
+ * would otherwise be shortened to a tail.
+ */
+const renderSession = (session: Session): ReadonlyArray<string> => {
+  const { openRequests, ...fields } = session;
+  return [
+    ...renderKeyValues(fields),
+    ...(openRequests.length === 0
+      ? []
+      : [
+          "",
+          "open requests",
+          ...renderTable(openRequests.map(summarizeOpenRequest), formatKeepingIds),
+        ]),
+  ];
 };
 
 /**
@@ -601,90 +788,107 @@ const renderNotificationDecided = (
   return [`notification ${formatCell(notification.id)} ${outcome}`];
 };
 
+/** Returns the lines for the items of a page, or for every item of an `--all` read. */
+type ItemsRenderer = (items: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<string>;
+
+/**
+ * The commands whose items are not printed as the generic table, by command
+ * id. The derived client decoded each item with the operation's schema, so the
+ * items of `run.query` are run summaries, those of `trigger.query` are
+ * triggers, and so on.
+ */
+const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
+  "transcript.read": renderTranscript,
+  "run.query": (items) => renderRunList(items as ReadonlyArray<RunSummary>),
+  "trigger.query": (items) => renderTriggerList(items as ReadonlyArray<Trigger>),
+  "notification.query": (items) =>
+    renderNotificationList(items as unknown as ReadonlyArray<Notification>),
+  "session.query": (items) =>
+    renderTable((items as unknown as ReadonlyArray<Session>).map(summarizeSession)),
+  "session.querySubagents": (items) =>
+    renderSubagentList(items as unknown as ReadonlyArray<Subagent>),
+  "input.query": (items) => renderInputList(items as unknown as ReadonlyArray<Input>),
+};
+
+/**
+ * Returns the lines printed after `session spawn`: the session, and a hint
+ * with the command that reads its transcript. This is the only hint this
+ * build prints after a command. A caller who has just spawned a session wants
+ * to watch it. The hint does not suggest a subscription on the session: no
+ * platform event about a session is emitted yet, so the controller would
+ * reject it. It points at the transcript, which the caller can already read.
+ * `transcript read` returns the rows so far and does not follow the session,
+ * so the hint uses "read", not "watch".
+ */
+const renderSpawnedSession = (session: Session): ReadonlyArray<string> => [
+  ...renderSession(session),
+  "",
+  `read what it has done so far with \`hercule transcript read ${formatCell(session.id)}\``,
+];
+
+/**
+ * Returns a workflow's source unchanged, so the output can be edited and
+ * piped back into `workflow update`. The CLI ends each printed line with
+ * `\n`. If the source's first line break is `\r\n`, a `\r` is added at the
+ * end, so the output ends in `\r\n` and a CRLF file comes back byte for byte.
+ */
+const renderWorkflowSource = ({ source }: Workflow): ReadonlyArray<string> => [
+  /^[^\n]*\r\n/.test(source) ? `${source}\r` : source,
+];
+
+/**
+ * The commands whose single result is not printed as generic key-value lines,
+ * by command id. The derived client decoded the result with the operation's
+ * schema, so each renderer may read it as that schema's type.
+ */
+const VALUE_RENDERERS: Partial<Record<OperationId, (value: unknown) => ReadonlyArray<string>>> = {
+  // These two queries return a short, complete array instead of a page, so
+  // the array is printed as a table, like the items of a page.
+  "workflowAction.query": (value) =>
+    renderTable((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction)),
+  "eventKind.query": (value) => renderTable(value as ReadonlyArray<Record<string, unknown>>),
+  // A create or an update prints no source, because the caller has just sent it.
+  "workflow.read": (value) => renderWorkflowSource(value as Workflow),
+  "workflow.create": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),
+  "workflow.update": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),
+  "workflow.validate": (value) => renderWorkflowIssues(value as WorkflowIssues),
+  "run.start": (value) => renderRunStarted(value as RunStarted),
+  "run.rerun": (value) => renderRunStarted(value as RunStarted),
+  "run.read": (value) => renderRun(value as Run, Date.now()),
+  "run.cancel": (value) => renderRunCancelled(value as Run),
+  "notification.read": (value) => renderNotification(value as Notification),
+  "notification.act": (value) =>
+    renderNotificationDecided(value as Notification & { readonly resolution: Resolution }),
+  "session.spawn": (value) => renderSpawnedSession(value as Session),
+  "session.read": (value) => renderSession(value as Session),
+  "session.update": (value) => renderSession(value as Session),
+  "session.interrupt": (value) => renderSession(value as Session),
+  "session.respondToApprovalRequest": (value) => renderSession(value as Session),
+  "session.respondToQuestion": (value) => renderSession(value as Session),
+  "session.stop": (value) => renderSession(value as Session),
+  "session.continue": (value) => renderSession(value as Session),
+};
+
 /**
  * Returns the lines for a successful command without `--json`, before
  * `renderHuman` removes the characters a terminal would act on.
  */
 const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
-  // The derived client decoded each item with the operation's schema, so the
-  // items of `run.query` are run summaries, those of `trigger.query` are
-  // triggers, those of `notification.query` are notifications, and those of
-  // `input.query` are inputs.
-  const asLines =
-    command.id === "transcript.read"
-      ? renderTranscript
-      : command.id === "run.query"
-        ? (items: ReadonlyArray<Record<string, unknown>>) =>
-            renderRunList(items as ReadonlyArray<RunSummary>)
-        : command.id === "trigger.query"
-          ? (items: ReadonlyArray<Record<string, unknown>>) =>
-              renderTriggerList(items as ReadonlyArray<Trigger>)
-          : command.id === "notification.query"
-            ? (items: ReadonlyArray<Record<string, unknown>>) =>
-                renderNotificationList(items as unknown as ReadonlyArray<Notification>)
-            : command.id === "input.query"
-              ? (items: ReadonlyArray<Record<string, unknown>>) =>
-                  renderInputList(items as unknown as ReadonlyArray<Input>)
-              : renderTable;
-
-  if (outcome.kind === "items") return asLines(outcome.items);
+  const renderItems = ITEMS_RENDERERS[command.id] ?? renderTable;
+  if (outcome.kind === "items") return renderItems(outcome.items);
 
   const value = outcome.value;
-  // These two queries return a short, complete array instead of a page, so
-  // print the array as a table, like the items of a page.
-  if (command.id === "workflowAction.query") {
-    return renderTable((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction));
-  }
-  if (command.id === "eventKind.query") {
-    return renderTable(value as ReadonlyArray<Record<string, unknown>>);
-  }
+  const renderValue = VALUE_RENDERERS[command.id];
+  if (renderValue !== undefined) return renderValue(value);
   if (isPage(value)) {
-    const lines = [...asLines(value.items)];
+    const lines = [...renderItems(value.items)];
     if (value.nextCursor !== undefined) {
       lines.push("", `more results: --cursor ${value.nextCursor}, or --all`);
     }
     return lines;
   }
   if (typeof value === "object" && value !== null) {
-    const record = value as Record<string, unknown>;
-    // Print a workflow's source unchanged, so the output can be edited and
-    // piped back into `workflow update`. A create or an update prints no
-    // source, because the caller has just sent it.
-    if (command.id === "workflow.read") {
-      const { source } = value as Workflow;
-      // The CLI ends each printed line with `\n`. If the source's first line
-      // break is `\r\n`, add a `\r` at the end, so the output ends in `\r\n`
-      // and a CRLF file comes back byte for byte.
-      return [/^[^\n]*\r\n/.test(source) ? `${source}\r` : source];
-    }
-    if (command.id === "workflow.create" || command.id === "workflow.update") {
-      return renderWorkflowSaveResult(value as WorkflowSaveResult);
-    }
-    if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
-    if (command.id === "run.start" || command.id === "run.rerun") {
-      return renderRunStarted(value as RunStarted);
-    }
-    if (command.id === "run.read") return renderRun(value as Run, Date.now());
-    if (command.id === "run.cancel") return renderRunCancelled(value as Run);
-    if (command.id === "notification.read") return renderNotification(value as Notification);
-    if (command.id === "notification.act") {
-      return renderNotificationDecided(value as Notification & { readonly resolution: Resolution });
-    }
-    const lines = [...renderKeyValues(record)];
-    // The only hint this build prints after a command. A caller who has just
-    // spawned a session wants to watch it. The hint does not suggest a
-    // subscription on the session: no platform event about a session is
-    // emitted yet, so the controller would reject it. It points at the
-    // transcript, which the caller can already read. `transcript read` returns
-    // the rows so far and does not follow the session, so the hint uses "read",
-    // not "watch".
-    if (command.id === "session.spawn") {
-      lines.push(
-        "",
-        `read what it has done so far with \`hercule transcript read ${formatCell(record["id"])}\``,
-      );
-    }
-    return lines;
+    return renderKeyValues(value as Record<string, unknown>);
   }
   return [formatCell(value)];
 };

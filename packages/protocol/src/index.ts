@@ -64,7 +64,19 @@ export {
   WorkspaceStepKey,
 };
 
-export const PROTOCOL_VERSION = 2;
+/**
+ * The runner protocol version. A runner on any other version is refused at
+ * hello, with a message telling the user to upgrade it.
+ *
+ * - Version 2 put a session's first input on `SessionStart`.
+ * - Version 3 added subagents: the `subagentId` on session events and on
+ *   `SessionInterrupt`. A capability with a fallback would not be safe here.
+ *   A controller that ignored `subagentId` would book a subagent's turns to
+ *   the session's own agent, and a runner that ignored it would stop the
+ *   whole session where the user asked to stop one subagent (spec 03
+ *   section 2.2).
+ */
+export const PROTOCOL_VERSION = 3;
 
 /**
  * The close code and reason the controller uses to end the connection of a

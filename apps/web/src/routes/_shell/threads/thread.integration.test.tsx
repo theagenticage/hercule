@@ -27,6 +27,7 @@ import type {
   Resource,
   Runner,
   Session,
+  SessionRequest,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
@@ -71,7 +72,7 @@ const BASE_SESSION: Session = {
   nativeSessionId: null,
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
-  openRequest: null,
+  openRequests: [],
   createdAt: "2026-09-08T09:59:00.000Z",
   startedAt: "2026-09-08T09:59:01.000Z",
   exitedAt: null,
@@ -2202,6 +2203,62 @@ describe("Thread: input queue", () => {
   });
 });
 
+/**
+ * Opens `fixture`, a busy session, clicks Stop, and checks that Stop stays
+ * gone when the interrupt's answer arrives after the live connection has
+ * already reported the session idle.
+ *
+ * The controller answers `session.interrupt` with the session as it read it
+ * before the interrupt, still busy. The app must not write that answer into
+ * the cache, or the late answer would bring Stop back on an idle session.
+ * `extra` adds the routes the screen needs besides the session's own.
+ */
+const checkLateInterruptAnswerKeepsStopGone = async (
+  fixture: Session,
+  extra: Readonly<Record<string, Handler>> = {},
+) => {
+  const user = userEvent.setup();
+  let current = fixture;
+  let answerInterrupt: (answer: { body: unknown }) => void = () => {};
+  const { api, live } = await openApp(fixture, buildTwoCompletedTurns(), {
+    ...extra,
+    [`GET /api/v1/sessions/${fixture.id}`]: () => ({ body: current }),
+    [`POST /api/v1/sessions/${fixture.id}/interrupt`]: () =>
+      new Promise((resolve) => {
+        answerInterrupt = resolve;
+      }),
+  });
+
+  await user.click(await screen.findByRole("button", { name: /^stop$/i }));
+  await waitFor(() => {
+    expect(
+      api.calls.some(
+        (call) =>
+          call.method === "POST" && call.path === `/api/v1/sessions/${fixture.id}/interrupt`,
+      ),
+    ).toBe(true);
+  });
+
+  current = { ...fixture, status: "idle" };
+  await waitFor(() => {
+    expect(live.topics()).toContain("session");
+  });
+  act(() => {
+    live.push("session", { _tag: "invalidate", ids: [fixture.id], kind: "updated" });
+  });
+  await waitFor(() => {
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+  });
+
+  await act(async () => {
+    answerInterrupt({ body: fixture });
+    // A real wait, not microtasks: the answer passes through `fetch`, the
+    // client's decoding and React Query before it could reach the cache.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+};
+
 describe("Thread: stop control", () => {
   it("shows Stop on a busy thread and calls POST /sessions/:id/interrupt", async () => {
     const user = userEvent.setup();
@@ -2219,6 +2276,10 @@ describe("Thread: stop control", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it("keeps Stop gone when the interrupt answers after the session went idle", async () => {
+    await checkLateInterruptAnswerKeepsStopGone(buildSession({ status: "busy" }));
   });
 
   it("has no Stop control on an idle thread", async () => {
@@ -2644,7 +2705,7 @@ describe("Composer: fields that locked when the thread started explain why", () 
  * there instead of repeating text that `apps/web` does not own.
  */
 describe("Thread: the permission card", () => {
-  const REQUEST: NonNullable<Session["openRequest"]> = {
+  const REQUEST: SessionRequest = {
     requestId: "req-1",
     itemId: "tool3",
     kind: "command_approval",
@@ -2652,7 +2713,7 @@ describe("Thread: the permission card", () => {
     detail: { command: "ls -la" },
   };
 
-  const QUESTIONS: NonNullable<Session["openRequest"]> = {
+  const QUESTIONS: SessionRequest = {
     requestId: "req-2",
     itemId: "tool3",
     kind: "question",
@@ -2719,7 +2780,7 @@ describe("Thread: the permission card", () => {
    * the card has no row for `decision`.
    */
   const buildAnswerMatcher = (
-    request: NonNullable<Session["openRequest"]>,
+    request: SessionRequest,
     decision: string,
   ): ((name: string) => boolean) => {
     const found = buildApprovalCard(request).rows.find((each) => each.id === decision);
@@ -2736,7 +2797,7 @@ describe("Thread: the permission card", () => {
   };
 
   it("docks the card above the composer, with one row per offered decision and no copy in the transcript", async () => {
-    await openApp(buildSession({ status: "busy", openRequest: REQUEST }), buildParkedRows());
+    await openApp(buildSession({ status: "busy", openRequests: [REQUEST] }), buildParkedRows());
 
     const allow = await screen.findByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") });
     // One row per offered decision, and exactly one card: the transcript does
@@ -2772,7 +2833,7 @@ describe("Thread: the permission card", () => {
 
   it("posts the clicked decision once, and removes the card when the session's open request is cleared", async () => {
     const user = userEvent.setup();
-    let current = buildSession({ status: "busy", openRequest: REQUEST });
+    let current = buildSession({ status: "busy", openRequests: [REQUEST] });
     let release: (() => void) | undefined;
     const api = stubApi({
       ...buildController(current, buildParkedRows()),
@@ -2783,7 +2844,7 @@ describe("Thread: the permission card", () => {
       [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: () =>
         new Promise<{ readonly body: unknown }>((resolve) => {
           release = () => {
-            resolve({ body: buildSession({ status: "busy", openRequest: REQUEST }) });
+            resolve({ body: buildSession({ status: "busy", openRequests: [REQUEST] }) });
           };
         }),
     });
@@ -2814,7 +2875,7 @@ describe("Thread: the permission card", () => {
     expect(
       screen.getByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") }),
     ).toBeDefined();
-    current = buildSession({ status: "busy", openRequest: null });
+    current = buildSession({ status: "busy", openRequests: [] });
     await waitFor(() => {
       expect(live.topics()).toContain("session");
     });
@@ -2841,7 +2902,7 @@ describe("Thread: the permission card", () => {
 
   it("accepts only one answer: a second click while the request is still open sends nothing", async () => {
     const user = userEvent.setup();
-    const current = buildSession({ status: "busy", openRequest: REQUEST });
+    const current = buildSession({ status: "busy", openRequests: [REQUEST] });
     const api = stubApi({
       ...buildController(current, buildParkedRows()),
       [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: { body: current },
@@ -2869,7 +2930,7 @@ describe("Thread: the permission card", () => {
 
   it("shows the item the request is about as awaiting approval, in the attention color", async () => {
     const user = userEvent.setup();
-    await openApp(buildSession({ status: "busy", openRequest: REQUEST }), buildParkedRows());
+    await openApp(buildSession({ status: "busy", openRequests: [REQUEST] }), buildParkedRows());
 
     await user.click(await screen.findByRole("button", { name: /^Working for/ }));
 
@@ -2880,7 +2941,7 @@ describe("Thread: the permission card", () => {
   });
 
   it("renders no card when the session has no open request", async () => {
-    await openApp(buildSession({ status: "busy", openRequest: null }), buildParkedRows());
+    await openApp(buildSession({ status: "busy", openRequests: [] }), buildParkedRows());
 
     await screen.findByRole("textbox");
     expect(screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") })).toBeNull();
@@ -2889,7 +2950,7 @@ describe("Thread: the permission card", () => {
   });
 
   it("shows a question request's questions with no decision", async () => {
-    await openApp(buildSession({ status: "busy", openRequest: QUESTIONS }), buildParkedRows());
+    await openApp(buildSession({ status: "busy", openRequests: [QUESTIONS] }), buildParkedRows());
 
     await screen.findByText("Which database should it use?");
     // A question takes answers only; the user turns it down with Stop.
@@ -2919,10 +2980,7 @@ describe("Thread: the permission card", () => {
  */
 describe("Thread: answering the agent's questions", () => {
   /** One question of a `question` request, as the contract types it. */
-  type Question = Extract<
-    NonNullable<Session["openRequest"]>,
-    { kind: "question" }
-  >["detail"]["questions"][number];
+  type Question = Extract<SessionRequest, { kind: "question" }>["detail"]["questions"][number];
 
   /** A single-select question. */
   const STORAGE: Question = {
@@ -2947,7 +3005,7 @@ describe("Thread: answering the agent's questions", () => {
   };
 
   /** A question request with a single-select question, then a multiSelect one. */
-  const QUESTIONS: NonNullable<Session["openRequest"]> = {
+  const QUESTIONS: SessionRequest = {
     requestId: "req-2",
     itemId: "tool3",
     kind: "question",
@@ -2955,7 +3013,7 @@ describe("Thread: answering the agent's questions", () => {
   };
 
   /** A question request with only the single-select question. */
-  const ONE_QUESTION: NonNullable<Session["openRequest"]> = {
+  const ONE_QUESTION: SessionRequest = {
     ...QUESTIONS,
     detail: { questions: [STORAGE] },
   };
@@ -2966,8 +3024,8 @@ describe("Thread: answering the agent's questions", () => {
    * Opens the thread parked on `request`, with a controller that accepts
    * every answer, and returns the app and its stubbed API.
    */
-  const openParked = (request: NonNullable<Session["openRequest"]>) => {
-    const session = buildSession({ status: "busy", openRequest: request });
+  const openParked = (request: SessionRequest) => {
+    const session = buildSession({ status: "busy", openRequests: [request] });
     return openApp(session, [], {
       [RESPOND_TO_QUESTION]: { body: session },
       [`POST /api/v1/sessions/${SESSION_ID}/interrupt`]: { body: session },
@@ -3474,7 +3532,7 @@ const findAssistantCrumb = async (): Promise<HTMLElement> =>
   });
 
 describe("Thread: the session view of an assistant's session", () => {
-  const REQUEST: NonNullable<Session["openRequest"]> = {
+  const REQUEST: SessionRequest = {
     requestId: "req-ada",
     itemId: "tool-ada",
     kind: "command_approval",
@@ -3532,7 +3590,7 @@ describe("Thread: the session view of an assistant's session", () => {
 
   it("still shows the permission card for an open request, and sends its answer to session.respondToApprovalRequest", async () => {
     const user = userEvent.setup();
-    const fixture = buildAssistantSession({ status: "busy", openRequest: REQUEST });
+    const fixture = buildAssistantSession({ status: "busy", openRequests: [REQUEST] });
     const api = stubApi({
       ...buildController(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
       [`POST /api/v1/sessions/${fixture.id}/respond-to-approval-request`]: { body: fixture },
@@ -3596,6 +3654,13 @@ describe("Thread: the session view of an assistant's session", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
     });
+  });
+
+  it("keeps Stop gone when the interrupt answers after the session went idle", async () => {
+    await checkLateInterruptAnswerKeepsStopGone(
+      buildAssistantSession({ status: "busy" }),
+      ASSISTANT_ROUTES,
+    );
   });
 
   it("has no Stop control while the session is idle", async () => {

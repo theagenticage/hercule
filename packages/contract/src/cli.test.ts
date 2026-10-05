@@ -198,6 +198,7 @@ const COMMANDS: Record<string, string> = {
 
   "session.query": "session list",
   "session.read": "session read",
+  "session.querySubagents": "session subagent list",
   "session.spawn": "session spawn",
   "session.update": "session update",
   "session.input": "session input",
@@ -347,9 +348,12 @@ const RESOLVES: Record<string, string> = {
   "session.spawn projectId": "project.query",
   "session.spawn runnerId": "runner.query",
   "session.read id": "session.query",
+  "session.querySubagents id": "session.query",
   "session.update id": "session.query",
   "session.input id": "session.query",
   "session.interrupt id": "session.query",
+  // Matched among the subagents of the session the command names.
+  "session.interrupt subagentId": "session.querySubagents",
   "session.respondToApprovalRequest id": "session.query",
   "session.respondToQuestion id": "session.query",
   "session.stop id": "session.query",
@@ -361,6 +365,7 @@ const RESOLVES: Record<string, string> = {
   "input.steer id": "session.query",
 
   "transcript.read id": "session.query",
+  "transcript.read subagentId": "session.querySubagents",
 };
 
 describe("the CLI table", () => {

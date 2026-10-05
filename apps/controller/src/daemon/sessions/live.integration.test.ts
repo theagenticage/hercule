@@ -94,7 +94,7 @@ const parkOnRequest = async (arranged: Arranged, session: Session): Promise<void
       detail: { command: "ls -la" },
     },
   });
-  await waitForSession(arranged, session.id, (one) => one.openRequest !== null);
+  await waitForSession(arranged, session.id, (one) => one.openRequests.length > 0);
 };
 
 /**
@@ -221,7 +221,7 @@ describe("the operations a conversation's session allows, as for a Thread", () =
         "POST",
         arranged.harness.base,
         `/api/v1/sessions/${session.id}/interrupt`,
-        { token: arranged.token },
+        { token: arranged.token, body: {} },
       );
 
       expect(response.status, await response.clone().text()).toBe(200);
@@ -289,7 +289,7 @@ describe("the operations a conversation's session allows, as for a Thread", () =
         "POST",
         arranged.harness.base,
         `/api/v1/sessions/${session.id}/interrupt`,
-        { token: arranged.token },
+        { token: arranged.token, body: {} },
       );
 
       expect(response.status, await response.clone().text()).toBe(200);

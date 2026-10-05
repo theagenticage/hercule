@@ -19,18 +19,20 @@
  *   A turn runs until the caller or a script ends it, so a spawned thread
  *   settles busy;
  * - a stop with `session.exited` for the reason `stopped`;
- * - an interrupt by withdrawing the open Request, if any, and ending the
- *   running turn as `interrupted`;
- * - a decision on the open approval, or answers to the open question, with
+ * - an interrupt by withdrawing the open Requests and ending the running
+ *   turns as `interrupted`: every agent's, or, when the interrupt names a
+ *   subagent, that subagent's and those of the subagents it started;
+ * - a decision on an open approval, or answers to an open question, with
  *   `request.resolved`.
  *
  * Nothing else happens until the caller calls a method. The simple methods
  * each report one change: a turn starts, a Request opens, the session exits.
  * `playScript` reports a whole turn's work instead: messages that stream word
- * by word, and tool calls that may ask for approval and wait for the user to
- * allow them. It reports the same events, with the same details, that the
- * Claude Code adapter in `apps/runner/src/providers` reports for that work, so
- * a screen sees what it would see from a real agent.
+ * by word, tool calls that may ask for approval and wait for the user to
+ * allow them, Token Usage, and subagents that play steps of their own. It
+ * reports the same events, with the same details, that the Claude Code
+ * adapter in `apps/runner/src/providers` reports for that work, so a screen
+ * sees what it would see from a real agent.
  *
  * Like the root `scripts/controller-process.ts`, it uses only Node's APIs,
  * imports nothing from a test framework, and uses only TypeScript that Node
@@ -59,6 +61,7 @@ import type {
   SessionInput,
   SessionStart,
   TurnState,
+  Usage,
 } from "../../../packages/protocol/src/index";
 
 /** The most sessions a runner may list in one report, as the protocol allows. */
@@ -159,8 +162,21 @@ export type RequestKind = OpenRequest["kind"];
  *   and `Edit`. The call runs for `forMs` (0 by default) and succeeds. With
  *   `ask`, it first opens a Request for approval and waits for the user to
  *   allow it; see `playScript`.
- * - `end` ends the turn in `state`. It must be the last step. A script
- *   without one leaves the turn running.
+ * - `usage` reports a Token Usage snapshot of the agent playing the step: the
+ *   whole session's when the session's own agent plays it, the subagent's own
+ *   when a subagent does.
+ * - `subagent` starts the subagent `subagentId` with the brief `brief`, the
+ *   way a real harness reports it (spec 06 section 13.2): the parent's
+ *   `subagent` item, `subagent.started`, and then the subagent's own turn,
+ *   which reports the brief as its user message, plays `steps`, and completes.
+ *   Every event of that turn carries `subagentId`. The parent waits for the
+ *   subagent's turn to end, unless `background` is set: then the parent's item
+ *   completes at once, and the subagent goes on working, even after the
+ *   parent's own turn has ended. A subagent's steps may start subagents of
+ *   their own. The id must be new to the session and contain no `:`.
+ * - `end` ends the turn in `state`. It must be the last step of its list. A
+ *   script for the session's own agent without one leaves the turn running; a
+ *   subagent's turn without one completes after its last step.
  */
 export type ScriptStep =
   | { readonly kind: "message"; readonly text: string; readonly deltaMs?: number }
@@ -176,6 +192,19 @@ export type ScriptStep =
       readonly path: string;
       readonly forMs?: number;
       readonly ask?: boolean;
+    }
+  | { readonly kind: "usage"; readonly usage: Usage }
+  | {
+      readonly kind: "subagent";
+      readonly subagentId: string;
+      /** The short task name the parent gives the subagent. */
+      readonly description: string;
+      /** The harness's name for the kind of agent, as Claude's `subagent_type`. */
+      readonly agentType?: string;
+      /** The prompt the parent gives the subagent: its first turn's user message. */
+      readonly brief: string;
+      readonly steps: ReadonlyArray<ScriptStep>;
+      readonly background?: boolean;
     }
   | { readonly kind: "end"; readonly state: TurnState };
 
@@ -201,55 +230,84 @@ const WebSocketWithHeaders = WebSocket as unknown as new (
   init: { readonly headers: Record<string, string> },
 ) => WebSocket;
 
+/** One agent of a hosted session: the session's own agent, or one of its subagents. */
+interface Agent {
+  /** The subagent's id, or `undefined` for the session's own agent. */
+  readonly subagentId: string | undefined;
+  /** The subagent that started this one, or `undefined` when the session's own agent did. */
+  readonly parentSubagentId: string | undefined;
+  /** The agent's turn that is running, if any. */
+  turnId: string | undefined;
+  /** How the agent's last turn ended. A parent waiting on a subagent reads it. */
+  lastTurnState: TurnState | undefined;
+  /** Stops the script playing into the agent's running turn, if any. */
+  script: AbortController | undefined;
+}
+
+/** A Request an agent of a session is parked on. */
+interface ParkedRequest {
+  readonly agent: Agent;
+  /** Resumes the script that opened the Request, with the decision or answers that resolved it. */
+  readonly resumeScript: ((response: RequestResolution) => void) | undefined;
+}
+
 /** A session the runner holds: its start has arrived and it has not exited. */
 interface HostedSession {
+  readonly sessionId: string;
   readonly instanceId: string;
   /** The sequence number of the last event sent. A new process numbers from 1 again. */
   seq: number;
-  /** The turn that is running, if any. */
-  turnId: string | undefined;
-  /** The Request the session is parked on, if any. */
-  requestId: string | undefined;
-  /** Stops the script playing into the running turn, if any. */
-  script: AbortController | undefined;
-  /** Resumes the script that opened the open Request, with the decision or answers that resolved it. */
-  resumeScript: ((response: RequestResolution) => void) | undefined;
+  readonly main: Agent;
+  /** The session's subagents, by id, in the order they started. */
+  readonly subagents: Map<string, Agent>;
+  /** The open Requests of every agent, by request id, oldest first. */
+  readonly requests: Map<string, ParkedRequest>;
 }
 
 /** A scripted runner, joined to a controller and connected to it. */
 export interface ScriptedRunner {
   readonly runnerId: string;
-  /** Starts a turn, which makes the session busy. Fails if a turn is already running. */
+  /** Starts a turn of the session's own agent, which makes the session busy. Fails if one is already running. */
   readonly startTurn: (sessionId: string) => void;
-  /** Completes the running turn, which makes the session idle. Fails if no turn is running. */
+  /**
+   * Completes the running turn of the session's own agent, which makes the
+   * session idle. Fails if no such turn is running. A subagent working in the
+   * background goes on.
+   */
   readonly completeTurn: (sessionId: string) => void;
   /**
-   * Opens a Request of the given kind and returns its id. A harness asks
-   * during a turn, so the session is realistic only when it is busy.
+   * Opens a Request of the given kind for the session's own agent and returns
+   * its id. A harness asks during a turn, so the session is realistic only
+   * when it is busy.
    */
   readonly openRequest: (sessionId: string, kind: RequestKind) => string;
   /**
-   * Plays a script into the session's running turn: each step reports its
-   * events in order, over the time the step takes. Waits up to 5 s for a turn
-   * to be running, as the one a spawn's prompt opens, and fails if none starts.
+   * Plays a script into the running turn of the session's own agent: each
+   * step reports its events in order, over the time the step takes. Waits up
+   * to 5 s for a turn to be running, as the one a spawn's prompt opens, and
+   * fails if none starts.
    *
-   * A step with `ask` parks the script on its Request until the user allows
+   * A step with `ask` parks its agent on its Request until the user allows
    * the call, with `allow` or `allow_always`; the tool call then runs, and
-   * the script goes on.
+   * the agent's script goes on. Requests of different agents can be open at
+   * once, and the user may answer them in any order.
    *
-   * Resolves once the last step has been played, or as soon as the turn ends
-   * some other way: an interrupt, `completeTurn`, or the session's exit. It
-   * also resolves when the runner closes its connection itself, with
+   * Resolves once every step has been played, including the steps of every
+   * subagent the script started in the background, or as soon as the turn
+   * ends some other way: an interrupt, `completeTurn`, or the session's exit.
+   * It also resolves when the runner closes its connection itself, with
    * `goOffline`. An interrupt leaves a message that was streaming unfinished,
    * as Claude Code does. Fails if the session is already playing a script, if
-   * an `end` step is not the last step, if the user denies or cancels a tool
-   * call, or if the controller closes the connection before the script is
-   * done.
+   * an `end` step is not the last of its list, if a subagent id is reused or
+   * contains `:`, if the user denies or cancels a tool call, or if the
+   * controller closes the connection before the script is done.
    */
   readonly playScript: (sessionId: string, script: ReadonlyArray<ScriptStep>) => Promise<void>;
   /**
-   * Ends the session for the given reason, first withdrawing the open Request
-   * if there is one. The runner no longer holds the session.
+   * Ends the session for the given reason, first withdrawing every open
+   * Request. The runner no longer holds the session. A subagent turn still
+   * open is left as it is: the controller reads it as cut off, and no event
+   * is made up for it (spec 06 section 13.2).
    */
   readonly endSession: (sessionId: string, reason: ExitReason) => void;
   /**
@@ -321,134 +379,140 @@ export async function enlistScriptedRunner(
     send({ _tag: "sessionEvent", seq: session.seq, event });
   };
 
-  /** Returns the fields every event carries. */
-  const stampEvent = (sessionId: string) => ({
-    eventId: randomUUID(),
-    sessionId,
-    at: new Date().toISOString(),
-  });
-
-  const startTurn = (sessionId: string): void => {
-    const session = findSession(sessionId);
-    if (session.turnId !== undefined) {
-      throw new Error(`session ${sessionId} is already running turn ${session.turnId}`);
+  /**
+   * Opens a turn of the agent and reports it. Fails if the agent already has
+   * a turn running.
+   */
+  const openTurn = (session: HostedSession, agent: Agent): void => {
+    if (agent.turnId !== undefined) {
+      throw new Error(
+        `${describeAgent(agent)} of session ${session.sessionId} is already running turn ${agent.turnId}`,
+      );
     }
-    session.turnId = randomUUID();
+    agent.turnId = randomUUID();
     reportEvent(session, {
       _tag: "turn.started",
-      ...stampEvent(sessionId),
-      turnId: session.turnId,
+      ...stampAgentEvent(session.sessionId, agent),
+      turnId: agent.turnId,
     });
   };
 
   /**
-   * Reports the user's message as an item of the running turn, as the Claude
-   * Code adapter does for every input it delivers. A message steered into a
-   * turn that was already running is marked `steered`.
+   * Reports a user message as an item of the agent's running turn, as the
+   * Claude Code adapter does for every input it delivers and for the brief a
+   * subagent starts with. A message steered into a turn that was already
+   * running is marked `steered`.
    */
-  const reportUserMessage = (sessionId: string, text: string, steered: boolean): void => {
-    const session = findSession(sessionId);
-    const turnId = session.turnId;
-    if (turnId === undefined) throw new Error(`session ${sessionId} has no running turn`);
+  const reportUserMessage = (
+    session: HostedSession,
+    agent: Agent,
+    text: string,
+    steered: boolean,
+  ): void => {
+    const turnId = agent.turnId;
+    if (turnId === undefined) {
+      throw new Error(
+        `${describeAgent(agent)} of session ${session.sessionId} has no running turn`,
+      );
+    }
     const item = {
       turnId,
       itemId: randomUUID(),
       kind: "user_message",
       detail: { text, ...(steered ? { steered: true } : {}) },
     } as const;
-    reportEvent(session, { _tag: "item.started", ...stampEvent(sessionId), ...item });
+    const stamp = () => stampAgentEvent(session.sessionId, agent);
+    reportEvent(session, { _tag: "item.started", ...stamp(), ...item });
+    reportEvent(session, { _tag: "item.completed", ...stamp(), ...item, status: "completed" });
+  };
+
+  /**
+   * Reports that an open Request is resolved, and resumes the script parked
+   * on it with the decision or the answers. Does nothing for a Request that
+   * is not open.
+   */
+  const resolveRequest = (
+    session: HostedSession,
+    requestId: string,
+    response: RequestResolution,
+  ): void => {
+    const parked = session.requests.get(requestId);
+    if (parked === undefined) return;
+    session.requests.delete(requestId);
     reportEvent(session, {
-      _tag: "item.completed",
-      ...stampEvent(sessionId),
-      ...item,
-      status: "completed",
+      _tag: "request.resolved",
+      ...stampAgentEvent(session.sessionId, parked.agent),
+      requestId,
+      ...response,
     });
+    parked.resumeScript?.(response);
   };
 
   /**
-   * Stops the script playing into the session's turn, if any. The script's
-   * waits fail at once, so it reports nothing more.
+   * Resolves every open Request of the agent as `cancel`, as Claude Code does
+   * before the agent's turn ends or the session exits: a Request left open
+   * after that would ask about work that is no longer happening. The caller
+   * stops the agent's script first: a script resumed with `cancel` fails.
    */
-  const stopScript = (session: HostedSession): void => {
-    session.script?.abort();
-    session.script = undefined;
-    session.resumeScript = undefined;
-  };
-
-  /**
-   * Ends the running turn in the given state, and stops the script playing
-   * into it. Fails if no turn is running.
-   */
-  const completeTurn = (sessionId: string, state: TurnState): void => {
-    const session = findSession(sessionId);
-    if (session.turnId === undefined) {
-      throw new Error(`session ${sessionId} has no running turn to complete`);
+  const withdrawRequests = (session: HostedSession, agent: Agent): void => {
+    for (const [requestId, parked] of session.requests) {
+      if (parked.agent === agent) resolveRequest(session, requestId, { decision: "cancel" });
     }
-    const turnId = session.turnId;
-    session.turnId = undefined;
-    stopScript(session);
+  };
+
+  /**
+   * Ends the agent's running turn in the given state, after stopping the
+   * script playing into it and withdrawing its open Requests. Fails if the
+   * agent has no turn running.
+   */
+  const completeTurn = (session: HostedSession, agent: Agent, state: TurnState): void => {
+    const turnId = agent.turnId;
+    if (turnId === undefined) {
+      throw new Error(
+        `${describeAgent(agent)} of session ${session.sessionId} has no running turn to complete`,
+      );
+    }
+    stopScript(agent);
+    withdrawRequests(session, agent);
+    agent.turnId = undefined;
+    agent.lastTurnState = state;
     reportEvent(session, {
       _tag: "turn.completed",
-      ...stampEvent(sessionId),
+      ...stampAgentEvent(session.sessionId, agent),
       turnId,
       state,
     });
   };
 
   /**
-   * Reports that the open Request is resolved, and resumes the script parked
-   * on it with the decision or the answers.
+   * Stops each agent the way an interrupt does: its script stops, its open
+   * Requests resolve as `cancel`, and its running turn completes as
+   * `interrupted`. An agent with no turn running reports nothing.
    */
-  const reportRequestResolved = (
-    sessionId: string,
-    requestId: string,
-    response: RequestResolution,
-  ): void => {
-    const session = findSession(sessionId);
-    const resumeScript = session.resumeScript;
-    session.requestId = undefined;
-    session.resumeScript = undefined;
-    reportEvent(session, {
-      _tag: "request.resolved",
-      ...stampEvent(sessionId),
-      requestId,
-      ...response,
-    });
-    resumeScript?.(response);
-  };
-
-  /**
-   * Resolves the open Request as `cancel`, if there is one, as Claude Code
-   * does before a turn is interrupted or the session exits: a Request left
-   * open after that would ask about work that is no longer happening. The
-   * caller stops the script first: a script resumed with `cancel` fails.
-   */
-  const withdrawRequest = (sessionId: string): void => {
-    const requestId = findSession(sessionId).requestId;
-    if (requestId !== undefined)
-      reportRequestResolved(sessionId, requestId, { decision: "cancel" });
+  const interruptAgents = (session: HostedSession, agents: ReadonlyArray<Agent>): void => {
+    // An agent with no turn running plays no script and is parked on no Request.
+    for (const agent of agents) {
+      if (agent.turnId !== undefined) completeTurn(session, agent, "interrupted");
+    }
   };
 
   const endSession = (sessionId: string, reason: ExitReason): void => {
     const session = findSession(sessionId);
-    stopScript(session);
-    withdrawRequest(sessionId);
+    for (const agent of listAgents(session)) stopScript(agent);
+    for (const agent of listAgents(session)) withdrawRequests(session, agent);
     reportEvent(session, { _tag: "session.exited", ...stampEvent(sessionId), reason });
     sessions.delete(sessionId);
   };
 
   /**
-   * Waits up to 5 s for the session to be held with a turn running, and
-   * returns the session and the turn's id. Fails if no turn starts in that
-   * time.
+   * Waits up to 5 s for the session to be held with a turn of its own agent
+   * running, and returns the session. Fails if no turn starts in that time.
    */
-  const waitForRunningTurn = (
-    sessionId: string,
-  ): Promise<{ readonly session: HostedSession; readonly turnId: string }> =>
+  const waitForRunningTurn = (sessionId: string): Promise<HostedSession> =>
     pollUntil(
       () => {
         const session = sessions.get(sessionId);
-        return session?.turnId === undefined ? undefined : { session, turnId: session.turnId };
+        return session?.main.turnId === undefined ? undefined : session;
       },
       {
         timeoutMs: 5_000,
@@ -464,21 +528,22 @@ export async function enlistScriptedRunner(
    * streamed block: the API message's id and the block's index.
    */
   const streamMessage = async (
-    sessionId: string,
+    session: HostedSession,
+    agent: Agent,
     turnId: string,
     pieces: Iterable<string>,
     delayMs: number,
     signal: AbortSignal,
   ): Promise<void> => {
-    const session = findSession(sessionId);
     const itemId = `msg_${randomBytes(12).toString("hex")}#0`;
     const kind = "assistant_message";
-    reportEvent(session, { _tag: "item.started", ...stampEvent(sessionId), turnId, itemId, kind });
+    const stamp = () => stampAgentEvent(session.sessionId, agent);
+    reportEvent(session, { _tag: "item.started", ...stamp(), turnId, itemId, kind });
     for (const delta of pieces) {
       await sleep(delayMs, undefined, { signal });
       reportEvent(session, {
         _tag: "content.delta",
-        ...stampEvent(sessionId),
+        ...stamp(),
         turnId,
         itemId,
         streamKind: "assistant_text",
@@ -487,7 +552,7 @@ export async function enlistScriptedRunner(
     }
     reportEvent(session, {
       _tag: "item.completed",
-      ...stampEvent(sessionId),
+      ...stamp(),
       turnId,
       itemId,
       kind,
@@ -502,17 +567,18 @@ export async function enlistScriptedRunner(
    * gives it has gone wrong.
    */
   const runToolCall = async (
-    sessionId: string,
+    session: HostedSession,
+    agent: Agent,
     turnId: string,
     call: ToolCall,
     options: { readonly forMs?: number; readonly ask?: boolean },
     signal: AbortSignal,
   ): Promise<void> => {
-    const session = findSession(sessionId);
     const itemId = `toolu_${randomBytes(12).toString("hex")}`;
+    const stamp = () => stampAgentEvent(session.sessionId, agent);
     reportEvent(session, {
       _tag: "item.started",
-      ...stampEvent(sessionId),
+      ...stamp(),
       turnId,
       itemId,
       kind: call.kind,
@@ -521,18 +587,17 @@ export async function enlistScriptedRunner(
     if (options.ask === true) {
       const request: OpenRequest = { ...call.approval, requestId: randomUUID(), itemId };
       const answered = new Promise<RequestResolution>((resolve, reject) => {
-        session.resumeScript = resolve;
+        session.requests.set(request.requestId, { agent, resumeScript: resolve });
         signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
       });
-      session.requestId = request.requestId;
-      reportEvent(session, { _tag: "request.opened", ...stampEvent(sessionId), request });
+      reportEvent(session, { _tag: "request.opened", ...stamp(), request });
       const response = await answered;
       if (
         !("decision" in response) ||
         (response.decision !== "allow" && response.decision !== "allow_always")
       ) {
         throw new Error(
-          `the user answered the Request of session ${sessionId} with ${JSON.stringify(response)}; ` +
+          `the user answered the Request of session ${session.sessionId} with ${JSON.stringify(response)}; ` +
             "a scripted tool call plays only a call the user allows",
         );
       }
@@ -540,7 +605,7 @@ export async function enlistScriptedRunner(
     await sleep(options.forMs ?? 0, undefined, { signal });
     reportEvent(session, {
       _tag: "item.completed",
-      ...stampEvent(sessionId),
+      ...stamp(),
       turnId,
       itemId,
       kind: call.kind,
@@ -549,17 +614,106 @@ export async function enlistScriptedRunner(
     });
   };
 
-  /** Plays one step of a script into the given turn, which is running. */
+  /**
+   * Starts a subagent from the parent's running turn and plays its turn, in
+   * the order a real harness reports it (spec 06 section 13.2). Waits for the
+   * subagent's turn to end, unless the step runs it in the background: then
+   * the subagent's play is added to `background`, for `playScript` to wait
+   * on. Fails if the subagent's play fails, or if the parent's script is
+   * stopped while it waits.
+   */
+  const runSubagent = async (
+    session: HostedSession,
+    parent: Agent,
+    turnId: string,
+    step: Extract<ScriptStep, { readonly kind: "subagent" }>,
+    signal: AbortSignal,
+    background: Array<Promise<Error | undefined>>,
+  ): Promise<void> => {
+    if (session.subagents.has(step.subagentId)) {
+      throw new Error(`session ${session.sessionId} already has subagent ${step.subagentId}`);
+    }
+    const itemId = `toolu_${randomBytes(12).toString("hex")}`;
+    const item = {
+      turnId,
+      itemId,
+      kind: "subagent",
+      detail: {
+        name: "Agent",
+        input: { description: step.description, prompt: step.brief },
+        subagentIds: [step.subagentId],
+      },
+    } as const;
+    const stamp = () => stampAgentEvent(session.sessionId, parent);
+    reportEvent(session, { _tag: "item.started", ...stamp(), ...item });
+
+    const subagent: Agent = {
+      subagentId: step.subagentId,
+      parentSubagentId: parent.subagentId,
+      turnId: undefined,
+      lastTurnState: undefined,
+      script: undefined,
+    };
+    session.subagents.set(step.subagentId, subagent);
+    // The introduction belongs to the parent, so it names the parent rather
+    // than carrying an attribution of its own.
+    reportEvent(session, {
+      _tag: "subagent.started",
+      ...stampEvent(session.sessionId),
+      subagentId: step.subagentId,
+      ...(parent.subagentId === undefined ? {} : { parentSubagentId: parent.subagentId }),
+      itemId,
+      description: step.description,
+      ...(step.agentType === undefined ? {} : { agentType: step.agentType }),
+    });
+    openTurn(session, subagent);
+    reportUserMessage(session, subagent, step.brief, false);
+    const played = playSubagentTurn(session, subagent, step.steps, background);
+
+    if (step.background === true) {
+      background.push(captureFailure(played));
+      reportEvent(session, { _tag: "item.completed", ...stamp(), ...item, status: "completed" });
+      return;
+    }
+    await played;
+    signal.throwIfAborted();
+    reportEvent(session, {
+      _tag: "item.completed",
+      ...stamp(),
+      ...item,
+      status: subagent.lastTurnState === "completed" ? "completed" : "failed",
+    });
+  };
+
+  /**
+   * Plays a subagent's steps into its running turn, then completes the turn
+   * if the steps left it open. A turn ended some other way, by an interrupt,
+   * an `end` step or the session's exit, is left as it is.
+   */
+  const playSubagentTurn = async (
+    session: HostedSession,
+    subagent: Agent,
+    steps: ReadonlyArray<ScriptStep>,
+    background: Array<Promise<Error | undefined>>,
+  ): Promise<void> => {
+    const finished = await playSteps(session, subagent, steps, background);
+    if (finished && subagent.turnId !== undefined) completeTurn(session, subagent, "completed");
+  };
+
+  /** Plays one step of a script into the given turn of the agent, which is running. */
   const playStep = async (
-    sessionId: string,
+    session: HostedSession,
+    agent: Agent,
     turnId: string,
     step: ScriptStep,
     signal: AbortSignal,
+    background: Array<Promise<Error | undefined>>,
   ): Promise<void> => {
     switch (step.kind) {
       case "message":
         return streamMessage(
-          sessionId,
+          session,
+          agent,
           turnId,
           splitIntoWords(step.text),
           step.deltaMs ?? WORD_DELAY_MS,
@@ -567,7 +721,8 @@ export async function enlistScriptedRunner(
         );
       case "stream":
         return streamMessage(
-          sessionId,
+          session,
+          agent,
           turnId,
           generateMarkdownWords(Date.now() + step.forMs),
           step.deltaMs ?? STREAM_DELAY_MS,
@@ -575,34 +730,71 @@ export async function enlistScriptedRunner(
         );
       case "command":
       case "file_change":
-        return runToolCall(sessionId, turnId, buildToolCall(step), step, signal);
+        return runToolCall(session, agent, turnId, buildToolCall(step), step, signal);
+      case "usage":
+        return reportEvent(session, {
+          _tag: "session.usage.updated",
+          ...stampAgentEvent(session.sessionId, agent),
+          usage: step.usage,
+        });
+      case "subagent":
+        return runSubagent(session, agent, turnId, step, signal, background);
       case "end":
-        return completeTurn(sessionId, step.state);
+        return completeTurn(session, agent, step.state);
+    }
+  };
+
+  /**
+   * Plays steps into the agent's running turn, in order, until they run out
+   * or the agent's script is stopped. Returns true when every step was
+   * played and the script was not stopped. Fails if the agent is already
+   * playing a script, or if a step fails while the script is not stopped.
+   */
+  const playSteps = async (
+    session: HostedSession,
+    agent: Agent,
+    steps: ReadonlyArray<ScriptStep>,
+    background: Array<Promise<Error | undefined>>,
+  ): Promise<boolean> => {
+    if (agent.script !== undefined) {
+      throw new Error(
+        `${describeAgent(agent)} of session ${session.sessionId} is already playing a script`,
+      );
+    }
+    const controller = new AbortController();
+    agent.script = controller;
+    try {
+      for (const step of steps) {
+        const turnId = agent.turnId;
+        if (controller.signal.aborted || turnId === undefined) return false;
+        await playStep(session, agent, turnId, step, controller.signal, background);
+      }
+      return !controller.signal.aborted;
+    } catch (error) {
+      // A stopped script fails its wait; that is how it learns the turn ended.
+      if (!controller.signal.aborted) throw error;
+      return false;
+    } finally {
+      if (agent.script === controller) agent.script = undefined;
     }
   };
 
   const playScript = async (sessionId: string, script: ReadonlyArray<ScriptStep>) => {
-    const end = script.findIndex((step) => step.kind === "end");
-    if (end !== -1 && end !== script.length - 1) {
-      throw new Error(`the end step is step ${end + 1} of ${script.length}; it must be the last`);
+    checkScript(script);
+    const session = await waitForRunningTurn(sessionId);
+    // A subagent in the background can outlive the turn that started it, so
+    // its play is waited on after the main script, and a failure in it is
+    // still reported. Each play is caught as it is added, so a failure that
+    // comes before the wait is not an unhandled rejection.
+    const background: Array<Promise<Error | undefined>> = [];
+    const failures = [await captureFailure(playSteps(session, session.main, script, background))];
+    // A background subagent may start more of them, so the list can grow while
+    // it is read.
+    for (let index = 0; index < background.length; index += 1) {
+      failures.push(await background[index]);
     }
-    const { session, turnId } = await waitForRunningTurn(sessionId);
-    if (session.script !== undefined) {
-      throw new Error(`session ${sessionId} is already playing a script`);
-    }
-    const controller = new AbortController();
-    session.script = controller;
-    try {
-      for (const step of script) {
-        if (controller.signal.aborted) return;
-        await playStep(sessionId, turnId, step, controller.signal);
-      }
-    } catch (error) {
-      // A stopped script fails its wait; that is how it learns the turn ended.
-      if (!controller.signal.aborted) throw error;
-    } finally {
-      if (session.script === controller) session.script = undefined;
-    }
+    const failure = failures.find((one) => one !== undefined);
+    if (failure !== undefined) throw failure;
   };
 
   /**
@@ -611,15 +803,16 @@ export async function enlistScriptedRunner(
    * a session input and the input a session start carries arrive here.
    */
   const deliverInput = (session: HostedSession, frame: SessionInput | SessionStart): void => {
-    const running = session.turnId !== undefined;
+    // Input goes to the session's own agent; a subagent takes no messages.
+    const running = session.main.turnId !== undefined;
     send({
       _tag: "sessionInputResult",
       requestId: frame.requestId,
       ok: true,
       delivery: running ? "steered" : "opened",
     });
-    if (!running) startTurn(frame.sessionId);
-    reportUserMessage(frame.sessionId, frame.input.text, running);
+    if (!running) openTurn(session, session.main);
+    reportUserMessage(session, session.main, frame.input.text, running);
   };
 
   const answerFrame = (frame: ControllerToRunner): void => {
@@ -649,12 +842,18 @@ export async function enlistScriptedRunner(
         return send({ _tag: "workspaceReport", workspaceId: frame.workspaceId, status: "deleted" });
       case "sessionStart": {
         const session: HostedSession = {
+          sessionId: frame.sessionId,
           instanceId: frame.spec.instanceId,
           seq: 0,
-          turnId: undefined,
-          requestId: undefined,
-          script: undefined,
-          resumeScript: undefined,
+          main: {
+            subagentId: undefined,
+            parentSubagentId: undefined,
+            turnId: undefined,
+            lastTurnState: undefined,
+            script: undefined,
+          },
+          subagents: new Map(),
+          requests: new Map(),
         };
         // A resume starts the same session id again, as a new process.
         sessions.set(frame.sessionId, session);
@@ -683,23 +882,32 @@ export async function enlistScriptedRunner(
       case "sessionStop":
         if (!sessions.has(frame.sessionId)) return;
         return endSession(frame.sessionId, "stopped");
-      // A late response to an earlier Request must not resolve the one open now.
-      case "sessionRespondToApprovalRequest":
-        if (sessions.get(frame.sessionId)?.requestId !== frame.requestId) return;
-        return reportRequestResolved(frame.sessionId, frame.requestId, {
-          decision: frame.decision,
-        });
-      case "sessionRespondToQuestion":
-        if (sessions.get(frame.sessionId)?.requestId !== frame.requestId) return;
-        return reportRequestResolved(frame.sessionId, frame.requestId, {
-          answers: frame.answers,
-        });
+      // A late response to a Request that is no longer open is ignored.
+      case "sessionRespondToApprovalRequest": {
+        const session = sessions.get(frame.sessionId);
+        if (session === undefined) return;
+        return resolveRequest(session, frame.requestId, { decision: frame.decision });
+      }
+      case "sessionRespondToQuestion": {
+        const session = sessions.get(frame.sessionId);
+        if (session === undefined) return;
+        return resolveRequest(session, frame.requestId, { answers: frame.answers });
+      }
+      // Without a subagent id, an interrupt stops all work in the session, even
+      // while its own agent is idle and only subagents run. With one, it stops
+      // that subagent and every subagent below it (spec 06 section 13.4).
       case "sessionInterrupt": {
         const session = sessions.get(frame.sessionId);
-        if (session?.turnId === undefined) return;
-        stopScript(session);
-        withdrawRequest(frame.sessionId);
-        return completeTurn(frame.sessionId, "interrupted");
+        if (session === undefined) return;
+        if (frame.subagentId === undefined) return interruptAgents(session, listAgents(session));
+        const stopped = session.subagents.get(frame.subagentId);
+        if (stopped === undefined) return;
+        return interruptAgents(
+          session,
+          listAgents(session).filter(
+            (agent) => agent === stopped || isBelow(session, agent, frame.subagentId!),
+          ),
+        );
       }
       default:
         // Every other frame asks for work a scripted runner does not do.
@@ -729,7 +937,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 2 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 3 satisfies typeof PROTOCOL_VERSION,
             capabilities: [],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
@@ -765,7 +973,9 @@ export async function enlistScriptedRunner(
    * runners, and the failure would be reported as an unhandled rejection.
    */
   const closeSocket = async (): Promise<void> => {
-    for (const session of sessions.values()) stopScript(session);
+    for (const session of sessions.values()) {
+      for (const agent of listAgents(session)) stopScript(agent);
+    }
     if (socket.readyState === WebSocket.CLOSED) return;
     const closed = new Promise((resolve) => socket.addEventListener("close", resolve));
     socket.close();
@@ -777,12 +987,18 @@ export async function enlistScriptedRunner(
 
   return {
     runnerId,
-    startTurn,
-    completeTurn: (sessionId) => completeTurn(sessionId, "completed"),
+    startTurn: (sessionId) => {
+      const session = findSession(sessionId);
+      openTurn(session, session.main);
+    },
+    completeTurn: (sessionId) => {
+      const session = findSession(sessionId);
+      completeTurn(session, session.main, "completed");
+    },
     openRequest: (sessionId, kind) => {
       const session = findSession(sessionId);
       const request = buildOpenRequest(kind);
-      session.requestId = request.requestId;
+      session.requests.set(request.requestId, { agent: session.main, resumeScript: undefined });
       reportEvent(session, { _tag: "request.opened", ...stampEvent(sessionId), request });
       return request.requestId;
     },
@@ -808,6 +1024,81 @@ export async function enlistScriptedRunner(
       send({ _tag: "sessionsReport", sessions: bindings });
     },
   };
+}
+
+/** Returns the fields every event carries. */
+function stampEvent(sessionId: string) {
+  return { eventId: randomUUID(), sessionId, at: new Date().toISOString() };
+}
+
+/**
+ * Returns the fields every event of an agent carries: those of `stampEvent`,
+ * and the subagent's id when the agent is a subagent.
+ */
+function stampAgentEvent(sessionId: string, agent: Agent) {
+  return {
+    ...stampEvent(sessionId),
+    ...(agent.subagentId === undefined ? {} : { subagentId: agent.subagentId }),
+  };
+}
+
+/** Describes an agent for an error message: "the session's own agent" or "subagent <id>". */
+function describeAgent(agent: Agent): string {
+  return agent.subagentId === undefined
+    ? "the session's own agent"
+    : `subagent ${agent.subagentId}`;
+}
+
+/** Lists every agent of the session: its own agent first, then its subagents in the order they started. */
+function listAgents(session: HostedSession): ReadonlyArray<Agent> {
+  return [session.main, ...session.subagents.values()];
+}
+
+/** Checks whether the agent was started, directly or further down, by the subagent `ancestorId`. */
+function isBelow(session: HostedSession, agent: Agent, ancestorId: string): boolean {
+  for (let parent = agent.parentSubagentId; parent !== undefined;) {
+    if (parent === ancestorId) return true;
+    parent = session.subagents.get(parent)?.parentSubagentId;
+  }
+  return false;
+}
+
+/** Stops the script playing into the agent's turn, if any. The script's waits fail at once, so it reports nothing more. */
+function stopScript(agent: Agent): void {
+  agent.script?.abort();
+  agent.script = undefined;
+}
+
+/**
+ * Checks a script before it is played, and every subagent's steps in it.
+ * Fails if an `end` step is not the last of its list, or if a subagent id
+ * contains `:`, which the protocol refuses.
+ */
+function checkScript(script: ReadonlyArray<ScriptStep>): void {
+  const end = script.findIndex((step) => step.kind === "end");
+  if (end !== -1 && end !== script.length - 1) {
+    throw new Error(`the end step is step ${end + 1} of ${script.length}; it must be the last`);
+  }
+  for (const step of script) {
+    if (step.kind !== "subagent") continue;
+    if (step.subagentId.includes(":")) {
+      throw new Error(
+        `the subagent id ${step.subagentId} contains ":", which the protocol refuses`,
+      );
+    }
+    checkScript(step.steps);
+  }
+}
+
+/**
+ * Waits for a play to settle and returns its failure as an `Error`, or
+ * `undefined` when it succeeded. It never rejects.
+ */
+function captureFailure(play: Promise<unknown>): Promise<Error | undefined> {
+  return play.then(
+    () => undefined,
+    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+  );
 }
 
 /**

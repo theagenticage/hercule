@@ -52,6 +52,19 @@ const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
  */
 const PositiveMillis = Schema.Int.check(Schema.isGreaterThan(0));
 
+/**
+ * The harness's own id for a subagent, unique within its session: the Claude
+ * agent id, the Codex child thread id, or the child id from Hercule's pi
+ * extension (spec 06 section 13). It may not contain `:`, because it is the
+ * last part of a subagent's live topic, `session:<id>:subagent:<subagentId>:stream`,
+ * and a colon in it would let that topic parse two ways.
+ */
+export const SubagentId = Fact.check(
+  Schema.isPattern(/^[^:]+$/, { title: "subagent id", description: "an id with no `:`" }),
+);
+
+export type SubagentId = Schema.Schema.Type<typeof SubagentId>;
+
 /** The model and the per-model choices a turn runs with (spec 06 section 4). */
 export const ModelSelection = Schema.Struct({
   model: Fact,
@@ -127,9 +140,21 @@ export const SessionSpec = Schema.Struct({
    * The provider-native session this one continues from, on the same runner
    * and the same instance (spec 06 section 4.1). A resume continues that
    * native session; a fork branches off it, leaving the original untouched.
+   *
+   * `subagents` lists the subagents the controller already has records of,
+   * sent on a resume only. The adapter seeds its own map from it, so a
+   * subagent the harness continues in the new process lands on the record it
+   * already has (spec 06 section 13.2). A fork sends none: a forked session
+   * starts with no subagents.
    */
   continue: Schema.optionalKey(
-    Schema.Struct({ nativeSessionId: Fact, mode: Schema.Literals(["resume", "fork"]) }),
+    Schema.Struct({
+      nativeSessionId: Fact,
+      mode: Schema.Literals(["resume", "fork"]),
+      subagents: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ subagentId: SubagentId, itemId: Schema.optionalKey(Fact) })),
+      ),
+    }),
   ),
   /**
    * The time limits the runner supervisor enforces on this session (spec 03
@@ -244,8 +269,9 @@ export const ItemStatus = Schema.Literals(["completed", "failed", "declined"]);
 export type ItemStatus = Schema.Schema.Type<typeof ItemStatus>;
 
 /**
- * The four answers a parked session can be given. `allow_always` keeps a rule
- * for the rest of the session; `cancel` denies the request and ends the turn.
+ * The four answers an approval can be given. `allow_always` keeps a rule for
+ * the rest of the session; `cancel` denies the request and ends the turn of
+ * the agent that asked it.
  */
 export const ApprovalDecision = Schema.Literals(["allow", "allow_always", "deny", "cancel"]);
 
@@ -277,7 +303,7 @@ const defineOpenRequestFields = <const K extends string, F extends Schema.Struct
   detail: Schema.Struct(detail),
 });
 
-/** An approval a harness parked a session on, and the decisions it accepts. */
+/** An approval one agent of a session is parked on, and the decisions it accepts. */
 const defineApprovalRequest = <const K extends string, F extends Schema.Struct.Fields>(
   kind: K,
   detail: F,
@@ -321,7 +347,7 @@ const Question = Schema.Struct({
 });
 
 /**
- * Questions a harness parked a session on. A harness asks one to four
+ * Questions one agent of a session is parked on. A harness asks one to four
  * questions at a time, so the request holds a list. It accepts answers only,
  * never a decision. To turn the questions down, the user stops the turn, and
  * the request resolves as `cancel`.
@@ -389,8 +415,9 @@ export const QuestionAnswers = Schema.Record(
 export type QuestionAnswers = Schema.Schema.Type<typeof QuestionAnswers>;
 
 /**
- * The request a session is parked on, as the database row and the API hold it.
- * `request.opened` carries the same five shapes.
+ * A Request one agent of a session is parked on, as the database row and the
+ * API hold it. `request.opened` carries the same five shapes. A session can
+ * have several open at once, one or more per agent (spec 06 section 13.3).
  */
 export const OpenRequest = Schema.Union([
   CommandApproval,
@@ -422,10 +449,13 @@ const Tokens = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Money = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
- * A cumulative token snapshot for the session, not a per-turn delta: harnesses
- * report at different intervals, and a snapshot works for all of them. The
- * optional fields are the ones only some harnesses report (spec 06 section
- * 6.6).
+ * A token snapshot counting everything the agent used since this process
+ * started, not a per-turn delta: harnesses report at different intervals, and
+ * a snapshot works for all of them. The controller adds each process's count
+ * to the session's running total, so a resumed session is not counted twice.
+ * The four token counts never overlap: `inputTokens` is the input not read
+ * from cache. The optional fields are the ones only some harnesses report
+ * (spec 06 section 6.6).
  */
 export const Usage = Schema.Struct({
   inputTokens: Tokens,
@@ -459,6 +489,15 @@ const defineEvent = <const Tag extends string, Fields extends Schema.Struct.Fiel
   fields: Fields,
 ) => Schema.Struct({ _tag: Schema.Literal(tag), ...base, ...fields });
 
+/**
+ * The field that names the agent an event belongs to: the subagent its id
+ * names, or the session's own agent when it is absent (spec 06 section 13).
+ * It is spread into each event an agent can cause, rather than put in `base`,
+ * because `session.started` and `session.exited` belong to the session's
+ * process and never to one agent.
+ */
+const attribution = { subagentId: Schema.optionalKey(SubagentId) };
+
 const SessionStarted = defineEvent("session.started", {});
 
 /**
@@ -487,13 +526,21 @@ export type StructuredResult = Schema.Schema.Type<typeof StructuredResult>;
  * The controller must be able to match a turn's completion with its start, so
  * the turn id is required on both.
  */
-const TurnStarted = defineEvent("turn.started", { turnId: Fact, model: Schema.optionalKey(Fact) });
+const TurnStarted = defineEvent("turn.started", {
+  ...attribution,
+  turnId: Fact,
+  model: Schema.optionalKey(Fact),
+});
 
 const TurnCompleted = defineEvent("turn.completed", {
+  ...attribution,
   turnId: Fact,
   state: TurnState,
   usage: Schema.optionalKey(Usage),
-  /** This turn's cost, where the harness prices a turn; `usage` is cumulative. */
+  /**
+   * This turn's cost, where the harness prices a turn. `usage` counts since
+   * this process started.
+   */
   costUsd: Schema.optionalKey(Money),
   error: Schema.optionalKey(Message),
   /**
@@ -510,6 +557,7 @@ const TurnCompleted = defineEvent("turn.completed", {
  * twelve shapes here would limit what each harness can report in future.
  */
 const itemFields = {
+  ...attribution,
   /** Every item belongs to a turn; unsolicited output gets a synthetic one. */
   turnId: Fact,
   itemId: Fact,
@@ -523,16 +571,22 @@ const ItemCompleted = defineEvent("item.completed", { ...itemFields, status: Ite
 
 /** Append-only text for one (item, streamKind). Unbounded: cutting it loses output. */
 const ContentDelta = defineEvent("content.delta", {
+  ...attribution,
   turnId: Fact,
   itemId: Fact,
   streamKind: StreamKind,
   delta: Schema.String,
 });
 
-const SessionUsageUpdated = defineEvent("session.usage.updated", { usage: Usage });
+/**
+ * Without `subagentId` the snapshot covers the session's own agent and every
+ * subagent; with one, it covers that subagent alone (spec 06 section 6.6).
+ */
+const SessionUsageUpdated = defineEvent("session.usage.updated", { ...attribution, usage: Usage });
 
 /** Either may fire inside a turn or between turns, so the turn id is optional. */
 const RuntimeWarning = defineEvent("runtime.warning", {
+  ...attribution,
   turnId: Schema.optionalKey(Fact),
   message: Message,
 });
@@ -543,36 +597,61 @@ const RuntimeWarning = defineEvent("runtime.warning", {
  * stays a string, so a class this build does not know still reaches the user.
  */
 const RuntimeError = defineEvent("runtime.error", {
+  ...attribution,
   turnId: Schema.optionalKey(Fact),
   class: Fact,
   message: Schema.optionalKey(Message),
 });
 
 /**
- * The session is parked: nothing more happens on this turn until a decision
- * arrives. The request is nested rather than spread across the event, so the
+ * An agent of the session is parked: nothing more happens on that agent's
+ * turn until a decision arrives. The request is nested rather than spread across the event, so the
  * row and the API hold exactly what arrived, whatever fields the event
  * envelope gains later.
  */
-const RequestOpened = defineEvent("request.opened", { request: OpenRequest });
+const RequestOpened = defineEvent("request.opened", { ...attribution, request: OpenRequest });
 
 /**
- * The session is no longer parked, whatever ended it: the user's decision, an
- * interrupted turn, or the harness withdrawing the question.
+ * The agent is no longer parked on this Request, whatever ended it: the
+ * user's decision, an interrupted turn, or the harness withdrawing the
+ * question.
  */
 const RequestResolved = defineEvent("request.resolved", {
+  ...attribution,
   requestId: Fact,
   decision: ApprovalDecision,
 });
 
 /**
- * The session is no longer parked because the user answered its question. It
+ * The agent is no longer parked on this Request, because the user answered
+ * its question. It
  * carries the answers rather than a decision, so the stream holds what the
  * user said.
  */
 const RequestResolvedWithAnswers = defineEvent("request.resolved", {
+  ...attribution,
   requestId: Fact,
   answers: QuestionAnswers,
+});
+
+/**
+ * A subagent's introduction, sent once per process before any event of that
+ * subagent (spec 06 section 13.2). The event belongs to the agent that started
+ * the subagent, so it has no `subagentId` of its own: it is stored in the
+ * transcript `parentSubagentId` names, or the session's own when that is
+ * absent.
+ *
+ * - `itemId` is the `subagent` item that started it, in its parent's transcript.
+ * - `description` is the short task name the parent gave it.
+ * - `agentType` is the harness's name for the kind of agent: Claude's
+ *   `subagent_type`, Codex's role.
+ */
+const SubagentStarted = defineEvent("subagent.started", {
+  subagentId: SubagentId,
+  parentSubagentId: Schema.optionalKey(SubagentId),
+  itemId: Schema.optionalKey(Fact),
+  description: Schema.optionalKey(Message),
+  agentType: Schema.optionalKey(Fact),
 });
 
 /**
@@ -585,6 +664,7 @@ export type RequestResolution =
 export const ProviderEvent = Schema.Union([
   SessionStarted,
   SessionExited,
+  SubagentStarted,
   TurnStarted,
   TurnCompleted,
   ItemStarted,
@@ -699,21 +779,28 @@ export type SessionInput = Schema.Schema.Type<typeof SessionInput>;
 export type FrameCarryingInput = SessionInput | SessionStart;
 
 /**
- * Ends the running turn as `interrupted`. There is no reply frame: the outcome
- * arrives in the session's own stream as `turn.completed`, so a reply would
- * add nothing.
+ * Stops work in a session; each turn it ends completes as `interrupted`.
+ *
+ * - Without `subagentId`, it stops all work in the session: the turn of the
+ *   session's own agent and every running subagent.
+ * - With `subagentId`, it stops that subagent and every subagent below it,
+ *   and leaves the rest of the session running (spec 06 section 13.4).
+ *
+ * There is no reply frame: the outcome arrives in the session's own stream as
+ * `turn.completed`, so a reply would add nothing.
  */
 export const SessionInterrupt = Schema.Struct({
   _tag: Schema.Literal("sessionInterrupt"),
   sessionId: SessionId,
+  subagentId: Schema.optionalKey(SubagentId),
 });
 
 export type SessionInterrupt = Schema.Schema.Type<typeof SessionInterrupt>;
 
 /**
- * Decides the approval the session is parked on. `requestId` is the adapter's
- * own id, sent back: the controller does not create ids for requests it did
- * not open. Like `SessionInterrupt`, there is no reply frame: the result
+ * Decides one approval an agent of the session is parked on. `requestId` is
+ * the adapter's own id, sent back: the controller does not create ids for
+ * requests it did not open. Like `SessionInterrupt`, there is no reply frame: the result
  * arrives in the session's own stream as `request.resolved`.
  */
 export const SessionRespondToApprovalRequest = Schema.Struct({
@@ -728,7 +815,7 @@ export type SessionRespondToApprovalRequest = Schema.Schema.Type<
 >;
 
 /**
- * Answers the questions the session is parked on. Like
+ * Answers the questions one agent of the session is parked on. Like
  * `SessionRespondToApprovalRequest`, there is no reply frame: the result
  * arrives in the session's own stream as `request.resolved`, with the
  * answers.

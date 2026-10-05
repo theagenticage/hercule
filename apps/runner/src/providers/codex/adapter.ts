@@ -27,6 +27,7 @@ import type {
   SendResult,
   SessionBinding,
   SessionSpec,
+  SubagentId,
   TurnInput,
 } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
@@ -118,12 +119,12 @@ interface Held {
   /** The turn the adapter believes is running. While it is set, an input steers that turn. */
   turnId: string | undefined;
   /**
-   * The request the session is parked on, and the requests that arrived while
-   * it was open. A session has at most one open request. If a second one were
-   * opened before the first was resolved, it would replace the first, and the
-   * first would vanish from every surface with no way to answer it. Codex
-   * waits for both, so the second waits here and is opened once the first is
-   * resolved.
+   * The request this adapter has reported for the session, and the requests
+   * that arrived while it was open. Codex can send a second request before
+   * the first is resolved, and waits for both. This adapter still reports one
+   * request at a time, so the second waits here and is reported once the
+   * first is resolved. Reporting every request at once, each with its asking
+   * subagent, is the Codex subagents ticket (#437, spec 06 section 13.3).
    */
   open: Park | undefined;
   readonly waiting: Array<Park>;
@@ -942,8 +943,13 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         return sent;
       }),
 
-    interrupt: (sessionId: string): Effect.Effect<void> =>
+    interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
+        // This adapter reports no subagents yet, so no subagent id can name
+        // work it runs, and stopping the session's own turn instead would stop
+        // work the user did not ask to stop. Stopping a subagent is built
+        // together with reporting them (#437).
+        if (subagentId !== undefined) return Effect.void;
         const held = sessions.get(sessionId);
         // No event is emitted here: the turn completing as `interrupted`
         // reports the interrupt.

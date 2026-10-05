@@ -1,11 +1,16 @@
 /**
- * Decides what an open thread does with each delivery on its two live topics:
+ * Decides what an open thread does with each delivery on its two live topics.
+ * A screen follows exactly one agent of a session: the session's own agent on
+ * `session:<id>:stream` and `:tap`, or one subagent on
+ * `session:<id>:subagent:<subagentId>:stream` and `:tap`. Either way:
  *
- * - `session:<id>:stream` delivers the transcript's stored rows;
- * - `session:<id>:tap` delivers the token deltas of the text being written.
+ * - the `stream` topic delivers the agent's transcript rows as they are
+ *   stored;
+ * - the `tap` topic delivers the token deltas of the text being written.
  *
- * The functions here only decide. Each app applies the decision to its own
- * cache, its own tail buffer and its own painting.
+ * Both pairs deliver the same shapes, so these functions serve either. They
+ * only decide. Each app applies the decision to its own cache, its own tail
+ * buffer and its own painting.
  */
 import type { TapItem, TranscriptRow } from "@hercule/contract";
 import type { LiveDelta } from "../live/live";

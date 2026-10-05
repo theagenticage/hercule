@@ -425,8 +425,8 @@ describe("the composer", () => {
 
     await mini.getByRole("button", { name: "Allow" }).click();
     await expect
-      .poll(async () => (await client.session.read({ params: { id: thread.id } })).openRequest)
-      .toBeNull();
+      .poll(async () => (await client.session.read({ params: { id: thread.id } })).openRequests)
+      .toEqual([]);
     await mini.waitFor({ state: "detached" });
     expect(await composer.root.getAttribute("class")).toBe("composer is-scrolled");
     await played;

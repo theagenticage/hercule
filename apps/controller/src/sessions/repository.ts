@@ -15,13 +15,15 @@ import type {
   AccessMode,
   DisallowedTool,
   ModelSelection,
-  OpenRequest,
   ProviderEvent,
+  SubagentId,
+  Usage,
 } from "@hercule/protocol";
 import {
   createNotFoundError,
   SESSION_STATUSES,
   type NotFound,
+  type SessionRequest,
   type SessionStatus,
   type SortDirection,
 } from "@hercule/contract";
@@ -41,7 +43,8 @@ import {
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
-import type { StreamRow } from "./stream";
+import { attributeEvent, type StreamRow } from "./stream";
+import type { StoredUsage } from "./usage";
 
 /**
  * Builds a SQL expression, over a row of `sessions` under the given alias,
@@ -89,7 +92,12 @@ export interface StoredSession {
   readonly parentSessionId: string | null;
   readonly status: SessionStatus;
   readonly resumable: boolean;
-  readonly openRequest: OpenRequest | null;
+  /** The Requests the session's agents are parked on, oldest first. */
+  readonly openRequests: ReadonlyArray<SessionRequest>;
+  /** The session's Token Usage over its whole life; `undefined` until a harness reports some. */
+  readonly usage: Usage | undefined;
+  /** The current process's last usage snapshot; see `addUsageSnapshot`. Never shown by the API. */
+  readonly usageProcess: Usage | undefined;
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
@@ -217,7 +225,10 @@ interface SessionRow {
   readonly parent_session_id: Uint8Array | null;
   readonly status: string;
   readonly resumable: number;
-  readonly open_request: string | null;
+  /** A JSON array of the open Requests, oldest first. */
+  readonly open_requests: string;
+  readonly usage: string | null;
+  readonly usage_process: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly exited_at: string | null;
@@ -244,13 +255,21 @@ const buildColumnList = (): string =>
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
-  "open_request, created_at, started_at, exited_at, exit_reason, " +
+  "open_requests, usage, usage_process, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
   "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
   "WHERE conversations.id = sessions.conversation_id)) AS conversation_deleted, " +
   `(${buildResumableClause("sessions")}) AS resumable`;
+
+/**
+ * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
+ * for `NULL`, which means no harness has reported usage yet. Shared by the
+ * session and subagent repositories, which store usage the same way.
+ */
+export const parseUsage = (column: string | null): Usage | undefined =>
+  column === null ? undefined : (JSON.parse(column) as Usage);
 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
@@ -273,7 +292,9 @@ const toSession = (row: SessionRow): StoredSession => ({
   parentSessionId: row.parent_session_id === null ? null : uuidToString(row.parent_session_id),
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
-  openRequest: row.open_request === null ? null : (JSON.parse(row.open_request) as OpenRequest),
+  openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
+  usage: parseUsage(row.usage),
+  usageProcess: parseUsage(row.usage_process),
   createdAt: row.created_at,
   startedAt: row.started_at,
   exitedAt: row.exited_at,
@@ -295,15 +316,32 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
 });
 
 /**
- * Builds the cursor scope for one session's transcript. The cursor key is the
- * position, which is per session, so the session id is part of the scope.
- * Without it, a cursor from one session's transcript would silently skip rows
- * on another session's transcript.
+ * Builds the cursor scope for one agent's transcript. The cursor key is the
+ * position, which is per session, and each agent of the session has its own
+ * transcript, so the session id and the subagent id are both part of the
+ * scope. Without them, a cursor from one transcript would silently skip rows
+ * on another. The session's own agent has an empty subagent part. Neither id
+ * can contain `:`, so two scopes cannot be spelled the same.
  */
-const buildTranscriptScope = (sessionId: string, direction: SortDirection): CursorScope => ({
+const buildTranscriptScope = (
+  sessionId: string,
+  subagentId: SubagentId | undefined,
+  direction: SortDirection,
+): CursorScope => ({
   op: "transcript.read",
-  sort: [{ field: `position:${sessionId}`, direction }],
+  sort: [{ field: `position:${sessionId}:${subagentId ?? ""}`, direction }],
 });
+
+/**
+ * Builds the SQL condition that picks one agent's rows of a session's
+ * stream: the subagent's, or the session's own agent's when `subagentId` is
+ * `undefined`.
+ */
+export const buildAgentClause = (
+  sql: SqlClient.SqlClient,
+  subagentId: SubagentId | undefined,
+): Fragment =>
+  subagentId === undefined ? sql`subagent_id IS NULL` : sql`subagent_id = ${subagentId}`;
 
 /**
  * The position of the last queued row a batch read. The next batch starts
@@ -353,6 +391,8 @@ export interface StoredStreamRow {
 
 export interface TranscriptPageRequest {
   readonly sessionId: string;
+  /** The subagent whose transcript is read; `undefined` for the session's own agent. */
+  readonly subagentId: SubagentId | undefined;
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly direction: SortDirection;
@@ -393,7 +433,7 @@ const make = Effect.gen(function* () {
         UPDATE sessions SET
           status = 'exited',
           last_activity_at = ${at},
-          open_request = NULL,
+          open_requests = '[]',
           token_hash = NULL,
           exited_at = ${at}
         WHERE id IN ${sql.in(rows.map((row) => row.id))} AND status <> 'exited'
@@ -607,7 +647,7 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns one page of a session's stream, in position order. The stored
+     * Returns one page of one agent's transcript, in position order. The stored
      * `event` is parsed with `JSON.parse` rather than decoded with the schema:
      * the schema has no transformations, so the JSON is already the value.
      */
@@ -615,7 +655,11 @@ const make = Effect.gen(function* () {
       request: TranscriptPageRequest,
     ): Effect.Effect<Page<StoredStreamRow>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = buildTranscriptScope(request.sessionId, request.direction);
+        const scope = buildTranscriptScope(
+          request.sessionId,
+          request.subagentId,
+          request.direction,
+        );
         const after =
           request.cursor === undefined
             ? undefined
@@ -632,7 +676,8 @@ const make = Effect.gen(function* () {
           readonly event: string;
         }>`
           SELECT position, at, event FROM session_stream
-          WHERE session_id = ${uuidFromString(request.sessionId)} AND ${keyset}
+          WHERE session_id = ${uuidFromString(request.sessionId)}
+            AND ${buildAgentClause(sql, request.subagentId)} AND ${keyset}
           ${order} LIMIT ${request.limit + 1}
         `;
         return yield* buildPage(
@@ -674,16 +719,16 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Appends one row at the next position for this session. A sequence number
-     * already written hits the unique index and writes nothing, so a replayed
-     * frame is harmless.
+     * Appends one row at the next position for this session, stored under the
+     * agent `attributeEvent` names. A sequence number already written hits the
+     * unique index and writes nothing, so a replayed frame is harmless.
      */
     append: (sessionId: string, row: StreamRow): Effect.Effect<void, SqlError> => {
       const id = uuidFromString(sessionId);
       return Effect.asVoid(sql`
-        INSERT INTO session_stream (session_id, position, runner_seq, at, event)
+        INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
         SELECT ${id}, COALESCE(MAX(position), 0) + 1, ${row.seq}, ${row.at},
-               ${JSON.stringify(row.event)}
+               ${JSON.stringify(row.event)}, ${attributeEvent(row.event) ?? null}
         FROM session_stream WHERE session_id = ${id}
         ON CONFLICT (session_id, runner_seq) DO NOTHING
       `);
@@ -773,7 +818,7 @@ const make = Effect.gen(function* () {
           status = 'queued',
           spec = ${spec},
           last_activity_at = ${at},
-          open_request = NULL,
+          open_requests = '[]',
           stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                          WHERE session_id = sessions.id)
         WHERE id = ${uuidFromString(sessionId)}
@@ -867,13 +912,24 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(sessionId)}
       `),
 
-    /** Stores the request the runner reported the session is waiting on, or `null` for none. */
-    setOpenRequest: (
+    /** Stores the Requests the session's agents are parked on, oldest first. */
+    setOpenRequests: (
       sessionId: string,
-      request: OpenRequest | null,
+      requests: ReadonlyArray<SessionRequest>,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE sessions SET open_request = ${request === null ? null : JSON.stringify(request)}
+        UPDATE sessions SET open_requests = ${JSON.stringify(requests)}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /** Stores the session's Token Usage and its current process's last snapshot. */
+    setUsage: (sessionId: string, usage: StoredUsage): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET
+          usage = ${usage.usage === undefined ? null : JSON.stringify(usage.usage)},
+          usage_process = ${
+            usage.usageProcess === undefined ? null : JSON.stringify(usage.usageProcess)
+          }
         WHERE id = ${uuidFromString(sessionId)}
       `),
 

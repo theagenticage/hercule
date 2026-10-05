@@ -42,7 +42,10 @@ export const sessionRecordComposer: Effect.Effect<
       "crashGuardArmed",
       "inputWaiting",
       "conversationDeleted",
+      "usage",
+      "usageProcess",
     ]),
+    ...(stored.usage === undefined ? {} : { usage: stored.usage }),
     resumeHeld: isResumeHeld(stored),
     unenforced: listUnenforcedFields(definitions, stored.providerId, stored.disallowedTools),
   }));

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
-import { buildThreadBlocks, type Pose } from "@hercule/client-core";
+import { buildSessionAgentState, buildThreadBlocks, type Pose } from "@hercule/client-core";
 import {
   buildNextRows,
   RUNNING_ITEM_ID,
@@ -59,7 +59,7 @@ describe("Transcript", () => {
     render(
       <Transcript
         sessionId={THREAD.session.id}
-        blocks={buildThreadBlocks(ROWS, THREAD.session)}
+        blocks={buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session))}
         pose="working"
         describeAgent={() => "Claude Code · Claude Sonnet 5"}
         attachOpenParagraph={() => undefined}
@@ -89,7 +89,7 @@ describe("Transcript", () => {
   });
 
   it("animates the live row's face only while the thread works", () => {
-    const blocks = buildThreadBlocks(ROWS, THREAD.session);
+    const blocks = buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session));
     // No message holds the face while the command runs, so the live row does.
     expect(blocks.at(-1)?.kind).toBe("live");
     const renderTranscript = (pose: Pose) => (

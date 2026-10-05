@@ -35,14 +35,26 @@ const decideRow = (thread: Session, runner: Runner | undefined) => ({
 
 describe("decideThreadPose and decideThreadRowEnd", () => {
   it("shows a thread with an open request as waiting, with the waiting mark", () => {
-    expect(decideRow(buildThread({ status: "busy", openRequest: REQUEST }), ONLINE)).toEqual({
+    expect(decideRow(buildThread({ status: "busy", openRequests: [REQUEST] }), ONLINE)).toEqual({
       pose: "waiting",
       end: { kind: "mark", mark: "waiting" },
     });
   });
 
   it("keeps a thread waiting when its runner is offline, because the request comes first", () => {
-    expect(decideRow(buildThread({ status: "busy", openRequest: REQUEST }), OFFLINE)).toEqual({
+    expect(decideRow(buildThread({ status: "busy", openRequests: [REQUEST] }), OFFLINE)).toEqual({
+      pose: "waiting",
+      end: { kind: "mark", mark: "waiting" },
+    });
+  });
+
+  it("shows a thread as waiting when only one of its subagents asked", () => {
+    const asked = buildThread({
+      status: "busy",
+      openRequests: [{ ...REQUEST, subagentId: "a-1" }],
+    });
+
+    expect(decideRow(asked, ONLINE)).toEqual({
       pose: "waiting",
       end: { kind: "mark", mark: "waiting" },
     });

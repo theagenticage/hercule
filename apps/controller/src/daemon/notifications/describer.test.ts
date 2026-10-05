@@ -98,7 +98,7 @@ const insertSession = (title: string, openRequest: OpenRequest | null = null) =>
       parentSessionId: undefined,
       at: AT,
     });
-    yield* sessions.setOpenRequest(id, openRequest);
+    yield* sessions.setOpenRequests(id, openRequest === null ? [] : [openRequest]);
     return id;
   });
 

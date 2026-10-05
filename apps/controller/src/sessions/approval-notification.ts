@@ -18,10 +18,11 @@ import {
   APPROVAL_ANSWER_LABELS,
   describeApprovalAnswer,
   type NotificationSubject,
+  type SessionRequest,
 } from "@hercule/contract";
-import type { ApprovalDecision, ApprovalRequest, OpenRequest } from "@hercule/protocol";
+import type { ApprovalDecision, ApprovalRequest } from "@hercule/protocol";
 import type { CoreAction, CoreNotification } from "../notifications";
-import type { RequestEvent } from "./stream";
+import type { RequestClosingEvent } from "./stream";
 
 /**
  * The id of the approval notification's answer that sends each decision. Ids
@@ -104,18 +105,26 @@ const formatCodeBlock = (text: string): string => {
 };
 
 /**
+ * Formats one line of text as markdown inline code, so it renders as itself.
+ * Used for paths and for text an agent wrote, such as a subagent's
+ * description: inline code cannot add a link, an image or emphasis, and it
+ * still reads well where the body is shown as plain text, as in the CLI.
+ *
+ * The spaces inside the fence keep text that starts or ends with a backtick
+ * apart from the fence; markdown drops them when it renders the text.
+ */
+const formatInlineCode = (text: string): string => {
+  const fence = buildFence(text, 1);
+  return `${fence} ${text} ${fence}`;
+};
+
+/**
  * Formats paths as a markdown list, one path per line, each as inline code.
  * Lists at most `MAX_LISTED_PATHS` paths, and ends with a line that counts
  * the rest.
- *
- * The spaces inside the fence keep a path that starts or ends with a backtick
- * apart from the fence; markdown drops them when it renders the path.
  */
 const formatPathList = (paths: ReadonlyArray<string>): string => {
-  const lines = paths.slice(0, MAX_LISTED_PATHS).map((path) => {
-    const fence = buildFence(path, 1);
-    return `- ${fence} ${path} ${fence}`;
-  });
+  const lines = paths.slice(0, MAX_LISTED_PATHS).map((path) => `- ${formatInlineCode(path)}`);
   const unlisted = paths.length - lines.length;
   return unlisted === 0
     ? lines.join("\n")
@@ -157,6 +166,12 @@ const buildRequestTitleAndDetail = (
  * Builds the approval notification for a request a session waits on, or
  * returns `undefined` for a `question` request, which raises none.
  *
+ * A Request a subagent asked starts its body with "Asked by" and the
+ * subagent's description, `askerDescription`, or "Asked by a subagent" when
+ * it has none. A session can wait on several Requests at once, and this line
+ * tells their notifications apart. The description is the parent agent's
+ * text, so it is shown as inline code and cannot format the body.
+ *
  * The answers are the decisions the request accepts, in the request's order.
  * Each answer has the same label and the same sentence under it as the
  * permission card in the session view, so an answer reads the same wherever
@@ -166,14 +181,20 @@ const buildRequestTitleAndDetail = (
  */
 export const buildApprovalNotification = (
   session: { readonly id: string; readonly title: string },
-  request: OpenRequest,
+  request: SessionRequest,
+  askerDescription?: string,
 ): CoreNotification | undefined => {
   if (request.kind === "question") return undefined;
   const described = buildRequestTitleAndDetail(request);
+  const asker =
+    request.subagentId === undefined
+      ? ""
+      : `Asked by ${askerDescription === undefined ? "a subagent" : formatInlineCode(askerDescription)}\n\n`;
   const waiting =
-    session.title === ""
+    asker +
+    (session.title === ""
       ? "A session is waiting for your answer."
-      : `The session "${session.title}" is waiting for your answer.`;
+      : `The session "${session.title}" is waiting for your answer.`);
   const actions = request.decisions.map((decision): CoreAction => ({
     id: APPROVAL_ANSWER_IDS[decision],
     label: APPROVAL_ANSWER_LABELS[decision],
@@ -197,17 +218,16 @@ export const buildApprovalNotification = (
 
 /**
  * Returns why an approval notification is withdrawn when a reported event
- * closes or replaces the request it asks about.
+ * closes the request it asks about. A new request never closes an older one:
+ * a session can wait on several at once.
  *
  * An answer given through the controller has already resolved the
  * notification by the time the harness reports the request as resolved. So
  * the `request.resolved` reason is used only when the harness settled the
  * request some other way.
  */
-export const buildWithdrawReason = (event: RequestEvent): string => {
+export const buildWithdrawReason = (event: RequestClosingEvent): string => {
   switch (event._tag) {
-    case "request.opened":
-      return "The harness asked something else before this request was answered.";
     case "request.resolved":
       return "The harness settled the request without this answer.";
     case "turn.completed":

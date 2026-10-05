@@ -79,13 +79,18 @@ const readOncePerId = <A>(read: (id: string) => Effect.Effect<A, SqlError>) => {
 };
 
 /**
- * Returns the parts that describe what the request a session waits on is
- * about, such as "the command «npm test»", listing every path of a file
- * change or read. Returns "the request" when the session no longer waits on
- * this request, because then its details are gone.
+ * Returns the parts that describe what one of the Requests a session waits
+ * on is about, found by `requestId` among `requests`, such as "the command
+ * «npm test»", listing every path of a file change or read. Returns "the
+ * request" when the session no longer waits on this Request, because then its
+ * details are gone.
  */
-const describeOpenRequest = (request: OpenRequest | null, requestId: string): DescribeLine => {
-  if (request === null || request.requestId !== requestId) return [buildTextPart("the request")];
+const describeOpenRequest = (
+  requests: ReadonlyArray<OpenRequest>,
+  requestId: string,
+): DescribeLine => {
+  const request = requests.find((open) => open.requestId === requestId);
+  if (request === undefined) return [buildTextPart("the request")];
   switch (request.kind) {
     case "command_approval":
       return [buildTextPart("the command "), buildMarkedPart(request.detail.command)];
@@ -230,18 +235,18 @@ export const buildDescribe: Effect.Effect<
     );
 
     /**
-     * Returns a session's name as a `marked` part, and the request the session
-     * waits on, or `null` when it waits on none. The name is the session's
-     * title, or its id once the session is gone.
+     * Returns a session's name as a `marked` part, and every Request the
+     * session waits on, or none when the session is gone. The name is the
+     * session's title, or its id once the session is gone.
      */
-    const readSessionNameAndRequest = readOncePerId((id) =>
+    const readSessionNameAndRequests = readOncePerId((id) =>
       Effect.map(sessions.one(id), (found) => ({
         markedName: buildMarkedPart(
           Option.match(found, { onNone: () => id, onSome: (session) => session.title }),
         ),
-        openRequest: Option.match(found, {
-          onNone: () => null,
-          onSome: (session) => session.openRequest,
+        openRequests: Option.match(found, {
+          onNone: () => [],
+          onSome: (session) => session.openRequests,
         }),
       })),
     );
@@ -347,7 +352,7 @@ export const buildDescribe: Effect.Effect<
           ];
         }),
       "session.input": ({ sessionId, text, model, options }) =>
-        Effect.map(readSessionNameAndRequest(sessionId), (session) => {
+        Effect.map(readSessionNameAndRequests(sessionId), (session) => {
           const optionEntries = Object.entries(options ?? {});
           return [
             buildTextPart("Send "),
@@ -370,10 +375,10 @@ export const buildDescribe: Effect.Effect<
           ];
         }),
       "session.respondToApprovalRequest": ({ sessionId, requestId, decision }) =>
-        Effect.map(readSessionNameAndRequest(sessionId), (session) =>
+        Effect.map(readSessionNameAndRequests(sessionId), (session) =>
           describeDecision(
             decision,
-            describeOpenRequest(session.openRequest, requestId),
+            describeOpenRequest(session.openRequests, requestId),
             session.markedName,
           ),
         ),

@@ -5,7 +5,12 @@
 import { useRef, useState, type JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { buildThreadBlocks, decideThreadPose, describeAgent } from "@hercule/client-core";
+import {
+  buildSessionAgentState,
+  buildThreadBlocks,
+  decideThreadPose,
+  describeAgent,
+} from "@hercule/client-core";
 import { providersQuery, runnersQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
@@ -44,7 +49,7 @@ export function ThreadScreen({ sessionId }: { readonly sessionId: string }): JSX
   const [composerFocused, setComposerFocused] = useState(false);
   const shrunk = !atBottom && !composerFocused;
 
-  const blocks = buildThreadBlocks(rows, session);
+  const blocks = buildThreadBlocks(rows, buildSessionAgentState(session));
   const runner =
     session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
   const instance = instances.find((each) => each.id === session.instanceId);

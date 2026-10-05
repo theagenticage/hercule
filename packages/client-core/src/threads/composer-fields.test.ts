@@ -463,7 +463,7 @@ const buildThread = (id: string, title: string): Session => ({
   nativeSessionId: null,
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
-  openRequest: null,
+  openRequests: [],
   createdAt: at,
   startedAt: at,
   exitedAt: null,

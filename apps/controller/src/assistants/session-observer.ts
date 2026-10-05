@@ -72,9 +72,10 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
   ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.gen(function* () {
       if (reply === "turn-end" && event._tag === "turn.completed") {
-        const texts = (yield* readAssistantTexts(sql, session.id, event.turnId)).map(
-          (item) => item.text,
-        );
+        const texts = (yield* readAssistantTexts(sql, {
+          sessionId: session.id,
+          turnId: event.turnId,
+        })).map((item) => item.text);
         if (event.state === "completed") return texts.slice(-1);
         const partialReply = texts.filter((text) => text !== "").join("\n\n");
         return partialReply === "" ? [] : [partialReply];
@@ -85,7 +86,11 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         event.kind === "assistant_message" &&
         event.status === "completed"
       ) {
-        const texts = yield* readAssistantTexts(sql, session.id, event.turnId, event.itemId);
+        const texts = yield* readAssistantTexts(sql, {
+          sessionId: session.id,
+          turnId: event.turnId,
+          itemId: event.itemId,
+        });
         return texts.map((item) => item.text);
       }
       return [];

@@ -8,6 +8,7 @@ import {
   buildApprovalCard,
   decideOfficeSeating,
   describePose,
+  findOldestOpenRequest,
   formatRequestQuestion,
   type SeatedPose,
 } from "@hercule/client-core";
@@ -47,6 +48,7 @@ function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): Offic
 
 /** Returns the colleague the Office draws for a seated thread in `pose`. */
 function buildColleague(session: Session, pose: SeatedPose): Colleague {
+  const oldestRequest = findOldestOpenRequest(session);
   return {
     id: session.id,
     name: session.title,
@@ -57,10 +59,8 @@ function buildColleague(session: Session, pose: SeatedPose): Colleague {
     runnerId: session.runnerId,
     model: session.modelSelection.model,
     request:
-      session.openRequest === null
-        ? null
-        : buildOfficeRequest(session.openRequest, session.lastActivityAt),
-    openRequest: session.openRequest,
+      oldestRequest === null ? null : buildOfficeRequest(oldestRequest, session.lastActivityAt),
+    oldestRequest,
   };
 }
 

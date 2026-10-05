@@ -48,7 +48,7 @@ const runbook = findFixtureThread(FIXTURE_THREAD_IDS.runbook);
  */
 const flakyAsking: Session = {
   ...findFixtureThread(FIXTURE_THREAD_IDS.flaky),
-  openRequest: { ...runbook.openRequest!, requestId: "req-2", itemId: "tool-2" },
+  openRequests: [{ ...runbook.openRequests[0]!, requestId: "req-2", itemId: "tool-2" }],
   lastActivityAt: "2026-09-10T09:06:00.000Z",
 };
 

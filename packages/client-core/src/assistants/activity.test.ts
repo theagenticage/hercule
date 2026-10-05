@@ -5,11 +5,11 @@
  * session, so both carry the session's id.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hercule/contract";
+import type { Session, SessionRequest } from "@hercule/contract";
 import { buildSession } from "../threads/workspaces.testing";
 import { decideConversationActivity } from "./activity";
 
-const REQUEST: NonNullable<Session["openRequest"]> = {
+const REQUEST: SessionRequest = {
   requestId: "req-1",
   itemId: "tool-1",
   kind: "command_approval",
@@ -33,13 +33,25 @@ describe("decideConversationActivity", () => {
   });
 
   it("is quiet for an exited session that still carries an open request", () => {
-    const session = buildConversationSession({ status: "exited", openRequest: REQUEST });
+    const session = buildConversationSession({ status: "exited", openRequests: [REQUEST] });
 
     expect(decideConversationActivity(session)).toEqual({ kind: "quiet" });
   });
 
   it("awaits approval for a busy session with an open request", () => {
-    const session = buildConversationSession({ status: "busy", openRequest: REQUEST });
+    const session = buildConversationSession({ status: "busy", openRequests: [REQUEST] });
+
+    expect(decideConversationActivity(session)).toEqual({
+      kind: "awaiting-approval",
+      sessionId: "s1",
+    });
+  });
+
+  it("awaits approval when only a subagent of the session asked", () => {
+    const session = buildConversationSession({
+      status: "busy",
+      openRequests: [{ ...REQUEST, subagentId: "agent-1" }],
+    });
 
     expect(decideConversationActivity(session)).toEqual({
       kind: "awaiting-approval",

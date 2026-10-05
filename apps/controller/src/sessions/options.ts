@@ -123,7 +123,8 @@ export const buildStepSessionTimeouts = (
  * Builds the spec sent to a runner for a session that continues a
  * provider-native session, either resumed in place or forked. Returns the
  * parent's spec with three changes: the model selection the parent ended on,
- * the native session to continue from, and the timeouts from the current
+ * `continuation`, which names the native session to continue from and, for a
+ * resume, the subagents the controller has records of, and the timeouts from the current
  * settings. `session` holds the conversation the continuing session answers
  * and the run it runs a step of, each `null` when there is none. They decide
  * the timeouts:
@@ -144,13 +145,12 @@ export const buildContinuingSpec = (
   parent: SessionSpec,
   controller: ScopeSettings<"controller">,
   modelSelection: ModelSelection,
-  nativeSessionId: string,
-  mode: NonNullable<SessionSpec["continue"]>["mode"],
+  continuation: NonNullable<SessionSpec["continue"]>,
   session: Pick<StoredSession, "conversationId" | "runId">,
 ): SessionSpec => ({
   ...parent,
   modelSelection,
-  continue: { nativeSessionId, mode },
+  continue: continuation,
   timeouts:
     session.conversationId !== null
       ? buildConversationTimeouts(controller)

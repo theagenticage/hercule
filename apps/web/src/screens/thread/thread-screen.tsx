@@ -11,11 +11,13 @@
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  buildSessionAgentState,
   buildSiblingTabs,
   buildTurns,
   chooseStamps,
   describeStartingRun,
   findAnsweredAssistantId,
+  findOldestOpenRequest,
   isJoinable,
   mayBeRunningTurn,
   type HerculeClient,
@@ -64,9 +66,9 @@ export function ThreadScreen({
 
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId)).data;
-  // The item the session is parked on shows `awaiting approval` in the
-  // transcript instead of `running`.
-  const turns = buildTurns(rows, session.openRequest?.itemId);
+  // An item the session's own agent is parked on shows `awaiting approval`
+  // in the transcript instead of `running`.
+  const turns = buildTurns(rows, buildSessionAgentState(session));
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useThreadLive(live, queryClient, sessionId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
@@ -95,6 +97,8 @@ export function ThreadScreen({
   // A step session's crumb names the run that started it.
   const startingRun = describeStartingRun(session);
 
+  const oldestRequest = findOldestOpenRequest(session);
+
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
   // whether the growth should move the scroll position. The user counts as at
@@ -104,7 +108,7 @@ export function ThreadScreen({
     followIfAtBottom();
     // A permission card docking above the composer takes space from the
     // column just like a queued row, so it also triggers a follow.
-  }, [rows.length, queuedCount, session.openRequest?.requestId, followIfAtBottom]);
+  }, [rows.length, queuedCount, oldestRequest?.requestId, followIfAtBottom]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -167,14 +171,14 @@ export function ThreadScreen({
         <div className="sticky bottom-0 flex flex-col gap-2">
           <QueuedInputs client={client} sessionId={sessionId} />
           <div className="flex flex-col">
-            {session.openRequest === null ? null : (
+            {oldestRequest === null ? null : (
               <PermissionCard
                 // A new request gets a new card, so the answered state of the
                 // previous request is not carried over.
-                key={session.openRequest.requestId}
+                key={oldestRequest.requestId}
                 client={client}
                 sessionId={sessionId}
-                request={session.openRequest}
+                request={oldestRequest}
               />
             )}
             {assistantId === null ? (

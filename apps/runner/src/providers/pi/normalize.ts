@@ -228,7 +228,7 @@ const addUsage = (totals: Totals, usage: PiUsage | undefined): void => {
   totals.cost += typeof cost === "number" && Number.isFinite(cost) && cost > 0 ? cost : 0;
 };
 
-const toUsage = (totals: Totals): Usage => ({
+const buildUsage = (totals: Totals): Usage => ({
   inputTokens: totals.input,
   outputTokens: totals.output,
   cacheReadTokens: totals.cacheRead,
@@ -570,14 +570,14 @@ export const endTurn = (
     {
       _tag: "session.usage.updated",
       ...buildSessionEnvelope(state),
-      usage: toUsage(state.sessionTotals),
+      usage: buildUsage(state.sessionTotals),
     },
     {
       _tag: "turn.completed",
       ...buildSessionEnvelope(state),
       turnId,
       state: stopped.state,
-      usage: toUsage(state.sessionTotals),
+      usage: buildUsage(state.sessionTotals),
       costUsd: cost,
       ...(stopped.error === undefined ? {} : { error: truncateMessage(stopped.error) }),
       ...(structuredResult === undefined ? {} : { structuredResult }),

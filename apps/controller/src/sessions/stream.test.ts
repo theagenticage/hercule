@@ -8,10 +8,13 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@hercule/protocol";
+import type { SessionRequest } from "@hercule/contract";
 import {
   DELTA_FLUSH_BYTES,
+  attributeEvent,
+  compareOpenRequests,
+  computeOpenRequestsAfter,
   fold,
-  computeOpenRequestAfter,
   isRequestEvent,
   startTracking,
   type Folded,
@@ -217,50 +220,132 @@ describe("every other event", () => {
   });
 });
 
-describe("the open request", () => {
-  it("is set by the request that opens it", () => {
-    expect(computeOpenRequestAfter(opened, null)).toEqual(request);
+describe("attributeEvent", () => {
+  it("stores an event under the subagent it names, or the session's own agent", () => {
+    expect(attributeEvent(turnStarted)).toBeUndefined();
+    expect(attributeEvent({ ...base, _tag: "turn.started", turnId: TURN, subagentId: "a1" })).toBe(
+      "a1",
+    );
+    expect(attributeEvent(started)).toBeUndefined();
   });
 
-  it("is cleared by its answer, by the turn completing and by the harness exiting", () => {
-    expect(computeOpenRequestAfter(resolved, request)).toBeNull();
+  it("stores a subagent's introduction under the agent that started it", () => {
+    const introduced = { ...base, _tag: "subagent.started", subagentId: "a2" } as const;
+    expect(attributeEvent(introduced)).toBeUndefined();
+    expect(attributeEvent({ ...introduced, parentSubagentId: "a1" })).toBe("a1");
+  });
+});
+
+describe("a subagent's events", () => {
+  const ofSubagent = <E extends ProviderEvent>(event: E): E => ({ ...event, subagentId: "a1" });
+
+  it("never move the session's status", () => {
+    const { folds } = applyEvents([
+      [1, started],
+      [2, ofSubagent(turnStarted)],
+      [3, ofSubagent(turnCompleted)],
+      [4, turnStarted],
+    ]);
+    expect(folds.map((folded) => folded.status)).toEqual(["idle", undefined, undefined, "busy"]);
+  });
+
+  it("are held apart from the session's own deltas on the same item id", () => {
+    const { folds, state } = applyEvents([
+      [1, buildDelta("i1", "main ")],
+      [2, ofSubagent(buildDelta("i1", "sub "))],
+      [3, buildDelta("i1", "again")],
+    ]);
+    expect(folds.every((folded) => folded.rows.length === 0)).toBe(true);
+    expect(state.buffers.size).toBe(2);
+  });
+
+  it("flush only on their own agent's item and turn ends", () => {
+    const { folds, state } = applyEvents([
+      [1, buildDelta("i1", "main")],
+      [2, ofSubagent(buildDelta("i1", "sub"))],
+      [3, ofSubagent(buildCompletedItem("i1"))],
+      [4, ofSubagent(buildDelta("i2", "more"))],
+      [5, turnCompleted],
+    ]);
+    expect(listTexts(folds[2]!)).toEqual(["sub"]);
+    // The session's own turn ends, so its text is flushed; the subagent's
+    // turn is still running and keeps its held text.
+    expect(listTexts(folds[4]!)).toEqual(["main"]);
+    expect(state.buffers.size).toBe(1);
+    expect(listTexts(fold(state, 6, exited)!)).toEqual(["more"]);
+  });
+});
+
+describe("the open Requests", () => {
+  const second = { ...request, requestId: "r2" } as const;
+  const main: SessionRequest = request;
+  const fromSubagent: SessionRequest = { ...second, subagentId: "a1" };
+
+  it("gain each opened Request at the end, with the subagent that asked", () => {
+    const afterMain = computeOpenRequestsAfter(opened, []);
+    expect(afterMain).toEqual([main]);
+    const fromA1: RequestEvent = {
+      ...base,
+      _tag: "request.opened",
+      request: second,
+      subagentId: "a1",
+    };
+    expect(computeOpenRequestsAfter(fromA1, afterMain)).toEqual([main, fromSubagent]);
+  });
+
+  it("ignore a Request reported again with an id already open", () => {
+    const open = [main];
+    expect(computeOpenRequestsAfter(opened, open)).toBe(open);
+  });
+
+  it("lose only the Request an answer names", () => {
+    const open = [main, fromSubagent];
+    expect(computeOpenRequestsAfter(resolved, open)).toEqual([fromSubagent]);
     const answered: RequestEvent = {
       ...base,
       _tag: "request.resolved",
-      requestId: "r1",
+      requestId: "r2",
       answers: { Storage: "localStorage" },
     };
-    expect(computeOpenRequestAfter(answered, request)).toBeNull();
-    // The question ends with the turn it was asked in, answered or not.
-    expect(computeOpenRequestAfter(turnCompleted, request)).toBeNull();
-    expect(computeOpenRequestAfter(exited, request)).toBeNull();
+    expect(computeOpenRequestsAfter(answered, open)).toEqual([main]);
   });
 
-  it("stays open when a different request is answered", () => {
-    const other: RequestEvent = {
-      ...base,
-      _tag: "request.resolved",
-      requestId: "r2",
-      decision: "allow",
-    };
-
-    expect(computeOpenRequestAfter(other, request)).toBeUndefined();
-    expect(computeOpenRequestAfter(resolved, null)).toBeUndefined();
+  it("lose only the Requests of the agent whose turn ended", () => {
+    const open = [main, fromSubagent];
+    expect(computeOpenRequestsAfter(turnCompleted, open)).toEqual([fromSubagent]);
+    expect(computeOpenRequestsAfter({ ...turnCompleted, subagentId: "a1" }, open)).toEqual([main]);
+    expect(computeOpenRequestsAfter({ ...turnCompleted, subagentId: "a9" }, open)).toBe(open);
   });
 
-  it("returns no change when there is no open request to clear, so nothing is written", () => {
-    // Most turns end like this: no request was open, and a write would make
+  it("are all closed when the harness exits", () => {
+    expect(computeOpenRequestsAfter(exited, [main, fromSubagent])).toEqual([]);
+  });
+
+  it("return the same list when nothing changed, so nothing is written", () => {
+    // Most turns end like this: no Request was open, and a write would make
     // every client watching the session refetch for no change.
-    expect(computeOpenRequestAfter(turnCompleted, null)).toBeUndefined();
-    expect(computeOpenRequestAfter(exited, null)).toBeUndefined();
+    const empty: ReadonlyArray<SessionRequest> = [];
+    expect(computeOpenRequestsAfter(turnCompleted, empty)).toBe(empty);
+    expect(computeOpenRequestsAfter(exited, empty)).toBe(empty);
+    expect(computeOpenRequestsAfter(resolved, empty)).toBe(empty);
   });
 
-  it("is not changed by any other event", () => {
+  it("are changed only by the four Request events", () => {
     for (const event of [started, turnStarted, buildDelta("i1", "hi"), buildCompletedItem("i1")]) {
       expect(isRequestEvent(event), event._tag).toBe(false);
     }
     for (const event of [opened, resolved, turnCompleted, exited]) {
       expect(isRequestEvent(event), event._tag).toBe(true);
     }
+  });
+});
+
+describe("compareOpenRequests", () => {
+  it("returns the Requests that closed and the ones that opened, by id", () => {
+    const a: SessionRequest = request;
+    const b: SessionRequest = { ...request, requestId: "r2", subagentId: "a1" };
+    const c: SessionRequest = { ...request, requestId: "r3" };
+    expect(compareOpenRequests([a, b], [b, c])).toEqual({ closed: [a], opened: [c] });
+    expect(compareOpenRequests([a], [a])).toEqual({ closed: [], opened: [] });
   });
 });

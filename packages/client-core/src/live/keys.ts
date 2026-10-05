@@ -71,10 +71,20 @@ export const queryKeys = {
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
   /**
-   * The whole transcript, in ascending order. A `:stream` delta is appended
-   * directly to this entry.
+   * One agent's whole transcript, in ascending order: the session's own
+   * agent's without `subagentId`, else that subagent's. A delta on the
+   * agent's `:stream` topic is appended directly to this entry. Both kinds of
+   * key have three parts, so the session's own agent's key is never a prefix
+   * of a subagent's, and a prefix match on one never reaches the other.
    */
-  transcript: (sessionId: string): LiveQueryKey => ["transcript", sessionId],
+  transcript: (sessionId: string, subagentId?: string): LiveQueryKey => [
+    "transcript",
+    sessionId,
+    subagentId ?? null,
+  ],
+  /** Every page of one session's subagents, whatever the sort; without it, the prefix of all of them. */
+  subagents: (sessionId?: string): LiveQueryKey =>
+    sessionId === undefined ? ["subagents"] : ["subagents", sessionId],
   /** A session's input history, including queued inputs. The composer's queued list reads it. */
   inputs: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["inputs"] : ["inputs", sessionId],
@@ -231,6 +241,14 @@ export const buildQueryKeys = (
           ...ids.map((id) => queryKeys.conversation(id)),
           ...ids.map((id) => queryKeys.conversationMessages(id)),
         ];
+  }
+  // A subagent is read through its session, so a push lists the ids of the
+  // sessions whose subagents changed, and those sessions' lists are
+  // refetched.
+  if (topic === "subagent") {
+    return ids.length === 0
+      ? [queryKeys.subagents()]
+      : ids.map((sessionId) => queryKeys.subagents(sessionId));
   }
   // Notifications are read only as lists: the notification center's pages
   // and the sidebar's count. Any change refetches both, whatever their filter.

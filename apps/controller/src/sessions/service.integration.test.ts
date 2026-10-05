@@ -1010,7 +1010,7 @@ describe("the frame builders on SessionService", () => {
     const frame = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
-        return sessions.interrupting(sessionId);
+        return sessions.interrupting(sessionId, undefined);
       }),
     );
     expect(frame).toStrictEqual({ _tag: "sessionInterrupt", sessionId });
@@ -1399,7 +1399,7 @@ describe("a report applied after its session ended", () => {
     );
 
     expect(result.session.status).toBe("exited");
-    expect(result.session.openRequest).toBeNull();
+    expect(result.session.openRequests).toEqual([]);
     expect(result.notifications).toEqual([]);
   });
 });

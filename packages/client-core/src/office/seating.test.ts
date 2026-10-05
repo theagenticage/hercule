@@ -113,9 +113,9 @@ describe("decideOfficeSeating", () => {
 
   it("queues the threads with an open Request, waiting longest first", () => {
     const { queue } = seat([
-      buildSession({ id: "s-recent", openRequest: REQUEST, lastActivityAt: buildTimestamp(5) }),
+      buildSession({ id: "s-recent", openRequests: [REQUEST], lastActivityAt: buildTimestamp(5) }),
       buildSession({ id: "s-calm", lastActivityAt: buildTimestamp(0) }),
-      buildSession({ id: "s-long", openRequest: REQUEST, lastActivityAt: buildTimestamp(1) }),
+      buildSession({ id: "s-long", openRequests: [REQUEST], lastActivityAt: buildTimestamp(1) }),
     ]);
 
     expect(queue).toEqual(["s-long", "s-recent"]);
@@ -137,7 +137,12 @@ describe("decideOfficeSeating", () => {
     const cove = { ...buildRunner("r-cove", "cove"), connectivity: "offline" as const };
     const { rooms, queue, lounge } = seat(
       [
-        buildSession({ id: "s-asking", status: "busy", openRequest: REQUEST, runnerId: cove.id }),
+        buildSession({
+          id: "s-asking",
+          status: "busy",
+          openRequests: [REQUEST],
+          runnerId: cove.id,
+        }),
         buildSession({ id: "s-asleep", status: "exited", resumable: true }),
         buildSession({ id: "s-away", status: "idle", runnerId: cove.id }),
         buildSession({ id: "s-busy", status: "busy" }),

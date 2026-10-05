@@ -100,7 +100,7 @@ interface SpecimenThread {
   /** How long before `SPECIMEN_NOW` the thread was last active. */
   readonly minutesAgo: number;
   readonly model: SpecimenModel;
-  readonly openRequest: OpenRequest | null;
+  readonly openRequests: ReadonlyArray<OpenRequest>;
 }
 
 /** The book's three projects, in the book's order. A project's tint follows its place in this list. */
@@ -133,13 +133,15 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     status: "busy",
     minutesAgo: 2,
     model: CLAUDE_SONNET,
-    openRequest: {
-      requestId: "rq-fix",
-      itemId: "it-fix",
-      kind: "command_approval",
-      decisions: ["allow", "deny"],
-      detail: { command: "git push" },
-    },
+    openRequests: [
+      {
+        requestId: "rq-fix",
+        itemId: "it-fix",
+        kind: "command_approval",
+        decisions: ["allow", "deny"],
+        detail: { command: "git push" },
+      },
+    ],
   },
   {
     id: "s-payout",
@@ -148,7 +150,7 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     status: "busy",
     minutesAgo: 5,
     model: GPT,
-    openRequest: null,
+    openRequests: [],
   },
   {
     id: MIGRATE_THREAD_ID,
@@ -157,24 +159,26 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     status: "busy",
     minutesAgo: 8,
     model: CLAUDE_SONNET,
-    openRequest: {
-      requestId: "rq-migrate",
-      itemId: "it-migrate",
-      kind: "question",
-      detail: {
-        questions: [
-          {
-            question: "Keep the old Grafana folder?",
-            header: "Grafana",
-            options: [
-              { label: "Keep", description: "Leave the v10 dashboards where they are." },
-              { label: "Delete", description: "Remove the v10 dashboards." },
-            ],
-            multiSelect: false,
-          },
-        ],
+    openRequests: [
+      {
+        requestId: "rq-migrate",
+        itemId: "it-migrate",
+        kind: "question",
+        detail: {
+          questions: [
+            {
+              question: "Keep the old Grafana folder?",
+              header: "Grafana",
+              options: [
+                { label: "Keep", description: "Leave the v10 dashboards where they are." },
+                { label: "Delete", description: "Remove the v10 dashboards." },
+              ],
+              multiSelect: false,
+            },
+          ],
+        },
       },
-    },
+    ],
   },
   {
     id: "s-rotate",
@@ -183,7 +187,7 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     status: "busy",
     minutesAgo: 12,
     model: CLAUDE_SONNET,
-    openRequest: null,
+    openRequests: [],
   },
   {
     id: "s-read",
@@ -192,7 +196,7 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     status: "idle",
     minutesAgo: 20,
     model: CLAUDE_SONNET,
-    openRequest: null,
+    openRequests: [],
   },
   {
     id: "s-refactor",
@@ -201,7 +205,7 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     status: "busy",
     minutesAgo: 35,
     model: CLAUDE_SONNET,
-    openRequest: null,
+    openRequests: [],
   },
   {
     id: "s-ideal",
@@ -210,7 +214,7 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     status: "idle",
     minutesAgo: 75,
     model: GPT,
-    openRequest: null,
+    openRequests: [],
   },
 ];
 
@@ -299,8 +303,8 @@ export const buildSpecimenSession = ({
 /** Every list the sidebar reads, as its query returns it. */
 export const SPECIMEN_RECORDS: SidebarRecords = {
   threads: SPECIMEN_THREADS.map(
-    ({ id, title, projectId, status, minutesAgo, model, openRequest }) =>
-      buildSpecimenSession({ id, title, projectId, status, minutesAgo, model, openRequest }),
+    ({ id, title, projectId, status, minutesAgo, model, openRequests }) =>
+      buildSpecimenSession({ id, title, projectId, status, minutesAgo, model, openRequests }),
   ),
   projects: PROJECTS,
   workspaces: [],

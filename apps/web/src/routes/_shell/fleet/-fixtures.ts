@@ -97,7 +97,7 @@ const BASE_SESSION: Session = {
   nativeSessionId: null,
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
-  openRequest: null,
+  openRequests: [],
   createdAt: "2026-09-05T09:00:00.000Z",
   startedAt: "2026-09-05T09:00:00.000Z",
   exitedAt: null,

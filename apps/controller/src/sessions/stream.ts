@@ -5,20 +5,24 @@
  * whether to trust the event.
  *
  * Deltas are never stored per token, so a streaming reply writes a handful of
- * rows instead of one per token. They are held per (item, stream kind) and
- * flushed as one row when:
+ * rows instead of one per token. They are held per (agent, item, stream kind)
+ * and flushed as one row when:
  *
  * - the item completes,
- * - the turn completes,
+ * - the turn of the agent that produced them completes,
  * - the session exits,
  * - the held text reaches `DELTA_FLUSH_BYTES`, so a long item is stored in
  *   pieces and a crash loses only its tail.
  *
  * Every other event becomes its own row. Spec 04 (Streaming) owns the rule
  * that deltas are not stored per token.
+ *
+ * A session's events come from its own agent and from its subagents. Only the
+ * session's own agent moves the session's status and closes its own Requests
+ * at the end of a turn (spec 06 section 13.1).
  */
-import type { OpenRequest, ProviderEvent, StreamKind } from "@hercule/protocol";
-import type { SessionStatus } from "@hercule/contract";
+import type { ProviderEvent, StreamKind, SubagentId } from "@hercule/protocol";
+import type { SessionRequest, SessionStatus } from "@hercule/contract";
 
 /**
  * How much held delta text forces a flush inside one item. It is roughly a
@@ -72,12 +76,27 @@ export const startTracking = (from: Omit<Tracked, "buffers">): Tracked => ({
 });
 
 /**
- * Two stream kinds on one item are two separate texts, so the key includes
- * both. No vendor id contains a NUL character, so using it as the separator
- * means two keys cannot collide.
+ * Returns the agent an event is stored under: the subagent it names, or
+ * `undefined` for the session's own agent. A `subagent.started` belongs to the
+ * agent that started the subagent, so it is stored under its
+ * `parentSubagentId` rather than the id it introduces (spec 06 section 13.2).
  */
-const buildBufferKey = (itemId: string, streamKind: StreamKind): string =>
-  `${itemId}\u0000${streamKind}`;
+export const attributeEvent = (event: ProviderEvent): SubagentId | undefined => {
+  if (event._tag === "subagent.started") return event.parentSubagentId;
+  return "subagentId" in event ? event.subagentId : undefined;
+};
+
+/**
+ * Builds the key one held text is stored under. Two agents may stream at the
+ * same time, and two stream kinds on one item are two separate texts, so the
+ * key includes all three. No vendor id contains a NUL character, so using it
+ * as the separator means two keys cannot collide.
+ */
+const buildBufferKey = (
+  agent: SubagentId | undefined,
+  itemId: string,
+  streamKind: StreamKind,
+): string => `${agent ?? ""}\u0000${itemId}\u0000${streamKind}`;
 
 const toFlushedRow = (held: Held): StreamRow => ({
   seq: held.seq,
@@ -85,7 +104,13 @@ const toFlushedRow = (held: Held): StreamRow => ({
   event: { ...held.first, delta: held.text },
 });
 
+/**
+ * Returns the status an event leaves the session in, or `undefined` when it
+ * changes nothing. Only the session's own agent moves the status: a subagent's
+ * turn never makes the session busy or idle.
+ */
 const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => {
+  if (attributeEvent(event) !== undefined) return undefined;
   switch (event._tag) {
     case "session.started":
       return "idle";
@@ -100,13 +125,16 @@ const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => 
   }
 };
 
-/** An event that can open or close the request a session waits on. */
+/** An event that can open or close one of the Requests a session waits on. */
 export type RequestEvent = Extract<
   ProviderEvent,
   { readonly _tag: "request.opened" | "request.resolved" | "turn.completed" | "session.exited" }
 >;
 
-/** Checks whether an event can open or close the request a session waits on. */
+/** An event that can close one of the Requests a session waits on. */
+export type RequestClosingEvent = Exclude<RequestEvent, { readonly _tag: "request.opened" }>;
+
+/** Checks whether an event can open or close one of the Requests a session waits on. */
 export const isRequestEvent = (event: ProviderEvent): event is RequestEvent =>
   event._tag === "request.opened" ||
   event._tag === "request.resolved" ||
@@ -114,33 +142,62 @@ export const isRequestEvent = (event: ProviderEvent): event is RequestEvent =>
   event._tag === "session.exited";
 
 /**
- * Returns the session's open request after this event, given the request open
- * now. Returns:
+ * Returns the session's open Requests after this event, oldest first, given
+ * the list open now:
  *
- * - the new request, for an event that opens one;
- * - `null`, for an event that closes the open request;
- * - `undefined`, for an event that does not change it.
+ * - `request.opened` adds the Request at the end, with the subagent that
+ *   asked;
+ * - `request.resolved` removes the Request it names, and leaves the others;
+ * - `turn.completed` removes the Requests of the agent whose turn ended, and
+ *   only those: the session's own agent ending its turn leaves its subagents'
+ *   Requests open;
+ * - `session.exited` removes every Request.
  *
- * A completed turn and an exited harness both close the open request, whether
- * or not it was ever answered, because the question ended with the turn. They
- * return `null` only when a request is open: clearing nothing would still make
- * every client watching the session refetch it. A `request.resolved` event
- * names its own request, so one for an older request leaves the open one
- * alone.
+ * Returns `open` itself when nothing changed, so a caller can tell a change by
+ * comparing references. A Request reported again with an id already open
+ * changes nothing.
  */
-export const computeOpenRequestAfter = (
+export const computeOpenRequestsAfter = (
   event: RequestEvent,
-  open: OpenRequest | null,
-): OpenRequest | null | undefined => {
+  open: ReadonlyArray<SessionRequest>,
+): ReadonlyArray<SessionRequest> => {
+  const keep = (predicate: (request: SessionRequest) => boolean) => {
+    const kept = open.filter(predicate);
+    return kept.length === open.length ? open : kept;
+  };
   switch (event._tag) {
-    case "request.opened":
-      return event.request;
+    case "request.opened": {
+      if (open.some((request) => request.requestId === event.request.requestId)) return open;
+      const asker = event.subagentId === undefined ? {} : { subagentId: event.subagentId };
+      return [...open, { ...event.request, ...asker }];
+    }
     case "request.resolved":
-      return open?.requestId === event.requestId ? null : undefined;
+      return keep((request) => request.requestId !== event.requestId);
     case "turn.completed":
+      return keep((request) => request.subagentId !== event.subagentId);
     case "session.exited":
-      return open === null ? undefined : null;
+      return open.length === 0 ? open : [];
   }
+};
+
+/**
+ * Compares a session's open Requests before and after a change, by request
+ * id. Returns the Requests that closed, in the order they were open, and the
+ * ones that opened, oldest first.
+ */
+export const compareOpenRequests = (
+  before: ReadonlyArray<SessionRequest>,
+  after: ReadonlyArray<SessionRequest>,
+): {
+  readonly closed: ReadonlyArray<SessionRequest>;
+  readonly opened: ReadonlyArray<SessionRequest>;
+} => {
+  const afterIds = new Set(after.map((request) => request.requestId));
+  const beforeIds = new Set(before.map((request) => request.requestId));
+  return {
+    closed: before.filter((request) => !afterIds.has(request.requestId)),
+    opened: after.filter((request) => !beforeIds.has(request.requestId)),
+  };
 };
 
 /**
@@ -160,16 +217,18 @@ export const fold = (
   const buffers = new Map(tracked.buffers);
   const rows: Array<StreamRow> = [];
 
-  const flushBuffers = (itemId?: string): void => {
+  const agent = attributeEvent(event);
+  /** Flushes the held texts that `isFlushed` picks, in the order they were first held. */
+  const flushBuffers = (isFlushed: (held: Held) => boolean): void => {
     for (const [key, held] of buffers) {
-      if (itemId !== undefined && held.first.itemId !== itemId) continue;
+      if (!isFlushed(held)) continue;
       rows.push(toFlushedRow(held));
       buffers.delete(key);
     }
   };
 
   if (event._tag === "content.delta") {
-    const key = buildBufferKey(event.itemId, event.streamKind);
+    const key = buildBufferKey(agent, event.itemId, event.streamKind);
     const held = buffers.get(key);
     const grown: Held =
       held === undefined
@@ -187,8 +246,14 @@ export const fold = (
   }
 
   // The three events after which no more text arrives for the held deltas.
-  if (event._tag === "item.completed") flushBuffers(event.itemId);
-  if (event._tag === "turn.completed" || event._tag === "session.exited") flushBuffers();
+  // An item or a turn ends only for the agent that reported it; another agent
+  // may still be streaming.
+  const isOwnAgent = (held: Held) => held.first.subagentId === agent;
+  if (event._tag === "item.completed") {
+    flushBuffers((held) => isOwnAgent(held) && held.first.itemId === event.itemId);
+  }
+  if (event._tag === "turn.completed") flushBuffers(isOwnAgent);
+  if (event._tag === "session.exited") flushBuffers(() => true);
 
   rows.push({ seq, at: event.at, event });
   return {

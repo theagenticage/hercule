@@ -1001,8 +1001,9 @@ const make = Effect.gen(function* () {
             yield* sessions.readSpec(parent.id),
             yield* settings.all(),
             parent.modelSelection,
-            nativeSessionId,
-            mode,
+            // A continuation is a new session with no subagent records, so
+            // it names no subagents, whatever its mode.
+            { nativeSessionId, mode },
             // A fork never answers a conversation: `session.continue`
             // refuses a conversation's session above. Nor does it run a
             // step, even when its parent did: it is placed with no step.

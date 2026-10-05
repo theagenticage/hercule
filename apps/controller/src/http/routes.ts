@@ -495,6 +495,9 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
     return handlers
       .handle("query", ({ query }) => withApiErrors(sessions.query(query)))
       .handle("read", ({ params }) => withApiErrors(sessions.read(params.id)))
+      .handle("querySubagents", ({ params, query }) =>
+        withApiErrors(sessions.querySubagents({ id: params.id, ...query })),
+      )
       .handle("spawn", ({ payload }) => withApiErrors(placement.placeSession(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(live.update({ id: params.id, ...payload })),
@@ -502,7 +505,9 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
       .handle("input", ({ params, payload }) =>
         withApiErrors(live.input({ id: params.id, ...payload })),
       )
-      .handle("interrupt", ({ params }) => withApiErrors(live.interrupt(params.id)))
+      .handle("interrupt", ({ params, payload }) =>
+        withApiErrors(live.interrupt({ id: params.id, ...payload })),
+      )
       .handle("respondToApprovalRequest", ({ params, payload }) =>
         withApiErrors(live.respondToApprovalRequest({ id: params.id, ...payload })),
       )

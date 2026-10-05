@@ -358,16 +358,18 @@ describe("the composer", () => {
   it("draws Stop while the turn waits on a question, the one way to turn the question down", async () => {
     const user = userEvent.setup();
     const asked = changeSession(THREAD_FIXTURES.waiting, {
-      openRequest: {
-        requestId: "req-2",
-        itemId: "tool-2",
-        kind: "question",
-        detail: {
-          questions: [
-            { question: "Which storage?", header: "Storage", options: [], multiSelect: false },
-          ],
+      openRequests: [
+        {
+          requestId: "req-2",
+          itemId: "tool-2",
+          kind: "question",
+          detail: {
+            questions: [
+              { question: "Which storage?", header: "Storage", options: [], multiSelect: false },
+            ],
+          },
         },
-      },
+      ],
     });
     const { calls } = await renderComposer(asked);
 
@@ -540,8 +542,8 @@ describe("the composer", () => {
   });
 
   it("stacks the queued inputs, then the Request, above the card, without taking the focus", async () => {
-    const approval = SIDEBAR_FIXTURE.threads[0]!.openRequest;
-    await renderComposer(changeSession(THREAD_FIXTURES.queued, { openRequest: approval }));
+    const approval = SIDEBAR_FIXTURE.threads[0]!.openRequests[0]!;
+    await renderComposer(changeSession(THREAD_FIXTURES.queued, { openRequests: [approval] }));
 
     const stack = document.querySelector(".composer")!;
     expect([...stack.children].map((child) => child.className)).toEqual([

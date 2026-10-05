@@ -74,7 +74,7 @@ describe("the scripted fleet", () => {
 
     // The slot is free again, so the queued thread is sent to the runner.
     await waitForStatus(second!.id, "busy");
-    await client.session.interrupt({ params: { id: second!.id } });
+    await client.session.interrupt({ params: { id: second!.id }, payload: {} });
     await waitForStatus(second!.id, "idle");
     await client.session.stop({ params: { id: second!.id } });
     await waitForStatus(second!.id, "exited");
@@ -91,8 +91,8 @@ describe("the scripted fleet", () => {
 
     for (const kind of REQUEST_KINDS) {
       const requestId = runner.openRequest(id, kind);
-      await expect.poll(async () => (await readSession(id)).openRequest?.kind).toBe(kind);
-      const openRequest = (await readSession(id)).openRequest!;
+      await expect.poll(async () => (await readSession(id)).openRequests[0]?.kind).toBe(kind);
+      const openRequest = (await readSession(id)).openRequests[0]!;
       // A question is answered with answers, every approval with a decision.
       if (openRequest.kind === "question") {
         await client.session.respondToQuestion({
@@ -113,7 +113,7 @@ describe("the scripted fleet", () => {
           payload: { requestId, decision: openRequest.decisions[0] },
         });
       }
-      await expect.poll(async () => (await readSession(id)).openRequest).toBeNull();
+      await expect.poll(async () => (await readSession(id)).openRequests).toEqual([]);
     }
     expect((await readSession(id)).status).toBe("busy");
   });

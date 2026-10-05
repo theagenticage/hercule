@@ -513,9 +513,11 @@ const endSession = async (arranged: Arranged, session: Session, seq: number): Pr
 const startAndEndSession = async (arranged: Arranged, prompt: string): Promise<Session> =>
   endSession(arranged, await startSession(arranged, prompt), 2);
 
-const interruptSession = (arranged: Arranged, id: string): Promise<Response> =>
+/** Interrupts a session, or with `subagentId` one of its subagents, over HTTP. */
+const interruptSession = (arranged: Arranged, id: string, subagentId?: string): Promise<Response> =>
   send("POST", arranged.harness.base, `/api/v1/sessions/${id}/interrupt`, {
     token: arranged.token,
+    body: subagentId === undefined ? {} : { subagentId },
   });
 
 const stopSession = (arranged: Arranged, id: string): Promise<Response> =>
@@ -4362,10 +4364,8 @@ const startParkedSession = async (
       detail: { command: "ls -la" },
     },
   });
-  return await waitForSession(
-    arranged,
-    session.id,
-    (one) => one.openRequest?.requestId === REQUEST_ID,
+  return await waitForSession(arranged, session.id, (one) =>
+    one.openRequests.some((request) => request.requestId === REQUEST_ID),
   );
 };
 
@@ -4384,7 +4384,7 @@ describe("session.respondToApprovalRequest", () => {
         expect(response.status, await response.clone().text()).toBe(200);
         const answered = (await response.json()) as Session;
         expect(answered.id).toBe(session.id);
-        expect(answered.openRequest).toMatchObject({ requestId: REQUEST_ID });
+        expect(answered.openRequests).toMatchObject([{ requestId: REQUEST_ID }]);
 
         const sent = await waitForFrames<SessionRespondToApprovalRequest>(
           arranged.wire,
@@ -4405,7 +4405,7 @@ describe("session.respondToApprovalRequest", () => {
     },
   );
 
-  it("clears the open request when the runner reports it resolved", async () => {
+  it("closes the Request when the runner reports it resolved", async () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
       const response = await respondToApprovalRequest(arranged, session.id, {
@@ -4428,12 +4428,16 @@ describe("session.respondToApprovalRequest", () => {
         decision: "allow",
       });
 
-      const cleared = await waitForSession(arranged, session.id, (one) => one.openRequest === null);
-      expect(cleared.openRequest).toBeNull();
+      const cleared = await waitForSession(
+        arranged,
+        session.id,
+        (one) => one.openRequests.length === 0,
+      );
+      expect(cleared.openRequests).toEqual([]);
     });
   });
 
-  it("clears the open request when the runner reports it no longer has the session", async () => {
+  it("closes the Request when the runner reports it no longer has the session", async () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
       arranged.wire.close();
@@ -4446,7 +4450,7 @@ describe("session.respondToApprovalRequest", () => {
       // No harness is waiting on the request any more, so an answer to it
       // could never be delivered. The request is cleared when its session
       // ends.
-      expect(gone.openRequest).toBeNull();
+      expect(gone.openRequests).toEqual([]);
     });
   });
 
@@ -4464,9 +4468,9 @@ describe("session.respondToApprovalRequest", () => {
       await delay(250);
       expect(listResponseFrames(arranged.wire)).toEqual([]);
       // The request the session is really waiting on is untouched.
-      expect((await readSession(arranged, session.id)).openRequest).toMatchObject({
-        requestId: REQUEST_ID,
-      });
+      expect((await readSession(arranged, session.id)).openRequests).toMatchObject([
+        { requestId: REQUEST_ID },
+      ]);
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
     });
   });
@@ -4474,7 +4478,7 @@ describe("session.respondToApprovalRequest", () => {
   it("rejects an answer to a session with no open request", async () => {
     await withFleet(async (arranged) => {
       const session = await startSession(arranged, "hello");
-      expect(session.openRequest).toBeNull();
+      expect(session.openRequests).toEqual([]);
 
       const response = await respondToApprovalRequest(arranged, session.id, {
         requestId: REQUEST_ID,
@@ -4489,7 +4493,7 @@ describe("session.respondToApprovalRequest", () => {
     });
   });
 
-  it("rejects a decision the open request does not offer, and sends nothing", async () => {
+  it("rejects a decision the Request does not offer, and sends nothing", async () => {
     await withFleet(async (arranged) => {
       // A request that cannot store a rule does not offer `allow_always`. An
       // `allow_always` answer must not be silently turned into a plain allow.
@@ -4507,9 +4511,9 @@ describe("session.respondToApprovalRequest", () => {
       expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
       // The request stays open with its offered decisions, so the user can
       // still answer it properly.
-      expect((await readSession(arranged, session.id)).openRequest).toMatchObject({
-        decisions: ["allow", "deny", "cancel"],
-      });
+      expect((await readSession(arranged, session.id)).openRequests).toMatchObject([
+        { decisions: ["allow", "deny", "cancel"] },
+      ]);
     });
   });
 
@@ -4609,10 +4613,8 @@ const startQuestionSession = async (arranged: Arranged): Promise<Session> => {
       detail: { questions: [...QUESTIONS] },
     },
   });
-  return await waitForSession(
-    arranged,
-    session.id,
-    (one) => one.openRequest?.requestId === REQUEST_ID,
+  return await waitForSession(arranged, session.id, (one) =>
+    one.openRequests.some((request) => request.requestId === REQUEST_ID),
   );
 };
 
@@ -4907,7 +4909,7 @@ describe("session approval notifications", () => {
         requestId: REQUEST_ID,
         decision: "allow_always",
       });
-      await waitForSession(arranged, session.id, (one) => one.openRequest === null);
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length === 0);
       expect(await readApprovalNotifications(arranged, session.id)).toEqual([decided]);
     });
   });
@@ -5064,7 +5066,7 @@ describe("session approval notifications", () => {
           },
         },
       });
-      await waitForSession(arranged, session.id, (one) => one.openRequest !== null);
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length > 0);
 
       expect(await readApprovalNotifications(arranged, session.id)).toEqual([]);
     });
@@ -5212,7 +5214,7 @@ describe("a frame whose caller's transaction rolls back", () => {
     await withFleet(async (arranged) => {
       const session = await startSession(arranged, "hello");
 
-      const exit = await runThenRollBack(arranged, (live) => live.interrupt(session.id));
+      const exit = await runThenRollBack(arranged, (live) => live.interrupt({ id: session.id }));
 
       expect(Exit.isFailure(exit)).toBe(true);
       await delay(250);

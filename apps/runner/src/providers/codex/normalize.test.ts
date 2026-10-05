@@ -370,15 +370,20 @@ const buildTokenBreakdown = (input: number, cached: number, output: number) => (
   reasoningOutputTokens: 0,
 });
 
-const USAGE = buildNote("thread/tokenUsage/updated", {
-  threadId: THREAD,
-  turnId: TURN,
-  tokenUsage: {
-    total: buildTokenBreakdown(1200, 800, 340),
-    last: buildTokenBreakdown(100, 40, 12),
-    modelContextWindow: 272000,
-  },
-});
+/**
+ * Builds a token usage notification. `total` is the thread's whole history,
+ * which on a resumed or forked thread includes tokens an earlier process
+ * spent; `last` is the most recent model call.
+ */
+const buildUsageNote = (
+  total: ReturnType<typeof buildTokenBreakdown>,
+  last: ReturnType<typeof buildTokenBreakdown>,
+): Note =>
+  buildNote("thread/tokenUsage/updated", {
+    threadId: THREAD,
+    turnId: TURN,
+    tokenUsage: { total, last, modelContextWindow: 272000 },
+  });
 
 const buildErrorNote = (
   codexErrorInfo: unknown,
@@ -397,15 +402,124 @@ const buildErrorNote = (
   });
 
 describe("what a session reports about its usage and its errors", () => {
-  it("reports the running total, not the last turn's usage", () => {
-    const events = normalizeFromStart([USAGE]);
+  it("reports a fresh thread's whole total, which grows with every report", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      // On a fresh thread the first call is the whole total.
+      buildUsageNote(buildTokenBreakdown(1000, 0, 300), buildTokenBreakdown(1000, 0, 300)),
+      buildUsageNote(buildTokenBreakdown(1500, 0, 400), buildTokenBreakdown(500, 0, 100)),
+    ]);
 
-    // `last` covers one turn, but the usage snapshot is cumulative:
-    // reporting `last` would make the session look like it never grew.
-    expect(filterByTag(events, "session.usage.updated")[0]?.usage).toMatchObject({
-      inputTokens: 1200,
-      outputTokens: 340,
-      cacheReadTokens: 800,
+    // The snapshot is the total since this process started, not the last call.
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 1000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 1500, outputTokens: 400, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("counts a resumed thread from where this process picked it up", () => {
+    const history = buildTokenBreakdown(50_000, 0, 5_000);
+    const events = normalizeFromStart([
+      // Codex reports the restored history right after the resume, before any
+      // turn. An earlier process already reported those tokens.
+      buildUsageNote(history, buildTokenBreakdown(8_000, 0, 1_000)),
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(62_000, 0, 6_000), buildTokenBreakdown(12_000, 0, 1_000)),
+      buildUsageNote(buildTokenBreakdown(70_000, 0, 7_000), buildTokenBreakdown(8_000, 0, 1_000)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 12_000, outputTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 20_000, outputTokens: 2_000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("counts a forked thread from its parent's total, even with no restored report before the turn", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(40_000, 0, 4_000), buildTokenBreakdown(3_000, 0, 200)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated")[0]?.usage).toEqual({
+      inputTokens: 3_000,
+      outputTokens: 200,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("counts a forked thread from its parent's total when the restored report comes first", () => {
+    const events = normalizeFromStart([
+      buildUsageNote(buildTokenBreakdown(37_000, 0, 3_800), buildTokenBreakdown(5_000, 0, 300)),
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(40_000, 0, 4_000), buildTokenBreakdown(3_000, 0, 200)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 3_000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("adds nothing when Codex repeats the restored total after a cancelled first call", () => {
+    const restored = buildUsageNote(
+      buildTokenBreakdown(50_000, 0, 5_000),
+      buildTokenBreakdown(8_000, 0, 1_000),
+    );
+    const events = normalizeFromStart([
+      restored,
+      TURN_STARTED,
+      // A cancelled call makes Codex send the unchanged total and last again.
+      restored,
+      buildUsageNote(buildTokenBreakdown(70_000, 0, 7_000), buildTokenBreakdown(20_000, 0, 2_000)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 20_000, outputTokens: 2_000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("adds nothing for a compaction, which keeps the total and estimates the last call", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(1_000, 0, 300), buildTokenBreakdown(1_000, 0, 300)),
+      buildUsageNote(buildTokenBreakdown(1_000, 0, 300), buildTokenBreakdown(200, 0, 0)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("never goes down when Codex resets its total, and counts the next call in full", () => {
+    // When the context window overflows, Codex resets the total's counts to zero.
+    const reset = buildTokenBreakdown(0, 0, 0);
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(1_000, 0, 300), buildTokenBreakdown(1_000, 0, 300)),
+      buildUsageNote(reset, buildTokenBreakdown(1_000, 0, 300)),
+      buildUsageNote(buildTokenBreakdown(400, 100, 50), buildTokenBreakdown(400, 100, 50)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 1_300, outputTokens: 350, cacheReadTokens: 100, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("does not count cached input twice", () => {
+    // Codex counts cached reads inside its input: 100k input, 90k of it cached.
+    const call = buildTokenBreakdown(100_000, 90_000, 2_000);
+    const events = normalizeFromStart([TURN_STARTED, buildUsageNote(call, call)]);
+
+    // The four parts never overlap, so they add up to the tokens used.
+    expect(filterByTag(events, "session.usage.updated")[0]?.usage).toEqual({
+      inputTokens: 10_000,
+      outputTokens: 2_000,
+      cacheReadTokens: 90_000,
+      cacheWriteTokens: 0,
     });
   });
 

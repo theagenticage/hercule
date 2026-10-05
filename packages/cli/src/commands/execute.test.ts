@@ -43,7 +43,7 @@ const buildSession = (tail: string) => ({
   nativeSessionId: null,
   modelSelection: { model: "claude-opus-4", options: {} },
   parentSessionId: null,
-  openRequest: null,
+  openRequests: [],
   createdAt: "2026-09-15T10:00:00.000Z",
   startedAt: null,
   exitedAt: null,
@@ -109,6 +109,127 @@ describe("a positional whose row resolves tails", () => {
       path: `/api/v1/sessions/${row.id}/inputs/${inputId}`,
       body: { text: "Actually, start with the test that fails least often." },
     });
+  });
+});
+
+/** Returns a subagent of `sessionId`, as `session subagent list` returns it. */
+const buildSubagent = (id: string, sessionId: string) => ({
+  id,
+  sessionId,
+  status: "running",
+  toolCalls: 0,
+  startedAt: "2026-09-15T10:00:00.000Z",
+});
+
+/**
+ * `--subagent` is matched among the subagents of the session the command
+ * names: the list is read with the command's own session id, so a tail never
+ * matches another session's subagent.
+ */
+describe("a flag resolved within the command's own session", () => {
+  const session = buildSession("eeeeeee5");
+  const SUBAGENTS = [
+    buildSubagent("agent-a1b2c3d4e5f6", session.id),
+    buildSubagent("agent-ffff0000c3d4e5f6", session.id),
+    buildSubagent("b7", session.id),
+  ];
+
+  /** Answers the session's subagent list, and the transcript with no rows. */
+  const stubSubagents = () =>
+    stubClient((request) =>
+      request.path === `/api/v1/sessions/${session.id}/subagents`
+        ? { items: SUBAGENTS }
+        : { items: [] },
+    );
+
+  const readTranscript = async (subagent: string) => {
+    const { fetch, client } = stubSubagents();
+    const command = lookUpCommand("transcript", "read");
+    const args = await parseArguments(
+      command,
+      [session.id, "--subagent", subagent],
+      refuseStdinRead,
+    );
+    return { fetch, run: () => execute(client, command, args) };
+  };
+
+  it("reads the session's subagents and sends the full id of the one a tail names", async () => {
+    const { fetch, run } = await readTranscript("a1b2c3d4e5f6");
+
+    await run();
+
+    expect(fetch.calls[0]).toMatchObject({
+      method: "GET",
+      path: `/api/v1/sessions/${session.id}/subagents`,
+    });
+    expect(fetch.calls[1]?.path).toBe(`/api/v1/sessions/${session.id}/transcript`);
+    expect(fetch.calls[1]?.query.get("subagentId")).toBe("agent-a1b2c3d4e5f6");
+  });
+
+  it("accepts a full id, even one shorter than a tail", async () => {
+    const { fetch, run } = await readTranscript("b7");
+
+    await run();
+
+    expect(fetch.calls[1]?.query.get("subagentId")).toBe("b7");
+  });
+
+  it("fails with conflict, listing the whole ids, when a tail matches two subagents", async () => {
+    const { fetch, run } = await readTranscript("c3d4e5f6");
+
+    await expect(run()).rejects.toMatchObject({
+      code: "conflict",
+      message: "c3d4e5f6 matches 2 subagent ids: agent-a1b2c3d4e5f6, agent-ffff0000c3d4e5f6",
+    });
+    expect(fetch.calls).toHaveLength(1);
+  });
+
+  /**
+   * A subagent's id is the harness's own and not canonical, so the CLI cannot
+   * tell a whole id from a tail, and the message reads true for both.
+   */
+  it("fails with not_found, for a whole id as for a tail, when no subagent of the session matches", async () => {
+    for (const text of ["99999999", "agent-nope00000000"]) {
+      const { fetch, run } = await readTranscript(text);
+
+      await expect(run()).rejects.toMatchObject({
+        code: "not_found",
+        message: `no subagent has the id ${text} or an id ending with it`,
+      });
+      expect(fetch.calls).toHaveLength(1);
+    }
+  });
+
+  it("fails with a usage error for short text that is no subagent's id", async () => {
+    const { fetch, run } = await readTranscript("a1b2");
+
+    await expect(run()).rejects.toThrow(UsageError);
+    expect(fetch.calls).toHaveLength(1);
+  });
+
+  it("reads the subagents of the session a tail names, once the session is resolved", async () => {
+    const { fetch, client } = stubClient((request) =>
+      request.path === "/api/v1/sessions"
+        ? { items: [session] }
+        : request.path === `/api/v1/sessions/${session.id}/subagents`
+          ? { items: SUBAGENTS }
+          : session,
+    );
+    const command = lookUpCommand("session", "interrupt");
+    const args = await parseArguments(
+      command,
+      ["0eeeeeee5", "--subagent", "a1b2c3d4e5f6"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls.map((call) => call.path)).toEqual([
+      "/api/v1/sessions",
+      `/api/v1/sessions/${session.id}/subagents`,
+      `/api/v1/sessions/${session.id}/interrupt`,
+    ]);
+    expect(fetch.calls[2]?.body).toEqual({ subagentId: "agent-a1b2c3d4e5f6" });
   });
 });
 

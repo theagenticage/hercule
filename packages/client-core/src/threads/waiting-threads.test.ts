@@ -22,13 +22,13 @@ describe("listWaitingThreads", () => {
         buildSession({
           id: "s-1",
           title: "Fix the login bug",
-          openRequest: buildCommandRequest("r-1", "git push"),
+          openRequests: [buildCommandRequest("r-1", "git push")],
         }),
         buildSession({ id: "s-2", title: "Idle thread" }),
         buildSession({
           id: "s-3",
           title: "Write the release notes",
-          openRequest: buildCommandRequest("r-3", "pnpm test"),
+          openRequests: [buildCommandRequest("r-3", "pnpm test")],
         }),
       ]),
     ).toEqual([
@@ -39,6 +39,23 @@ describe("listWaitingThreads", () => {
         title: "Write the release notes",
         question: "Run pnpm test?",
       },
+    ]);
+  });
+
+  it("shows the oldest of a thread's open Requests, whichever agent asked it", () => {
+    expect(
+      listWaitingThreads([
+        buildSession({
+          id: "s-1",
+          title: "Fix the login bug",
+          openRequests: [
+            { ...buildCommandRequest("r-1", "git push"), subagentId: "agent-1" },
+            buildCommandRequest("r-2", "pnpm test"),
+          ],
+        }),
+      ]),
+    ).toEqual([
+      { sessionId: "s-1", requestId: "r-1", title: "Fix the login bug", question: "Run git push?" },
     ]);
   });
 
@@ -70,7 +87,7 @@ describe("listWaitingThreads", () => {
 
     expect(
       listWaitingThreads([
-        buildSession({ id: "s-1", title: "Save drafts", openRequest: question }),
+        buildSession({ id: "s-1", title: "Save drafts", openRequests: [question] }),
       ]),
     ).toEqual([
       {

@@ -265,7 +265,7 @@ describe("the thread view", () => {
     await expect.poll(() => page.evaluate(buildLiveCheck(thread.id))).toBe(true);
     await page.evaluate(recordLastMessage);
 
-    const { openRequest } = await client.session.read({ params: { id: thread.id } });
+    const [openRequest] = (await client.session.read({ params: { id: thread.id } })).openRequests;
     await client.session.respondToApprovalRequest({
       params: { id: thread.id },
       payload: { requestId: openRequest!.requestId, decision: "allow" },
@@ -331,7 +331,7 @@ describe("the thread view", () => {
     await waitingNote.waitFor({ state: "detached" });
     await played;
     await fleet.waitForTurn(thread!.id, 1, "completed");
-    expect((await client.session.read({ params: { id: thread!.id } })).openRequest).toBeNull();
+    expect((await client.session.read({ params: { id: thread!.id } })).openRequests).toEqual([]);
   });
 
   it("shows a queued input above the composer, and Cancel removes it", async () => {
@@ -402,7 +402,7 @@ describe("the thread view", () => {
       .toBe(true);
     await evaluateInPage(`(${recordLastMessage.toString()})()`);
 
-    const { openRequest } = await client.session.read({ params: { id: thread.id } });
+    const [openRequest] = (await client.session.read({ params: { id: thread.id } })).openRequests;
     await client.session.respondToApprovalRequest({
       params: { id: thread.id },
       payload: { requestId: openRequest!.requestId, decision: "allow" },
