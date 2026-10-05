@@ -107,7 +107,7 @@ describe("the dock badge and the threads' notifications", () => {
       { title: "Thread 1", body: "Run pnpm test?", state: "closed" },
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([
-      { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: true },
+      { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: false },
       { label: "No Threads", accelerator: null, enabled: false },
     ]);
   });

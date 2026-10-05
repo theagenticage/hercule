@@ -451,6 +451,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says. Choosing a thread in Go with the mouse closes the picker.
   - Sign Out, in the app menu.
   - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings… `⌘,`, in the app menu under About, opens [Settings](#settings).
+  - *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* File › New Thread, Go › Office and Settings… are dimmed while signed out, as Sign Out is, because only the shell carries them out: on the connect and sign-in screens, choosing one would do nothing.
 - **Dock badge:** the number of threads waiting on you. A thread waits on you while its session has an open Request (`Session.openRequest`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
   - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* macOS shows an app's dock badge only once the user has allowed the app to notify. The app asks when the user signs in, so the badge can show from the first waiting thread.
 - **Notifications:**
@@ -735,7 +736,7 @@ The frame is the book's: the app's sidebar stays, and the main pane holds the Se
   - Safety: Identities, Permission profiles, Secrets, Bounds
   - System: Plugins, System
   - The open section's row is selected. Connections carries the book's red dot while a Connection's status is `error` or `needs-reauth`.
-- **Rows that lead nowhere yet are drawn and inert:** Providers, Identities, Permission profiles, Secrets and Bounds. They show their hover state, do nothing when pressed and carry `aria-disabled`, like the sidebar's Search. Each has a tooltip: "Not built yet". They are drawn rather than hidden so the list keeps the shape the book gives it, and does not change shape when they are built.
+- **Rows that lead nowhere yet are drawn and inert:** Providers, Identities, Permission profiles, Secrets and Bounds. They show their hover state, do nothing when pressed and carry `aria-disabled`, like the sidebar's Search. Each has a tooltip: "Not built yet". They are drawn rather than hidden so the list keeps the shape the book gives it, and does not change shape when they are built. *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* A section whose slice has not been built yet is drawn inert the same way, and its slice makes its row lead to it. The Connections row shows its dot while inert.
   - Providers comes with the provider remodel ([Write the provider remodel into the specs, CONTEXT.md and an ADR, and its build tickets (#406)](https://github.com/theagenticage/hercule/issues/406)). Until then, a runner's providers are logged in to from Machines.
   - Identities, Permission profiles and Bounds are empty states in the web app too. Secrets is left out of this port: the secrets a section needs, such as a Connection's token or a provider's key, are set from that section.
 - **A narrow window.** At the window's smallest width, 800, the body column is about 230px. While the body is narrower than 520px, a `set-row` stacks its control under its label, and a table drops to one column per row. Nothing clips and nothing scrolls sideways. This is a container query on the body, so the sidebar and the list keep their widths.
@@ -788,6 +789,7 @@ Each section lists what it reads and writes through the contract, its live topic
 - Reads `user.read`, `settings.read` and `connection.query`. Writes `settings.update` (`user.timezone` and `github.defaultConnectionId`) and `auth.logout`. Live topic: `connection`.
 - Shows the user's avatar and name, the time zone, the default GitHub account, and Sign out.
 - Same as the web screen. Sign out is also in the app menu, as it is today.
+- *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* **The time zone's hint differs from the web screen's:** "Schedules run in this zone, such as a workflow's cron trigger and an assistant's heartbeat. This app shows times in your Mac's time zone." The web's hint says every time on screen is read in this zone, but the desktop shows times in the Mac's time zone (see "Messages carry their own time" under [Design system](#design-system)), because the Mac's clock follows the user when they travel. The setting decides when schedules run on the controller.
 
 **Threads.** Not drawn by the book.
 
@@ -1397,6 +1399,22 @@ The rows below were read on the prototype's page, not in the app, because the me
 - **A minimized window was not measured:** the measuring script's call to minimize its window had no effect. Chromium treats a minimized window as hidden, and the hidden row read no frames and no wakeups.
 - **Standing still was read with the battery reported as discharging** by an override in the measuring script, not on a Mac running on battery.
 - **`apps/desktop/scripts/perf.ts` read CPU from `percentCPUUsage`** until this change, a share of the whole machine. It now reports a share of one core ([Measuring](#measuring)).
+
+**Settings: the frame, Profile and System,** measured 2026-10-05 with `pnpm build:desktop`'s size checks and `apps/desktop/scripts/perf.ts`, on `main` at 959696a8 (Before) and on this change (After), for [#410](https://github.com/theagenticage/hercule/issues/410). Settings adds no process, no timer, no polling and no live topic: Profile reads what the shell already holds, and System reads the controller's record once each time it opens.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Processes | none added | 4 | 4 |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, a guide | 297.8 kB in 7 chunks, of 20 built | **298.4 kB** in 8 chunks, of 26 built |
+| Settings' chunks, gzipped, none on the first screen | one per section | - | the frame and the list 2.1 kB, Profile 1.7 kB, System 1.3 kB, and three chunks they share: the Connection helpers 1.0 kB, the setting row 0.4 kB and the time zones 0.3 kB |
+| Main's startup, minified | 160 kB | 156.1 kB | 156.2 kB |
+| Memory with Profile open, 40 threads | summed 220 MB, renderer 100 MB | - | **217.2 MB** summed: browser 51.9, GPU 105.5, network utility 7.5, renderer 52.3 |
+| Idle with Profile open, window visible | the idle row | - | renderer 0.6% of a core and 1 wakeup a second, GPU process 0% and 0; hidden, 1 a second each |
+| Launch, spawn to window shown | 500 ms | - | 378 ms; Settings is not on the launch path |
+
+- **The first screen grows by 0.6 kB:** the foot's Settings link, the `openSettings` command, the shell's handler for it and the route tree's entries for Settings. Each section is its own chunk and loads the first time it opens.
+- **Memory and idle were read with Profile open, not Appearance and Machines** as [What Settings costs](#what-settings-costs) asks, because those sections are not built yet. Their slices read them. With Profile open the app reads within the memory row, where the new-thread screen of the same launch setup reads 690 MB with its composer focused: Profile focuses no field, so the GPU process holds 105.5 MB against 586 MB.
+- **The one-minute load average was 8.4** at the Settings launch, from other programs on the machine.
 
 ## Slices
 

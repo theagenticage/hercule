@@ -20,16 +20,22 @@ import type { MarkState } from "../marks";
  * `worktree` and `chevron-right` `chev-r`.
  */
 export type IconName =
+  | "bound"
   | "branch"
   | "check"
   | "chevron-right"
   | "clock"
   | "close"
   | "compose"
+  | "connections"
+  | "cpu"
+  | "crew"
   | "editor"
   | "external"
   | "eye"
   | "file"
+  | "fleet"
+  | "id"
   | "intake"
   | "key"
   | "laptop"
@@ -37,8 +43,10 @@ export type IconName =
   | "mic"
   | "more"
   | "office"
+  | "palette"
   | "pause"
   | "plus"
+  | "puzzle"
   | "question"
   | "search"
   | "send"
@@ -48,7 +56,10 @@ export type IconName =
   | "sliders"
   | "sparkle"
   | "stop"
+  | "system"
   | "tasks"
+  | "threads"
+  | "user"
   | "workspace";
 
 /** What one cell draws. */
@@ -82,16 +93,22 @@ const MARK_STATES: ReadonlyArray<MarkState> = [
 // Every icon, with each size other than 16 that the v1 desktop pages draw it
 // at. The sheet draws every icon at 16, and again at each of these sizes.
 const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
+  ["bound", []],
   ["branch", [13, 14]],
   ["check", [12, 14]],
   ["chevron-right", [13]],
   ["clock", [14]],
   ["close", [12]],
   ["compose", [14]],
+  ["connections", []],
+  ["cpu", []],
+  ["crew", []],
   ["editor", []],
   ["external", [12, 14]],
   ["eye", [14]],
   ["file", [12, 14]],
+  ["fleet", []],
+  ["id", []],
   ["intake", [13, 14]],
   ["key", [14]],
   ["laptop", [13]],
@@ -99,8 +116,10 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["mic", []],
   ["more", []],
   ["office", []],
+  ["palette", []],
   ["pause", [12, 14]],
   ["plus", [14]],
+  ["puzzle", []],
   ["question", [14]],
   ["search", [14]],
   ["send", []],
@@ -110,9 +129,15 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["sliders", [14]],
   ["sparkle", [14]],
   ["stop", [14]],
+  ["system", []],
   ["tasks", [14]],
+  ["threads", []],
+  ["user", []],
   ["workspace", [13, 14, 18, 20]],
 ];
+
+/** Every icon at 16, in one list the sheet splits into two rows. */
+const ICONS_AT_16 = ICONS.map(([icon]) => buildIconCell(icon, 16));
 
 /** Every icon at each of its sizes other than 16, in one list the sheet splits into two rows. */
 const SIZED_ICONS = ICONS.flatMap(([icon, sizes]) =>
@@ -185,8 +210,9 @@ export const SHEET: ReadonlyArray<ReadonlyArray<Cell>> = [
       name: `mark/${state}`,
       piece: { kind: "mark", state },
     })),
-    ...ICONS.map(([icon]) => buildIconCell(icon, 16)),
+    ...ICONS_AT_16.slice(0, Math.ceil(ICONS_AT_16.length / 2)),
   ],
+  ICONS_AT_16.slice(Math.ceil(ICONS_AT_16.length / 2)),
   SIZED_ICONS.slice(0, Math.ceil(SIZED_ICONS.length / 2)),
   SIZED_ICONS.slice(Math.ceil(SIZED_ICONS.length / 2)),
 ];

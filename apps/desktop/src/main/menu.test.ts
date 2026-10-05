@@ -34,6 +34,18 @@ const listMenuItems = (menuBar: MenuTemplate, name: string): MenuTemplate => {
 const findMenuItem = (menuBar: MenuTemplate, name: string, label: string) =>
   listMenuItems(menuBar, name).find((item) => item.label === label);
 
+/**
+ * Returns whether each item only a signed-in user can choose is enabled in
+ * `menuBar`: Settings…, Sign Out, New Thread and Office, in that order.
+ */
+const readSignedInItemsEnabled = (menuBar: MenuTemplate): Array<boolean | undefined> =>
+  [
+    findMenuItem(menuBar, "appMenu", "Settings…"),
+    findMenuItem(menuBar, "appMenu", "Sign Out"),
+    findMenuItem(menuBar, "File", "New Thread"),
+    findMenuItem(menuBar, "Go", "Office"),
+  ].map((item) => item?.enabled);
+
 /** Chooses an item of the menu bar, as the user does, by its menu's name and its label. */
 type ChooseMenuItem = (name: string, label: string) => Effect.Effect<void>;
 
@@ -112,12 +124,41 @@ describe("MainMenu", () => {
     ]);
   });
 
-  it("holds About, Services, Hide, Hide Others, Show All, Sign Out and Quit in the app menu", async () => {
+  it("holds About, Settings…, Services, Hide, Hide Others, Show All, Sign Out and Quit in the app menu", async () => {
     expect(
       listMenuItems(await readFirstMenuBar(), "appMenu").flatMap(
         (item) => item.role ?? item.label ?? [],
       ),
-    ).toEqual(["about", "services", "hide", "hideOthers", "unhide", "Sign Out", "quit"]);
+    ).toEqual([
+      "about",
+      "Settings…",
+      "services",
+      "hide",
+      "hideOthers",
+      "unhide",
+      "Sign Out",
+      "quit",
+    ]);
+  });
+
+  it("puts Settings… with ⌘, under About, between separators, in the app menu", async () => {
+    const items = listMenuItems(await readFirstMenuBar(), "appMenu");
+    expect(
+      items.slice(0, 5).map((item) => [item.role ?? item.label ?? item.type, item.accelerator]),
+    ).toEqual([
+      ["about", undefined],
+      ["separator", undefined],
+      ["Settings…", "CmdOrCtrl+,"],
+      ["separator", undefined],
+      ["services", undefined],
+    ]);
+  });
+
+  it("shows the window and sends the page openSettings when Settings… is chosen", async () => {
+    const { window } = await runWithMenu((menu, choose) =>
+      Effect.all([menu.setSignedIn(true), choose("appMenu", "Settings…")]),
+    );
+    expect(window).toEqual(['showAndSend menu.command "openSettings"']);
   });
 
   it("puts Sign Out above Quit, between separators, in the app menu", async () => {
@@ -135,23 +176,24 @@ describe("MainMenu", () => {
     [
       "enabled when a login token is stored",
       { controllerUrl: CONTROLLER_URL, token: "AAEC" },
-      true,
+      [true, true, true, true],
     ],
-    ["disabled when none is stored", null, false],
-  ])("starts with Sign Out %s", async (_case, settings, enabled) => {
-    if (settings !== null) writeFileSync(settingsFile.path, JSON.stringify(settings));
-    expect(findMenuItem(await readFirstMenuBar(), "appMenu", "Sign Out")?.enabled).toBe(enabled);
-  });
+    ["disabled when none is stored", null, [false, false, false, false]],
+  ])(
+    "starts with Settings…, Sign Out, New Thread and Office %s",
+    async (_case, settings, enabled) => {
+      if (settings !== null) writeFileSync(settingsFile.path, JSON.stringify(settings));
+      expect(readSignedInItemsEnabled(await readFirstMenuBar())).toEqual(enabled);
+    },
+  );
 
-  it("enables Sign Out when the user signs in, and disables it when the user signs out", async () => {
-    const readSignOutEnabled = async (use: (menu: MainMenu["Service"]) => Effect.Effect<unknown>) =>
-      findMenuItem((await runWithMenu(use)).menuBar, "appMenu", "Sign Out")?.enabled;
-    expect(await readSignOutEnabled((menu) => menu.setSignedIn(true))).toBe(true);
+  it("enables Settings…, Sign Out, New Thread and Office when the user signs in, and disables them when the user signs out", async () => {
+    const readEnabled = async (use: (menu: MainMenu["Service"]) => Effect.Effect<unknown>) =>
+      readSignedInItemsEnabled((await runWithMenu(use)).menuBar);
+    expect(await readEnabled((menu) => menu.setSignedIn(true))).toEqual([true, true, true, true]);
     expect(
-      await readSignOutEnabled((menu) =>
-        Effect.all([menu.setSignedIn(true), menu.setSignedIn(false)]),
-      ),
-    ).toBe(false);
+      await readEnabled((menu) => Effect.all([menu.setSignedIn(true), menu.setSignedIn(false)])),
+    ).toEqual([false, false, false, false]);
   });
 
   it("shows the window and sends the page signOut when Sign Out is chosen", async () => {
@@ -171,21 +213,25 @@ describe("MainMenu", () => {
   });
 
   it("shows the window and sends the page newThread when New Thread is chosen", async () => {
-    const { window } = await runWithMenu((_menu, choose) => choose("File", "New Thread"));
+    const { window } = await runWithMenu((menu, choose) =>
+      Effect.all([menu.setSignedIn(true), choose("File", "New Thread")]),
+    );
     expect(window).toEqual(['showAndSend menu.command "newThread"']);
   });
 
   it("holds Office with ⌘⇧O, then a separator and one dimmed No Threads, in Go at start", async () => {
     const items = listMenuItems(await readFirstMenuBar(), "Go");
     expect(items.map((item) => [item.label ?? item.type, item.accelerator, item.enabled])).toEqual([
-      ["Office", "CmdOrCtrl+Shift+O", undefined],
+      ["Office", "CmdOrCtrl+Shift+O", false],
       ["separator", undefined, undefined],
       ["No Threads", undefined, false],
     ]);
   });
 
   it("shows the window and sends the page openOffice when Office is chosen", async () => {
-    const { window } = await runWithMenu((_menu, choose) => choose("Go", "Office"));
+    const { window } = await runWithMenu((menu, choose) =>
+      Effect.all([menu.setSignedIn(true), choose("Go", "Office")]),
+    );
     expect(window).toEqual(['showAndSend menu.command "openOffice"']);
   });
 

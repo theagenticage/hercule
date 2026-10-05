@@ -16,6 +16,10 @@ import { Route as ConnectedShellRouteImport } from './routes/_connected/_shell'
 import { Route as ConnectedLoginRouteImport } from './routes/_connected/login'
 import { Route as ConnectedShellIndexRouteImport } from './routes/_connected/_shell/index'
 import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_shell/office'
+import { Route as ConnectedShellSettingsRouteRouteImport } from './routes/_connected/_shell/settings/route'
+import { Route as ConnectedShellSettingsIndexRouteImport } from './routes/_connected/_shell/settings/index'
+import { Route as ConnectedShellSettingsProfileRouteImport } from './routes/_connected/_shell/settings/profile'
+import { Route as ConnectedShellSettingsSystemRouteImport } from './routes/_connected/_shell/settings/system'
 import { Route as ConnectedShellThreadsSessionIdRouteImport } from './routes/_connected/_shell/threads/$sessionId'
 
 const ConnectedRoute = ConnectedRouteImport.update({
@@ -51,6 +55,30 @@ const ConnectedShellOfficeRoute = ConnectedShellOfficeRouteImport.update({
   path: '/office',
   getParentRoute: () => ConnectedShellRoute,
 } as any)
+const ConnectedShellSettingsRouteRoute =
+  ConnectedShellSettingsRouteRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => ConnectedShellRoute,
+  } as any)
+const ConnectedShellSettingsIndexRoute =
+  ConnectedShellSettingsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
+const ConnectedShellSettingsProfileRoute =
+  ConnectedShellSettingsProfileRouteImport.update({
+    id: '/profile',
+    path: '/profile',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
+const ConnectedShellSettingsSystemRoute =
+  ConnectedShellSettingsSystemRouteImport.update({
+    id: '/system',
+    path: '/system',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
 const ConnectedShellThreadsSessionIdRoute =
   ConnectedShellThreadsSessionIdRouteImport.update({
     id: '/threads/$sessionId',
@@ -63,8 +91,12 @@ export interface FileRoutesByFullPath {
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
   '/office': typeof ConnectedShellOfficeRoute
+  '/settings/profile': typeof ConnectedShellSettingsProfileRoute
+  '/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
+  '/settings/': typeof ConnectedShellSettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/first-run': typeof FirstRunRouteRoute
@@ -72,7 +104,10 @@ export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
   '/office': typeof ConnectedShellOfficeRoute
+  '/settings/profile': typeof ConnectedShellSettingsProfileRoute
+  '/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
+  '/settings': typeof ConnectedShellSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -81,9 +116,13 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/_connected/_shell': typeof ConnectedShellRouteWithChildren
   '/_connected/login': typeof ConnectedLoginRoute
+  '/_connected/_shell/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
   '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
   '/_connected/_shell/': typeof ConnectedShellIndexRoute
+  '/_connected/_shell/settings/profile': typeof ConnectedShellSettingsProfileRoute
+  '/_connected/_shell/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/_connected/_shell/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRoute
+  '/_connected/_shell/settings/': typeof ConnectedShellSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -92,8 +131,12 @@ export interface FileRouteTypes {
     | '/'
     | '/connect'
     | '/login'
+    | '/settings'
     | '/office'
+    | '/settings/profile'
+    | '/settings/system'
     | '/threads/$sessionId'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/first-run'
@@ -101,7 +144,10 @@ export interface FileRouteTypes {
     | '/connect'
     | '/login'
     | '/office'
+    | '/settings/profile'
+    | '/settings/system'
     | '/threads/$sessionId'
+    | '/settings'
   id:
     | '__root__'
     | '/first-run'
@@ -109,9 +155,13 @@ export interface FileRouteTypes {
     | '/connect'
     | '/_connected/_shell'
     | '/_connected/login'
+    | '/_connected/_shell/settings'
     | '/_connected/_shell/office'
     | '/_connected/_shell/'
+    | '/_connected/_shell/settings/profile'
+    | '/_connected/_shell/settings/system'
     | '/_connected/_shell/threads/$sessionId'
+    | '/_connected/_shell/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +221,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellOfficeRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/settings': {
+      id: '/_connected/_shell/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof ConnectedShellSettingsRouteRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
+    '/_connected/_shell/settings/': {
+      id: '/_connected/_shell/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof ConnectedShellSettingsIndexRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
+    '/_connected/_shell/settings/profile': {
+      id: '/_connected/_shell/settings/profile'
+      path: '/profile'
+      fullPath: '/settings/profile'
+      preLoaderRoute: typeof ConnectedShellSettingsProfileRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
+    '/_connected/_shell/settings/system': {
+      id: '/_connected/_shell/settings/system'
+      path: '/system'
+      fullPath: '/settings/system'
+      preLoaderRoute: typeof ConnectedShellSettingsSystemRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
     '/_connected/_shell/threads/$sessionId': {
       id: '/_connected/_shell/threads/$sessionId'
       path: '/threads/$sessionId'
@@ -181,13 +259,34 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ConnectedShellSettingsRouteRouteChildren {
+  ConnectedShellSettingsProfileRoute: typeof ConnectedShellSettingsProfileRoute
+  ConnectedShellSettingsSystemRoute: typeof ConnectedShellSettingsSystemRoute
+  ConnectedShellSettingsIndexRoute: typeof ConnectedShellSettingsIndexRoute
+}
+
+const ConnectedShellSettingsRouteRouteChildren: ConnectedShellSettingsRouteRouteChildren =
+  {
+    ConnectedShellSettingsProfileRoute: ConnectedShellSettingsProfileRoute,
+    ConnectedShellSettingsSystemRoute: ConnectedShellSettingsSystemRoute,
+    ConnectedShellSettingsIndexRoute: ConnectedShellSettingsIndexRoute,
+  }
+
+const ConnectedShellSettingsRouteRouteWithChildren =
+  ConnectedShellSettingsRouteRoute._addFileChildren(
+    ConnectedShellSettingsRouteRouteChildren,
+  )
+
 interface ConnectedShellRouteChildren {
+  ConnectedShellSettingsRouteRoute: typeof ConnectedShellSettingsRouteRouteWithChildren
   ConnectedShellOfficeRoute: typeof ConnectedShellOfficeRoute
   ConnectedShellIndexRoute: typeof ConnectedShellIndexRoute
   ConnectedShellThreadsSessionIdRoute: typeof ConnectedShellThreadsSessionIdRoute
 }
 
 const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
+  ConnectedShellSettingsRouteRoute:
+    ConnectedShellSettingsRouteRouteWithChildren,
   ConnectedShellOfficeRoute: ConnectedShellOfficeRoute,
   ConnectedShellIndexRoute: ConnectedShellIndexRoute,
   ConnectedShellThreadsSessionIdRoute: ConnectedShellThreadsSessionIdRoute,

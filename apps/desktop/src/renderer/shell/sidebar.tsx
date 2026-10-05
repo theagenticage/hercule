@@ -21,12 +21,7 @@ import { buildSidebar, listGoMenuThreads, type SectionKey } from "./sidebar-item
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import "./sidebar.css";
-
-/**
- * The classes the Office button adds while the Office is open. The router
- * also sets `aria-current="page"` on it then.
- */
-const SELECTED = { className: "is-on" } as const;
+import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 
 /**
  * Renders the sidebar, as the Bureau book's crew.js draws it:
@@ -39,12 +34,13 @@ const SELECTED = { className: "is-on" } as const;
  * - the thread list: Waiting on you, then the threads grouped by project and
  *   workspace, with the Draft Thread's row, while one is open, in the group
  *   it will join;
- * - the foot: the thread counts and the signed-in user.
+ * - the foot: the thread counts, the signed-in user and the Settings button.
  *
- * Hide the sidebar, Search and Settings are drawn but do nothing yet, and
- * carry `aria-disabled` to say so. The open thread is marked in the list by
- * its links, which the router marks as the current page. The Office button
- * is marked the same way while the Office is open.
+ * Hide the sidebar and Search are drawn but do nothing yet, and carry
+ * `aria-disabled` to say so. The open thread is marked in the list by its
+ * links, which the router marks as the current page. The Office button is
+ * marked the same way while the Office is open, and the Settings button
+ * while Settings is open.
  *
  * While the Office is open, the row of a thread with a colleague in the
  * Office opens the thread in the Office's drawer instead of on its own
@@ -129,7 +125,12 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
         <button type="button" className="icon-btn" title="Search ⌘K" aria-disabled="true">
           <SearchIcon />
         </button>
-        <Link to="/office" className="icon-btn" title="Office ⌘⇧O" activeProps={SELECTED}>
+        <Link
+          to="/office"
+          className="icon-btn"
+          title="Office ⌘⇧O"
+          activeProps={SELECTED_LINK_PROPS}
+        >
           <OfficeIcon />
         </Link>
       </div>
