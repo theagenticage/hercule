@@ -246,7 +246,8 @@ const make = Effect.gen(function* () {
      * A session that already has an input sent and unanswered is left out.
      * The runner takes one input per turn boundary, so a second input sent
      * before the first one's turn has started would have to be held by the
-     * runner.
+     * runner. A step prompt marked `sent` does not count as unanswered here
+     * (see `holdsInputOnTheWire`).
      */
     listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
@@ -270,6 +271,11 @@ const make = Effect.gen(function* () {
      * the first one's turn has started would have to be held by the runner, so
      * a caller with an input still out sends nothing more until the runner
      * reports what happened to it.
+     *
+     * Only a `queued` row with `sentAt` set counts. A step prompt marked
+     * `sent` no longer counts, even though the runner may still hold it, so
+     * another input can be sent after it. An ordinary input put back to
+     * waiting after no answer came leaves the same gap.
      */
     holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -371,7 +377,8 @@ const make = Effect.gen(function* () {
      * does for one input. Returns the claimed row, or `none` when:
      *
      * - no input is waiting;
-     * - another input of the session is already sent and unanswered;
+     * - another input of the session is already sent and unanswered, where a
+     *   step prompt marked `sent` does not count (see `holdsInputOnTheWire`);
      * - the session is not `idle`.
      *
      * The runner takes one input per turn. A second input sent before the
