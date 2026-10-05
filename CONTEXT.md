@@ -438,7 +438,7 @@ A step whose work happens on the run's runner: an action step that calls a Works
 _Avoid_: remote step, runner step
 
 **Step Key**:
-The triple `(runId, stepId, iteration)` that names one iteration of a step. Every delivery of a Workspace Step and of its outcome is idempotent by it, so either side can send it again after a restart.
+The triple `(runId, stepId, iteration)` that names one iteration of a step. Every delivery of a Workspace Step and of its outcome is idempotent by it, so either side can send it again after a restart. An agent step's prompt is the exception: it is sent at most once, because a second turn could repeat what the first one did, and the controller asks for the step's result instead.
 _Avoid_: step id (bare, which names the step, not the iteration)
 
 **Entry Step**:
