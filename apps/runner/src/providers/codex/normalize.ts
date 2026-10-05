@@ -12,7 +12,7 @@
  *   of them is streamed, so the text is not doubled.
  * - Codex reports the thread's usage over its whole history, but a usage
  *   snapshot counts only what this process spent, so the state holds the
- *   thread's usage from before this process started.
+ *   last total Codex reported and the tokens counted so far.
  *
  * A notification this build does not handle produces no events: the
  * app-server adds methods between releases, and a live session must survive
@@ -74,15 +74,14 @@ export interface Normalizing {
   /**
    * Whether a turn has started in this process. On a resume or a fork, Codex
    * reports the thread's restored usage before any turn starts. An earlier
-   * process already reported those tokens, so reports before the first turn
-   * are dropped.
+   * process already reported those tokens, so a report before the first turn
+   * is not counted.
    */
   turnStarted: boolean;
-  /**
-   * The thread's usage from before this process started, subtracted from
-   * every report. It is unknown until the first report after a turn starts.
-   */
-  usageBaseline: TokenCounts | undefined;
+  /** The thread's total from Codex's last usage report, or `undefined` before the first report. */
+  previousTotal: TokenCounts | undefined;
+  /** The tokens counted since this process started, in Codex's own counts. */
+  counted: TokenCounts;
 }
 
 export const buildNormalizingState = (
@@ -97,7 +96,8 @@ export const buildNormalizingState = (
   outputSchema,
   lastCompletedItem: undefined,
   turnStarted: false,
-  usageBaseline: undefined,
+  previousTotal: undefined,
+  counted: NO_TOKENS,
 });
 
 const buildSessionEnvelope = (state: Normalizing): Envelope =>
@@ -260,13 +260,44 @@ type TokenCounts = Pick<
   "inputTokens" | "cachedInputTokens" | "cacheWriteInputTokens" | "outputTokens"
 >;
 
-/** Returns `total` minus `earlier`, count by count. */
+const TOKEN_COUNT_KEYS = [
+  "inputTokens",
+  "cachedInputTokens",
+  "cacheWriteInputTokens",
+  "outputTokens",
+] as const satisfies ReadonlyArray<keyof TokenCounts>;
+
+const NO_TOKENS: TokenCounts = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  cacheWriteInputTokens: 0,
+  outputTokens: 0,
+};
+
+/** Returns `total` minus `earlier`, count by count. A count may come out negative. */
 const subtractTokenCounts = (total: TokenCounts, earlier: TokenCounts): TokenCounts => ({
   inputTokens: total.inputTokens - earlier.inputTokens,
   cachedInputTokens: total.cachedInputTokens - earlier.cachedInputTokens,
   cacheWriteInputTokens: total.cacheWriteInputTokens - earlier.cacheWriteInputTokens,
   outputTokens: total.outputTokens - earlier.outputTokens,
 });
+
+/**
+ * Returns `counted` plus how much each count grew from `previous` to `total`.
+ * A count that went down adds nothing: Codex resets its total when the
+ * context window overflows, and a usage snapshot never goes down (spec 06
+ * section 6.6).
+ */
+const addTotalGrowth = (
+  counted: TokenCounts,
+  previous: TokenCounts,
+  total: TokenCounts,
+): TokenCounts => {
+  const growth = subtractTokenCounts(total, previous);
+  const sum = { ...counted };
+  for (const key of TOKEN_COUNT_KEYS) sum[key] += Math.max(0, growth[key]);
+  return sum;
+};
 
 /**
  * Builds a usage snapshot from Codex's counts. Codex counts cached reads
@@ -281,19 +312,28 @@ const buildUsage = (counts: TokenCounts): Usage => ({
 });
 
 /**
- * Returns the tokens the thread used since this process started, or
- * `undefined` for a report that comes before the first turn: that report is
- * the restored history of a resumed or forked thread.
+ * Counts how much the thread's total grew since Codex's previous report, and
+ * returns the tokens counted since this process started. Returns `undefined`
+ * for a report that comes before the first turn: that report is the restored
+ * history of a resumed or forked thread, and it only sets where counting
+ * starts.
  *
- * The first report after a turn starts sets the baseline to `total - last`,
- * the thread's usage before the model call it reports. That one rule covers a
- * fresh thread (the baseline is zero), a resume, and a fork, which starts
- * from its parent's total (spec 06 section 13.5).
+ * Counting the growth of the total, rather than the total itself, covers
+ * every report Codex sends (spec 06 section 13.5):
+ *
+ * - With no earlier report, counting starts from `total - last`, the thread's
+ *   usage before the model call reported. That is zero on a fresh thread and
+ *   the parent's total on a forked one.
+ * - Codex repeats an unchanged total after a cancelled call, a stream error
+ *   or a compaction. A repeated total adds nothing.
+ * - A total that went down adds nothing, and counting continues from it.
  */
-const computeUsageSinceStart = (state: Normalizing, usage: ThreadTokenUsage): Usage | undefined => {
+const countUsageSinceStart = (state: Normalizing, usage: ThreadTokenUsage): Usage | undefined => {
+  const previous = state.previousTotal ?? subtractTokenCounts(usage.total, usage.last);
+  state.previousTotal = usage.total;
   if (!state.turnStarted) return undefined;
-  state.usageBaseline ??= subtractTokenCounts(usage.total, usage.last);
-  return buildUsage(subtractTokenCounts(usage.total, state.usageBaseline));
+  state.counted = addTotalGrowth(state.counted, previous, usage.total);
+  return buildUsage(state.counted);
 };
 
 /**
@@ -516,7 +556,7 @@ export const normalize = (
     }
     case "thread/tokenUsage/updated": {
       const params = frame.params as ThreadTokenUsageUpdatedNotification;
-      const usage = computeUsageSinceStart(state, params.tokenUsage);
+      const usage = countUsageSinceStart(state, params.tokenUsage);
       if (usage === undefined) return [];
       return [
         {

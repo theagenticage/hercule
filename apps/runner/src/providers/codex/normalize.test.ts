@@ -448,6 +448,67 @@ describe("what a session reports about its usage and its errors", () => {
     });
   });
 
+  it("counts a forked thread from its parent's total when the restored report comes first", () => {
+    const events = normalizeFromStart([
+      buildUsageNote(buildTokenBreakdown(37_000, 0, 3_800), buildTokenBreakdown(5_000, 0, 300)),
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(40_000, 0, 4_000), buildTokenBreakdown(3_000, 0, 200)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 3_000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("adds nothing when Codex repeats the restored total after a cancelled first call", () => {
+    const restored = buildUsageNote(
+      buildTokenBreakdown(50_000, 0, 5_000),
+      buildTokenBreakdown(8_000, 0, 1_000),
+    );
+    const events = normalizeFromStart([
+      restored,
+      TURN_STARTED,
+      // A cancelled call makes Codex send the unchanged total and last again.
+      restored,
+      buildUsageNote(buildTokenBreakdown(70_000, 0, 7_000), buildTokenBreakdown(20_000, 0, 2_000)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 20_000, outputTokens: 2_000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("adds nothing for a compaction, which keeps the total and estimates the last call", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(1_000, 0, 300), buildTokenBreakdown(1_000, 0, 300)),
+      buildUsageNote(buildTokenBreakdown(1_000, 0, 300), buildTokenBreakdown(200, 0, 0)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it("never goes down when Codex resets its total, and counts the next call in full", () => {
+    // When the context window overflows, Codex resets the total's counts to zero.
+    const reset = buildTokenBreakdown(0, 0, 0);
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(1_000, 0, 300), buildTokenBreakdown(1_000, 0, 300)),
+      buildUsageNote(reset, buildTokenBreakdown(1_000, 0, 300)),
+      buildUsageNote(buildTokenBreakdown(400, 100, 50), buildTokenBreakdown(400, 100, 50)),
+    ]);
+
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 1_000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 1_300, outputTokens: 350, cacheReadTokens: 100, cacheWriteTokens: 0 },
+    ]);
+  });
+
   it("does not count cached input twice", () => {
     // Codex counts cached reads inside its input: 100k input, 90k of it cached.
     const call = buildTokenBreakdown(100_000, 90_000, 2_000);

@@ -373,6 +373,68 @@ describe("the thread a session gets", () => {
     expect(binding.nativeSessionId).toBe(RESUMED);
   });
 
+  it("counts a resumed thread's usage from the restored report Codex sends right after the reply", async () => {
+    const buildUsageReport = (
+      total: readonly [number, number],
+      last: readonly [number, number],
+    ): Record<string, unknown> => {
+      const buildBreakdown = ([input, output]: readonly [number, number]) => ({
+        totalTokens: input + output,
+        inputTokens: input,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        outputTokens: output,
+        reasoningOutputTokens: 0,
+      });
+      return {
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: RESUMED,
+          turnId: TURN,
+          tokenUsage: {
+            total: buildBreakdown(total),
+            last: buildBreakdown(last),
+            modelContextWindow: 272000,
+          },
+        },
+      };
+    };
+    const restored = buildUsageReport([50_000, 5_000], [8_000, 1_000]);
+    const run = createDriving({
+      "thread/resume": () => {
+        // Codex sends the restored usage right after the reply. The waiting
+        // fiber resumes inside the reply's delivery and registers the
+        // session before the reader reaches the next line, so the report is
+        // kept. This test fails if that ever stops being true.
+        queueMicrotask(() => run.spawns[0]!.push(restored));
+        return { thread: { id: RESUMED } };
+      },
+    });
+    const spec: SessionSpec = { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } };
+    await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
+    const server = run.spawns[0]!;
+
+    server.push({
+      method: "turn/started",
+      params: {
+        threadId: RESUMED,
+        turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" },
+      },
+    });
+    // A cancelled first call makes Codex repeat the restored total.
+    server.push(restored);
+    server.push(buildUsageReport([70_000, 7_000], [20_000, 2_000]));
+    await waitUntil(
+      "reported both usage snapshots",
+      () => filterByTag(run.seen, "session.usage.updated").length === 2,
+    );
+
+    expect(filterByTag(run.seen, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 20_000, outputTokens: 2_000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
   it("forks a native thread, and uses the new thread's id", async () => {
     const { adapter, ctx, requests } = createDriving();
     const spec: SessionSpec = { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } };
