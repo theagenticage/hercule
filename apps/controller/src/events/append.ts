@@ -1,8 +1,8 @@
 /**
  * The one write of a row into the event log. Every writer in this domain -
- * `event.emit`, the platform-source writer and the Scheduler's ticks - builds
- * its row and appends it here, so the column list and the dedup rule live in
- * one place.
+ * `event.emit`, the platform-source writer, the Scheduler's ticks and the
+ * ingested-event writer - builds its row and appends it here, so the column
+ * list and the dedup rule live in one place.
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -10,7 +10,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { EventId } from "@hercule/contract";
 import { announce } from "../db";
 
-/** One event as it goes into the log. The log has no `url` or `raw` for these writers. */
+/** One event as it goes into the log. */
 export interface EventToAppend {
   readonly source: string;
   readonly connectionId: Uint8Array | null;
@@ -20,7 +20,11 @@ export interface EventToAppend {
   readonly receivedAt: string;
   readonly dedupKey: string;
   readonly refs: ReadonlyArray<string>;
+  /** Where a person opens the event in its own system, or null when there is no such page. */
+  readonly url: string | null;
   readonly payload: unknown;
+  /** The external system's own body, kept for debugging, or null. */
+  readonly raw: Readonly<Record<string, unknown>> | null;
   /** The actor stamp of the mutation behind the event, or null when there is none. */
   readonly actor: string | null;
 }
@@ -46,8 +50,8 @@ export const appendEvent = (
       VALUES
         (${event.source}, ${event.connectionId}, ${event.system}, ${event.kind},
          ${event.occurredAt}, ${event.receivedAt}, ${event.dedupKey},
-         ${JSON.stringify(event.refs)}, NULL, ${JSON.stringify(event.payload)}, NULL,
-         ${event.actor})
+         ${JSON.stringify(event.refs)}, ${event.url}, ${JSON.stringify(event.payload)},
+         ${event.raw === null ? null : JSON.stringify(event.raw)}, ${event.actor})
       ON CONFLICT (source, ifnull(connection_id, x''), dedup_key) DO NOTHING
       RETURNING id
     `;

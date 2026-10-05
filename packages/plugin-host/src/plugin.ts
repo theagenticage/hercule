@@ -1,7 +1,7 @@
 import { Effect, Option, Redacted, Schema } from "effect";
 import type { PluginManifest } from "./manifest";
 import type {
-  EventSourceDefinition,
+  EventSourceContribution,
   ProviderDefinition,
   WorkflowActionContribution,
 } from "./contributions";
@@ -24,7 +24,7 @@ export interface ProviderRegistration {
 }
 
 export interface EventSourceRegistration {
-  readonly register: (definition: EventSourceDefinition) => Effect.Effect<void, PluginError>;
+  readonly register: (contribution: EventSourceContribution) => Effect.Effect<void, PluginError>;
 }
 
 export interface WorkflowActionRegistration {
@@ -111,11 +111,11 @@ export const registerConnectionType = (
 
 export const registerEventSource = (
   host: RegistrationHost,
-  definition: EventSourceDefinition,
+  contribution: EventSourceContribution,
 ): Effect.Effect<void, PluginError> =>
   host.eventSources === undefined
     ? Effect.fail(new PluginError({ message: "the event-sources capability was not granted" }))
-    : host.eventSources.register(definition);
+    : host.eventSources.register(contribution);
 
 export const registerWorkflowAction = (
   host: RegistrationHost,

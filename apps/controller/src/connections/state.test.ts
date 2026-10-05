@@ -1,0 +1,162 @@
+/**
+ * Tests the Connection state store an ingest handle receives:
+ *
+ * - each Connection reads only its own keys;
+ * - deleting a Connection deletes its state, through the foreign key;
+ * - `wipePluginState` deletes the state of one plugin's Connections, and no others;
+ * - an empty key is refused with a message for the plugin author;
+ * - a write to a Connection that is no longer ingesting dies and changes nothing.
+ */
+import { describe, expect, it } from "vitest";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { TestDatabase } from "../db/testing";
+import { connectionRepository } from "./repository";
+import { ConnectionNotIngesting, connectionStateRepository } from "./state";
+
+const at = "2026-09-01T00:00:00.000Z";
+
+/** Inserts a Connection of the plugin, GitHub by default, and returns its id. */
+const insertConnection = (label: string, pluginId = "github") =>
+  Effect.map(
+    Effect.flatMap(connectionRepository, (connections) =>
+      connections.insert({
+        pluginId,
+        type: `${pluginId}/${pluginId}`,
+        label,
+        displayName: label,
+        accountId: label,
+        labels: [],
+        config: {},
+        at,
+      }),
+    ),
+    (connection) => connection.id,
+  );
+
+const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(TestDatabase), Effect.orDie));
+
+describe("the Connection state store", () => {
+  it("keeps each Connection's keys apart", async () => {
+    const read = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const work = state.buildStore(yield* insertConnection("work"));
+        const home = state.buildStore(yield* insertConnection("home"));
+        yield* work.set("cursor", { since: "2026-09-01" });
+        yield* work.set("seen", [1, 2]);
+        yield* home.set("cursor", "other");
+        yield* work.delete("seen");
+        return {
+          workCursor: yield* work.get("cursor"),
+          workKeys: yield* work.list(),
+          homeCursor: yield* home.get("cursor"),
+          homeSeen: yield* home.get("seen"),
+        };
+      }),
+    );
+
+    expect(read.workCursor).toEqual(Option.some({ since: "2026-09-01" }));
+    expect(read.workKeys).toEqual(["cursor"]);
+    expect(read.homeCursor).toEqual(Option.some("other"));
+    expect(read.homeSeen).toEqual(Option.none());
+  });
+
+  it("is deleted with its Connection", async () => {
+    const keys = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const id = yield* insertConnection("work");
+        yield* state.buildStore(id).set("cursor", 1);
+        yield* Effect.flatMap(connectionRepository, (connections) => connections.delete(id));
+        const sql = yield* SqlClient.SqlClient;
+        return yield* sql`SELECT key FROM connection_state`;
+      }),
+    );
+
+    expect(keys).toEqual([]);
+  });
+
+  it("is wiped for the plugin's Connections, and kept for another plugin's", async () => {
+    const read = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const work = yield* insertConnection("work");
+        const other = yield* insertConnection("other", "gitlab");
+        yield* state.buildStore(work).set("cursor", 1);
+        yield* state.buildStore(other).set("cursor", 2);
+        yield* state.wipePluginState("github");
+        return {
+          work: yield* state.buildStore(work).list(),
+          other: yield* state.buildStore(other).list(),
+        };
+      }),
+    );
+
+    expect(read).toEqual({ work: [], other: ["cursor"] });
+  });
+
+  it("refuses an empty key with a message for the plugin author", async () => {
+    const exit = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const store = state.buildStore(yield* insertConnection("work"));
+        return yield* Effect.exit(store.set("", 1));
+      }),
+    );
+
+    expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain(
+      "A Connection state key cannot be empty.",
+    );
+  });
+
+  it("refuses a write once the Connection is disabled, and keeps what it held", async () => {
+    const read = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const id = yield* insertConnection("work");
+        const store = state.buildStore(id);
+        yield* store.set("cursor", 1);
+        yield* Effect.flatMap(connectionRepository, (connections) =>
+          connections.update(id, { status: "disabled" }, at),
+        );
+        return {
+          set: yield* Effect.exit(store.set("cursor", 2)),
+          delete: yield* Effect.exit(store.delete("cursor")),
+          cursor: yield* store.get("cursor"),
+        };
+      }),
+    );
+
+    for (const exit of [read.set, read.delete]) {
+      expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBeInstanceOf(
+        ConnectionNotIngesting,
+      );
+    }
+    expect(read.cursor).toEqual(Option.some(1));
+  });
+
+  it("refuses a write once the Connection is deleted, and writes no row", async () => {
+    const read = await run(
+      Effect.gen(function* () {
+        const state = yield* connectionStateRepository;
+        const id = yield* insertConnection("work");
+        yield* Effect.flatMap(connectionRepository, (connections) => connections.delete(id));
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          exit: yield* Effect.exit(state.buildStore(id).set("cursor", 1)),
+          rows: yield* sql`SELECT key FROM connection_state`,
+        };
+      }),
+    );
+
+    expect(Exit.isFailure(read.exit) && Cause.squash(read.exit.cause)).toBeInstanceOf(
+      ConnectionNotIngesting,
+    );
+    expect(read.rows).toEqual([]);
+  });
+});

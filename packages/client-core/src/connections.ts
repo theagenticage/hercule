@@ -6,7 +6,7 @@
  * screen that shows it and the service that builds it use the same function.
  * The connection types are derived in the same way: a connection type is a
  * plugin contribution, so the types come from the plugin list rather than from
- * an operation of their own.
+ * an operation of their own, and so are the feeds a type's event source polls.
  */
 import {
   GITHUB_CONNECTION_TYPE,
@@ -16,8 +16,11 @@ import {
   type PluginDetail,
 } from "@hercule/contract";
 import type { HerculeClient } from "./client";
+import { listIssuesInGroup, matchConfigIssues, type ConfigIssues } from "./config-fields";
+import { readValidationIssues } from "./errors";
 import { readJsonObject } from "./json-shape";
 import { describeMinutes } from "./minutes-left";
+import { parseWholeNumber } from "./whole-number";
 
 /**
  * Returns the GitHub connections: the accounts a repo can be cloned through.
@@ -108,7 +111,56 @@ export interface ConnectionType {
   readonly pluginName: string;
   readonly setup: ReadonlyArray<SetupStep>;
   readonly configSchema?: Record<string, unknown>;
+  /**
+   * The feeds the type's event source polls, in the order the plugin declares
+   * them. Empty for a type no event source polls, such as a chat channel.
+   */
+  readonly feeds: ReadonlyArray<ConnectionFeed>;
 }
+
+/** One feed an event source polls for every Connection of its type. */
+export interface ConnectionFeed {
+  /** The feed's name, such as `repos`. The key of the Connection's `feedIntervals`. */
+  readonly name: string;
+  /** The seconds between polls when the user sets no interval of their own. */
+  readonly defaultIntervalSeconds: number;
+  /**
+   * The shortest interval the user may set, in seconds. A feed that declares
+   * no minimum may not poll faster than its default, so this is the default then.
+   */
+  readonly minIntervalSeconds: number;
+}
+
+/**
+ * Returns the feeds of every event source in the plugin list, keyed by the
+ * connection type the event source polls for. A feed whose declaration does not
+ * have the expected shape is left out: the definition arrives as untyped
+ * JSON, and a form cannot offer an interval it cannot read.
+ */
+const listFeedsByConnectionType = (
+  plugins: ReadonlyArray<PluginDetail>,
+): ReadonlyMap<string, ReadonlyArray<ConnectionFeed>> => {
+  const feedsByType = new Map<string, ReadonlyArray<ConnectionFeed>>();
+  for (const plugin of plugins) {
+    for (const contribution of plugin.contributions) {
+      if (contribution.extensionPoint !== "event-source") continue;
+      const definition = readJsonObject(contribution.definition);
+      const connectionType = definition?.["connectionType"];
+      const declared = readJsonObject(definition?.["feeds"]);
+      if (typeof connectionType !== "string" || declared === undefined) continue;
+      const feeds = Object.entries(declared).flatMap(([name, value]) => {
+        const feed = readJsonObject(value);
+        const defaultIntervalSeconds = feed?.["defaultIntervalSeconds"];
+        const minIntervalSeconds = feed?.["minIntervalSeconds"] ?? defaultIntervalSeconds;
+        return typeof defaultIntervalSeconds === "number" && typeof minIntervalSeconds === "number"
+          ? [{ name, defaultIntervalSeconds, minIntervalSeconds }]
+          : [];
+      });
+      feedsByType.set(connectionType, feeds);
+    }
+  }
+  return feedsByType;
+};
 
 /**
  * Returns the connection types declared in the plugin list. There is no
@@ -116,11 +168,17 @@ export interface ConnectionType {
  * list the plugins screen already fetches contains every type. Disabled
  * plugins are included, because their `register()` still ran, so their types
  * can still validate what the user pastes.
+ *
+ * Each type carries the feeds of the type's event source. An event source is
+ * a contribution of its own, so its feeds are matched to the type by the
+ * connection type the event source names. The controller refuses a second
+ * event source for one type, so a type has at most one.
  */
 export const listConnectionTypes = (
   plugins: ReadonlyArray<PluginDetail>,
-): ReadonlyArray<ConnectionType> =>
-  plugins.flatMap((plugin) =>
+): ReadonlyArray<ConnectionType> => {
+  const feedsByType = listFeedsByConnectionType(plugins);
+  return plugins.flatMap((plugin) =>
     plugin.contributions
       .filter((contribution) => contribution.extensionPoint === "connection-type")
       .flatMap((contribution) => {
@@ -138,10 +196,12 @@ export const listConnectionTypes = (
             pluginName: plugin.displayName,
             setup: Array.isArray(setup) ? (setup as ReadonlyArray<SetupStep>) : [],
             ...(configSchema === undefined ? {} : { configSchema }),
+            feeds: feedsByType.get(type) ?? [],
           },
         ];
       }),
   );
+};
 
 /**
  * Checks whether a screen shows the plugin's name under the type's name. The
@@ -421,3 +481,146 @@ export const waitForDeviceFlow = async (
 /** Returns the secret fields the type's setup asks the user to paste, in declared order. */
 export const listCredentialFields = (type: ConnectionType): ReadonlyArray<CredentialField> =>
   type.setup.flatMap((step) => (step.kind === "credentials" ? [...step.fields] : []));
+
+/**
+ * Returns the feed's name as a form shows it: the first letter in upper case,
+ * and dashes and underscores as spaces, so `pull_requests` reads "Pull requests".
+ */
+export const describeFeedName = (feed: ConnectionFeed): string => {
+  const words = feed.name.replace(/[-_]+/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+/**
+ * Returns the help line of a feed's interval field: how often the feed is
+ * polled when the user sets nothing, and the shortest interval allowed.
+ * `typeName` is the connection type's display name, such as "GitHub".
+ *
+ * When the default is already the shortest interval, the line says so in one
+ * sentence, because "Every 60 seconds. At least 60 seconds." repeats itself.
+ */
+export const describeFeedInterval = (feed: ConnectionFeed, typeName: string): string =>
+  feed.defaultIntervalSeconds === feed.minIntervalSeconds
+    ? `Every ${feed.defaultIntervalSeconds} seconds by default, the shortest ${typeName} allows.`
+    : `Every ${feed.defaultIntervalSeconds} seconds by default. At least ${feed.minIntervalSeconds} seconds.`;
+
+/**
+ * What the user typed into each feed's interval field, keyed by feed name.
+ * An empty string means the feed polls at its default.
+ */
+export type FeedIntervalsDraft = Readonly<Record<string, string>>;
+
+/**
+ * Returns the draft a form starts from: the stored interval of each feed the
+ * type declares, as text, or an empty string for a feed on its default.
+ */
+export const buildFeedIntervalsDraft = (
+  feeds: ReadonlyArray<ConnectionFeed>,
+  stored: Connection["feedIntervals"],
+): FeedIntervalsDraft =>
+  Object.fromEntries(
+    feeds.map((feed) => {
+      const seconds = stored[feed.name];
+      return [feed.name, seconds === undefined ? "" : String(seconds)];
+    }),
+  );
+
+/** The message under a feed's interval field when its text is not a whole number of seconds. */
+export const FEED_INTERVAL_UNREADABLE = "Enter a whole number of seconds.";
+
+/** The result of reading the interval fields: the intervals to save, or the feeds whose text cannot be read. */
+export type FeedIntervalsReading =
+  | { readonly feedIntervals: Connection["feedIntervals"] }
+  | { readonly errors: Readonly<Record<string, string>> };
+
+/**
+ * Converts the draft into the `feedIntervals` to save. A field left empty, or
+ * holding only spaces, is left out, so that feed polls at its default. A field
+ * holding anything `parseWholeNumber` cannot read, such as "abc", "1.5" or
+ * "-5", is an error on that feed, and nothing is saved. Sending such text
+ * would fail with a message about types rather than about the field.
+ *
+ * The map is sent whole and replaces the stored one, so an interval stored
+ * for a feed the type no longer declares is dropped; the controller would
+ * refuse it anyway. The numbers are not checked against each feed's minimum
+ * here. The controller checks them, and the form shows its errors under the
+ * fields, so the two can never disagree.
+ */
+export const buildFeedIntervalsPayload = (
+  feeds: ReadonlyArray<ConnectionFeed>,
+  draft: FeedIntervalsDraft,
+): FeedIntervalsReading => {
+  const feedIntervals: Record<string, number> = {};
+  const errors: Record<string, string> = {};
+  for (const feed of feeds) {
+    const typed = draft[feed.name] ?? "";
+    if (typed.trim() === "") continue;
+    const seconds = parseWholeNumber(typed);
+    if (seconds === undefined) errors[feed.name] = FEED_INTERVAL_UNREADABLE;
+    else feedIntervals[feed.name] = seconds;
+  }
+  return Object.keys(errors).length === 0 ? { feedIntervals } : { errors };
+};
+
+/**
+ * The validation errors of a refused `connection.update`, split by the part
+ * of the configure form that shows them.
+ */
+export interface ConnectionIssues {
+  /** The error for each setting of the type's config schema, keyed by field name. */
+  readonly config: Readonly<Record<string, string>>;
+  /**
+   * The error for each entry of a list setting, keyed by field name and then
+   * by the entry's position, counted from 0.
+   */
+  readonly configEntries: ConfigIssues["perEntry"];
+  /** The error for each feed's poll interval, keyed by feed name. */
+  readonly feedIntervals: Readonly<Record<string, string>>;
+  /**
+   * Whether any error belongs to no field the form renders, or the failure is
+   * not a validation error at all. The form must then show a general error,
+   * or the save fails and the user is told nothing.
+   */
+  readonly rest: boolean;
+}
+
+const NO_CONNECTION_ISSUES: ConnectionIssues = {
+  config: {},
+  configEntries: {},
+  feedIntervals: {},
+  rest: false,
+};
+
+/**
+ * Returns the errors of a failed `connection.update`, matched to the config
+ * fields and the feeds the configure form renders.
+ *
+ * - An issue under `config` is matched as `matchConfigIssues` describes, so
+ *   `config.repos.2` goes under the third entry of the `repos` list.
+ * - An issue at `feedIntervals.<feed>` goes under that feed's field.
+ * - Any other issue sets `rest`.
+ *
+ * Only the first issue of each field, and of each entry, is kept.
+ */
+export const readConnectionIssues = (
+  error: unknown,
+  configFields: ReadonlyArray<{ readonly name: string }>,
+  feeds: ReadonlyArray<ConnectionFeed>,
+): ConnectionIssues => {
+  if (error === null || error === undefined) return NO_CONNECTION_ISSUES;
+  const issues = readValidationIssues(error);
+  if (issues === undefined) return { ...NO_CONNECTION_ISSUES, rest: true };
+
+  const config = matchConfigIssues(listIssuesInGroup(issues, "config"), configFields);
+  const feedNames = new Set(feeds.map((feed) => feed.name));
+  const feedIntervals: Record<string, string> = {};
+  let rest = config.rest;
+  for (const { path, message } of issues) {
+    const [part, feed] = path;
+    if (part === "config") continue;
+    if (part === "feedIntervals" && path.length === 2 && feed !== undefined && feedNames.has(feed))
+      feedIntervals[feed] ??= message;
+    else rest = true;
+  }
+  return { config: config.perField, configEntries: config.perEntry, feedIntervals, rest };
+};

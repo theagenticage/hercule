@@ -28,6 +28,7 @@ import {
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
+import { connectionStateRepository } from "../connections";
 import { AuditLog } from "../events";
 import { PluginHost } from "./host";
 import { pluginRepository, readStoredStateOrDie } from "./repository";
@@ -56,6 +57,7 @@ const make = Effect.gen(function* () {
   const repository = yield* pluginRepository;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
+  const connectionState = yield* connectionStateRepository;
 
   const details: Effect.Effect<
     ReadonlyArray<PluginDetail>,
@@ -163,18 +165,20 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns every workflow action a step can call, with its input schema as
-     * JSON Schema. Fails with `Forbidden` if the caller lacks the grant.
+     * JSON Schema, and the Connection type of each action that acts through
+     * one. Fails with `Forbidden` if the caller lacks the grant.
      */
     queryWorkflowActions: (): Effect.Effect<ReadonlyArray<WorkflowAction>, Forbidden> =>
       Effect.gen(function* () {
         yield* requireGrant("workflowAction.query");
         const actions = yield* host.listActiveWorkflowActions();
-        return actions.map(({ id, displayName, description, runsIn, inputSchema }) => ({
+        return actions.map(({ id, displayName, description, runsIn, inputSchema, connection }) => ({
           id,
           displayName,
           description,
           runsIn,
           inputSchema,
+          ...(connection === undefined ? {} : { connection }),
         }));
       }),
 
@@ -193,10 +197,15 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Disables a plugin. It is stopped before the flag is written, so nothing
-     * is still running once its contributions read as disabled. This is the
-     * one change allowed for a plugin that needs a restart, because turning it
-     * off is how to deal with parts a failed teardown left running.
+     * Disables a plugin. It is stopped before the flag is written, so its
+     * ingest has closed and its `deactivate` has run by the time its
+     * contributions read as disabled. From then on no new workflow or run may
+     * use its actions. A run that had already started still executes them,
+     * because it finishes the plan it froze when it started.
+     *
+     * This is the one change allowed for a plugin that needs a restart,
+     * because turning it off is how to deal with parts a failed teardown left
+     * running.
      */
     disable: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
@@ -258,6 +267,10 @@ const make = Effect.gen(function* () {
      * Deletes everything a plugin stored and restarts it. Also allowed while
      * the plugin is inactive or errored, because leftover state is a likely
      * cause of either.
+     *
+     * The state of the plugin's Connections goes too. Stopping the plugin has
+     * closed their ingest handles, and the controller daemon opens them again
+     * once the plugin is active, so each starts from now.
      */
     resetState: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
@@ -266,7 +279,9 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             yield* readRestartablePluginOrFail(id);
             const stopped = yield* host.stop(id);
-            yield* writeMove(id, "plugin.stateReset", () => repository.kvWipe(id));
+            yield* writeMove(id, "plugin.stateReset", () =>
+              Effect.andThen(repository.kvWipe(id), connectionState.wipePluginState(id)),
+            );
             if (stopped) yield* host.refresh(id);
             return yield* readPluginOrFail(id);
           }),

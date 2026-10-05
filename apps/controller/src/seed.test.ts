@@ -51,6 +51,7 @@ describe("the shipped permission profiles", () => {
         "memory.write",
         "settings.read",
         "connection.read",
+        "connection.use",
         "infra.read",
         "workspace.read",
         "agent.read",

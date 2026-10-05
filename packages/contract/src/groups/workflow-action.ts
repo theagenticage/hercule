@@ -30,10 +30,21 @@ export const WorkflowAction = Schema.Struct({
   description: Schema.String,
   runsIn: WorkflowActionRunsIn,
   /**
-   * The JSON Schema of the params a step writes. Typed as an open record,
-   * because a JSON Schema object can hold any keyword.
+   * The JSON Schema of the params the action decodes. Typed as an open record,
+   * because a JSON Schema object can hold any keyword. An action with
+   * `connection` takes one more param that this schema leaves out: see
+   * `connection`.
    */
   inputSchema: Schema.Record(Schema.String, Schema.Unknown),
+  /**
+   * Present when the action acts through a Connection: `type` is the
+   * qualified Connection type, such as `github/github`. A step that calls the
+   * action must also write the param `connection`, set to the id of a
+   * Connection of this type or to a template such as
+   * `{{ inputs.account }}`. That param is not in `inputSchema`, because the
+   * core reads it to pick the Connection and the action never receives it.
+   */
+  connection: Schema.optionalKey(Schema.Struct({ type: Schema.String })),
 });
 
 export type WorkflowAction = Schema.Schema.Type<typeof WorkflowAction>;

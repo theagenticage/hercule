@@ -22,6 +22,8 @@
  * - A mail plugin, for a Connection of the wrong type.
  * - A provider, for an Agent.
  * - A notes plugin that declares one workflow action.
+ * - A forge plugin with a Connection type and one action that acts through
+ *   it.
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -32,7 +34,14 @@ import {
 } from "@hercule/contract";
 import { lintOutputSchema } from "@hercule/protocol";
 import { get, post, readErrorBody } from "../http/testing";
-import { NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
+import {
+  buildForgePlugin,
+  FORGE_CONNECTION_TYPE,
+  FORGE_REVIEW_ACTION_ID,
+  NOTE_APPEND_ACTION,
+  NOTE_APPEND_ACTION_ID,
+  notesPlugin,
+} from "../plugins/testing";
 import {
   spawnThreadUnder,
   readProfileNamed,
@@ -47,6 +56,7 @@ import {
   createAgent,
   createConnection,
   createWorkflow,
+  createWorkflowOrFail,
   disablePlugin,
   DUPLICATE_STEP_ID_SOURCE,
   expectNothingStored,
@@ -96,13 +106,14 @@ interface FixtureContext {
   readonly agentId: string;
   readonly githubConnectionId: string;
   readonly mailConnectionId: string;
+  readonly forgeConnectionId: string;
 }
 
 /** A controller after setup, with an Agent and one Connection of each type. */
 interface ArrangedController extends SetUpController, FixtureContext {}
 
 /**
- * Starts a controller with the mail and notes plugins, an Agent and one
+ * Starts a controller with the mail, notes and forge plugins, an Agent and one
  * Connection of each type, and runs `body` against it.
  */
 const withArrangedController = (
@@ -120,9 +131,12 @@ const withArrangedController = (
         mailConnectionId: await createConnection(base, token, "mail/mail", {
           password: "an-app-password",
         }),
+        forgeConnectionId: await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        }),
       });
     },
-    [localMailPlugin, notesPlugin],
+    [localMailPlugin, notesPlugin, buildForgePlugin().plugin],
   );
 
 const validateWorkflow = (base: string, token: string, body: unknown): Promise<Response> =>
@@ -1122,7 +1136,11 @@ describe("the actions", () => {
   it("rejects an unknown action, and lists every available action in the message", async () => {
     await withArrangedController(async (controller) => {
       const [issue] = await expectErrorsAt(controller, UNKNOWN_ACTION);
-      for (const actionId of [...BUILT_IN_ACTION_IDS, NOTE_APPEND_ACTION_ID]) {
+      for (const actionId of [
+        ...BUILT_IN_ACTION_IDS,
+        NOTE_APPEND_ACTION_ID,
+        FORGE_REVIEW_ACTION_ID,
+      ]) {
         expect(issue!.message).toContain(actionId);
       }
     });
@@ -1916,6 +1934,307 @@ ${buildTaskStep("file_task")}
   paths: [["inputs", "0", "connection", "type"]],
 };
 
+/* ------------------------------------------------------------------------ */
+/* An action that acts through a Connection.                                 */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Builds a workflow with one step that calls the forge review action. The
+ * workflow has a Connection input `account` of the type `accountType`, and a
+ * string input `verdict`. `connection` is the YAML value of the step's
+ * `connection` param, or `undefined` to leave the param out.
+ */
+const buildReviewSource = (
+  connection: string | undefined,
+  options: { readonly verdict?: string; readonly accountType?: string } = {},
+): string => `name: Review through a Connection
+inputs:
+  - name: account
+    connection:
+      type: ${options.accountType ?? FORGE_CONNECTION_TYPE}
+    required: false
+  - name: verdict
+    schema:
+      type: string
+    required: false
+steps:
+  - id: review
+    kind: action
+    action: ${FORGE_REVIEW_ACTION_ID}
+    params:
+${connection === undefined ? "" : `      connection: ${connection}\n`}      verdict: ${options.verdict ?? "approve"}
+`;
+
+/** The path of the review step's `connection` param in `buildReviewSource`. */
+const REVIEW_CONNECTION_PATH = ["steps", "0", "params", "connection"];
+
+const MISSING_CONNECTION_PARAM: InvalidFixture = {
+  description: "a step that names no Connection for an action that acts through one",
+  build: () => buildReviewSource(undefined),
+  paths: [["steps", "0", "params"]],
+};
+
+const ABSENT_CONNECTION_PARAM: InvalidFixture = {
+  description: "a step that names a Connection that does not exist",
+  build: () => buildReviewSource(ABSENT_ID),
+  paths: [REVIEW_CONNECTION_PATH],
+};
+
+const WRONG_TYPE_CONNECTION_PARAM: InvalidFixture = {
+  description: "a step that names a Connection of another type",
+  build: ({ githubConnectionId }) => buildReviewSource(githubConnectionId),
+  paths: [REVIEW_CONNECTION_PATH],
+};
+
+const NUMBER_CONNECTION_PARAM: InvalidFixture = {
+  description: "a step whose connection param is a number",
+  build: () => buildReviewSource("42"),
+  paths: [REVIEW_CONNECTION_PATH],
+};
+
+const WRONG_TYPE_CONNECTION_INPUT: InvalidFixture = {
+  description: "a step that names a Connection input of another type",
+  build: () => buildReviewSource('"{{ inputs.account }}"', { accountType: "github/github" }),
+  paths: [REVIEW_CONNECTION_PATH],
+};
+
+const STRING_INPUT_AS_CONNECTION: InvalidFixture = {
+  description: "a step that names an input that is not a Connection input",
+  build: () => buildReviewSource('"{{ inputs.verdict }}"'),
+  paths: [REVIEW_CONNECTION_PATH],
+};
+
+const ABSENT_INPUT_AS_CONNECTION: InvalidFixture = {
+  description: "a step that names an input the workflow does not have",
+  build: () => buildReviewSource('"{{ inputs.nobody }}"'),
+  paths: [REVIEW_CONNECTION_PATH],
+};
+
+describe("an action that acts through a Connection", () => {
+  it("rejects a step with no connection param, and says what the param names", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, MISSING_CONNECTION_PARAM);
+      expect(issue!.message).toContain("needs the param connection");
+      expect(issue!.message).toContain(FORGE_CONNECTION_TYPE);
+    });
+  });
+
+  it("rejects a literal connection that is no Connection, or a Connection of another type", async () => {
+    await withArrangedController(async (controller) => {
+      const [absent] = await expectErrorsAt(controller, ABSENT_CONNECTION_PARAM);
+      expect(absent!.message).toContain("No Connection has this id");
+      const [wrongType] = await expectErrorsAt(controller, WRONG_TYPE_CONNECTION_PARAM);
+      expect(wrongType!.message).toContain("This Connection is of type github/github");
+      expect(wrongType!.message).toContain(FORGE_CONNECTION_TYPE);
+      const [number] = await expectErrorsAt(controller, NUMBER_CONNECTION_PARAM);
+      expect(number!.message).toContain("the id of a Connection of type");
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+
+  it("rejects a template that reads an input which is not a Connection input of the action's type", async () => {
+    await withArrangedController(async (controller) => {
+      const [wrongType] = await expectErrorsAt(controller, WRONG_TYPE_CONNECTION_INPUT);
+      expect(wrongType!.message).toContain("github/github");
+      expect(wrongType!.message).toContain(FORGE_CONNECTION_TYPE);
+      const [stringInput] = await expectErrorsAt(controller, STRING_INPUT_AS_CONNECTION);
+      expect(stringInput!.message).toContain("is not a Connection input");
+      const [absentInput] = await expectErrorsAt(controller, ABSENT_INPUT_AS_CONNECTION);
+      expect(absentInput!.message).toContain("has no input named");
+    });
+  });
+
+  it("accepts a Connection of the action's type, and a Connection input of that type", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "a literal Connection",
+        buildReviewSource(controller.forgeConnectionId),
+      );
+      await expectAccepted(
+        controller,
+        "a Connection input",
+        buildReviewSource('"{{ inputs.account }}"'),
+      );
+      await expectAccepted(
+        controller,
+        "a Connection input with no spaces inside the braces",
+        buildReviewSource('"{{inputs.account}}"'),
+      );
+    });
+  });
+
+  it("rejects every other template, and names the two forms the param takes", async () => {
+    await withArrangedController(async (controller) => {
+      for (const [description, connection] of [
+        ["an input read with brackets", `'{{ inputs["account"] }}'`],
+        ["a step's output", '"{{ steps.find.output.id }}"'],
+        ["a field inside an input", '"{{ inputs.account.id }}"'],
+        ["text around an input", '"acct-{{ inputs.account }}"'],
+        ["two templates", '"{{ inputs.account }}{{ inputs.account }}"'],
+      ] as const) {
+        const [issue] = await expectErrorsAt(controller, {
+          description,
+          build: () => buildReviewSource(connection),
+          paths: [REVIEW_CONNECTION_PATH],
+        });
+        expect(issue!.message, description).toBe(
+          `The param connection cannot be computed by a template: the action acts through a Connection of type ${FORGE_CONNECTION_TYPE}, and that Connection must be known before a run starts. Write the id of a Connection of type ${FORGE_CONNECTION_TYPE}, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}.`,
+        );
+      }
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+
+  it("accepts a template for a param that allows only fixed literals, such as the verdict", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "a verdict template",
+        buildReviewSource(controller.forgeConnectionId, { verdict: '"{{ inputs.verdict }}"' }),
+      );
+    });
+  });
+});
+
+/**
+ * Builds a workflow with one `run.start` step. Its `workflowId` param is
+ * `workflowId` and its `inputs` param is `inputs`, both as YAML values. The
+ * workflow has a Connection input `acc` of the forge's type, and string
+ * inputs `child` and `label`.
+ */
+const buildRunStartSource = (workflowId: string, inputs: string): string => `name: Start a review
+inputs:
+  - name: acc
+    connection:
+      type: ${FORGE_CONNECTION_TYPE}
+    required: false
+  - name: child
+    schema:
+      type: string
+    required: false
+  - name: label
+    schema:
+      type: string
+    required: false
+steps:
+  - id: start
+    kind: action
+    action: run.start
+    params:
+      workflowId: ${workflowId}
+      inputs: ${inputs}
+`;
+
+/** The path of the value the `run.start` step of `buildRunStartSource` gives for the input `account`. */
+const STARTED_ACCOUNT_PATH = ["steps", "0", "params", "inputs", "account"];
+
+describe("a run.start step that gives a value for a Connection input", () => {
+  /** Saves the review workflow, whose Connection input `account` the review step acts through, and returns its id. */
+  const createReviewTarget = async (controller: ArrangedController): Promise<string> =>
+    (
+      await createWorkflowOrFail(controller.base, controller.token, {
+        source: buildReviewSource('"{{ inputs.account }}"'),
+      })
+    ).id;
+
+  it("checks the value against the Connection input of a stored workflow, in the forms of the connection param", async () => {
+    await withArrangedController(async (controller) => {
+      const targetId = await createReviewTarget(controller);
+      const forms = `Write the id of a Connection of type ${FORGE_CONNECTION_TYPE}, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}.`;
+      const need = `the input account of the workflow this step starts takes a Connection of type ${FORGE_CONNECTION_TYPE}`;
+      for (const [description, account, message] of [
+        [
+          "a computed template",
+          '"acct-{{ inputs.acc }}"',
+          `The value for the input account cannot be computed by a template: ${need}, and that Connection must be known before a run starts. ${forms}`,
+        ],
+        ["an id no Connection has", ABSENT_ID, `No Connection has this id. ${forms}`],
+        [
+          "an input that is not a Connection input",
+          '"{{ inputs.label }}"',
+          `The input label is not a Connection input, and ${need}. ${forms}`,
+        ],
+        [
+          "a Connection of another type",
+          controller.githubConnectionId,
+          `This Connection is of type github/github, but ${need}. ${forms}`,
+        ],
+      ] as const) {
+        const [issue] = await expectErrorsAt(controller, {
+          description,
+          build: () => buildRunStartSource(targetId, `{ account: ${account} }`),
+          paths: [STARTED_ACCOUNT_PATH],
+        });
+        expect(issue!.message, description).toBe(message);
+      }
+
+      await expectAccepted(
+        controller,
+        "a literal Connection",
+        buildRunStartSource(targetId, `{ account: ${controller.forgeConnectionId} }`),
+      );
+      await expectAccepted(
+        controller,
+        "a Connection input",
+        buildRunStartSource(targetId, '{ account: "{{ inputs.acc }}" }'),
+      );
+    });
+  });
+
+  it("refuses every computed value, and a computed inputs template, when the workflow to start is a template", async () => {
+    await withArrangedController(async (controller) => {
+      const fix =
+        "Write the value itself, or a template that is exactly one input, such as {{ inputs.account }}. Or name the workflow to start by its id, so that only its Connection inputs are checked.";
+      const need =
+        "the workflow this step starts may take a Connection in its inputs, and that Connection must be known before a run starts.";
+      // Which inputs take a Connection is unknown, so even a computed value
+      // for what is plain text, such as a title, is refused.
+      for (const [description, inputs, path, message] of [
+        [
+          "a computed value for a Connection",
+          '{ account: "x-{{ inputs.acc }}" }',
+          STARTED_ACCOUNT_PATH,
+          `The value for the input account cannot be computed by a template: ${need} ${fix}`,
+        ],
+        [
+          "a computed value for plain text",
+          '{ title: "Review {{ inputs.label }}" }',
+          ["steps", "0", "params", "inputs", "title"],
+          `The value for the input title cannot be computed by a template: ${need} ${fix}`,
+        ],
+        [
+          "a computed inputs template",
+          '"{{ inputs.label }}-inputs"',
+          ["steps", "0", "params", "inputs"],
+          `The param inputs cannot be computed by a template: ${need} ${fix}`,
+        ],
+      ] as const) {
+        const [issue] = await expectErrorsAt(controller, {
+          description,
+          build: () => buildRunStartSource('"{{ inputs.child }}"', inputs),
+          paths: [path],
+        });
+        expect(issue!.message, description).toBe(message);
+      }
+
+      // Any literal, and any single input, may fill an input of a workflow
+      // that is not known before a run, and so may fill the whole inputs param.
+      for (const [description, inputs] of [
+        ["a literal", "{ account: any-text }"],
+        ["a string input", '{ account: "{{ inputs.label }}" }'],
+        ["an inputs template that is exactly one input", '"{{ inputs.label }}"'],
+      ] as const) {
+        await expectAccepted(
+          controller,
+          description,
+          buildRunStartSource('"{{ inputs.child }}"', inputs),
+        );
+      }
+    });
+  });
+});
+
 const INPUT_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
   ABSENT_CONNECTION_DEFAULT,
   WRONG_TYPE_CONNECTION_DEFAULT,
@@ -2240,6 +2559,7 @@ interface WorkflowActionItem {
   readonly displayName: string;
   readonly description: string;
   readonly runsIn: string;
+  readonly connection?: { readonly type: string };
   readonly inputSchema: {
     readonly type?: unknown;
     readonly properties?: Record<string, unknown>;
@@ -2286,10 +2606,11 @@ describe("workflowAction.query", () => {
     await withArrangedController(async ({ base, token }) => {
       const actions = await listWorkflowActions(base, token);
       expect(actions.map((action) => action.id).sort()).toEqual(
-        [...BUILT_IN_ACTION_IDS, NOTE_APPEND_ACTION_ID].sort(),
+        [...BUILT_IN_ACTION_IDS, NOTE_APPEND_ACTION_ID, FORGE_REVIEW_ACTION_ID].sort(),
       );
       for (const action of actions) {
         expect(Object.keys(action).sort(), action.id).toEqual([
+          ...(action.id === FORGE_REVIEW_ACTION_ID ? ["connection"] : []),
           "description",
           "displayName",
           "id",
@@ -2326,11 +2647,22 @@ describe("workflowAction.query", () => {
     });
   });
 
+  it("gives the Connection type of an action that acts through a Connection, and leaves the connection param out of its input schema", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      const review = findActionById(await listWorkflowActions(base, token), FORGE_REVIEW_ACTION_ID);
+      expect(review.connection).toEqual({ type: FORGE_CONNECTION_TYPE });
+      expect(Object.keys(review.inputSchema.properties ?? {}).sort()).toEqual(["body", "verdict"]);
+      expect(review.inputSchema.required).toEqual(["verdict"]);
+    });
+  });
+
   it("leaves out the actions of a plugin once it is disabled", async () => {
     await withArrangedController(async ({ base, token }) => {
       await disablePlugin(base, token, "notes");
       const actions = await listWorkflowActions(base, token);
-      expect(actions.map((action) => action.id).sort()).toEqual(BUILT_IN_ACTION_IDS);
+      expect(actions.map((action) => action.id).sort()).toEqual(
+        [...BUILT_IN_ACTION_IDS, FORGE_REVIEW_ACTION_ID].sort(),
+      );
     });
   });
 });

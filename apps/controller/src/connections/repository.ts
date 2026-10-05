@@ -43,6 +43,11 @@ export interface StoredConnection {
   readonly statusDetail: string | undefined;
   readonly labels: ReadonlyArray<string>;
   readonly config: Record<string, Schema.Json>;
+  /**
+   * The user's own poll interval for each feed, in seconds, keyed by feed
+   * name. A feed missing from it is polled at its plugin's default.
+   */
+  readonly feedIntervals: Readonly<Record<string, number>>;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -64,6 +69,7 @@ export interface ConnectionEdit {
   readonly label?: string;
   readonly labels?: ReadonlyArray<string>;
   readonly config?: Record<string, Schema.Json>;
+  readonly feedIntervals?: Readonly<Record<string, number>>;
   readonly displayName?: string;
   readonly status?: ConnectionStatus;
   /** `null` clears the detail, as when the status goes back to `connected`. */
@@ -97,13 +103,14 @@ interface ConnectionRow {
   readonly status_detail: string | null;
   readonly labels: string;
   readonly config: string;
+  readonly feed_intervals: string;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
 const COLUMNS =
   "id, plugin_id, type, label, display_name, account_id, status, status_detail, labels, config, " +
-  "created_at, updated_at";
+  "feed_intervals, created_at, updated_at";
 
 /** How a connection listing sorts by each of its sortable fields. */
 const CONNECTION_SORT_COLUMNS: Record<ConnectionSortField, SortColumn<StoredConnection>> = {
@@ -133,6 +140,7 @@ const toConnection = (row: ConnectionRow): StoredConnection => ({
   statusDetail: row.status_detail ?? undefined,
   labels: parseJson<ReadonlyArray<string>>(row.labels),
   config: parseJson<Record<string, Schema.Json>>(row.config),
+  feedIntervals: parseJson<Record<string, number>>(row.feed_intervals),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -190,6 +198,7 @@ const make = Effect.gen(function* () {
           statusDetail: undefined,
           labels: connection.labels,
           config: connection.config,
+          feedIntervals: {},
           createdAt: connection.at,
           updatedAt: connection.at,
         };
@@ -201,6 +210,9 @@ const make = Effect.gen(function* () {
       if (edit.label !== undefined) sets.push(sql`label = ${edit.label}`);
       if (edit.labels !== undefined) sets.push(sql`labels = ${JSON.stringify(edit.labels)}`);
       if (edit.config !== undefined) sets.push(sql`config = ${JSON.stringify(edit.config)}`);
+      if (edit.feedIntervals !== undefined) {
+        sets.push(sql`feed_intervals = ${JSON.stringify(edit.feedIntervals)}`);
+      }
       if (edit.displayName !== undefined) sets.push(sql`display_name = ${edit.displayName}`);
       if (edit.status !== undefined) sets.push(sql`status = ${edit.status}`);
       if (edit.statusDetail !== undefined) sets.push(sql`status_detail = ${edit.statusDetail}`);
@@ -208,6 +220,41 @@ const make = Effect.gen(function* () {
         sql`UPDATE connections SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );
     },
+
+    /**
+     * Sets the status and its detail, and `updated_at`, but only while the
+     * current status is one of `from`. Returns whether the row changed.
+     *
+     * The ingest loops write status from a fiber that runs beside the user's
+     * own changes. The condition stops a loop from overwriting a change it
+     * did not see, such as the user disabling the Connection while a poll
+     * was failing.
+     */
+    changeStatusFrom: (
+      id: string,
+      from: ReadonlyArray<ConnectionStatus>,
+      status: ConnectionStatus,
+      detail: string | null,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE connections SET status = ${status}, status_detail = ${detail}, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)} AND status IN ${sql.in(from)}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /** Lists every connection whose status is one of `statuses`, oldest first. */
+    listByStatus: (
+      statuses: ReadonlyArray<ConnectionStatus>,
+    ): Effect.Effect<ReadonlyArray<StoredConnection>, SqlError> =>
+      Effect.map(
+        sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
+                           WHERE status IN ${sql.in(statuses)} ORDER BY created_at, id`,
+        (rows) => rows.map(toConnection),
+      ),
 
     /** Removes the row. Its secrets are removed by the caller, in the same transaction. */
     delete: (id: string): Effect.Effect<void, SqlError> =>

@@ -14,7 +14,7 @@
  * and is never read back, by this API or any other.
  */
 import { Schema } from "effect";
-import { ConnectionStatus } from "@hercule/plugin-host";
+import { ConnectionStatus, MAX_CONTRIBUTION_NAME_LENGTH } from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
@@ -69,6 +69,31 @@ const Origin = Schema.String.check(
 /** A connection's own plugin config, validated against the type's declared schema. */
 const Config = Schema.Record(Schema.String, Schema.Json);
 
+/**
+ * The longest poll interval the user may set for a feed: one day. A feed
+ * polled less often than that is better turned off, and the bound keeps the
+ * number far from any limit of the timer that waits it out.
+ */
+export const MAX_FEED_INTERVAL_SECONDS = 86_400;
+
+/**
+ * The most poll intervals one connection can hold. A connection has one per
+ * feed its type's event source declares, and a source declares a handful.
+ */
+export const MAX_FEED_INTERVALS = 32;
+
+/**
+ * The user's own poll interval for each feed of a connection, in whole seconds,
+ * keyed by the feed's name as the event source declares it. A feed missing
+ * from the map is polled at its plugin's default. The controller checks each
+ * name and each value against the feeds the type declares: the name must be
+ * one of them, and the value must be at least that feed's shortest interval.
+ */
+const FeedIntervals = Schema.Record(
+  bounded(1, MAX_CONTRIBUTION_NAME_LENGTH),
+  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_FEED_INTERVAL_SECONDS })),
+).check(Schema.isMaxProperties(MAX_FEED_INTERVALS));
+
 /** The credential values the user pastes, keyed by the field names the type declared. */
 const Credentials = Schema.Record(Schema.String, SecretValue);
 
@@ -97,6 +122,8 @@ export const Connection = Schema.Struct({
   statusDetail: Schema.optionalKey(Schema.String),
   labels: Schema.Array(Label),
   config: Config,
+  /** The user's own poll interval per feed. Empty when every feed polls at its default. */
+  feedIntervals: FeedIntervals,
   credentials: Schema.Array(CredentialRef),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -126,6 +153,8 @@ export const ConnectionUpdateInput = Schema.Struct({
   label: Schema.optionalKey(ConnectionLabel),
   labels: Schema.optionalKey(Topics),
   config: Schema.optionalKey(Config),
+  /** Replaces every poll interval at once. `{}` puts every feed back on its default. */
+  feedIntervals: Schema.optionalKey(FeedIntervals),
 });
 
 export type ConnectionUpdateInput = Schema.Schema.Type<typeof ConnectionUpdateInput>;

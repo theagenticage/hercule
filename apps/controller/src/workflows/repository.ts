@@ -42,6 +42,8 @@ import {
   type Page,
 } from "../db";
 import { CRON_TICK_EVENT_KIND } from "../events";
+import { CONNECTION_PARAM } from "../plugins";
+import type { Input } from "./validation";
 
 /** A YAML source and the definition it parses to. They are always stored together. */
 export interface ParsedSource {
@@ -139,6 +141,13 @@ export interface CronAdvance {
 /** A trigger that names a Connection, with its workflow's name for a message. */
 export interface TriggerNamingConnection extends TriggerKey {
   readonly workflowName: string;
+}
+
+/** An action step that names a Connection in its `connection` param, with its workflow's name for a message. */
+export interface StepNamingConnection {
+  readonly workflowId: string;
+  readonly workflowName: string;
+  readonly stepId: string;
 }
 
 export interface WorkflowPageRequest {
@@ -362,6 +371,30 @@ const make = Effect.gen(function* () {
             (row) => JSON.parse(row.definition) as WorkflowDefinition,
           ),
       ),
+
+    /**
+     * Returns the declared inputs of each stored workflow with one of the
+     * ids, by workflow id. A workflow that declares no inputs has an empty
+     * list, and an id no workflow has is not in the map.
+     */
+    readInputs: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<Input>>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly inputs: string | null }>`
+              SELECT id, json_extract(definition, '$.inputs') AS inputs
+              FROM workflows WHERE id IN ${sql.in(ids.map(uuidFromString))}
+            `,
+            (rows) =>
+              new Map(
+                rows.map((row) => [
+                  uuidToString(row.id),
+                  row.inputs === null ? [] : (JSON.parse(row.inputs) as ReadonlyArray<Input>),
+                ]),
+              ),
+          ),
 
     /** Inserts a new workflow, disabled, and returns it. */
     insert: (parsedSource: ParsedSource, savedAt: string): Effect.Effect<Workflow, SqlError> =>
@@ -801,6 +834,39 @@ const make = Effect.gen(function* () {
             workflowId: uuidToString(row.workflow_id),
             workflowName: row.workflow_name,
             triggerId: row.trigger_id,
+          })),
+      ),
+
+    /**
+     * Returns every action step whose `connection` param is the Connection's
+     * id, written as a literal, sorted by workflow name and step id. A step
+     * whose param is a template reads its Connection from an input that each
+     * run fills in, so it is not returned.
+     *
+     * Steps are not stored in a table of their own, so this reads each
+     * stored definition's `steps` array.
+     */
+    listStepsNamingConnection: (
+      connectionId: string,
+    ): Effect.Effect<ReadonlyArray<StepNamingConnection>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly workflow_id: Uint8Array;
+          readonly workflow_name: string;
+          readonly step_id: string;
+        }>`
+          SELECT workflows.id AS workflow_id, ${sql.literal(NAME_FROM_DEFINITION)} AS workflow_name,
+                 json_extract(step.value, '$.id') AS step_id
+          FROM workflows, json_each(workflows.definition, '$.steps') AS step
+          WHERE json_extract(step.value, '$.kind') = 'action'
+            AND json_extract(step.value, ${`$.params.${CONNECTION_PARAM}`}) = ${connectionId}
+          ORDER BY workflow_name, step_id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            workflowId: uuidToString(row.workflow_id),
+            workflowName: row.workflow_name,
+            stepId: row.step_id,
           })),
       ),
 

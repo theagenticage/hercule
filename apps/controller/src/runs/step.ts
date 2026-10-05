@@ -8,6 +8,12 @@
  * `executeStep` on the child fiber that executes the record. A step whose
  * action runs in the run's workspace is prepared the same way, but a runner
  * executes it, not this module.
+ *
+ * A plugin's action may act through a Connection. The step names the
+ * Connection in its `connection` param, and the stored input keeps that id
+ * beside the action's own input. Just before the action runs, `executeStep`
+ * reads the Connection's credentials and hands them to the action. They are
+ * never stored on the step record.
  */
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -21,6 +27,7 @@ import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import {
   formatIssue,
   isApiError,
+  isId,
   listDecodeIssues,
   type Run,
   type RunStarted,
@@ -33,13 +40,20 @@ import {
   type TaskFilter,
   type TaskUpdateCall,
 } from "@hercule/contract";
-import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
+import {
+  ActionError,
+  type ActionContext,
+  type WorkflowActionContribution,
+} from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
+import { connectionRepository, ConnectionTypes } from "../connections";
 import { nowIso, withTransaction } from "../db";
 import { renderTemplates } from "../expressions";
 import {
+  CONNECTION_PARAM,
   isBuiltInControllerActionId,
   PluginHost,
+  separateConnectionParam,
   type BuiltInControllerActionId,
   type RegisteredWorkflowAction,
 } from "../plugins";
@@ -59,7 +73,12 @@ import type { RunStartError } from "./start";
  * - `expression_error`: the step's condition, or a template in its params,
  *   could not be evaluated, or the condition gave something other than true
  *   or false.
- * - `validation`: the rendered params do not match the action's input schema.
+ * - `validation`: the rendered params do not match the action's input schema,
+ *   or the step names a Connection of another type than its action acts
+ *   through.
+ * - `connection_unavailable`: the Connection the step acts through is
+ *   disabled, or its credentials could not be read, for example because its
+ *   access token could not be refreshed.
  * - `unexpected`: the action failed with something that is neither an API
  *   error nor an `ActionError`, such as a bug, or the controller could not
  *   carry out the run at this step.
@@ -72,6 +91,7 @@ type EngineStepErrorCode =
   | "not_found"
   | "expression_error"
   | "validation"
+  | "connection_unavailable"
   | "unexpected"
   | "interrupted"
   | "workspace_failed";
@@ -105,21 +125,6 @@ export interface InputFailure {
   readonly error: EngineStepError;
   readonly failureReason: ExecutionFailureReason;
 }
-
-/**
- * Returns the input or the output schema of an action in the catalog, or
- * `undefined` when the action is not in the catalog. The catalog holds any
- * Effect schema, but what a step record stores is JSON, so the engine reads
- * the schema as one that encodes to JSON.
- */
-export const findActionSchema = (
-  actions: ReadonlyArray<RegisteredWorkflowAction>,
-  actionId: string,
-  side: "input" | "output",
-): Schema.Codec<unknown, Schema.Json> | undefined => {
-  const action = actions.find((candidate) => candidate.id === actionId);
-  return action === undefined ? undefined : (action[side] as Schema.Codec<unknown, Schema.Json>);
-};
 
 /**
  * Returns the action step of a run's plan with this id. Throws when there is
@@ -180,7 +185,8 @@ const describeActionFailure = (failure: unknown): StepError | undefined => {
 
 /**
  * Calls a plugin's action with a signal that aborts when the run is
- * cancelled, and returns its result encoded with the action's output schema.
+ * cancelled, and with the Connection it acts through, if any. Returns its
+ * result encoded with the action's output schema.
  * Fails with the action's `ActionError`, or with an `ActionError` of code
  * `unexpected` when the result does not match the output schema: later steps
  * read the output, so a result of the wrong shape must not be stored as if
@@ -193,12 +199,12 @@ const executePluginAction = (
   action: RegisteredWorkflowAction,
   execute: WorkflowActionContribution["execute"],
   input: unknown,
-  run: { readonly runId: string; readonly stepId: string },
+  context: Pick<ActionContext, "run" | "connection">,
 ): Effect.Effect<unknown, ActionError> =>
   Effect.suspend(() => {
     const cancelled = new AbortController();
     return Effect.flatMap(
-      Effect.onInterrupt(execute(input, { run, signal: cancelled.signal }), () =>
+      Effect.onInterrupt(execute(input, { ...context, signal: cancelled.signal }), () =>
         Effect.sync(() => cancelled.abort()),
       ),
       (output) =>
@@ -256,6 +262,8 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
     const tasks = yield* TaskService;
     const notifier = yield* Notifier;
     const host = yield* PluginHost;
+    const connections = yield* connectionRepository;
+    const connectionTypes = yield* ConnectionTypes;
 
     /**
      * The built-in actions, by id. Each but `wait` calls the same service
@@ -306,7 +314,18 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      *
      * - `expression_error` when a template cannot be rendered;
      * - `not_found` when the action is not in the catalog;
-     * - `validation` when the rendered params do not match the action's input.
+     * - `validation` when the rendered params do not match the action's
+     *   input, or when the action acts through a Connection and the
+     *   `connection` param did not render to a Connection id.
+     *
+     * The action is looked up in the full catalog, so the action of a plugin
+     * that is disabled, or that failed to start, is still found: a run that
+     * has started finishes its frozen plan.
+     *
+     * For an action that acts through a Connection, the `connection` param is
+     * left out of the decode and stored beside the encoded input. Whether it
+     * names a usable Connection is checked by `executeStep`, just before the
+     * action runs, because the Connection can change until then.
      */
     const prepareInput = (
       run: Run,
@@ -322,18 +341,39 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             failureReason: "expression-error",
           });
         }
-        const schema = findActionSchema(
-          yield* host.listActiveWorkflowActions(),
-          step.action,
-          "input",
-        );
-        if (schema === undefined) {
+        const found = yield* host.findWorkflowAction(step.action);
+        if (Option.isNone(found)) {
           return Result.fail({
             error: buildActionUnavailableError(step.action),
             failureReason: "step-failed",
           });
         }
-        const decoded = Schema.decodeUnknownResult(schema)(rendered.success, {
+        const action = found.value;
+        const schema = action.input as Schema.Codec<unknown, Schema.Json>;
+        // Rendering keeps the shape of the params, which are a record.
+        const params = rendered.success as Readonly<Record<string, unknown>>;
+        const { connection, actionParams } =
+          action.connection === undefined
+            ? { connection: undefined, actionParams: params }
+            : separateConnectionParam(params);
+        let connectionId: string | undefined;
+        if (action.connection !== undefined) {
+          // Validation allows the param only as a Connection id or as a
+          // template that is exactly one Connection input, and a run's inputs
+          // are checked when it starts. This is the same rule, applied to the
+          // rendered value.
+          if (!isId(connection)) {
+            return Result.fail({
+              error: {
+                code: "validation",
+                message: `The param ${CONNECTION_PARAM} must render to the id of a Connection of type ${action.connection.type}, but it rendered to ${JSON.stringify(connection)}.`,
+              },
+              failureReason: "step-failed",
+            });
+          }
+          connectionId = connection;
+        }
+        const decoded = Schema.decodeUnknownResult(schema)(actionParams, {
           errors: "all",
           onExcessProperty: "error",
         });
@@ -346,7 +386,76 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             failureReason: "step-failed",
           });
         }
-        return Result.succeed(Schema.encodeSync(schema)(decoded.success));
+        const encoded = Schema.encodeSync(schema)(decoded.success);
+        // The input schema is a struct, so the encoded input is an object.
+        return Result.succeed(
+          connectionId === undefined
+            ? encoded
+            : { [CONNECTION_PARAM]: connectionId, ...(encoded as Record<string, Schema.Json>) },
+        );
+      });
+
+    /**
+     * Returns the Connection a step acts through, with its credentials read
+     * just now, refreshed first if its access token has expired. Returns
+     * instead the step error to end the step with:
+     *
+     * - `not_found` when no Connection has the id `connectionId`;
+     * - `validation` when the Connection is of another type than `action`
+     *   acts through;
+     * - `connection_unavailable` when the Connection is disabled, or its
+     *   credentials could not be read.
+     *
+     * A Connection that needs reauth, or that reported an error, is still
+     * used: its credentials may work again, and the action fails with the
+     * provider's own error when they do not.
+     *
+     * Fails only with a database error. Holds no transaction: a refresh
+     * calls the provider over the network.
+     */
+    const readStepConnection = (
+      action: RegisteredWorkflowAction & { readonly connection: { readonly type: string } },
+      connectionId: string,
+    ): Effect.Effect<
+      Result.Result<NonNullable<ActionContext["connection"]>, EngineStepError>,
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const wanted = action.connection.type;
+        const found = isId(connectionId) ? yield* connections.one(connectionId) : Option.none();
+        if (Option.isNone(found)) {
+          return Result.fail<EngineStepError>({
+            code: "not_found",
+            message: `No Connection has the id ${connectionId}. Name a Connection of type ${wanted} in the step's ${CONNECTION_PARAM} param.`,
+          });
+        }
+        const row = found.value;
+        if (row.type !== wanted) {
+          return Result.fail<EngineStepError>({
+            code: "validation",
+            message: `The Connection ${connectionId} is of type ${row.type}, but the action ${action.id} acts through a Connection of type ${wanted}. Name a Connection of type ${wanted} in the step's ${CONNECTION_PARAM} param.`,
+          });
+        }
+        if (row.status === "disabled") {
+          return Result.fail<EngineStepError>({
+            code: "connection_unavailable",
+            message: `The Connection ${connectionId} is disabled. Enable it, or name another Connection of type ${wanted}.`,
+          });
+        }
+        const credentials = yield* Effect.result(
+          connectionTypes.runtimeFor(action.owner).credentials(connectionId),
+        );
+        if (Result.isFailure(credentials)) {
+          return Result.fail<EngineStepError>({
+            code: "connection_unavailable",
+            message: `The credentials of the Connection ${connectionId} could not be read: ${credentials.failure.message}. If the Connection needs to sign in again, reconnect it under Connections.`,
+          });
+        }
+        return Result.succeed({
+          id: connectionId,
+          credentials: credentials.success,
+          config: row.config,
+        });
       });
 
     /**
@@ -360,6 +469,10 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
      * transaction, except for `wait`. A plugin's action reaches outside the
      * controller, so it is called after its record's `running` commits and
      * outside any transaction, and its record ends in a transaction of its own.
+     *
+     * As in `prepareInput`, the action is looked up in the full catalog. A
+     * plugin disabled while the step waits, for example on a token refresh,
+     * does not stop the step: the run finishes its frozen plan.
      */
     const executeStep = (
       run: Run,
@@ -369,10 +482,8 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
       Effect.gen(function* () {
         const step = findActionStep(run, attempt.stepId);
         const { startedAt } = attempt;
-        const catalogEntry = (yield* host.listActiveWorkflowActions()).find(
-          (action) => action.id === step.action,
-        );
-        if (catalogEntry === undefined) {
+        const found = yield* host.findWorkflowAction(step.action);
+        if (Option.isNone(found)) {
           return yield* failRun(
             run.id,
             attempt,
@@ -380,11 +491,18 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             "step-failed",
           );
         }
+        const catalogEntry = found.value;
+        // `prepareInput` stored the Connection's id beside the action's own
+        // input, which is an object.
+        const { connection: connectionId, actionParams } =
+          catalogEntry.connection === undefined
+            ? { connection: undefined, actionParams: input }
+            : separateConnectionParam(input as Readonly<Record<string, unknown>>);
         // The stored input was encoded with this schema, so it decodes; a
         // failure means the catalog entry changed since, and the step fails
         // the way a step with params the action does not take would.
         const decoded = Schema.decodeUnknownResult(catalogEntry.input as Schema.Codec<unknown>)(
-          input,
+          actionParams,
           { errors: "all", onExcessProperty: "error" },
         );
         if (Result.isFailure(decoded)) {
@@ -447,10 +565,27 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             ? withTransaction(sql, Effect.flatMap(called, writeCompletion))
             : Effect.flatMap(called, (output) => withTransaction(sql, writeCompletion(output)));
         } else if (pluginExecute !== undefined) {
+          const { connection: declared } = catalogEntry;
+          let connection: ActionContext["connection"];
+          if (declared !== undefined) {
+            // The stored input names no Connection only when the action
+            // started to declare one after the input was stored.
+            const resolved =
+              typeof connectionId === "string"
+                ? yield* readStepConnection({ ...catalogEntry, connection: declared }, connectionId)
+                : Result.fail<EngineStepError>({
+                    code: "validation",
+                    message: `The step's input names no Connection, but the action ${catalogEntry.id} acts through a Connection of type ${declared.type}.`,
+                  });
+            if (Result.isFailure(resolved)) {
+              return yield* failRun(run.id, attempt, resolved.failure, "step-failed");
+            }
+            connection = resolved.success;
+          }
           execute = Effect.flatMap(
             executePluginAction(catalogEntry, pluginExecute, decoded.success, {
-              runId: run.id,
-              stepId: attempt.stepId,
+              run: { runId: run.id, stepId: attempt.stepId },
+              ...(connection === undefined ? {} : { connection }),
             }),
             (output) => withTransaction(sql, writeCompletion(output)),
           );

@@ -156,6 +156,7 @@ const GITHUB: Connection = {
   status: "connected",
   labels: [],
   config: {},
+  feedIntervals: {},
   credentials: [],
   createdAt: CONNECTION_AT,
   updatedAt: CONNECTION_AT,

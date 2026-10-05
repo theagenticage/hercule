@@ -16,7 +16,15 @@ export { SegmentedControl, SegmentedControlItem } from "./primitives/segmented-c
 export { Textarea } from "./primitives/textarea";
 
 export { AnswerLedger, type AnswerLedgerRow } from "./patterns/answer-ledger";
-export { EmptyState, Field, FormCard, Group, LaneLabel, Row } from "./patterns/patterns";
+export {
+  EmptyState,
+  Field,
+  FormCard,
+  FormSection,
+  Group,
+  LaneLabel,
+  Row,
+} from "./patterns/patterns";
 
 export {
   CancelledMark,

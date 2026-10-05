@@ -5,10 +5,20 @@
  */
 export { EventKindCatalogLayer } from "./event-kinds";
 export { PluginConfigsLayer, PluginHost, PluginHostLayer } from "./host";
+export {
+  computeIngestFingerprint,
+  IngestLoops,
+  IngestLoopsLayer,
+  type RunningIngest,
+} from "./ingest";
+export { IngestExecutor } from "./ingest-executor";
+export type { RegisteredEventSource } from "./event-sources";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
 export {
+  CONNECTION_PARAM,
   isBuiltInControllerActionId,
+  separateConnectionParam,
   runsInWorkspace,
   WORKSPACE_ACTION_IDS,
   type BuiltInControllerActionId,

@@ -39,6 +39,12 @@ import {
   waitWithin,
 } from "../http/testing";
 import {
+  buildForgePlugin,
+  FORGE_CONNECTION_TYPE,
+  FORGE_REVIEW_ACTION_ID,
+} from "../plugins/testing";
+import {
+  createProfile,
   spawnThreadUnder,
   readProfileNamed,
   WAIT_DEADLINE_MS,
@@ -1098,6 +1104,148 @@ describe("the actor stamped on workflow writes", () => {
       ]);
       expect(await readWorkflowEntries(base, arranged.token)).toEqual(workflowEntriesBefore);
     });
+  });
+});
+
+describe("saving a workflow whose step acts through a Connection", () => {
+  /** The message of the refusal for a caller without the connection.use grant. */
+  const SAVE_REFUSAL =
+    "This workflow has a step that acts through a Connection, or that may give a Connection to a run it starts, and choosing that Connection needs the connection.use grant, which this session lacks. Ask the user to save the workflow, or to grant connection.use.";
+
+  /** Builds a workflow whose review step acts through the Connection its `connection` param names. */
+  const buildReviewDefinition = (connection: string) => ({
+    name: "Review a pull request",
+    inputs: [{ name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: false }],
+    steps: [
+      {
+        id: "review",
+        kind: "action",
+        action: FORGE_REVIEW_ACTION_ID,
+        params: { connection, verdict: "approve" },
+      },
+    ],
+  });
+
+  it("is refused to a session without connection.use, whether the step names the Connection by its id or through an input, and changes nothing", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const base = arranged.harness.base;
+        const connectionId = await createConnection(base, arranged.token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const profile = await createProfile(arranged, "Writes workflows", [
+          "workflow.write",
+          "workflow.read",
+        ]);
+        const session = await spawnThreadUnder(arranged, profile);
+        // A workflow with no such step needs no connection.use, to save or to edit.
+        const stored = await createWorkflowOrFail(base, session.token, {
+          source: buildFileTaskSource("No Connection"),
+        });
+        const storedBefore = await readWorkflow(base, arranged.token, stored.id);
+        const entriesBefore = await readWorkflowEntries(base, arranged.token);
+
+        for (const connection of [connectionId, "{{ inputs.account }}"]) {
+          const definition = buildReviewDefinition(connection);
+          for (const response of [
+            await createWorkflow(base, session.token, { definition }),
+            await updateWorkflow(base, session.token, stored.id, { definition }),
+          ]) {
+            const refusal = await readErrorBody(response);
+            expect(response.status, refusal.text).toBe(403);
+            expect(refusal).toMatchObject({
+              code: "forbidden",
+              grant: "connection.use",
+              message: SAVE_REFUSAL,
+            });
+          }
+        }
+
+        expect(await readWorkflow(base, arranged.token, stored.id)).toEqual(storedBefore);
+        expect((await queryWorkflows(base, arranged.token)).items.map((item) => item.id)).toEqual([
+          stored.id,
+        ]);
+        expect(await readWorkflowEntries(base, arranged.token)).toEqual(entriesBefore);
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+
+  it("is refused to a session without connection.use when a run.start step gives a Connection to the workflow it starts, named by its id or by a template", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const base = arranged.harness.base;
+        const connectionId = await createConnection(base, arranged.token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createWorkflowOrFail(base, arranged.token, {
+          definition: buildReviewDefinition("{{ inputs.account }}"),
+        });
+        const profile = await createProfile(arranged, "Writes workflows", [
+          "workflow.write",
+          "workflow.read",
+        ]);
+        const session = await spawnThreadUnder(arranged, profile);
+        const entriesBefore = await readWorkflowEntries(base, arranged.token);
+
+        for (const workflowId of [target.id, "{{ inputs.child }}"]) {
+          const response = await createWorkflow(base, session.token, {
+            definition: {
+              name: "Start a review",
+              inputs: [{ name: "child", schema: { type: "string" }, required: false }],
+              steps: [
+                {
+                  id: "start",
+                  kind: "action",
+                  action: "run.start",
+                  params: { workflowId, inputs: { account: connectionId } },
+                },
+              ],
+            },
+          });
+
+          const refusal = await readErrorBody(response);
+          expect(response.status, refusal.text).toBe(403);
+          expect(refusal).toMatchObject({
+            code: "forbidden",
+            grant: "connection.use",
+            message: SAVE_REFUSAL,
+          });
+        }
+        expect((await queryWorkflows(base, arranged.token)).items.map((item) => item.id)).toEqual([
+          target.id,
+        ]);
+        expect(await readWorkflowEntries(base, arranged.token)).toEqual(entriesBefore);
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
+  });
+
+  it("is allowed to the user, and to a session whose profile holds connection.use", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const base = arranged.harness.base;
+        const connectionId = await createConnection(base, arranged.token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const profile = await createProfile(arranged, "Writes workflows with Connections", [
+          "workflow.write",
+          "workflow.read",
+          "connection.use",
+        ]);
+        const session = await spawnThreadUnder(arranged, profile);
+
+        for (const caller of [arranged.token, session.token]) {
+          const workflow = await createWorkflowOrFail(base, caller, {
+            definition: buildReviewDefinition(connectionId),
+          });
+          await updateWorkflowOrFail(base, caller, workflow.id, {
+            definition: buildReviewDefinition("{{ inputs.account }}"),
+          });
+        }
+      },
+      { plugins: [buildForgePlugin().plugin] },
+    );
   });
 });
 

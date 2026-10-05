@@ -309,9 +309,12 @@ const renderWorkflowIssues = (answer: WorkflowIssues): ReadonlyArray<string> =>
 const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown> => {
   const properties = Object.keys(action.inputSchema["properties"] ?? {});
   const required = new Set((action.inputSchema["required"] ?? []) as ReadonlyArray<string>);
+  // The `connection` param is not in the input schema, because the action
+  // never receives it, but a step must still write it.
+  const params = properties.map((name) => (required.has(name) ? name : `${name}?`));
   return {
     id: action.id,
-    params: properties.map((name) => (required.has(name) ? name : `${name}?`)).join(" "),
+    params: (action.connection === undefined ? params : ["connection", ...params]).join(" "),
     description: action.description,
   };
 };

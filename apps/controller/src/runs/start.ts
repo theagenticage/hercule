@@ -22,6 +22,7 @@ import {
   createNotFoundError,
   createValidationError,
   formatIssue,
+  isId,
   listEntrySteps,
   RunRerunInput,
   RunStartInput,
@@ -38,12 +39,18 @@ import {
   Validation,
   type WorkflowDefinition,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, type Actor } from "../actor";
+import { checkActorHoldsGrant, currentStamp, requireGrant, type Actor } from "../actor";
+import { connectionRepository } from "../connections";
 import { afterCommit, nowIso, withTransaction } from "../db";
-import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
+import { CONNECTION_PARAM, PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
-import { workflowRepository, WorkflowService, type PendingTriggerEffect } from "../workflows";
+import {
+  readConnectionInputName,
+  workflowRepository,
+  WorkflowService,
+  type PendingTriggerEffect,
+} from "../workflows";
 import { runRepository, type RunOutcome } from "./repository";
 import { describeMissingCapableRunner, listWorkspaceActionIds } from "./runner-capabilities";
 import { isUnfinished } from "./step-records";
@@ -131,10 +138,7 @@ const REPLAY_REFUSALS: RefusalMessages = {
  * it is refused: a run that ignored a step or a trigger it cannot execute
  * would do something the author did not write.
  */
-const listUnsupportedElements = (
-  definition: WorkflowDefinition,
-  actions: ReadonlyArray<RegisteredWorkflowAction>,
-): ReadonlyArray<Issue> => {
+const listUnsupportedElements = (definition: WorkflowDefinition): ReadonlyArray<Issue> => {
   const triggerIssues = (definition.triggers ?? []).flatMap((trigger, index) =>
     trigger.kind === "signal"
       ? [
@@ -147,28 +151,13 @@ const listUnsupportedElements = (
       : [],
   );
   const stepIssues = definition.steps.flatMap((step: PlanStep, index): ReadonlyArray<Issue> => {
-    const path = ["steps", String(index)];
-    if (step.kind === "agent") {
-      return [
-        {
-          path: [...path, "kind"],
-          message: "Runs cannot run agent steps yet. Only action steps can run.",
-        },
-      ];
-    }
-    const action = actions.find((candidate) => candidate.id === step.action);
-    // Which of a step's params names the Connection is not settled yet, and
-    // an action called without its Connection would fail in ways its author
-    // never planned for.
-    return action?.connection === undefined
-      ? []
-      : [
-          {
-            path: [...path, "action"],
-            message:
-              "Runs cannot call an action that acts through a Connection yet. Remove this step to run this workflow.",
-          },
-        ];
+    if (step.kind !== "agent") return [];
+    return [
+      {
+        path: ["steps", String(index), "kind"],
+        message: "Runs cannot run agent steps yet. Only action steps can run.",
+      },
+    ];
   });
   return [...triggerIssues, ...stepIssues];
 };
@@ -183,6 +172,26 @@ interface RunToWrite {
   readonly inputs: Readonly<Record<string, unknown>>;
   readonly originalRunId?: string;
 }
+
+/**
+ * The message of the `Forbidden` error for a sent workflow with a connection
+ * param: a step that acts through a Connection, or that may give one to a run
+ * it starts.
+ */
+const SENT_WORKFLOW_CONNECTION_USE_REFUSAL =
+  "This run's definition has a step that acts through a Connection, or that may give a Connection to a run it starts, and choosing that Connection needs the connection.use grant, which this session lacks. Start a stored workflow and leave its Connection inputs to their defaults, or ask the user to grant connection.use.";
+
+/**
+ * Returns the message of the `Forbidden` error for a start of a stored
+ * workflow that gives a value for `inputName`, an input a connection param
+ * reads.
+ */
+const describeConnectionInputRefusal = (inputName: string): string =>
+  `The input ${inputName} chooses the Connection a step acts through, or one a step gives to a run it starts, and giving it a value needs the connection.use grant, which this session lacks. A run that leaves the input to its default needs no grant. Ask the user to start the run, or to grant connection.use.`;
+
+/** The message of the `Forbidden` error for a replay of a sent workflow with a connection param. */
+const REPLAY_CONNECTION_USE_REFUSAL =
+  "This run's workflow was sent with run.start, and its sender chose the Connection a step acts through, or one it may give to a run it starts. Replaying it needs the connection.use grant, which this session lacks. Ask the user to replay the run, or to grant connection.use.";
 
 /**
  * Returns the message a run stores when it could not start: the refusal's
@@ -230,6 +239,7 @@ export const makeRunStart = (
     const host = yield* PluginHost;
     const settings = yield* Settings;
     const runners = yield* runnerRepository;
+    const connections = yield* connectionRepository;
 
     /**
      * Checks that a run started by a step of another run is not nested
@@ -254,11 +264,68 @@ export const makeRunStart = (
       });
 
     /**
+     * Returns an issue for each step of a valid `plan` that names a disabled
+     * Connection as a literal id in its `connection` param, at the param's
+     * path. Only steps whose action acts through a Connection are checked.
+     *
+     * Saving the workflow checked that the Connection exists and is of the
+     * right type, but not that it is enabled: it can be enabled again before
+     * a run starts, in the same way as the default of a Connection input. A
+     * template is exactly one Connection input, and resolving the run's
+     * inputs checks the Connection the input names.
+     */
+    const listDisabledConnectionIssues = (
+      plan: WorkflowDefinition,
+    ): Effect.Effect<ReadonlyArray<Issue>, SqlError> =>
+      Effect.gen(function* () {
+        const actions = yield* host.listActiveWorkflowActions();
+        const issues: Array<Issue> = [];
+        for (const [index, step] of plan.steps.entries()) {
+          if (step.kind !== "action") continue;
+          const action = actions.find((candidate) => candidate.id === step.action);
+          const connectionId = step.params?.[CONNECTION_PARAM];
+          if (action?.connection === undefined || !isId(connectionId)) continue;
+          const found = yield* connections.one(connectionId);
+          if (Option.isSome(found) && found.value.status === "disabled") {
+            issues.push({
+              path: ["steps", String(index), "params", CONNECTION_PARAM],
+              message: `This Connection is disabled. Enable it, or name another Connection of type ${action.connection.type}.`,
+            });
+          }
+        }
+        return issues;
+      });
+
+    /**
+     * Checks that `actor` may choose the Connection a step acts through.
+     * Fails with `Forbidden` and `message` when the actor lacks the
+     * `connection.use` grant.
+     *
+     * Only an actor that holds the grant may write a connection param into a
+     * definition, or fill in the input a connection param reads (see
+     * `WorkflowService.listConnectionParams`). Filling in a stored workflow's
+     * other inputs, or leaving a Connection input to its default, needs no
+     * grant: the Connection was then chosen by whoever saved the workflow,
+     * and saving it needed the grant. A connection param includes a value a
+     * `run.start` step gives for a Connection input of the workflow it
+     * starts, so this holds for a child run too: the child's own check passes,
+     * because a run passes every grant check, but its parent's start was
+     * checked here.
+     */
+    const requireConnectionUse = (
+      actor: Actor,
+      message: string,
+    ): Effect.Effect<void, Forbidden> => {
+      const refused = checkActorHoldsGrant("connection.use", actor, message);
+      return refused === undefined ? Effect.void : Effect.fail(refused);
+    };
+
+    /**
      * Checks that `plan` can run with `unresolvedInputs`, and returns the
      * inputs with their defaults applied. It validates the plan again,
-     * refuses what runs cannot execute yet, and resolves the inputs. Fails
-     * with `Validation` when any check fails, with the message from
-     * `refusals` where it has one.
+     * refuses what runs cannot execute yet and steps that name a disabled
+     * Connection, and resolves the inputs. Fails with `Validation` when any
+     * check fails, with the message from `refusals` where it has one.
      */
     const checkRunnable = (
       plan: WorkflowDefinition,
@@ -272,7 +339,7 @@ export const makeRunStart = (
         const problems =
           invalid.length > 0
             ? invalid
-            : listUnsupportedElements(plan, yield* host.listActiveWorkflowActions());
+            : [...listUnsupportedElements(plan), ...(yield* listDisabledConnectionIssues(plan))];
         if (problems.length > 0) {
           return yield* Effect.fail(createValidationError(problems, refusals.unrunnablePlan));
         }
@@ -382,6 +449,12 @@ export const makeRunStart = (
      *   workspace action the workflow uses, or the inputs do not match its
      *   declarations;
      * - `NotFound` for an unknown `workflowId`;
+     * - `Forbidden` when the caller lacks the `connection.use` grant and the
+     *   request sends a workflow with a connection param, or gives a value
+     *   for an input a connection param reads. A connection param is a
+     *   step's `connection` param, or a value a `run.start` step gives for a
+     *   Connection input of the workflow it starts (see
+     *   `WorkflowService.listConnectionParams`);
      * - `CapExceeded` when the run would be nested deeper than the
      *   controller's `run.nestingLimit`.
      *
@@ -406,21 +479,28 @@ export const makeRunStart = (
         }
         const origin = yield* decideOrigin(actor);
         if (workflowId !== undefined) {
-          return yield* writeRun(
-            Effect.map(
-              readStoredDefinition(workflowId, () => createNotFoundError("no such workflow")),
-              (plan) => ({ plan, workflowId, inputs }),
-            ),
-            origin,
-            STORED_WORKFLOW_REFUSALS,
-          );
+          const readStoredRun = Effect.gen(function* () {
+            const plan = yield* readStoredDefinition(workflowId, () =>
+              createNotFoundError("no such workflow"),
+            );
+            const chosenInput = (yield* workflows.listConnectionParams(plan))
+              .map((param) => readConnectionInputName(param.value))
+              .find((name) => name !== undefined && Object.hasOwn(inputs, name));
+            if (chosenInput !== undefined) {
+              yield* requireConnectionUse(actor, describeConnectionInputRefusal(chosenInput));
+            }
+            return { plan, workflowId, inputs };
+          });
+          return yield* writeRun(readStoredRun, origin, STORED_WORKFLOW_REFUSALS);
         }
         const plan = yield* workflows.parseDefinition(content);
-        return yield* writeRun(
-          Effect.succeed({ plan, workflowId: null, inputs }),
-          origin,
-          SENT_WORKFLOW_REFUSALS,
-        );
+        const readSentRun = Effect.gen(function* () {
+          if ((yield* workflows.listConnectionParams(plan)).length > 0) {
+            yield* requireConnectionUse(actor, SENT_WORKFLOW_CONNECTION_USE_REFUSAL);
+          }
+          return { plan, workflowId: null, inputs };
+        });
+        return yield* writeRun(readSentRun, origin, SENT_WORKFLOW_REFUSALS);
       });
 
     /**
@@ -456,6 +536,12 @@ export const makeRunStart = (
      * Fails with:
      *
      * - `NotFound` when no run has the id;
+     * - `Forbidden` when a replay runs a workflow that was sent with
+     *   `run.start` and has a connection param, and the caller lacks the
+     *   `connection.use` grant. The sender chose that
+     *   Connection, so replaying the run chooses it again. A re-stamp, or a
+     *   replay of a stored workflow, runs steps whose Connection was chosen
+     *   when the workflow was saved, with the original run's inputs;
      * - `InvalidState` when the run has not ended, or when a re-stamp has no
      *   stored workflow to read, because the run's workflow was sent with
      *   `run.start` or has been deleted since. It never falls back to
@@ -474,16 +560,22 @@ export const makeRunStart = (
         );
         const origin = yield* decideOrigin(actor);
         if (mode === "replay") {
-          return yield* writeRun(
-            Effect.map(readEndedRun(id), (original) => ({
+          const readReplayedRun = Effect.gen(function* () {
+            const original = yield* readEndedRun(id);
+            if (
+              original.workflowId === null &&
+              (yield* workflows.listConnectionParams(original.plan)).length > 0
+            ) {
+              yield* requireConnectionUse(actor, REPLAY_CONNECTION_USE_REFUSAL);
+            }
+            return {
               plan: original.plan,
               workflowId: original.workflowId,
               inputs: original.inputs,
               originalRunId: original.id,
-            })),
-            origin,
-            REPLAY_REFUSALS,
-          );
+            };
+          });
+          return yield* writeRun(readReplayedRun, origin, REPLAY_REFUSALS);
         }
         const readRestampedRun = Effect.gen(function* () {
           const original = yield* readEndedRun(id);

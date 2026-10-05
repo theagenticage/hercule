@@ -286,6 +286,33 @@ describe("a catalog query that returns a plain array", () => {
       "task.create  title description labels?  Creates one Task.",
     ]);
   });
+
+  it("lists connection first for an action that acts through a Connection, though its schema leaves the param out", () => {
+    expect(
+      renderHuman(
+        {
+          kind: "value",
+          value: [
+            {
+              id: "github/pr.review",
+              displayName: "Review a pull request",
+              description: "Reviews a pull request.",
+              inputSchema: {
+                type: "object",
+                properties: { verdict: {}, body: {} },
+                required: ["verdict"],
+              },
+              connection: { type: "github/github" },
+            },
+          ],
+        },
+        lookUpCommand("workflow-action", "list"),
+      ),
+    ).toEqual([
+      "id                params                    description",
+      "github/pr.review  connection verdict body?  Reviews a pull request.",
+    ]);
+  });
 });
 
 describe("hercule run", () => {

@@ -52,7 +52,9 @@ export const appendPlatformSourceEvent = (
       // never matches such an event.
       dedupKey: crypto.randomUUID(),
       refs: [],
+      url: null,
       payload: event.payload,
+      raw: null,
       actor: event.actor,
     }),
     // A random dedup key never collides, so the insert is never skipped,

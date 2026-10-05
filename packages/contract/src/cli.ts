@@ -943,7 +943,7 @@ export const CLI = {
   },
   "event.emit": {
     command: "event emit",
-    help: "Posts one event into the pipeline by hand. Use it to test a subscription or a filter without waiting for the real thing to happen, or to tell Hercule about something no source watches. The kind must be one a plugin declared, and the payload must match that kind's schema; the core fills in the rest and returns the new event's id.",
+    help: "Posts one event into the pipeline by hand. Use it to test a subscription or a filter without waiting for the real thing to happen, or to tell Hercule about something no source watches. The kind must be one a plugin declared, and the payload must match that kind's schema; the core fills in the rest and returns the new event's id. An event of a plugin's kind starts the same workflows as one the plugin's event source sends through a Connection, so posting one needs the connection.use grant as well as event.emit.",
     examples: [
       {
         args: [
@@ -989,6 +989,8 @@ export const CLI = {
       },
     },
     errors: {
+      forbidden:
+        "you lack event.emit, or you lack connection.use, which posting an event of a plugin's kind needs; the error names the grant to ask for in a Permission Request, or ask the user to post the event",
       not_found: "no Connection has that id",
       validation:
         "no plugin declares that kind, or the payload does not fit the kind's schema, or a ref is not written <system>:<kind>:<identity>",
@@ -1115,7 +1117,7 @@ export const CLI = {
   },
   "workflow.create": {
     command: "workflow create",
-    help: "Creates a workflow from the YAML read from stdin, and stores the YAML byte for byte. An invalid source is rejected with one line per error, each giving its path in the definition, and nothing is stored. A new workflow is disabled: its triggers match no events until you enable it with `hercule workflow update <id> --enabled true`.",
+    help: "Creates a workflow from the YAML read from stdin, and stores the YAML byte for byte. An invalid source is rejected with one line per error, each giving its path in the definition, and nothing is stored. A new workflow is disabled: its triggers match no events until you enable it with `hercule workflow update <id> --enabled true`. A workflow with a step that acts through a Connection, or that gives a Connection to a run it starts, needs the connection.use grant as well as workflow.write, because the step chooses the Connection every run of the workflow acts through.",
     examples: [
       {
         args: [],
@@ -1149,13 +1151,15 @@ export const CLI = {
       definition: { hidden: true },
     },
     errors: {
+      forbidden:
+        "you lack workflow.write, or the workflow has a step that acts through a Connection, or gives one to a run it starts, and you lack connection.use; the error names the grant to ask for in a Permission Request, or ask the user to save the workflow; nothing was stored",
       validation:
         "the source is not a valid workflow: each printed line gives a path in the definition and the problem there, and a YAML syntax error gives its line and column; nothing was stored",
     },
   },
   "workflow.update": {
     command: "workflow update",
-    help: "Replaces a workflow's YAML source, or enables or disables the workflow. Enabling or disabling leaves the source unchanged. An invalid new source is rejected and the stored workflow does not change. When the source changes, each trigger that keeps its id also keeps its status.",
+    help: "Replaces a workflow's YAML source, or enables or disables the workflow. Enabling or disabling leaves the source unchanged. An invalid new source is rejected and the stored workflow does not change. When the source changes, each trigger that keeps its id also keeps its status. A new source with a step that acts through a Connection, or that gives a Connection to a run it starts, needs the connection.use grant as well as workflow.write.",
     examples: [
       { args: ["1f3a9c2e", "--enabled", "true"] },
       {
@@ -1192,6 +1196,8 @@ export const CLI = {
       },
     },
     errors: {
+      forbidden:
+        "you lack workflow.write, or the new source has a step that acts through a Connection, or gives one to a run it starts, and you lack connection.use; the error names the grant to ask for in a Permission Request, or ask the user to save the workflow; the stored workflow did not change",
       validation:
         "the new source is not a valid workflow: each printed line gives a path in the definition and the problem there; the stored workflow did not change",
     },
@@ -1323,7 +1329,7 @@ export const CLI = {
 
   "workflowAction.query": {
     command: "workflow-action list",
-    help: "Lists every action a workflow step can call right now, with the params each one takes. An optional param ends in ?, and --json prints the params as JSON Schema and says where each action runs: `controller`, or `workspace` for an action a runner runs in the run's workspace, such as git.commit. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin is running.",
+    help: "Lists every action a workflow step can call right now, with the params each one takes. An optional param ends in ?. An action that acts through a Connection takes the param connection: the id of a Connection of its type, or a template that is exactly one Connection input of that type, such as {{ inputs.account }}. --json prints the params as JSON Schema, without the connection param, gives the Connection type as connection.type, and says where each action runs: `controller`, or `workspace` for an action a runner runs in the run's workspace, such as git.commit. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin is running.",
     examples: [{ args: [] }, { args: ["--json"] }],
     fields: {},
   },
@@ -1337,7 +1343,7 @@ export const CLI = {
 
   "run.start": {
     command: "run start",
-    help: "Starts a run and prints its id at once, without waiting for any step. Name a stored workflow with --workflow, or pipe a workflow's YAML with --source-stdin to run it once without storing it, for example to try it before saving it. The workflow is checked first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Follow the run with `hercule run read <id>`, or subscribe to it with `hercule subscription create run:<id>` to hear when it ends.",
+    help: "Starts a run and prints its id at once, without waiting for any step. Name a stored workflow with --workflow, or pipe a workflow's YAML with --source-stdin to run it once without storing it, for example to try it before saving it. The workflow is checked first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Choosing the Connection a step acts through needs the connection.use grant as well as run.start: sending a workflow with such a step does, and so does giving a value for an input that a step's connection param reads. A step that gives a Connection to a run it starts counts as such a step. A stored workflow whose Connection inputs keep their defaults needs no such grant. Follow the run with `hercule run read <id>`, or subscribe to it with `hercule subscription create run:<id>` to hear when it ends.",
     examples: [
       { args: ["--workflow", "1f3a9c2e"] },
       { args: ["--workflow", "1f3a9c2e", "--inputs", '{"title":"Fix login"}'] },
@@ -1379,6 +1385,8 @@ export const CLI = {
       },
     },
     errors: {
+      forbidden:
+        "you lack run.start, or you lack connection.use and chose the Connection a step acts through, by sending the workflow or by giving a value for its Connection input; the error names the grant to ask for in a Permission Request, or leave the Connection input to its default; no run was started",
       validation:
         "the workflow is not valid, or an input is unknown, missing or has the wrong value: each printed line gives the path and the problem; no run was started",
       cap_exceeded:
@@ -1455,7 +1463,7 @@ export const CLI = {
   },
   "run.rerun": {
     command: "run rerun",
-    help: "Starts a new run with the inputs of a run that has ended, and prints the new run's id at once. By default the new run uses the workflow as it is stored now, so a fix to the workflow takes effect: --mode re-stamp. --mode replay runs the plan the original run froze instead. A run of a workflow that was sent rather than stored, or that has been deleted since, can only be replayed. The new run names the original run as the run it re-runs; list the re-runs of a run with `hercule run list --original-run <id>`.",
+    help: "Starts a new run with the inputs of a run that has ended, and prints the new run's id at once. By default the new run uses the workflow as it is stored now, so a fix to the workflow takes effect: --mode re-stamp. --mode replay runs the plan the original run froze instead. A run of a workflow that was sent rather than stored, or that has been deleted since, can only be replayed. Replaying a run of a sent workflow with a step that acts through a Connection needs the connection.use grant as well as run.start. The new run names the original run as the run it re-runs; list the re-runs of a run with `hercule run list --original-run <id>`.",
     examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--mode", "replay"] }],
     fields: {
       id: {
@@ -1469,6 +1477,8 @@ export const CLI = {
       },
     },
     errors: {
+      forbidden:
+        "you lack run.start, or you replay a run of a sent workflow with a step that acts through a Connection and you lack connection.use; the error names the grant to ask for in a Permission Request, or ask the user to re-run it; no run was started",
       invalid_state:
         "the run has not ended yet: wait for it to end or cancel it first; or it has no stored workflow to re-stamp from: re-run it with --mode replay",
       validation:
@@ -1889,8 +1899,11 @@ export const CLI = {
   },
   "connection.update": {
     command: "connection update",
-    help: "Edits what the user chose about a Connection: its label, its topics, its config. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
-    examples: [{ args: ["1f3a9c2e", "--label", "personal"] }],
+    help: "Edits a Connection's label, topics, config, and how often each of its feeds is polled. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
+    examples: [
+      { args: ["1f3a9c2e", "--label", "personal"] },
+      { args: ["1f3a9c2e", "--feed-intervals", '{"repos":300}'] },
+    ],
     fields: {
       id: {
         positional: true,
@@ -1903,6 +1916,10 @@ export const CLI = {
         help: "A Topic to file its events into. The list is replaced whole, so send every topic it is to keep. The CLI cannot clear every topic, because a flag given zero times sends nothing; clear them in the web app or through the API.",
       },
       config: { flag: "config", help: "A replacement config as inline JSON." },
+      feedIntervals: {
+        flag: "feed-intervals",
+        help: 'Seconds between polls, per feed, as inline JSON such as {"repos":300}. The map is replaced whole, and a feed left out polls at its default, so {} puts every feed back on its default. Each feed has a shortest interval its plugin allows; `hercule plugin read` shows the feeds of the plugin\'s event source.',
+      },
     },
   },
   "connection.delete": {

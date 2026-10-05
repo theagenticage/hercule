@@ -14,10 +14,13 @@ import { Cause, Effect, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   HOST_API,
+  PluginError,
   registerConnectionType,
   registerEventSource,
   secret,
+  type FeedDeclaration,
   type Plugin,
+  type PluginCapability,
   type ProviderDefinition,
 } from "@hercule/plugin-host";
 import { PluginHost, Plugins } from "./index";
@@ -30,6 +33,8 @@ import {
   notesPlugin,
   buildPluginStack,
   buildProviderDefinition,
+  IDLE_FEEDS,
+  IDLE_INGEST_OPEN,
 } from "./testing";
 
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
@@ -693,21 +698,110 @@ describe("the workflow action catalog", () => {
       "wait",
     ]);
   });
+
+  it("lists the actions of active plugins only, and finds the action of a stopped or failed plugin by id", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          notesPlugin,
+          {
+            ...buildActionPlugin("broken", NOTE_APPEND_ACTION),
+            activate: () => Effect.fail(new PluginError({ message: "broken on purpose" })),
+          },
+          buildActionPlugin("slashed", { ...NOTE_APPEND_ACTION, id: "note/append" }),
+        ]);
+        yield* host.stop("notes");
+        const listed = (yield* host.listActiveWorkflowActions()).map((action) => action.id);
+        const lookups = yield* Effect.forEach(
+          ["notes/note.append", "broken/note.append", "slashed/note/append", "absent/note.append"],
+          (id) =>
+            Effect.map(
+              host.findWorkflowAction(id),
+              Option.map((action) => action.owner),
+            ),
+        );
+        return { listed, lookups, broken: yield* host.status("broken") };
+      }),
+    );
+
+    expect(readErroredMessage(found.broken)).toContain("broken on purpose");
+    expect(found.listed.filter((id) => id.includes("/"))).toEqual([]);
+    expect(found.lookups).toEqual([
+      Option.some("notes"),
+      Option.some("broken"),
+      Option.none(),
+      Option.none(),
+    ]);
+  });
+
+  it("marks a plugin errored if an action that acts through a Connection has a connection field, or declares another plugin's Connection type", async () => {
+    const statuses = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildActionPlugin("shadowed", {
+            ...NOTE_APPEND_ACTION,
+            connection: { type: "shadowed/shadowed" },
+            input: Schema.Struct({ text: Schema.String, connection: Schema.String }),
+          }),
+          buildActionPlugin("borrowed", {
+            ...NOTE_APPEND_ACTION,
+            connection: { type: "github/github" },
+          }),
+          buildActionPlugin("owned", {
+            ...NOTE_APPEND_ACTION,
+            connection: { type: "owned/owned" },
+          }),
+        ]);
+        return {
+          shadowed: yield* host.status("shadowed"),
+          borrowed: yield* host.status("borrowed"),
+          owned: yield* host.status("owned"),
+        };
+      }),
+    );
+
+    expect(readErroredMessage(statuses.shadowed)).toContain(
+      "its input schema has a field named connection, and that name is reserved",
+    );
+    expect(readErroredMessage(statuses.borrowed)).toContain(
+      "a Connection of type github/github, which the plugin borrowed does not declare",
+    );
+    expect(readErroredMessage(statuses.owned)).toBeUndefined();
+  });
 });
 
-/** Builds a plugin that declares one event source, with the id `word`, and one event kind. */
-const buildEventSourcePlugin = (id: string, word: string, kind: string): Plugin => ({
+/**
+ * Builds a plugin that declares one event source, with the id `word`, and one
+ * event kind. The source polls nothing unless `options.feeds` declares feeds,
+ * the manifest requests `event-sources` and `events` unless
+ * `options.capabilities` replaces them, and the source is for the type
+ * `<id>/<id>` unless `options.connectionType` names another.
+ */
+const buildEventSourcePlugin = (
+  id: string,
+  word: string,
+  kind: string,
+  options: {
+    readonly feeds?: Record<string, FeedDeclaration>;
+    readonly capabilities?: ReadonlyArray<PluginCapability>;
+    readonly connectionType?: string;
+  } = {},
+): Plugin => ({
   manifest: {
     id,
     displayName: `Plugin ${id}`,
     hostApi: HOST_API,
-    capabilities: ["event-sources"],
+    capabilities: options.capabilities ?? ["event-sources", "events"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>
     registerEventSource(host, {
       id: word,
-      connectionType: `${id}/${id}`,
+      connectionType: options.connectionType ?? `${id}/${id}`,
+      feeds: options.feeds ?? IDLE_FEEDS,
+      open: IDLE_INGEST_OPEN,
       kinds: {
         [kind]: {
           description: `Something happened: ${kind}`,
@@ -719,6 +813,97 @@ const buildEventSourcePlugin = (id: string, word: string, kind: string): Plugin 
 });
 
 describe("the event source catalog", () => {
+  it("stores the source's Connection type, kinds and feeds, with each feed's intervals", async () => {
+    const definition = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildEventSourcePlugin("acme", "acme", "acme.thing.done", {
+            feeds: {
+              notifications: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+              repos: { defaultIntervalSeconds: 300 },
+            },
+          }),
+        ]);
+        const catalog = yield* Effect.flatMap(pluginRepository, (repository) =>
+          repository.contributions(),
+        );
+        return catalog.get("acme")?.find((row) => row.extensionPoint === "event-source")
+          ?.definition;
+      }),
+    );
+
+    expect(definition).toMatchObject({
+      connectionType: "acme/acme",
+      kinds: { "acme.thing.done": { description: "Something happened: acme.thing.done" } },
+      feeds: {
+        notifications: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+        repos: { defaultIntervalSeconds: 300 },
+      },
+    });
+  });
+
+  it("lists the sources of active plugins only", async () => {
+    const listed = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildEventSourcePlugin("acme", "acme", "acme.thing.done"),
+          buildEventSourcePlugin("bolt", "bolt", "bolt.thing.done"),
+        ]);
+        yield* host.stop("bolt");
+        return yield* host.listActiveEventSources();
+      }),
+    );
+
+    expect(listed.map((source) => [source.id, source.connectionType])).toEqual([
+      ["acme/acme", "acme/acme"],
+    ]);
+  });
+
+  it.each([
+    ["a feed name with a /", { "a/b": { defaultIntervalSeconds: 60 } }, 'the feed name "a/b"'],
+    ["an empty feed name", { "": { defaultIntervalSeconds: 60 } }, 'the feed name ""'],
+    ["a zero interval", { repos: { defaultIntervalSeconds: 0 } }, "the feed repos is invalid"],
+    [
+      "a minimum longer than the default",
+      { repos: { defaultIntervalSeconds: 60, minIntervalSeconds: 120 } },
+      "Make the minimum no longer than the default.",
+    ],
+    ["no feeds at all", {}, "declares no feeds, so the host would never poll it"],
+    [
+      "a default longer than one day",
+      { repos: { defaultIntervalSeconds: 86_401 } },
+      "the feed repos has a default interval of 86401 seconds",
+    ],
+  ])("marks a plugin errored for %s", async (_, feeds, expected) => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildEventSourcePlugin("acme", "acme", "acme.thing.done", { feeds })]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain(expected);
+  });
+
+  it("marks a plugin errored if its manifest lacks the events capability, and says to add it", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildEventSourcePlugin("acme", "acme", "acme.thing.done", {
+            capabilities: ["event-sources"],
+          }),
+        ]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain(`Add "events" to the manifest's capabilities.`);
+  });
+
   it("marks a plugin errored if its event source id contains a /", async () => {
     const status = await run(
       Effect.gen(function* () {
@@ -729,6 +914,59 @@ describe("the event source catalog", () => {
     );
 
     expect(readErroredMessage(status)).toContain("The id cannot contain a / character");
+  });
+
+  it("marks a plugin errored if its event source is for another plugin's Connection type", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildEventSourcePlugin("acme", "acme", "acme.thing.done", {
+            connectionType: "bolt/bolt",
+          }),
+        ]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain(
+      "the event source acme is for the Connection type bolt/bolt, which another plugin owns",
+    );
+  });
+
+  it("marks a plugin errored if two of its event sources are for one Connection type", async () => {
+    const twoSources: Plugin = {
+      ...buildEventSourcePlugin("acme", "acme", "acme.thing.done"),
+      register: (host) =>
+        Effect.forEach(
+          ["first", "second"],
+          (word) =>
+            registerEventSource(host, {
+              id: word,
+              connectionType: "acme/acme",
+              feeds: IDLE_FEEDS,
+              open: IDLE_INGEST_OPEN,
+              kinds: {
+                [`acme.${word}.done`]: {
+                  description: `Something happened: ${word}`,
+                  schema: Schema.Struct({ url: Schema.String }),
+                },
+              },
+            }),
+          { discard: true },
+        ),
+    };
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([twoSources]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain(
+      "the event sources acme/first and acme/second are both for the Connection type acme/acme",
+    );
   });
 
   it("marks a plugin errored if it declares a core event kind, and includes the kind in the message", async () => {

@@ -51,6 +51,7 @@ interface Connection {
   readonly statusDetail?: string;
   readonly labels: readonly string[];
   readonly config: Record<string, unknown>;
+  readonly feedIntervals: Record<string, number>;
   readonly credentials: readonly { readonly name: string; readonly rotatedAt?: string }[];
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -73,7 +74,10 @@ const PAPER_TYPE = {
   ],
   configSchema: {
     type: "object",
-    properties: { folder: { type: "string", title: "Folder" } },
+    properties: {
+      folder: { type: "string", title: "Folder" },
+      tags: { type: "array", items: { type: "string" }, title: "Tags" },
+    },
     required: [],
     additionalProperties: false,
   },
@@ -143,11 +147,31 @@ const BYSTANDER: Plugin = {
   contributions: [{ extensionPoint: "provider", id: "acme", definition: {} }],
 };
 
+/**
+ * The Glasshouse plugin's event source, which polls two feeds for every
+ * Glasshouse connection: `repos`, with a minimum below its default, and
+ * `check_runs`, whose default is also its minimum.
+ */
+const GLASS_EVENTS: Contribution = {
+  extensionPoint: "event-source",
+  id: "glasshouse/glass-events",
+  definition: {
+    connectionType: GLASS_TYPE.type,
+    kinds: {},
+    feeds: {
+      repos: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
+      check_runs: { defaultIntervalSeconds: 60 },
+    },
+  },
+};
+
+const GLASSHOUSE = buildPlugin("glasshouse", GLASS_TYPE);
+
 const CATALOG: readonly Plugin[] = [
   buildPlugin("paper-trail", PAPER_TYPE),
   buildPlugin("skyline", SKY_TYPE),
   buildPlugin("chatterbox", CHATTER_TYPE),
-  buildPlugin("glasshouse", GLASS_TYPE),
+  { ...GLASSHOUSE, contributions: [...GLASSHOUSE.contributions, GLASS_EVENTS] },
   BYSTANDER,
 ];
 
@@ -159,6 +183,7 @@ const PAPER: Connection = {
   status: "connected",
   labels: ["Code", "Ops"],
   config: { folder: "inbox" },
+  feedIntervals: {},
   credentials: [{ name: "token", rotatedAt: "2026-09-11T17:21:00.000Z" }],
   createdAt: "2026-09-01T08:15:00.000Z",
   updatedAt: "2026-09-11T17:21:00.000Z",
@@ -173,6 +198,7 @@ const SKY: Connection = {
   statusDetail: "the refresh token was rejected",
   labels: ["Business"],
   config: {},
+  feedIntervals: {},
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-09-02T09:30:00.000Z",
   updatedAt: "2026-09-12T07:05:00.000Z",
@@ -186,6 +212,7 @@ const GLASS: Connection = {
   status: "connected",
   labels: ["Code"],
   config: {},
+  feedIntervals: {},
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-10-02T08:15:00.000Z",
   updatedAt: "2026-10-02T08:15:00.000Z",
@@ -200,6 +227,7 @@ const UNNAMED: Connection = {
   status: "connected",
   labels: [],
   config: {},
+  feedIntervals: {},
   credentials: [{ name: "oauth.tokens" }],
   createdAt: "2026-10-02T08:15:00.000Z",
   updatedAt: "2026-10-02T08:15:00.000Z",
@@ -747,6 +775,10 @@ describe("Connections > configuring a connection", () => {
     );
 
     expect(screen.getByLabelText<HTMLInputElement>(/folder/i).value).toBe("inbox");
+    // The schema has no title, so its settings sit under the generic heading.
+    expect(
+      within(screen.getByRole("group", { name: "Configuration" })).getByLabelText(/folder/i),
+    ).toBe(screen.getByLabelText(/folder/i));
     expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("work");
     expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("Code");
     expect(readSuggestions("Topic")).toEqual(
@@ -799,6 +831,9 @@ describe("Connections > configuring a connection", () => {
       label: "personal",
       labels: ["Code"],
       config: {},
+      // The type polls feeds, so their intervals are sent whole: every feed
+      // is on its default.
+      feedIntervals: {},
     });
   });
 
@@ -870,6 +905,32 @@ describe("Connections > configuring a connection", () => {
     );
   });
 
+  it("shows a rejected list entry's error under that entry, not under the whole list", async () => {
+    const user = userEvent.setup();
+    const complaint = "Write a tag as one word, such as invoices.";
+    const TAGGED: Connection = {
+      ...PAPER,
+      config: { folder: "inbox", tags: ["receipts", "not one word", "travel"] },
+    };
+    await openApp([TAGGED], {
+      [`PATCH /api/v1/connections/${TAGGED.id}`]: buildRefusal("the settings were refused", [
+        { path: ["config", "tags", "1"], message: complaint },
+      ]),
+    });
+
+    await user.click(
+      within(await findConnectionRow(TAGGED)).getByRole("button", { name: "Configure" }),
+    );
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await screen.findByText(complaint);
+    const second = screen.getByLabelText("Tags entry 2");
+    expectMessageAtField(complaint, second, screen.getByLabelText("Tags entry 1"));
+    expectMessageAtField(complaint, second, screen.getByLabelText("Tags entry 3"));
+    // The error sits under its entry, so it is not repeated under the list or the buttons.
+    expect(screen.getAllByText(complaint)).toHaveLength(1);
+  });
+
   it("shows only the name and the topic for a type with no settings of its own", async () => {
     const user = userEvent.setup();
     await openApp([SKY]);
@@ -881,6 +942,124 @@ describe("Connections > configuring a connection", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("personal");
     expect(screen.getByLabelText<HTMLInputElement>("Topic").value).toBe("Business");
     expect(screen.queryByLabelText(/folder/i)).toBeNull();
+    // No event source polls this type, so there is nothing to poll.
+    expect(screen.queryByText("Polling")).toBeNull();
+  });
+});
+
+describe("Connections > configuring how often a connection is polled", () => {
+  /** A Glasshouse connection whose `repos` feed the user slowed down to every 5 minutes. */
+  const SLOWED: Connection = { ...GLASS, feedIntervals: { repos: 300 } };
+
+  const openPolling = async (connection: Connection, answer: Handler = { body: connection }) => {
+    const user = userEvent.setup();
+    const app = await openApp([connection], {
+      [`PATCH /api/v1/connections/${connection.id}`]: answer,
+    });
+    await user.click(
+      within(await findConnectionRow(connection)).getByRole("button", { name: "Configure" }),
+    );
+    return { ...app, user };
+  };
+
+  it("shows each feed with its default and its shortest interval, after the settings", async () => {
+    await openPolling(SLOWED);
+
+    const repos = screen.getByLabelText<HTMLInputElement>("Repos");
+    const checks = screen.getByLabelText<HTMLInputElement>("Check runs");
+    // A stored interval fills its field; a feed on its default leaves the
+    // field empty and shows the default as the placeholder.
+    expect(repos.value).toBe("300");
+    expect(repos.placeholder).toBe("120");
+    expect(checks.value).toBe("");
+    expect(checks.placeholder).toBe("60");
+    const polling = screen.getByRole("group", { name: "Polling" });
+    expect(within(polling).getByLabelText("Repos")).toBe(repos);
+    expectInDocumentOrder([
+      screen.getByLabelText("Topic"),
+      polling,
+      screen.getByText("Every 120 seconds by default. At least 60 seconds."),
+      repos,
+      // The default of this feed is also its minimum, so the line says that once.
+      screen.getByText("Every 60 seconds by default, the shortest Glasshouse allows."),
+      checks,
+      within(getFormWithField("Name")).getByRole("button", { name: "Save" }),
+    ]);
+  });
+
+  it("saves a typed interval and leaves an empty feed on its default", async () => {
+    const { api, user } = await openPolling(GLASS);
+
+    await user.type(screen.getByLabelText("Check runs"), "90");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({
+      label: "work",
+      config: {},
+      feedIntervals: { check_runs: 90 },
+    });
+  });
+
+  it("puts a feed back on its default once the user clears its field", async () => {
+    const { api, user } = await openPolling(SLOWED);
+
+    await user.clear(screen.getByLabelText("Repos"));
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toMatchObject({ feedIntervals: {} });
+  });
+
+  it("refuses an interval that is not a whole number under its field, and sends nothing", async () => {
+    const complaint = "Enter a whole number of seconds.";
+    const { api, user } = await openPolling(GLASS);
+    const repos = screen.getByLabelText<HTMLInputElement>("Repos");
+
+    await user.type(repos, "abc");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await screen.findByText(complaint);
+    expectMessageAtField(complaint, repos, screen.getByLabelText("Check runs"));
+    // What the user typed stays, so they can see what to fix.
+    expect(repos.value).toBe("abc");
+    expect(listWrites(api)).toHaveLength(0);
+
+    await user.clear(repos);
+    await user.type(repos, "300");
+    expect(screen.queryByText(complaint)).toBeNull();
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toMatchObject({ feedIntervals: { repos: 300 } });
+  });
+
+  it("shows an interval below the feed's minimum under that feed, and keeps the form open", async () => {
+    const complaint =
+      "Poll repos every 60 seconds or slower; Glasshouse does not allow a shorter interval.";
+    const { user } = await openPolling(
+      GLASS,
+      buildRefusal(complaint, [{ path: ["feedIntervals", "repos"], message: complaint }]),
+    );
+
+    await user.type(screen.getByLabelText("Repos"), "30");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await screen.findByText(complaint);
+    expectMessageAtField(
+      complaint,
+      screen.getByLabelText("Repos"),
+      screen.getByLabelText("Check runs"),
+    );
+    // The error sits under its field, so it is not repeated under the buttons.
+    expect(screen.getAllByText(complaint)).toHaveLength(1);
+    expect(screen.getByLabelText<HTMLInputElement>("Repos").value).toBe("30");
   });
 });
 

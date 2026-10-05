@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import { useId, type JSX, type ReactNode } from "react";
 import { cn } from "../primitives/cn";
 import { Label } from "../primitives/label";
 
@@ -93,6 +93,33 @@ export function Field({
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Renders a titled group of fields inside a form: a lane label, then the
+ * fields, with 12px between each line. The heading names the group for a
+ * screen reader.
+ *
+ * The section sets no space above itself. The form puts more space between
+ * sections than between fields, so each heading reads as the start of what
+ * follows it rather than as the end of what came before.
+ */
+export function FormSection({
+  heading,
+  children,
+}: {
+  readonly heading: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const headingId = useId();
+  return (
+    <div role="group" aria-labelledby={headingId} className="flex flex-col gap-3">
+      <LaneLabel id={headingId} className="mb-0">
+        {heading}
+      </LaneLabel>
+      {children}
     </div>
   );
 }

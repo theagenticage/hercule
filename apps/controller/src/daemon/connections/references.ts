@@ -29,6 +29,7 @@ const ConnectionReferencesLayer: Layer.Layer<ConnectionReferences, never, SqlCli
           Effect.gen(function* () {
             const actingResources = yield* resources.listActingThroughConnection(connectionId);
             const namingTriggers = yield* workflows.listTriggersNamingConnection(connectionId);
+            const namingSteps = yield* workflows.listStepsNamingConnection(connectionId);
             return [
               ...actingResources.map((resource): ConnectionReference => ({
                 kind: "resource",
@@ -39,6 +40,7 @@ const ConnectionReferencesLayer: Layer.Layer<ConnectionReferences, never, SqlCli
                 kind: "trigger",
                 ...trigger,
               })),
+              ...namingSteps.map((step): ConnectionReference => ({ kind: "step", ...step })),
             ];
           }),
       };

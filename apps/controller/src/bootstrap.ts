@@ -41,6 +41,7 @@ import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./conn
 import {
   cancelStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
+  IngestExecutorLayer,
 } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
@@ -74,6 +75,7 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import {
+  IngestLoops,
   PluginConfigsLayer,
   PluginHost,
   PluginHostLayer,
@@ -229,6 +231,7 @@ export type ControllerServices =
   | JoinTokens
   | Plugins
   | PluginHost
+  | IngestLoops
   | ConnectionTypes
   | RunnerConnections
   | ProviderProbes
@@ -298,9 +301,13 @@ export const bootWith = <A, E>(
      * The plugin host on top of those repositories: it reads secrets and
      * appends to the audit log, so it is built on them rather than merged
      * beside them. It is also the catalog every layer above reads a provider's
-     * definition from, which is why the fleet is built on it.
+     * definition from, which is why the fleet is built on it. Each
+     * Connection's ingest runs on a fiber of the controller daemon's Ingest
+     * Executor, which is built below the host so that it is released after
+     * the host has closed every ingest at shutdown.
      */
     const catalog = PluginHostLayer.pipe(
+      Layer.provide(IngestExecutorLayer),
       Layer.provideMerge(ConnectionTypesLayer),
       Layer.provideMerge(PluginConfigsLayer),
       Layer.provideMerge(repositories),

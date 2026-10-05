@@ -1,0 +1,121 @@
+/**
+ * The ingest handle of one GitHub Connection: what the host calls to poll
+ * each of the three feeds, `notifications`, `repos` and `checks`.
+ *
+ * Every poll reads the token and the watch list afresh, so a refreshed token
+ * or a newly linked repository is used from the next poll on.
+ */
+import { Effect, Schema } from "effect";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import type * as HttpClient from "effect/unstable/http/HttpClient";
+import {
+  AuthError,
+  PluginError,
+  type EventSourceContribution,
+  type IngestContext,
+  type PollResult,
+} from "@hercule/plugin-host";
+import { readToken } from "../api";
+import { DEFAULT_CHECKS_WINDOW_DAYS, GithubConnectionConfig } from "../connection-type";
+import { readWatchList } from "../watch-list";
+import { pollChecks } from "./checks";
+import { pollNotifications } from "./notifications";
+import { pollRepos } from "./repos";
+import type { FeedError } from "./requests";
+
+/**
+ * Reads the Connection's token. Fails with an `AuthError` when the
+ * credentials hold no token, because only the user can fix that, and with a
+ * `PluginError` when the host could not read the credentials at all.
+ */
+const readConnectionToken = (
+  context: IngestContext,
+): Effect.Effect<string, AuthError | PluginError> =>
+  Effect.gen(function* () {
+    const credentials = yield* context
+      .credentials()
+      .pipe(Effect.mapError((error) => new PluginError({ message: error.message })));
+    const token = readToken(credentials);
+    if (token === undefined) {
+      return yield* new AuthError({
+        message: "The Connection has no GitHub token. Reconnect it to sign in to GitHub again.",
+      });
+    }
+    return token;
+  });
+
+/** Polls one feed once, with the Connection's token and config. */
+type FeedPoll = (
+  token: string,
+  config: GithubConnectionConfig,
+  context: IngestContext,
+) => Effect.Effect<PollResult, FeedError, HttpClient.HttpClient>;
+
+/**
+ * The poll of each feed, by the feed's name. The names are the feeds the
+ * event source declares in `../index.ts`, and the host polls no other.
+ */
+const FEED_POLLS: Record<"notifications" | "repos" | "checks", FeedPoll> = {
+  notifications: (token, _config, context) => pollNotifications(token, context),
+  repos: (token, config, context) =>
+    Effect.flatMap(readWatchList(context.resources, config.repos ?? []), (watchList) =>
+      pollRepos(token, context, watchList),
+    ),
+  checks: (token, config, context) =>
+    Effect.flatMap(readWatchList(context.resources, config.repos ?? []), (watchList) =>
+      pollChecks(token, context, watchList, config.checksWindowDays ?? DEFAULT_CHECKS_WINDOW_DAYS),
+    ),
+};
+
+/** The name of one of the event source's feeds, such as `repos`. */
+export type GithubFeed = keyof typeof FEED_POLLS;
+
+/**
+ * Polls one feed once and returns when the host may poll it next. A rate
+ * limit is not a failure: the poll stops, and succeeds with
+ * `nextAfterSeconds` set to the wait GitHub asked for.
+ *
+ * Fails with an `AuthError` when GitHub rejects the token, and with a
+ * `PluginError` for any other failure.
+ */
+export const pollGithubFeed = (
+  feed: GithubFeed,
+  config: GithubConnectionConfig,
+  context: IngestContext,
+): Effect.Effect<PollResult, AuthError | PluginError, HttpClient.HttpClient> =>
+  Effect.flatMap(readConnectionToken(context), (token) =>
+    FEED_POLLS[feed](token, config, context),
+  ).pipe(
+    Effect.catchTag("GithubRateLimited", (limit) =>
+      Effect.succeed({ nextAfterSeconds: limit.retryAfterSeconds }),
+    ),
+  );
+
+/**
+ * Opens the ingest handle for one GitHub Connection. Fails with a
+ * `PluginError` when the Connection's config does not match
+ * `GithubConnectionConfig`.
+ *
+ * The fetch client is provided here, where the host calls in, so everything
+ * below can be tested with a stub client.
+ */
+export const openGithubIngest: EventSourceContribution["open"] = (connection, context) =>
+  Effect.map(
+    Schema.decodeUnknownEffect(GithubConnectionConfig)(connection.config).pipe(
+      Effect.mapError(
+        (error) =>
+          new PluginError({
+            message: `The GitHub Connection's config is invalid: ${error.message}`,
+          }),
+      ),
+    ),
+    (config) => ({
+      // The host polls only the feeds the event source declares, which are
+      // the keys of `FEED_POLLS`.
+      poll: (feed) =>
+        pollGithubFeed(feed as GithubFeed, config, context).pipe(
+          Effect.provide(FetchHttpClient.layer),
+        ),
+      close: Effect.void,
+    }),
+  );

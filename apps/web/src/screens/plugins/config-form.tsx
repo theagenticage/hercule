@@ -1,21 +1,23 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { Button, Checkbox, Field, Input, LaneLabel, Select, StringList } from "@hercule/ui";
+import { Button, Checkbox, Field, FormSection, Input, Select, StringList } from "@hercule/ui";
 import {
   buildConfigDraft,
   buildConfigPayload,
   type ConfigDraft,
   type ConfigField,
+  type ConfigIssues,
   type ConfigJson,
   type ConfigValue,
 } from "@hercule/client-core";
 
 /**
- * The form generated from a plugin's config schema. The form does not
- * validate anything beyond giving each widget the right input type. The
- * schema lives in the plugin and only the controller can apply it, so a
- * second check in the browser could disagree with the controller about the
- * same value. Validation errors come back from the save and are shown under
- * the field they belong to.
+ * The form generated from a plugin's config schema. Before the save, the form
+ * checks only that each number field's text can be read as a number, because
+ * nothing could be sent for it otherwise; that error is shown under the field
+ * and nothing is sent. Every other rule belongs to the schema, which lives in
+ * the plugin and which only the controller can apply, so a second check in
+ * the browser could disagree with the controller about the same value. Those
+ * errors come back from the save and are shown under the field they belong to.
  */
 export function ConfigForm({
   id,
@@ -30,45 +32,53 @@ export function ConfigForm({
   readonly id: string;
   readonly fields: ReadonlyArray<ConfigField>;
   readonly config: unknown;
-  readonly issues: Readonly<Record<string, string>>;
+  /** The errors of the last save. Errors that belong to no field are the parent's to show. */
+  readonly issues: ConfigIssues;
   readonly saving: boolean;
   /** Called on every edit, so the parent can clear the result of the last save. */
   readonly onEdit: () => void;
   readonly onSave: (config: ConfigJson) => void;
 }): JSX.Element {
   const [draft, setDraft] = useState<ConfigDraft>(() => buildConfigDraft(fields, config));
+  // The number fields whose text cannot be read as a number, found when the
+  // user pressed Save. Nothing is sent until every field can be read.
+  const [unreadable, setUnreadable] = useState<Readonly<Record<string, string>>>({});
 
   const setField = (name: string, value: ConfigValue): void => {
     onEdit();
+    setUnreadable({});
     setDraft((current) => ({ ...current, [name]: value }));
   };
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    onSave(buildConfigPayload(fields, draft, config));
+    const reading = buildConfigPayload(fields, draft, config);
+    if ("errors" in reading) {
+      setUnreadable(reading.errors);
+      return;
+    }
+    onSave(reading.config);
   };
 
   return (
     <form className="flex flex-col gap-3 border-t border-line-soft pt-3" onSubmit={submit}>
       {/* The settings get a rule above them inside the plugin's card; without
-          it they look like part of the plugin's contributions. The label's
-          own margin is removed, because the form's gap sets the spacing
-          between every other pair of lines here. */}
-      <div className="-mb-2.5">
-        <LaneLabel>Configuration</LaneLabel>
-      </div>
-      {fields.map((field) => (
-        <ConfigFieldRow
-          key={field.name}
-          inputId={`${id}-${field.name}`}
-          field={field}
-          value={draft[field.name] ?? ""}
-          error={issues[field.name]}
-          onChange={(value) => {
-            setField(field.name, value);
-          }}
-        />
-      ))}
+          it they look like part of the plugin's contributions. */}
+      <FormSection heading="Configuration">
+        {fields.map((field) => (
+          <ConfigFieldRow
+            key={field.name}
+            inputId={`${id}-${field.name}`}
+            field={field}
+            value={draft[field.name] ?? ""}
+            error={unreadable[field.name] ?? issues.perField[field.name]}
+            entryErrors={issues.perEntry[field.name]}
+            onChange={(value) => {
+              setField(field.name, value);
+            }}
+          />
+        ))}
+      </FormSection>
       <div>
         <Button type="submit" variant="form" disabled={saving}>
           Save
@@ -97,12 +107,16 @@ export function ConfigFieldRow({
   field,
   value,
   error,
+  entryErrors,
   onChange,
 }: {
   readonly inputId: string;
   readonly field: ConfigField;
   readonly value: ConfigValue;
+  /** The error about the setting as a whole, shown under the field. */
   readonly error: string | undefined;
+  /** For a list setting, the error of each entry by position, shown under that entry. */
+  readonly entryErrors: Readonly<Record<number, string>> | undefined;
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
   if (field.kind === "boolean") {
@@ -126,7 +140,13 @@ export function ConfigFieldRow({
     <Field id={field.kind === "stringList" ? undefined : inputId} label={field.label} error={error}>
       {/* The description goes above the input, so an error appears directly under the input. */}
       <Description field={field} />
-      <ConfigWidget inputId={inputId} field={field} value={value} onChange={onChange} />
+      <ConfigWidget
+        inputId={inputId}
+        field={field}
+        value={value}
+        entryErrors={entryErrors}
+        onChange={onChange}
+      />
     </Field>
   );
 }
@@ -145,11 +165,13 @@ function ConfigWidget({
   inputId,
   field,
   value,
+  entryErrors,
   onChange,
 }: {
   readonly inputId: string;
   readonly field: ConfigField;
   readonly value: ConfigValue;
+  readonly entryErrors: Readonly<Record<number, string>> | undefined;
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
   // Announced with `aria-required` but not enforced with `required`. If the
@@ -170,7 +192,7 @@ function ConfigWidget({
           }}
         >
           {/* An optional setting needs an empty choice, so the user can unset it. */}
-          {field.required ? null : <option value="">—</option>}
+          {field.required ? null : <option value="">Not set</option>}
           {(field.options ?? []).map((option) => (
             <option key={option} value={option}>
               {option}
@@ -187,6 +209,7 @@ function ConfigWidget({
         required={field.required}
         label={field.label}
         values={Array.isArray(value) ? value : []}
+        errors={entryErrors}
         onChange={onChange}
       />
     );
@@ -196,10 +219,16 @@ function ConfigWidget({
     <Input
       id={inputId}
       aria-required={required}
-      // A number needs only a few characters; only text can be arbitrarily long.
+      // A number needs only a few characters, so a number field is as narrow
+      // as a feed's poll interval field; only text can be arbitrarily long.
       className={field.kind === "string" ? undefined : "w-[140px]"}
-      type={field.kind === "string" ? "text" : "number"}
-      step={field.kind === "integer" ? 1 : "any"}
+      // A text field even for a number, like the poll interval fields. For
+      // text the browser cannot read as a number, a number field hands over
+      // an empty value or blocks the save with a popup of its own, so the
+      // form could not say under the field what is wrong. Unlike a poll
+      // interval, a number here may be negative, and the numeric and decimal
+      // keypads on iOS have no minus key, so the field keeps the full keyboard.
+      placeholder={field.defaultValue}
       value={typeof value === "string" ? value : ""}
       onChange={(event) => {
         onChange(event.target.value);

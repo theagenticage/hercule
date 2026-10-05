@@ -100,6 +100,7 @@ export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
   "core.run-failed",
   "core.plugin-error",
+  "core.connection-error",
   "core.runner-unreachable",
   "core.subscription-condition-error",
   "core.trigger-error",

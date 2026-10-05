@@ -45,6 +45,8 @@ import {
   cancelStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   EventRoutingInterval,
+  IngestExecutorLayer,
+  IngestReconcileInterval,
   Live,
   LostRunnerSweepInterval,
   RunFibers,
@@ -149,6 +151,7 @@ const buildServices = (home: string) =>
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(
+            Layer.provide(IngestExecutorLayer),
             Layer.provideMerge(ConnectionTypesLayer),
             Layer.provideMerge(PluginConfigsLayer),
           ),
@@ -320,6 +323,8 @@ export interface ServerOptions {
   readonly lostRunnerSweepInterval?: Duration.Duration;
   /** How often the scheduler looks for cron triggers that are due. The default is a second. */
   readonly schedulerInterval?: Duration.Duration;
+  /** How often the Ingest Reconciler opens and closes ingest handles. The default is two seconds. */
+  readonly ingestReconcileInterval?: Duration.Duration;
   /**
    * How long one evaluation of a condition may run before it is reported as
    * over budget. A test that wants every evaluation reported sets a budget no
@@ -502,6 +507,7 @@ const provideTimings =
     provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
     provideIfSet(SchedulerInterval, options.schedulerInterval);
+    provideIfSet(IngestReconcileInterval, options.ingestReconcileInterval);
     provideIfSet(ExpressionBudget, options.expressionBudget);
     return provided;
   };

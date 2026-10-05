@@ -7,12 +7,23 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll } from "vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   HOST_API,
   PluginError,
+  registerConnectionType,
+  registerEventSource,
   registerWorkflowAction,
+  type ActionContext,
   type ActivationContext,
+  type AuthError,
+  type EventSourceContribution,
+  type IngestConnection,
+  type FeedDeclaration,
+  type IngestContext,
+  type PollResult,
   type Plugin,
   type PluginCapability,
   type ProviderDefinition,
@@ -25,7 +36,9 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
-import { ConnectionTypesLayer } from "../connections";
+import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
+import { IngestExecutorLayer } from "../daemon/ingest";
+import { nowIso } from "../db";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 
 /** Builds a provider definition that supports everything natively. */
@@ -73,7 +86,7 @@ export const buildPluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
-    Layer.provideMerge(PluginHostLayer),
+    Layer.provideMerge(PluginHostLayer.pipe(Layer.provide(IngestExecutorLayer))),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
@@ -123,6 +136,8 @@ export const createPluginFixture = (options: {
   readonly activateFailures?: number;
   /** The message the returned deactivate fails with, when it fails. */
   readonly deactivateFails?: string;
+  /** Whether the returned deactivate never returns, like a plugin stuck on a lock. */
+  readonly deactivateHangs?: boolean;
   /** Whether the hooks yield, so a second caller can interleave with them. */
   readonly slow?: boolean;
   /** A hook that misbehaves in a way the options above cannot express. */
@@ -169,6 +184,7 @@ export const createPluginFixture = (options: {
           pause,
           Effect.suspend(() => {
             calls.push("deactivate");
+            if (options.deactivateHangs === true) return Effect.never;
             if (options.deactivateFails !== undefined) {
               return Effect.fail(new PluginError({ message: options.deactivateFails }));
             }
@@ -210,3 +226,232 @@ export const buildActionPlugin = (id: string, action: WorkflowActionContribution
 
 /** A plugin with the id `notes` that declares `NOTE_APPEND_ACTION`, for tests of action steps. */
 export const notesPlugin: Plugin = buildActionPlugin("notes", NOTE_APPEND_ACTION);
+
+/** The qualified Connection type that `buildForgePlugin` declares. */
+export const FORGE_CONNECTION_TYPE = "forge/forge";
+
+/** The qualified id a step uses to call the review action of `buildForgePlugin`. */
+export const FORGE_REVIEW_ACTION_ID = "forge/pr.review";
+
+/** The verdicts the forge review action accepts, as a GitHub review does. */
+export const FORGE_REVIEW_VERDICTS = ["approve", "request-changes", "comment"] as const;
+
+/** The forge plugin, and every `ActionContext` its review action was called with. */
+export interface ForgePlugin {
+  readonly plugin: Plugin;
+  readonly contexts: ReadonlyArray<ActionContext>;
+  /** The decoded input of every call, in the same order as `contexts`. */
+  readonly inputs: ReadonlyArray<unknown>;
+}
+
+/**
+ * Builds a plugin with the id `forge`, for tests of an action that acts
+ * through a Connection. It declares:
+ *
+ * - the Connection type `forge/forge`, set up by pasting a `token`, or
+ *   through a redirect flow when `tokenUrl` is given. The redirect flow lets
+ *   a test give a Connection a token set whose refresh goes to `tokenUrl`;
+ * - the workflow action `forge/pr.review`, which acts through a `forge/forge`
+ *   Connection, takes a `verdict` from a fixed list, and records the context
+ *   and input of every call.
+ *
+ * The plugin config accepts `clientId`, which a refresh needs.
+ */
+export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): ForgePlugin => {
+  const contexts: Array<ActionContext> = [];
+  const inputs: Array<unknown> = [];
+  const { tokenUrl } = options;
+  const plugin: Plugin = {
+    manifest: {
+      id: "forge",
+      displayName: "Forge",
+      hostApi: HOST_API,
+      capabilities: ["connections", "workflow-actions"],
+      configSchema: Schema.Struct({ clientId: Schema.optionalKey(Schema.String) }),
+    },
+    register: (host) =>
+      Effect.andThen(
+        registerConnectionType(host, {
+          type: "forge",
+          displayName: "Forge",
+          setup: [
+            { kind: "credentials", fields: [{ name: "token", label: "Token" }] },
+            ...(tokenUrl === undefined ? [] : [{ kind: "oauth" as const }]),
+          ],
+          ...(tokenUrl === undefined
+            ? {}
+            : { oauth: { authorizationUrl: tokenUrl, tokenUrl, scopes: ["repo"] } }),
+          validate: () => Effect.succeed({ displayName: "octocat", accountId: "1" }),
+        }),
+        registerWorkflowAction(host, {
+          id: "pr.review",
+          displayName: "Review a pull request",
+          description: "Submits a review with a verdict on a pull request.",
+          connection: { type: FORGE_CONNECTION_TYPE },
+          input: Schema.Struct({
+            verdict: Schema.Literals(FORGE_REVIEW_VERDICTS),
+            body: Schema.optionalKey(Schema.String),
+          }),
+          output: Schema.Struct({ reviewed: Schema.Boolean }),
+          execute: (input, context) =>
+            Effect.sync(() => {
+              contexts.push(context);
+              inputs.push(input);
+              return { reviewed: true };
+            }),
+        }),
+      ),
+    activate: () => Effect.succeed(Effect.void),
+  };
+  return { plugin, contexts, inputs };
+};
+
+/**
+ * An event source's `open` whose handle polls nothing and closes at once, for
+ * a test about anything but ingest.
+ */
+export const IDLE_INGEST_OPEN: EventSourceContribution["open"] = () =>
+  Effect.succeed({ poll: () => Effect.succeed({}), close: Effect.void });
+
+/** The one feed of a source whose handle is `IDLE_INGEST_OPEN`'s: a source must declare one. */
+export const IDLE_FEEDS: Record<string, FeedDeclaration> = {
+  idle: { defaultIntervalSeconds: 3600 },
+};
+
+/** The plugin id, Connection type and event kind of `createEventSourceFixture`'s plugin. */
+export const EVENT_SOURCE_FIXTURE = {
+  pluginId: "acme",
+  connectionType: "acme/acme",
+  kind: "acme.thing.done",
+} as const;
+
+export interface EventSourceFixture {
+  readonly plugin: Plugin;
+  /**
+   * What the source was asked to do, in order: `open`, `poll <feed>` when a
+   * poll starts, `polled <feed>` when it ends, and `close`.
+   */
+  readonly calls: Array<string>;
+  /** The `IngestConnection` and `IngestContext` of every open, in order. */
+  readonly opened: Array<{
+    readonly connection: IngestConnection;
+    readonly context: IngestContext;
+  }>;
+  /** Decides how each open ends. By default it succeeds. A test replaces it to make opens fail. */
+  open: () => Effect.Effect<void, AuthError | PluginError>;
+  /** Decides how each poll ends. By default it succeeds with no hint. */
+  poll: (feed: string) => Effect.Effect<PollResult, AuthError | PluginError>;
+  /** Decides how each close ends. By default it returns at once. */
+  close: () => Effect.Effect<void>;
+  /** Returns the most polls that were running at one time. */
+  readonly countMostPollsAtOnce: () => number;
+}
+
+/**
+ * Creates a plugin with one Connection type, `acme/acme`, and one event source
+ * for it that emits `acme.thing.done`. The source records every call, and a
+ * test decides how each open and poll ends by replacing `open` and `poll`.
+ */
+export const createEventSourceFixture = (
+  options: {
+    readonly feeds?: Record<string, FeedDeclaration>;
+    readonly capabilities?: ReadonlyArray<PluginCapability>;
+  } = {},
+): EventSourceFixture => {
+  let running = 0;
+  let most = 0;
+  const fixture: EventSourceFixture = {
+    calls: [],
+    opened: [],
+    open: () => Effect.void,
+    poll: () => Effect.succeed({}),
+    close: () => Effect.void,
+    countMostPollsAtOnce: () => most,
+    plugin: {
+      manifest: {
+        id: EVENT_SOURCE_FIXTURE.pluginId,
+        displayName: "Acme",
+        hostApi: HOST_API,
+        capabilities: options.capabilities ?? ["connections", "event-sources", "events"],
+        configSchema: Schema.Struct({}),
+      },
+      register: (host) =>
+        Effect.andThen(
+          registerConnectionType(host, {
+            type: "acme",
+            displayName: "Acme",
+            setup: [],
+            configSchema: Schema.Struct({ project: Schema.optionalKey(Schema.String) }),
+            validate: () => Effect.succeed({ displayName: "Acme", accountId: "acme-1" }),
+          }),
+          registerEventSource(host, {
+            id: "acme",
+            connectionType: EVENT_SOURCE_FIXTURE.connectionType,
+            feeds: options.feeds ?? { notifications: { defaultIntervalSeconds: 60 } },
+            kinds: {
+              [EVENT_SOURCE_FIXTURE.kind]: {
+                description: "Something was done in Acme.",
+                schema: Schema.Struct({ title: Schema.String }),
+              },
+            },
+            open: (connection, context) =>
+              Effect.suspend(() => {
+                fixture.calls.push("open");
+                fixture.opened.push({ connection, context });
+                return Effect.as(fixture.open(), {
+                  poll: (feed: string) =>
+                    Effect.suspend(() => {
+                      fixture.calls.push(`poll ${feed}`);
+                      running += 1;
+                      most = Math.max(most, running);
+                      return fixture.poll(feed);
+                    }).pipe(
+                      Effect.ensuring(
+                        Effect.sync(() => {
+                          running -= 1;
+                          fixture.calls.push(`polled ${feed}`);
+                        }),
+                      ),
+                    ),
+                  close: Effect.suspend(() => {
+                    fixture.calls.push("close");
+                    return fixture.close();
+                  }),
+                });
+              }),
+          }),
+        ),
+      activate: () => Effect.succeed(Effect.void),
+    },
+  };
+  return fixture;
+};
+
+/**
+ * Inserts a `connected` Connection of the fixture's type, with the label and
+ * feed intervals given, and returns it as the repository reads it back.
+ */
+export const insertFixtureConnection = (
+  options: {
+    readonly label?: string;
+    readonly feedIntervals?: Readonly<Record<string, number>>;
+  } = {},
+): Effect.Effect<StoredConnection, SqlError, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const connections = yield* connectionRepository;
+    const at = yield* nowIso;
+    const inserted = yield* connections.insert({
+      pluginId: EVENT_SOURCE_FIXTURE.pluginId,
+      type: EVENT_SOURCE_FIXTURE.connectionType,
+      label: options.label ?? "work",
+      displayName: "Acme",
+      accountId: "acme-1",
+      labels: [],
+      config: {},
+      at,
+    });
+    if (options.feedIntervals !== undefined) {
+      yield* connections.update(inserted.id, { feedIntervals: options.feedIntervals }, at);
+    }
+    return Option.getOrThrow(yield* connections.one(inserted.id));
+  });

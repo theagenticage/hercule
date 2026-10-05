@@ -9,5 +9,5 @@ export {
   TriggerHealthLayer,
 } from "./trigger-health";
 export { TriggerEffects, TriggerEffectsLayer, type PendingTriggerEffect } from "./trigger-effects";
-export { isGitActionId } from "./validation";
+export { isGitActionId, readConnectionInputName } from "./validation";
 export { WorkflowService, WorkflowServiceLayer } from "./service";

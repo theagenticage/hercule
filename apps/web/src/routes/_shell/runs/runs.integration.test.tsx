@@ -122,6 +122,7 @@ const GITHUB_WORK: Connection = {
   status: "connected",
   labels: ["Code"],
   config: {},
+  feedIntervals: {},
   credentials: [{ name: "token" }],
   createdAt: "2026-09-01T08:15:00.000Z",
   updatedAt: "2026-09-01T08:15:00.000Z",

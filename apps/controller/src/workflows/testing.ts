@@ -25,7 +25,12 @@ import {
   type ServerHarness,
   type ServerOptions,
 } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import {
+  buildProviderDefinition,
+  createPluginFixture,
+  IDLE_FEEDS,
+  IDLE_INGEST_OPEN,
+} from "../plugins/testing";
 import type { DeclaredTrigger } from "./repository";
 import type { WorkflowPage } from "./service";
 
@@ -50,7 +55,7 @@ const localGithubPlugin: Plugin = {
     id: "github",
     displayName: "GitHub",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources"],
+    capabilities: ["connections", "event-sources", "events"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>
@@ -69,6 +74,9 @@ const localGithubPlugin: Plugin = {
       registerEventSource(host, {
         id: "github",
         connectionType: "github/github",
+        // A source that polls nothing: these tests are about its kinds.
+        feeds: IDLE_FEEDS,
+        open: IDLE_INGEST_OPEN,
         kinds: {
           "github.pr.labeled": {
             description: "The labels on a pull request changed.",
@@ -119,13 +127,17 @@ export interface SetUpController {
  * The controller has a provider for Agents and the local GitHub plugin for
  * triggers. `additionalPlugins` are installed too, for tests that need a
  * Connection type or a workflow action that GitHub does not declare.
- * `timings` shortens the event router's and the scheduler's intervals, whose
- * one-second defaults would make a test that waits for several passes slow.
+ * `timings` shortens the intervals of the event router, the scheduler and the
+ * Ingest Reconciler, whose defaults of a second or two would make a test that
+ * waits for several passes slow.
  */
 export const withSetUpController = (
   body: (controller: SetUpController) => Promise<void>,
   additionalPlugins: ReadonlyArray<Plugin> = [],
-  timings: Pick<ServerOptions, "eventRoutingInterval" | "schedulerInterval"> = {},
+  timings: Pick<
+    ServerOptions,
+    "eventRoutingInterval" | "schedulerInterval" | "ingestReconcileInterval"
+  > = {},
 ): Promise<void> =>
   withServer(
     async (harness) => {
@@ -422,3 +434,22 @@ export const emitLabeledEvent = async (
   expect(response.ok, await response.clone().text()).toBe(true);
   return ((await response.json()) as { readonly eventId: number }).eventId;
 };
+
+/**
+ * Sets a Connection's status by writing its row directly, because no
+ * operation disables a Connection or marks it as needing reauth. Resolves once
+ * the row is written.
+ */
+export const setConnectionStatus = (
+  harness: ServerHarness,
+  id: string,
+  status: string,
+): Promise<void> =>
+  Effect.runPromise(
+    Effect.orDie(
+      Effect.asVoid(
+        harness.sql`UPDATE connections SET status = ${status}
+                    WHERE id = unhex(replace(${id}, '-', ''))`,
+      ),
+    ),
+  );

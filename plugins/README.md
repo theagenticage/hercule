@@ -12,13 +12,13 @@ teardown.
 Every plugin runs in-process on the controller, and installed means compiled in. A
 plugin is loaded only once it is listed in
 `apps/controller/src/plugins/registry.ts`, which is the whole inventory: there is no
-discovery, no dynamic loading and no install step. The three shipped so far each
-register one provider definition:
+discovery, no dynamic loading and no install step. The plugins shipped so far:
 
 | Package | Contributes |
 | --- | --- |
 | `@hercule/plugin-claude-code` | the `claude-code` provider |
 | `@hercule/plugin-codex` | the `codex` provider |
 | `@hercule/plugin-pi` | the `pi` provider |
+| `@hercule/plugin-github` | the `github` connection type, the event source that polls GitHub, and the workflow actions on issues and pull requests |
 
 The runner entrypoint imports no plugin host and no plugin package.

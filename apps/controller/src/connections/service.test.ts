@@ -22,6 +22,7 @@ import { TestClock } from "effect/testing";
 import { ConnectionValidationFailed, type SetupStep } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
+import { IngestExecutorLayer } from "../daemon/ingest";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
@@ -49,7 +50,7 @@ const buildStack = () => {
   homes.push(home);
   return ConnectionServiceLayer.pipe(
     Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
-    Layer.provideMerge(PluginHostLayer),
+    Layer.provideMerge(PluginHostLayer.pipe(Layer.provide(IngestExecutorLayer))),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
@@ -136,6 +137,7 @@ const buildDeviceType = (
     },
     validate,
   },
+  feeds: {},
 });
 
 /**
@@ -269,6 +271,7 @@ describe("a device flow whose type changed while the user was approving it", () 
                   setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
                   validate: type.contribution.validate,
                 },
+                feeds: {},
               },
             ]),
           );
@@ -304,6 +307,7 @@ describe("the refusal of a setup operation the type does not offer", () => {
       setup,
       validate: () => Effect.succeed({ displayName: "account", accountId: "account-1" }),
     },
+    feeds: {},
   });
 
   it("says that nothing can set up a type with no credentials, oauth or device step", async () => {
@@ -372,6 +376,7 @@ const buildPastedType = (displayName: string): RegisteredConnectionType => ({
     setup: [{ kind: "credentials", fields: [{ name: "pat", label: "Token" }] }],
     validate: () => Effect.succeed({ displayName, accountId: "account-1" }),
   },
+  feeds: {},
 });
 
 describe("the label of a connection the user did not name", () => {

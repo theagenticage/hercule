@@ -7,7 +7,7 @@
  *   the domain that owns it. The providers domain is the last exception: it
  *   still sends its own frames, and issue #209 moves it under the same rule;
  * - the fibers behind the ports domains declare, such as the runs domain's
- *   Run Executor;
+ *   Run Executor and the plugins domain's Ingest Executor;
  * - the loops that run for the life of the controller, and boot;
  * - the ports that break a cycle between two domains, and, as the last
  *   resort, an operation whose domains could not be untangled otherwise.
@@ -34,7 +34,10 @@
  * - `workflows/`: what the workflows domain reads from the runs domain, and
  *   the Scheduler, which fires cron triggers;
  * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
- *   Workspace Steps, which hands a workspace step to its runner and stops it.
+ *   Workspace Steps, which hands a workspace step to its runner and stops it;
+ * - `ingest/`: the Ingest Reconciler, which keeps an ingest handle open for
+ *   every Connection that should be ingesting events from its plugin, and
+ *   the Ingest Executor, which gives each Connection's ingest a fiber.
  *
  * The top level holds what belongs to no single folder: the steps run once at
  * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
@@ -60,6 +63,7 @@ export {
   PipelineLayer,
 } from "./events";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
+export { IngestExecutorLayer, IngestReconcileInterval, runIngestReconciler } from "./ingest";
 export { BindableOperationsLayer } from "./notifications";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export {

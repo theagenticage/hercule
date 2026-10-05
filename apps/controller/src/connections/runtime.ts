@@ -4,9 +4,9 @@
  *
  * This module is in the connections domain rather than in the plugin host,
  * because everything it uses is here: the connection rows, their secrets and
- * the OAuth refresh. The plugin host registers types here at boot and asks for
- * a plugin's `ConnectionsRuntime` at activation; this module never calls the
- * plugin host.
+ * the OAuth refresh. The plugin host registers types here at boot
+ * and asks for a plugin's `ConnectionsRuntime` at activation; this module
+ * never calls the plugin host.
  *
  * A plugin's access is scoped by the `plugin_id` column alone: a plugin reaches
  * the connections whose `plugin_id` is its own, and cannot learn that any
@@ -29,6 +29,7 @@ import {
   type ConnectionType,
   type ConnectionsRuntime,
   type ConnectionTypeContribution,
+  type FeedDeclaration,
   type OAuthDeclaration,
 } from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
@@ -46,14 +47,20 @@ import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository, type StoredConnection } from "./repository";
 
 /**
- * A connection type a plugin declared: the decoded catalog entry, plus the
- * `validate` function, which a catalog cannot hold because it is code.
- * `contribution.type` is the qualified `<pluginId>/<word>` name the host built,
- * and every lookup uses that name.
+ * A connection type a plugin declared.
+ *
+ * - `contribution` is the decoded catalog entry, plus the `validate`
+ *   function, which a catalog cannot hold because it is code.
+ *   `contribution.type` is the qualified `<pluginId>/<word>` name the host
+ *   built, and every lookup uses that name.
+ * - `feeds` are the feeds the type's event source declared, keyed by feed
+ *   name, and `{}` for a type no event source ingests for. A type has at
+ *   most one event source: the plugin host refuses a second one.
  */
 export interface RegisteredConnectionType {
   readonly pluginId: string;
   readonly contribution: ConnectionType & Pick<ConnectionTypeContribution, "validate">;
+  readonly feeds: Readonly<Record<string, FeedDeclaration>>;
 }
 
 /**
@@ -79,6 +86,11 @@ const make = Effect.gen(function* () {
     config: row.config,
   });
 
+  /**
+   * Sets the connection's status and detail, unless the user disabled it.
+   * Only the user enables a connection again, so a plugin's report or a
+   * failed refresh that lands after the user disabled it changes nothing.
+   */
   const setStatus = (
     connectionId: string,
     status: ConnectionStatus,
@@ -90,7 +102,14 @@ const make = Effect.gen(function* () {
         withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* connections.update(connectionId, { status, statusDetail: detail }, at);
+            const changed = yield* connections.changeStatusFrom(
+              connectionId,
+              ["connected", "error", "needs-reauth"],
+              status,
+              detail,
+              at,
+            );
+            if (!changed) return;
             yield* announce({
               _tag: "record",
               topic: "connection",
@@ -397,6 +416,18 @@ const make = Effect.gen(function* () {
       Effect.map(Ref.get(declared), (all) => [...all.values()]),
 
     runtimeFor,
+
+    /**
+     * Returns a string that changes whenever the connection's credentials
+     * change: the name and rotation time of each secret it holds, without
+     * decrypting any. A reconnect either rotates a secret of the same name or
+     * swaps the names, so the string differs after one. An OAuth refresh
+     * rotates the token set, so it changes the string too.
+     */
+    readCredentialsVersion: (connectionId: string): Effect.Effect<string> =>
+      Effect.map(Effect.orDie(secrets.refs("connection", [connectionId])), (all) =>
+        JSON.stringify(all.get(connectionId) ?? []),
+      ),
   };
 });
 

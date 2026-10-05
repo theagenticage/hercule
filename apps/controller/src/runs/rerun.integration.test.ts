@@ -7,6 +7,7 @@
  *   the original's resolved inputs and name it in `originalRunId`;
  * - whose origin the new run gets, which follows the caller as for
  *   `run.start`;
+ * - who may replay a run of a sent workflow that acts through a Connection;
  * - every request the controller refuses, with its HTTP status and error code,
  *   and that a refused request creates no run;
  * - the list of a run's re-runs, read with `GET /runs?originalRunId=`.
@@ -14,9 +15,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { del, post, readErrorBody, type ServerHarness } from "../http/testing";
-import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
+import {
+  buildActionPlugin,
+  buildForgePlugin,
+  FORGE_CONNECTION_TYPE,
+  FORGE_REVIEW_ACTION_ID,
+  NOTE_APPEND_ACTION,
+  NOTE_APPEND_ACTION_ID,
+} from "../plugins/testing";
 import { spawnThreadWithGrants, WAIT_DEADLINE_MS } from "../sessions/testing";
 import {
+  createConnection,
   createWorkflowOrFail,
   disablePlugin,
   updateWorkflow,
@@ -273,6 +282,134 @@ describe("the origin of a re-run", () => {
       expect(rerun.origin).toEqual({ kind: "api", actor: `session:${allowed.session.id}` });
       expect(rerun.originalRunId).toBe(originalId);
     });
+  });
+});
+
+describe("a replay of a run whose step acts through a Connection", () => {
+  /** The message of the refusal for a caller without the connection.use grant. */
+  const REPLAY_REFUSAL =
+    "This run's workflow was sent with run.start, and its sender chose the Connection a step acts through, or one it may give to a run it starts. Replaying it needs the connection.use grant, which this session lacks. Ask the user to replay the run, or to grant connection.use.";
+
+  it("is refused to a session without connection.use when the workflow was sent, and allowed when it was stored or the caller holds the grant", async () => {
+    await withRunFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const definition = {
+          name: "Review a pull request",
+          steps: [
+            {
+              id: "review",
+              kind: "action",
+              action: FORGE_REVIEW_ACTION_ID,
+              params: { connection: connectionId, verdict: "approve" },
+            },
+          ],
+        };
+        const sentRunId = await startSentWorkflow(base, token, { definition });
+        expect((await waitForRunToFinish(base, token, sentRunId)).status).toBe("completed");
+        const workflow = await createWorkflowOrFail(base, token, { definition });
+        const storedRunId = await startRun(base, token, workflow.id);
+        expect((await waitForRunToFinish(base, token, storedRunId)).status).toBe("completed");
+        const withoutGrant = await spawnThreadWithGrants(arranged, "rerunner", [
+          "run.start",
+          "run.read",
+        ]);
+        const withGrant = await spawnThreadWithGrants(arranged, "connection user", [
+          "run.start",
+          "run.read",
+          "connection.use",
+        ]);
+
+        const response = await requestRerun(base, withoutGrant.token, sentRunId, {
+          mode: "replay",
+        });
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message: REPLAY_REFUSAL,
+        });
+        expect(await countRuns(harness)).toBe(2);
+
+        // The user chose the stored workflow's Connection when saving it.
+        for (const mode of ["replay", "re-stamp"]) {
+          const rerunId = await rerunRun(base, withoutGrant.token, storedRunId, { mode });
+          expect((await waitForRunToFinish(base, token, rerunId)).status).toBe("completed");
+        }
+        for (const caller of [token, withGrant.token]) {
+          const rerunId = await rerunRun(base, caller, sentRunId, { mode: "replay" });
+          expect((await waitForRunToFinish(base, token, rerunId)).status).toBe("completed");
+        }
+      },
+      [buildForgePlugin().plugin],
+    );
+  });
+
+  it("is refused to a session without connection.use when the sent workflow's run.start step gives a Connection to the run it starts", async () => {
+    await withRunFleet(
+      async (arranged) => {
+        const { harness, token } = arranged;
+        const base = harness.base;
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const target = await createWorkflowOrFail(base, token, {
+          definition: {
+            name: "Review a pull request",
+            inputs: [
+              { name: "account", connection: { type: FORGE_CONNECTION_TYPE }, required: true },
+            ],
+            steps: [
+              {
+                id: "review",
+                kind: "action",
+                action: FORGE_REVIEW_ACTION_ID,
+                params: { connection: "{{ inputs.account }}", verdict: "approve" },
+              },
+            ],
+          },
+        });
+        const sentRunId = await startSentWorkflow(base, token, {
+          definition: {
+            name: "Start a review",
+            steps: [
+              {
+                id: "start",
+                kind: "action",
+                action: "run.start",
+                params: { workflowId: target.id, inputs: { account: connectionId } },
+              },
+            ],
+          },
+        });
+        expect((await waitForRunToFinish(base, token, sentRunId)).status).toBe("completed");
+        const [child] = (await queryRuns(base, token, `actor=run:${sentRunId}`)).items;
+        expect((await waitForRunToFinish(base, token, child!.id)).status).toBe("completed");
+        const withoutGrant = await spawnThreadWithGrants(arranged, "rerunner", [
+          "run.start",
+          "run.read",
+        ]);
+
+        const response = await requestRerun(base, withoutGrant.token, sentRunId, {
+          mode: "replay",
+        });
+
+        const refusal = await readErrorBody(response);
+        expect(response.status, refusal.text).toBe(403);
+        expect(refusal).toMatchObject({
+          code: "forbidden",
+          grant: "connection.use",
+          message: REPLAY_REFUSAL,
+        });
+        expect(await countRuns(harness)).toBe(2);
+      },
+      [buildForgePlugin().plugin],
+    );
   });
 });
 

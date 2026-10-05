@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildConfigDraft,
   buildConfigFields,
+  readConfigHeading,
   readConfigIssues,
   buildConfigPayload,
+  CONFIG_NUMBER_UNREADABLE,
+  CONFIG_INTEGER_UNREADABLE,
 } from "./config-fields";
 import { ApiError } from "./errors";
 
@@ -92,8 +95,50 @@ describe("buildConfigFields", () => {
     expect(fields[1]?.description).toBeUndefined();
   });
 
+  it("passes a text or number field's default through as text", () => {
+    const fields = buildConfigFields(
+      buildObjectSchema({
+        endpoint: { type: "string", default: "https://notes.test" },
+        timeout: { type: "number", default: 1.5 },
+        days: { type: "integer", minimum: 1, maximum: 30, default: 7 },
+        retries: { type: "integer" },
+      }),
+    );
+
+    expect(fields.map((field) => [field.name, field.defaultValue])).toEqual([
+      ["endpoint", "https://notes.test"],
+      ["timeout", "1.5"],
+      ["days", "7"],
+      ["retries", undefined],
+    ]);
+  });
+
+  it("gives no default to a kind whose widget has no placeholder", () => {
+    const fields = buildConfigFields(
+      buildObjectSchema({
+        verbose: { type: "boolean", default: true },
+        mode: { type: "string", enum: ["fast", "slow"], default: "fast" },
+        tags: { type: "array", items: { type: "string" }, default: ["alpha"] },
+      }),
+    );
+
+    expect(fields.every((field) => field.defaultValue === undefined)).toBe(true);
+  });
+
   it("returns no fields for a plugin with nothing to configure", () => {
     expect(buildConfigFields(buildObjectSchema({}))).toEqual([]);
+  });
+});
+
+describe("readConfigHeading", () => {
+  it("returns the schema's title", () => {
+    expect(readConfigHeading({ ...buildObjectSchema({}), title: "Watching" })).toBe("Watching");
+  });
+
+  it("falls back to Configuration for a schema with no title, or an empty one", () => {
+    expect(readConfigHeading(buildObjectSchema({}))).toBe("Configuration");
+    expect(readConfigHeading({ ...buildObjectSchema({}), title: "" })).toBe("Configuration");
+    expect(readConfigHeading(undefined)).toBe("Configuration");
   });
 });
 
@@ -158,11 +203,13 @@ describe("buildConfigPayload", () => {
         {},
       ),
     ).toEqual({
-      endpoint: "https://notes.test",
-      timeout: 1.5,
-      retries: 3,
-      verbose: true,
-      tags: ["alpha", "beta"],
+      config: {
+        endpoint: "https://notes.test",
+        timeout: 1.5,
+        retries: 3,
+        verbose: true,
+        tags: ["alpha", "beta"],
+      },
     });
   });
 
@@ -170,16 +217,16 @@ describe("buildConfigPayload", () => {
     expect(
       buildConfigPayload(
         fields,
-        { endpoint: "", timeout: "", retries: "", verbose: false, tags: [] },
+        { endpoint: "", timeout: " ", retries: "  ", verbose: false, tags: [] },
         {},
       ),
-    ).toEqual({});
+    ).toEqual({ config: {} });
   });
 
   it("keeps sending a checkbox and a list that the stored config already has a value for", () => {
     expect(
       buildConfigPayload(fields, { verbose: false, tags: [] }, { verbose: true, tags: ["alpha"] }),
-    ).toEqual({ verbose: false, tags: [] });
+    ).toEqual({ config: { verbose: false, tags: [] } });
   });
 
   it("sends a required checkbox and list even when nothing is stored", () => {
@@ -191,9 +238,44 @@ describe("buildConfigPayload", () => {
     );
 
     expect(buildConfigPayload(required, { verbose: false, tags: [] }, {})).toEqual({
-      verbose: false,
-      tags: [],
+      config: { verbose: false, tags: [] },
     });
+  });
+
+  it("reads a number field's text with spaces around it", () => {
+    expect(buildConfigPayload(fields, { timeout: " -2.5 ", retries: " 7 " }, {})).toEqual({
+      config: { timeout: -2.5, retries: 7 },
+    });
+  });
+
+  it("refuses an integer field's text that is not an integer, and sends nothing", () => {
+    for (const typed of ["abc", "1.5", "1e3", "0x10", "--5", "5-"]) {
+      expect(
+        buildConfigPayload(fields, { endpoint: "https://notes.test", retries: typed }, {}),
+      ).toEqual({ errors: { retries: CONFIG_INTEGER_UNREADABLE } });
+    }
+  });
+
+  it("sends a negative integer, because an integer setting may be negative", () => {
+    expect(buildConfigPayload(fields, { retries: "-5" }, {})).toEqual({
+      config: { retries: -5 },
+    });
+  });
+
+  it("saves a stored negative integer back unchanged", () => {
+    const stored = { retries: -5 };
+
+    expect(buildConfigPayload(fields, buildConfigDraft(fields, stored), stored)).toEqual({
+      config: { retries: -5 },
+    });
+  });
+
+  it("refuses a number field's text that is not a number, on the field that holds it", () => {
+    for (const typed of ["abc", "1e3", "0x10", "1.", "1,5"]) {
+      expect(buildConfigPayload(fields, { timeout: typed, retries: "x" }, {})).toEqual({
+        errors: { timeout: CONFIG_NUMBER_UNREADABLE, retries: CONFIG_INTEGER_UNREADABLE },
+      });
+    }
   });
 });
 
@@ -212,6 +294,7 @@ describe("readConfigIssues", () => {
 
     expect(readConfigIssues(refusal, fields)).toEqual({
       perField: { endpoint: "must be an https URL", retries: "must be at least 1" },
+      perEntry: {},
       rest: false,
     });
   });
@@ -219,10 +302,12 @@ describe("readConfigIssues", () => {
   it("sets rest for an error that belongs to no rendered field", () => {
     expect(readConfigIssues(new ApiError("internal", "the database is locked"), fields)).toEqual({
       perField: {},
+      perEntry: {},
       rest: true,
     });
     expect(readConfigIssues(new Error("the controller could not be reached"), fields)).toEqual({
       perField: {},
+      perEntry: {},
       rest: true,
     });
     // An error about the payload as a whole belongs to the form, not a field.
@@ -231,18 +316,49 @@ describe("readConfigIssues", () => {
         new ApiError("validation", "no", { issues: [{ path: [], message: "no" }] }),
         fields,
       ),
-    ).toEqual({ perField: {}, rest: true });
+    ).toEqual({ perField: {}, perEntry: {}, rest: true });
     // Without `rest`, an error on a setting this form does not render would be shown nowhere.
     expect(
       readConfigIssues(
         new ApiError("validation", "no", { issues: [{ path: ["gone"], message: "unknown key" }] }),
         fields,
       ),
-    ).toEqual({ perField: {}, rest: true });
+    ).toEqual({ perField: {}, perEntry: {}, rest: true });
+  });
+
+  it("puts an error about one entry of a list field under that entry", () => {
+    const listFields = buildConfigFields(
+      buildObjectSchema({ tags: { type: "array", items: { type: "string" } } }),
+    );
+    const refusal = new ApiError("validation", "the config does not match", {
+      issues: [
+        { path: ["tags", "2"], message: "must not be empty" },
+        { path: ["tags", "2"], message: "a second error for the same entry" },
+        { path: ["tags"], message: "at most 5 tags" },
+      ],
+    });
+
+    expect(readConfigIssues(refusal, listFields)).toEqual({
+      perField: { tags: "at most 5 tags" },
+      perEntry: { tags: { 2: "must not be empty" } },
+      rest: false,
+    });
+  });
+
+  it("puts an error deeper than an entry under its field, so it is still shown", () => {
+    const refusal = new ApiError("validation", "no", {
+      issues: [{ path: ["endpoint", "host", "0"], message: "unreadable host" }],
+    });
+
+    expect(readConfigIssues(refusal, fields)).toEqual({
+      perField: { endpoint: "unreadable host" },
+      perEntry: {},
+      rest: false,
+    });
   });
 
   it("returns no errors when the write did not fail", () => {
-    expect(readConfigIssues(null, fields)).toEqual({ perField: {}, rest: false });
+    expect(readConfigIssues(null, fields)).toEqual({ perField: {}, perEntry: {}, rest: false });
   });
 
   it("reads a group's fields from paths that start with the group's name", () => {
@@ -255,11 +371,13 @@ describe("readConfigIssues", () => {
 
     expect(readConfigIssues(refusal, [{ name: "token" }], "credentials")).toEqual({
       perField: { token: "that token was rejected" },
+      perEntry: {},
       // The settings error matches no field this form renders.
       rest: true,
     });
     expect(readConfigIssues(refusal, fields, "config")).toEqual({
       perField: { endpoint: "must be an https URL" },
+      perEntry: {},
       rest: true,
     });
   });
@@ -271,6 +389,10 @@ describe("readConfigIssues", () => {
 
     // The type is gone, so this form renders no fields. Without `rest`, the
     // message would belong to a field nobody can see and never be shown.
-    expect(readConfigIssues(refusal, [], "config")).toEqual({ perField: {}, rest: true });
+    expect(readConfigIssues(refusal, [], "config")).toEqual({
+      perField: {},
+      perEntry: {},
+      rest: true,
+    });
   });
 });

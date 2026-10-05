@@ -23,6 +23,12 @@ import { Settings, type SettingError } from "./settings";
 /**
  * The shipped profiles.
  *
+ * The assistant profile gets `connection.use`, so an assistant can act
+ * through the user's Connections as the user would: start a run that picks
+ * the Connection a step acts through, or post an event of a plugin's kind.
+ * Its sessions already get the token of the user's default GitHub
+ * Connection, so on GitHub the grant adds little the token did not give.
+ *
  * The worker profile gets `notification.read` as well as `notification.write`:
  * every other family lists its read verb explicitly, and without it a worker
  * could create a notification it cannot read back.
@@ -53,6 +59,7 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "event.read",
       "event.emit",
       "connection.read",
+      "connection.use",
       "infra.read",
       "workspace.read",
       "agent.read",

@@ -172,6 +172,9 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
   const triggers = named.flatMap((each) =>
     each.kind === "trigger" ? [`${each.triggerId} in the workflow ${each.workflowName}`] : [],
   );
+  const steps = named.flatMap((each) =>
+    each.kind === "step" ? [`${each.stepId} in the workflow ${each.workflowName}`] : [],
+  );
   const parts: Array<string> = [];
   if (resources.length > 0) {
     parts.push(
@@ -183,6 +186,12 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
     parts.push(
       `workflow triggers match only events from this connection: ${triggers.join(", ")}; ` +
         "point those triggers at another connection, or delete them, before deleting this one",
+    );
+  }
+  if (steps.length > 0) {
+    parts.push(
+      `workflow steps act through this connection: ${steps.join(", ")}; ` +
+        "point those steps at another connection, or delete them, before deleting this one",
     );
   }
   return parts.join("; ");
@@ -395,6 +404,48 @@ const make = Effect.gen(function* () {
   };
 
   /**
+   * Checks the user's poll intervals against the feeds the type's event
+   * source declares. Fails with `validation`, with one issue per refused feed
+   * at `feedIntervals.<feed>`, when a feed is not declared, or when its
+   * interval is shorter than the feed's shortest: its `minIntervalSeconds`, or
+   * its default when it declares no minimum.
+   *
+   * A shorter interval is refused rather than raised to the shortest, because
+   * the user would otherwise see a number stored that is not the one polled.
+   */
+  const checkFeedIntervals = (
+    { contribution, feeds }: RegisteredConnectionType,
+    intervals: Readonly<Record<string, number>>,
+  ): Effect.Effect<void, Validation> =>
+    Effect.gen(function* () {
+      const issues = Object.entries(intervals).flatMap(([feed, seconds]) => {
+        const declaration = feeds[feed];
+        if (declaration === undefined) {
+          const known = Object.keys(feeds);
+          const message =
+            known.length === 0
+              ? `${contribution.displayName} has no feeds to poll, so it takes no poll intervals.`
+              : `${contribution.displayName} has no feed named ${feed}. Its feeds are ${known.join(", ")}.`;
+          return [{ path: ["feedIntervals", feed], message }];
+        }
+        const shortest = declaration.minIntervalSeconds ?? declaration.defaultIntervalSeconds;
+        if (seconds >= shortest) return [];
+        return [
+          {
+            path: ["feedIntervals", feed],
+            message: `Poll ${feed} every ${String(shortest)} seconds or slower; ${contribution.displayName} does not allow a shorter interval.`,
+          },
+        ];
+      });
+      // Every message is also in the top-level message, which is the line
+      // the CLI prints.
+      if (issues.length > 0) {
+        const message = issues.map((issue) => issue.message).join(" ");
+        return yield* Effect.fail(createValidationError(issues, message));
+      }
+    });
+
+  /**
    * Checks that the credentials have exactly the fields the type declares, and
    * returns them. Fails with `validation` for a missing field or an unknown
    * one: an unknown field would be stored as a secret that nothing ever reads.
@@ -460,6 +511,7 @@ const make = Effect.gen(function* () {
     ...(row.statusDetail === undefined ? {} : { statusDetail: row.statusDetail }),
     labels: row.labels,
     config: row.config,
+    feedIntervals: row.feedIntervals,
     credentials: refs.map((ref) => ({
       name: ref.name,
       ...(ref.rotatedAt === null ? {} : { rotatedAt: ref.rotatedAt }),
@@ -837,7 +889,10 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Updates what the user chose: the label, topics and config. Not the account or status. */
+    /**
+     * Updates what the user chose: the label, topics, config and poll
+     * intervals. Not the account or status.
+     */
     update: (
       input: UpdateInput,
     ): Effect.Effect<
@@ -854,6 +909,9 @@ const make = Effect.gen(function* () {
         if (patch.config !== undefined) {
           const { contribution } = yield* readStoredTypeOrFail(row);
           yield* readConfig(contribution, patch.config);
+        }
+        if (patch.feedIntervals !== undefined) {
+          yield* checkFeedIntervals(yield* readStoredTypeOrFail(row), patch.feedIntervals);
         }
         return yield* withTransaction(
           sql,
@@ -1211,9 +1269,9 @@ const make = Effect.gen(function* () {
     /**
      * Deletes the connection and every secret it owns, in one transaction,
      * and records the deletion in the audit log. Fails with `NotFound` when
-     * no connection has the id, and with `InvalidState` while a resource or a
-     * trigger still names the connection, because deleting it would break
-     * that record.
+     * no connection has the id, and with `InvalidState` while a resource, a
+     * trigger or a workflow step still names the connection, because
+     * deleting it would break that record.
      *
      * The check runs in the delete's transaction. Otherwise a resource or a
      * workflow saved between the check and the delete would name a

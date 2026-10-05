@@ -18,7 +18,9 @@ import {
   ConnectionValidationFailed,
   HOST_API,
   registerConnectionType,
+  registerEventSource,
   type ActivationContext,
+  type FeedDeclaration,
   type Plugin,
   type SetupStep,
 } from "@hercule/plugin-host";
@@ -35,10 +37,12 @@ import {
   buildAccount,
   buildAccountName,
   listConnections,
+  readConnection,
   readConnectionsSurface,
   type ConnectionRecord,
   type TestPlugin,
 } from "./testing";
+import { IDLE_INGEST_OPEN } from "../plugins/testing";
 
 /** The error envelope every failing operation returns. */
 interface ErrorBody {
@@ -79,43 +83,59 @@ const buildConnectionPlugin = (options: {
   readonly type: string;
   readonly flow?: "credentials" | "oauth";
   readonly configSchema?: Schema.Top;
+  /** When given, the plugin also declares an event source for the type, with these feeds. */
+  readonly feeds?: Record<string, FeedDeclaration>;
 }): TestPlugin => {
   const contexts: Array<ActivationContext> = [];
   const setup: ReadonlyArray<SetupStep> =
     options.flow === "oauth"
       ? [{ kind: "oauth" }]
       : [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }];
+  const feeds = options.feeds;
 
   const plugin: Plugin = {
     manifest: {
       id: options.id,
       displayName: `Plugin ${options.id}`,
       hostApi: HOST_API,
-      capabilities: ["connections"],
+      capabilities:
+        feeds === undefined ? ["connections"] : ["connections", "event-sources", "events"],
       configSchema: Schema.Struct({}),
     },
     register: (host) =>
-      registerConnectionType(host, {
-        type: options.type,
-        displayName: `Type ${options.type}`,
-        setup,
-        ...(options.flow === "oauth"
-          ? {
-              oauth: {
-                authorizationUrl: "https://provider.test/authorize",
-                tokenUrl: "https://provider.test/token",
-                scopes: ["read"],
-              },
-            }
-          : {}),
-        ...(options.configSchema === undefined ? {} : { configSchema: options.configSchema }),
-        validate: (credentials: Record<string, string>) => {
-          const token = credentials["token"] ?? "";
-          return token.startsWith("good-")
-            ? Effect.succeed(buildAccount(token))
-            : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
-        },
-      }),
+      Effect.andThen(
+        registerConnectionType(host, {
+          type: options.type,
+          displayName: `Type ${options.type}`,
+          setup,
+          ...(options.flow === "oauth"
+            ? {
+                oauth: {
+                  authorizationUrl: "https://provider.test/authorize",
+                  tokenUrl: "https://provider.test/token",
+                  scopes: ["read"],
+                },
+              }
+            : {}),
+          ...(options.configSchema === undefined ? {} : { configSchema: options.configSchema }),
+          validate: (credentials: Record<string, string>) => {
+            const token = credentials["token"] ?? "";
+            return token.startsWith("good-")
+              ? Effect.succeed(buildAccount(token))
+              : Effect.fail(new ConnectionValidationFailed({ message: REJECTED }));
+          },
+        }),
+        feeds === undefined
+          ? Effect.void
+          : registerEventSource(host, {
+              id: options.type,
+              connectionType: `${options.id}/${options.type}`,
+              kinds: {},
+              feeds,
+              // These tests are about the feeds' intervals, so the source polls nothing.
+              open: IDLE_INGEST_OPEN,
+            }),
+      ),
     activate: (ctx) =>
       Effect.sync(() => {
         contexts.push(ctx);
@@ -136,6 +156,14 @@ const buildPlugins = () => ({
     configSchema: Schema.Struct({ watch: Schema.String }),
   }),
   oauth: buildConnectionPlugin({ id: "oauthy", type: "oauth-type", flow: "oauth" }),
+  polled: buildConnectionPlugin({
+    id: "polled",
+    type: "polled-type",
+    feeds: {
+      fast: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+      slow: { defaultIntervalSeconds: 120 },
+    },
+  }),
 });
 
 type Registry = ReturnType<typeof buildPlugins>;
@@ -169,16 +197,6 @@ const createConnectionOrFail = async (
     ...body,
   });
   expect(response.status, await response.clone().text()).toBe(201);
-  return (await response.json()) as ConnectionRecord;
-};
-
-const readConnection = async (
-  base: string,
-  token: string,
-  id: string,
-): Promise<ConnectionRecord> => {
-  const response = await get(base, `/api/v1/connections/${id}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as ConnectionRecord;
 };
 
@@ -487,6 +505,114 @@ describe("PATCH /connections/:id", () => {
 
       const filled = await patchConnection(base, token, one.id, { config: { watch: "a" } });
       expect(await readError(filled)).toMatchObject({ code: "validation" });
+    });
+  });
+
+  it("stores the user's poll intervals, returns them, and puts every feed back on its default with {}", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "polled/polled-type" });
+      expect(one.feedIntervals).toEqual({});
+
+      const set = await patchConnection(base, token, one.id, {
+        feedIntervals: { fast: 30, slow: 600 },
+      });
+      expect(set.status, await set.clone().text()).toBe(200);
+      expect(await set.json()).toMatchObject({ feedIntervals: { fast: 30, slow: 600 } });
+      expect((await readConnection(base, token, one.id)).feedIntervals).toEqual({
+        fast: 30,
+        slow: 600,
+      });
+
+      // The map is replaced whole, so a feed left out goes back to its default.
+      const narrowed = await patchConnection(base, token, one.id, { feedIntervals: { slow: 600 } });
+      expect(await narrowed.json()).toMatchObject({ feedIntervals: { slow: 600 } });
+
+      const cleared = await patchConnection(base, token, one.id, { feedIntervals: {} });
+      expect(cleared.status, await cleared.clone().text()).toBe(200);
+      expect((await readConnection(base, token, one.id)).feedIntervals).toEqual({});
+    });
+  });
+
+  it("refuses an interval shorter than the feed allows, at that feed, and stores nothing", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "polled/polled-type" });
+
+      // `fast` declares a shortest interval of 30 seconds; `slow` declares
+      // none, so its default of 120 seconds is also its shortest.
+      const refused = await readError(
+        await patchConnection(base, token, one.id, {
+          label: "renamed",
+          feedIntervals: { fast: 29, slow: 119 },
+        }),
+      );
+
+      expect(refused.code).toBe("validation");
+      expect(refused.details?.issues).toEqual([
+        {
+          path: ["feedIntervals", "fast"],
+          message:
+            "Poll fast every 30 seconds or slower; Type polled-type does not allow a shorter interval.",
+        },
+        {
+          path: ["feedIntervals", "slow"],
+          message:
+            "Poll slow every 120 seconds or slower; Type polled-type does not allow a shorter interval.",
+        },
+      ]);
+      expect(refused.message).toContain("Poll fast every 30 seconds or slower");
+      expect(await readConnection(base, token, one.id)).toMatchObject({
+        label: one.label,
+        feedIntervals: {},
+      });
+
+      const shortest = await patchConnection(base, token, one.id, {
+        feedIntervals: { fast: 30, slow: 120 },
+      });
+      expect(shortest.status, await shortest.clone().text()).toBe(200);
+    });
+  });
+
+  it("refuses a feed the type does not declare, and any feed for a type with no feeds", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const polled = await createConnectionOrFail(base, token, { type: "polled/polled-type" });
+      const unknown = await readError(
+        await patchConnection(base, token, polled.id, { feedIntervals: { hourly: 3600 } }),
+      );
+      expect(unknown.code).toBe("validation");
+      expect(unknown.details?.issues).toEqual([
+        {
+          path: ["feedIntervals", "hourly"],
+          message: "Type polled-type has no feed named hourly. Its feeds are fast, slow.",
+        },
+      ]);
+
+      const plain = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      const none = await readError(
+        await patchConnection(base, token, plain.id, { feedIntervals: { fast: 60 } }),
+      );
+      expect(none.details?.issues).toEqual([
+        {
+          path: ["feedIntervals", "fast"],
+          message: "Type main-type has no feeds to poll, so it takes no poll intervals.",
+        },
+      ]);
+      const empty = await patchConnection(base, token, plain.id, { feedIntervals: {} });
+      expect(empty.status, await empty.clone().text()).toBe(200);
+    });
+  });
+
+  it("refuses an interval that is not a whole number of seconds from one to a day", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "polled/polled-type" });
+
+      for (const seconds of [0, 90.5, 86_401]) {
+        const refused = await readError(
+          await patchConnection(base, token, one.id, { feedIntervals: { slow: seconds } }),
+        );
+        expect(refused.code, String(seconds)).toBe("validation");
+      }
+      const day = await patchConnection(base, token, one.id, { feedIntervals: { slow: 86_400 } });
+      expect(day.status, await day.clone().text()).toBe(200);
     });
   });
 });
