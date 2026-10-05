@@ -34,7 +34,7 @@ export function ConversationSessionNotice({
   const queryClient = useQueryClient();
   const assistant = useSuspenseQuery(answeredAssistantQuery(client, assistantId)).data;
   const interrupt = useMutation({
-    mutationFn: () => client.session.interrupt({ params: { id: sessionId } }),
+    mutationFn: () => client.session.interrupt({ params: { id: sessionId }, payload: {} }),
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.session(updated.id), updated);
     },

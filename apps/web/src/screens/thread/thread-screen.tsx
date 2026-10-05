@@ -90,6 +90,10 @@ export function ThreadScreen({
   const project = projects.find((each) => each.id === session.projectId);
   const assistantId = findAnsweredAssistantId(session);
 
+  // Several Requests can be open at once; the dock shows the oldest, the one
+  // the agents have waited on longest.
+  const oldestRequest = session.openRequests[0];
+
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
   // whether the growth should move the scroll position. The user counts as at
@@ -99,7 +103,7 @@ export function ThreadScreen({
     followIfAtBottom();
     // A permission card docking above the composer takes space from the
     // column just like a queued row, so it also triggers a follow.
-  }, [rows.length, queuedCount, session.openRequest?.requestId, followIfAtBottom]);
+  }, [rows.length, queuedCount, oldestRequest?.requestId, followIfAtBottom]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -160,14 +164,14 @@ export function ThreadScreen({
         <div className="sticky bottom-0 flex flex-col gap-2">
           <QueuedInputs client={client} sessionId={sessionId} />
           <div className="flex flex-col">
-            {session.openRequest === null ? null : (
+            {oldestRequest === undefined ? null : (
               <PermissionCard
                 // A new request gets a new card, so the answered state of the
                 // previous request is not carried over.
-                key={session.openRequest.requestId}
+                key={oldestRequest.requestId}
                 client={client}
                 sessionId={sessionId}
-                request={session.openRequest}
+                request={oldestRequest}
               />
             )}
             {assistantId === null ? (

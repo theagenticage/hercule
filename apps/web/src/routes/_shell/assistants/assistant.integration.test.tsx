@@ -26,6 +26,7 @@ import {
   type Conversation,
   type ConversationMessage,
   type Session,
+  type SessionRequest,
 } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -88,7 +89,7 @@ const buildConversationSession = (overrides: Partial<Session>): Session => ({
   nativeSessionId: "native-ada",
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
-  openRequest: null,
+  openRequests: [],
   createdAt: "2026-09-25T09:10:00.000Z",
   startedAt: "2026-09-25T09:10:01.000Z",
   exitedAt: null,
@@ -686,7 +687,7 @@ describe("Assistant conversation: earlier messages", () => {
 });
 
 describe("Assistant conversation: the row under the last bubble", () => {
-  const REQUEST: NonNullable<Session["openRequest"]> = {
+  const REQUEST: SessionRequest = {
     requestId: "req-ada",
     itemId: "tool-ada",
     kind: "command_approval",
@@ -763,7 +764,7 @@ describe("Assistant conversation: the row under the last bubble", () => {
   it("links to the session when it waits for an approval, and shows no permission card", async () => {
     await openConversation({
       messages: [LAST],
-      current: buildConversationSession({ status: "busy", openRequest: REQUEST }),
+      current: buildConversationSession({ status: "busy", openRequests: [REQUEST] }),
     });
 
     const row = await screen.findByRole("link", { name: /Ada needs your approval/ });

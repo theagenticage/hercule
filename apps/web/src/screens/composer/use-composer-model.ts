@@ -136,7 +136,7 @@ export function useComposerModel(
     onSettled: releaseSend,
   });
   const interrupt = useMutation({
-    mutationFn: (id: string) => client.session.interrupt({ params: { id } }),
+    mutationFn: (id: string) => client.session.interrupt({ params: { id }, payload: {} }),
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.session(updated.id), updated);
     },
