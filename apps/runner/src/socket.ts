@@ -18,10 +18,12 @@
 import { mkdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -61,7 +63,7 @@ import {
   type ProviderRunnerContext,
 } from "./providers";
 import type { LoginAnswer, Logins } from "./providers/login";
-import { sessions } from "./sessions";
+import type { Supervising } from "./sessions";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS, type WorkspaceSteps } from "./workspace-actions";
 import type { Workspaces } from "./workspaces";
@@ -132,6 +134,8 @@ export interface ConnectOptions {
   readonly credentials: CredentialRelay;
   /** The provider logins on this machine. They outlive this connection. */
   readonly providerLogins: Logins;
+  /** The sessions on this machine. They outlive this connection. */
+  readonly sessions: Supervising;
   /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
   /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
@@ -273,9 +277,9 @@ export const connect = (
       ),
     );
     const write = yield* socket.writer;
-    // A probe or an install runs longer than the handling of the frame that
-    // asked for it, so it is forked into the connection's scope, not the
-    // transport's per-frame fiber.
+    // A probe, an install, a facts report or a session's work runs longer
+    // than the handling of the frame that asked for it, so it is forked into
+    // the connection's scope, and the next frame is handled at once.
     const connection = yield* Effect.scope;
 
     const nonce = encodeBase64(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
@@ -298,10 +302,17 @@ export const connect = (
         yield* write(new Socket.CloseEvent(PROTOCOL_ERROR, "unrecognised controller"));
       });
 
-    const reportFacts = Effect.tap(options.probe, (probed) =>
-      Effect.sync(() => {
-        facts = probed;
-      }),
+    // Facts are probed one at a time. A request, an install and the hourly
+    // report can each ask for a probe, and two probes that ran side by side
+    // could finish in either order, so the older result could overwrite the
+    // newer one in `facts`.
+    const probing = Semaphore.makeUnsafe(1);
+    const reportFacts = probing.withPermits(1)(
+      Effect.tap(options.probe, (probed) =>
+        Effect.sync(() => {
+          facts = probed;
+        }),
+      ),
     );
 
     const findBinaryPath = (binaryName: string): string | undefined =>
@@ -337,7 +348,7 @@ export const connect = (
     // The connection gives the supervisor a way to send frames and the paths
     // this machine resolved. The sessions themselves belong to the process,
     // not to this connection.
-    const supervisor = sessions.forConnection({
+    const supervisor = options.sessions.forConnection({
       send: (frame) => write(encodeFrameText(frame)),
       machine: {
         providersDir: options.providersDir,
@@ -496,6 +507,74 @@ export const connect = (
             );
       });
 
+    /**
+     * The last frame queued for each session, by session id. Each frame of a
+     * session waits for the one queued before it, so a session's frames run
+     * one at a time in arrival order. An entry is removed when its frame
+     * finishes and no later frame was queued behind it.
+     */
+    const sessionLanes = new Map<string, Deferred.Deferred<void>>();
+
+    /**
+     * Adds a frame to the end of its session's lane. Returns the wait for the
+     * frame queued before it, and the effect that marks this frame finished,
+     * which the caller runs once the frame's work is done, however it ends.
+     * Call it from the frame loop, so frames join their lanes in the order
+     * they arrived.
+     */
+    const joinSessionLane = (
+      sessionId: string,
+    ): { readonly previous: Effect.Effect<void>; readonly finish: Effect.Effect<void> } => {
+      const previous = sessionLanes.get(sessionId);
+      const finished = Deferred.makeUnsafe<void>();
+      sessionLanes.set(sessionId, finished);
+      return {
+        previous: previous === undefined ? Effect.void : Deferred.await(previous),
+        finish: Effect.sync(() => {
+          Deferred.doneUnsafe(finished, Effect.void);
+          if (sessionLanes.get(sessionId) === finished) sessionLanes.delete(sessionId);
+        }),
+      };
+    };
+
+    /**
+     * Queues the work of one session frame behind the earlier frames of the
+     * same session. Returns the effect that waits its turn and then runs the
+     * work.
+     */
+    const queueSessionWork = (
+      sessionId: string,
+      work: Effect.Effect<void>,
+    ): Effect.Effect<void> => {
+      const lane = joinSessionLane(sessionId);
+      return Effect.andThen(lane.previous, work).pipe(Effect.ensuring(lane.finish));
+    };
+
+    /**
+     * Returns the effect that runs the work of one session frame at once,
+     * ahead of the earlier frames of its session, while the later frames of
+     * the session still wait for it. The frame counts as finished only once
+     * the earlier frames have finished too, so the order of everything queued
+     * behind it is kept.
+     */
+    const runAheadOfSessionLane = (
+      sessionId: string,
+      work: Effect.Effect<void>,
+    ): Effect.Effect<void> => {
+      const lane = joinSessionLane(sessionId);
+      return Effect.andThen(work, lane.previous).pipe(Effect.ensuring(lane.finish));
+    };
+
+    /**
+     * Handles one frame in the frame loop. Returns the work of a session
+     * frame, which the loop forks, or undefined when the frame is fully
+     * handled. Fails with `ProtocolMismatch` when the controller uses another
+     * protocol version.
+     *
+     * Everything done here is quick, because every later frame, pings
+     * included, waits for it. Work that waits on a harness or on the network
+     * is returned or forked instead.
+     */
     const handleFrame = (raw: string) =>
       Effect.gen(function* () {
         if (impostor !== undefined) return;
@@ -551,9 +630,17 @@ export const connect = (
             return yield* write(encodeFrameText({ _tag: "pong" }));
           case "factsRequest":
             // Unlike the hourly report, this is sent even when nothing changed,
-            // because someone is waiting for the response.
-            return yield* write(
-              encodeFrameText({ _tag: "factsReport", facts: yield* reportFacts }),
+            // because someone is waiting for the response. Forked, like a
+            // probe, because the probe takes seconds.
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                Effect.ignore(
+                  Effect.flatMap(reportFacts, (probed) =>
+                    write(encodeFrameText({ _tag: "factsReport", facts: probed })),
+                  ),
+                ),
+                connection,
+              ),
             );
           case "probeRequest":
             // Forked, because a probe takes seconds, and the connection must keep
@@ -575,20 +662,41 @@ export const connect = (
                 connection,
               ),
             );
-          // Session frames are handled in arrival order, without forking, so
-          // input for a session cannot overtake the frame that started it.
+          // A session's frames are queued in its own lane, so input for a
+          // session cannot overtake the frame that started it, while other
+          // sessions and every other frame go on.
           case "sessionStart":
-            return yield* supervisor.start(message);
+            // `start` records the start now, before the next frame is
+            // handled, so a stop that arrives after this frame always finds
+            // it.
+            return queueSessionWork(message.sessionId, supervisor.start(message));
           case "sessionInput":
-            return yield* supervisor.input(message);
+            return queueSessionWork(message.sessionId, supervisor.input(message));
           case "sessionInterrupt":
-            return yield* supervisor.interrupt(message);
+            return queueSessionWork(message.sessionId, supervisor.interrupt(message));
           case "sessionRespondToApprovalRequest":
-            return yield* supervisor.respondToApprovalRequest(message);
+            return queueSessionWork(
+              message.sessionId,
+              supervisor.respondToApprovalRequest(message),
+            );
           case "sessionRespondToQuestion":
-            return yield* supervisor.respondToQuestion(message);
+            return queueSessionWork(message.sessionId, supervisor.respondToQuestion(message));
           case "sessionStop":
-            return yield* supervisor.stop(message);
+            // A stop does not wait behind its session's frames: it must
+            // reach a start that is still starting, so the start refuses its
+            // input instead of handing it over (spec 06 section 4.2). An
+            // input still waiting in the lane is then refused too. `stop`
+            // records the stop now. The effect it returns asks the adapter to
+            // stop the harness and waits until the harness is gone.
+            //
+            // The session's later frames do wait for that effect. The
+            // controller can send a start right after a stop for the same
+            // id, with no exit between them: it stops a harness the runner
+            // still lists for a session it has already ended, and a resume
+            // can then start that session again. The start must find the old
+            // harness gone, not still listed by an adapter that is stopping
+            // it.
+            return runAheadOfSessionLane(message.sessionId, supervisor.stop(message));
           case "ack":
             // Acks are for replayable events, which nothing sends yet.
             return;
@@ -627,11 +735,38 @@ export const connect = (
         return message satisfies never;
       });
 
-    // The transport forks a fiber per frame. Without this lock, two frames
-    // arriving together could run the hello check at the same time over the
-    // same shared state.
-    const frames = yield* Semaphore.make(1);
-    const receive = (raw: string) => frames.withPermits(1)(handleFrame(raw));
+    // The transport calls `receive` once per frame, in arrival order, and
+    // `receive` only puts the frame in the inbox. One fiber, the frame loop,
+    // takes the frames out and passes each through `handleFrame` before it
+    // takes the next, so:
+    //
+    // - two frames arriving together cannot run the hello check at the same
+    //   time over the same shared state;
+    // - a frame that arrives while the hello is being checked waits for the
+    //   check, instead of being dropped as if no hello had come;
+    // - session frames join their lanes in arrival order.
+    //
+    // Nothing between the transport and the loop can reorder frames. A lock
+    // taken by a fiber per frame could: a lock does not hand itself to its
+    // waiters in the order they came.
+    //
+    // A session frame's work is forked into the connection's scope, so a
+    // ping is never answered late because a harness is slow to start. The end
+    // of the connection closes that scope, which interrupts the work and
+    // waits for it.
+    const inbox = yield* Queue.unbounded<string>();
+    const receive = (raw: string): void => {
+      Queue.offerUnsafe(inbox, raw);
+    };
+    const handleFrames = Effect.forever(
+      Effect.flatMap(Queue.take(inbox), (raw) =>
+        Effect.flatMap(handleFrame(raw), (sessionWork) =>
+          Effect.isEffect(sessionWork)
+            ? Effect.asVoid(Effect.forkIn(sessionWork, connection))
+            : Effect.void,
+        ),
+      ),
+    );
 
     /**
      * Waits for the proof, then starts the session relay and the periodic
@@ -689,20 +824,25 @@ export const connect = (
     });
 
     // `raceFirst`, not `race`: the connection ending is a failure, and `race`
-    // would ignore that failure and keep waiting for the other side.
+    // would ignore that failure and keep waiting for the other side. The
+    // frame loop never ends on its own; it fails when the controller uses
+    // another protocol version, and that ends the connection too.
     yield* Effect.raceFirst(
-      socket.runString(receive, {
-        onOpen: write(
-          encodeFrameText({
-            _tag: "runnerHello",
-            protocolVersion: PROTOCOL_VERSION,
-            capabilities: CAPABILITIES,
-            binaryVersion: VERSION,
-            nonce,
-            facts: options.facts,
-          }),
-        ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
-      }),
+      Effect.raceFirst(
+        socket.runString(receive, {
+          onOpen: write(
+            encodeFrameText({
+              _tag: "runnerHello",
+              protocolVersion: PROTOCOL_VERSION,
+              capabilities: CAPABILITIES,
+              binaryVersion: VERSION,
+              nonce,
+              facts: options.facts,
+            }),
+          ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
+        }),
+        handleFrames,
+      ),
       reporting,
     ).pipe(
       // When the runner closed the connection on an impostor, report that

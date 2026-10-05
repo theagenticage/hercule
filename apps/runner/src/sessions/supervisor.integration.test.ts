@@ -1542,6 +1542,42 @@ describe("a session that sits idle between turns", () => {
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
 
+  it("does not wait idleMs again after an input is refused while the session is stopping", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        // The harness takes the stop and is slow to exit, and an input that
+        // reaches it in that time is refused. The session is on its way out,
+        // so the refusal must not give it a new idle wait.
+        fake.stopsSilently = true;
+        yield* Effect.forkChild(supervisor.stop({ _tag: "sessionStop", sessionId: SESSION }));
+        yield* waitOnWallClock("asked the adapter to stop", () => fake.stops.length === 1);
+        fake.fails = "the harness is stopping";
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "still there?" },
+        });
+
+        yield* TestClock.adjust(IDLE_MS * 2);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(listInputResults(sent).at(-1)).toMatchObject({ requestId: REQUEST, ok: false });
+  });
+
   it("is left alone while parked on a permission request, however long it waits", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);

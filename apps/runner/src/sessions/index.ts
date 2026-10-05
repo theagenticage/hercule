@@ -7,7 +7,7 @@ import { adapters } from "../providers";
 import { makeSupervising } from "./supervisor";
 
 export type { Machine } from "./context";
-export type { Connection, SessionSupervisor } from "./supervisor";
+export type { Connection, SessionSupervisor, Supervising } from "./supervisor";
 
 /**
  * Created once per process, not once per connection, because this runner's

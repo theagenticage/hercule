@@ -25,6 +25,7 @@ import {
   readSession,
   spawnSession,
   spawnSessionOrFail,
+  waitForSession,
   waitForStartFrames,
   waitUntil,
   WAIT_DEADLINE_MS,
@@ -469,7 +470,11 @@ describe("placeSession from an Agent", () => {
         agentId: agent.id,
         prompt: "assess this",
       });
-      const before = await readSession(arranged, session.id);
+      // The fake runner answers the input the start carries, which moves the
+      // session from `starting` to `busy`. Taken before that answer, the
+      // snapshot would differ from the later read for a reason that has
+      // nothing to do with the edit.
+      const before = await waitForSession(arranged, session.id, (one) => one.status === "busy");
       const specBefore = await readStartedSpec(arranged, session.id);
 
       const patched = await send("PATCH", arranged.harness.base, `/api/v1/agents/${agent.id}`, {

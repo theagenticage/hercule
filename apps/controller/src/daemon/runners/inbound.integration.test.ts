@@ -49,6 +49,7 @@ const reportExit = async (
   seq: number,
   reason: ExitReason,
 ): Promise<void> => {
+  const exitedBefore = (await readSession(arranged, sessionId)).exitedAt;
   reportEvent(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId,
@@ -56,11 +57,14 @@ const reportExit = async (
     _tag: "session.exited",
     reason,
   });
-  // The resume may already have moved the session on, so any status other
-  // than `busy` or `idle` shows the exit was applied.
+  // The status cannot show that the exit was applied: a session that keeps
+  // its input is resumed at once, and the fake runner answers the resumed
+  // start, so the session can be `busy` again before a poll sees it exited.
+  // The exit time stays on the session through a resume, and every exit sets
+  // it again, so a new exit time is the proof.
   await waitUntil("applied the exit", async () => {
     const found = await readSession(arranged, sessionId);
-    return found.status !== "busy" && found.status !== "idle" ? found : undefined;
+    return found.exitedAt !== null && found.exitedAt !== exitedBefore ? found : undefined;
   });
 };
 
