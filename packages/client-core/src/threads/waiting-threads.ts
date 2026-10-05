@@ -1,33 +1,41 @@
 /**
  * The threads waiting on the user, which the desktop app counts on its dock
  * badge and shows notifications for. A thread waits on the user while its
- * session has an open Request; answering the Request, wherever it is
- * answered, ends the wait.
+ * session has an open Request, whichever of its agents asked; answering the
+ * last one, wherever it is answered, ends the wait.
  */
 import type { Session } from "@hercule/contract";
 import { formatRequestQuestion } from "./request-question";
 
-/** A thread waiting on the user, and the Request it waits on. */
+/** A thread waiting on the user, and the oldest Request it waits on. */
 export interface WaitingThread {
   readonly sessionId: string;
-  /** The open Request's id. A new Request on the same thread has a new id. */
+  /**
+   * The oldest open Request's id. When it is answered, the next oldest takes
+   * its place, with a new id.
+   */
   readonly requestId: string;
   readonly title: string;
   /** What the agent asks, in one line, such as "Run git push?". */
   readonly question: string;
 }
 
-/** Returns the threads in `sessions` that have an open Request, in the order of `sessions`. */
+/**
+ * Returns the threads in `sessions` that have an open Request, in the order
+ * of `sessions`, each with the oldest of its Requests: the one its agents
+ * have waited on longest.
+ */
 export const listWaitingThreads = (sessions: readonly Session[]): WaitingThread[] =>
-  sessions.flatMap((session) =>
-    session.openRequest === null
+  sessions.flatMap((session) => {
+    const oldest = session.openRequests[0];
+    return oldest === undefined
       ? []
       : [
           {
             sessionId: session.id,
-            requestId: session.openRequest.requestId,
+            requestId: oldest.requestId,
             title: session.title,
-            question: formatRequestQuestion(session.openRequest),
+            question: formatRequestQuestion(oldest),
           },
-        ],
-  );
+        ];
+  });

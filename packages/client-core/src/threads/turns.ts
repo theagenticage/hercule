@@ -14,6 +14,7 @@
  */
 import type { SessionStatus, TranscriptRow } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
+import type { AgentState } from "./agent-state";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
@@ -26,7 +27,7 @@ export interface ThreadItem {
   readonly verb: string;
   readonly target: string;
   /**
-   * `awaiting approval` marks a running item the session's open request is
+   * `awaiting approval` marks a running item an open Request of the agent is
    * about. The text is decided here rather than in the column that shows it,
    * so both screens that render an item show the same text.
    */
@@ -145,12 +146,16 @@ interface Building {
 export const mayBeRunningTurn = (status: SessionStatus): boolean =>
   status !== "exited" && status !== "queued";
 
-/** Returns the transcript's turns, in the order they first appear. */
+/**
+ * Returns the turns of one agent's transcript, in the order they first
+ * appear. `agent` is that agent's state: an item one of its open Requests is
+ * about shows `awaiting approval`.
+ */
 export const buildTurns = (
   rows: readonly TranscriptRow[],
-  /** The item the session's open request is about, if it has one. */
-  awaitingItemId?: string,
+  agent: AgentState,
 ): readonly ThreadTurn[] => {
+  const awaitingItemIds = new Set(agent.openRequests.map((request) => request.itemId));
   const turns = new Map<string, Building>();
 
   const findOrStartTurn = (turnId: string, fallbackAt: string): Building => {
@@ -228,11 +233,11 @@ export const buildTurns = (
   return Array.from(turns.values()).map((turn) => ({
     turnId: turn.turnId,
     user: turn.user,
-    // Only a running item can be waiting for the open request. An item the
-    // harness already finished keeps its result, even if the request still
+    // Only a running item can be waiting for an open Request. An item the
+    // harness already finished keeps its result, even if a Request still
     // refers to it.
     items: turn.items.map((item) =>
-      item.itemId === awaitingItemId && item.result === "running"
+      awaitingItemIds.has(item.itemId) && item.result === "running"
         ? { ...item, result: "awaiting approval" as const }
         : item,
     ),

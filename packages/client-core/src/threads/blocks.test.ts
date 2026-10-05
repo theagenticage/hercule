@@ -1,5 +1,5 @@
 /**
- * Tests `buildThreadBlocks(rows, session)`, which turns a thread's transcript
+ * Tests `buildThreadBlocks(rows, agent)`, which turns a thread's transcript
  * into the flat list of blocks the desktop draws.
  *
  * The fixtures follow the adapters' real shapes: a user message is an
@@ -8,12 +8,12 @@
  * `content.delta` rows. Times are seconds after 09:00.
  */
 import { describe, expect, it } from "vitest";
-import type { Session, TranscriptRow } from "@hercule/contract";
+import type { OpenRequest, Session, Subagent, TranscriptRow } from "@hercule/contract";
+import { buildSessionAgentState, buildSubagentAgentState } from "./agent-state";
 import { buildThreadBlocks, type ThreadBlock } from "./blocks";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemKind = Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
-type OpenRequest = NonNullable<Session["openRequest"]>;
 
 const START = Date.parse("2026-09-30T09:00:00.000Z");
 
@@ -170,7 +170,7 @@ const BASE: Session = {
   nativeSessionId: null,
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
-  openRequest: null,
+  openRequests: [],
   createdAt: "2026-09-30T08:59:00.000Z",
   startedAt: "2026-09-30T08:59:01.000Z",
   exitedAt: null,
@@ -204,7 +204,7 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t1", 3),
     ];
 
-    expect(buildThreadBlocks(rows, IDLE)).toEqual([
+    expect(buildThreadBlocks(rows, buildSessionAgentState(IDLE))).toEqual([
       { kind: "user", key: "user:u1", itemId: "u1", text: "Say hi", at: buildInstant(0) },
       {
         kind: "agent",
@@ -238,7 +238,7 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t1", 31),
     ];
 
-    const blocks = buildThreadBlocks(rows, IDLE);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:r1", "agent:a1", "work:c2", "agent:a2"]);
     const first = findBlock(blocks, "work", "work:r1");
@@ -268,7 +268,7 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t1", 9),
     ];
 
-    const blocks = buildThreadBlocks(rows, IDLE);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
 
     expect(listKeys(blocks)).toEqual([
       "user:u1",
@@ -296,7 +296,7 @@ describe("buildThreadBlocks", () => {
       buildItemCompleted("t1", "a1", "assistant_message", 3),
     ];
 
-    const writing = buildThreadBlocks(opening, BUSY);
+    const writing = buildThreadBlocks(opening, buildSessionAgentState(BUSY));
     expect(listKeys(writing)).toEqual(["user:u1", "agent:a1", "user:u2"]);
     expect(findBlock(writing, "agent", "agent:a1")).toMatchObject({
       text: "",
@@ -304,7 +304,7 @@ describe("buildThreadBlocks", () => {
       live: true,
     });
 
-    const written = buildThreadBlocks([...opening, ...closing], BUSY);
+    const written = buildThreadBlocks([...opening, ...closing], buildSessionAgentState(BUSY));
     expect(findBlock(written, "agent", "agent:a1")).toMatchObject({
       text: "Hello there.",
       open: false,
@@ -316,16 +316,16 @@ describe("buildThreadBlocks", () => {
   });
 
   it("shows a live row for a session that is starting before any row", () => {
-    expect(buildThreadBlocks([], { ...BASE, status: "starting" })).toEqual([
+    expect(buildThreadBlocks([], buildSessionAgentState({ ...BASE, status: "starting" }))).toEqual([
       { kind: "live", key: "live", model: "claude-sonnet-5" },
     ]);
-    expect(buildThreadBlocks([], IDLE)).toEqual([]);
+    expect(buildThreadBlocks([], buildSessionAgentState(IDLE))).toEqual([]);
   });
 
   it("shows only the live row while a turn runs before its first item", () => {
     const rows = [buildTurnStarted("t1", 0, "gpt-5.5"), ...buildUserMessage("t1", "u1", 0, "Hi")];
 
-    expect(buildThreadBlocks(rows, BUSY)).toEqual([
+    expect(buildThreadBlocks(rows, buildSessionAgentState(BUSY))).toEqual([
       expect.objectContaining({ key: "user:u1" }),
       { kind: "live", key: "live", model: "gpt-5.5" },
     ]);
@@ -337,10 +337,13 @@ describe("buildThreadBlocks", () => {
       ...buildUserMessage("t1", "u1", 0, "Hi"),
       buildItemStarted("t1", "r1", "reasoning", 1),
     ];
-    expect(listKeys(buildThreadBlocks(thinking, BUSY))).toEqual(["user:u1", "live"]);
+    expect(listKeys(buildThreadBlocks(thinking, buildSessionAgentState(BUSY)))).toEqual([
+      "user:u1",
+      "live",
+    ]);
 
     const working = [...thinking, buildItemStarted("t1", "c1", "command_execution", 2)];
-    const blocks = buildThreadBlocks(working, BUSY);
+    const blocks = buildThreadBlocks(working, buildSessionAgentState(BUSY));
     expect(listKeys(blocks)).toEqual(["user:u1", "work:r1", "live"]);
     const work = findBlock(blocks, "work", "work:r1");
     expect(work.items.map((item) => item.kind)).toEqual(["reasoning", "command_execution"]);
@@ -357,7 +360,7 @@ describe("buildThreadBlocks", () => {
       buildText("t1", "a1", 3, "Hel"),
     ];
 
-    const blocks = buildThreadBlocks(rows, BUSY);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "agent:a1"]);
     expect(findBlock(blocks, "agent", "agent:a1")).toMatchObject({
@@ -378,7 +381,7 @@ describe("buildThreadBlocks", () => {
       buildItemStarted("t1", "a2", "assistant_message", 2),
     ];
 
-    const blocks = buildThreadBlocks(rows, BUSY);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
     expect(findBlock(blocks, "agent", "agent:a1")).toMatchObject({
       text: "Hel",
@@ -395,11 +398,14 @@ describe("buildThreadBlocks", () => {
       ...buildAgentMessage("t1", "a1", 1, "Hello."),
     ];
 
-    const waiting = buildThreadBlocks(answered, BUSY);
+    const waiting = buildThreadBlocks(answered, buildSessionAgentState(BUSY));
     expect(listKeys(waiting)).toEqual(["user:u1", "agent:a1"]);
     expect(findBlock(waiting, "agent", "agent:a1")).toMatchObject({ open: false, live: true });
 
-    const ended = buildThreadBlocks([...answered, buildTurnCompleted("t1", 3)], IDLE);
+    const ended = buildThreadBlocks(
+      [...answered, buildTurnCompleted("t1", 3)],
+      buildSessionAgentState(IDLE),
+    );
     expect(listKeys(ended)).toEqual(["user:u1", "agent:a1"]);
     expect(findBlock(ended, "agent", "agent:a1").live).toBe(false);
   });
@@ -412,7 +418,7 @@ describe("buildThreadBlocks", () => {
       buildItemStarted("t1", "c1", "command_execution", 3),
     ];
 
-    const blocks = buildThreadBlocks(rows, BUSY);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "agent:a1", "work:c1", "live"]);
     expect(findBlock(blocks, "agent", "agent:a1").live).toBe(false);
@@ -426,7 +432,7 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t1", 4, "interrupted"),
     ];
 
-    const blocks = buildThreadBlocks(rows, IDLE);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "ending:t1"]);
     expect(findBlock(blocks, "ending", "ending:t1")).toEqual({
@@ -446,7 +452,7 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t1", 2, "failed"),
     ];
 
-    expect(buildThreadBlocks(rows, IDLE)).toEqual([
+    expect(buildThreadBlocks(rows, buildSessionAgentState(IDLE))).toEqual([
       expect.objectContaining({ key: "user:u1" }),
       { kind: "ending", key: "ending:t1", turnId: "t1", endState: "failed", duration: 2000 },
     ]);
@@ -460,7 +466,10 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t1", 5, "interrupted"),
     ];
 
-    expect(findBlock(buildThreadBlocks(rows, IDLE), "ending", "ending:t1").duration).toBe(4000);
+    expect(
+      findBlock(buildThreadBlocks(rows, buildSessionAgentState(IDLE)), "ending", "ending:t1")
+        .duration,
+    ).toBe(4000);
   });
 
   it("cuts a turn short where its session exited", () => {
@@ -471,7 +480,7 @@ describe("buildThreadBlocks", () => {
       buildRow({ _tag: "session.exited", ...buildEnvelope(7), reason: "crash" }),
     ];
 
-    const blocks = buildThreadBlocks(rows, { ...BASE, status: "exited" });
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState({ ...BASE, status: "exited" }));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "ending:t1"]);
     expect(findBlock(blocks, "ending", "ending:t1")).toMatchObject({
@@ -491,7 +500,7 @@ describe("buildThreadBlocks", () => {
         buildItemStarted("t1", "c1", "command_execution", 3),
       ];
 
-      const blocks = buildThreadBlocks(rows, { ...BASE, status });
+      const blocks = buildThreadBlocks(rows, buildSessionAgentState({ ...BASE, status }));
 
       expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "ending:t1"]);
       expect(findBlock(blocks, "ending", "ending:t1").endState).toBeNull();
@@ -510,7 +519,7 @@ describe("buildThreadBlocks", () => {
         ...buildUserMessage("t1", "u1", 0, "Hi"),
       ];
 
-      expect(buildThreadBlocks(rows, { ...BASE, status })).toEqual([
+      expect(buildThreadBlocks(rows, buildSessionAgentState({ ...BASE, status }))).toEqual([
         expect.objectContaining({ key: "user:u1" }),
         { kind: "live", key: "live", model: "claude-sonnet-5" },
       ]);
@@ -525,7 +534,7 @@ describe("buildThreadBlocks", () => {
       buildRow({ _tag: "session.started", ...buildEnvelope(9) }),
     ];
 
-    const blocks = buildThreadBlocks(rows, { ...BASE, status: "starting" });
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState({ ...BASE, status: "starting" }));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "ending:t1"]);
     expect(findBlock(blocks, "work", "work:c1").endedAt).toBe(buildInstant(9));
@@ -542,7 +551,7 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t2", 8),
     ];
 
-    expect(listKeys(buildThreadBlocks(rows, IDLE))).toEqual([
+    expect(listKeys(buildThreadBlocks(rows, buildSessionAgentState(IDLE)))).toEqual([
       "user:u1",
       "work:c1",
       "ending:t1",
@@ -564,7 +573,7 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t2", 4),
     ];
 
-    const blocks = buildThreadBlocks(rows, IDLE);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "ending:t1"]);
     expect(findBlock(blocks, "work", "work:c1").items[0]!.result).toBe("failed");
@@ -587,7 +596,10 @@ describe("buildThreadBlocks", () => {
       buildTurnCompleted("t1", 3),
     ];
 
-    expect(listKeys(buildThreadBlocks(rows, IDLE))).toEqual(["user:u1", "agent:a1"]);
+    expect(listKeys(buildThreadBlocks(rows, buildSessionAgentState(IDLE)))).toEqual([
+      "user:u1",
+      "agent:a1",
+    ]);
   });
 
   it("places the waiting block where its Request opened, and freezes the stretch there", () => {
@@ -601,7 +613,10 @@ describe("buildThreadBlocks", () => {
       buildRequestOpened(3),
     ];
 
-    const blocks = buildThreadBlocks(rows, { ...BUSY, openRequest: REQUEST });
+    const blocks = buildThreadBlocks(
+      rows,
+      buildSessionAgentState({ ...BUSY, openRequests: [REQUEST] }),
+    );
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "waiting:r1"]);
     expect(findBlock(blocks, "waiting", "waiting:r1")).toEqual({
@@ -613,6 +628,48 @@ describe("buildThreadBlocks", () => {
     const work = findBlock(blocks, "work", "work:c1");
     expect(work.endedAt).toBe(buildInstant(3));
     expect(work.items[0]!.result).toBe("awaiting approval");
+  });
+
+  it("draws a waiting block for each of the agent's open Requests, and no working face", () => {
+    const second: OpenRequest = { ...REQUEST, requestId: "r2", itemId: "c2" };
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Clean up"),
+      // Two tool calls of one model call start before the harness asks
+      // about either.
+      buildItemStarted("t1", "c1", "command_execution", 1),
+      buildItemStarted("t1", "c2", "command_execution", 1),
+      buildRequestOpened(2),
+      buildRequestOpened(3, second),
+    ];
+
+    const blocks = buildThreadBlocks(
+      rows,
+      buildSessionAgentState({ ...BUSY, openRequests: [REQUEST, second] }),
+    );
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "waiting:r1", "waiting:r2"]);
+    expect(findBlock(blocks, "work", "work:c1").items.map((item) => item.result)).toEqual([
+      "awaiting approval",
+      "awaiting approval",
+    ]);
+  });
+
+  it("shows the working face of a running subagent before its first turn", () => {
+    const subagent: Subagent = {
+      id: "agent-1",
+      sessionId: BUSY.id,
+      status: "running",
+      toolCalls: 0,
+      startedAt: buildInstant(0),
+    };
+
+    expect(listKeys(buildThreadBlocks([], buildSubagentAgentState(subagent, IDLE)))).toEqual([
+      "live",
+    ]);
+    expect(
+      buildThreadBlocks([], buildSubagentAgentState({ ...subagent, status: "completed" }, BUSY)),
+    ).toEqual([]);
   });
 
   it("draws no waiting block for a Request that was answered", () => {
@@ -629,7 +686,7 @@ describe("buildThreadBlocks", () => {
       }),
     ];
 
-    const blocks = buildThreadBlocks(rows, BUSY);
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
     expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "live"]);
     const work = findBlock(blocks, "work", "work:c1");
@@ -647,12 +704,12 @@ describe("buildThreadBlocks", () => {
       ...buildAgentMessage("t1", "a2", 7, "Done."),
       buildTurnCompleted("t1", 9, "interrupted"),
     ];
-    const final = listKeys(buildThreadBlocks(rows, IDLE));
+    const final = listKeys(buildThreadBlocks(rows, buildSessionAgentState(IDLE)));
 
     for (let length = 1; length < rows.length; length++) {
-      const keys = listKeys(buildThreadBlocks(rows.slice(0, length), BUSY)).filter(
-        (key) => key !== "live",
-      );
+      const keys = listKeys(
+        buildThreadBlocks(rows.slice(0, length), buildSessionAgentState(BUSY)),
+      ).filter((key) => key !== "live");
       expect(final.slice(0, keys.length)).toEqual(keys);
     }
   });
@@ -674,7 +731,11 @@ describe("buildThreadBlocks", () => {
       buildItemStarted("t1", "command", "command_execution", 1, { path: "src/e.ts" }),
     ];
 
-    const work = findBlock(buildThreadBlocks(rows, BUSY), "work", "work:claude");
+    const work = findBlock(
+      buildThreadBlocks(rows, buildSessionAgentState(BUSY)),
+      "work",
+      "work:claude",
+    );
 
     expect(work.items.map((item) => item.paths)).toEqual([
       ["src/a.ts"],

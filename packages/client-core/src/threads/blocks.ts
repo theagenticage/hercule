@@ -11,10 +11,11 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import type { Session, TranscriptRow } from "@hercule/contract";
+import type { TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
+import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
-import { buildThreadItem, mayBeRunningTurn, type ThreadItem } from "./turns";
+import { buildThreadItem, type ThreadItem } from "./turns";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
@@ -62,7 +63,7 @@ export interface AgentBlock {
   /** The text the stream rows hold. The text still streaming is in the tail, not here. */
   readonly text: string;
   readonly startedAt: string;
-  /** The model the turn ran on, or the session's model when the harness did not say. */
+  /** The model the turn ran on, or the agent's model when the harness did not say. */
   readonly model: string;
   /**
    * Whether the agent is still writing it: it is the transcript's open item
@@ -90,7 +91,7 @@ export interface EndingBlock {
 export interface LiveBlock {
   readonly kind: "live";
   readonly key: string;
-  /** The model the running turn runs on, or the session's model. */
+  /** The model the running turn runs on, or the agent's model. */
   readonly model: string;
 }
 
@@ -164,14 +165,11 @@ const readChangedPaths = (event: ItemStarted): readonly string[] => {
   return typeof path === "string" ? [path] : [];
 };
 
-/** Checks whether a session status means its harness is working or about to. */
-const isWorking = (status: Session["status"]): boolean =>
-  status === "starting" || status === "busy";
-
 /**
- * Returns the transcript's blocks in reading order. `session` decides what
- * the rows cannot: whether the last turn still runs, the Request it waits on,
- * and the model when a turn does not name one.
+ * Returns the blocks of one agent's transcript in reading order: the
+ * session's own agent's, or a subagent's. `agent` is that agent's state, and
+ * decides what the rows cannot: whether the last turn still runs, the
+ * Requests the agent waits on, and the model when a turn does not name one.
  *
  * - A `user` block per user message, and an `agent` block per assistant
  *   message, placed where the message started.
@@ -179,13 +177,13 @@ const isWorking = (status: Session["status"]): boolean =>
  *   it holds an item other than reasoning.
  * - An `ending` block after a turn that was stopped, failed, or cut short. A
  *   turn is cut short when, before its `turn.completed`, its session exited,
- *   its session started again, another turn started, or the session reads
- *   `exited` or `queued` (`mayBeRunningTurn`).
- * - A `waiting` block where the session's open Request opened, once its
+ *   its session started again, another turn started, or no harness process
+ *   runs the agent (`harnessRunning`).
+ * - A `waiting` block where one of the agent's open Requests opened, once its
  *   `request.opened` row has landed.
- * - A `live` block at the end while no Request is open, no agent message
- *   holds the working face, and either the last turn has not finished or,
- *   before any turn, the session is starting or busy.
+ * - A `live` block at the end while the agent has no open Request, no agent
+ *   message holds the working face, and either the last turn has not
+ *   finished or, before any turn, the agent is working.
  *
  * The working face is on one block at most: the agent message the agent is
  * writing; else the running turn's last agent message, when nothing started
@@ -196,8 +194,10 @@ const isWorking = (status: Session["status"]): boolean =>
  */
 export const buildThreadBlocks = (
   rows: readonly TranscriptRow[],
-  session: Session,
+  agent: AgentState,
 ): readonly ThreadBlock[] => {
+  const openRequestIds = new Set(agent.openRequests.map((request) => request.requestId));
+  const awaitingItemIds = new Set(agent.openRequests.map((request) => request.itemId));
   const slots: Slot[] = [];
   const turns = new Map<string, BuildingTurn>();
   const agents = new Map<string, BuildingAgent>();
@@ -371,7 +371,7 @@ export const buildThreadBlocks = (
       }
       case "request.opened": {
         // The row names no turn, so it belongs to the turn it sits in.
-        if (event.request.requestId !== session.openRequest?.requestId) break;
+        if (!openRequestIds.has(event.request.requestId)) break;
         slots.push({
           kind: "waiting",
           key: `waiting:${event.request.requestId}`,
@@ -387,21 +387,19 @@ export const buildThreadBlocks = (
     }
   }
 
-  // A session that runs no harness runs no turn. Any other status may be
-  // older than the rows, so the rows decide.
+  // An agent that no harness process runs is running no turn. While one
+  // does, the agent's record may be older than the rows, so the rows decide.
   const last = state.current;
-  if (last !== null && !last.finished && !mayBeRunningTurn(session.status)) {
+  if (last !== null && !last.finished && !agent.harnessRunning) {
     finishTurn(last, last.lastAt, null);
   }
   const running = last !== null && !last.finished ? last : null;
   const hasFace =
-    session.openRequest === null &&
-    (running !== null || (last === null && isWorking(session.status)));
+    agent.openRequests.length === 0 && (running !== null || (last === null && agent.working));
   const openItemId = findOpenItem(rows);
   const faceAgent =
     hasFace && running !== null ? findFaceAgent(running, agents, openItemId) : undefined;
-  const model = (turn: BuildingTurn | null): string => turn?.model ?? session.modelSelection.model;
-  const awaitingItemId = session.openRequest?.itemId;
+  const model = (turn: BuildingTurn | null): string => turn?.model ?? agent.model;
 
   const blocks: ThreadBlock[] = [];
   for (const slot of slots) {
@@ -429,10 +427,10 @@ export const buildThreadBlocks = (
           kind: "work",
           key: `work:${slot.items[0]!.itemId}`,
           turnId: slot.turn.turnId,
-          // Only a running item can wait on the open Request. An item the
+          // Only a running item can wait on an open Request. An item the
           // harness already finished keeps its result.
           items: slot.items.map((item) =>
-            item.itemId === awaitingItemId && item.result === "running"
+            awaitingItemIds.has(item.itemId) && item.result === "running"
               ? { ...item, result: "awaiting approval" as const }
               : item,
           ),

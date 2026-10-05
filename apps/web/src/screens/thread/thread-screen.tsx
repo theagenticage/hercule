@@ -10,6 +10,7 @@
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  buildSessionAgentState,
   buildSiblingTabs,
   buildTurns,
   chooseStamps,
@@ -61,9 +62,9 @@ export function ThreadScreen({
 
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId)).data;
-  // The item the session is parked on shows `awaiting approval` in the
-  // transcript instead of `running`.
-  const turns = buildTurns(rows, session.openRequest?.itemId);
+  // An item the session's own agent is parked on shows `awaiting approval`
+  // in the transcript instead of `running`.
+  const turns = buildTurns(rows, buildSessionAgentState(session));
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useThreadLive(live, queryClient, sessionId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;

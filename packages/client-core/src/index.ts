@@ -81,7 +81,7 @@ export { toIdTail } from "./id-tail";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
 export { buildIdOptions } from "./id-options";
-export { readJsonObject } from "./json-shape";
+export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";
 export { joinCommand } from "./join-command";
 export {
@@ -229,8 +229,14 @@ export {
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
 export { resolveThreadRowsMode } from "./thread-rows";
+export { countUsedTokens } from "./token-usage";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";
+export {
+  buildSessionAgentState,
+  buildSubagentAgentState,
+  type AgentState,
+} from "./threads/agent-state";
 export { buildApprovalCard, type ApprovalQuestion } from "./threads/approval";
 export {
   buildThreadBlocks,

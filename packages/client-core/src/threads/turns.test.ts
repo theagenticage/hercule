@@ -1,6 +1,6 @@
 /**
- * Tests `buildTurns(rows)`, which groups a session's transcript rows into
- * turns.
+ * Tests `buildTurns(rows, agent)`, which groups an agent's transcript rows
+ * into turns.
  *
  * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
  * `apps/runner/src/providers/claude-code.ts` / `claude-code-normalize.ts`):
@@ -12,10 +12,27 @@
  *   `assistant_message` item events.
  */
 import { describe, expect, it } from "vitest";
-import type { TranscriptRow } from "@hercule/contract";
+import type { SessionRequest, TranscriptRow } from "@hercule/contract";
+import type { AgentState } from "./agent-state";
 import { buildTurns } from "./turns";
 
 const SESSION_ID = "session-1";
+
+/** Returns a busy agent whose open Requests are about the items `itemIds`. */
+const buildAgentAskingAbout = (...itemIds: readonly string[]): AgentState => ({
+  working: true,
+  harnessRunning: true,
+  openRequests: itemIds.map((itemId): SessionRequest => ({
+    requestId: `r-${itemId}`,
+    itemId,
+    kind: "command_approval",
+    decisions: ["allow", "deny"],
+    detail: { command: "ls -la" },
+  })),
+  model: "claude-sonnet-5",
+});
+
+const AGENT_ASKING_NOTHING = buildAgentAskingAbout();
 
 let idSeq = 0;
 const nextId = (): string => `e${idSeq++}`;
@@ -197,7 +214,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns).toHaveLength(2);
 
@@ -273,7 +290,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns[0]!.assistantText).toBe("Sleep 1 of 4 finished.\n\nSleep 2 of 4 finished.");
   });
@@ -304,84 +321,99 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns[0]!.items[0]!.target).toBe("ls -la");
   });
 
   it("summarizes a web search's target as what it searched for, not the tool's name", () => {
     // The Claude adapter's shape for Claude Code's WebSearch tool.
-    const turns = buildTurns([
-      buildRow({
-        _tag: "item.started",
-        eventId: nextId(),
-        sessionId: SESSION_ID,
-        at: "2026-09-08T10:00:00.000Z",
-        turnId: "t-search",
-        itemId: "t-search",
-        kind: "web_search",
-        detail: { name: "WebSearch", input: { query: "3-D Secure challenge timeout" } },
-      }),
-    ]);
+    const turns = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-search",
+          itemId: "t-search",
+          kind: "web_search",
+          detail: { name: "WebSearch", input: { query: "3-D Secure challenge timeout" } },
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
 
     expect(turns[0]!.items[0]!.target).toBe("3-D Secure challenge timeout");
   });
 
   it("falls back from file_path to description, then name, then raw JSON", () => {
-    const fileChange = buildTurns([
-      buildRow({
-        _tag: "item.started",
-        eventId: nextId(),
-        sessionId: SESSION_ID,
-        at: "2026-09-08T10:00:00.000Z",
-        turnId: "t-path",
-        itemId: "t-path",
-        kind: "file_change",
-        detail: { input: { file_path: "src/auth.ts" } },
-      }),
-    ]);
+    const fileChange = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-path",
+          itemId: "t-path",
+          kind: "file_change",
+          detail: { input: { file_path: "src/auth.ts" } },
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
     expect(fileChange[0]!.items[0]!.target).toBe("src/auth.ts");
 
-    const described = buildTurns([
-      buildRow({
-        _tag: "item.started",
-        eventId: nextId(),
-        sessionId: SESSION_ID,
-        at: "2026-09-08T10:00:00.000Z",
-        turnId: "t-desc",
-        itemId: "t-desc",
-        kind: "file_change",
-        detail: { input: { description: "Search the web" } },
-      }),
-    ]);
+    const described = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-desc",
+          itemId: "t-desc",
+          kind: "file_change",
+          detail: { input: { description: "Search the web" } },
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
     expect(described[0]!.items[0]!.target).toBe("Search the web");
 
-    const named = buildTurns([
-      buildRow({
-        _tag: "item.started",
-        eventId: nextId(),
-        sessionId: SESSION_ID,
-        at: "2026-09-08T10:00:00.000Z",
-        turnId: "t-name",
-        itemId: "t-name",
-        kind: "file_change",
-        detail: { name: "some_mcp_tool" },
-      }),
-    ]);
+    const named = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-name",
+          itemId: "t-name",
+          kind: "file_change",
+          detail: { name: "some_mcp_tool" },
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
     expect(named[0]!.items[0]!.target).toBe("some_mcp_tool");
 
-    const bare = buildTurns([
-      buildRow({
-        _tag: "item.started",
-        eventId: nextId(),
-        sessionId: SESSION_ID,
-        at: "2026-09-08T10:00:00.000Z",
-        turnId: "t-json",
-        itemId: "t-json",
-        kind: "file_change",
-        detail: { foo: "bar" },
-      }),
-    ]);
+    const bare = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-json",
+          itemId: "t-json",
+          kind: "file_change",
+          detail: { foo: "bar" },
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
     expect(bare[0]!.items[0]!.target).toBe(JSON.stringify({ foo: "bar" }));
   });
 
@@ -428,7 +460,7 @@ describe("buildTurns", () => {
       // No item.completed for tool3, and no turn.completed: the turn is live.
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns).toHaveLength(1);
     expect(turns[0]!.duration).toBeNull();
@@ -457,11 +489,14 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns([
-      ...endTurn("done", "completed"),
-      ...endTurn("broke", "failed"),
-      ...endTurn("stopped", "interrupted"),
-    ]);
+    const turns = buildTurns(
+      [
+        ...endTurn("done", "completed"),
+        ...endTurn("broke", "failed"),
+        ...endTurn("stopped", "interrupted"),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
 
     expect(turns.map((turn) => [turn.turnId, turn.endState, turn.duration])).toEqual([
       ["done", "completed", 22000],
@@ -531,7 +566,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns[0]!.items).toEqual([
       expect.objectContaining({ itemId: "edit4", verb: "edit", result: "failed" }),
@@ -584,7 +619,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns[0]!.items).toEqual([
       expect.objectContaining({ itemId: "novel1", verb: "unknown" }),
@@ -660,7 +695,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns[0]!.items).toEqual([]);
     expect(turns[0]!.assistantText).toBe("Hi!");
@@ -705,7 +740,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns[0]!.items[0]!.target).toBe("");
   });
@@ -773,7 +808,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
     expect(turns[0]!.user).toContain("Fix the login bug");
     expect(turns[0]!.user).toContain("Also check auth.ts");
@@ -782,7 +817,7 @@ describe("buildTurns", () => {
 
 /**
  * The item a session's open request is about shows `awaiting approval`
- * instead of `running`, so the transcript line for `openRequest.itemId`
+ * instead of `running`, so the transcript line for a Request's `itemId`
  * matches what the card above the composer is asking about.
  */
 describe("buildTurns: the item an open request is about", () => {
@@ -817,14 +852,20 @@ describe("buildTurns: the item an open request is about", () => {
   ];
 
   it("marks the item of the open request as awaiting approval, and only that one", () => {
-    const items = buildTurns(buildParkedRows(), "tool9")[0]!.items;
+    const items = buildTurns(buildParkedRows(), buildAgentAskingAbout("tool9"))[0]!.items;
 
     expect(items.find((item) => item.itemId === "tool9")!.result).toBe("awaiting approval");
     expect(items.find((item) => item.itemId === "tool10")!.result).toBe("running");
   });
 
+  it("marks the item of each open request as awaiting approval", () => {
+    const items = buildTurns(buildParkedRows(), buildAgentAskingAbout("tool9", "tool10"))[0]!.items;
+
+    expect(items.map((item) => item.result)).toEqual(["awaiting approval", "awaiting approval"]);
+  });
+
   it("marks every open item as running when no request is open", () => {
-    const items = buildTurns(buildParkedRows())[0]!.items;
+    const items = buildTurns(buildParkedRows(), AGENT_ASKING_NOTHING)[0]!.items;
 
     expect(items.map((item) => item.result)).toEqual(["running", "running"]);
   });
@@ -846,7 +887,9 @@ describe("buildTurns: the item an open request is about", () => {
     ];
 
     expect(
-      buildTurns(rows, "tool9")[0]!.items.find((item) => item.itemId === "tool9")!.result,
+      buildTurns(rows, buildAgentAskingAbout("tool9"))[0]!.items.find(
+        (item) => item.itemId === "tool9",
+      )!.result,
     ).toBe("completed");
   });
 });

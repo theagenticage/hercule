@@ -59,8 +59,9 @@ const isRunnerDisconnected = (runner: Runner | undefined): boolean =>
 /**
  * Returns the pose of a thread. The first rule that matches decides:
  *
- * - an open Request makes it `waiting`. An exited session never has one, so
- *   this never hides an ended thread;
+ * - an open Request makes it `waiting`, whichever of the session's agents
+ *   asked, even while its own agent is idle. An exited session never has
+ *   one, so this never hides an ended thread;
  * - a session that cannot be resumed, or that the crash-loop guard holds, is
  *   `away` ("can't be reached"), because neither runs until the user acts;
  * - a session whose runner is offline or unreachable is `away`, because no
@@ -74,7 +75,7 @@ const isRunnerDisconnected = (runner: Runner | undefined): boolean =>
  * that reason, and `failed` with it.
  */
 export const decideThreadPose = (session: Session, runner: Runner | undefined): Pose => {
-  if (session.openRequest !== null) return "waiting";
+  if (session.openRequests.length > 0) return "waiting";
   if (isStoppedUntilUserActs(session) || isRunnerDisconnected(runner)) return "away";
   if (session.status === "exited") return "asleep";
   if (session.status === "idle") return "idle";

@@ -123,12 +123,12 @@ export const decideOfficeSeating = ({
   ].filter((room) => room.desks.length > 0);
 
   const seated = rooms.flatMap((room) => room.desks);
-  // A session records no time for when its Request opened. The session is
-  // active until the Request opens and then waits, so the oldest
+  // A session records no time for when its Requests opened. The session is
+  // active until a Request opens and then waits, so the oldest
   // `lastActivityAt` stands in for the longest wait.
   const queue = seated
     .map((desk) => desk.session)
-    .filter((session) => session.openRequest !== null)
+    .filter((session) => session.openRequests.length > 0)
     .sort(
       (a, b) =>
         Date.parse(a.lastActivityAt) - Date.parse(b.lastActivityAt) || compareText(a.id, b.id),
