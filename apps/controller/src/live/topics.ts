@@ -13,7 +13,10 @@
  *   changed. A burst of changes is collected for a short window and sent as
  *   one message per kind of change. So a screen refetches once for three
  *   creates instead of three times, and the window is too short for anyone
- *   to notice.
+ *   to notice. Changes that come in a steady stream while an agent works, a
+ *   subagent's progress and a session's Token Usage, are collected for a
+ *   longer window instead, so a busy session costs each client at most one
+ *   refetch per record per second.
  * - A log topic carries the records themselves. A commit only signals that
  *   the log grew, never which rows. Each follower then reads forward from its
  *   own position, so records arrive in log order, never twice, and the replay
@@ -40,6 +43,8 @@ import {
   createValidationError,
   buildSessionStreamTopic,
   buildSessionTapTopic,
+  buildSubagentStreamTopic,
+  buildSubagentTapTopic,
   type CapExceeded,
   type Delta,
   type Event,
@@ -56,7 +61,7 @@ import {
 } from "@hercule/contract";
 import { AfterCommit, type Change } from "../db";
 import { readEventsAfter, readLogHead } from "../events";
-import { readTranscriptHead, sessionExists, readTranscriptRowsAfter } from "../sessions";
+import { agentExists, readTranscriptHead, readTranscriptRowsAfter } from "../sessions";
 
 /**
  * How long a burst of record changes is collected before it is sent, in
@@ -67,7 +72,15 @@ import { readTranscriptHead, sessionExists, readTranscriptRowsAfter } from "../s
  */
 export const COALESCE_WINDOW_MS = 50;
 
-const COALESCE_WINDOW = Duration.millis(COALESCE_WINDOW_MS);
+/**
+ * How long the changes of a slow-paced record are collected before they are
+ * sent, in milliseconds: the `subagent` topic, and a session whose only
+ * change is its Token Usage. Both change with almost every event a working
+ * agent reports, and a client that refetched each time would read the same
+ * record many times a second. Exported for the same reason as
+ * `COALESCE_WINDOW_MS`.
+ */
+export const SLOW_COALESCE_WINDOW_MS = 1000;
 
 /**
  * How many messages may wait for one subscriber before the controller ends
@@ -108,14 +121,31 @@ const SESSION_UNREADABLE = "the session could not be read";
 
 const NO_SUCH_SESSION = "no such session";
 
+const NO_SUCH_SUBAGENT = "no such subagent on that session";
+
+/**
+ * Builds the topic of one agent's transcript: the session's own agent's when
+ * `subagentId` is `undefined`, otherwise that subagent's.
+ */
+const buildAgentStreamTopic = (sessionId: string, subagentId: string | undefined): LiveTopic =>
+  subagentId === undefined
+    ? buildSessionStreamTopic(sessionId)
+    : buildSubagentStreamTopic(sessionId, subagentId);
+
+/** Builds the topic of one agent's token taps, the same way as `buildAgentStreamTopic`. */
+const buildAgentTapTopic = (sessionId: string, subagentId: string | undefined): LiveTopic =>
+  subagentId === undefined
+    ? buildSessionTapTopic(sessionId)
+    : buildSubagentTapTopic(sessionId, subagentId);
+
+/** Checks whether a record change is collected for the slow window rather than the short one. */
+const isSlowPaced = (change: Extract<Change, { readonly _tag: "record" }>): boolean =>
+  change.topic === "subagent" || change.usageOnly === true;
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const watchers = new Map<LiveTopic, Set<Watcher>>();
-  /** The ids of the records changed since the last flush, by topic and by kind. */
-  const pending = new Map<MutableLiveTopic, Map<InvalidateKind, Set<string>>>();
-  /** Receives a signal when changes are pending. Holds at most one signal. */
-  const wake = yield* Queue.dropping<void>(1);
 
   const listWatchers = (topic: LiveTopic): ReadonlySet<Watcher> => watchers.get(topic) ?? new Set();
 
@@ -146,36 +176,64 @@ const make = Effect.gen(function* () {
       return yield* Queue.offer(watcher.queue, message);
     });
 
-  /** Sends everything collected during the window, one message per topic and kind. */
-  const flush = Effect.gen(function* () {
-    const collected = [...pending];
-    pending.clear();
-    for (const [topic, kinds] of collected) {
-      const subscribers = watchers.get(topic);
-      if (subscribers === undefined) continue;
-      for (const [kind, ids] of kinds) {
-        const message: LiveMessage = { _tag: "invalidate", ids: [...ids], kind };
-        yield* Effect.forEach(subscribers, (watcher) => offerTo(watcher, message), {
-          discard: true,
-        });
-      }
-    }
-  });
+  /**
+   * Starts collecting record changes for a window of `windowMs` and sending
+   * them when it closes, one message per topic and kind. Returns the function
+   * that adds a change. The first change after a send opens the next window,
+   * so an id is sent at most once per window however often it changes.
+   */
+  const startCoalescing = (windowMs: number) =>
+    Effect.gen(function* () {
+      /** The ids of the records changed since the last send, by topic and by kind. */
+      const pending = new Map<MutableLiveTopic, Map<InvalidateKind, Set<string>>>();
+      /** Receives a signal when changes are pending. Holds at most one signal. */
+      const wake = yield* Queue.dropping<void>(1);
 
-  yield* Effect.forkScoped(
-    Effect.forever(
-      Effect.gen(function* () {
-        yield* Queue.take(wake);
-        yield* Effect.sleep(COALESCE_WINDOW);
-        // Clear the signal before reading the collected changes, so a change
-        // recorded during the flush signals again and is not lost.
-        yield* Queue.clear(wake);
-        yield* flush;
-        // This loop is the only thing that sends record changes, so it must
-        // survive a failed flush, and log what went wrong.
-      }).pipe(Effect.catchCause((cause) => Effect.logError("a live announcement failed", cause))),
-    ),
-  );
+      const flush = Effect.gen(function* () {
+        const collected = [...pending];
+        pending.clear();
+        for (const [topic, kinds] of collected) {
+          const subscribers = watchers.get(topic);
+          if (subscribers === undefined) continue;
+          for (const [kind, ids] of kinds) {
+            const message: LiveMessage = { _tag: "invalidate", ids: [...ids], kind };
+            yield* Effect.forEach(subscribers, (watcher) => offerTo(watcher, message), {
+              discard: true,
+            });
+          }
+        }
+      });
+
+      yield* Effect.forkScoped(
+        Effect.forever(
+          Effect.gen(function* () {
+            yield* Queue.take(wake);
+            yield* Effect.sleep(Duration.millis(windowMs));
+            // Clear the signal before reading the collected changes, so a change
+            // recorded during the flush signals again and is not lost.
+            yield* Queue.clear(wake);
+            yield* flush;
+            // This loop is the only thing that sends these record changes, so
+            // it must survive a failed flush, and log what went wrong.
+          }).pipe(
+            Effect.catchCause((cause) => Effect.logError("a live announcement failed", cause)),
+          ),
+        ),
+      );
+
+      return (topic: MutableLiveTopic, kind: InvalidateKind, id: string): Effect.Effect<void> =>
+        Effect.suspend(() => {
+          const kinds = pending.get(topic) ?? new Map<InvalidateKind, Set<string>>();
+          pending.set(topic, kinds);
+          const ids = kinds.get(kind) ?? new Set<string>();
+          kinds.set(kind, ids);
+          ids.add(id);
+          return Effect.asVoid(Queue.offer(wake, undefined));
+        });
+    });
+
+  const collectChange = yield* startCoalescing(COALESCE_WINDOW_MS);
+  const collectSlowChange = yield* startCoalescing(SLOW_COALESCE_WINDOW_MS);
 
   /**
    * A log a subscription can read from: the event log for `event`, or one
@@ -258,10 +316,14 @@ const make = Effect.gen(function* () {
     unreadable: LOG_UNREADABLE,
   };
 
-  const buildTranscriptSource = (sessionId: string): LogSource<TranscriptRow> => ({
-    after: (position, limit) => readTranscriptRowsAfter(sql, sessionId, position, limit),
+  const buildTranscriptSource = (
+    sessionId: string,
+    subagentId: string | undefined,
+  ): LogSource<TranscriptRow> => ({
+    after: (position, limit) =>
+      readTranscriptRowsAfter(sql, sessionId, subagentId, position, limit),
     positionOf: (item) => item.position,
-    head: readTranscriptHead(sql, sessionId),
+    head: readTranscriptHead(sql, sessionId, subagentId),
     noun: "transcript",
     unreadable: SESSION_UNREADABLE,
   });
@@ -325,6 +387,27 @@ const make = Effect.gen(function* () {
         ),
     );
 
+  /**
+   * Checks that a session exists and, for a subagent's topic, that the
+   * session has that subagent. Fails with not_found otherwise, so a stale tab
+   * cannot open a subscription to nothing.
+   */
+  const requireAgent = (
+    sessionId: string,
+    subagentId: string | undefined,
+  ): Effect.Effect<void, NotFound | Internal> =>
+    Effect.flatMap(
+      Effect.mapError(agentExists(sql, sessionId, subagentId), () =>
+        createInternalError(SESSION_UNREADABLE),
+      ),
+      (exists) =>
+        exists
+          ? Effect.void
+          : Effect.fail(
+              createNotFoundError(subagentId === undefined ? NO_SUCH_SESSION : NO_SUCH_SUBAGENT),
+            ),
+    );
+
   return {
     /** Opens a subscription to a mutable topic, which carries news of changes and no records. */
     subscribe: (topic: MutableLiveTopic): Effect.Effect<LiveQueue, never, Scope.Scope> =>
@@ -337,47 +420,40 @@ const make = Effect.gen(function* () {
       followLog(LOG_TOPIC, eventSource, after),
 
     /**
-     * Opens a subscription to one session's transcript, replayed from `after`
-     * and then followed, like `follow` above. The topic is built from the
-     * session id rather than passed in, so a caller cannot pass a topic and id
-     * that do not match. Fails with not_found for an unknown session, so a
-     * stale sidebar tab cannot open a subscription to nothing.
+     * Opens a subscription to one agent's transcript, replayed from `after`
+     * and then followed, like `follow` above. The agent is the session's own
+     * when `subagentId` is `undefined`, otherwise that subagent. The topic is
+     * built from the ids rather than passed in, so a caller cannot pass a
+     * topic and ids that do not match. Fails with not_found for an unknown
+     * session or subagent.
      */
     followSession: (
       sessionId: string,
+      subagentId: string | undefined,
       after: number | undefined,
     ): Effect.Effect<LiveQueue, Validation | NotFound | Internal, Scope.Scope> =>
       Effect.gen(function* () {
-        if (
-          !(yield* Effect.mapError(sessionExists(sql, sessionId), () =>
-            createInternalError(SESSION_UNREADABLE),
-          ))
-        ) {
-          return yield* Effect.fail(createNotFoundError(NO_SUCH_SESSION));
-        }
+        yield* requireAgent(sessionId, subagentId);
         return yield* followLog(
-          buildSessionStreamTopic(sessionId),
-          buildTranscriptSource(sessionId),
+          buildAgentStreamTopic(sessionId, subagentId),
+          buildTranscriptSource(sessionId, subagentId),
           after,
         );
       }),
 
     /**
-     * Opens a subscription to one session's token taps. It works like a
+     * Opens a subscription to one agent's token taps. It works like a
      * mutable topic, since there is nothing to replay, and fails with
-     * not_found for an unknown session, like `followSession`.
+     * not_found for an unknown session or subagent, like `followSession`.
      */
-    tapSession: (sessionId: string): Effect.Effect<LiveQueue, NotFound | Internal, Scope.Scope> =>
+    tapSession: (
+      sessionId: string,
+      subagentId: string | undefined,
+    ): Effect.Effect<LiveQueue, NotFound | Internal, Scope.Scope> =>
       Effect.gen(function* () {
-        if (
-          !(yield* Effect.mapError(sessionExists(sql, sessionId), () =>
-            createInternalError(SESSION_UNREADABLE),
-          ))
-        ) {
-          return yield* Effect.fail(createNotFoundError(NO_SUCH_SESSION));
-        }
+        yield* requireAgent(sessionId, subagentId);
         return yield* Effect.map(
-          registerWatcher(buildSessionTapTopic(sessionId), 0, undefined),
+          registerWatcher(buildAgentTapTopic(sessionId, subagentId), 0, undefined),
           (watcher) => watcher.queue,
         );
       }),
@@ -399,39 +475,37 @@ const make = Effect.gen(function* () {
      * plus any `tap` changes, which never go through a transaction.
      *
      * - Mutable topic changes are collected and sent after the coalescing
-     *   window.
+     *   window: the slow one for the `subagent` topic and for a change to a
+     *   session's Token Usage alone, the short one for everything else.
      * - For a log topic, nothing here reads the database: each follower is
      *   signalled that the log grew, and reads the new entries itself.
      * - A `tap` item is sent directly to every current subscriber, with no
      *   window. Nothing is stored for a follower to read, and tokens only feel
      *   live when they arrive at once.
+     *
+     * A transcript change and a tap go to the topic of the agent that
+     * produced them: the session's own, or one subagent's.
      */
     publish: (changes: ReadonlyArray<Change>): Effect.Effect<void> =>
       Effect.gen(function* () {
         const grown = new Set<LiveTopic>();
         const taps: Array<{ readonly sessionId: string; readonly item: TapItem }> = [];
-        let collected = false;
         for (const change of changes) {
           if (change._tag === "event") {
             grown.add(LOG_TOPIC);
             continue;
           }
           if (change._tag === "transcript") {
-            grown.add(buildSessionStreamTopic(change.sessionId));
+            grown.add(buildAgentStreamTopic(change.sessionId, change.subagentId));
             continue;
           }
           if (change._tag === "tap") {
             taps.push(change);
             continue;
           }
-          const kinds = pending.get(change.topic) ?? new Map<InvalidateKind, Set<string>>();
-          pending.set(change.topic, kinds);
-          const ids = kinds.get(change.kind) ?? new Set<string>();
-          kinds.set(change.kind, ids);
-          ids.add(change.id);
-          collected = true;
+          const collect = isSlowPaced(change) ? collectSlowChange : collectChange;
+          yield* collect(change.topic, change.kind, change.id);
         }
-        if (collected) yield* Queue.offer(wake, undefined);
         for (const topic of grown) {
           yield* Effect.forEach(
             listWatchers(topic),
@@ -445,7 +519,7 @@ const make = Effect.gen(function* () {
         for (const tap of taps) {
           const message: LiveMessage = { _tag: "delta", items: [tap.item] };
           yield* Effect.forEach(
-            listWatchers(buildSessionTapTopic(tap.sessionId)),
+            listWatchers(buildAgentTapTopic(tap.sessionId, tap.item.subagentId)),
             (watcher) => offerTo(watcher, message),
             { discard: true },
           );

@@ -93,8 +93,9 @@ export const buildConversationTimeouts = (
  * Builds the spec sent to a runner for a session that continues a
  * provider-native session, either resumed in place or forked. Returns the
  * parent's spec with three changes: the model selection the parent ended on,
- * the native session to continue from, and the timeouts from the current
- * settings. `conversationId` is the conversation the continuing session
+ * `continuation`, which names the native session to continue from and, for a
+ * resume, the subagents the controller has records of, and the timeouts from
+ * the current settings. `conversationId` is the conversation the continuing session
  * answers, or `null` when it answers none; a session that answers a
  * conversation gets the idle unload too.
  *
@@ -110,13 +111,12 @@ export const buildContinuingSpec = (
   parent: SessionSpec,
   controller: ScopeSettings<"controller">,
   modelSelection: ModelSelection,
-  nativeSessionId: string,
-  mode: NonNullable<SessionSpec["continue"]>["mode"],
+  continuation: NonNullable<SessionSpec["continue"]>,
   conversationId: string | null,
 ): SessionSpec => ({
   ...parent,
   modelSelection,
-  continue: { nativeSessionId, mode },
+  continue: continuation,
   timeouts:
     conversationId === null ? buildTimeouts(controller) : buildConversationTimeouts(controller),
 });

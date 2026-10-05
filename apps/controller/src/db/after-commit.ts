@@ -33,6 +33,12 @@ import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hercule/contrac
  * One thing a committed transaction changed. The exception is `tap`: a token
  * delta is never written to the database, so it is announced as soon as it is
  * reported, with no transaction involved.
+ *
+ * - A `record` change with `usageOnly` changed nothing about the record but
+ *   its Token Usage. It comes with almost every event a working agent
+ *   reports, so it is sent at a slower pace than other changes.
+ * - A `transcript` change names the agent whose transcript grew: the
+ *   session's own when `subagentId` is absent, otherwise that subagent's.
  */
 export type Change =
   | {
@@ -40,9 +46,10 @@ export type Change =
       readonly topic: MutableLiveTopic;
       readonly id: string;
       readonly kind: InvalidateKind;
+      readonly usageOnly?: true;
     }
   | { readonly _tag: "event" }
-  | { readonly _tag: "transcript"; readonly sessionId: string }
+  | { readonly _tag: "transcript"; readonly sessionId: string; readonly subagentId?: string }
   | { readonly _tag: "tap"; readonly sessionId: string; readonly item: TapItem };
 
 /** Receives the changes of each committed transaction. */

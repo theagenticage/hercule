@@ -23,6 +23,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   SessionSpec,
+  type SubagentId,
   type ControllerToRunner,
   type ModelSelection,
   type SessionInputResult,
@@ -38,6 +39,7 @@ import {
   SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
   SESSION_RESPOND_TO_QUESTION_FIELDS,
   SESSION_UPDATE_FIELDS,
+  SessionInterruptInput,
   type Forbidden,
   type Session,
   type SessionInputOutcome,
@@ -94,6 +96,7 @@ const decodeInput = Schema.decodeUnknownEffect(InputInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeRespondToApprovalRequest = Schema.decodeUnknownEffect(RespondToApprovalRequestInput);
 const decodeRespondToQuestion = Schema.decodeUnknownEffect(RespondToQuestionInput);
+const decodeInterrupt = Schema.decodeUnknownEffect(SessionInterruptInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
 /**
@@ -137,10 +140,12 @@ const CONVERSATION_DELETED =
 const NO_OPEN_REQUEST = "that session is not waiting on a request";
 
 /**
- * The harness has moved on: the answer is for a request other than the one it
- * is waiting on now, so applying it would answer the wrong question.
+ * The harness has moved on: the answer is for a request that is not among the
+ * ones it is waiting on now, so applying it would answer the wrong question.
  */
-const STALE_REQUEST = "that request is not the one this session is waiting on";
+const STALE_REQUEST =
+  "that request is not one this session is waiting on; " +
+  "read the session again to see the requests it waits on now";
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -237,6 +242,22 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Builds the `continue` part of a resume spec: the native session to
+   * resume, and the subagents the controller has records of, so the adapter
+   * puts a subagent the harness continues back on its record. `subagents` is
+   * left out when there are none.
+   */
+  const buildResumeContinuation = (
+    sessionId: string,
+    nativeSessionId: string,
+  ): Effect.Effect<NonNullable<SessionSpec["continue"]>, SqlError> =>
+    Effect.map(sessions.listSubagentsToContinue(sessionId), (subagents) => ({
+      nativeSessionId,
+      mode: "resume" as const,
+      ...(subagents.length === 0 ? {} : { subagents }),
+    }));
+
+  /**
    * Builds the spec a session is queued with when it resumes its own
    * transcript, and returns it as JSON. The spec is built from the stored spec
    * rather than from scratch, so the resumed session runs under exactly what
@@ -252,8 +273,7 @@ const make = Effect.gen(function* () {
         yield* sessions.readSpec(session.id),
         yield* settings.all(),
         modelSelection,
-        nativeSessionId,
-        "resume",
+        yield* buildResumeContinuation(session.id, nativeSessionId),
         session.conversationId,
       );
       return JSON.stringify(encodeSpec(spec));
@@ -311,8 +331,7 @@ const make = Effect.gen(function* () {
         yield* sessions.readSpec(session.id),
         yield* settings.all(),
         session.modelSelection,
-        nativeSessionId,
-        "resume",
+        yield* buildResumeContinuation(session.id, nativeSessionId),
         session.conversationId,
       );
       return JSON.stringify(encodeSpec({ ...spec, accessMode }));
@@ -492,20 +511,20 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Reads the session `id` and the request it is parked on, and checks that
-   * the request is `requestId`. Fails with `InvalidState` when the session
-   * has exited, waits on no request, or waits on a different one, and with
-   * `NotFound` when there is no such session.
+   * Reads the session `id` and finds `requestId` among the Requests it waits
+   * on. Fails with `InvalidState` when the session has exited, waits on no
+   * Request, or does not wait on this one, and with `NotFound` when there is
+   * no such session.
    */
   const readOpenRequest = (id: Id, requestId: string) =>
     Effect.gen(function* () {
       const session = yield* readSession(id);
       if (session.status === "exited")
         return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
-      const open = session.openRequest;
-      if (open === null) return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST));
-      if (open.requestId !== requestId)
-        return yield* Effect.fail(createInvalidStateError(STALE_REQUEST));
+      if (session.openRequests.length === 0)
+        return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST));
+      const open = session.openRequests.find((request) => request.requestId === requestId);
+      if (open === undefined) return yield* Effect.fail(createInvalidStateError(STALE_REQUEST));
       return { session, open };
     });
 
@@ -559,26 +578,33 @@ const make = Effect.gen(function* () {
 
   /**
    * Tells the session's runner to end the running turn, as the actor behind
-   * the current request. Writes the `session.interrupted` audit entry and
-   * withdraws the approval notification about the request the turn waits on,
-   * if any, because the interrupt ends that wait. The runner is told once
-   * those writes commit.
+   * the current request, or, with `subagentId`, to stop that subagent and
+   * every subagent below it. Writes the `session.interrupted` audit entry and
+   * withdraws the approval notifications about the Requests the interrupt
+   * ends. The runner is told once those writes commit.
    * Fails with `InvalidState` when the runner is not connected.
    */
-  const interruptTurn = (session: StoredSession): Effect.Effect<void, InvalidState | SqlError> =>
+  const interruptTurn = (
+    session: StoredSession,
+    subagentId?: SubagentId,
+  ): Effect.Effect<void, InvalidState | SqlError> =>
     Effect.gen(function* () {
       const actor = yield* currentStamp;
       yield* writeThenTellRunner(
         session.runnerId,
-        sessions.interrupting(session.id),
+        sessions.interrupting(session.id, subagentId),
         Effect.gen(function* () {
           yield* audit.append({
             kind: "session.interrupted",
             actor,
-            payload: { sessionId: session.id, runnerId: session.runnerId },
+            payload: {
+              sessionId: session.id,
+              runnerId: session.runnerId,
+              ...(subagentId === undefined ? {} : { subagentId }),
+            },
             at: yield* nowIso,
           });
-          yield* sessions.withdrawApprovalNotification(session.id, "interrupted");
+          yield* sessions.withdrawApprovalNotification(session.id, "interrupted", subagentId);
         }),
       );
     });
@@ -902,21 +928,30 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Ends the turn the session is running. Returns the session. Fails if the
-     * session has exited or its runner is not connected.
+     * Ends the turn the session is running, which stops all of its work, its
+     * subagents' too. With `subagentId` it stops only that subagent and every
+     * subagent below it, and the session's own agent keeps working. Returns
+     * the session. Fails if the session has exited, has no record of the
+     * subagent, or its runner is not connected.
      *
-     * An idle session is not rejected. The controller's status lags behind the
-     * runner's stream, so "no turn is running" would be a guess about a moment
-     * that has already passed. The adapter knows, and its interrupt does
-     * nothing when there is no turn to end.
+     * An idle session, or a subagent whose record no longer says `running`,
+     * is not rejected. The controller's status lags behind the runner's
+     * stream, so "nothing is running" would be a guess about a moment that
+     * has already passed. The adapter knows, and its interrupt does nothing
+     * when there is nothing to end.
      */
-    interrupt: (id: Id): Effect.Effect<Session, Exclude<InputError, Validation>> =>
+    interrupt: (id: Id, input: SessionInterruptInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.interrupt");
+        const { subagentId } = yield* Effect.mapError(
+          decodeInterrupt(input),
+          createDecodeValidationError,
+        );
         const session = yield* readSession(id);
         if (session.status === "exited")
           return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
-        yield* interruptTurn(session);
+        if (subagentId !== undefined) yield* sessions.requireSubagent(id, subagentId);
+        yield* interruptTurn(session, subagentId);
         return (yield* recordComposer)(session);
       }),
 

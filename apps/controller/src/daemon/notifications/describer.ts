@@ -84,8 +84,12 @@ const readOncePerId = <A>(read: (id: string) => Effect.Effect<A, SqlError>) => {
  * change or read. Returns "the request" when the session no longer waits on
  * this request, because then its details are gone.
  */
-const describeOpenRequest = (request: OpenRequest | null, requestId: string): DescribeLine => {
-  if (request === null || request.requestId !== requestId) return [buildTextPart("the request")];
+const describeOpenRequest = (
+  requests: ReadonlyArray<OpenRequest>,
+  requestId: string,
+): DescribeLine => {
+  const request = requests.find((open) => open.requestId === requestId);
+  if (request === undefined) return [buildTextPart("the request")];
   switch (request.kind) {
     case "command_approval":
       return [buildTextPart("the command "), buildMarkedPart(request.detail.command)];
@@ -230,8 +234,8 @@ export const buildDescribe: Effect.Effect<
     );
 
     /**
-     * Returns a session's name as a `marked` part, and the request the session
-     * waits on, or `null` when it waits on none. The name is the session's
+     * Returns a session's name as a `marked` part, and the Requests the
+     * session waits on, none when the session is gone. The name is the session's
      * title, or its id once the session is gone.
      */
     const readSessionNameAndRequest = readOncePerId((id) =>
@@ -239,9 +243,9 @@ export const buildDescribe: Effect.Effect<
         markedName: buildMarkedPart(
           Option.match(found, { onNone: () => id, onSome: (session) => session.title }),
         ),
-        openRequest: Option.match(found, {
-          onNone: () => null,
-          onSome: (session) => session.openRequest,
+        openRequests: Option.match(found, {
+          onNone: () => [],
+          onSome: (session) => session.openRequests,
         }),
       })),
     );
@@ -373,7 +377,7 @@ export const buildDescribe: Effect.Effect<
         Effect.map(readSessionNameAndRequest(sessionId), (session) =>
           describeDecision(
             decision,
-            describeOpenRequest(session.openRequest, requestId),
+            describeOpenRequest(session.openRequests, requestId),
             session.markedName,
           ),
         ),

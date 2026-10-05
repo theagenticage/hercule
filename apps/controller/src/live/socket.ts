@@ -320,7 +320,10 @@ const handlers = live.toLayer(
             // the same grant as reading the transcript over HTTP, like the
             // `:stream` topic below.
             yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
-            return yield* holdSubscription(connection, topics.tapSession(session.sessionId));
+            return yield* holdSubscription(
+              connection,
+              topics.tapSession(session.sessionId, session.subagentId),
+            );
           }
 
           if (session?.kind === "stream") {
@@ -330,7 +333,7 @@ const handlers = live.toLayer(
             yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
             return yield* holdSubscription(
               connection,
-              topics.followSession(session.sessionId, cursor),
+              topics.followSession(session.sessionId, session.subagentId, cursor),
             );
           }
 

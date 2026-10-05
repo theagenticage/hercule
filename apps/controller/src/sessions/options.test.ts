@@ -107,8 +107,7 @@ describe("buildContinuingSpec", () => {
       buildParent({ inactivityMs: MINUTE_MS, absoluteMs: MINUTE_MS }),
       controller,
       { model: "clever", options: {} },
-      "native-1",
-      "resume",
+      { nativeSessionId: "native-1", mode: "resume" },
       "0199e0e7-0000-7000-8000-0000000000c1",
     );
 
@@ -124,8 +123,7 @@ describe("buildContinuingSpec", () => {
       buildParent({ inactivityMs: MINUTE_MS, absoluteMs: MINUTE_MS, idleMs: MINUTE_MS }),
       controller,
       { model: "clever", options: {} },
-      "native-1",
-      "fork",
+      { nativeSessionId: "native-1", mode: "fork" },
       null,
     );
 
