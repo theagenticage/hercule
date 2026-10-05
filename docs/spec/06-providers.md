@@ -244,7 +244,7 @@ type SessionStatus = "queued" | "starting" | "idle" | "busy" | "exited"
 
 *(Amended 2026-10-05, [#431](https://github.com/theagenticage/hercule/issues/431).)* **A start's input is always answered.** The runner answers it delivered or refused, on every path:
 
-- A start that fails before the harness took the input answers it refused: the spawn or the context staging fails, a `stopSession` arrives before the runner hands the input to the harness, including while the start waits behind earlier frames of its session, or the runner shuts down. A stop never waits behind its session's frames ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2).
+- A start that fails before the harness took the input answers it refused: the spawn or the context staging fails, a `stopSession` arrives before the runner hands the input to the harness, including while the start waits behind earlier frames of its session, or the runner shuts down. A stop never waits behind its session's frames ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). A stop that arrives before the harness is spawned means none is: the runner reports the session's exit itself, with reason `stopped`.
 - Once the runner has handed the input to the harness, a `stopSession` that arrives races the input. The input's answer shows which won: delivered if the harness took the input first, refused if the stop got there first.
 - A duplicate start for a session the runner already holds stays a no-op and answers its input refused, so the input is never delivered twice.
 

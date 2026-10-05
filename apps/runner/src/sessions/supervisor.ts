@@ -101,9 +101,9 @@ interface Live {
   pendingStop: ExitReason | undefined;
   /**
    * Completed when this entry is removed, which happens only once the adapter
-   * no longer holds the session or never started it. A stop waits on it, so
-   * the session's next frame, which may be a new start of the same id, is not
-   * handled while the old harness is still on its way out.
+   * no longer holds the session or never started it. A start of the same id
+   * that arrives while this session is being stopped waits on it, instead of
+   * being refused because the old harness is still on its way out.
    */
   readonly gone: Deferred.Deferred<void>;
 }
@@ -112,17 +112,14 @@ interface Live {
  * A start that has arrived on the connection and has not asked the adapter
  * for its harness yet: it may still wait behind earlier frames of its session,
  * check the adapter, or resolve its context. The session has no `live` entry
- * in that time, so a stop that arrives then is kept here, and moves to the
- * entry's `pendingStop` when the entry is added.
+ * in that time, so a stop that arrives then is kept here.
  *
- * Such a start still asks the adapter for its harness, and then stops it, even
- * though the session is already meant to stop. The controller has moved the
- * session to `starting`, and it ends the session only when a
- * `session.exited` arrives. The adapter is what reports the exit of every
- * session it holds, so starting the harness and stopping it at once produces
- * that exit through the same path as every other stop. The alternative, a
- * second place that reports the exit of a session that never ran, would have
- * to agree with the adapters on every detail of that report.
+ * - A stop kept here before the start resolves its context means no harness
+ *   is spawned: the start refuses its input and reports the exit itself, with
+ *   reason `stopped`. The controller has moved the session to `starting`, and
+ *   it ends the session only when a `session.exited` arrives.
+ * - A stop that arrives after that check moves to the entry's `pendingStop`
+ *   when the entry is added, and the start stops the harness once it is up.
  */
 interface ArrivedStart {
   readonly sessionId: string;
@@ -157,6 +154,11 @@ export interface SessionSupervisor {
    * runs, so call it as soon as the frame arrives. A stop that arrives later
    * is then never lost, even while the start still waits its turn: the input
    * is refused and the session is stopped.
+   *
+   * When an earlier session of the same id is being stopped, the effect first
+   * waits until that session is gone from this runner, for at most
+   * `STOP_WAIT_BOUND`, and refuses the input if the adapter still holds it
+   * by then.
    */
   readonly start: (frame: SessionStart) => Effect.Effect<void>;
   readonly input: (frame: SessionInput) => Effect.Effect<void>;
@@ -167,13 +169,15 @@ export interface SessionSupervisor {
   readonly respondToQuestion: (frame: SessionRespondToQuestion) => Effect.Effect<void>;
   /**
    * Records the stop at once, when called, and returns the effect that asks
-   * the adapter to stop the session, if it is running. A session that is
-   * still starting, or whose start has arrived and waits its turn, is stopped
-   * once its harness is up, and the input its start carries is refused.
-   * The effect then waits until the session is gone from this runner, for
-   * at most `STOP_WAIT_BOUND`, because some adapters return before their
-   * harness has exited. Idempotent: a session this runner neither holds nor
-   * is starting is already stopped.
+   * the adapter to stop the session, if it is running. The input a start of
+   * the session carries is refused if that start has not handed it over yet:
+   *
+   * - a start that has not resolved its context yet spawns no harness, and
+   *   reports the exit itself;
+   * - a start whose harness is starting stops it once it is up.
+   *
+   * Idempotent: a session this runner neither holds nor is starting is
+   * already stopped.
    */
   readonly stop: (frame: SessionStop) => Effect.Effect<void>;
 }
@@ -204,11 +208,10 @@ export interface Supervising {
 const SHUTDOWN_STOP_BOUND: Duration.Duration = Duration.seconds(5);
 
 /**
- * How long a stop from the controller waits for the harness to be gone before
- * the session's later frames are handled anyway. Some adapters return from
- * `stopSession` before the harness has exited. A start of the same id that
- * comes after the bound is refused as a duplicate, which tells the controller
- * the truth, instead of waiting for ever behind a harness that never exits.
+ * How long a start waits for an earlier harness of the same session id, which
+ * is being stopped, to be gone. Some adapters return from `stopSession` before
+ * the harness has exited. After the bound the start is refused, instead of
+ * waiting for ever behind a harness that never exits.
  */
 const STOP_WAIT_BOUND: Duration.Duration = Duration.seconds(30);
 
@@ -221,13 +224,14 @@ const STOP_WAIT_BOUND: Duration.Duration = Duration.seconds(30);
  *   end nobody asked for that leaves nothing to resume.
  * - `runner_restart`: the runner began shutting down while the session was
  *   starting.
+ * - `stopped`: a stop arrived before the harness was spawned, so none was.
  * - undefined: the session is left as it was, running or stopping.
  */
 interface UndeliveredStart {
   /** The reason the input is refused with. */
   readonly message: string;
   /** The exit to report, or undefined to leave the session as it was. */
-  readonly exitReason: "crash" | "runner_restart" | undefined;
+  readonly exitReason: "crash" | "runner_restart" | "stopped" | undefined;
 }
 
 /** Builds the `UndeliveredStart` of a session that failed to start for the given reason. */
@@ -279,23 +283,6 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     return held.phase === "running" ? held.adapter.stopSession(sessionId, reason) : Effect.void;
   };
 
-  /**
-   * Waits until a session that is being stopped is gone from this runner, for
-   * at most `STOP_WAIT_BOUND`. Returns at once when the runner holds no such
-   * session, or holds it and no stop was requested.
-   *
-   * The connection handles the session's later frames only after this wait,
-   * and one of them may be a start of the same id. While the old harness is
-   * still on its way out, that start would be refused as a duplicate.
-   */
-  const waitUntilStoppedSessionGone = (sessionId: string): Effect.Effect<void> =>
-    Effect.suspend(() => {
-      const held = live.get(sessionId);
-      return held?.pendingStop === undefined
-        ? Effect.void
-        : Effect.asVoid(Effect.timeoutOption(Deferred.await(held.gone), STOP_WAIT_BOUND));
-    });
-
   const forConnection = (connection: Connection): SessionSupervisor => {
     /**
      * The starts on this connection that have not added their `live` entry
@@ -304,6 +291,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      * connection is gone.
      */
     const arrivedStarts = new Set<ArrivedStart>();
+
+    /** Checks whether the adapter holds a session of this id right now. */
+    const isHeldBy = (adapter: ProviderAdapter, sessionId: string): Effect.Effect<boolean> =>
+      Effect.map(adapter.listSessions, (bindings) =>
+        bindings.some((binding) => binding.sessionId === sessionId),
+      );
 
     const discardScratch = (scratch: string | undefined): void => {
       if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
@@ -342,12 +335,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       Effect.gen(function* () {
         const held = live.get(sessionId);
         if (held === undefined) return;
-        const still = yield* held.adapter.listSessions;
-        if (still.some((binding) => binding.sessionId === sessionId)) return;
+        if (yield* isHeldBy(held.adapter, sessionId)) return;
         // Compare by identity again after the wait above. A new start for this
         // id may have replaced the entry while this call waited on the
-        // adapter, before the adapter registered the new session, so `still`
-        // only describes the session this exit belongs to.
+        // adapter, before the adapter registered the new session, so the
+        // answer only describes the session this exit belongs to.
         if (live.get(sessionId) !== held) return;
         live.delete(sessionId);
         yield* tearDownSession(held);
@@ -412,8 +404,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             Effect.suspend(() => {
               held.idle = undefined;
               // Compare by identity: by the time the wait ends, the entry for
-              // this id may have been removed or replaced by a new start.
-              if (live.get(sessionId) !== held) return Effect.void;
+              // this id may have been removed or replaced by a new start. A
+              // session already being stopped is not stopped a second time.
+              if (live.get(sessionId) !== held || held.pendingStop !== undefined) {
+                return Effect.void;
+              }
               return requestStop(sessionId, held, "idle_unload");
             }),
           ),
@@ -635,6 +630,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               );
             case "runner_restart":
               return reportExit(frame.sessionId, "runner_restart");
+            case "stopped":
+              return reportExit(frame.sessionId, "stopped");
             case undefined:
               return Effect.void;
           }
@@ -647,7 +644,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      * context. Fails with an `UndeliveredStart` when the session must not
      * start, or cannot.
      */
-    const prepareStart = (frame: SessionStart): Effect.Effect<PreparedStart, UndeliveredStart> =>
+    const prepareStart = (
+      frame: SessionStart,
+      arrived: ArrivedStart,
+    ): Effect.Effect<PreparedStart, UndeliveredStart> =>
       Effect.gen(function* () {
         // The controller may have sent this start before it learned of the
         // shutdown. A harness spawned now would never be stopped.
@@ -667,16 +667,42 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // session whatever its cause (spec 03 section 2.3). Its input is
         // refused, never delivered, so the harness is never handed the same
         // input twice.
-        const bindings = yield* adapter.listSessions;
-        if (bindings.some((binding) => binding.sessionId === frame.sessionId)) {
+        //
+        // The one exception is a session that is being stopped. The
+        // controller can send a start right after a stop of the same id: it
+        // stops a harness the runner still lists for a session it has already
+        // ended, and a resume can start that session again. That start waits
+        // until the old entry is gone.
+        //
+        // It waits even when the adapter no longer lists the old session,
+        // because the old exit may not have been handled yet. Handled after
+        // this start had replaced the entry, that exit would remove the new
+        // entry while its harness is still starting, and nothing would ever
+        // stop that harness.
+        const earlier = live.get(frame.sessionId);
+        const held = yield* isHeldBy(adapter, frame.sessionId);
+        if (held && earlier?.pendingStop === undefined) {
           return yield* Effect.fail<UndeliveredStart>({
             message: `session ${frame.sessionId} is already running on this runner`,
             exitReason: undefined,
           });
         }
+        if (earlier?.pendingStop !== undefined) {
+          yield* Effect.timeoutOption(Deferred.await(earlier.gone), STOP_WAIT_BOUND);
+          if (yield* isHeldBy(adapter, frame.sessionId)) {
+            yield* Effect.logWarning(
+              "A start waited for the earlier harness of its session to stop, and it is still running",
+            ).pipe(Effect.annotateLogs({ sessionId: frame.sessionId }));
+            return yield* Effect.fail<UndeliveredStart>({
+              message: `session ${frame.sessionId} is still stopping on this runner`,
+              exitReason: undefined,
+            });
+          }
+        }
         // An exit published while the socket was down reached no relay, so
         // the `live` entry can outlive its session. Remove such a stale
-        // entry before starting again.
+        // entry before starting again. A stale entry of a session that was
+        // being stopped is removed only after the wait above ran out.
         const stale = live.get(frame.sessionId);
         if (stale !== undefined) {
           live.delete(frame.sessionId);
@@ -695,6 +721,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               `the output schema is outside the subset every harness accepts: ${issues.join("; ")}`,
             ),
           );
+        }
+        // A stop that reached this start before now means no harness is
+        // spawned at all. Checked last before the context is resolved, which
+        // is the first step that changes anything on this machine.
+        if (arrived.pendingStop !== undefined) {
+          return yield* Effect.fail<UndeliveredStart>({
+            message: `session ${frame.sessionId} was stopped before its input was handed over`,
+            exitReason: "stopped",
+          });
         }
         const resolved = yield* Effect.mapError(
           resolveSessionContext(frame, connection.machine, adapter.binaryName),
@@ -884,7 +919,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const arrived: ArrivedStart = { sessionId: frame.sessionId, pendingStop: undefined };
         arrivedStarts.add(arrived);
         return Effect.uninterruptibleMask((restore) =>
-          restore(prepareStart(frame)).pipe(
+          restore(prepareStart(frame, arrived)).pipe(
             Effect.flatMap((prepared) => launchHarness(frame, prepared, arrived)),
             Effect.flatMap((held) => handOverStartInput(held, frame)),
             Effect.catch((undelivered) => answerUndeliveredStart(frame, undelivered)),
@@ -899,12 +934,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   ),
             ),
           ),
-        ).pipe(
-          Effect.ensuring(Effect.sync(() => arrivedStarts.delete(arrived))),
-          // A stop that reached this start stopped its harness. The wait runs
-          // after the answer, and can be interrupted, unlike the start above.
-          Effect.andThen(waitUntilStoppedSessionGone(frame.sessionId)),
-        );
+        ).pipe(Effect.ensuring(Effect.sync(() => arrivedStarts.delete(arrived))));
       },
 
       /**
@@ -919,12 +949,18 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // the session's earlier frames, such as its start, are done.
         Effect.suspend(() => {
           const held = live.get(frame.sessionId);
+          if (held === undefined) {
+            return refuseInput(frame, `session ${frame.sessionId} is not running on this runner`);
+          }
+          // The session is on its way out, so the input would open a turn
+          // nothing finishes.
+          if (held.pendingStop !== undefined) {
+            return refuseInput(frame, `session ${frame.sessionId} is stopping on this runner`);
+          }
           // Cancel the idle wait before the input reaches the harness. The
           // turn this input opens may start only after the wait would have
           // ended.
-          return held === undefined
-            ? refuseInput(frame, `session ${frame.sessionId} is not running on this runner`)
-            : Effect.andThen(cancelIdleUnload(held), sendInputAndAnswer(held, frame));
+          return Effect.andThen(cancelIdleUnload(held), sendInputAndAnswer(held, frame));
         }),
 
       /** Idempotent: a session this runner does not hold has no turn to end. */
@@ -971,10 +1007,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           }
         }
         const held = live.get(frame.sessionId);
-        return Effect.andThen(
-          held === undefined ? Effect.void : requestStop(frame.sessionId, held, "stopped"),
-          waitUntilStoppedSessionGone(frame.sessionId),
-        );
+        return held === undefined ? Effect.void : requestStop(frame.sessionId, held, "stopped");
       },
     };
   };

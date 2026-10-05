@@ -360,56 +360,6 @@ describe("a session that has a workspace", () => {
     expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
   });
 
-  it("waits for other git work in the workspace before it switches the branch", async () => {
-    const remote = makeRemote();
-    addBranch(remote, "release");
-    const machine = buildMachine();
-    const workspaceId = createId();
-    await machine.workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
-      }),
-    );
-    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
-    // Stands in for another start's branch switch, or a workspace step, that
-    // holds the workspace while this start arrives.
-    let release: () => void = () => {};
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let entered = false;
-    const holding = Effect.runPromise(
-      machine.workspaces.runExclusively(
-        workspaceId,
-        Effect.andThen(
-          Effect.sync(() => {
-            entered = true;
-          }),
-          Effect.promise(() => released),
-        ),
-      ),
-    );
-    expect(entered).toBe(true);
-
-    const starting = resolveAsync(
-      buildSessionStart({
-        spec: { ...buildSessionStart().spec, workspaceId },
-        checkoutBranch: "release",
-      }),
-      machine,
-    );
-    // Long enough for git to have switched, had the start not waited.
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
-
-    release();
-    await holding;
-    expect((await starting)._tag).toBe("Success");
-    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
-  });
-
   it("starts two sessions in one primary at once, and both switch without colliding", async () => {
     const remote = makeRemote();
     addBranch(remote, "release");

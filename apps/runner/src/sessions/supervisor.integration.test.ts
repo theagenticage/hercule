@@ -596,7 +596,7 @@ describe("an exit that arrives after the id was started again", () => {
 });
 
 describe("a stale exit's release racing a fresh start under the same id", () => {
-  it("does not tear down the fresh start's entry", async () => {
+  it("holds the fresh start until the stale exit is handled, then keeps its entry", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -609,18 +609,15 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
       resumeRelease = resolve;
     });
     let startCalls = 0;
-    let freshStartEntered = false;
-    let resumeFreshStart: () => void = () => {};
-    const freshStartGate = new Promise<void>((resolve) => {
-      resumeFreshStart = resolve;
-    });
+    // Whether the stale exit had reached the wire when the fresh start asked
+    // the adapter for its harness.
+    let staleExitSentBeforeFreshStart: boolean | undefined;
 
     // The second `listSessions` call comes from `releaseSession`, handling the
-    // stale exit. It is held open so a fresh start for the same id can run
-    // meanwhile. The second `startSession` call is that fresh start's. It is
-    // held open after the fresh start has added its `live` entry but before
-    // the adapter holds the session. That is the window in which the held
-    // `listSessions` call must return for the race to matter.
+    // stale exit. It is held open while a fresh start for the same id
+    // arrives. A start that follows a stop must wait until the stopped
+    // session's entry is gone, so the fresh start cannot reach the harness
+    // while the release is still deciding which entry to remove.
     Object.assign(fake.adapter, {
       listSessions: Effect.suspend(() => {
         listCalls += 1;
@@ -633,12 +630,10 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
       }),
       startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) => {
         startCalls += 1;
-        if (startCalls !== 2) return originalStartSession(sessionId, spec, ctx);
-        freshStartEntered = true;
-        return Effect.andThen(
-          Effect.promise(() => freshStartGate),
-          originalStartSession(sessionId, spec, ctx),
-        );
+        if (startCalls === 2) {
+          staleExitSentBeforeFreshStart = listSessionEvents(sent).length === 2;
+        }
+        return originalStartSession(sessionId, spec, ctx);
       },
     });
 
@@ -651,13 +646,7 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
         yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
         yield* waitUntil("release began checking who is live", () => releaseEntered);
         yield* Effect.forkChild(supervisor.start(START));
-        yield* waitUntil("the fresh start reached the harness", () => freshStartEntered);
         resumeRelease();
-        yield* waitUntil(
-          "the stale exit reached the wire",
-          () => listSessionEvents(sent).length === 2,
-        );
-        resumeFreshStart();
         yield* waitUntil("the fresh start finished", () => fake.contexts.length === 2);
         // If `releaseSession` tore down the fresh entry by mistake, this second
         // stop finds no entry and does nothing. The assertion below catches
@@ -667,6 +656,7 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
       }),
     );
 
+    expect(staleExitSentBeforeFreshStart).toBe(true);
     expect(fake.stops.map((stop) => stop.reason)).toEqual(["stopped", "stopped"]);
   });
 });
@@ -1557,12 +1547,10 @@ describe("a session that sits idle between turns", () => {
         yield* awaitForwarded(sent, 3);
 
         // The harness takes the stop and is slow to exit, and an input that
-        // reaches it in that time is refused. The session is on its way out,
-        // so the refusal must not give it a new idle wait.
+        // arrives in that time is refused. The session is on its way out, so
+        // the refusal must not give it a new idle wait.
         fake.stopsSilently = true;
-        yield* Effect.forkChild(supervisor.stop({ _tag: "sessionStop", sessionId: SESSION }));
-        yield* waitOnWallClock("asked the adapter to stop", () => fake.stops.length === 1);
-        fake.fails = "the harness is stopping";
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
         yield* supervisor.input({
           _tag: "sessionInput",
           requestId: REQUEST,
@@ -1576,6 +1564,9 @@ describe("a session that sits idle between turns", () => {
 
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
     expect(listInputResults(sent).at(-1)).toMatchObject({ requestId: REQUEST, ok: false });
+    expect(listInputResults(sent).at(-1)?.message).toContain("is stopping");
+    // The harness was never handed the input.
+    expect(fake.inputs).toEqual([START_INPUT]);
   });
 
   it("is left alone while parked on a permission request, however long it waits", async () => {
@@ -1799,6 +1790,160 @@ describe("a stop that arrives while a session is still starting", () => {
     // A session on its way out gets no turn.
     expect(fake.inputs).toEqual([]);
     expectStartInputRefused(sent, "was stopped before its input was handed over");
+  });
+});
+
+describe("a start that follows a stop of the same id", () => {
+  /** How long the start waits for the earlier harness to exit, as the supervisor sets it. */
+  const STOP_WAIT_MS = 30 * 1000;
+  const AGAIN: SessionStart = { ...START, requestId: REQUEST };
+
+  it("is refused as still stopping when the earlier harness has not exited 30 seconds later", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    let listed = 0;
+    const original = fake.adapter.listSessions;
+    Object.assign(fake.adapter, {
+      listSessions: Effect.suspend(() => {
+        listed += 1;
+        return original;
+      }),
+    });
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        fake.stopsSilently = true;
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        const before = listed;
+        yield* Effect.forkChild(supervisor.start(AGAIN));
+        // The start lists the adapter's sessions, finds the old harness still
+        // there, and waits for it to exit.
+        yield* waitOnWallClock("checked the adapter", () => listed > before);
+
+        yield* TestClock.adjust(STOP_WAIT_MS - 1);
+        expect(listInputResults(sent)).toHaveLength(1);
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock(
+          "answered the second start",
+          () => listInputResults(sent).length === 2,
+        );
+      }),
+    );
+
+    expect(listInputResults(sent)[1]).toMatchObject({ requestId: REQUEST, ok: false });
+    expect(listInputResults(sent)[1]?.message).toContain("is still stopping");
+    // No second harness was asked for, and the old one was not stopped twice.
+    expect(fake.contexts).toHaveLength(1);
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+  });
+
+  it("keeps its entry when the old exit is handled after the adapter dropped the old session", async () => {
+    const fake = createFake();
+    const { runner, machine } = buildConnection(fake);
+    // The relay holds this event until the test lets it go, so the old exit,
+    // published after it, is handled only then.
+    const HOLD: ProviderEvent = { ...MARKER, eventId: "e-hold" };
+    let releaseHold: () => void = () => {};
+    const hold = new Promise<void>((resolve) => {
+      releaseHold = resolve;
+    });
+    const sent: Array<RunnerToController> = [];
+    const supervisor = runner.forConnection({
+      machine,
+      send: (frame) =>
+        Effect.andThen(
+          frame._tag === "sessionEvent" && frame.event.eventId === HOLD.eventId
+            ? Effect.promise(() => hold)
+            : Effect.void,
+          Effect.sync(() => void sent.push(frame)),
+        ),
+    });
+
+    // `dropped`: the adapter no longer lists the old session, although its
+    // exit is still on the way. The fake drops it from `listSessions` only,
+    // so the second harness counts as listed once it has started.
+    let dropped = false;
+    // Set for the second start: its `listSessions` call lets the relay go, and
+    // its `startSession` waits at `secondStart` before the harness is listed.
+    let armed = false;
+    let secondStartReached = false;
+    let openSecondStart: () => void = () => {};
+    const secondStart = new Promise<void>((resolve) => {
+      openSecondStart = resolve;
+    });
+    const originalList = fake.adapter.listSessions;
+    const originalStart = fake.adapter.startSession;
+    Object.assign(fake.adapter, {
+      listSessions: Effect.suspend(() => {
+        if (armed) {
+          armed = false;
+          releaseHold();
+        }
+        return Effect.map(originalList, (bindings) =>
+          dropped ? bindings.filter((binding) => binding.sessionId !== SESSION) : bindings,
+        );
+      }),
+      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) =>
+        !dropped
+          ? originalStart(sessionId, spec, ctx)
+          : Effect.andThen(
+              Effect.promise(() => {
+                secondStartReached = true;
+                return secondStart;
+              }),
+              Effect.suspend(() => {
+                dropped = false;
+                return originalStart(sessionId, spec, ctx);
+              }),
+            ),
+    });
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
+        fake.stopsSilently = true;
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        fake.emit(HOLD);
+        dropped = true;
+        fake.emit({
+          _tag: "session.exited",
+          eventId: "e-old-exit",
+          sessionId: SESSION,
+          at,
+          reason: "stopped",
+        });
+
+        armed = true;
+        yield* Effect.forkChild(supervisor.start(AGAIN));
+        yield* waitUntil(
+          "sent the old exit, and the second start asked for its harness",
+          () => listExitReasons(sent).length === 1 && secondStartReached,
+        );
+        openSecondStart();
+        yield* waitUntil("answered the second start", () => listInputResults(sent).length === 2);
+
+        // The new session still has its entry: an input reaches its harness.
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: "0199e0e7-0000-7000-8000-0000000000f9",
+          sessionId: SESSION,
+          input: { text: "still there?" },
+        });
+      }),
+    );
+
+    expect(listInputResults(sent).map((result) => [result.requestId, result.ok])).toEqual([
+      [START_REQUEST, true],
+      [REQUEST, true],
+      ["0199e0e7-0000-7000-8000-0000000000f9", true],
+    ]);
+    expect(fake.inputs).toEqual([START_INPUT, START_INPUT, { text: "still there?" }]);
   });
 });
 

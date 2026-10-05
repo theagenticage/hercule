@@ -306,8 +306,8 @@ export const connect = (
     // report can each ask for a probe, and two probes that ran side by side
     // could finish in either order, so the older result could overwrite the
     // newer one in `facts`.
-    const probing = Semaphore.makeUnsafe(1);
-    const reportFacts = probing.withPermits(1)(
+    const probeLock = Semaphore.makeUnsafe(1);
+    const reportFacts = probeLock.withPermits(1)(
       Effect.tap(options.probe, (probed) =>
         Effect.sync(() => {
           facts = probed;
@@ -516,53 +516,29 @@ export const connect = (
     const sessionLanes = new Map<string, Deferred.Deferred<void>>();
 
     /**
-     * Adds a frame to the end of its session's lane. Returns the wait for the
-     * frame queued before it, and the effect that marks this frame finished,
-     * which the caller runs once the frame's work is done, however it ends.
-     * Call it from the frame loop, so frames join their lanes in the order
-     * they arrived.
-     */
-    const joinSessionLane = (
-      sessionId: string,
-    ): { readonly previous: Effect.Effect<void>; readonly finish: Effect.Effect<void> } => {
-      const previous = sessionLanes.get(sessionId);
-      const finished = Deferred.makeUnsafe<void>();
-      sessionLanes.set(sessionId, finished);
-      return {
-        previous: previous === undefined ? Effect.void : Deferred.await(previous),
-        finish: Effect.sync(() => {
-          Deferred.doneUnsafe(finished, Effect.void);
-          if (sessionLanes.get(sessionId) === finished) sessionLanes.delete(sessionId);
-        }),
-      };
-    };
-
-    /**
      * Queues the work of one session frame behind the earlier frames of the
-     * same session. Returns the effect that waits its turn and then runs the
-     * work.
+     * same session. Returns the effect that waits its turn, runs the work, and
+     * then lets the session's next frame go. Call it from the frame loop, so
+     * frames join their lanes in the order they arrived.
      */
     const queueSessionWork = (
       sessionId: string,
       work: Effect.Effect<void>,
     ): Effect.Effect<void> => {
-      const lane = joinSessionLane(sessionId);
-      return Effect.andThen(lane.previous, work).pipe(Effect.ensuring(lane.finish));
-    };
-
-    /**
-     * Returns the effect that runs the work of one session frame at once,
-     * ahead of the earlier frames of its session, while the later frames of
-     * the session still wait for it. The frame counts as finished only once
-     * the earlier frames have finished too, so the order of everything queued
-     * behind it is kept.
-     */
-    const runAheadOfSessionLane = (
-      sessionId: string,
-      work: Effect.Effect<void>,
-    ): Effect.Effect<void> => {
-      const lane = joinSessionLane(sessionId);
-      return Effect.andThen(work, lane.previous).pipe(Effect.ensuring(lane.finish));
+      const previous = sessionLanes.get(sessionId);
+      const finished = Deferred.makeUnsafe<void>();
+      sessionLanes.set(sessionId, finished);
+      return Effect.andThen(
+        previous === undefined ? Effect.void : Deferred.await(previous),
+        work,
+      ).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            Deferred.doneUnsafe(finished, Effect.void);
+            if (sessionLanes.get(sessionId) === finished) sessionLanes.delete(sessionId);
+          }),
+        ),
+      );
     };
 
     /**
@@ -682,21 +658,13 @@ export const connect = (
           case "sessionRespondToQuestion":
             return queueSessionWork(message.sessionId, supervisor.respondToQuestion(message));
           case "sessionStop":
-            // A stop does not wait behind its session's frames: it must
-            // reach a start that is still starting, so the start refuses its
-            // input instead of handing it over (spec 06 section 4.2). An
-            // input still waiting in the lane is then refused too. `stop`
-            // records the stop now. The effect it returns asks the adapter to
-            // stop the harness and waits until the harness is gone.
-            //
-            // The session's later frames do wait for that effect. The
-            // controller can send a start right after a stop for the same
-            // id, with no exit between them: it stops a harness the runner
-            // still lists for a session it has already ended, and a resume
-            // can then start that session again. The start must find the old
-            // harness gone, not still listed by an adapter that is stopping
-            // it.
-            return runAheadOfSessionLane(message.sessionId, supervisor.stop(message));
+            // A stop does not wait behind its session's frames, and nothing
+            // waits behind it: it must reach a start that is still starting,
+            // so the start refuses its input instead of handing it over
+            // (spec 06 section 4.2). An input still waiting in the lane is
+            // then refused too. `stop` records the stop now, and the effect
+            // it returns asks the adapter to stop the harness.
+            return supervisor.stop(message);
           case "ack":
             // Acks are for replayable events, which nothing sends yet.
             return;

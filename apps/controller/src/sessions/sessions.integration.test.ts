@@ -2269,6 +2269,34 @@ describe("session.stop", () => {
     });
   });
 
+  it("ends a starting session as stopped when the runner refuses the start's input and reports a stopped exit", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.answering(() => undefined);
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      const start = (await waitForStartFrames(arranged, session.id, 1))[0]!;
+      expect((await readSession(arranged, session.id)).status).toBe("starting");
+
+      const response = await stopSession(arranged, session.id);
+      expect(response.status, await response.clone().text()).toBe(200);
+      await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 1);
+      // A runner that receives the stop before it spawned the harness spawns
+      // none: it refuses the start's input and reports the exit itself.
+      arranged.wire.release({
+        message: "the session was stopped before its input was handed over",
+      });
+      reportExited(arranged.wire, session.id, 1);
+
+      const ended = await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      expect(ended.exitedAt).not.toBeNull();
+      const row = await waitUntil("cancelled the start input", async () => {
+        const [found] = await listInputs(arranged, session.id);
+        return found?.id === start.requestId && found.status === "cancelled" ? found : undefined;
+      });
+      expect(row.sentAt).toBeNull();
+      expect(await arranged.harness.audit("session.stopped")).toHaveLength(1);
+    });
+  });
+
   it("ends a queued session once when several stops race, and returns the session as it is now", async () => {
     await withFleet(async (arranged) => {
       // The runner's only slot is taken, so the second session waits in the

@@ -1057,30 +1057,36 @@ describe("session frames on one connection", () => {
   });
 
   /**
-   * The two points of a start a stop can arrive at: before the session has an
-   * entry, while the start checks the adapter, and after, while the harness
-   * starts.
+   * The two points of a start a stop can arrive at:
+   *
+   * - before the session has an entry, while the start checks the adapter.
+   *   No harness is spawned, and the start reports the exit itself.
+   * - after, while the harness starts. The harness is stopped once it is up,
+   *   and the adapter reports the exit.
    */
   const STOP_POINTS: ReadonlyArray<{
     readonly point: string;
     readonly holdStart: (fake: Fake, gate: Gate) => void;
+    readonly spawned: boolean;
   }> = [
     {
       point: "while the start checks the adapter, before the session has an entry",
       holdStart: (fake, gate) => {
         fake.listGate = gate;
       },
+      spawned: false,
     },
     {
       point: "while the harness starts",
       holdStart: (fake, gate) => {
         fake.startGates.set(SESSION_A, gate);
       },
+      spawned: true,
     },
   ];
 
-  for (const { point, holdStart } of STOP_POINTS) {
-    it(`refuses the start's input and stops the session when a stop arrives ${point}`, async () => {
+  for (const { point, holdStart, spawned } of STOP_POINTS) {
+    it(`refuses the start's input and ends the session as stopped when a stop arrives ${point}`, async () => {
       const fake = createFake();
       const gate = createGate();
       const { stub, pending } = await connectWithSessions(fake);
@@ -1104,7 +1110,15 @@ describe("session frames on one connection", () => {
         "was stopped before its input was handed over",
       );
       expect(fake.inputs).toEqual([]);
-      expect(fake.stops).toEqual([[SESSION_A, "stopped"]]);
+      expect(fake.stops).toEqual(spawned ? [[SESSION_A, "stopped"]] : []);
+      await waitUntil(() =>
+        stub.received.some(
+          (frame) =>
+            frame._tag === "sessionEvent" &&
+            frame.event._tag === "session.exited" &&
+            frame.event.reason === "stopped",
+        ),
+      );
       stub.hangUp();
       await pending;
     });
@@ -1159,8 +1173,9 @@ describe("session frames on one connection", () => {
     await waitUntil(stopping.reached);
     stub.say(again);
     await pingAndWaitForPong(stub);
-    // The adapter still lists the old harness while it stops it. A start
-    // handled now would be refused as a duplicate of a running session.
+    // The adapter still lists the old harness while it stops it, so the new
+    // start waits for the old harness to be gone instead of being refused as
+    // a duplicate of a running session.
     expect(listInputResults(stub)).toHaveLength(1);
 
     stopping.open();
@@ -1184,9 +1199,9 @@ describe("session frames on one connection", () => {
     fake.stopGate = stopping;
     const again = buildStart(SESSION_A, "0199e0e7-0000-7000-8000-0000000000f2");
 
-    // The second start waits behind the first stop, which the adapter holds
-    // open. The second stop does not wait, so it reaches the second start
-    // while that start is still waiting its turn.
+    // The second start waits for the old harness, which the adapter holds
+    // open while it stops it. The second stop reaches the second start while
+    // that start is still waiting.
     stub.say(buildStop(SESSION_A));
     await waitUntil(stopping.reached);
     stub.say(again);
@@ -1200,7 +1215,8 @@ describe("session frames on one connection", () => {
       "was stopped before its input was handed over",
     );
     expect(fake.inputs).toEqual([[SESSION_A, `start ${SESSION_A}`]]);
-    // The second start's harness was stopped too, once it was up.
+    // The second stop reached the old harness too. The second start spawned
+    // no harness, so nothing else was stopped.
     expect(fake.stops.at(-1)).toEqual([SESSION_A, "stopped"]);
     stub.hangUp();
     await pending;
