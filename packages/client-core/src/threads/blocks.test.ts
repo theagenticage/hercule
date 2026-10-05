@@ -672,6 +672,29 @@ describe("buildThreadBlocks", () => {
     ).toEqual([]);
   });
 
+  it("cuts a subagent's last turn short when the subagent was stopped, though its session runs again", () => {
+    // The session exited mid-turn, which stopped the subagent, and then
+    // resumed. The subagent's transcript holds no row of either.
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Look around"),
+      buildItemStarted("t1", "c1", "command_execution", 2),
+    ];
+    const subagent: Subagent = {
+      id: "agent-1",
+      sessionId: IDLE.id,
+      status: "stopped",
+      toolCalls: 1,
+      startedAt: buildInstant(0),
+      endedAt: buildInstant(5),
+    };
+
+    const blocks = buildThreadBlocks(rows, buildSubagentAgentState(subagent, IDLE));
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "ending:t1"]);
+    expect(findBlock(blocks, "ending", "ending:t1").endState).toBeNull();
+  });
+
   it("draws no waiting block for a Request that was answered", () => {
     const rows = [
       buildTurnStarted("t1", 0),

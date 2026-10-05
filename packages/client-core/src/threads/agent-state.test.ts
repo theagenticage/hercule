@@ -1,7 +1,7 @@
 /**
  * Tests `buildSessionAgentState` and `buildSubagentAgentState`, which read
  * the state of one agent of a session from its records: whether it works,
- * whether a harness process runs it, its own open Requests and its model.
+ * whether it may still be running a turn, its own open Requests and its model.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionRequest, Subagent } from "@hercule/contract";
@@ -46,12 +46,15 @@ describe("buildSessionAgentState", () => {
     ["idle", false, true],
     ["queued", false, false],
     ["exited", false, false],
-  ] as const)("reads a %s session as working=%s, harnessRunning=%s", (status, working, running) => {
-    expect(buildSessionAgentState({ ...SESSION, status })).toMatchObject({
-      working,
-      harnessRunning: running,
-    });
-  });
+  ] as const)(
+    "reads a %s session as working=%s, mayBeRunningTurn=%s",
+    (status, working, running) => {
+      expect(buildSessionAgentState({ ...SESSION, status })).toMatchObject({
+        working,
+        mayBeRunningTurn: running,
+      });
+    },
+  );
 
   it("takes the session's model", () => {
     expect(buildSessionAgentState(SESSION).model).toBe(SESSION.modelSelection.model);
@@ -72,11 +75,21 @@ describe("buildSubagentAgentState", () => {
     );
   });
 
-  it("reads whether a harness runs from the session, which hosts the subagent", () => {
-    expect(buildSubagentAgentState(SUBAGENT, { ...SESSION, status: "exited" }).harnessRunning).toBe(
-      false,
-    );
-  });
+  it.each([
+    ["running", "idle", true],
+    ["stopped", "idle", false],
+    ["completed", "busy", false],
+    ["running", "exited", false],
+  ] as const)(
+    "reads a %s subagent of a %s session as mayBeRunningTurn=%s",
+    (subagentStatus, sessionStatus, expected) => {
+      const state = buildSubagentAgentState(
+        { ...SUBAGENT, status: subagentStatus },
+        { ...SESSION, status: sessionStatus },
+      );
+      expect(state.mayBeRunningTurn).toBe(expected);
+    },
+  );
 
   it("takes the subagent's model, and the session's when the subagent names none", () => {
     expect(buildSubagentAgentState({ ...SUBAGENT, model: "claude-haiku-5" }, SESSION).model).toBe(

@@ -177,8 +177,8 @@ const readChangedPaths = (event: ItemStarted): readonly string[] => {
  *   it holds an item other than reasoning.
  * - An `ending` block after a turn that was stopped, failed, or cut short. A
  *   turn is cut short when, before its `turn.completed`, its session exited,
- *   its session started again, another turn started, or no harness process
- *   runs the agent (`harnessRunning`).
+ *   its session started again, another turn started, or the agent's records
+ *   say it can no longer be running a turn (`mayBeRunningTurn`).
  * - A `waiting` block where one of the agent's open Requests opened, once its
  *   `request.opened` row has landed.
  * - A `live` block at the end while the agent has no open Request, no agent
@@ -387,10 +387,10 @@ export const buildThreadBlocks = (
     }
   }
 
-  // An agent that no harness process runs is running no turn. While one
-  // does, the agent's record may be older than the rows, so the rows decide.
+  // An agent whose records say it cannot be running a turn is running none.
+  // While it may be, its records may be older than the rows, so the rows decide.
   const last = state.current;
-  if (last !== null && !last.finished && !agent.harnessRunning) {
+  if (last !== null && !last.finished && !agent.mayBeRunningTurn) {
     finishTurn(last, last.lastAt, null);
   }
   const running = last !== null && !last.finished ? last : null;

@@ -21,7 +21,7 @@ const SESSION_ID = "session-1";
 /** Returns a busy agent whose open Requests are about the items `itemIds`. */
 const buildAgentAskingAbout = (...itemIds: readonly string[]): AgentState => ({
   working: true,
-  harnessRunning: true,
+  mayBeRunningTurn: true,
   openRequests: itemIds.map((itemId): SessionRequest => ({
     requestId: `r-${itemId}`,
     itemId,
