@@ -292,6 +292,31 @@ describe("computeSubagentsAfter", () => {
     expect(computeSubagentsAfter(SESSION, delta, new Map())).toEqual([bare]);
   });
 
+  it("keeps the spawn link when the parent's item comes before the introduction", () => {
+    const call = {
+      ...base,
+      _tag: "item.started",
+      turnId: "t",
+      itemId: "agent-call",
+      kind: "subagent",
+      detail: { subagentIds: ["a1"] },
+    } as const;
+    const [listed] = computeSubagentsAfter(SESSION, call, new Map());
+    expect(listed).toEqual({ ...bare, itemId: "agent-call" });
+    const [introduced] = computeSubagentsAfter(
+      SESSION,
+      { ...base, at: later, _tag: "subagent.started", subagentId: "a1", description: "Fix it" },
+      new Map([["a1", listed!]]),
+    );
+    expect(introduced).toMatchObject({
+      itemId: "agent-call",
+      startedAt: base.at,
+      description: "Fix it",
+    });
+    const relisted = { ...call, at: later, itemId: "send-message" };
+    expect(computeSubagentsAfter(SESSION, relisted, new Map([["a1", introduced!]]))).toEqual([]);
+  });
+
   it("returns only the records the event changed", () => {
     expect(computeSubagentsAfter(SESSION, delta, new Map([["a1", bare]]))).toEqual([]);
     const started = { ...base, _tag: "session.started" } as const;

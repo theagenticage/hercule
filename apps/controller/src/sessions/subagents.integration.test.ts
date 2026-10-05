@@ -599,6 +599,36 @@ describe("session.querySubagents", () => {
   });
 });
 
+describe("a subagent's spawn link", () => {
+  it("comes from its parent's item even when the item comes before the introduction", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      const call = (itemId: string): ProviderEvent => ({
+        ...buildBase(id),
+        _tag: "item.started",
+        turnId: "t1",
+        itemId,
+        kind: "subagent",
+        detail: { subagentIds: ["a1"] },
+      });
+      reportEvents(arranged, 2, [
+        { ...buildBase(id), _tag: "turn.started", turnId: "t1" },
+        call("agent-call"),
+        { ...buildBase(id), _tag: "subagent.started", subagentId: "a1", description: "Fix it" },
+        call("send-message"),
+      ]);
+      const subagent = await waitForSubagent(
+        arranged,
+        id,
+        "a1",
+        (one) => one.description !== undefined,
+      );
+      expect(subagent).toMatchObject({ itemId: "agent-call", description: "Fix it" });
+    });
+  });
+});
+
 describe("a subagent's description", () => {
   it("comes from its first turn's brief, never from a later turn's message", async () => {
     await withAgentFleet(async (arranged) => {

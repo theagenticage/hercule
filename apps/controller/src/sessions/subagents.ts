@@ -167,8 +167,11 @@ export const createBareSubagent = (
  *   introduces, or the one an event is attributed to. A record is created for
  *   it when none exists.
  * - `listed` holds the subagents a `subagent` item names in
- *   `detail.subagentIds`, whichever agent reported the item. Their records
- *   only have `itemId` filled, so none is created for them.
+ *   `detail.subagentIds`, whichever agent reported the item. The item fills
+ *   only their `itemId`. A record is created for one that has none too,
+ *   because a parent's item can come before the `subagent.started` that
+ *   introduces the subagent, and an adapter lists only subagents it
+ *   introduces (spec 06 section 13.2).
  */
 export const findSubagentsNamedBy = (
   event: ProviderEvent,
@@ -232,9 +235,15 @@ export interface SubagentEventFacts {
 
 /**
  * Returns the records one event changes, among `records`, the ones
- * `findSubagentsToRead` asked for. A subagent the event is about that has no
- * record yet gets a bare one, which is returned even when the event changes
- * nothing else on it. Records the event leaves as they were are not returned.
+ * `findSubagentsToRead` asked for. Records the event leaves as they were are
+ * not returned.
+ *
+ * Every subagent the event names (`findSubagentsNamedBy`) that has no record
+ * yet gets a bare one, which starts at the event's time and is returned even
+ * when the event changes nothing else on it. A later event fills the rest:
+ * when a parent's `subagent` item comes before the `subagent.started` that
+ * introduces the subagent, the item fills `itemId` and the introduction
+ * fills the fields still empty.
  */
 export const computeSubagentsAfter = (
   sessionId: string,
@@ -257,10 +266,10 @@ export const computeSubagentsAfter = (
     if (next !== record || stored === undefined) changed.push(next);
   }
   for (const id of listed) {
-    const record = records.get(id);
-    if (record === undefined) continue;
+    const stored = records.get(id);
+    const record = stored ?? createBareSubagent(sessionId, id, event.at);
     const next = computeSubagentAfter(record, event);
-    if (next !== record) changed.push(next);
+    if (next !== record || stored === undefined) changed.push(next);
   }
   return changed;
 };
