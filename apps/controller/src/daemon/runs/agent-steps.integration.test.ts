@@ -260,6 +260,19 @@ const waitForFrame = (
   matches: (frame: ControllerToRunner) => boolean,
 ): Promise<ControllerToRunner> => waitUntil(what, () => wire.frames.find(matches));
 
+/**
+ * Waits until the runner has been sent the provision of a run's workspace,
+ * and reports that workspace ready, so the run's sessions can start in it.
+ */
+const reportRunWorkspaceReady = async (arranged: Arranged): Promise<void> => {
+  const provision = await waitForFrame(
+    arranged.wire,
+    "sent the run's workspace",
+    (frame) => frame._tag === "workspaceProvision",
+  );
+  await reportWorkspaceReady(arranged, (provision as { readonly workspaceId: string }).workspaceId);
+};
+
 /** Waits until a session's state passes `ready`, and returns the session. */
 const waitForSessionTo = (
   arranged: Arranged,
@@ -1198,6 +1211,122 @@ describe("agent steps over the runner socket", () => {
       });
     },
     WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "switches a repo's main workspace to the workflow's branch for the first step's session only, never for a fresh session or a later commit",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        const repoId = await createRepo(arranged, "https://github.com/o/agent.git");
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            name: "Implement on the release branch, then commit",
+            workspace: { kind: "primary", resourceId: repoId, branch: "release" },
+            steps: [
+              {
+                id: IMPLEMENT,
+                kind: "agent",
+                agent: agentId,
+                prompt: "Implement the change.",
+                entry: true,
+                outputSchema: DONE_SCHEMA,
+                freshSession: true,
+              },
+              {
+                id: "commit",
+                kind: "action",
+                action: "git.commit",
+                params: { message: "Save the work" },
+              },
+            ],
+            edges: [
+              {
+                from: IMPLEMENT,
+                to: IMPLEMENT,
+                condition: "steps.implement.output.done == false",
+                maxTraversals: 1,
+              },
+              { from: IMPLEMENT, to: "commit", condition: "steps.implement.output.done == true" },
+            ],
+          },
+        });
+        await reportRunWorkspaceReady(arranged);
+        const firstKey = buildStepKey(runId, 1);
+        const first = await startStepSession(arranged, player, firstKey);
+        expect(listSessionStarts(wire, first)[0]?.checkoutBranch).toBe("release");
+        player.runTurn(wire, first, firstKey, completeWith({ done: false }));
+
+        // The first session's agent may have moved to another branch by now,
+        // so the second session starts on whatever branch is current.
+        const secondKey = buildStepKey(runId, 2);
+        const second = await startStepSession(arranged, player, secondKey);
+        expect(listSessionStarts(wire, second)[0]).not.toHaveProperty("checkoutBranch");
+        player.runTurn(wire, second, secondKey, completeWith({ done: true }));
+
+        // The commit goes to that branch too.
+        const commit = await waitForFrame(
+          wire,
+          "sent the commit step",
+          (frame) =>
+            frame._tag === "workspaceStepStart" &&
+            frame.kind !== "agent" &&
+            frame.runId === runId &&
+            frame.stepId === "commit",
+        );
+        expect(commit).not.toHaveProperty("checkoutBranch");
+        player.sendResult(
+          wire,
+          { runId, stepId: "commit", iteration: 1 },
+          completeWith({ sha: "abc123", branch: "feature/renamed", committed: true }),
+        );
+        await waitForRunEnded(arranged, runId, "completed");
+      });
+    },
+    WAIT_DEADLINE_MS * 3,
+  );
+
+  it(
+    "never switches a repo's main workspace to the workflow's branch again when the first step's session is resumed",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        const repoId = await createRepo(arranged, "https://github.com/o/agent.git");
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: {
+            ...buildLoopDefinition(agentId),
+            workspace: { kind: "primary", resourceId: repoId, branch: "release" },
+          },
+        });
+        await reportRunWorkspaceReady(arranged);
+        const first = buildStepKey(runId, 1);
+        const second = buildStepKey(runId, 2);
+        const sessionId = await startStepSession(arranged, player, first);
+        expect(listSessionStarts(wire, sessionId)[0]?.checkoutBranch).toBe("release");
+        // The second iteration's prompt waits on the busy session, which then
+        // unloads, so the session is resumed for it.
+        player.startTurn(wire, sessionId, first);
+        player.sendResult(wire, first, completeWith({ done: false }));
+        await waitUntil("queued the second iteration's prompt", async () =>
+          (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
+        );
+        player.report(wire, sessionId, { _tag: "session.exited", reason: "idle_unload" });
+
+        const resumed = await waitUntil("resumed the step's session", () =>
+          listSessionStarts(wire, sessionId).find((frame) => frame.spec.continue !== undefined),
+        );
+        expect(resumed).not.toHaveProperty("checkoutBranch");
+        player.reportStarted(wire, sessionId);
+        await waitForStepInput(wire, second);
+        player.runTurn(wire, sessionId, second, completeWith({ done: true }));
+        await waitForRunEnded(arranged, runId, "completed");
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
   );
 
   it(

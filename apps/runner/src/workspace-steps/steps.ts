@@ -308,9 +308,9 @@ export const makeWorkspaceSteps = (options: {
       };
       const context = { workspace, resourceId: frame.resourceId, gitEnv, stopGrace };
       const { checkoutBranch } = frame;
-      // A main workspace is shared, so something else may have switched its
-      // checkout since the run's last step. The switch runs here, under the
-      // workspace's lock, so no other step's git runs in between.
+      // The controller sets the branch only on a run's first workspace step,
+      // to start the run on its workflow's branch. The switch runs here,
+      // under the workspace's lock, so no other step's git runs in between.
       const switched =
         checkoutBranch === undefined ? Effect.void : switchCheckoutBranch(context, checkoutBranch);
       const ran = yield* switched.pipe(

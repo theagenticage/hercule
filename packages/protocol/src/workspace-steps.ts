@@ -76,9 +76,10 @@ export const ActionStepStart = Schema.Struct({
   resourceId: Schema.optionalKey(StorageId),
   /**
    * The branch the checkout is switched to before the action runs, as a
-   * session start switches it. Set only for a run on a main workspace whose
-   * workflow names a branch: a main workspace is shared, so something else
-   * may have switched it since the last step. An ephemeral checkout is
+   * session start switches it. Set only for the run's first workspace step,
+   * in a run on a main workspace whose workflow names a branch: the run
+   * starts on that branch, and after that the branch belongs to the run's
+   * agents, so no later step switches it back. An ephemeral checkout is
    * already on the run's own branch.
    */
   checkoutBranch: Schema.optionalKey(Fact),

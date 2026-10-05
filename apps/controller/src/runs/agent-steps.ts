@@ -101,7 +101,9 @@ export const WAITS_FOR_RUNNER = { _tag: "waitsForRunner" } as const;
  * Where a workspace step of a run is to run, or why it does not start now:
  *
  * - `placed`: on this runner, in this workspace of the run, or in none for a
- *   run whose plan has no workspace;
+ *   run whose plan has no workspace, and on `checkoutBranch` when it is set:
+ *   only the step whose start pinned the run, in a repo's main workspace
+ *   whose workflow names a branch, switches the checkout to it;
  * - `ended`: the step and its run have failed;
  * - `waitsForRunner`: no runner can take the run now, and the step stays
  *   pending.
@@ -110,7 +112,12 @@ export const WAITS_FOR_RUNNER = { _tag: "waitsForRunner" } as const;
  * action step and for an agent step alike.
  */
 export type WorkspaceStepPlacement =
-  | { readonly _tag: "placed"; readonly runnerId: string; readonly workspaceId: string | null }
+  | {
+      readonly _tag: "placed";
+      readonly runnerId: string;
+      readonly workspaceId: string | null;
+      readonly checkoutBranch: string | undefined;
+    }
   | typeof ENDED
   | typeof WAITS_FOR_RUNNER;
 
@@ -378,6 +385,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
                 definition: step,
                 runnerId: placed.runnerId,
                 workspaceId: placed.workspaceId,
+                checkoutBranch: placed.checkoutBranch,
                 prompt,
                 title: `${run.plan.name} · ${record.stepId}`,
                 previousSessionId: findPreviousStepSession(run, step),

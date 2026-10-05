@@ -201,6 +201,12 @@ interface Placing {
   readonly workspace: SpawnWorkspace | undefined;
   /** The GitHub connection the session pushes as when its workspace names none. */
   readonly fallbackGithubConnectionId: string | undefined;
+  /**
+   * The branch the session's start switches a joined workspace's checkout
+   * to, or undefined to take the branch from the workspace it opens. Only a
+   * workflow run's first workspace step sets it.
+   */
+  readonly checkoutBranch: string | undefined;
 }
 
 const make = Effect.gen(function* () {
@@ -542,7 +548,7 @@ const make = Effect.gen(function* () {
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
-            checkoutBranch: opened.checkoutBranch,
+            checkoutBranch: open.checkoutBranch ?? opened.checkoutBranch,
             // A session pushes as one GitHub account, chosen here: the
             // workspace's own connection if it has one, otherwise the
             // caller's fallback. The fallback is the user's default GitHub
@@ -675,6 +681,7 @@ const make = Effect.gen(function* () {
           projectId: undefined,
           workspace: undefined,
           fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
+          checkoutBranch: undefined,
           payload: {
             instanceId: agent.instanceId,
             runnerId,
@@ -694,13 +701,16 @@ const make = Effect.gen(function* () {
      * its commit: it tells the runner and dispatches.
      *
      * The session runs on the run's runner, in the run's workspace when the
-     * run has one, and takes its lease on that workspace. Each setting is the
-     * step's value if the step sets one, otherwise the Agent's: the model
-     * with its options, and the access mode. The Agent gives the instance,
-     * the permission profile, the system prompt and the disallowed tools. The
-     * step's output schema goes on the spec, and so does an idle unload of a
-     * few seconds, so the session frees its runner slot soon after each of
-     * its turns ends (`buildStepSessionTimeouts`).
+     * run has one, and takes its lease on that workspace. Its start switches
+     * the workspace's checkout to `checkoutBranch` when that is set, which
+     * the run engine does only for the run's first workspace step.
+     *
+     * Each setting is the step's value if the step sets one, otherwise the
+     * Agent's: the model with its options, and the access mode. The Agent
+     * gives the instance, the permission profile, the system prompt and the
+     * disallowed tools. The step's output schema goes on the spec, and so
+     * does an idle unload of a few seconds, so the session frees its runner
+     * slot soon after each of its turns ends (`buildStepSessionTimeouts`).
      *
      * It checks no grant: the caller is the run's execution, and the user
      * gave the run this step by saving the workflow. The current actor must
@@ -718,6 +728,7 @@ const make = Effect.gen(function* () {
       readonly outputSchema: SessionSpec["outputSchema"];
       readonly runnerId: string;
       readonly workspaceId: string | null;
+      readonly checkoutBranch: string | undefined;
       readonly prompt: string;
       readonly title: string;
     }): Effect.Effect<
@@ -779,6 +790,7 @@ const make = Effect.gen(function* () {
           projectId: undefined,
           workspace: undefined,
           fallbackGithubConnectionId: undefined,
+          checkoutBranch: request.checkoutBranch,
           payload: {
             instanceId: agent.instanceId,
             runnerId,
@@ -917,6 +929,7 @@ const make = Effect.gen(function* () {
           projectId: decoded.projectId,
           workspace: decoded.workspace,
           fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
+          checkoutBranch: undefined,
           payload: {
             instanceId,
             runnerId,
@@ -1001,6 +1014,7 @@ const make = Effect.gen(function* () {
           projectId: parent.projectId ?? undefined,
           workspace: undefined,
           fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
+          checkoutBranch: undefined,
           payload: { parentSessionId: parent.id, mode },
         });
       }),

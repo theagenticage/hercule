@@ -46,11 +46,12 @@ export interface ActionStepToStart extends WorkspaceStepKey {
   /** The resource whose checkout the action works in, when the step names one. */
   readonly resourceId?: string;
   /**
-   * The branch the checkout is switched to before the action runs: the
-   * branch a run on a repo's main workspace names. A main workspace is
-   * shared, so something else may have switched it since the run's last
-   * step. Absent for an ephemeral workspace, which is already on the run's
-   * own branch.
+   * The branch the checkout is switched to before the action runs. Set only
+   * when this step is the run's first workspace step, in a run on a repo's
+   * main workspace whose workflow names a branch. After the first step the
+   * branch belongs to the run's agents, which may rename it or switch to
+   * another, so no later step switches it back. Absent for an ephemeral
+   * workspace, which is already on the run's own branch.
    */
   readonly checkoutBranch?: string;
 }
@@ -79,6 +80,13 @@ export interface StepSessionToOpen {
   readonly runnerId: string;
   /** The run's workspace, or null for a run that has none. */
   readonly workspaceId: string | null;
+  /**
+   * The branch the session's start switches the checkout to, set only when
+   * this step is the run's first workspace step (see
+   * `ActionStepToStart.checkoutBranch`). A session that continues
+   * `previousSessionId` ignores it.
+   */
+  readonly checkoutBranch: string | undefined;
   /** The step's prompt, rendered for this iteration. */
   readonly prompt: string;
   /**

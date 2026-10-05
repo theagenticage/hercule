@@ -31,7 +31,6 @@ import type {
   StepStatus,
   TriggerEvent,
   WorkflowDefinition,
-  WorkspacePolicy,
 } from "@hercule/contract";
 import {
   announce,
@@ -120,7 +119,7 @@ export interface StepRecordId {
  * runner needs to run it again, or to report how it ended:
  *
  * - `action`: an action step, with its action, its stored input and the
- *   run's workspace policy;
+ *   branch it switches the checkout to;
  * - `agent`: an agent step, with whether its prompt is still waiting in
  *   its session, not sent to the runner yet.
  */
@@ -137,8 +136,8 @@ export type PinnedRunningStep = {
       readonly action: string;
       /** The step's input as stored when the record started. Every action step's record stores one. */
       readonly input?: Schema.Json;
-      /** The run's workspace policy, from its plan, or undefined for a run with no workspace. */
-      readonly workspacePolicy: WorkspacePolicy | undefined;
+      /** The branch stored when the record started (see `startStep`), if it has one. */
+      readonly checkoutBranch?: string;
     }
   | {
       readonly kind: "agent";
@@ -714,7 +713,9 @@ const make = Effect.gen(function* () {
      * with:
      *
      * - for an action step, its input: the params rendered and checked
-     *   against the action's input schema;
+     *   against the action's input schema. A workspace action's step that
+     *   switches the run's checkout to a branch stores that branch too, so
+     *   the step sent again after a reconnect switches it the same way;
      * - for an agent step, the session that runs it.
      *
      * Fails with `StepRecordEnded` if the record is not pending any more, so
@@ -723,15 +724,19 @@ const make = Effect.gen(function* () {
     startStep: (
       runId: string,
       step: StepRecordId,
-      started: { readonly input: Schema.Json } | { readonly sessionId: string },
+      started:
+        | { readonly input: Schema.Json; readonly checkoutBranch?: string }
+        | { readonly sessionId: string },
       at: string,
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
         const input = "input" in started ? JSON.stringify(started.input) : null;
+        const branch = "input" in started ? (started.checkoutBranch ?? null) : null;
         const session = "sessionId" in started ? uuidFromString(started.sessionId) : null;
         const updated = yield* sql`
           UPDATE run_steps SET status = 'running', started_at = ${at},
-                               input = ${input}, session_id = ${session}
+                               input = ${input}, checkout_branch = ${branch},
+                               session_id = ${session}
           WHERE run_id = ${uuidFromString(runId)} AND step_id = ${step.stepId}
             AND iteration = ${step.iteration} AND status = 'pending'
           RETURNING step_id
@@ -956,10 +961,10 @@ const make = Effect.gen(function* () {
           readonly input: string | null;
           readonly session_id: Uint8Array | null;
           readonly prompt_waiting: number;
-          readonly workspace_policy: string | null;
+          readonly checkout_branch: string | null;
         }>`
           SELECT s.run_id, r.workspace_id, s.step_id, s.iteration, s.input, s.session_id,
-                 json_extract(r.plan, '$.workspace') AS workspace_policy,
+                 s.checkout_branch,
                  json_extract(step.value, '$.kind') AS kind,
                  json_extract(step.value, '$.action') AS action,
                  EXISTS (SELECT 1 FROM session_inputs AS prompt
@@ -999,10 +1004,7 @@ const make = Effect.gen(function* () {
                 kind: "action",
                 action: row.action,
                 ...(row.input === null ? {} : { input: JSON.parse(row.input) as Schema.Json }),
-                workspacePolicy:
-                  row.workspace_policy === null
-                    ? undefined
-                    : (JSON.parse(row.workspace_policy) as WorkspacePolicy),
+                ...(row.checkout_branch === null ? {} : { checkoutBranch: row.checkout_branch }),
               },
             ];
           }),

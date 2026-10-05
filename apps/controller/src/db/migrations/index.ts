@@ -53,6 +53,7 @@ import connectionIngest from "./0042-connection-ingest";
 import connectionUseOnAssistant from "./0043-connection-use-on-assistant";
 import agentStepsAndSignalTriggers from "./0044-agent-steps-and-signal-triggers";
 import sessionExitReason from "./0045-session-exit-reason";
+import stepCheckoutBranch from "./0046-step-checkout-branch";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -100,6 +101,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [43, "connection-use-on-assistant", Effect.succeed(connectionUseOnAssistant)],
   [44, "agent-steps-and-signal-triggers", Effect.succeed(agentStepsAndSignalTriggers)],
   [45, "session-exit-reason", Effect.succeed(sessionExitReason)],
+  [46, "step-checkout-branch", Effect.succeed(stepCheckoutBranch)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

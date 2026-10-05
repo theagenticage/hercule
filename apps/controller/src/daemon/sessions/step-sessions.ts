@@ -93,6 +93,7 @@ export const makeStepSessions = Effect.gen(function* () {
         outputSchema: definition.outputSchema,
         runnerId: request.runnerId,
         workspaceId: request.workspaceId,
+        checkoutBranch: request.checkoutBranch,
         prompt: request.prompt,
         title: request.title,
       });

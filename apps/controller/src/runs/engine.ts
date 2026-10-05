@@ -254,24 +254,16 @@ const readResourceId = (input: Schema.Json): string | undefined => {
 };
 
 /**
- * Returns the branch a run's checkout is switched to before each workspace
- * step: the branch a policy for a repo's main workspace names, if it names
- * one. An ephemeral workspace is already on the run's own branch.
- */
-const readCheckoutBranch = (policy: WorkspacePolicy | undefined): string | undefined =>
-  policy?.kind === "primary" ? policy.branch : undefined;
-
-/**
- * Builds the action step to hand to a runner from its step record: the
- * `resourceId` its input names, and the branch its run's workspace policy
- * switches the checkout to.
+ * Builds the action step to hand to a runner from its step record, with the
+ * `resourceId` its input names. `checkoutBranch` is the branch stored on the
+ * record when it started; the step switches the checkout to it only when it
+ * is set.
  */
 const buildActionStepToStart = (
   step: Omit<ActionStepToStart, "kind" | "resourceId" | "checkoutBranch">,
-  policy: WorkspacePolicy | undefined,
+  checkoutBranch: string | undefined,
 ): ActionStepToStart => {
   const resourceId = readResourceId(step.input);
-  const checkoutBranch = readCheckoutBranch(policy);
   return {
     kind: "action",
     ...step,
@@ -597,7 +589,13 @@ export const makeRunEngine = Effect.gen(function* () {
    * runner and workspace. Otherwise this chooses a runner, opens the run's
    * workspace there when its plan has a workspace policy, and pins the run
    * to both; a run whose plan has none is pinned to the runner alone.
-   * Returns the runner and the workspace, or the step's other fate:
+   * Returns the runner, the workspace and the branch the step switches the
+   * checkout to, or the step's other fate. Only the step whose start pins
+   * the run gets a branch, and only when the plan names one for a repo's
+   * main workspace: the run starts on that branch, and from then on the
+   * branch belongs to the run's agents, so no later step switches it back.
+   * Start transactions run one at a time, so of two first steps that start
+   * together exactly one pins the run. The other fates:
    *
    * - `ended`: no runner that is neither retired nor reserved can run the
    *   plan, or the workspace cannot be opened, and the step and the run have
@@ -617,6 +615,7 @@ export const makeRunEngine = Effect.gen(function* () {
           _tag: "placed",
           runnerId: run.runnerId,
           workspaceId: run.workspaceId ?? null,
+          checkoutBranch: undefined,
         } as const;
       }
       const chosen = yield* chooseRunner(run.plan);
@@ -635,7 +634,7 @@ export const makeRunEngine = Effect.gen(function* () {
       const policy = run.plan.workspace;
       if (policy === undefined) {
         yield* runs.pin(run.id, { runnerId, workspaceId: null });
-        return { _tag: "placed", runnerId, workspaceId: null } as const;
+        return { _tag: "placed", runnerId, workspaceId: null, checkoutBranch: undefined } as const;
       }
       const actor = buildRunActor(run, record.stepId);
       const opened = yield* Effect.result(
@@ -675,7 +674,12 @@ export const makeRunEngine = Effect.gen(function* () {
         return yield* Effect.die(`opening the workspace of run ${run.id} gave no workspace`);
       }
       yield* runs.pin(run.id, { runnerId, workspaceId });
-      return { _tag: "placed", runnerId, workspaceId } as const;
+      return {
+        _tag: "placed",
+        runnerId,
+        workspaceId,
+        checkoutBranch: opened.success.checkoutBranch,
+      } as const;
     });
 
   /**
@@ -768,7 +772,13 @@ export const makeRunEngine = Effect.gen(function* () {
           if (placed.workspaceId === null) {
             return yield* Effect.die(`run ${runId} is pinned with no workspace`);
           }
-          yield* runs.startStep(runId, record, { input }, at);
+          const { checkoutBranch } = placed;
+          yield* runs.startStep(
+            runId,
+            record,
+            { input, ...(checkoutBranch === undefined ? {} : { checkoutBranch }) },
+            at,
+          );
           return {
             _tag: "started",
             run,
@@ -784,7 +794,7 @@ export const makeRunEngine = Effect.gen(function* () {
                 action: step.action,
                 input,
               },
-              policy,
+              checkoutBranch,
             ),
           } as const;
         }),
@@ -1427,13 +1437,13 @@ export const makeRunEngine = Effect.gen(function* () {
           // A workspace action's record is only ever started with its input
           // stored, in its run's workspace, so a record without them is not
           // a workspace action's.
-          const { action, input, workspacePolicy } = record;
+          const { action, input, checkoutBranch } = record;
           return !runsInWorkspace(action) || input === undefined || workspaceId === null
             ? []
             : [
                 buildActionStepToStart(
                   { runId, stepId, iteration, runnerId, workspaceId, action, input },
-                  workspacePolicy,
+                  checkoutBranch,
                 ),
               ];
         }),
