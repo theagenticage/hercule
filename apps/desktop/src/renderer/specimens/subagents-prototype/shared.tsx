@@ -131,7 +131,7 @@ let state: ProtoState = {
   tally: pick(TALLIES, params.get("tally"), "composer"),
   takeover: pick(TAKEOVERS, params.get("takeover"), "crumb"),
   hue: HUES.find((each) => each === params.get("hue")) ?? null,
-  paneTone: pick(PANE_TONES, params.get("pane"), "sidebar"),
+  paneTone: pick(PANE_TONES, params.get("pane"), "main"),
   theme: pick(THEMES, params.get("theme"), "whitehaven"),
 };
 const listeners = new Set<() => void>();
