@@ -664,6 +664,57 @@ describe("a subagent's description", () => {
   });
 });
 
+describe("a subagent the session's end stops", () => {
+  it("takes the first line of its last message as its result, or keeps the old one", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      const turn = (subagentId: string, turnId: string, ended: boolean): ProviderEvent =>
+        ended
+          ? { ...buildBase(id, subagentId), _tag: "turn.completed", turnId, state: "completed" }
+          : { ...buildBase(id, subagentId), _tag: "turn.started", turnId };
+      // A message the exit cuts off: its item never completes, so its text
+      // is still held back until the exit flushes it.
+      const cutOff = (subagentId: string, turnId: string, text: string) =>
+        buildAssistantMessage(id, turnId, `${turnId}-cut`, text, subagentId).slice(0, 2);
+      const seq = reportEvents(arranged, 2, [
+        // Continued, and its second turn writes a new message.
+        turn("continued", "c1", false),
+        ...buildAssistantMessage(id, "c1", "c1-a", "Found A", "continued"),
+        turn("continued", "c1", true),
+        turn("continued", "c2", false),
+        ...cutOff("continued", "c2", "Found B\nDetails follow."),
+        // Continued, and its second turn writes nothing.
+        turn("silent", "s1", false),
+        ...buildAssistantMessage(id, "s1", "s1-a", "Found A", "silent"),
+        turn("silent", "s1", true),
+        turn("silent", "s2", false),
+        // Its only turn never completes.
+        turn("unfinished", "u1", false),
+        ...cutOff("unfinished", "u1", "Found B"),
+      ]);
+      await waitForSubagent(arranged, id, "unfinished", (one) => one.activity === "Writing");
+      reportEvent(arranged.wire, seq, {
+        ...buildBase(id),
+        _tag: "session.exited",
+        reason: "stopped",
+      });
+      await waitForSession(arranged, id, (one) => one.status === "exited");
+      const results = Object.fromEntries(
+        (await listSubagents(arranged, id)).items.map((one) => [
+          one.id,
+          `${one.status}: ${one.result ?? ""}`,
+        ]),
+      );
+      expect(results).toEqual({
+        continued: "stopped: Found B",
+        silent: "stopped: Found A",
+        unfinished: "stopped: Found B",
+      });
+    });
+  });
+});
+
 describe("transcript.read of one agent", () => {
   it("reads the session's own transcript or one subagent's, and keeps their cursors apart", async () => {
     await withAgentFleet(async (arranged) => {

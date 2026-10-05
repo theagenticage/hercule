@@ -10,9 +10,11 @@
  *   `apps/controller/src/events/log.ts` reads the event log for the `event`
  *   topic;
  * - the assistant text of one turn or one item, which the assistants domain
- *   turns into conversation replies. It reads only the rows since the turn's
- *   or the item's start, walking back from the newest row, so its cost does
- *   not grow with the length of the session.
+ *   turns into conversation replies, and a subagent's last message into its
+ *   result. It reads only the rows since the turn's or the item's start,
+ *   walking back from the newest row, so its cost does not grow with the
+ *   length of the session;
+ * - the turn a subagent has open, if any.
  *
  * `transcript.read` reads the same table through
  * `sessionRepository.transcript`. That operation uses an opaque keyset cursor,
@@ -126,6 +128,31 @@ export const hasOtherTurn = (
       LIMIT 1
     `,
     (rows) => rows.length > 0,
+  );
+
+/**
+ * Returns the id of a subagent's open turn: the turn of its newest
+ * `turn.started` row, when no `turn.completed` row comes after it. Returns
+ * `undefined` when the subagent has no turn, or its last turn ended.
+ *
+ * Used when the session ends while the subagent is still running, to find
+ * the turn whose last message becomes its result. Only rows already written
+ * are read, like `readAssistantTexts`.
+ */
+export const readOpenTurnId = (
+  sql: SqlClient.SqlClient,
+  sessionId: string,
+  subagentId: SubagentId,
+): Effect.Effect<string | undefined, SqlError> =>
+  Effect.map(
+    sql<{ readonly tag: string; readonly turnId: string }>`
+      SELECT json_extract(event, '$._tag') AS tag, json_extract(event, '$.turnId') AS turnId
+      FROM session_stream
+      WHERE session_id = ${uuidFromString(sessionId)} AND ${buildAgentClause(sql, subagentId)}
+        AND json_extract(event, '$._tag') IN ('turn.started', 'turn.completed')
+      ORDER BY position DESC LIMIT 1
+    `,
+    (rows) => (rows[0]?.tag === "turn.started" ? rows[0].turnId : undefined),
   );
 
 /**

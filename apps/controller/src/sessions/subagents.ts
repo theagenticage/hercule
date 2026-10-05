@@ -7,7 +7,9 @@
  *
  * A session's exit is not handled here. Every way a session ends, a reported
  * exit included, goes through the service's one cleanup step, which stops the
- * session's running subagents with `stopSubagent`.
+ * session's running subagents with `stopSubagent`. It reads each one's last
+ * message from the transcript first, because that message becomes its
+ * `result` just as a completed turn's last message does.
  *
  * A record is filled from several events, and a resumed process may know
  * less than an earlier one. So the introduction, `subagent.started`, fills a
@@ -208,11 +210,37 @@ const readListedSubagentIds = (detail: unknown): ReadonlyArray<SubagentId> => {
  * when it is no longer running. A subagent never outlives its session's
  * process, so every way a session ends stops its running subagents. No event
  * is made up for a turn the end cut off.
+ *
+ * `lastAssistantText` is the text of the last assistant message in the turn
+ * the end cut off. Its first line becomes the `result`, as it does when a
+ * turn completes (`decideResult`).
  */
-export const stopSubagent = (record: StoredSubagent, at: string): StoredSubagent =>
+export const stopSubagent = (
+  record: StoredSubagent,
+  at: string,
+  lastAssistantText: string | undefined,
+): StoredSubagent =>
   record.status === "running"
-    ? { ...record, status: "stopped", endedAt: at, activity: undefined }
+    ? {
+        ...record,
+        status: "stopped",
+        endedAt: at,
+        activity: undefined,
+        result: decideResult(record.result, lastAssistantText),
+      }
     : record;
+
+/**
+ * Returns a subagent's `result` after one of its turns ended: the first line
+ * of the turn's last assistant message. Returns `previous` when the turn
+ * wrote no message or only a blank first line, so a turn that only ran tools
+ * keeps the result of the turn before it.
+ */
+const decideResult = (
+  previous: string | undefined,
+  lastAssistantText: string | undefined,
+): string | undefined =>
+  lastAssistantText === undefined ? previous : (truncateToFirstLine(lastAssistantText) ?? previous);
 
 /**
  * What the service reads from the transcript for an event, because the event
@@ -349,10 +377,7 @@ const applyEventToSubagent = (
         status: toEndedStatus(event.state),
         endedAt: event.at,
         activity: undefined,
-        result:
-          facts.lastAssistantText === undefined
-            ? record.result
-            : (truncateToFirstLine(facts.lastAssistantText) ?? record.result),
+        result: decideResult(record.result, facts.lastAssistantText),
       };
     case "session.usage.updated":
       return { ...record, ...addUsageSnapshot(record, event.usage) };

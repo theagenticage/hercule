@@ -124,7 +124,7 @@ import {
   type StoredSubagent,
   type SubagentEventFacts,
 } from "./subagents";
-import { hasOtherTurn, readAssistantTexts } from "./transcript-log";
+import { hasOtherTurn, readAssistantTexts, readOpenTurnId } from "./transcript-log";
 import { addUsageSnapshot, clearProcessShare } from "./usage";
 
 const QueryInput = Schema.Struct({
@@ -759,11 +759,27 @@ const make = Effect.gen(function* () {
    * Stops every running subagent of a session that ended, at `at`. This is
    * the one place that does so: `endSessions` calls it for every way a
    * session ends, an exit the harness reported included.
+   *
+   * Each subagent's `result` becomes the first line of the last assistant
+   * message in the turn the end cut off, read from the transcript.
+   *
+   * - For an exit the harness reported, the text still held back in the
+   *   ingest buffers was flushed as rows by the same report, and those rows
+   *   were written before this runs, in the same transaction.
+   * - For any other end, such as a lost runner or a stop, nothing is flushed,
+   *   so only the text already written counts.
    */
   const stopRunningSubagents = (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       const running = yield* subagents.listRunning(sessionId);
-      for (const record of running) yield* subagents.save(stopSubagent(record, at));
+      for (const record of running) {
+        const turnId = yield* readOpenTurnId(sql, sessionId, record.id);
+        const lastAssistantText =
+          turnId === undefined
+            ? undefined
+            : yield* readLastAssistantText(sessionId, record.id, turnId);
+        yield* subagents.save(stopSubagent(record, at, lastAssistantText));
+      }
       if (running.length > 0) {
         yield* announce({ _tag: "record", topic: "subagent", id: sessionId, kind: "updated" });
       }

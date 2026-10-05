@@ -388,15 +388,25 @@ describe("buildSubagentActivity", () => {
 });
 
 describe("stopSubagent", () => {
-  it("stops only a running subagent and clears what it was doing", () => {
-    const working = { ...bare, activity: "Thinking" };
-    expect(stopSubagent(working, later)).toMatchObject({
+  const working = { ...bare, activity: "Thinking", result: "Found it." };
+
+  it("stops a running subagent, clears what it was doing and takes its last message as the result", () => {
+    expect(stopSubagent(working, later, "\nFixed it.\nDetails follow.")).toMatchObject({
       status: "stopped",
       endedAt: later,
       activity: undefined,
+      result: "Fixed it.",
     });
+  });
+
+  it("keeps the old result when the cut-off turn wrote no message", () => {
+    expect(stopSubagent(working, later, undefined).result).toBe("Found it.");
+    expect(stopSubagent(working, later, "  ").result).toBe("Found it.");
+  });
+
+  it("leaves a subagent that is no longer running unchanged", () => {
     const failed = { ...bare, status: "failed" as const, endedAt: base.at };
-    expect(stopSubagent(failed, later)).toBe(failed);
+    expect(stopSubagent(failed, later, "Too late.")).toBe(failed);
   });
 });
 
