@@ -696,7 +696,7 @@ describe("run.start of a workflow that acts through a Connection", () => {
     ],
   });
 
-  it("refuses an assistant session that sends the workflow, whether the step names the Connection by its id or through a template", async () => {
+  it("refuses a session without connection.use that sends the workflow, whether the step names the Connection by its id or through a template", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { harness, token } = arranged;
@@ -704,10 +704,10 @@ describe("run.start of a workflow that acts through a Connection", () => {
         const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
           token: "a-forge-token",
         });
-        // The shipped assistant profile holds run.start but not connection.use.
+        // The profile holds run.start but not connection.use.
         const agent = await spawnThreadUnder(
           arranged,
-          await readProfileNamed(arranged, "assistant"),
+          await createProfile(arranged, "Starts runs", ["run.start", "run.read"]),
         );
 
         for (const connection of [connectionId, "{{ inputs.account }}"]) {
@@ -730,7 +730,7 @@ describe("run.start of a workflow that acts through a Connection", () => {
     );
   });
 
-  it("refuses an assistant session that gives a value for a stored workflow's Connection input, and starts the run when the Connection was chosen when the workflow was saved", async () => {
+  it("refuses a session without connection.use that gives a value for a stored workflow's Connection input, and starts the run when the Connection was chosen when the workflow was saved", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { harness, token } = arranged;
@@ -740,7 +740,7 @@ describe("run.start of a workflow that acts through a Connection", () => {
         });
         const agent = await spawnThreadUnder(
           arranged,
-          await readProfileNamed(arranged, "assistant"),
+          await createProfile(arranged, "Starts runs", ["run.start", "run.read"]),
         );
         const fromInput = buildReviewDefinitionWithAccountInput("{{ inputs.account }}");
         const filled = await createWorkflowOrFail(base, token, { definition: fromInput });
@@ -870,7 +870,7 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
       },
     });
 
-  it("refuses an assistant session that sends the wrapper, whether it names the workflow to start by its id or by a template, and no run starts", async () => {
+  it("refuses a session without connection.use that sends the wrapper, whether it names the workflow to start by its id or by a template, and no run starts", async () => {
     const forge = buildForgePlugin();
     await withAgentFleet(
       async (arranged) => {
@@ -880,10 +880,10 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
           token: "a-forge-token",
         });
         const target = await createReviewTarget(base, token);
-        // The shipped assistant profile holds run.start but not connection.use.
+        // The profile holds run.start but not connection.use.
         const agent = await spawnThreadUnder(
           arranged,
-          await readProfileNamed(arranged, "assistant"),
+          await createProfile(arranged, "Starts runs", ["run.start", "run.read"]),
         );
 
         for (const workflowId of [target.id, "{{ inputs.child }}"]) {
@@ -907,7 +907,7 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
     );
   });
 
-  it("refuses an assistant session that gives a stored wrapper the Connection it passes on", async () => {
+  it("refuses a session without connection.use that gives a stored wrapper the Connection it passes on", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { harness, token } = arranged;
@@ -921,7 +921,7 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
         });
         const agent = await spawnThreadUnder(
           arranged,
-          await readProfileNamed(arranged, "assistant"),
+          await createProfile(arranged, "Starts runs", ["run.start", "run.read"]),
         );
 
         const response = await requestStart(base, agent.token, {
@@ -971,7 +971,7 @@ describe("run.start of a workflow whose run.start step gives a Connection to the
         });
         const agent = await spawnThreadUnder(
           arranged,
-          await readProfileNamed(arranged, "assistant"),
+          await createProfile(arranged, "Starts runs", ["run.start", "run.read"]),
         );
         const inputs = { child: target.id, payload: { account: connectionId } };
 
