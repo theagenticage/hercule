@@ -2456,11 +2456,24 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`.",
+    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Requests its agents are parked on come with it, oldest first, each naming the subagent that asked when it was not the session's own agent; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`. The Token Usage of the whole session comes with it too, once the harness has reported any.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
         positional: true,
+        help: "The session's id, or a tail of eight or more characters.",
+        resolves: "session.query",
+      },
+    },
+  },
+  "session.querySubagents": {
+    command: "session subagent list",
+    help: "Lists the subagents a session's harness delegated work to, oldest first. Each row says what the subagent was asked to do, whether it is still running, how many tools it called, its own Token Usage and how it ended. Read one subagent's transcript with `hercule transcript read <session-id> --subagent <id>`.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--sort", "startedAt:desc"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
@@ -2605,13 +2618,17 @@ export const CLI = {
   },
   "session.interrupt": {
     command: "session interrupt",
-    help: "Stops the turn a session is running and leaves the session alive. This is not steering: what was being done is abandoned. Nothing is waited for - what became of the turn arrives in the session's own stream.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Stops the work a session is doing and leaves the session alive. That is its own agent's turn and every subagent that is running. With `--subagent` it stops only that subagent and the subagents it started, and the rest of the session keeps working. This is not steering: what was being done is abandoned. Nothing is waited for - what became of the turn arrives in the session's own stream.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--subagent", "agent-a1b2c3d4"] }],
     fields: {
       id: {
         positional: true,
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
+      },
+      subagentId: {
+        flag: "subagent",
+        help: "The subagent, by its full id as `hercule session subagent list` prints it. Without it, all work in the session stops.",
       },
     },
     errors: { invalid_state: "that session has exited, or its runner is no longer connected" },
@@ -2805,14 +2822,18 @@ export const CLI = {
 
   "transcript.read": {
     command: "transcript read",
-    help: "Reads what a session actually did: the normalized stream it left behind, one row per event. The rows are in order, each with its position. The transcript is append-only and read by position, so there is no filter and no search - the only choice is which end to start from.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Reads what a session actually did: the normalized stream it left behind, one row per event. The rows are in order, each with its position. Each agent of a session has its own transcript: without `--subagent` this reads the session's own agent's, and with it the transcript of that subagent. The transcript is append-only and read by position, so there is no other filter and no search - the only other choice is which end to start from.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--subagent", "agent-a1b2c3d4"] }],
     fields: {
       id: {
         positional: true,
         placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
+      },
+      subagentId: {
+        flag: "subagent",
+        help: "The subagent, by its full id as `hercule session subagent list` prints it. Without it, the session's own agent's transcript is read.",
       },
     },
   },
@@ -2937,7 +2958,7 @@ export const NOUNS = {
   },
   session: {
     summary: "Sessions: provider-backed agents at work, resumable and forkable.",
-    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session stop ends it.",
+    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session subagent list shows the subagents it delegated to, hercule session stop ends it.",
   },
   input: {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",

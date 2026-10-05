@@ -4,9 +4,10 @@
  * The transcript is a separate entity from the session record ([11-public-api
  * section 2]): the record holds a session's current state, and the transcript
  * holds what it did. The transcript is append-only and keyed by a per-session
- * position, so reading it is a keyset walk over that position and nothing
- * else: there is no filter and no search, and the only choice a caller has is
- * which end to start from.
+ * position, so reading it is a keyset walk over that position. Each agent of
+ * a session has a transcript of its own: the session's own agent's, and one
+ * per subagent. There is no other filter and no search; besides the agent,
+ * the only choice a caller has is which end to start from.
  * `transcript.query`, the full-text search over every session, is a different
  * operation and is not built yet.
  *
@@ -16,7 +17,7 @@
  * coalesced]). Nothing else is folded, rewritten or dropped.
  */
 import { Schema } from "effect";
-import { ProviderEvent, StructuredResult } from "@hercule/protocol";
+import { ProviderEvent, StructuredResult, SubagentId } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
@@ -53,7 +54,15 @@ export const transcript = HttpApiGroup.make("transcript")
   .add(
     HttpApiEndpoint.get("read", "/sessions/:id/transcript", {
       params: { id: Id },
-      query: pageParams(TRANSCRIPT_SORT_FIELDS),
+      query: Schema.Struct({
+        /**
+         * The subagent whose transcript to read. Without it, the session's
+         * own agent's transcript is read; a subagent's events are never
+         * part of it.
+         */
+        subagentId: Schema.optionalKey(SubagentId),
+        ...pageParams(TRANSCRIPT_SORT_FIELDS).fields,
+      }),
       success: page(TranscriptRow),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

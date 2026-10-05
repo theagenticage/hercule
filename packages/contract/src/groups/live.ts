@@ -34,7 +34,7 @@
 import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import { StreamKind } from "@hercule/protocol";
+import { StreamKind, SubagentId } from "@hercule/protocol";
 import {
   CapExceeded,
   Forbidden,
@@ -66,6 +66,9 @@ export const MUTABLE_LIVE_TOPICS = [
   "provider",
   "assistant",
   "conversation",
+  // A subagent is read through its session, so this topic's invalidations
+  // carry the ids of the sessions whose subagents changed.
+  "subagent",
 ] as const;
 
 /**
@@ -77,26 +80,33 @@ export const APPEND_ONLY_LIVE_TOPICS = ["event"] as const;
 export const LIVE_TOPICS = [...MUTABLE_LIVE_TOPICS, ...APPEND_ONLY_LIVE_TOPICS] as const;
 
 /**
- * The two per-session append-only topics: `stream` is the durable coalesced
+ * The two per-agent append-only topics: `stream` is the durable coalesced
  * transcript, keyed and replayed exactly as `event` is; `tap` carries the
  * ephemeral token deltas, which are never stored and never replayed. They
  * include the session id, so unlike the topics above they are a pattern rather
  * than a fixed list.
+ *
+ * `session:<id>:stream` and `session:<id>:tap` carry the session's own agent.
+ * Each subagent has its own pair, `session:<id>:subagent:<subagentId>:stream`
+ * and `:tap`, so a screen showing one agent never receives another's tokens.
  */
 export const SESSION_TOPIC_KINDS = ["stream", "tap"] as const;
 
 export type SessionTopicKind = (typeof SESSION_TOPIC_KINDS)[number];
 
-/** A per-session topic's shape on the wire, e.g. `session:s_1:stream`. */
+/**
+ * A per-agent topic's shape on the wire, e.g. `session:s_1:stream` or
+ * `session:s_1:subagent:a_1:tap`.
+ */
 export type SessionLiveTopic = `session:${string}:${SessionTopicKind}`;
 
 /**
  * The pattern a session topic matches. Both the schema that decodes a session
- * topic and the parser that reads its id and kind use it, so the two can never
- * disagree about what a session topic is. The id cannot contain `:`, which
- * makes the split unambiguous.
+ * topic and the parser that reads its ids and kind use it, so the two can
+ * never disagree about what a session topic is. Neither a session id nor a
+ * subagent id can contain `:`, which makes the split unambiguous.
  */
-const SESSION_TOPIC_PATTERN = /^session:([^:]+):(stream|tap)$/;
+const SESSION_TOPIC_PATTERN = /^session:([^:]+)(?::subagent:([^:]+))?:(stream|tap)$/;
 
 /**
  * A pattern check does not narrow a schema's `Type` past `string`, so this
@@ -107,7 +117,8 @@ const SESSION_TOPIC_PATTERN = /^session:([^:]+):(stream|tap)$/;
 const SessionLiveTopicSchema = Schema.String.check(
   Schema.isPattern(SESSION_TOPIC_PATTERN, {
     title: "session live topic",
-    description: "`session:<id>:stream` or `session:<id>:tap`",
+    description:
+      "`session:<id>:stream` or `session:<id>:tap`, or the same with `:subagent:<subagentId>` before the kind",
   }),
 );
 
@@ -124,13 +135,28 @@ export const isAppendOnlyLiveTopic = (topic: LiveTopic): topic is AppendOnlyLive
   (APPEND_ONLY_LIVE_TOPICS as ReadonlyArray<string>).includes(topic) ||
   SESSION_TOPIC_PATTERN.test(topic);
 
-/** Parses a session topic into its session id and kind. Returns `undefined` when the topic is not a session topic. */
+/**
+ * Parses a session topic into its session id, its subagent id and its kind.
+ * `subagentId` is absent for a topic of the session's own agent. Returns
+ * `undefined` when the topic is not a session topic.
+ */
 export const parseSessionTopic = (
   topic: string,
-): { readonly sessionId: string; readonly kind: SessionTopicKind } | undefined => {
+):
+  | {
+      readonly sessionId: string;
+      readonly subagentId?: string;
+      readonly kind: SessionTopicKind;
+    }
+  | undefined => {
   const match = SESSION_TOPIC_PATTERN.exec(topic);
   if (match === null) return undefined;
-  return { sessionId: match[1]!, kind: match[2] as SessionTopicKind };
+  const [, sessionId, subagentId, kind] = match;
+  return {
+    sessionId: sessionId!,
+    ...(subagentId === undefined ? {} : { subagentId }),
+    kind: kind as SessionTopicKind,
+  };
 };
 
 /** Builds the topic name of a session's durable transcript. */
@@ -140,6 +166,14 @@ export const buildSessionStreamTopic = (sessionId: string): SessionLiveTopic =>
 /** Builds the topic name of a session's ephemeral token deltas. */
 export const buildSessionTapTopic = (sessionId: string): SessionLiveTopic =>
   `session:${sessionId}:tap`;
+
+/** Builds the topic name of one subagent's durable transcript. */
+export const buildSubagentStreamTopic = (sessionId: string, subagentId: string): SessionLiveTopic =>
+  `session:${sessionId}:subagent:${subagentId}:stream`;
+
+/** Builds the topic name of one subagent's ephemeral token deltas. */
+export const buildSubagentTapTopic = (sessionId: string, subagentId: string): SessionLiveTopic =>
+  `session:${sessionId}:subagent:${subagentId}:tap`;
 
 /** How a record changed, spelled as in the audit kinds. */
 export const InvalidateKind = Schema.Literals(["created", "updated", "deleted"]);
@@ -156,15 +190,17 @@ export const Invalidate = Schema.Struct({
 export type Invalidate = Schema.Schema.Type<typeof Invalidate>;
 
 /**
- * One token delta, as `session:<id>:tap` pushes it: the same fields as
+ * One token delta, as a `tap` topic pushes it: the same fields as
  * `content.delta`, without the envelope. A tap is not stored, so it needs no
- * session id, timestamp or provenance of its own.
+ * session id, timestamp or provenance of its own. `subagentId` names the
+ * subagent that produced it; it is absent for the session's own agent.
  */
 export const TapItem = Schema.Struct({
   turnId: Schema.String,
   itemId: Schema.String,
   streamKind: StreamKind,
   delta: Schema.String,
+  subagentId: Schema.optionalKey(SubagentId),
 });
 
 export type TapItem = Schema.Schema.Type<typeof TapItem>;

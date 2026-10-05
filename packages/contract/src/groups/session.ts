@@ -6,7 +6,7 @@
  * `requestedAccessMode` and `accessMode` are both on the record because the
  * access-mode fallback of [06-providers section 8.4] must never be silent.
  */
-import { Schema } from "effect";
+import { Schema, Tuple } from "effect";
 import {
   AccessMode,
   ApprovalDecision,
@@ -16,6 +16,8 @@ import {
   OpenRequest,
   OutputSchema,
   QuestionAnswers,
+  SubagentId,
+  Usage,
 } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -35,9 +37,23 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 
-/** The request vocabulary comes from the runner protocol; the API returns it unchanged. */
-export { ApprovalDecision, OpenRequest, QuestionAnswers };
+/**
+ * The request, subagent and usage vocabulary comes from the runner protocol;
+ * the API returns it unchanged.
+ */
+export { ApprovalDecision, OpenRequest, QuestionAnswers, SubagentId, Usage };
 export type { ApprovalRequest };
+
+/**
+ * A Request one agent of a session is parked on: the request exactly as the
+ * harness opened it, and the subagent that asked. `subagentId` is absent when
+ * the session's own agent asked (spec 06 section 13.3).
+ */
+export const SessionRequest = OpenRequest.mapMembers(
+  Tuple.map(Schema.fieldsAssign({ subagentId: Schema.optionalKey(SubagentId) })),
+);
+
+export type SessionRequest = Schema.Schema.Type<typeof SessionRequest>;
 
 /** The longest prompt or turn input the API accepts: it is sent to the runner in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
@@ -115,12 +131,20 @@ export const Session = Schema.Struct({
   /** Set where this session was forked off another one; null otherwise. */
   parentSessionId: Schema.NullOr(Id),
   /**
-   * The request the harness is parked on, if any: what the user has to answer
-   * before this turn can continue. At most one is open at a time, and it is
-   * cleared when the machine resolves it or when the turn or session it belongs
-   * to ends.
+   * The Requests the session's agents are parked on, oldest first; empty when
+   * nothing waits on the user. Several can be open at once, from the
+   * session's own agent and from its subagents, and each is answered on its
+   * own, in any order. A Request closes when it is answered, when the turn of
+   * the agent that asked ends, when that agent is stopped, or when the
+   * session exits.
    */
-  openRequest: Schema.NullOr(OpenRequest),
+  openRequests: Schema.Array(SessionRequest),
+  /**
+   * The session's Token Usage: every token its own agent and all its
+   * subagents have used over the session's whole life, summed across its
+   * processes. Absent until the harness first reports usage.
+   */
+  usage: Schema.optionalKey(Usage),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
   /** The time of the last exit. Kept while the session is resumed, and overwritten when it exits again. */
@@ -135,6 +159,80 @@ export const Session = Schema.Struct({
 });
 
 export type Session = Schema.Schema.Type<typeof Session>;
+
+/**
+ * How a subagent stands, computed from its turns:
+ *
+ * - `running`: one of its turns is open;
+ * - `completed`, `failed`: how its last turn ended;
+ * - `stopped`: its last turn was interrupted, or it was still running when
+ *   its session's process exited.
+ *
+ * A subagent its parent gives more work goes back to `running`.
+ */
+export const SUBAGENT_STATUSES = ["running", "completed", "failed", "stopped"] as const;
+
+export const SubagentStatus = Schema.Literals(SUBAGENT_STATUSES);
+
+export type SubagentStatus = Schema.Schema.Type<typeof SubagentStatus>;
+
+/**
+ * An agent a session's harness delegated work to while the session runs (spec
+ * 02, Subagent). It is part of its session, never a session of its own, so it
+ * is read through its session. Every field is written as the session's events
+ * arrive, so a list row needs no second read.
+ */
+export const Subagent = Schema.Struct({
+  /** The harness's own id for the subagent, unique within its session. */
+  id: SubagentId,
+  sessionId: Id,
+  /** The subagent that started this one; absent when the session's own agent did. */
+  parentSubagentId: Schema.optionalKey(SubagentId),
+  /** The `subagent` item that started it, in its parent's transcript. */
+  itemId: Schema.optionalKey(Schema.String),
+  /** The short task name its parent gave it, else the first line of the brief its parent gave it. */
+  description: Schema.optionalKey(Schema.String),
+  /** The harness's name for the kind of agent: Claude's `subagent_type`, Codex's role. */
+  agentType: Schema.optionalKey(Schema.String),
+  /** The model its latest turn ran on, as the harness reports it. */
+  model: Schema.optionalKey(Schema.String),
+  status: SubagentStatus,
+  /** How many of its items were tool calls of any kind, calls on subagents included. */
+  toolCalls: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** One line saying what it is doing now, while it runs; absent once it has ended. */
+  activity: Schema.optionalKey(Schema.String),
+  /** The first line of its last message, once it has ended. */
+  result: Schema.optionalKey(Schema.String),
+  /**
+   * Its own Token Usage, not its subagents'. Absent where the harness reports
+   * no exact count for it, which a screen shows as not reported, never as 0.
+   */
+  usage: Schema.optionalKey(Usage),
+  /**
+   * The `at` of its `subagent.started`, or of its first event when that came
+   * first. Like every event's `at`, it was read off the runner's clock.
+   */
+  startedAt: Schema.String,
+  /** The `at` of the event that ended its last turn; absent while it runs. */
+  endedAt: Schema.optionalKey(Schema.String),
+});
+
+export type Subagent = Schema.Schema.Type<typeof Subagent>;
+
+/** What a session's subagent listing may be sorted by; oldest first by default. */
+export const SUBAGENT_SORT_FIELDS = ["startedAt"] as const;
+
+/**
+ * The payload of `session.interrupt`. Without `subagentId` it stops all work
+ * in the session: its own agent's turn and every running subagent. With
+ * `subagentId` it stops that subagent and every subagent below it, and leaves
+ * the rest of the session running.
+ */
+export const SessionInterruptInput = closedStruct({
+  subagentId: Schema.optionalKey(SubagentId),
+});
+
+export type SessionInterruptInput = Schema.Schema.Type<typeof SessionInterruptInput>;
 
 /** The most repos one thread's workspace may hold. */
 export const MAX_SPAWN_CHECKOUTS = 32;
@@ -382,6 +480,12 @@ export const session = HttpApiGroup.make("session")
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
+    HttpApiEndpoint.get("querySubagents", "/sessions/:id/subagents", {
+      params: { id: Id },
+      query: pageParams(SUBAGENT_SORT_FIELDS),
+      success: page(Subagent),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
     HttpApiEndpoint.post("spawn", "/sessions", {
       payload: SessionSpawnInput,
       success: Session,
@@ -401,6 +505,7 @@ export const session = HttpApiGroup.make("session")
     }),
     HttpApiEndpoint.post("interrupt", "/sessions/:id/interrupt", {
       params: { id: Id },
+      payload: SessionInterruptInput,
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
