@@ -22,7 +22,7 @@ import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import {
   type ActionStepStart,
-  type AgentStepStart,
+  type AgentStepResultRequest,
   MAX_MESSAGE_LENGTH,
   type WorkspaceStepKey,
   type WorkspaceStepOutcome,
@@ -389,7 +389,7 @@ export const makeWorkspaceSteps = (options: {
    * Answers the controller's question about an agent step, as `start`
    * describes. Takes no workspace lock and runs nothing.
    */
-  const answerAgentStep = (frame: AgentStepStart): Effect.Effect<void> =>
+  const answerAgentStep = (frame: AgentStepResultRequest): Effect.Effect<void> =>
     Effect.gen(function* () {
       const key = readKey(frame);
       const name = buildStepName(key);

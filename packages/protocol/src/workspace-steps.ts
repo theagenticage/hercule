@@ -37,12 +37,12 @@ export const MAX_WORKSPACE_STEPS = 256;
 export const buildWorkspaceActionCapability = (actionId: string): string => `action:${actionId}`;
 
 /**
- * The capability for agent steps. A runner lists it at hello when it runs an
- * agent step's turn and answers `AgentStepStart`, and the controller when it
- * sends them. A runner on an older build closes the socket on a frame it
- * cannot read, and ignores the `step` field of a `TurnInput`, so the
- * controller places a run with an agent step only on a runner whose hello
- * lists this.
+ * The capability for agent steps. A runner lists it at hello when it can run
+ * an agent step's turn and answer `AgentStepResultRequest`; the controller
+ * lists it when it can send agent steps. A runner on an older build closes
+ * the socket on a frame it cannot read, and ignores the `step` field of a
+ * `TurnInput`, so the controller places a run with an agent step only on a
+ * runner whose hello lists this.
  */
 export const AGENT_STEPS_CAPABILITY = "agentSteps";
 
@@ -104,7 +104,7 @@ export type ActionStepStart = Schema.Schema.Type<typeof ActionStepStart>;
  * - at once with a failed `interrupted` outcome otherwise, because the turn
  *   was lost when the runner restarted.
  */
-export const AgentStepStart = Schema.Struct({
+export const AgentStepResultRequest = Schema.Struct({
   _tag: Schema.Literal("workspaceStepStart"),
   kind: Schema.Literal("agent"),
   ...WorkspaceStepKey.fields,
@@ -117,7 +117,7 @@ export const AgentStepStart = Schema.Struct({
   workspaceId: Schema.NullOr(StorageId),
 });
 
-export type AgentStepStart = Schema.Schema.Type<typeof AgentStepStart>;
+export type AgentStepResultRequest = Schema.Schema.Type<typeof AgentStepResultRequest>;
 
 /**
  * Starts one workspace step, or asks for its result: a workspace action step
@@ -125,7 +125,7 @@ export type AgentStepStart = Schema.Schema.Type<typeof AgentStepStart>;
  * kinds share the step key, so a runner answers both with
  * `WorkspaceStepResult` and keeps both results in the same place.
  */
-export const WorkspaceStepStart = Schema.Union([ActionStepStart, AgentStepStart]);
+export const WorkspaceStepStart = Schema.Union([ActionStepStart, AgentStepResultRequest]);
 
 export type WorkspaceStepStart = Schema.Schema.Type<typeof WorkspaceStepStart>;
 

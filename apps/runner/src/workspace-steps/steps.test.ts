@@ -16,7 +16,7 @@ import * as Scope from "effect/Scope";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type {
   ActionStepStart,
-  AgentStepStart,
+  AgentStepResultRequest,
   WorkspaceStepKey,
   WorkspaceStepOutcome,
   WorkspaceStepResult,
@@ -624,7 +624,7 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
   });
 });
 
-const buildAgentStart = (workspaceId: string | null): AgentStepStart => ({
+const buildAgentStart = (workspaceId: string | null): AgentStepResultRequest => ({
   _tag: "workspaceStepStart",
   kind: "agent",
   runId: createId(),
@@ -639,7 +639,7 @@ const REVIEWED: WorkspaceStepOutcome = { status: "completed", output: { verdict:
 /** Records the agent step as begun, with a turn that runs for as long as `running` returns true. */
 const beginAgentStep = (
   runner: Runner,
-  frame: AgentStepStart,
+  frame: AgentStepResultRequest,
   running: () => boolean = () => true,
 ): void => runner.steps.beginAgentStep(frame, frame.workspaceId, Effect.sync(running));
 

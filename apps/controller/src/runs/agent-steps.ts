@@ -95,7 +95,7 @@ type StepPlacement =
  * - `waitsForRunner`: no runner can take the run now, and the record stays
  *   pending.
  */
-export type AgentStepStart =
+export type AgentStepStartOutcome =
   | { readonly _tag: "sessionOpened"; readonly send: OpenedStepSession["send"] }
   | { readonly _tag: "ended" }
   | { readonly _tag: "waitsForRunner" };
@@ -230,7 +230,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
               "expression-error",
               at,
             );
-            return { _tag: "ended" } satisfies AgentStepStart;
+            return { _tag: "ended" } satisfies AgentStepStartOutcome;
           }
           // A prompt that is exactly one expression renders to the
           // expression's value, which is text only when the value is.
@@ -239,7 +239,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
               ? rendered.success
               : JSON.stringify(rendered.success);
           const placed = yield* placeOnRunner(run, record, at);
-          if (placed._tag !== "placed") return placed satisfies AgentStepStart;
+          if (placed._tag !== "placed") return placed satisfies AgentStepStartOutcome;
           const opened = yield* Effect.result(
             Effect.provideService(
               workspaceSteps.openSession({
@@ -263,10 +263,13 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
               "session-failed",
               at,
             );
-            return { _tag: "ended" } satisfies AgentStepStart;
+            return { _tag: "ended" } satisfies AgentStepStartOutcome;
           }
           yield* runs.startStep(run.id, record, { sessionId: opened.success.sessionId }, at);
-          return { _tag: "sessionOpened", send: opened.success.send } satisfies AgentStepStart;
+          return {
+            _tag: "sessionOpened",
+            send: opened.success.send,
+          } satisfies AgentStepStartOutcome;
         }),
     };
   });
