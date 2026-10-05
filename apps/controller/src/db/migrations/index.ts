@@ -51,6 +51,7 @@ import connectionAccountId from "./0040-connection-account-id";
 import taskSortRanks from "./0041-task-sort-ranks";
 import connectionIngest from "./0042-connection-ingest";
 import connectionUseOnAssistant from "./0043-connection-use-on-assistant";
+import subagents from "./0044-subagents";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -96,6 +97,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [41, "task-sort-ranks", Effect.succeed(taskSortRanks)],
   [42, "connection-ingest", Effect.succeed(connectionIngest)],
   [43, "connection-use-on-assistant", Effect.succeed(connectionUseOnAssistant)],
+  [44, "subagents", Effect.succeed(subagents)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
