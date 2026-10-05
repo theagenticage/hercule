@@ -115,6 +115,11 @@ The five monitoring axes (from #20's reaction) and their pinned encodings:
   (~0.82 opacity, smaller type).
 - Radii: 10px cards/groups, 6px controls.
 - A "last check-in" divider marks what the user has already seen.
+- *(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* The thread's
+  **side pane** is a split that stays open, beside the thread's column, with the thread's own
+  `--surface` behind it ([spec 14](./spec/14-web-app.md) §The thread surface). Intake's rule
+  "detail lives in a drawer, never a page or a permanent split" is about Intake's detail and
+  does not apply to it: the user opens the pane on purpose and works beside it, as in an editor.
 
 ## Monitoring semantics (pinned by ticket #20, 2026-08-28)
 

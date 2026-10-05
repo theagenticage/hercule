@@ -452,13 +452,14 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - Sign Out, in the app menu.
   - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings… `⌘,`, in the app menu under About, opens [Settings](#settings).
   - *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* File › New Thread, Go › Office and Settings… are dimmed while signed out, as Sign Out is, because only the shell carries them out: on the connect and sign-in screens, choosing one would do nothing.
-- **Dock badge:** the number of threads waiting on you. A thread waits on you while its session has an open Request (`Session.openRequest`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
+- **Dock badge:** the number of threads waiting on you. A thread waits on you while its session has an open Request (~~`Session.openRequest`~~ `Session.openRequests` is not empty, whoever asked: its own agent or a subagent *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
   - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* macOS shows an app's dock badge only once the user has allowed the app to notify. The app asks when the user signs in, so the badge can show from the first waiting thread.
 - **Notifications:**
   - When a thread starts waiting on you and the window is not focused, main shows a native notification.
   - Clicking it focuses the window and opens the thread.
   - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* The notification's title is the thread's title and its body is the question, such as "Run git push?".
   - A thread has at most one notification. A new Request on the thread replaces it; when the new Request opens while the window is focused, the old notification is removed and no new one shows.
+  - *(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); [#353](https://github.com/theagenticage/hercule/issues/353).)* A thread can have several Requests open at once. Its notification shows the newest, and its body ends with "+N more waiting" when others are open. A subagent's Request names it: the body starts with "<subagent> asks:". Clicking the notification opens the thread, where the dock pages through every Request. When a Request closes and others stay open, the notification is not shown again.
   - Launching the app, or signing in, shows no notification for the threads that already wait; the badge counts them.
   - Signing out, or connecting to another controller, hides the badge, removes every notification and empties Go. They stay empty until the user signs in again.
 - **Answered anywhere clears everywhere** ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)):
@@ -517,7 +518,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 
 | The session | Pose | The row's end |
 |---|---|---|
-| has an open Request | waiting | the waiting mark |
+| has an open Request (any agent's, *amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355)*) | waiting | the waiting mark |
 | is held by the crash-loop guard, or has exited and cannot be resumed | away | its age |
 | runs on a runner that is offline or unreachable | away | the word "offline", or its age once the session has exited |
 | has exited and can be resumed | asleep | its age |
@@ -580,6 +581,13 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - The message renders once per finished paragraph. The tokens in between are painted into the paragraph being written, at most once per frame, without a render.
   - Spec 14 draws the stored text as markdown and the tokens after it as plain text, until the message ends. There, a cut word breaks across two lines, and the tokens' finished paragraphs show their markdown marks.
 - **A thread that is gone** shows "This thread was not found." with a link to start a new thread. Any other failure shows [A screen that fails](#reaching-the-controller).
+- *(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); decided by [#354](https://github.com/theagenticage/hercule/issues/354). Prototype: branch `prototype/subagents-ui`, commit 6253a529, `apps/desktop/src/renderer/specimens/subagents-prototype/`, which now opens with the chosen settings.)* **Subagents** follow spec 14's §The thread surface (spawn lines, the side pane and its Subagents surface, the tally, a subagent's page, the Request pager), with these differences:
+  - **A subagent has a face,** seeded by its session id and its subagent id together, so its hue and shape never change. Spawn lines and the Subagents surface's rows show the face where the web shows a state mark. Faces in the surface are still in their pose; only the face of the open page's running turn animates (rule 2 of [Rules](#rules)).
+  - **A subagent's page is marked by a tinted crumb:** the header crumb reads "<parent thread> › <subagent>", and the subagent's crumb is in its hue, with a ring and a "subagent" tag. Louder marks were tried and dropped: a band, a frame, a wash and a gradient.
+  - **The brief card** is tinted in the subagent's hue. In dark it reads as a loud block in the prototype; the build tones it down.
+  - **The side pane's tab titles** shrink to a few letters at 1280px with the pane open. The build decides what the header gives up, as on the web.
+  - The side pane's background is `--surface`, as the main pane's.
+  - The Subagents surface reads the record only, so the sidebar, the Waiting on you rows and `dock-mini` need nothing new: `dock-mini` answers the oldest open Request, as the dock shows it first.
 
 **A new thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread creation and the book's `session-empty.html`, with these differences:
 
@@ -875,6 +883,21 @@ The rules apply as everywhere ([Rules](#rules)); the costs below are what each s
 
 Settings does not open a live topic the shell does not already need, except while a section that reads it is open.
 
+### What subagents cost
+
+*(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md).)* The plan for the subagents build, measured by that build and recorded in [Measured](#measured):
+
+| Cost | Expected | Measured by |
+|---|---|---|
+| Processes | none added | the perf script's process count |
+| The first screen's JavaScript | grows only by the spawn line and the tally; the side pane and the subagent page are their own chunk, loaded the first time one opens | `pnpm build:desktop`'s bundle check, before and after |
+| Live topics | `subagent` only while a thread is open, and a nudge causes a refetch only when it names the open thread. The controller sends at most one nudge per session per second. A subagent's page holds one agent's `:stream` and `:tap` in place of the thread's, never both | the perf script, with a thread whose four subagents run |
+| Work per streamed token | unchanged: a subagent's tokens reach the app only while its page is open, and then take the thread's path | the Performance panel, once, on a subagent's page |
+| Memory | within the app's memory row with the side pane open on 20 subagents: the list is records, never transcripts | the perf script |
+| Idle | the idle row with the side pane open and every subagent ended: no timer, and the durations of ended subagents do not tick | the perf script's idle sample |
+| Running subagents | a running row's duration ticks at most once a second, and only while it is on screen; faces in the surface are still | the Performance panel, once |
+| Resizing the pane | layout per pointer move while the user drags, nothing after | the Performance panel, once |
+
 ## Performance
 
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
@@ -993,7 +1016,7 @@ These rules keep the budgets:
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
    - Reduce motion turns every animation off. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* macOS's Reduce motion or the Appearance page's. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
-   - The renderer drops the open thread's `session:<id>:tap` subscription. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
+   - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
    - `backgroundThrottling` stays on.
    - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats.

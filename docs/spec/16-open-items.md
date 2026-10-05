@@ -19,6 +19,7 @@ To find the exact line for any entry: `grep -n '^\*\*Open:\*\*' docs/spec/<doc>.
 - 10 §5, §7.4: **binding `trigger.resume`.** The breaker's Resume answers need it on the list. [#87](https://github.com/theagenticage/hercule/issues/87) builds the operation and adds it, with its describe line.
 - 10 §7.4, §7.6: **binding `permission.decide`.** [#86](https://github.com/theagenticage/hercule/issues/86) builds the operation. Its "add to profile" answer edits a permission profile, and the test that guards the list refuses any operation in the `permission` family, for every producer. #86 decides how the core's Permission Request binds it: a narrower rule for core producers, or a list entry the test allows on purpose.
 - 06 §6.5, 10 §7.6: **answering a harness `question` from a notification.** A `question` request raises no notification, ~~because `session.respond` sends a decision, not answers. The answer shape is pinned in 06 §6.5 and not built; no ticket owns it yet.~~ *(amended 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309))* because none of a notification's bound answers fits a set of answers to questions. [#317](https://github.com/theagenticage/hercule/issues/317) owns it.
+- 06 §13.6: **where a pi subagent runs.** In pi's own process through its SDK, as a `pi --mode rpc` child that Hercule's pi extension spawns, or as a child the runner spawns at the extension's request. Handed to the pi build, [PI_TICKET], which decides it after a research step *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 
 ## B. Implementer's choices
 
@@ -62,6 +63,9 @@ Not design questions. The constraint is stated where one exists.
 - 17 §Development: Vite's HMR socket accepts a client whose origin is `app://hercule`. The fallback is a Vite proxy.
 - ~~17 §Auth and the token: whether `safeStorage` prompts for Keychain access in an unsigned development build. A signed build must not prompt.~~ **Resolved 2026-10-01 ([#308](https://github.com/theagenticage/hercule/issues/308)):** a new build reads the old build's Keychain item only when both have the same designated requirement. Ad hoc builds differ in it, and a probe's second build was refused with `errSecAuthFailed`; two builds signed with the same self-signed certificate share it, and the second read the item without a prompt. The released app is signed with one certificate for every build; recorded in 17 §Auth and the token and §Security baseline. Two consecutive `edge` builds are the final check.
 - 17 §Performance: a macOS window fully covered by other windows stops animation frames, as a minimized one does.
+- 06 §13.5: whether a Claude subagent's own frames' `message.usage`, each `message.id` counted once, plus the main agent's, adds up to the growth of `result.modelUsage`. If it does not, a Claude subagent carries no Token Usage. The Claude build, [CLAUDE_TICKET], probes it *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
+- 06 §13.5: the total a forked Codex child thread starts from (expected: its parent's). The Codex build, [CODEX_TICKET], probes it *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
+- 06 §8.1: what Claude's `interrupt: true` on a denied `canUseTool` does when the asker is a subagent. The Claude build, [CLAUDE_TICKET], checks it *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 - 17 §Performance: the cost of glass on the slowest Mac the app supports, measured before the first release.
 - ~~15 §11: serving the embedded SPA (`import index from "./index.html"` / `Bun.serve({ routes })`) through the Effect HTTP server on Bun (`@effect/platform-bun`), or beside it on the same port - confirm before the web bundle is wired in.~~ **Resolved 2026-09-04 ([#58](https://github.com/theagenticage/hercule/issues/58)):** measured both; Bun's HTML route ignores `vite.config.ts` and so loses the React Compiler and code splitting. `vite build`'s output is embedded per file with `with { type: "file" }` and served through the Effect HTTP server; recorded in 15 §11.
 
@@ -76,6 +80,8 @@ Not design questions. The constraint is stated where one exists.
 
 - 12 §10: `assistant.delete` tells the assistant's live sessions to stop after the delete commits and does not wait. A session whose runner is not connected at that moment is not stopped: it runs on until its idle unload or its runner restarts, and whatever it reports afterwards is written nowhere, because its conversation is gone. The warning is logged. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
 - 06 §5: a conversation input on the wire when its session exits waits for its answer, or for its deadline (`SessionInputDeadline`, 10 seconds), before it is put back and the session is resumed for it. The owner sees no reply for that long. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
+- 06 §13.4: after a Stop, Claude's main model is never told that its background subagents were stopped, and may go on believing one still runs *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
+- 06 §13.6: Claude's `compact_boundary` and `api_retry` name no agent, so a subagent's compaction or retry is attributed to the session's own agent *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 
 ## Not yet specified (map fog)
 
@@ -87,8 +93,12 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 - `auth.wsTicket` (11 §auth) has no schema in `packages/contract`; it is added by the ticket that builds the live overlay and its `client-core` client. *(Noted 2026-09-04, [#58](https://github.com/theagenticage/hercule/issues/58).)*
 - Task and Project pruning: both soft-delete in v1 ([Domain model residue](https://github.com/theagenticage/hercule/issues/46)) and events live as long as a live Task refers to them (04 §Retention), so the log's real bound becomes task retention; the idea on record is hard-pruning deleted tasks with their runs and events after something like a year. Sharpens with dogfooding.
 - Holding an owner's message while the owner is still typing, so a quick follow-up joins the first message instead of steering the turn that message just opened. Today every message is delivered at once: steered into a running turn, or sent as a new turn. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
+- The side pane's other surfaces: Browser, Terminal, Files, Diff and Pull request. The pane itself and its Subagents surface are specified (14 §The thread surface); what each other surface shows, and which of them a thread needs first, is not *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
+- A Hercule session spawned by another session, shown as a child of the session that spawned it. It is a Session, not a Subagent (02 §Subagent), and no link to its spawner beyond the actor stamp is specified *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 
 ## Pending prototypes
+
+- ~~[How the web and desktop apps show subagents](https://github.com/theagenticage/hercule/issues/354)~~ - resolved 2026-10-05: 14 §The thread surface and 17 §Design system pin the side pane with its Subagents surface, the spawn lines, the tally above the composer, a subagent's page and the Request pager *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 
 - ~~[Prototype: the app shell and navigation](https://github.com/theagenticage/hercule/issues/51)~~ - resolved 2026-09-01: 14 §App shell pins the two-face sidebar, the codexlip composer as the thread's configuration, and what locks at start.
 

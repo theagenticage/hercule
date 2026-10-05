@@ -219,13 +219,14 @@ Semantics: [./06-providers.md](./06-providers.md), [./12-assistants.md](./12-ass
 | `session.continue` | `{ sessionId, mode: ~~"resume" \|~~ "fork", prompt }` -> the new `Session` | `session.spawn` | `POST /sessions/{id}/continue` |
 | `session.update` | `{ sessionId, model?, options? }` -> the `Session` | `session.steer` | `PATCH /sessions/{id}` |
 | `session.input` | `{ sessionId, text, model?, options? }` -> `{ inputId, result: "opened" \| "steered" \| "queued" }` | `session.steer` | `POST /sessions/{id}/input` |
-| `session.interrupt` / `session.stop` | `{ sessionId }` | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
+| `session.interrupt` / `session.stop` | `{ sessionId }`; `session.interrupt` also takes `subagentId?` *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))* | `session.steer` | `POST /sessions/{id}/interrupt` / `.../stop` |
 | ~~`session.respond`~~ `session.respondToApprovalRequest` *(renamed 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309))* | `{ sessionId, requestId, decision: "allow" \| "allow_always" \| "deny" \| "cancel" }` | `session.steer` | ~~`POST /sessions/{id}/respond`~~ `POST /sessions/{id}/respond-to-approval-request` |
 | `session.respondToQuestion` *(added 2026-10-01, [#309](https://github.com/theagenticage/hercule/issues/309))* | `{ sessionId, requestId, answers: Record<header, string \| string[]> }` | `session.steer` | `POST /sessions/{id}/respond-to-question` |
 | `input.query` | `{ sessionId }` (the controller-owned queue) | `session.read` | `GET /sessions/{id}/inputs` |
 | `input.update` / `input.cancel` | `{ sessionId, inputId, text }` / `{ sessionId, inputId }`, each answering the row | `session.steer` | `PATCH` / `DELETE /sessions/{id}/inputs/{inputId}` |
 | `input.steer` | `{ sessionId, inputId }` -> `{ inputId, result: "steered" \| "opened" \| "queued" }` (`queued` *amended 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92)*: see below) | `session.steer` | `POST /sessions/{id}/inputs/{inputId}/steer` |
-| `transcript.read` | `{ sessionId, cursor? }` -> the normalized transcript | `session.read` | `GET /sessions/{id}/transcript` |
+| `transcript.read` | `{ sessionId, subagentId?, cursor? }` -> the normalized transcript of the session's own agent, or of one subagent *(`subagentId` added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))* | `session.read` | `GET /sessions/{id}/transcript` |
+| `session.querySubagents` *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))* | `{ sessionId }` -> `items: Subagent[]`, oldest first | `session.read` | `GET /sessions/{id}/subagents` |
 | `transcript.query` | `{ text, sessionId?, agentId?, ~~assistantId?~~, actor?, since?, until? }` -> `items: Passage[]` (there is no `assistantId` filter: an assistant's id is its Agent's id, so `agentId` already answers an assistant's transcripts *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*) | `session.read` | `GET /transcripts` |
 
 *(Amended 2026-09-08, [#66](https://github.com/theagenticage/hercule/issues/66).)* Three rows changed to match what shipped, rather than the code churning to match the table.
@@ -261,10 +262,26 @@ A single-select answer may be a one-item list. A question raises no notification
 *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* Three things about the `session.spawn` row. A session actor may spawn from an Agent, but only from one whose permission profile grants nothing beyond its own; any wider Agent is refused 403 naming `session.spawn`, and the user actor passes every profile ([./13-security.md](./13-security.md) section 6.3). The input takes `outputSchema?`, what every turn of the session must answer with, linted at spawn against the subset of [./06-providers.md](./06-providers.md) section 7 and refused as `validation` naming the rule it broke. On the CLI that field is the inline JSON flag `--output-schema` rather than a stdin document, because the prompt owns stdin. It is also bounded: a schema whose JSON is longer than `MAX_OUTPUT_SCHEMA_LENGTH` (32 KiB, `@hercule/protocol`) is refused as `validation` before any row is written, because the document is stored, sent over the runner socket and, on pi, handed to the harness in its environment.
 
 ```ts
-interface Passage { sessionId: string; turnId: string; at: string; excerpt: string }
+interface Passage { sessionId: string; subagentId?: string; turnId: string; at: string; excerpt: string }  // subagentId added 2026-10-05, #355
 ```
 
 `transcript.query` is full-text search over normalized transcripts and is the transcript-recall operation of [./12-assistants.md](./12-assistants.md): an assistant recalls its own conversations with ~~`assistantId: "me"`~~ `agentId: "me"`, where `"me"` is the Agent the calling session runs as *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*, and any agent granted `session.read` searches any session (a learning workflow reading past sessions uses the same operation). `actor: "me"` on `session.query` and `transcript.query` is the shortcut for "sessions this session spawned"; it is a filter on the actor stamp, not a permission.
+
+*(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); decided by [#352](https://github.com/theagenticage/hercule/issues/352), [#353](https://github.com/theagenticage/hercule/issues/353) and [#377](https://github.com/theagenticage/hercule/issues/377); [ADR 0038](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md).)* **Subagents are read through their session.** A Subagent ([./02-domain-model.md](./02-domain-model.md) Subagent) is part of its session, so it has no root noun, no grant and no write operation of its own.
+
+- **`transcript.read`** without `subagentId` returns the transcript of the session's own agent: only the events that belong to no subagent. Before this change it returned every event. With `subagentId`, it returns that subagent's transcript, read through the same code. There is no mode that returns every agent at once; a caller lists the subagents and reads each one.
+  - A subagent's `subagent.started`, and the `subagent` item that started it, belong to the agent that started it, so the main transcript shows the subagents its own agent started.
+  - The cursor records the `subagentId`, beside the session and the direction, so a cursor from one transcript is refused on another (`validation`).
+  - An unknown `subagentId` is `not_found`, also while the subagent's events are still held back before its `subagent.started` ([./06-providers.md](./06-providers.md) section 13.2). The read never answers an empty transcript for it.
+- **`session.querySubagents`** lists a session's subagents as a flat list of Subagent records, paged by `startedAt` as `conversation.queryMessages` is. A client builds the tree from `parentSubagentId`. Every field of the record is written at ingest, so a list row needs no second read: what the subagent is, what it is doing now or how it ended, how many tool calls it made, and its Token Usage. There is no `session.readSubagent`, because nothing needs one yet.
+- **`session.read`** answers `openRequests` in place of `openRequest`: the Requests of every agent of the session, each naming its asking subagent ([./02-domain-model.md](./02-domain-model.md) Session). It also answers the session's `usage`, which covers its subagents ([./06-providers.md](./06-providers.md) section 6.6).
+- **`session.interrupt { sessionId, subagentId }`** stops that subagent and every subagent below it, and leaves the rest of the session running. It is `not_found` for a subagent the session does not have. Like an interrupt of the session's own agent, it is sent whatever the subagent's recorded status, because the record lags behind the runner; the adapter ignores it for a subagent with no open turn. Without `subagentId` it stops all work in the session: its own agent's turn and every running subagent ([./06-providers.md](./06-providers.md) section 13.4). `session.respondToApprovalRequest` and `session.respondToQuestion` are unchanged: they are keyed by request id, and any open Request can be answered, in any order.
+- **`transcript.query`** searches every agent's transcript. A `Passage` from a subagent carries its `subagentId`.
+- **The CLI rows:**
+  - `hercule transcript read <session-id> --subagent <id>`. Human output of a filtered read leaves out `subagentId`, which is the same on every row. A `subagent` item's row prints `subagentIds=...`, so an agent sees which id to pass.
+  - `hercule session subagent list <session-id>`, by the nested-noun rule of section 6.3.
+  - `hercule session interrupt <session-id> --subagent <id>`.
+  - `--subagent` takes the harness's full id, or a tail of eight or more characters matched within that session.
 
 ### subscription
 

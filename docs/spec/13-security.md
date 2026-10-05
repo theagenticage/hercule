@@ -178,7 +178,7 @@ A profile is a set of grants. Grants are coarse: one family per operation area, 
 | `task` | `task.*` | `read`, `create`, `update`, `delete` |
 | `workflow` | `workflow.*`, `trigger.*`~~; `run.rerun`~~ | `read`, `write`~~, `run` (start a stored workflow, rerun), `submit` (start an unstored definition)~~ *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* |
 | `run` | `run.*` (read, cancel, start, rerun) | `read`, `write`, `start` (start a run of a stored or an unstored workflow, rerun; replaces `workflow.run` and `workflow.submit`, amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79)) |
-| `session` | `session.*`, `input.*`, `transcript.*` | `read` (records and transcripts), `spawn` (spawn, continue), `steer` (input, interrupt, stop, respond, queue edits) |
+| `session` | `session.*`, `input.*`, `transcript.*` | `read` (records and transcripts; a session's subagents and their transcripts *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*), `spawn` (spawn, continue), `steer` (input, interrupt, stop, respond, queue edits; interrupting one subagent *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*) |
 | `subscription` | `subscription.*` | `read`, `write` |
 | `notification` | `notification.*` | `read`, `write` (create, act, withdraw own; act by the user only, *amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85)*: a session or a run holding `write` is refused `notification.act`, section 6.5) |
 | `settings` | `settings.*` (the user settings store: timezone, topic order, mutes, last-checked markers) | `read`, `write` |
