@@ -30,7 +30,6 @@ import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { RunExecutorLayer } from "../daemon/runs";
 import { RunService, RunServiceLayer } from "./service";
-import { StepSessionFailuresLayer } from "./session-observer";
 import {
   WorkspaceSteps,
   type WorkspaceStepToStart,
@@ -135,7 +134,6 @@ const runTest = <A, E>(
     Layer.provideMerge(RunExecutorLayer),
     Layer.provideMerge(PlatformEventsLayer),
     Layer.provideMerge(workspaceSteps),
-    Layer.provideMerge(StepSessionFailuresLayer),
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
     Layer.provideMerge(buildPluginStack()),
   );

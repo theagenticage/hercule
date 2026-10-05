@@ -19,18 +19,23 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import type { StepError, WorkflowDefinition } from "@hercule/contract";
 import type { WorkspaceStepFailureCode } from "@hercule/protocol";
 import { buildRunActor, CurrentActor } from "../actor";
 import { agentRepository } from "../agents";
+import { afterCommit, nowIso, withTransaction } from "../db";
 import { renderTemplate } from "../expressions";
 import { isLoggedIn, providerRepository } from "../providers";
 import type { PlacementCandidate } from "../runners";
+import { inputRepository, type StoredSession } from "../sessions";
+import { RunExecutor } from "./executor";
 import { runRepository, type ExecutionFailureReason, type StoredRun } from "./repository";
 import { buildRunContext } from "./run-context";
 import type { StepRecordKey } from "./step";
+import { isUnfinished } from "./step-records";
 import { WorkspaceSteps, type AgentStep, type OpenedStepSession } from "./workspace-steps";
 
 /**
@@ -123,6 +128,9 @@ export type AgentStepStartOutcome =
   | typeof ENDED
   | typeof WAITS_FOR_RUNNER;
 
+/** The fields of a session that name the agent step it runs, if any. */
+type SessionOfStep = Pick<StoredSession, "id" | "runId">;
+
 /** What starting an agent step needs from the run engine. */
 interface AgentStepNeeds {
   /** Fails a step record and its run, inside the caller's transaction. */
@@ -145,12 +153,19 @@ interface AgentStepNeeds {
 }
 
 /**
- * Builds `startAgentStep`, which starts an agent step's pending record, and
- * `filterAgentHosts`, which narrows the runners a run can be pinned to.
+ * Builds the run engine's agent step operations:
+ *
+ * - `startAgentStep` starts an agent step's pending record;
+ * - `filterAgentHosts` narrows the runners a run can be pinned to;
+ * - `failStepsOfEndedSessions` and `failStepWithDroppedPrompt` fail a
+ *   running agent step whose turn no runner will report.
  */
 export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNeeds) =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
+    const inputs = yield* inputRepository;
+    const executor = yield* RunExecutor;
     const agents = yield* agentRepository;
     const providers = yield* providerRepository;
     const workspaceSteps = yield* WorkspaceSteps;
@@ -183,7 +198,94 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
         };
       });
 
+    /**
+     * Returns the running record of the agent step that runs in `session`,
+     * with its run's id. Returns `undefined` when no agent step started the
+     * session, when the step's run has ended, or when no record of the step
+     * is running in the session.
+     */
+    const findRunningStepOfSession = (
+      session: SessionOfStep,
+    ): Effect.Effect<
+      { readonly runId: string; readonly record: StepRecordKey } | undefined,
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        if (session.runId === null) return undefined;
+        const run = yield* runs.read(session.runId);
+        if (Option.isNone(run) || !isUnfinished(run.value.status)) return undefined;
+        const record = run.value.steps.find(
+          (candidate) => candidate.status === "running" && candidate.sessionId === session.id,
+        );
+        return record === undefined ? undefined : { runId: run.value.id, record };
+      });
+
+    /**
+     * Fails a running agent step record with `session_failed`, and its run
+     * with `session-failed`, inside the caller's transaction. Once the
+     * transaction has committed, the Run Executor stops the run's execution,
+     * which may still carry out a parallel controller step.
+     */
+    const failStepOfSession = (
+      { runId, record }: { readonly runId: string; readonly record: StepRecordKey },
+      message: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* writeStepFailure(
+          runId,
+          record,
+          { code: "session_failed", message },
+          "session-failed",
+          at,
+        );
+        yield* afterCommit(() => executor.stop([runId]));
+      });
+
     return {
+      /**
+       * Fails the running agent step of each session in `ended`, sessions
+       * the controller has just ended itself, with `message` as the step's
+       * error. No runner saw those sessions end, so no runner will report
+       * their steps' turns. Joins the caller's transaction, which ended the
+       * sessions. A session that runs no agent step, or whose step has no
+       * record running in it, is skipped.
+       */
+      failStepsOfEndedSessions: (
+        ended: ReadonlyArray<SessionOfStep>,
+        message: string,
+      ): Effect.Effect<void, SqlError> =>
+        Effect.gen(function* () {
+          const at = yield* nowIso;
+          for (const session of ended) {
+            const step = yield* findRunningStepOfSession(session);
+            if (step !== undefined) yield* failStepOfSession(step, message, at);
+          }
+        }),
+
+      /**
+       * Fails the running agent step of `session` with `message` as the
+       * step's error, when the step's prompt was cancelled before a runner
+       * took it: no runner saw the prompt, so none will report its turn.
+       * Does nothing when the session runs no agent step, when its step has
+       * no record running in it, or when the prompt was not cancelled. Joins
+       * the caller's transaction as a savepoint.
+       */
+      failStepWithDroppedPrompt: (
+        session: SessionOfStep,
+        message: string,
+      ): Effect.Effect<void, SqlError> =>
+        withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const step = yield* findRunningStepOfSession(session);
+            if (step === undefined) return;
+            const prompt = yield* inputs.readStepInput(session.id, step.record.iteration);
+            if (Option.isNone(prompt) || prompt.value.status !== "cancelled") return;
+            yield* failStepOfSession(step, message, yield* nowIso);
+          }),
+        ),
+
       /**
        * Returns the runners among `candidates` that can host every agent
        * step of `plan`: those signed in to the provider instance of each

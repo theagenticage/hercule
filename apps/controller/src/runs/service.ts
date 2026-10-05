@@ -53,7 +53,6 @@ import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
-import type { StepSessionFailures } from "./session-observer";
 import type { WorkspaceSteps } from "./workspace-steps";
 
 const QueryInput = Schema.Struct({
@@ -92,6 +91,8 @@ const make = Effect.gen(function* () {
     completeStep: engine.completeStep,
     failRunsInWorkspace: engine.failRunsInWorkspace,
     failRunsPinnedTo: engine.failRunsPinnedTo,
+    failStepsOfEndedSessions: engine.failStepsOfEndedSessions,
+    failStepWithDroppedPrompt: engine.failStepWithDroppedPrompt,
     listOwedWorkspaceSteps: engine.listOwedWorkspaceSteps,
     listEndedWorkspaceSteps: engine.listEndedWorkspaceSteps,
     wakeRunsWaitingForRunner: engine.wakeRunsWaitingForRunner,
@@ -162,7 +163,6 @@ export const RunServiceLayer: Layer.Layer<
   | PlatformEvents
   | Notifier
   | ConnectionTypes
-  | StepSessionFailures
 > = Layer.effect(RunService)(make);
 
 /**

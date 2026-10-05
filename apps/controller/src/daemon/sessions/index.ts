@@ -12,6 +12,11 @@ export { AssistantSessionsLayer } from "./assistant-sessions";
 export { Dispatch, DispatchLayer } from "./dispatch";
 export { Live, LiveLayer, SessionInputDeadline } from "./live";
 export { LostRunnerSweepInterval, sweepSessionsOnLostRunners } from "./lost-runners";
-export { SessionObserverLayer } from "./observer";
+export {
+  RunServiceReference,
+  RunServiceReferenceFill,
+  RunServiceReferenceLayer,
+  SessionObserverLayer,
+} from "./observer";
 export { Placement, PlacementLayer } from "./placement";
 export { makeStepSessions } from "./step-sessions";

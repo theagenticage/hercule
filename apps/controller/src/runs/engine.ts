@@ -169,7 +169,6 @@ import {
   buildRunFailedNotification,
   decideRunFailedUnlessRaised,
 } from "./run-events";
-import { StepSessionFailures } from "./session-observer";
 import { makeSignalMatching } from "./signals";
 import { makeRunStart } from "./start";
 import {
@@ -373,7 +372,6 @@ export const makeRunEngine = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
   const runHeld = yield* runHeldSubscriptions;
-  const stepSessionFailures = yield* StepSessionFailures;
   // The listener that publishes a committed change on the live topics. A
   // run's execution is carried out apart from the request that started it,
   // so the listener is provided to the execution here.
@@ -801,10 +799,11 @@ export const makeRunEngine = Effect.gen(function* () {
     routeAfterStep,
   });
 
-  const { startAgentStep, filterAgentHosts } = yield* makeAgentSteps({
-    writeStepFailure,
-    placeOnRunner: placeWorkspaceStep,
-  });
+  const { startAgentStep, filterAgentHosts, failStepsOfEndedSessions, failStepWithDroppedPrompt } =
+    yield* makeAgentSteps({
+      writeStepFailure,
+      placeOnRunner: placeWorkspaceStep,
+    });
 
   /**
    * Completes a pending record of a signal trigger, which an event wrote
@@ -1129,27 +1128,6 @@ export const makeRunEngine = Effect.gen(function* () {
       if (runIds.length > 0) yield* afterCommit(() => executor.stop(runIds));
     });
 
-  // The runs domain's session observer fails an agent step whose turn no
-  // runner will report through this handler (see `session-observer.ts`).
-  // Once the transaction has committed, the Run Executor stops the run's
-  // execution, which may still carry out a parallel controller step.
-  stepSessionFailures.register(({ runId, record, message }) =>
-    withTransaction(
-      sql,
-      Effect.gen(function* () {
-        const at = yield* nowIso;
-        yield* writeStepFailure(
-          runId,
-          record,
-          { code: "session_failed", message },
-          "session-failed",
-          at,
-        );
-        yield* afterCommit(() => executor.stop([runId]));
-      }),
-    ),
-  );
-
   /**
    * Decodes a workspace step's output against its action's output schema,
    * and returns it encoded again, as it is stored. Fails the result with
@@ -1412,6 +1390,9 @@ export const makeRunEngine = Effect.gen(function* () {
       Effect.flatMap(runs.listPinnedTo(runnerId), (runIds) =>
         failRunsWhoseWorkspaceFailed(runIds, message),
       ),
+
+    failStepsOfEndedSessions,
+    failStepWithDroppedPrompt,
 
     /**
      * Returns every workspace step still running on a runner, for the

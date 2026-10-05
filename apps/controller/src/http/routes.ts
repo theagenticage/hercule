@@ -56,6 +56,7 @@ import {
   Retirement,
   RetirementLayer,
   RunExecutorLayer,
+  RunServiceReferenceFill,
   RunTargetsLayer,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
@@ -724,6 +725,10 @@ export const operationLayers = Layer.mergeAll(
   SubscriptionServiceLayer.pipe(Layer.provide(RunTargetsLayer), Layer.provide(RunDomainLayer)),
   EventKindsOperationLayer,
   RunDomainLayer,
+  // The session service's observer fails an agent step through the run
+  // service, which is built here, after the session service. So the observer
+  // holds a reference that this layer sets once the run service is built.
+  RunServiceReferenceFill.pipe(Layer.provide(RunDomainLayer)),
   LiveTopicsLayer,
   WsTicketsLayer,
 );

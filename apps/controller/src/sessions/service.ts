@@ -1137,11 +1137,11 @@ const make = Effect.gen(function* () {
      * Ends every session still open on a runner, with the same cleanup as any
      * other move to `exited` (`endSessions`), and each session is announced
      * once. Joins the caller's transaction as a savepoint.
-     * Returns the ids of the sessions that were `starting`, `idle` or `busy`,
-     * so a caller retiring the runner can tell it to stop each one before
-     * closing the connection.
+     * Returns the ended sessions as they were before. A caller retiring the
+     * runner tells it to stop each one that was `starting`, `idle` or `busy`
+     * before closing the connection.
      */
-    endOnRunner: (runnerId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    endOnRunner: (runnerId: string): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
@@ -1159,9 +1159,7 @@ const make = Effect.gen(function* () {
               }),
             { discard: true },
           );
-          // A queued session was never sent to the runner, so only the
-          // others have a process to stop.
-          return ended.filter((session) => session.status !== "queued").map(({ id }) => id);
+          return ended;
         }),
       ),
 
@@ -1174,9 +1172,11 @@ const make = Effect.gen(function* () {
      * Without this, a session on a runner that never comes back would keep a
      * valid token forever. Joins the caller's transaction, which is where
      * `connected` was read. Nothing is sent to a runner, because none of these
-     * runners is connected.
+     * runners is connected. Returns the ended sessions as they were before.
      */
-    endOnLostRunners: (connected: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
+    endOnLostRunners: (
+      connected: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
       Effect.gen(function* () {
         const at = yield* nowIso;
         const ended = yield* sessions.endOnLostRunners(connected, at);
@@ -1193,6 +1193,7 @@ const make = Effect.gen(function* () {
             }),
           { discard: true },
         );
+        return ended;
       }),
 
     /**

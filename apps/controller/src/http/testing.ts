@@ -52,6 +52,7 @@ import {
   RunFibers,
   SchedulerInterval,
   SessionInputDeadline,
+  RunServiceReferenceLayer,
   SessionObserverLayer,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -85,7 +86,7 @@ import { SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
-import { RunWorkspaceStepActivityLayer, StepSessionFailuresLayer } from "../runs";
+import { RunWorkspaceStepActivityLayer } from "../runs";
 import { WorkspaceServiceLayer } from "../workspaces";
 import {
   JoinTokens,
@@ -139,11 +140,11 @@ const buildServices = (home: string) =>
       ).pipe(
         // As in the real boot: sessions take and release workspace leases,
         // the workspace service asks the runs domain whether a workspace
-        // step is running, and the observer and the run engine share one
-        // `StepSessionFailures`.
+        // step is running, and the observer reaches the run service through
+        // the one `RunServiceReference` the operation layers set.
         Layer.provideMerge(WorkspaceServiceLayer),
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
-        Layer.provideMerge(StepSessionFailuresLayer),
+        Layer.provideMerge(RunServiceReferenceLayer),
       ),
     ),
     // One connection map and one probe driver: the socket route and every

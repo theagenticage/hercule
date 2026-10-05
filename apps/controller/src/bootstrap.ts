@@ -41,7 +41,9 @@ import {
   cancelStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
+  RunServiceReferenceLayer,
   SessionObserverLayer,
+  type RunServiceReference,
 } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
@@ -93,11 +95,7 @@ import {
 import { seed } from "./seed";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
-import {
-  RunWorkspaceStepActivityLayer,
-  StepSessionFailuresLayer,
-  type StepSessionFailures,
-} from "./runs";
+import { RunWorkspaceStepActivityLayer } from "./runs";
 import { WorkspaceService, WorkspaceServiceLayer, type WorkspaceStepActivity } from "./workspaces";
 
 /** Setup tokens are created and stored like every other Hercule token. */
@@ -243,7 +241,7 @@ export type ControllerServices =
   | SessionService
   | WorkspaceService
   | WorkspaceStepActivity
-  | StepSessionFailures
+  | RunServiceReference
   | ConnectionService
   | LocalRunnerId
   | HerculeHome
@@ -350,10 +348,10 @@ export const bootWith = <A, E>(
      * import the runs domain, so the two are joined here. The connection
      * service asks the resources and workflows domains, through the
      * `ConnectionReferences` port, what still names a Connection before it
-     * deletes one, and is joined to them here for the same reason. The run
-     * engine registers how it fails an agent step in `StepSessionFailures`,
-     * which the session service's observer calls, so the one instance is
-     * merged here for both.
+     * deletes one, and is joined to them here for the same reason. The
+     * session service's observer reaches the run service through
+     * `RunServiceReference`, which the operation layers set once they have
+     * built the run service, so the one reference is merged here for both.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
@@ -363,7 +361,7 @@ export const bootWith = <A, E>(
     ).pipe(
       Layer.provideMerge(WorkspaceServiceLayer),
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
-      Layer.provideMerge(StepSessionFailuresLayer),
+      Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(withFleet),
     );
 

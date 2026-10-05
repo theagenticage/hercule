@@ -13,11 +13,7 @@
 export { RunExecutor } from "./executor";
 export { runRepository } from "./repository";
 export { resumeUnfinishedRuns, RunService, RunServiceLayer } from "./service";
-export {
-  makeRunSessionObserver,
-  StepSessionFailures,
-  StepSessionFailuresLayer,
-} from "./session-observer";
+export { makeRunSessionObserver } from "./session-observer";
 export { isUnfinished } from "./step-records";
 export { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 export {

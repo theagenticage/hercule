@@ -1,6 +1,7 @@
 /**
  * Retiring a runner: marks it retired, ends the sessions it hosted and the
- * workspaces it held, and fails the runs pinned to it, in one transaction.
+ * workspaces it held, and fails the agent steps of those sessions and the
+ * runs pinned to it, in one transaction.
  * Then it tells the runner what to stop once that transaction has committed,
  * and wakes the runs waiting for a runner, which may have been waiting for
  * this one.
@@ -37,7 +38,7 @@ const make = Effect.gen(function* () {
       // stayed connected, pinging a controller that will never take it back.
       Effect.uninterruptible(
         Effect.gen(function* () {
-          const { detail, toStop } = yield* withTransaction(
+          const { detail, ended } = yield* withTransaction(
             sql,
             Effect.gen(function* () {
               // `retire` returns its timestamp, so the workspaces are marked lost
@@ -47,19 +48,29 @@ const make = Effect.gen(function* () {
               // running session, so this ends only queued sessions. With
               // `force`, it ends both. Either way a retired runner never
               // dispatches again, so nothing else would ever end them.
-              const toStop = yield* sessions.endOnRunner(detail.id);
+              const ended = yield* sessions.endOnRunner(detail.id);
               yield* workspaces.lostOnRunner(detail.id, at);
+              // The agent steps of the ended sessions fail first, so their
+              // runs fail as `session-failed`, with the step's own error. If
+              // the pinned runs failed first, they would end as
+              // `workspace-failed`, and a step of an ended run is no longer
+              // failed.
+              yield* runs.failStepsOfEndedSessions(
+                ended,
+                "The step's session ended because its runner was retired.",
+              );
               // A run pinned to the runner can never run another step in its
               // workspace, which is lost with the runner.
               yield* runs.failRunsPinnedTo(detail.id, `runner ${detail.name} was retired`);
-              return { detail, toStop };
+              return { detail, ended };
             }),
           );
           // After the commit: a session now marked exited may still have a
           // running harness on the runner, which needs a stop frame. Queued
           // sessions were never sent to the runner, so they get no frame.
-          for (const sessionId of toStop) {
-            yield* connections.tell(detail.id, sessions.stopping(sessionId));
+          for (const session of ended) {
+            if (session.status === "queued") continue;
+            yield* connections.tell(detail.id, sessions.stopping(session.id));
           }
           // Also after the commit: closing the socket for a retirement that then
           // rolled back would disconnect a runner the controller still has.
