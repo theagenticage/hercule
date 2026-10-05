@@ -1,6 +1,7 @@
 export { useMinuteClock, useTickingClock } from "./primitives/clock";
 export { useElementWidth } from "./primitives/element-width";
-export { useSessionFlag } from "./primitives/session-flag";
+export { DisclosureButton } from "./primitives/disclosure-button";
+export { useTabFlag } from "./primitives/tab-flag";
 export { cn } from "./primitives/cn";
 export { Button, buildButtonClassName, type ButtonVariant } from "./primitives/button";
 export { Checkbox, ChoiceInput } from "./primitives/checkbox";

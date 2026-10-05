@@ -260,7 +260,7 @@ export const buildThreadGroups = ({
   // Agent: an assistant's session shows under Assistants, and a workflow
   // step's session under its run.
   const threads = sessions.filter((session) => session.agentId === null);
-  const rows = buildThreadRows(threads, mode, instances);
+  const rows = buildThreadRows(threads, mode, runners, instances);
   const sessionsById = new Map(threads.map((session) => [session.id, session]));
   const listedProjectIds = new Set(projects.map((each) => each.id));
   // A draft for a project the list does not hold joins the threads with no

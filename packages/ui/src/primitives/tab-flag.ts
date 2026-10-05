@@ -9,7 +9,7 @@ import { useState } from "react";
  * caught: a browser that denies storage still shows the fold, and only
  * forgets whether it was open.
  */
-export function useSessionFlag(key: string): readonly [boolean, () => void] {
+export function useTabFlag(key: string): readonly [boolean, () => void] {
   const [flag, setFlag] = useState(() => {
     try {
       return sessionStorage.getItem(key) === "true";

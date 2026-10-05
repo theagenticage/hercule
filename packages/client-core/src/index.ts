@@ -277,9 +277,9 @@ export { findNextDurationChange, formatDuration } from "./threads/duration";
 export {
   buildHeadline,
   buildLanes,
+  buildStepSessionRows,
   describeStartingStep,
-  listWorkflowSessions,
-  summarizeWorkflowSessions,
+  summarizeStepSessions,
   type LaneKind,
 } from "./threads/lanes";
 export {
