@@ -775,8 +775,16 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // fiber. Interrupted between recording the step and the harness's
         // answer, the step would stay recorded with no turn, and its result
         // request after the reconnect would wait for a turn end that never
-        // comes. The close waits for this block instead, at most as long as
-        // the adapter's own timeout on the input.
+        // comes. The close waits for this block instead. Each adapter's own
+        // deadlines on its requests to the harness bound that wait:
+        //
+        // - claude-code: one control request of at most 5 seconds, sent only
+        //   when the input changes the model;
+        // - pi: up to three requests of at most 5 seconds each, two of them
+        //   only when the input changes the model;
+        // - codex: a steer and then a new turn, each at most 30 seconds plus
+        //   a few seconds of retries while the app-server is overloaded, so
+        //   more than a minute.
         return Effect.uninterruptible(
           Effect.flatMap(beginStep, (recorded) =>
             recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
