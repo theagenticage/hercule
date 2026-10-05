@@ -1,7 +1,8 @@
 /**
  * Tests the output that is not the generic table: the hint after a spawn, the
  * transcript, the output of workflow read, create, update and validate, and
- * the two catalogs used to write a workflow, and a notification's answers.
+ * the two catalogs used to write a workflow, a notification's answers, and
+ * a session's subagents.
  * Also tests two rules of all output: each table row stays on one line, and
  * no text reaches the terminal with characters the terminal would act on.
  */
@@ -100,6 +101,54 @@ describe("hercule transcript read", () => {
     expect(lines).toContain("more results: --cursor next, or --all");
   });
 
+  it("leaves out the subagent a row belongs to, but names the subagent a row started", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            buildTranscriptRow(1, { _tag: "turn.started", turnId: "t1", subagentId: "agent-a1" }),
+            buildTranscriptRow(2, {
+              _tag: "subagent.started",
+              subagentId: "agent-b2",
+              parentSubagentId: "agent-a1",
+            }),
+          ],
+        },
+      },
+      lookUpCommand("transcript", "read"),
+    );
+
+    expect(lines).toEqual([
+      "1  2026-09-07T10:00:00.000Z  turn.started",
+      "2  2026-09-07T10:00:00.000Z  subagent.started  subagentId=agent-b2  parentSubagentId=agent-a1",
+    ]);
+  });
+
+  it("prints the whole ids of the subagents a subagent item started, after its kind", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            buildTranscriptRow(1, {
+              _tag: "item.started",
+              turnId: "t1",
+              itemId: "i1",
+              kind: "subagent",
+              detail: { description: "x".repeat(200), subagentIds: ["agent-a1", "agent-b2"] },
+            }),
+          ],
+        },
+      },
+      lookUpCommand("transcript", "read"),
+    );
+
+    expect(lines[0]).toMatch(
+      /^1 {2}2026-09-07T10:00:00\.000Z {2}item\.started {2}kind=subagent {2}subagentIds=agent-a1,agent-b2 {2}detail=/,
+    );
+  });
+
   it("prints no results when the transcript is empty", () => {
     const lines = renderHuman(
       { kind: "value", value: { items: [] } },
@@ -107,6 +156,47 @@ describe("hercule transcript read", () => {
     );
 
     expect(lines).toEqual(["no results"]);
+  });
+});
+
+describe("hercule session subagent list", () => {
+  it("prints one row per subagent, its tokens summed, and no column no subagent fills", () => {
+    const startedAt = new Date().toISOString();
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            {
+              id: "agent-a1",
+              sessionId: SESSION,
+              status: "completed",
+              agentType: "Explore",
+              toolCalls: 3,
+              usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 5 },
+              startedAt,
+              description: "Find the login handler",
+              result: "It is in auth.ts\nline 12",
+            },
+            {
+              id: "agent-b2",
+              sessionId: SESSION,
+              parentSubagentId: "agent-a1",
+              status: "running",
+              toolCalls: 0,
+              startedAt,
+            },
+          ],
+        },
+      },
+      lookUpCommand("session", "subagent", "list"),
+    );
+
+    expect(lines).toEqual([
+      "id        parent    status     agentType  toolCalls  tokens  age  description             result",
+      "agent-a1            completed  Explore    3          125     now  Find the login handler  It is in auth.ts ...",
+      "agent-b2  agent-a1  running               0                  now",
+    ]);
   });
 });
 

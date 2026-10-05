@@ -14,7 +14,9 @@ import {
   describeResolution,
   describeTriggerOn,
   formatDescribeLine,
+  countUsedTokens,
   readJsonObject,
+  readStringList,
   readTimestamps,
 } from "@hercule/client-core";
 import {
@@ -27,6 +29,7 @@ import {
   type RunStarted,
   type RunSummary,
   type StructuredResult,
+  type Subagent,
   type Trigger,
   type Workflow,
   type WorkflowAction,
@@ -248,12 +251,38 @@ const describeResult = (structuredResult: unknown): string => {
   }
 };
 
+/**
+ * Checks whether a transcript line shows a field of its event. Besides the
+ * noise above, the line leaves out `subagentId`, the subagent an event belongs
+ * to: a transcript read holds the rows of one agent, so the field would repeat
+ * on every line. On `subagent.started` it is kept, because there it names the
+ * new subagent, which a reader can pass to `--subagent`.
+ */
+const showsTranscriptField = (tag: unknown, key: string): boolean =>
+  !TRANSCRIPT_NOISE.has(key) &&
+  key !== "structuredResult" &&
+  (key !== "subagentId" || tag === "subagent.started");
+
 /** Formats one transcript row as `<position>  <at>  <tag>  <the event's own fields>`. */
 const renderTranscriptLine = (row: Record<string, unknown>): string => {
   const event = (row["event"] ?? {}) as Record<string, unknown>;
   const fields = Object.entries(event)
-    .filter(([key]) => !TRANSCRIPT_NOISE.has(key) && key !== "structuredResult")
+    .filter(([key]) => showsTranscriptField(event["_tag"], key))
     .map(([key, value]) => `${key}=${abbreviateValue(value)}`);
+  // A `subagent` item names the subagents it started. Their ids are printed in
+  // full, right after the kind, because the detail they sit in is truncated
+  // and a reader passes them to `--subagent`.
+  const subagentIds =
+    event["kind"] === "subagent"
+      ? (readStringList(readJsonObject(event["detail"])?.["subagentIds"]) ?? [])
+      : [];
+  if (subagentIds.length > 0) {
+    fields.splice(
+      fields.findIndex((field) => field.startsWith("kind=")) + 1,
+      0,
+      `subagentIds=${subagentIds.map(removeTerminalControls).join(",")}`,
+    );
+  }
   // Put the result right after the turn's state, not where the event happens
   // to have it. The result is what the reader looks for, and after the usage
   // figures it would wrap off a 120-column terminal.
@@ -404,6 +433,40 @@ const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
 const renderRunList = (runs: ReadonlyArray<RunSummary>): ReadonlyArray<string> => {
   const now = new Date();
   return renderTable(runs.map((run) => summarizeRun(run, now)));
+};
+
+/**
+ * Returns a subagent as a row of `session subagent list`: its id, the
+ * subagent that started it, its status, what it is, how much it has done,
+ * its age, and what it was asked, is doing, or returned. A figure the harness
+ * never reported is an empty cell, never 0.
+ */
+const summarizeSubagent = (subagent: Subagent, now: Date): Record<string, unknown> => ({
+  id: subagent.id,
+  parent: subagent.parentSubagentId,
+  status: subagent.status,
+  agentType: subagent.agentType,
+  model: subagent.model,
+  toolCalls: subagent.toolCalls,
+  tokens: subagent.usage === undefined ? undefined : countUsedTokens(subagent.usage),
+  age: formatAge(subagent.startedAt, now),
+  description: subagent.description,
+  activity: subagent.activity,
+  result: subagent.result,
+});
+
+/**
+ * Returns the rows of `session subagent list` as a table. A column no
+ * subagent has a value for is left out: a harness that reports no models or
+ * no usage would otherwise print empty columns.
+ */
+const renderSubagentList = (subagents: ReadonlyArray<Subagent>): ReadonlyArray<string> => {
+  const now = new Date();
+  const rows = subagents.map((subagent) => summarizeSubagent(subagent, now));
+  return renderTableColumns(
+    rows,
+    listColumns(rows).filter((column) => rows.some((row) => row[column] !== undefined)),
+  );
 };
 
 /**
@@ -593,7 +656,8 @@ const renderNotificationDecided = (
 const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   // The derived client decoded each item with the operation's schema, so the
   // items of `run.query` are run summaries, those of `trigger.query` are
-  // triggers, and those of `notification.query` are notifications.
+  // triggers, those of `notification.query` are notifications, and those of
+  // `session.querySubagents` are subagents.
   const asLines =
     command.id === "transcript.read"
       ? renderTranscript
@@ -606,7 +670,10 @@ const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> 
           : command.id === "notification.query"
             ? (items: ReadonlyArray<Record<string, unknown>>) =>
                 renderNotificationList(items as unknown as ReadonlyArray<Notification>)
-            : renderTable;
+            : command.id === "session.querySubagents"
+              ? (items: ReadonlyArray<Record<string, unknown>>) =>
+                  renderSubagentList(items as unknown as ReadonlyArray<Subagent>)
+              : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 
