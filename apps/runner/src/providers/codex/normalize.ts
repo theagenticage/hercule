@@ -1,6 +1,6 @@
 /**
  * Converts the app-server's notifications into normalized provider events.
- * It takes one decoded frame and a small mutable per-session state, and
+ * It takes one decoded frame and a small mutable per-thread state, and
  * returns events. It uses no process, no socket, and no clock other than the
  * wall clock. Spec 06 section 6 owns the event taxonomy.
  *
@@ -27,6 +27,7 @@ import type {
   ProviderEvent,
   StreamKind,
   StructuredResult,
+  SubagentId,
   TurnState,
   Usage,
 } from "@hercule/protocol";
@@ -57,13 +58,17 @@ export interface Normalizing {
   readonly sessionId: string;
   /** The native thread id, included on every event so a surface can link the two. */
   readonly threadId: string;
+  /** The session's native root thread, excluded from subagent item links. */
+  readonly rootThreadId: string;
+  /** The subagent whose events this state normalizes, absent for the root. */
+  readonly subagentId: SubagentId | undefined;
   /**
    * The model the adapter last opened a turn with. `turn/started` does not
    * include it, and only the adapter knows which model it asked for.
    */
   model: string | undefined;
   readonly reasoning: Map<string, Channel>;
-  /** The schema every turn of this session must answer with, if there is one. */
+  /** The root's output schema, absent for a subagent whose answer belongs to its parent. */
   readonly outputSchema: OutputSchema | undefined;
   /**
    * The last item the running turn completed. The structured answer is read
@@ -84,24 +89,32 @@ export interface Normalizing {
   counted: TokenCounts;
 }
 
+/** Builds independent state for one native thread; only the root keeps an output schema. */
 export const buildNormalizingState = (
   sessionId: string,
   threadId: string,
   outputSchema: OutputSchema | undefined,
+  subagent?: { readonly subagentId: SubagentId; readonly rootThreadId: string },
 ): Normalizing => ({
   sessionId,
   threadId,
+  rootThreadId: subagent?.rootThreadId ?? threadId,
+  subagentId: subagent?.subagentId,
   model: undefined,
   reasoning: new Map(),
-  outputSchema,
+  outputSchema: subagent === undefined ? outputSchema : undefined,
   lastCompletedItem: undefined,
   turnStarted: false,
   previousTotal: undefined,
   counted: NO_TOKENS,
 });
 
-const buildSessionEnvelope = (state: Normalizing): Envelope =>
-  buildEnvelope(state.sessionId, { threadId: state.threadId });
+const buildThreadEnvelope = (
+  state: Normalizing,
+): Envelope & { readonly subagentId?: SubagentId } => ({
+  ...buildEnvelope(state.sessionId, { threadId: state.threadId }),
+  ...(state.subagentId === undefined ? {} : { subagentId: state.subagentId }),
+});
 
 /** Builds the `raw` field: the notification the event came from, under this adapter's channel. */
 const buildNotificationRaw = (payload: unknown): ReturnType<typeof buildRaw> =>
@@ -136,7 +149,8 @@ const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
   exitedReviewMode: "unknown",
 };
 
-const classifyItem = (item: ThreadItem): ItemKind | null => {
+const classifyItem = (state: Normalizing, item: ThreadItem): ItemKind | null => {
+  if (item.type === "userMessage" && state.subagentId !== undefined) return "user_message";
   const known: ItemKind | null | undefined = ITEM_KINDS[item.type];
   // An item type added after this release is still reported, as `unknown`.
   return known === undefined ? "unknown" : known;
@@ -158,8 +172,16 @@ export const readChangedPaths = (
  * called. Everything else stays in `raw`. A detail shaped like Codex's own
  * data would make the row look different depending on the harness.
  */
-const buildDetail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
+const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: Schema.Json } => {
   switch (item.type) {
+    case "userMessage":
+      return {
+        detail: {
+          text: item.content
+            .flatMap((input) => (input.type === "text" ? [input.text] : []))
+            .join("\n"),
+        },
+      };
     case "commandExecution":
       return { detail: { command: truncateMessage(item.command) } };
     case "fileChange": {
@@ -178,8 +200,25 @@ const buildDetail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
       return { detail: { name: truncateFact(item.name), kind: "native" } };
     case "webSearch":
       return { detail: { description: truncateMessage(item.query) } };
-    case "collabAgentToolCall":
-      return { detail: { name: truncateFact(item.tool) } };
+    case "collabAgentToolCall": {
+      const subagentIds = item.receiverThreadIds.filter((id) => id !== state.rootThreadId);
+      return {
+        detail: {
+          name: truncateFact(item.tool),
+          ...(subagentIds.length === 0 ? {} : { subagentIds }),
+          ...(item.prompt == null ? {} : { description: truncateMessage(item.prompt) }),
+        },
+      };
+    }
+    case "subAgentActivity":
+      return {
+        detail: {
+          name: item.kind,
+          ...(item.agentThreadId === state.rootThreadId
+            ? {}
+            : { subagentIds: [item.agentThreadId] }),
+        },
+      };
     default:
       // A plan, a reasoning block, an assistant message, a compaction and an
       // unmapped item are shown from their own text or their raw payload.
@@ -188,15 +227,15 @@ const buildDetail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
 };
 
 /**
- * Returns an item's final status. Only commands and patches have a status, and
- * only they can be declined. A declined item is reported as `declined`, not
- * `failed`: reporting it as a failure would make the agent look broken when
- * the user just said no.
+ * Returns an item's final status. A declined command or patch stays declined
+ * because the user refused it. An interrupted subagent call failed to finish
+ * its work, so the call is failed; the subagent's own turn reports its end.
  */
 const readItemStatus = (item: ThreadItem): ItemStatus => {
+  if (item.type === "subAgentActivity" && item.kind === "interrupted") return "failed";
   const status = "status" in item ? item.status : undefined;
   if (status === "declined") return "declined";
-  return status === "failed" ? "failed" : "completed";
+  return status === "failed" || status === "interrupted" ? "failed" : "completed";
 };
 
 /**
@@ -226,7 +265,7 @@ const buildContentDelta = (
 ): ReadonlyArray<ProviderEvent> => [
   {
     _tag: "content.delta",
-    ...buildSessionEnvelope(state),
+    ...buildThreadEnvelope(state),
     turnId: ensureId(params.turnId),
     itemId: ensureId(params.itemId),
     streamKind,
@@ -272,6 +311,45 @@ const NO_TOKENS: TokenCounts = {
   cachedInputTokens: 0,
   cacheWriteInputTokens: 0,
   outputTokens: 0,
+};
+
+/**
+ * Restores the thread's previous native total without counting its history.
+ * Returns false when the saved report belongs to another provider or thread,
+ * or its counters cannot be read. The controller stores the report unchanged;
+ * only this adapter knows how to interpret Codex's counters.
+ */
+export const restoreUsageReport = (state: Normalizing, report: unknown): boolean => {
+  if (
+    typeof report !== "object" ||
+    report === null ||
+    !("source" in report) ||
+    report.source !== CODEX_NOTIFICATION ||
+    !("payload" in report)
+  )
+    return false;
+  const payload = report.payload;
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("threadId" in payload) ||
+    payload.threadId !== state.threadId ||
+    !("tokenUsage" in payload)
+  )
+    return false;
+  const usage = payload.tokenUsage;
+  if (typeof usage !== "object" || usage === null || !("total" in usage)) return false;
+  const total = usage.total;
+  if (typeof total !== "object" || total === null) return false;
+  const counters = { ...NO_TOKENS };
+  for (const key of TOKEN_COUNT_KEYS) {
+    const value: unknown = (total as Record<string, unknown>)[key];
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return false;
+    counters[key] = value;
+  }
+  if (counters.cachedInputTokens > counters.inputTokens) return false;
+  state.previousTotal = counters;
+  return true;
 };
 
 /** Returns `total` minus `earlier`, count by count. A count may come out negative. */
@@ -356,7 +434,7 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
     return [
       {
         _tag: "runtime.warning",
-        ...buildSessionEnvelope(state),
+        ...buildThreadEnvelope(state),
         ...buildNotificationRaw(params),
         ...turn,
         message: truncateMessage(`${failure}: ${params.error.message} (Codex is retrying)`),
@@ -366,7 +444,7 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
   return [
     {
       _tag: "runtime.error",
-      ...buildSessionEnvelope(state),
+      ...buildThreadEnvelope(state),
       ...buildNotificationRaw(params),
       ...turn,
       class: failure,
@@ -491,7 +569,7 @@ export const normalize = (
       return [
         {
           _tag: "turn.started",
-          ...buildSessionEnvelope(state),
+          ...buildThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turn.id),
           ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
@@ -510,7 +588,7 @@ export const normalize = (
       return [
         {
           _tag: "turn.completed",
-          ...buildSessionEnvelope(state),
+          ...buildThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turn.id),
           state: ended,
@@ -520,17 +598,17 @@ export const normalize = (
     }
     case "item/started": {
       const params = frame.params as ItemStartedNotification;
-      const kind = classifyItem(params.item);
+      const kind = classifyItem(state, params.item);
       if (kind === null) return [];
       return [
         {
           _tag: "item.started",
-          ...buildSessionEnvelope(state),
+          ...buildThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turnId),
           itemId: ensureId(params.item.id),
           kind,
-          ...buildDetail(params.item),
+          ...buildDetail(state, params.item),
         },
       ];
     }
@@ -539,18 +617,18 @@ export const normalize = (
       // Recorded before the item is classified, because the echo of the user's
       // message also counts: a turn that ends on that echo has no answer.
       state.lastCompletedItem = params.item;
-      const kind = classifyItem(params.item);
+      const kind = classifyItem(state, params.item);
       if (kind === null) return [];
       return [
         {
           _tag: "item.completed",
-          ...buildSessionEnvelope(state),
+          ...buildThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turnId),
           itemId: ensureId(params.item.id),
           kind,
           status: readItemStatus(params.item),
-          ...buildDetail(params.item),
+          ...buildDetail(state, params.item),
         },
       ];
     }
@@ -561,7 +639,7 @@ export const normalize = (
       return [
         {
           _tag: "session.usage.updated",
-          ...buildSessionEnvelope(state),
+          ...buildThreadEnvelope(state),
           ...buildNotificationRaw(params),
           usage,
         },

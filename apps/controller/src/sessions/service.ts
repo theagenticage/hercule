@@ -1357,19 +1357,28 @@ const make = Effect.gen(function* () {
     /**
      * Returns the subagents a resumed session's harness is told about, so
      * the adapter puts a subagent it continues back on the record the
-     * controller already has. Checks no grant: the controller daemon calls
+     * controller already has. Each saved provider usage report goes back
+     * unchanged, so its adapter can restore native counters without reading
+     * the transcript. Checks no grant: the controller daemon calls
      * it while it builds a resume spec.
      */
     listSubagentsToContinue: (
       sessionId: string,
     ): Effect.Effect<
-      ReadonlyArray<{ readonly subagentId: SubagentId; readonly itemId?: string }>,
+      ReadonlyArray<{
+        readonly subagentId: SubagentId;
+        readonly itemId?: string;
+        readonly lastUsageReport?: NonNullable<ProviderEvent["raw"]>;
+      }>,
       SqlError
     > =>
       Effect.map(subagents.listAll(sessionId), (records) =>
         records.map((record) => ({
           subagentId: record.id,
           ...(record.itemId === undefined ? {} : { itemId: record.itemId }),
+          ...(record.lastUsageReport === undefined
+            ? {}
+            : { lastUsageReport: record.lastUsageReport }),
         })),
       ),
 

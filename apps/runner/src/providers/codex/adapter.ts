@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as PubSub from "effect/PubSub";
 import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
@@ -19,7 +20,6 @@ import type {
   ApprovalDecision,
   ExitReason,
   ModelSelection,
-  OpenRequest,
   ProbeResult,
   ProviderEvent,
   QuestionAnswers,
@@ -37,8 +37,16 @@ import { buildUserMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
 import { truncateMessage } from "../text";
 import { now } from "../../report";
-import { ASKED, type Asked } from "./approvals";
-import { normalize, readChangedPaths, buildNormalizingState, type Normalizing } from "./normalize";
+import { ASKED } from "./approvals";
+import { normalize, readChangedPaths } from "./normalize";
+import {
+  makeCodexThreads,
+  readThreadId,
+  type CodexThreads,
+  type Park,
+  type ThreadFrame,
+  type ThreadState,
+} from "./threads";
 import {
   makeCodexInstall,
   initializeAppServer,
@@ -98,41 +106,11 @@ interface Host extends AppServer {
   readonly sessionId: string | undefined;
 }
 
-/**
- * A request from Codex that the session is parked on: the request surfaces
- * show, and what is needed to reply to it. `id` is Codex's own frame id and
- * is sent back unchanged. Codex uses both string and number ids, and a reply
- * under a converted id would not match the request.
- */
-interface Park {
-  readonly id: string | number;
-  readonly request: OpenRequest;
-  readonly asked: Asked;
-  readonly params: unknown;
-}
-
-/** One session this adapter hosts, and what the adapter knows about its thread. */
+/** One session and every Codex thread its app-server runs. */
 interface Held {
   readonly binding: SessionBinding;
   readonly host: Host;
-  readonly state: Normalizing;
-  /** The turn the adapter believes is running. While it is set, an input steers that turn. */
-  turnId: string | undefined;
-  /**
-   * The request this adapter has reported for the session, and the requests
-   * that arrived while it was open. Codex can send a second request before
-   * the first is resolved, and waits for both. This adapter still reports one
-   * request at a time, so the second waits here and is reported once the
-   * first is resolved. Reporting every request at once, each with its asking
-   * subagent, is the Codex subagents ticket (#437, spec 06 section 13.3).
-   */
-  open: Park | undefined;
-  readonly waiting: Array<Park>;
-  /**
-   * The paths of each running file change item, by item id. A file change
-   * request has no paths at this release, so the card takes them from the item.
-   */
-  readonly fileChanges: Map<string, ReadonlyArray<string>>;
+  readonly threads: CodexThreads;
 }
 
 /**
@@ -220,12 +198,6 @@ const retryWhileOverloaded = <A>(request: Effect.Effect<A, RpcError>): Effect.Ef
     while: (error: RpcError) => error.code === OVERLOADED,
   });
 
-/** Returns the `threadId` in a frame's params, or `undefined` if there is none. */
-const readThreadId = (params: unknown): string | undefined => {
-  const threadId = (params as { readonly threadId?: unknown } | null | undefined)?.threadId;
-  return typeof threadId === "string" ? threadId : undefined;
-};
-
 /**
  * Builds the developer instructions for one thread. A Codex thread accepts only
  * one set of instructions, so the parts are joined with a blank line between
@@ -309,18 +281,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     PubSub.publishUnsafe(published, event);
   };
 
-  /** Returns the session this host serves, or `undefined` until its thread is open. */
-  const findHostSession = (host: Host): Held | undefined =>
-    host.sessionId === undefined ? undefined : sessions.get(host.sessionId);
-
-  /**
-   * Returns the session on this host whose thread is `threadId`, or
-   * `undefined`. A thread belongs to one app-server, so only this host's
-   * session is checked.
-   */
-  const findThreadSession = (host: Host, threadId: string): Held | undefined => {
-    const held = findHostSession(host);
-    return held?.binding.nativeSessionId === threadId ? held : undefined;
+  /** Returns only the current session hosted by this exact process. */
+  const findHostSession = (host: Host): Held | undefined => {
+    const held = host.sessionId === undefined ? undefined : sessions.get(host.sessionId);
+    return held?.host === host ? held : undefined;
   };
 
   /**
@@ -360,6 +324,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     // server may close the thread or the app-server may die, which already
     // ended this session. A second exit would record the same end twice.
     if (sessions.get(held.binding.sessionId) !== held) return;
+    held.threads.close();
     sessions.delete(held.binding.sessionId);
     emit({
       _tag: "session.exited",
@@ -520,114 +485,100 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       );
     });
 
+  /** Delivers a known thread's frame without letting malformed vendor data stop the reader. */
+  const dispatchThreadFrame = (held: Held, thread: ThreadState, frame: ThreadFrame): void => {
+    try {
+      if ("id" in frame) {
+        openRequest(held, thread, frame);
+        return;
+      }
+      if (frame.method === "thread/closed") {
+        if (thread === held.threads.root) exitSession(held, "idle_unload");
+        return;
+      }
+      for (const event of normalize(thread.state, frame)) {
+        if (event._tag !== "session.usage.updated") emit(event);
+        else {
+          thread.usage = event.usage;
+          const { subagentId, ...aggregate } = event;
+          if (subagentId !== undefined) emit(event);
+          emit({ ...aggregate, eventId: crypto.randomUUID(), usage: held.threads.sumUsage() });
+        }
+      }
+      if (frame.method === "item/started" || frame.method === "item/completed") {
+        const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
+        if (item.type === "fileChange") {
+          if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
+          else thread.fileChanges.set(item.id, readChangedPaths(item));
+        }
+      }
+      if (frame.method === "turn/started") {
+        thread.turnId ??= (frame.params as TurnStartedNotification).turn.id;
+      } else if (frame.method === "turn/completed") {
+        const turn = (frame.params as TurnCompletedNotification).turn;
+        if (turn.status !== "inProgress" && turn.id === thread.turnId) {
+          thread.turnId = undefined;
+          // The turn event closes its Requests at the controller. Codex still
+          // needs a reply to each native RPC, but no duplicate resolution event.
+          cancelRequests(held, thread, false);
+          thread.fileChanges.clear();
+        }
+      }
+    } catch {
+      if ("id" in frame)
+        refuseRequest(held.host, frame, {
+          code: INVALID_REQUEST,
+          message: `Hercule could not read this ${frame.method} request`,
+        });
+      warn(held.host, `the app-server sent a ${frame.method} that this build could not read`);
+    }
+  };
+
   const onNotification = (host: Host, frame: NotificationFrame): void => {
-    const threadId = readThreadId(frame.params);
-    const held = threadId === undefined ? undefined : findThreadSession(host, threadId);
-    if (held === undefined) return;
-    // The thread is unloaded and its rollout is on disk, so this is the one
-    // exit a later session can continue from (spec 06 section 4.1).
-    if (frame.method === "thread/closed") {
-      exitSession(held, "idle_unload");
-      return;
-    }
-    for (const event of normalize(held.state, frame)) emit(event);
-    // A file change request has no paths at this release, so the card shows
-    // the item's paths. They are kept from when the item starts until it
-    // completes, which is when a request for it can arrive.
-    if (frame.method === "item/started" || frame.method === "item/completed") {
-      const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
-      if (item.type !== "fileChange") return;
-      if (frame.method === "item/completed") held.fileChanges.delete(item.id);
-      else {
-        held.fileChanges.set(item.id, readChangedPaths(item));
-      }
-      return;
-    }
-    // Track which turn is running, which decides whether the next input
-    // steers it.
-    if (frame.method === "turn/started") {
-      // The turn id from the `turn/start` reply is already set, and it is the
-      // turn this session steers. A turn started some other way does not
-      // replace it.
-      held.turnId ??= (frame.params as TurnStartedNotification).turn.id;
-    } else if (frame.method === "turn/completed") {
-      const turn = (frame.params as TurnCompletedNotification).turn;
-      // Only the running turn's completion clears it. Otherwise a completion
-      // for another turn would make the next input start a second turn
-      // beside the running one.
-      if (turn.status !== "inProgress" && turn.id === held.turnId) {
-        held.turnId = undefined;
-        // The controller closes the open request when the turn ends, so no
-        // resolution is reported for it. But Codex is still waiting for a
-        // reply to every request it sent, and a request left without a reply
-        // leaves the connection in an unknown state.
-        cancelWaiting(held);
-        const open = held.open;
-        held.open = undefined;
-        if (open !== undefined) cancelPark(held, open);
-        held.fileChanges.clear();
-      }
-    }
+    findHostSession(host)?.threads.receive(frame);
   };
 
-  /** Replies to a request with a cancel, in the reply shape Codex expects for it. */
-  const cancelPark = (held: Held, park: Park): void => {
-    held.host.rpc.answer(park.id, park.asked.replies("cancel", park.params));
-  };
-
-  /**
-   * Cancels every waiting request that was never shown to the user. No event
-   * is emitted, because no surface was ever told these requests existed.
-   */
-  const cancelWaiting = (held: Held): void => {
-    for (const park of held.waiting.splice(0)) cancelPark(held, park);
-  };
-
-  /** Makes `park` the session's open request and emits `request.opened`. */
-  const announce = (held: Held, park: Park): void => {
-    held.open = park;
-    emit({
-      _tag: "request.opened",
-      eventId: crypto.randomUUID(),
-      sessionId: held.binding.sessionId,
-      at: now(),
-      request: park.request,
-    });
-  };
-
-  /**
-   * Resolves the open request: sends `reply` to Codex, emits
-   * `request.resolved` with the user's decision or answers, and opens the
-   * next waiting request, if any.
-   */
+  /** Resolves one Request under its asking thread and native RPC id. */
   const resolvePark = (
     held: Held,
+    thread: ThreadState,
     park: Park,
     reply: RpcReply,
     resolution: RequestResolution,
+    report = true,
   ): void => {
-    held.open = undefined;
+    thread.parks.delete(park.request.requestId);
     held.host.rpc.answer(park.id, reply);
-    emit({
-      _tag: "request.resolved",
-      eventId: crypto.randomUUID(),
-      sessionId: held.binding.sessionId,
-      at: now(),
-      requestId: park.request.requestId,
-      ...resolution,
-    });
-    const next = held.waiting.shift();
-    if (next !== undefined) announce(held, next);
+    if (report)
+      emit({
+        _tag: "request.resolved",
+        eventId: crypto.randomUUID(),
+        sessionId: held.binding.sessionId,
+        at: now(),
+        requestId: park.request.requestId,
+        ...(thread.state.subagentId === undefined ? {} : { subagentId: thread.state.subagentId }),
+        ...resolution,
+      });
   };
 
-  /** Returns the session's open request when its id is `requestId`, or `undefined`. */
-  const findOpenPark = (
-    sessionId: string,
-    requestId: string,
-  ): { readonly held: Held; readonly park: Park } | undefined => {
+  /** Cancels only the Requests of the thread whose work ended. */
+  const cancelRequests = (held: Held, thread: ThreadState, report = true): void => {
+    for (const park of [...thread.parks.values()])
+      resolvePark(
+        held,
+        thread,
+        park,
+        park.asked.replies("cancel", park.params),
+        { decision: "cancel" },
+        report,
+      );
+  };
+
+  /** Finds a Request in this session, regardless of which agent asked first. */
+  const findOpenPark = (sessionId: string, requestId: string) => {
     const held = sessions.get(sessionId);
-    const park = held?.open;
-    return held === undefined || park?.request.requestId !== requestId ? undefined : { held, park };
+    const found = held?.threads.findRequest(requestId);
+    return held === undefined || found === undefined ? undefined : { held, ...found };
   };
 
   /**
@@ -660,10 +611,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       warn(host, `the app-server sent ${frame.method}, which this runner build does not support`);
       return;
     }
-    const threadId = readThreadId(frame.params);
-    const held = threadId === undefined ? undefined : findThreadSession(host, threadId);
-    // No session here holds the thread, so there is nobody to ask. No warning
-    // is emitted either: it would go to a session the request is not about.
+    const held = findHostSession(host);
+    const threadId = readThreadId(frame);
     if (threadId === undefined || held === undefined) {
       refuseRequest(host, frame, {
         code: INVALID_REQUEST,
@@ -671,36 +620,57 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       });
       return;
     }
-    const requestId = crypto.randomUUID();
-    const request = asked.opens(frame.params, {
-      requestId,
-      threadId,
-      paths: (itemId) => held.fileChanges.get(itemId) ?? [],
-    });
-    const park: Park = { id: frame.id, request, asked, params: frame.params };
-    // Codex can send a second request before the first is resolved, and waits
-    // for both. The second is opened once the first is resolved.
-    if (held.open === undefined) announce(held, park);
-    else held.waiting.push(park);
+    held.threads.receive(frame);
   };
 
-  /**
-   * Interrupts the running turn, if the adapter believes there is one. Never
-   * fails: an error reply means the turn is already over, which is the same
-   * outcome, and a timeout is ignored too.
-   */
-  const interruptTurn = (held: Held): Effect.Effect<void> =>
-    held.turnId === undefined
+  /** Publishes every Request immediately, with the identity of its asker. */
+  const openRequest = (held: Held, thread: ThreadState, frame: ServerRequestFrame): void => {
+    const asked = ASKED[frame.method]!;
+    const request = asked.opens(frame.params, {
+      requestId: crypto.randomUUID(),
+      threadId: thread.state.threadId,
+      paths: (itemId) => thread.fileChanges.get(itemId) ?? [],
+    });
+    const park: Park = { id: frame.id, request, asked, params: frame.params };
+    thread.parks.set(request.requestId, park);
+    emit({
+      _tag: "request.opened",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      request,
+      ...(thread.state.subagentId === undefined ? {} : { subagentId: thread.state.subagentId }),
+    });
+    if (held.threads.isStopped(thread)) cancelRequests(held, thread);
+  };
+
+  /** Interrupts only this thread's native turn, within the control deadline. */
+  const interruptTurn = (held: Held, thread: ThreadState): Effect.Effect<void> =>
+    thread.turnId === undefined
       ? Effect.void
       : Effect.ignore(
           Effect.timeout(
             held.host.rpc.request("turn/interrupt", {
-              threadId: held.binding.nativeSessionId,
-              turnId: held.turnId,
+              threadId: thread.state.threadId,
+              turnId: thread.turnId,
             } satisfies TurnInterruptParams),
             CONTROL_DEADLINE,
           ),
         );
+
+  /** Cancels a thread's Requests before stopping the turn that asked them. */
+  const stopThread = (held: Held, thread: ThreadState): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      cancelRequests(held, thread);
+      return interruptTurn(held, thread);
+    });
+
+  /** Stops selected threads together, so a silent child cannot delay its siblings. */
+  const stopThreads = (held: Held, subagentId?: SubagentId): Effect.Effect<void> =>
+    Effect.forEach(held.threads.selectForStop(subagentId), (thread) => stopThread(held, thread), {
+      concurrency: "unbounded",
+      discard: true,
+    });
 
   const getHostedSession = (sessionId: string): Effect.Effect<Held, string> =>
     Effect.suspend(() => {
@@ -722,7 +692,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       // Codex takes the schema per turn, not per thread, so every turn of the
       // session sends it. If it were sent only once, the second turn of an
       // Agent's session would answer in prose.
-      const schema = held.state.outputSchema;
+      const schema = held.threads.root.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
         input: [buildTextInput(input.text)],
@@ -735,14 +705,15 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       // The normalizer reports this model on `turn.started`, because the
       // notification has no model. It is set before the request is sent,
       // because `turn/started` can arrive before this fiber resumes.
-      const before = held.state.model;
-      if (input.modelSelection !== undefined) held.state.model = input.modelSelection.model;
+      const before = held.threads.root.state.model;
+      if (input.modelSelection !== undefined)
+        held.threads.root.state.model = input.modelSelection.model;
       const answer = yield* Effect.mapError(
         retryWhileOverloaded(held.host.rpc.request("turn/start", params)),
         (error) => {
           // No turn started, so restore the previous model for the next turn
           // to report.
-          held.state.model = before;
+          held.threads.root.state.model = before;
           return error.message;
         },
       );
@@ -896,17 +867,20 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           nativeSessionId: opened,
           instanceId: spec.instanceId,
         };
-        const state = buildNormalizingState(sessionId, opened, spec.outputSchema);
-        state.model = spec.modelSelection.model;
-        sessions.set(sessionId, {
+        const held: Held = {
           binding,
           host,
-          state,
-          turnId: undefined,
-          open: undefined,
-          waiting: [],
-          fileChanges: new Map(),
-        });
+          threads: makeCodexThreads({
+            sessionId,
+            rootThreadId: opened,
+            spec,
+            rpc: host.rpc,
+            emit,
+            dispatch: (thread, frame) => dispatchThreadFrame(held, thread, frame),
+            interrupt: (thread) => stopThread(held, thread),
+          }),
+        };
+        sessions.set(sessionId, held);
         // The native id is sent on this event because the controller has no
         // other way to learn it: a session started after the runner's hello
         // is not listed again.
@@ -923,14 +897,21 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
-        const running = held.turnId;
-        const steered =
-          running === undefined ? undefined : yield* steerTurn(held, input.text, running);
-        const sent = steered ?? (yield* startTurn(held, input));
+        yield* held.threads.restoreUsage;
+        const running = held.threads.root.turnId;
+        held.threads.beginInput();
+        const sent = yield* Effect.onExit(
+          Effect.gen(function* () {
+            const steered =
+              running === undefined ? undefined : yield* steerTurn(held, input.text, running);
+            return steered ?? (yield* startTurn(held, input));
+          }),
+          (exit) => Effect.sync(() => held.threads.finishInput(Exit.isSuccess(exit))),
+        );
         // The turn counts as running from the reply, not from the
         // `turn/started` notification after it: an input arriving in between
         // would otherwise start a second turn.
-        held.turnId = sent.turnId;
+        held.threads.root.turnId = sent.turnId;
         for (const event of buildUserMessage({
           sessionId,
           turnId: sent.turnId,
@@ -945,29 +926,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
     interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
-        // This adapter reports no subagents yet, so no subagent id can name
-        // work it runs, and stopping the session's own turn instead would stop
-        // work the user did not ask to stop. Stopping a subagent is built
-        // together with reporting them (#437).
-        if (subagentId !== undefined) return Effect.void;
         const held = sessions.get(sessionId);
-        // No event is emitted here: the turn completing as `interrupted`
-        // reports the interrupt.
-        if (held === undefined) return Effect.void;
-        // The turn is waiting on its unresolved requests, so they are all
-        // cancelled first, with the closest reply each request's shape allows.
-        // The waiting requests are cancelled before the open one, so that
-        // resolving the open one does not open any of them.
-        cancelWaiting(held);
-        const open = held.open;
-        // The open request is reported as resolved with `cancel`, because
-        // the interrupt is what ended it.
-        if (open !== undefined) {
-          resolvePark(held, open, open.asked.replies("cancel", open.params), {
-            decision: "cancel",
-          });
-        }
-        return interruptTurn(held);
+        return held === undefined ? Effect.void : stopThreads(held, subagentId);
       }),
 
     respondToApprovalRequest: (
@@ -986,15 +946,12 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         ) {
           return Effect.void;
         }
-        const { held, park } = found;
-        // A decision that ends the turn cancels every waiting request with it,
-        // so none of them is shown to the user only to be cancelled at once.
-        const ending = park.asked.endsTurn.includes(decision);
-        if (ending) cancelWaiting(held);
-        resolvePark(held, park, park.asked.replies(decision, park.params), { decision });
-        // Interrupt only when the reply cannot express the decision itself;
-        // every other row tells Codex to stop through its own reply.
-        return ending ? interruptTurn(held) : Effect.void;
+        const { held, thread, park } = found;
+        resolvePark(held, thread, park, park.asked.replies(decision, park.params), { decision });
+        // Cancel ends the asking agent alone. The explicit Stop operation is
+        // the operation that also stops descendants.
+        if (decision === "cancel") cancelRequests(held, thread);
+        return park.asked.endsTurn.includes(decision) ? interruptTurn(held, thread) : Effect.void;
       }),
 
     respondToQuestion: (
@@ -1009,7 +966,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             ? found.park.asked.answers?.(answers, found.park.params)
             : undefined;
         if (found === undefined || reply === undefined) return;
-        resolvePark(found.held, found.park, reply, { answers });
+        resolvePark(found.held, found.thread, found.park, reply, { answers });
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
@@ -1023,7 +980,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // app-server would keep working in the workspace until it is killed,
         // and nobody would receive its notifications.
         return Effect.andThen(
-          interruptTurn(held),
+          stopThreads(held),
           Effect.sync(() => exitSession(held, reason)),
         );
       }),

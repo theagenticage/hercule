@@ -481,6 +481,25 @@ describe("what the controller sends for a session", () => {
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(forked))).toEqual(forked);
   });
 
+  it("returns a saved provider usage report unchanged on a resume", () => {
+    const lastUsageReport = {
+      source: "codex.app-server.notification",
+      payload: {
+        threadId: "agent-a",
+        tokenUsage: { total: { inputTokens: 10 }, last: { inputTokens: 10 } },
+      },
+    };
+    const resumed = {
+      ...spec,
+      continue: {
+        nativeSessionId: "native-1",
+        mode: "resume",
+        subagents: [{ subagentId: "agent-a", lastUsageReport }],
+      },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(resumed))).toEqual(resumed);
+  });
+
   it("accepts a session without a workspace as an explicit null, never as an absent key", () => {
     expect(decode(SessionSpec, { ...spec, workspaceId: "w1" })._tag).toBe("Success");
     expect(decode(SessionSpec, omitKey(spec, "workspaceId"))._tag).toBe("Failure");

@@ -72,7 +72,7 @@ const seedAndMigrate = (): Promise<Migrated> =>
           ),
         { discard: true },
       );
-      yield* runMigrations();
+      yield* runMigrations(migrations.filter(([id]) => id <= 48));
 
       const sessions = yield* sql<{
         readonly id: Uint8Array;

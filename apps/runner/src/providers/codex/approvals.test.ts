@@ -426,11 +426,15 @@ describe("answering a question the agent asks", () => {
     expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
   });
 
-  it("opens the next waiting request once the question is answered", async () => {
+  it("answers a question while another Request stays open", async () => {
     const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
     run.server.push({ id: SECOND_ID, method: COMMAND, params: COMMAND_PARAMS });
     await settle();
-    const question = await awaitOpenedRequest(run);
+    await waitUntil(
+      "opened both requests",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+    const question = filterByTag(run.seen, "request.opened")[0]!;
 
     await Effect.runPromise(
       run.adapter.respondToQuestion(SESSION, question.request.requestId, {
@@ -706,52 +710,39 @@ describe("an approval resolved while the turn is still running", () => {
 describe("a second request Codex sends before the first is resolved", () => {
   const SECOND_PARAMS = { ...COMMAND_PARAMS, itemId: FILE_ITEM, command: "rm -rf dist" };
 
-  it("opens them one at a time, and replies to each under its own id", async () => {
+  it("opens both at once and accepts answers in reverse order", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
-    await settle();
-
-    // The adapter reports one request at a time and holds the second back,
-    // while Codex waits for both. Each is answered under its own id.
-    const first = await awaitOpenedRequest(run);
-    expect(first.request.detail).toEqual({ command: "rm -rf build" });
-    expect(run.answered).toEqual([]);
-
-    await Effect.runPromise(
-      run.adapter.respondToApprovalRequest(SESSION, first.request.requestId, "allow"),
-    );
-
     await waitUntil(
-      "opened the second",
+      "opened both requests",
       () => filterByTag(run.seen, "request.opened").length === 2,
     );
-    const second = filterByTag(run.seen, "request.opened")[1]!;
-    expect(second.request.detail).toEqual({ command: "rm -rf dist" });
-    expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "accept" });
-
+    const [first, second] = filterByTag(run.seen, "request.opened");
+    expect(run.answered).toEqual([]);
     await Effect.runPromise(
-      run.adapter.respondToApprovalRequest(SESSION, second.request.requestId, "deny"),
+      run.adapter.respondToApprovalRequest(SESSION, second!.request.requestId, "deny"),
     );
-
     expect((await awaitAnswer(run, SECOND_ID)).result).toEqual({ decision: "decline" });
-    expect(listResolutions(run)).toEqual(["allow", "deny"]);
+    expect(run.answered.some((reply) => reply.id === ID)).toBe(false);
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, first!.request.requestId, "allow_always"),
+    );
+    expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "acceptForSession" });
+    expect(listResolutions(run)).toEqual(["deny", "allow_always"]);
   });
 
-  it("cancels the waiting request too when the session is interrupted", async () => {
+  it("cancels every open Request when the session is interrupted", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
-    await settle();
-    const first = await awaitOpenedRequest(run);
-
+    await waitUntil(
+      "opened both requests",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
     await Effect.runPromise(run.adapter.interrupt(SESSION));
-
     expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "cancel" });
     expect((await awaitAnswer(run, SECOND_ID)).result).toEqual({ decision: "cancel" });
-    // Only the open request was ever reported as opened, so only it is reported as resolved.
-    const resolved = filterByTag(run.seen, "request.resolved");
-    expect(resolved).toHaveLength(1);
-    expect(resolved[0]).toMatchObject({ requestId: first.request.requestId, decision: "cancel" });
-    expect(filterByTag(run.seen, "request.opened")).toHaveLength(1);
+    expect(filterByTag(run.seen, "request.resolved")).toHaveLength(2);
+    expect(listResolutions(run)).toEqual(["cancel", "cancel"]);
   });
 });
 
@@ -828,21 +819,49 @@ describe("a handled request this build could not read", () => {
 
 const OTHER_THREAD = "0199e0e7-0000-7000-8000-0000000000e9";
 
-describe("a request about a thread no session here holds", () => {
-  it("rejects it without warning a session it is not about", async () => {
-    const run = await startBusySession();
-
+describe("a Request from a thread first discovered through its approval", () => {
+  it("reads metadata, introduces the child and publishes the Request", async () => {
+    const run = await startBusySession({
+      "thread/read": () => ({
+        thread: {
+          id: OTHER_THREAD,
+          parentThreadId: THREAD,
+          model: "gpt-5.5",
+          agentRole: "reviewer",
+          agentNickname: "Audit",
+          source: {
+            subAgent: {
+              thread_spawn: {
+                parent_thread_id: THREAD,
+                depth: 1,
+                agent_path: "/root/audit",
+                agent_nickname: "Audit",
+                agent_role: "reviewer",
+              },
+            },
+          },
+        },
+      }),
+    });
     run.server.push({
       id: "req-c",
       method: COMMAND,
       params: { ...COMMAND_PARAMS, threadId: OTHER_THREAD },
     });
-
-    expect((await awaitAnswer(run, "req-c")).error?.code).toBe(INVALID_REQUEST);
-    await settle();
-    // No session holds the thread, so no session is warned.
-    expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
-    expect(filterByTag(run.seen, "request.opened")).toEqual([]);
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.subagentId).toBe(OTHER_THREAD);
+    expect(filterByTag(run.seen, "subagent.started")[0]).toMatchObject({
+      subagentId: OTHER_THREAD,
+      description: "Audit",
+      agentType: "reviewer",
+    });
+    expect(listSentParams(run.requests, "thread/read")).toEqual([
+      { threadId: OTHER_THREAD, includeTurns: false },
+    ]);
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
+    );
+    expect((await awaitAnswer(run, "req-c")).result).toEqual({ decision: "accept" });
   });
 });
 
@@ -872,7 +891,7 @@ describe("a request whose turn ends before it is resolved", () => {
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
 
-  it("replies to the waiting requests too, so none is left without a reply", async () => {
+  it("replies to every open Request when the turn ends", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     run.server.push({
       id: SECOND_ID,
@@ -891,10 +910,10 @@ describe("a request whose turn ends before it is resolved", () => {
 
     await settle();
     expect(run.answered).toEqual([
-      { id: SECOND_ID, result: { decision: "cancel" } },
       { id: ID, result: { decision: "cancel" } },
+      { id: SECOND_ID, result: { decision: "cancel" } },
     ]);
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
-    expect(filterByTag(run.seen, "request.opened")).toHaveLength(1);
+    expect(filterByTag(run.seen, "request.opened")).toHaveLength(2);
   });
 });

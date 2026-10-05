@@ -23,7 +23,9 @@ import { addUsageSnapshot, clearProcessShare } from "./usage";
 /**
  * A subagent record as stored. Absent fields are `undefined` rather than
  * missing, and `usageProcess` is the current process's last usage snapshot,
- * which `addUsageSnapshot` needs and the API never shows.
+ * which `addUsageSnapshot` needs and the API never shows. `lastUsageReport`
+ * keeps the provider's original report behind that snapshot for a resume;
+ * it is private and survives a process ending or starting.
  */
 export interface StoredSubagent {
   readonly sessionId: string;
@@ -39,6 +41,7 @@ export interface StoredSubagent {
   readonly result: string | undefined;
   readonly usage: Usage | undefined;
   readonly usageProcess: Usage | undefined;
+  readonly lastUsageReport: ProviderEvent["raw"];
   readonly startedAt: string;
   readonly endedAt: string | undefined;
 }
@@ -157,6 +160,7 @@ export const createBareSubagent = (
   result: undefined,
   usage: undefined,
   usageProcess: undefined,
+  lastUsageReport: undefined,
   startedAt: at,
   endedAt: undefined,
 });
@@ -380,7 +384,7 @@ const applyEventToSubagent = (
         result: decideResult(record.result, facts.lastAssistantText),
       };
     case "session.usage.updated":
-      return { ...record, ...addUsageSnapshot(record, event.usage) };
+      return { ...record, ...addUsageSnapshot(record, event.usage), lastUsageReport: event.raw };
     default:
       return record;
   }

@@ -48,13 +48,14 @@ interface SubagentRow {
   readonly result: string | null;
   readonly usage: string | null;
   readonly usage_process: string | null;
+  readonly last_usage_report: string | null;
   readonly started_at: string;
   readonly ended_at: string | null;
 }
 
 const COLUMNS =
   "session_id, subagent_id, parent_subagent_id, item_id, description, agent_type, model, " +
-  "status, tool_calls, activity, result, usage, usage_process, started_at, ended_at";
+  "status, tool_calls, activity, result, usage, usage_process, last_usage_report, started_at, ended_at";
 
 /** Converts one `session_subagents` row into the record the rest of the domain works with. */
 const toStoredSubagent = (row: SubagentRow): StoredSubagent => ({
@@ -71,6 +72,10 @@ const toStoredSubagent = (row: SubagentRow): StoredSubagent => ({
   result: row.result ?? undefined,
   usage: parseUsage(row.usage),
   usageProcess: parseUsage(row.usage_process),
+  lastUsageReport:
+    row.last_usage_report === null
+      ? undefined
+      : (JSON.parse(row.last_usage_report) as StoredSubagent["lastUsageReport"]),
   startedAt: row.started_at,
   endedAt: row.ended_at ?? undefined,
 });
@@ -182,6 +187,8 @@ const make = Effect.gen(function* () {
       const usage = record.usage === undefined ? null : JSON.stringify(record.usage);
       const usageProcess =
         record.usageProcess === undefined ? null : JSON.stringify(record.usageProcess);
+      const lastUsageReport =
+        record.lastUsageReport === undefined ? null : JSON.stringify(record.lastUsageReport);
       return Effect.asVoid(sql`
         INSERT INTO session_subagents (${sql.literal(COLUMNS)})
         VALUES (${uuidFromString(record.sessionId)}, ${record.id},
@@ -189,7 +196,7 @@ const make = Effect.gen(function* () {
                 ${record.description ?? null}, ${record.agentType ?? null},
                 ${record.model ?? null}, ${record.status}, ${record.toolCalls},
                 ${record.activity ?? null}, ${record.result ?? null}, ${usage},
-                ${usageProcess}, ${record.startedAt}, ${record.endedAt ?? null})
+                ${usageProcess}, ${lastUsageReport}, ${record.startedAt}, ${record.endedAt ?? null})
         ON CONFLICT (session_id, subagent_id) DO UPDATE SET
           parent_subagent_id = excluded.parent_subagent_id,
           item_id = excluded.item_id,
@@ -202,6 +209,7 @@ const make = Effect.gen(function* () {
           result = excluded.result,
           usage = excluded.usage,
           usage_process = excluded.usage_process,
+          last_usage_report = excluded.last_usage_report,
           started_at = excluded.started_at,
           ended_at = excluded.ended_at
       `);

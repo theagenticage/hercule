@@ -794,6 +794,10 @@ describe("Token Usage across a resume", () => {
     await withAgentFleet(async (arranged) => {
       const session = await startSession(arranged);
       const id = session.id;
+      const lastUsageReport = {
+        source: "test.provider",
+        payload: { nativeCounts: [1000, 900, 10], thread: "a1" },
+      };
       reportEvents(arranged, 2, [
         {
           ...buildBase(id),
@@ -805,6 +809,7 @@ describe("Token Usage across a resume", () => {
           ...buildBase(id, "a1"),
           _tag: "session.usage.updated",
           usage: { inputTokens: 100, outputTokens: 10 },
+          raw: lastUsageReport,
         },
       ]);
       await waitForSubagent(arranged, id, "a1", (one) => one.usage !== undefined);
@@ -827,6 +832,24 @@ describe("Token Usage across a resume", () => {
       await waitForSession(arranged, id, (one) => one.status === "exited");
       expect((await waitForSubagent(arranged, id, "a1", () => true)).status).toBe("stopped");
 
+      const lateEvent = {
+        ...buildBase(id, "a1"),
+        _tag: "session.usage.updated",
+        usage: { inputTokens: 999, outputTokens: 99 },
+        raw: { source: "test.provider", payload: { nativeCounts: [9999, 0, 99] } },
+      } as const;
+      reportEvent(arranged.wire, 6, lateEvent);
+      await waitUntil("stored late usage report", async () => {
+        const response = await readTranscript(arranged, id, "?subagentId=a1");
+        const page = (await response.json()) as {
+          readonly items: ReadonlyArray<{ readonly event: ProviderEvent }>;
+        };
+        return page.items.some((row) => row.event.eventId === lateEvent.eventId) ? true : undefined;
+      });
+      const exitedSubagent = await waitForSubagent(arranged, id, "a1", () => true);
+      expect(exitedSubagent.usage).toEqual({ inputTokens: 100, outputTokens: 10 });
+      expect(exitedSubagent).not.toHaveProperty("lastUsageReport");
+
       const input = await post(
         arranged.harness.base,
         `/api/v1/sessions/${id}/input`,
@@ -838,11 +861,11 @@ describe("Token Usage across a resume", () => {
       expect(starts[1]!.spec.continue).toEqual({
         nativeSessionId: "native-1",
         mode: "resume",
-        subagents: [{ subagentId: "a1", itemId: "call-1" }],
+        subagents: [{ subagentId: "a1", itemId: "call-1", lastUsageReport }],
       });
 
       // The new process counts from zero again.
-      reportEvents(arranged, 6, [
+      reportEvents(arranged, 7, [
         { ...buildBase(id), _tag: "session.started" },
         {
           ...buildBase(id),

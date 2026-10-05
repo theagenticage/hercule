@@ -1,5 +1,5 @@
 /**
- * Checks the Codex adapter against a real `codex` binary, in two suites.
+ * Checks the Codex adapter against a real `codex` binary.
  *
  * The first checks what a Thread that sees the user's material is shown, and
  * what another session is shown. It renders the prompt with
@@ -21,12 +21,20 @@
  *
  * The login is copied into a throwaway instance home, because the session
  * runs under that home.
+ *
+ * The third suite drives real native subagents and approvals against a local
+ * Responses API fixture. It needs no login and makes no external API calls.
+ * `HERCULE_CODEX_TEST_BINARY` can select a pinned binary without changing PATH.
  */
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Duration, Effect, Stream } from "effect";
+import { Duration, Effect, Fiber, Stream } from "effect";
+import {
+  computeSubagentAfter,
+  createBareSubagent,
+} from "../../../../controller/src/sessions/subagents";
 import type { OutputSchema, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
@@ -36,11 +44,13 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
 import { codex, makeCodexAdapter } from "./adapter";
+import { runProcess, spawnAppServer } from "../process";
+import { startMockModel } from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
 import { NO_USER_MATERIAL_PATHS } from "../testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
-const binary = Bun.which("codex") ?? undefined;
+const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
 
 const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 
@@ -287,5 +297,369 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
       expect(await Effect.runPromise(codex.listSessions)).toEqual([]);
     },
     Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+});
+
+/** These tests run real native tools against a local model fixture, with no account or API calls. */
+describe.skipIf(binary === undefined)(
+  "a real Codex session with concurrent child approvals",
+  () => {
+    it.each(["v1", "v2"] as const)(
+      "%s keeps both approvals open, completes children independently, and sums thread usage",
+      async (version) => {
+        const model = startMockModel(version);
+        const home = createScratchDir("subagents");
+        mkdirSync(join(home, "codex"));
+        writeFileSync(join(home, "codex", "config.toml"), model.config);
+        const nativeNicknames = new Map<string, string>();
+        const adapter = makeCodexAdapter({
+          run: runProcess,
+          appServer: (command, env) => {
+            const process = spawnAppServer(command, env);
+            return {
+              ...process,
+              stdout: {
+                async *[Symbol.asyncIterator]() {
+                  for await (const line of process.stdout) {
+                    const frame = JSON.parse(line) as {
+                      readonly result?: {
+                        readonly thread?: {
+                          readonly id: string;
+                          readonly agentNickname?: string | null;
+                        };
+                      };
+                    };
+                    const thread = frame.result?.thread;
+                    if (thread?.agentNickname) nativeNicknames.set(thread.id, thread.agentNickname);
+                    yield line;
+                  }
+                },
+              },
+            };
+          },
+        });
+        const seen: Array<ProviderEvent> = [];
+        const trace: Array<Record<string, unknown>> = [];
+        const record = (entry: Record<string, unknown>) => trace.push({ at: Date.now(), ...entry });
+        const subscriber = Effect.runFork(
+          Stream.runForEach(adapter.events, (event) =>
+            Effect.sync(() => {
+              seen.push(event);
+              record({
+                kind: event._tag,
+                ...("subagentId" in event ? { subagentId: event.subagentId } : {}),
+                ...("turnId" in event ? { turnId: event.turnId } : {}),
+                ...(event._tag === "request.opened" ? { requestId: event.request.requestId } : {}),
+                ...(event._tag === "request.resolved" ? { requestId: event.requestId } : {}),
+                ...(event._tag === "session.usage.updated" ? { usage: event.usage } : {}),
+                ...(event._tag === "turn.completed" ? { state: event.state } : {}),
+                ...(event._tag === "turn.started" ? { model: event.model } : {}),
+                ...(event._tag === "subagent.started"
+                  ? { description: event.description, parentSubagentId: event.parentSubagentId }
+                  : {}),
+                ...(event._tag === "item.started" || event._tag === "item.completed"
+                  ? { itemKind: event.kind }
+                  : {}),
+              });
+            }),
+          ),
+        );
+        const waitUntil = async (predicate: () => boolean) => {
+          const deadline = Date.now() + 20_000;
+          while (!predicate()) {
+            if (Date.now() >= deadline)
+              throw new Error(`Codex fixture deadline: ${JSON.stringify(trace)}`);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        };
+        const childCompletions = () =>
+          seen.filter(
+            (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+              event._tag === "turn.completed" && event.subagentId !== undefined,
+          );
+        const approvals = () =>
+          seen.filter(
+            (event): event is Extract<ProviderEvent, { _tag: "request.opened" }> =>
+              event._tag === "request.opened",
+          );
+        const sessionId =
+          version === "v1"
+            ? "0199e0e7-0000-7000-8000-00000000ff07"
+            : "0199e0e7-0000-7000-8000-00000000ff08";
+        try {
+          await Effect.runPromise(
+            adapter.startSession(
+              sessionId,
+              {
+                ...SESSION_SPEC,
+                modelSelection: { model: "gpt-5.4", options: {} },
+              },
+              {
+                ...buildContext(home),
+                env: {
+                  PATH: process.env["PATH"] ?? "",
+                  HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
+                },
+              },
+            ),
+          );
+          await Effect.runPromise(
+            adapter.sendInput(sessionId, { text: "Establish root history." }),
+          );
+          await waitUntil(() => seen.some((event) => event._tag === "turn.completed"));
+          await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
+          await waitUntil(
+            () =>
+              approvals().length === 2 &&
+              seen.filter(
+                (event) => event._tag === "turn.completed" && event.subagentId === undefined,
+              ).length === 2,
+          );
+          const [first, second] = approvals();
+          expect(first!.subagentId).toBeDefined();
+          expect(second!.subagentId).toBeDefined();
+          expect(first!.subagentId).not.toBe(second!.subagentId);
+          expect(childCompletions()).toHaveLength(0);
+          const introduced = seen.filter((event) => event._tag === "subagent.started");
+          expect(introduced).toHaveLength(2);
+          expect(introduced.every((event) => event.parentSubagentId === undefined)).toBe(true);
+          if (version === "v1") {
+            const descriptions = introduced.map(
+              (child) =>
+                seen.reduce(
+                  (record, event) => computeSubagentAfter(record, event, { inFirstTurn: true }),
+                  createBareSubagent(sessionId, child.subagentId, child.at),
+                ).description,
+            );
+            expect(descriptions.sort()).toEqual([
+              "Child first: ask approval, then finish.",
+              "Child second: ask approval, then finish.",
+            ]);
+          } else {
+            for (const child of introduced) {
+              expect(nativeNicknames.has(child.subagentId)).toBe(true);
+              expect(child.description).toBe(nativeNicknames.get(child.subagentId));
+            }
+          }
+          expect(
+            seen
+              .filter((event) => event._tag === "turn.started" && event.subagentId !== undefined)
+              .map((event) => (event._tag === "turn.started" ? event.model : undefined)),
+          ).toEqual(["gpt-5.4", "gpt-5.4"]);
+          expect(
+            seen.filter(
+              (event) =>
+                event._tag === "item.started" &&
+                event.subagentId !== undefined &&
+                event.kind === "command_execution",
+            ),
+          ).toHaveLength(2);
+          record({
+            kind: "approval-decision",
+            requestId: second!.request.requestId,
+            decision: "allow",
+          });
+          await Effect.runPromise(
+            adapter.respondToApprovalRequest(sessionId, second!.request.requestId, "allow"),
+          );
+          await waitUntil(() => childCompletions().length === 1);
+          expect(childCompletions()[0]!.subagentId).toBe(second!.subagentId);
+          expect(
+            seen.some(
+              (event) =>
+                event._tag === "request.resolved" && event.requestId === first!.request.requestId,
+            ),
+          ).toBe(false);
+          record({
+            kind: "approval-decision",
+            requestId: first!.request.requestId,
+            decision: "allow",
+          });
+          await Effect.runPromise(
+            adapter.respondToApprovalRequest(sessionId, first!.request.requestId, "allow"),
+          );
+          await waitUntil(() => childCompletions().length === 2);
+          const usage = seen.filter((event) => event._tag === "session.usage.updated");
+          const children = usage.filter((event) => event.subagentId !== undefined);
+          expect(new Set(children.map((event) => event.subagentId)).size).toBe(2);
+          for (const childId of model.children) {
+            expect(children.filter((event) => event.subagentId === childId).at(-1)!.usage).toEqual({
+              inputTokens: 600,
+              outputTokens: 20,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            });
+          }
+          expect(usage.filter((event) => event.subagentId === undefined).at(-1)!.usage).toEqual({
+            inputTokens: version === "v1" ? 2_500 : 2_400,
+            outputTokens: version === "v1" ? 80 : 70,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          });
+        } finally {
+          await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+          await Effect.runPromise(Fiber.interrupt(subscriber));
+          await model.stop();
+          const evidenceDir = process.env["HERCULE_CODEX_EVIDENCE_DIR"];
+          if (evidenceDir !== undefined) {
+            writeFileSync(
+              join(evidenceDir, `provider-events-${version}.json`),
+              JSON.stringify(trace, null, 2),
+            );
+          }
+        }
+      },
+      45_000,
+    );
+  },
+);
+
+/** Proves accounting across a real process restart, including cancellation before a model completes. */
+describe.skipIf(binary === undefined)("a real Codex child's usage after process restart", () => {
+  it.each([
+    ["v1", true],
+    ["v2", true],
+    ["v1", false],
+    ["v2", false],
+  ] as const)(
+    "%s counts only new calls with saved report=%s",
+    async (version, saveReport) => {
+      const model = startMockModel(version);
+      const home = createScratchDir("usage-resume");
+      mkdirSync(join(home, "codex"));
+      writeFileSync(join(home, "codex", "config.toml"), model.config);
+      const context: ProviderRunnerContext = {
+        ...buildContext(home),
+        env: { PATH: process.env["PATH"] ?? "", HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
+      };
+      const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
+      const spec: SessionSpec = {
+        ...SESSION_SPEC,
+        modelSelection: { model: "gpt-5.4", options: {} },
+      };
+      let adapter = makeCodexAdapter({ appServer: spawnAppServer, run: runProcess });
+      const seen: Array<ProviderEvent> = [];
+      const subscribe = () =>
+        Effect.runFork(
+          Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+        );
+      let subscriber = subscribe();
+      const waitUntil = async (predicate: () => boolean) => {
+        const deadline = Date.now() + 20_000;
+        while (!predicate()) {
+          if (Date.now() >= deadline)
+            throw new Error(
+              `Codex resume fixture deadline: ${seen.map((event) => event._tag).join(", ")}`,
+            );
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      };
+      const childCompletions = () =>
+        seen.filter(
+          (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+            event._tag === "turn.completed" && event.subagentId !== undefined,
+        );
+      const rootCompletions = () =>
+        seen.filter((event) => event._tag === "turn.completed" && event.subagentId === undefined);
+      try {
+        const binding = await Effect.runPromise(adapter.startSession(sessionId, spec, context));
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
+        await waitUntil(() => rootCompletions().length === 1);
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn children." }));
+        await waitUntil(() => seen.filter((event) => event._tag === "request.opened").length === 2);
+        for (const event of seen.filter((event) => event._tag === "request.opened")) {
+          await Effect.runPromise(
+            adapter.respondToApprovalRequest(sessionId, event.request.requestId, "allow"),
+          );
+        }
+        await waitUntil(() => childCompletions().length === 2 && rootCompletions().length === 2);
+        const carried = seen
+          .filter((event) => event._tag === "subagent.started")
+          .map((event) => {
+            const report = seen
+              .filter(
+                (usage) =>
+                  usage._tag === "session.usage.updated" && usage.subagentId === event.subagentId,
+              )
+              .at(-1);
+            expect(
+              report?._tag === "session.usage.updated" ? report.usage.inputTokens : undefined,
+            ).toBe(600);
+            expect(report?.raw).toBeDefined();
+            return {
+              subagentId: event.subagentId,
+              ...(event.itemId === undefined ? {} : { itemId: event.itemId }),
+              ...(saveReport ? { lastUsageReport: report!.raw! } : {}),
+            };
+          });
+        const childId = carried[0]!.subagentId;
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        await Effect.runPromise(Fiber.interrupt(subscriber));
+        seen.length = 0;
+        adapter = makeCodexAdapter({ appServer: spawnAppServer, run: runProcess });
+        subscriber = subscribe();
+        await Effect.runPromise(
+          adapter.startSession(
+            sessionId,
+            {
+              ...spec,
+              continue: {
+                nativeSessionId: binding.nativeSessionId,
+                mode: "resume",
+                subagents: carried,
+              },
+            },
+            context,
+          ),
+        );
+        model.scheduleFollowup(childId, true);
+        await Effect.runPromise(
+          adapter.sendInput(sessionId, { text: "Continue the known child." }),
+        );
+        await waitUntil(() => model.waitingChildren.has(childId) && rootCompletions().length === 1);
+        await Effect.runPromise(adapter.interrupt(sessionId, childId));
+        await waitUntil(() => childCompletions().length === 1);
+        expect(childCompletions()[0]!.state).toBe("interrupted");
+        const cancelledUsage = seen
+          .filter((event) => event._tag === "session.usage.updated" && event.subagentId === childId)
+          .at(-1);
+        expect(
+          cancelledUsage?._tag === "session.usage.updated" ? cancelledUsage.usage : undefined,
+        ).toEqual({
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        });
+        model.scheduleFollowup(childId, false);
+        await Effect.runPromise(
+          adapter.sendInput(sessionId, { text: "Continue the child to completion." }),
+        );
+        await waitUntil(() => childCompletions().length === 2);
+        const completedUsage = seen
+          .filter((event) => event._tag === "session.usage.updated" && event.subagentId === childId)
+          .at(-1);
+        expect(
+          completedUsage?._tag === "session.usage.updated" ? completedUsage.usage : undefined,
+        ).toEqual({
+          inputTokens: 300,
+          outputTokens: 10,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        });
+        const introducedIds = seen
+          .filter((event) => event._tag === "subagent.started")
+          .map((event) => event.subagentId);
+        expect(introducedIds.every((id) => carried.some((known) => known.subagentId === id))).toBe(
+          true,
+        );
+        expect(new Set(introducedIds).size).toBe(introducedIds.length);
+      } finally {
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        await Effect.runPromise(Fiber.interrupt(subscriber));
+        await model.stop();
+      }
+    },
+    45_000,
   );
 });

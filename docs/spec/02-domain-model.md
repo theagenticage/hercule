@@ -237,6 +237,8 @@ Fields, all written at ingest in the transaction that appends the event they com
 | `usage` | optional; its Token Usage, the same shape as the Session's, covering itself alone. Absent where the harness reports no exact count for it ([06-providers.md](./06-providers.md) section 13.5): a screen shows that as not reported, never as 0 |
 | timestamps | `startedAt` (its `subagent.started`), `endedAt?` (the end of its last turn; cleared while it runs again) |
 
+*(Added 2026-10-06, [#437](https://github.com/theagenticage/hercule/issues/437).)* The stored record also keeps private `lastUsageReport`, the `{ source, payload }` from the latest accepted attributed `session.usage.updated` event's `raw`. It is saved in the same transaction as that usage snapshot, survives process exits and starts, and is sent to the adapter on a resume ([06-providers.md](./06-providers.md) section 13.5). A usage event accepted without `raw` clears the saved report; a late event ignored because the session already exited changes neither usage nor the report. The controller never interprets the provider payload, and the public Subagent record never includes this field.
+
 Its transcript is the part of its session's normalized stream attributed to it, read with the same code as the session's own transcript, which is the part attributed to no subagent ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `transcript.read`). A forked session starts with no subagents.
 
 Rule: **an event attributed to a subagent never changes the session's own state** - its status, the Requests its own agent waits on, an assistant's reply, the session's turn notifications ([06-providers.md](./06-providers.md) section 13.1).

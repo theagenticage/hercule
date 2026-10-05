@@ -52,6 +52,9 @@ const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
  */
 const PositiveMillis = Schema.Int.check(Schema.isGreaterThan(0));
 
+/** The provider's original report, retained without interpreting its payload. */
+const ProviderReport = Schema.Struct({ source: Fact, payload: Schema.Json });
+
 /**
  * The harness's own id for a subagent, unique within its session: the Claude
  * agent id, the Codex child thread id, or the child id from Hercule's pi
@@ -144,15 +147,24 @@ export const SessionSpec = Schema.Struct({
    * `subagents` lists the subagents the controller already has records of,
    * sent on a resume only. The adapter seeds its own map from it, so a
    * subagent the harness continues in the new process lands on the record it
-   * already has (spec 06 section 13.2). A fork sends none: a forked session
-   * starts with no subagents.
+   * already has (spec 06 section 13.2). `lastUsageReport` is the original
+   * report behind its latest accepted usage snapshot. An adapter can restore
+   * its native counter baseline without counting that history again. The
+   * controller keeps the report unchanged. A fork sends none: a forked
+   * session starts with no subagents.
    */
   continue: Schema.optionalKey(
     Schema.Struct({
       nativeSessionId: Fact,
       mode: Schema.Literals(["resume", "fork"]),
       subagents: Schema.optionalKey(
-        Schema.Array(Schema.Struct({ subagentId: SubagentId, itemId: Schema.optionalKey(Fact) })),
+        Schema.Array(
+          Schema.Struct({
+            subagentId: SubagentId,
+            itemId: Schema.optionalKey(Fact),
+            lastUsageReport: Schema.optionalKey(ProviderReport),
+          }),
+        ),
       ),
     }),
   ),
@@ -481,7 +493,7 @@ const base = {
   providerRefs: Schema.optionalKey(
     Schema.Record(Fact, Schema.String.check(Schema.isMaxLength(MAX_FACT_LENGTH))),
   ),
-  raw: Schema.optionalKey(Schema.Struct({ source: Fact, payload: Schema.Json })),
+  raw: Schema.optionalKey(ProviderReport),
 };
 
 const defineEvent = <const Tag extends string, Fields extends Schema.Struct.Fields>(
