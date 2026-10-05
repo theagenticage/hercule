@@ -9,15 +9,17 @@
  *
  * - a turn spans many messages and ends at the `result` message;
  * - a text item runs from `content_block_start` to `content_block_stop`;
- * - a tool item is closed by the `tool_result` that arrives one message later.
+ * - a tool item is closed by the `tool_result` that arrives one message later;
+ * - a subagent's frames name it only by the `Agent` call that started it, and
+ *   its turns are the adapter's own (spec 06 section 13.6).
  *
  * Nothing throws. A message this build does not recognise becomes an `unknown`
  * item that carries the raw payload (spec 06 section 6.7).
  */
-import type * as Schema from "effect/Schema";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   MAX_MESSAGE_LENGTH,
+  type ContinuedSubagent,
   type ItemKind,
   type OutputSchema,
   type ProviderEvent,
@@ -26,7 +28,22 @@ import {
   type TurnState,
   type Usage,
 } from "@hercule/protocol";
+import {
+  buildSubagentRegistry,
+  cleanSubagentId,
+  dropRequestsOfUnknownSubagents,
+  findSendMessageRecipient,
+  findSubagentByAgentCall,
+  isSubagentWorking,
+  recordAgentCall,
+  registerSubagent,
+  takeWaitingRequests,
+  type Subagent,
+  type SubagentRegistry,
+} from "./claude-code-subagents";
+import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
+import { truncateFact } from "./text";
 
 /** The `source` name on every raw payload from this adapter. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -38,10 +55,32 @@ interface Block {
   readonly streamKind: StreamKind;
 }
 
-/** The assistant message an agent is streaming: the main loop's or a subagent's. */
-interface Streaming {
-  messageId: string;
-  readonly blocks: Map<number, Block>;
+/**
+ * What one agent is streaming: the session's own agent or one subagent. Each
+ * agent numbers its content blocks on its own, and one agent's turn ending
+ * must not cut off another's stream.
+ */
+interface AgentStream {
+  /**
+   * The assistant message the agent is streaming right now, if any, with the
+   * model `message_start` named for it.
+   */
+  current:
+    | {
+        readonly messageId: string;
+        readonly model: string | undefined;
+        readonly blocks: Map<number, Block>;
+      }
+    | undefined;
+  /**
+   * The ids of the agent's assistant messages whose blocks arrived as stream
+   * events. With `includePartialMessages`, the complete message that follows
+   * repeats what was already streamed, so only a message that never streamed
+   * still needs its text reported. Messages are matched by id, not by block
+   * index, because a block's position in the message is not its position in
+   * the stream.
+   */
+  readonly streamed: Set<string>;
 }
 
 /** The state `normalize` keeps for one session between messages. */
@@ -53,35 +92,47 @@ export interface Normalizing {
   readonly now: () => string;
   /** The schema every turn's output must match. `undefined` means free text. */
   readonly outputSchema: OutputSchema | undefined;
-  /** The open turn, or `undefined` between turns. The adapter opens the first. */
+  /**
+   * The open turn of the session's own agent, or `undefined` between turns.
+   * The adapter opens the first. Subagents' turns are in `subagents`.
+   */
   turnId: string | undefined;
-  /**
-   * The message each agent is streaming right now, keyed by
-   * `parent_tool_use_id`. Subagents stream at the same time as the main loop,
-   * and each numbers its content blocks on its own, so a single block map would
-   * let them overwrite each other.
-   */
-  readonly streams: Map<string, Streaming>;
-  /**
-   * The ids of assistant messages whose blocks arrived as stream events. With
-   * `includePartialMessages`, the complete message that follows repeats what
-   * was already streamed, so only a message that never streamed still needs
-   * its text reported. Messages are matched by id, not by block index, because
-   * a block's position in the message is not its position in the stream.
-   */
-  readonly streamed: Set<string>;
+  /** What each agent is streaming, keyed by `buildStreamKey`. */
+  readonly streams: Map<string, AgentStream>;
   /**
    * The kind of each open tool item, by `tool_use` id, so its `tool_result`
-   * completes it with the same kind.
+   * completes it with the same kind. Tool ids are unique across agents.
    */
   readonly tools: Map<string, ItemKind>;
+  /** The session's subagents and their turns. */
+  readonly subagents: SubagentRegistry;
+  /**
+   * Frames from a subagent the registry does not know yet: from an agent call
+   * no `task_started` has linked, or a denial naming an unknown agent id. They
+   * wait for the next `task_started` or `task_notification` of a subagent,
+   * and at most `MAX_HELD_FRAMES` of them are kept.
+   */
+  readonly heldFrames: Array<SDKMessage>;
 }
 
+/**
+ * The most frames `Normalizing.heldFrames` keeps. A harness that never
+ * reports a subagent's start would otherwise make the runner hold that
+ * subagent's frames for the life of the process.
+ */
+const MAX_HELD_FRAMES = 1000;
+
+/**
+ * Returns the state for a new session. `seeded` lists the subagents a resumed
+ * session already has records of, so a subagent the harness continues lands
+ * on its record (spec 06 section 13.2).
+ */
 export const buildNormalizingState = (
   sessionId: string,
   mint: () => string,
   now: () => string,
   outputSchema: OutputSchema | undefined,
+  seeded?: ReadonlyArray<ContinuedSubagent>,
 ): Normalizing => ({
   sessionId,
   mint,
@@ -89,9 +140,51 @@ export const buildNormalizingState = (
   outputSchema,
   turnId: undefined,
   streams: new Map(),
-  streamed: new Set(),
   tools: new Map(),
+  subagents: buildSubagentRegistry(seeded),
+  heldFrames: [],
 });
+
+/**
+ * Checks whether any agent of the session is working: the session's own
+ * agent has an open turn, or a subagent's turn is open or about to open.
+ */
+export const isAnyAgentWorking = (state: Normalizing): boolean => {
+  if (state.turnId !== undefined) return true;
+  for (const subagent of state.subagents.byId.values()) {
+    if (isSubagentWorking(subagent)) return true;
+  }
+  return false;
+};
+
+/**
+ * The agent whose turn a frame belongs to: one of the session's subagents,
+ * or `undefined` for the session's own agent.
+ */
+type TurnOwner = Subagent | undefined;
+
+/** The turn an event goes into, and the subagent the event belongs to. */
+interface TurnRef {
+  readonly turnId: string;
+  readonly subagentId: string | undefined;
+}
+
+/** Returns the field that names the subagent an event belongs to, or nothing for the session's own agent. */
+const attributeTo = (subagentId: string | undefined): { readonly subagentId?: string } =>
+  subagentId === undefined ? {} : { subagentId };
+
+/** Returns the key of an agent's entry in `Normalizing.streams`: `""` for the session's own agent. */
+const buildStreamKey = (agent: TurnOwner): string => agent?.subagentId ?? "";
+
+/** Returns what the agent is streaming, creating its empty entry the first time. */
+const ensureAgentStream = (state: Normalizing, agent: TurnOwner): AgentStream => {
+  const key = buildStreamKey(agent);
+  const found = state.streams.get(key);
+  if (found !== undefined) return found;
+  const created: AgentStream = { current: undefined, streamed: new Set() };
+  state.streams.set(key, created);
+  return created;
+};
 
 /**
  * The item kind for each Claude tool name. Only the tool families the
@@ -111,6 +204,7 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   WebSearch: "web_search",
   Task: "subagent",
   Agent: "subagent",
+  SendMessage: "subagent",
   ExitPlanMode: "plan",
 };
 
@@ -123,6 +217,28 @@ export const classifyTool = (name: string): ItemKind => TOOL_KINDS[name] ?? "too
 
 /** Checks whether a tool is an MCP tool. The name prefix is the only way to tell. */
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
+
+/**
+ * The tools that start a subagent. Recent CLIs name the tool `Agent` in
+ * `tool_use` blocks, and older ones named it `Task`.
+ */
+const AGENT_TOOLS: ReadonlySet<string> = new Set(["Agent", "Task"]);
+
+/**
+ * Converts an id the harness gives for an item, such as a tool call, into one
+ * the protocol accepts. Returns `undefined` when the value is missing, not a
+ * string, or empty. The agent call ids that link a subagent's frames go
+ * through it too, so each one has the same spelling wherever it is read.
+ */
+const cleanItemId = (raw: unknown): string | undefined =>
+  typeof raw === "string" && raw !== "" ? truncateFact(raw) : undefined;
+
+/** Returns a tool input's string field, or `undefined` when it is missing or not a string. */
+const readInputString = (input: unknown, key: string): string | undefined => {
+  if (typeof input !== "object" || input === null) return undefined;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+};
 
 /**
  * Informational messages from Claude that are dropped on purpose. Rate-limit
@@ -148,35 +264,17 @@ const TRIMMED: ReadonlySet<string> = new Set([
   "system:hook_progress",
   "system:hook_response",
   "system:files_persisted",
-  // The lifecycle of a background or subagent task. None of these is model
-  // work: a task's command already shows as its tool item, and when a
-  // background task finishes, the model's answer to it arrives as ordinary
-  // `assistant` messages and a `result`, which open and close a real turn.
-  // Kept, each one became an empty synthetic turn.
-  "system:task_started",
+  // The lifecycle of a task. None of these is model work: a task's command
+  // already shows as its tool item, and when a background task finishes, the
+  // model's answer to it arrives as ordinary `assistant` messages and a
+  // `result`, which open and close a real turn. Kept, each one became an empty
+  // synthetic turn.
   "system:task_progress",
   "system:task_updated",
-  "system:task_notification",
 ]);
 
 /** Truncates text to the longest message the protocol accepts. */
 const cutToMessageLength = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
-
-/**
- * Converts a value to JSON by serializing and parsing it, not by a cast. A
- * single `undefined` property anywhere in a vendor payload would make a frame
- * the protocol cannot encode, and that costs the runner its connection and
- * every session on it.
- */
-const toJson = (value: unknown): Schema.Json =>
-  JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
-
-/**
- * Converts a count to a whole number that is never negative, as the protocol
- * requires. Anything else becomes 0.
- */
-const clampCount = (value: number | null | undefined): number =>
-  typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 
 type Emit = Array<ProviderEvent>;
 
@@ -209,20 +307,63 @@ export const openTurn = (
   };
 };
 
-const ensureOpenTurn = (state: Normalizing, out: Emit): string => {
-  const { turnId, events } = openTurn(state);
-  out.push(...events);
-  return turnId;
+/**
+ * Opens the agent's turn if none is open, and returns it. The events that open
+ * it go to `out`.
+ *
+ * For a subagent the turn opens like this (spec 06 section 13.6):
+ *
+ * - `turn.started`, with `model` when the frame that opens it names one;
+ * - the subagent's brief as a `user_message` item, when `task_started` gave
+ *   one. A turn the subagent opens by itself has no brief;
+ * - the events the adapter deferred until this turn opened.
+ */
+const ensureAgentTurn = (
+  state: Normalizing,
+  agent: TurnOwner,
+  out: Emit,
+  model?: string,
+): TurnRef => {
+  if (agent === undefined) {
+    const { turnId, events } = openTurn(state);
+    out.push(...events);
+    return { turnId, subagentId: undefined };
+  }
+  const { subagentId } = agent;
+  if (agent.turn.phase === "open") return { turnId: agent.turn.turnId, subagentId };
+  const turn: TurnRef = { turnId: state.mint(), subagentId };
+  out.push({
+    _tag: "turn.started",
+    eventId: state.mint(),
+    sessionId: state.sessionId,
+    at: state.now(),
+    subagentId,
+    turnId: turn.turnId,
+    ...(model === undefined ? {} : { model: truncateFact(model) }),
+  });
+  if (agent.turn.phase === "pending" && agent.turn.prompt !== undefined) {
+    // The same item the adapter reports for the user's own input, so the
+    // brief reads like any other turn's input.
+    const itemId = state.mint();
+    const detail = { text: agent.turn.prompt };
+    out.push(buildItemStarted(state, turn, itemId, "user_message", detail));
+    out.push(buildItemCompleted(state, turn, itemId, "user_message", "completed", detail));
+  }
+  agent.turn = { phase: "open", turnId: turn.turnId };
+  out.push(...takeWaitingRequests(state.subagents, subagentId));
+  return turn;
 };
 
 /**
- * Emits `turn.completed` and clears the turn's streaming state. Open tool items
- * are kept, because an interrupted turn's `tool_result` still arrives later and
- * needs the kind its item started with.
+ * Emits `turn.completed` and clears the agent's streaming state, and only that
+ * agent's: another agent may be streaming at the same time. Open tool items
+ * are kept, because an interrupted turn's `tool_result` still arrives later
+ * and needs the kind its item started with.
  */
 const closeTurn = (
   state: Normalizing,
   out: Emit,
+  agent: TurnOwner,
   turnId: string,
   turnState: TurnState,
   extra: {
@@ -236,39 +377,39 @@ const closeTurn = (
     eventId: state.mint(),
     sessionId: state.sessionId,
     at: state.now(),
+    ...attributeTo(agent?.subagentId),
     turnId,
     state: turnState,
     ...(extra.usage === undefined ? {} : { usage: extra.usage }),
     ...(extra.error === undefined ? {} : { error: extra.error }),
     ...(extra.structuredResult === undefined ? {} : { structuredResult: extra.structuredResult }),
   });
-  state.turnId = undefined;
-  state.streams.clear();
-  state.streamed.clear();
+  state.streams.delete(buildStreamKey(agent));
+  if (agent === undefined) state.turnId = undefined;
+  else agent.turn = { phase: "idle" };
 };
 
 const buildItemStarted = (
   state: Normalizing,
-  turnId: string,
+  turn: TurnRef,
   itemId: string,
   kind: ItemKind,
   detail?: unknown,
-): ProviderEvent => {
-  return {
-    _tag: "item.started",
-    eventId: state.mint(),
-    sessionId: state.sessionId,
-    at: state.now(),
-    turnId,
-    itemId,
-    kind,
-    ...(detail === undefined ? {} : { detail: toJson(detail) }),
-  };
-};
+): ProviderEvent => ({
+  _tag: "item.started",
+  eventId: state.mint(),
+  sessionId: state.sessionId,
+  at: state.now(),
+  ...attributeTo(turn.subagentId),
+  turnId: turn.turnId,
+  itemId,
+  kind,
+  ...(detail === undefined ? {} : { detail: toJson(detail) }),
+});
 
 const buildItemCompleted = (
   state: Normalizing,
-  turnId: string,
+  turn: TurnRef,
   itemId: string,
   kind: ItemKind,
   status: "completed" | "failed",
@@ -278,7 +419,8 @@ const buildItemCompleted = (
   eventId: state.mint(),
   sessionId: state.sessionId,
   at: state.now(),
-  turnId,
+  ...attributeTo(turn.subagentId),
+  turnId: turn.turnId,
   itemId,
   kind,
   status,
@@ -287,7 +429,7 @@ const buildItemCompleted = (
 
 const buildContentDelta = (
   state: Normalizing,
-  turnId: string,
+  turn: TurnRef,
   itemId: string,
   streamKind: StreamKind,
   text: string,
@@ -296,7 +438,8 @@ const buildContentDelta = (
   eventId: state.mint(),
   sessionId: state.sessionId,
   at: state.now(),
-  turnId,
+  ...attributeTo(turn.subagentId),
+  turnId: turn.turnId,
   itemId,
   streamKind,
   delta: text,
@@ -305,36 +448,78 @@ const buildContentDelta = (
 /** Returns the events for a whole item at once, for a complete message that never streamed. */
 const buildWholeItem = (
   state: Normalizing,
-  turnId: string,
+  turn: TurnRef,
   itemId: string,
   kind: ItemKind,
   streamKind: StreamKind,
   text: string,
 ): Emit => [
-  buildItemStarted(state, turnId, itemId, kind),
-  buildContentDelta(state, turnId, itemId, streamKind, text),
-  buildItemCompleted(state, turnId, itemId, kind, "completed"),
+  buildItemStarted(state, turn, itemId, kind),
+  buildContentDelta(state, turn, itemId, streamKind, text),
+  buildItemCompleted(state, turn, itemId, kind, "completed"),
 ];
 
 /**
- * Emits an `unknown` item for a vendor message this adapter does not map.
- * `normalize` attaches the raw payload.
+ * Emits an `unknown` item, in the agent's turn, for a vendor message this
+ * adapter does not map. `normalize` attaches the raw payload.
  */
-const emitUnknownItem = (state: Normalizing, out: Emit): void => {
-  const turnId = ensureOpenTurn(state, out);
+const emitUnknownItem = (state: Normalizing, agent: TurnOwner, out: Emit): void => {
+  const turn = ensureAgentTurn(state, agent, out);
   const itemId = state.mint();
-  out.push(buildItemStarted(state, turnId, itemId, "unknown"));
-  out.push(buildItemCompleted(state, turnId, itemId, "unknown", "completed"));
+  out.push(buildItemStarted(state, turn, itemId, "unknown"));
+  out.push(buildItemCompleted(state, turn, itemId, "unknown", "completed"));
+};
+
+/**
+ * Emits `subagent.started` for a subagent not yet introduced in this process
+ * (spec 06 section 13.2). The event belongs to the subagent's parent, so it
+ * has no `subagentId` field of its own. `task` adds what only `task_started`
+ * reports: the parent's short name for the task, and the kind of agent. Each
+ * is left out when it is missing, not a string, or empty.
+ */
+const introduceSubagent = (
+  state: Normalizing,
+  subagent: Subagent,
+  out: Emit,
+  task?: { readonly description: unknown; readonly agentType: unknown },
+): void => {
+  if (subagent.introduced) return;
+  const description = readInputString(task, "description");
+  const agentType = readInputString(task, "agentType");
+  // Built before `introduced` is set, so a field that fails to convert leaves
+  // the subagent to be introduced by its next frame.
+  const started: ProviderEvent = {
+    _tag: "subagent.started",
+    eventId: state.mint(),
+    sessionId: state.sessionId,
+    at: state.now(),
+    subagentId: subagent.subagentId,
+    ...(subagent.parentSubagentId === undefined
+      ? {}
+      : { parentSubagentId: subagent.parentSubagentId }),
+    ...(subagent.agentCallId === undefined ? {} : { itemId: subagent.agentCallId }),
+    ...(description === undefined || description === ""
+      ? {}
+      : { description: cutToMessageLength(description) }),
+    ...(agentType === undefined || agentType === "" ? {} : { agentType: truncateFact(agentType) }),
+  };
+  subagent.introduced = true;
+  out.push(started);
 };
 
 type Streamed = Extract<SDKMessage, { type: "stream_event" }>["event"];
 
-const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: Emit): void => {
-  const open = state.streams.get(agent);
+const onStreamEvent = (state: Normalizing, event: Streamed, agent: TurnOwner, out: Emit): void => {
+  const stream = ensureAgentStream(state, agent);
+  const open = stream.current;
   switch (event.type) {
     case "message_start": {
-      state.streamed.add(event.message.id);
-      state.streams.set(agent, { messageId: event.message.id, blocks: new Map() });
+      stream.streamed.add(event.message.id);
+      stream.current = {
+        messageId: event.message.id,
+        model: readInputString(event.message, "model"),
+        blocks: new Map(),
+      };
       return;
     }
     case "content_block_start": {
@@ -349,14 +534,15 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
             ? "reasoning"
             : undefined;
       if (kind === undefined || open === undefined) return;
-      const turnId = ensureOpenTurn(state, out);
+      // A turn a stream opens carries the model too, from `message_start`.
+      const turn = ensureAgentTurn(state, agent, out, open.model);
       const itemId = `${open.messageId}#${event.index}`;
       open.blocks.set(event.index, {
         itemId,
         kind,
         streamKind: kind === "reasoning" ? "reasoning_text" : "assistant_text",
       });
-      out.push(buildItemStarted(state, turnId, itemId, kind));
+      out.push(buildItemStarted(state, turn, itemId, kind));
       return;
     }
     case "content_block_delta": {
@@ -371,7 +557,13 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
             : undefined;
       if (text === undefined || text === "") return;
       out.push(
-        buildContentDelta(state, ensureOpenTurn(state, out), block.itemId, block.streamKind, text),
+        buildContentDelta(
+          state,
+          ensureAgentTurn(state, agent, out),
+          block.itemId,
+          block.streamKind,
+          text,
+        ),
       );
       return;
     }
@@ -382,7 +574,7 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
       out.push(
         buildItemCompleted(
           state,
-          ensureOpenTurn(state, out),
+          ensureAgentTurn(state, agent, out),
           block.itemId,
           block.kind,
           "completed",
@@ -397,58 +589,81 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
   }
 };
 
+/**
+ * Returns what a `subagent` item lists in `detail.subagentIds`: for a
+ * `SendMessage`, the subagent its `to` names, when that is a known subagent.
+ * An `Agent` call lists none, because the subagent it starts has no id yet;
+ * `subagent.started` links the two (spec 06 section 13.2).
+ */
+const listMessagedSubagents = (
+  state: Normalizing,
+  toolName: string,
+  input: unknown,
+): ReadonlyArray<string> => {
+  if (toolName !== "SendMessage") return [];
+  const to = readInputString(input, "to");
+  const recipient = to === undefined ? undefined : findSendMessageRecipient(state.subagents, to);
+  return recipient === undefined ? [] : [recipient];
+};
+
 const onAssistant = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "assistant" }>,
+  agent: TurnOwner,
   out: Emit,
 ): void => {
-  const turnId = ensureOpenTurn(state, out);
+  const turn = ensureAgentTurn(state, agent, out, sdk.message.model);
   // Text and reasoning that streamed were already emitted, and this message
   // repeats them. Only a message that never streamed still needs them reported.
-  const echo = state.streamed.has(sdk.message.id);
+  const echo = ensureAgentStream(state, agent).streamed.has(sdk.message.id);
   for (const block of sdk.message.content) {
     if (block.type === "tool_use") {
       const kind = classifyTool(block.name);
-      const itemId = block.id === "" ? state.mint() : block.id;
+      const itemId = cleanItemId(block.id) ?? state.mint();
       state.tools.set(itemId, kind);
+      if (AGENT_TOOLS.has(block.name)) {
+        recordAgentCall(
+          state.subagents,
+          itemId,
+          agent?.subagentId,
+          readInputString(block.input, "name"),
+        );
+      }
+      const subagentIds = listMessagedSubagents(state, block.name, block.input);
       out.push(
-        buildItemStarted(state, turnId, itemId, kind, {
+        buildItemStarted(state, turn, itemId, kind, {
           name: block.name,
           input: block.input,
           ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
+          ...(subagentIds.length === 0 ? {} : { subagentIds }),
         }),
       );
       continue;
     }
     if (echo) continue;
-    if (block.type === "text") {
+    // An empty block, such as a thinking block whose text the harness leaves
+    // out, would only add a blank entry to the transcript.
+    if (block.type === "text" && block.text !== "") {
       out.push(
         ...buildWholeItem(
           state,
-          turnId,
+          turn,
           state.mint(),
           "assistant_message",
           "assistant_text",
           block.text,
         ),
       );
-    } else if (block.type === "thinking") {
+    } else if (block.type === "thinking" && block.thinking !== "") {
       out.push(
-        ...buildWholeItem(
-          state,
-          turnId,
-          state.mint(),
-          "reasoning",
-          "reasoning_text",
-          block.thinking,
-        ),
+        ...buildWholeItem(state, turn, state.mint(), "reasoning", "reasoning_text", block.thinking),
       );
     }
   }
   if (sdk.error !== undefined) {
     const itemId = state.mint();
-    out.push(buildItemStarted(state, turnId, itemId, "error", { class: sdk.error }));
-    out.push(buildItemCompleted(state, turnId, itemId, "error", "failed", { class: sdk.error }));
+    out.push(buildItemStarted(state, turn, itemId, "error", { class: sdk.error }));
+    out.push(buildItemCompleted(state, turn, itemId, "error", "failed", { class: sdk.error }));
   }
 };
 
@@ -457,26 +672,31 @@ const onAssistant = (
  * Hercule sent, but the repeated message does not show whether that input was
  * steered into a running turn, which `user_message` must report as `steered`
  * (spec 06 section 6.3). So the adapter reports user messages itself, and this
- * function ignores their text. It only handles `tool_result` blocks, each of
- * which closes a tool item.
+ * function ignores their text. A subagent's brief arrives as a user message
+ * too, and is reported from `task_started` instead. This function only
+ * handles `tool_result` blocks, each of which closes a tool item.
  */
 const onUser = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "user" }>,
+  agent: TurnOwner,
   out: Emit,
 ): void => {
   const content = sdk.message.content;
   if (typeof content === "string") return;
-  const turnId = ensureOpenTurn(state, out);
+  // A message with no tool result opens no turn: for a subagent it is the
+  // brief, and its turn opens at the subagent's first answer.
+  if (!content.some((block) => block.type === "tool_result")) return;
+  const turn = ensureAgentTurn(state, agent, out);
   for (const block of content) {
     if (block.type === "tool_result") {
-      const itemId = block.tool_use_id === "" ? state.mint() : block.tool_use_id;
+      const itemId = cleanItemId(block.tool_use_id) ?? state.mint();
       const kind = state.tools.get(itemId) ?? "tool_call";
       state.tools.delete(itemId);
       out.push(
         buildItemCompleted(
           state,
-          turnId,
+          turn,
           itemId,
           kind,
           block.is_error === true ? "failed" : "completed",
@@ -595,7 +815,7 @@ const onResult = (
   sdk: Extract<SDKMessage, { type: "result" }>,
   out: Emit,
 ): void => {
-  const turnId = ensureOpenTurn(state, out);
+  const { turnId } = ensureAgentTurn(state, undefined, out);
   const usage = readUsage(sdk);
   const turnState = readTurnState(sdk);
   const structuredResult = judgeTurn(state, sdk, turnState);
@@ -606,16 +826,90 @@ const onResult = (
     at: state.now(),
     usage,
   });
-  closeTurn(state, out, turnId, turnState, {
+  closeTurn(state, out, undefined, turnId, turnState, {
     usage,
     ...(turnState === "failed" ? { error: describeFailure(sdk) } : {}),
     ...(structuredResult === undefined ? {} : { structuredResult }),
   });
 };
 
+/**
+ * Returns the turn state a subagent's `task_notification` status ends its
+ * turn in. A stopped subagent was interrupted, which is neither success nor
+ * failure.
+ */
+const convertTaskStatusToTurnState = (status: "completed" | "failed" | "stopped"): TurnState =>
+  status === "stopped" ? "interrupted" : status;
+
+/**
+ * Handles `task_started` for a subagent; every other task type is trimmed.
+ * The first `task_started` of a subagent in this process introduces it. Its
+ * turn then waits for the subagent's first frame, so the turn's model is
+ * known when it opens. A subagent whose turn is pending or open is left alone:
+ * a later `task_started` is never read as a `SendMessage`, because a subagent
+ * also wakes by itself when its background shell finishes (spec 06 section
+ * 13.6).
+ */
+const onTaskStarted = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { subtype: "task_started" }>,
+  out: Emit,
+): void => {
+  const subagentId = cleanSubagentId(sdk.task_id);
+  if (sdk.task_type !== "local_agent" || subagentId === undefined) return;
+  const isNew = !state.subagents.byId.has(subagentId);
+  const subagent = registerSubagent(state.subagents, subagentId, cleanItemId(sdk.tool_use_id));
+  introduceSubagent(state, subagent, out, {
+    description: sdk.description,
+    agentType: sdk.subagent_type,
+  });
+  // A subagent is registered once, so each changed id is reported once.
+  if (isNew && subagentId !== sdk.task_id) {
+    out.push({
+      _tag: "runtime.warning",
+      eventId: state.mint(),
+      sessionId: state.sessionId,
+      at: state.now(),
+      subagentId,
+      message: cutToMessageLength(
+        `the harness named a subagent "${sdk.task_id}", which the protocol does not accept, so it is reported as "${subagentId}"`,
+      ),
+    });
+  }
+  if (subagent.turn.phase === "idle") subagent.turn = { phase: "pending", prompt: sdk.prompt };
+};
+
+/**
+ * Handles `task_notification` for a subagent: it ends the subagent's turn,
+ * opening it first if no frame did. The turn carries no usage: Claude's count
+ * per task is not what the subagent spent (spec 06 section 13.5). A
+ * notification for a subagent with no turn is ignored: it is an orphan, or a
+ * `worker_restart` on a resume. One for any other task is trimmed.
+ *
+ * A subagent that ends `stopped` is stopped for good: Claude Code cannot
+ * continue it, so a frame it still sends goes into a turn that ends at once.
+ * A subagent whose stop was sent but that ends `completed` or `failed`
+ * finished before `stopTask` reached it, or the harness refused the stop. Its
+ * stop is wanted again, so it gets `stopTask` if it works again.
+ */
+const onTaskNotification = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { subtype: "task_notification" }>,
+  out: Emit,
+): void => {
+  const subagentId = cleanSubagentId(sdk.task_id);
+  const subagent = subagentId === undefined ? undefined : state.subagents.byId.get(subagentId);
+  if (subagent === undefined || subagent.turn.phase === "idle") return;
+  const { turnId } = ensureAgentTurn(state, subagent, out);
+  closeTurn(state, out, subagent, turnId, convertTaskStatusToTurnState(sdk.status));
+  if (sdk.status === "stopped") subagent.stop = "stopped";
+  else if (subagent.stop === "sent") subagent.stop = "wanted";
+};
+
 const onSystem = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "system" }>,
+  agent: TurnOwner,
   out: Emit,
 ): void => {
   switch (sdk.subtype) {
@@ -623,18 +917,26 @@ const onSystem = (
       // The adapter emits `session.started` itself when it starts the session,
       // so `init` adds nothing.
       return;
+    // `task_started` and `task_notification` are kept for a subagent, and
+    // trimmed for every other task, as `TRIMMED` explains.
+    case "task_started":
+      onTaskStarted(state, sdk, out);
+      return;
+    case "task_notification":
+      onTaskNotification(state, sdk, out);
+      return;
+    // Known limit: compaction and retries name no agent, so a subagent's are
+    // reported as the session's own agent's (spec 06 section 13.6).
     case "compact_boundary": {
-      const turnId = ensureOpenTurn(state, out);
+      const turn = ensureAgentTurn(state, undefined, out);
       const itemId = state.mint();
       const detail = {
         trigger: sdk.compact_metadata.trigger,
         preTokens: sdk.compact_metadata.pre_tokens,
         postTokens: sdk.compact_metadata.post_tokens,
       };
-      out.push(buildItemStarted(state, turnId, itemId, "context_compaction", detail));
-      out.push(
-        buildItemCompleted(state, turnId, itemId, "context_compaction", "completed", detail),
-      );
+      out.push(buildItemStarted(state, turn, itemId, "context_compaction", detail));
+      out.push(buildItemCompleted(state, turn, itemId, "context_compaction", "completed", detail));
       return;
     }
     case "api_retry":
@@ -650,7 +952,10 @@ const onSystem = (
       });
       return;
     default:
-      if (!TRIMMED.has(`system:${sdk.subtype}`)) emitUnknownItem(state, out);
+      // `permission_denied` lands here too, in the turn of the agent it names:
+      // the taxonomy has no kind for it, and the denied call's item already
+      // ends failed when its `tool_result` arrives.
+      if (!TRIMMED.has(`system:${sdk.subtype}`)) emitUnknownItem(state, agent, out);
       return;
   }
 };
@@ -662,41 +967,120 @@ const onSystem = (
  * look busy for good. So a turn opened for one of these messages is closed
  * after that same message (spec 06 section 6.2, synthetic turns). `assistant`
  * and `stream_event` messages are model output, and a `result` ends their turn.
+ *
+ * The same holds for a subagent that woke by itself: a turn its `user` or
+ * `system` message opens is closed after that message.
  */
 const SELF_CONTAINED: ReadonlySet<string> = new Set(["user", "system"]);
 
 /**
+ * Returns the agent call a frame comes from: its `parent_tool_use_id`, or
+ * `undefined` for a frame of the session's own agent or a frame that names no
+ * agent.
+ */
+const readAgentCallId = (sdk: SDKMessage): string | undefined => {
+  if (sdk.type !== "assistant" && sdk.type !== "user" && sdk.type !== "stream_event") {
+    return undefined;
+  }
+  return cleanItemId(sdk.parent_tool_use_id);
+};
+
+/**
+ * Checks whether a frame may link held frames to their subagent: a subagent's
+ * `task_started` or `task_notification`. After one, the held frames are
+ * emitted or dropped (spec 06 section 13.6).
+ */
+const isSubagentBoundary = (state: Normalizing, sdk: SDKMessage): boolean =>
+  sdk.type === "system" &&
+  ((sdk.subtype === "task_started" && sdk.task_type === "local_agent") ||
+    (sdk.subtype === "task_notification" &&
+      state.subagents.byId.has(cleanSubagentId(sdk.task_id) ?? "")));
+
+/**
+ * Checks whether an event comes from opening a turn rather than from the
+ * frame being normalized: the turn's start, a subagent's brief, and the
+ * Requests the adapter deferred until the turn opened.
+ */
+const isTurnOpeningEvent = (event: ProviderEvent): boolean =>
+  event._tag === "turn.started" ||
+  event._tag === "request.opened" ||
+  (event._tag === "item.started" && event.kind === "user_message") ||
+  (event._tag === "item.completed" && event.kind === "user_message");
+
+/**
  * Converts one SDK message into normalized events and returns them. The raw
- * payload is attached to the first event that is not a `turn.started`, so the
- * vendor message is always available without every delta carrying a copy.
+ * payload is attached to the first event that comes from the message itself,
+ * so the vendor message is always available without every delta carrying a
+ * copy.
+ *
+ * A subagent's frame whose subagent is not known yet returns nothing: it is
+ * held, and returned after the next `task_started` or `task_notification`
+ * of a subagent, or dropped then with a warning. That boundary may belong to
+ * any subagent, so it also drops the held frames of another subagent that is
+ * still unknown. At most `MAX_HELD_FRAMES` frames are held: the frame that
+ * would be one more drops them all, itself included, the same way.
  *
  * Never throws. A message with a known type but changed fields becomes an
  * `unknown` item, because the CLI ships weekly and a `TypeError` here would
  * take a live session down.
  */
 export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<ProviderEvent> => {
+  const boundary = isSubagentBoundary(state, sdk);
+  const out = normalizeFrame(state, sdk);
+  if (boundary) out.push(...releaseHeldFrames(state));
+  return out;
+};
+
+/** Returns the agent a frame belongs to, or `"unknown"` for a subagent not known yet. */
+const findTurnOwner = (state: Normalizing, sdk: SDKMessage): TurnOwner | "unknown" => {
+  if (sdk.type === "system" && sdk.subtype === "permission_denied") {
+    // A denial names the agent by its SubagentId, and names none for the
+    // session's own agent. An id the registry does not know yet is held like
+    // any other frame of an unknown subagent.
+    const subagentId = cleanSubagentId(sdk.agent_id);
+    if (subagentId === undefined) return undefined;
+    return state.subagents.byId.get(subagentId) ?? "unknown";
+  }
+  const agentCallId = readAgentCallId(sdk);
+  if (agentCallId === undefined) return undefined;
+  return findSubagentByAgentCall(state.subagents, agentCallId) ?? "unknown";
+};
+
+const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
+  const agent = findTurnOwner(state, sdk);
+  if (agent === "unknown") return holdFrame(state, sdk);
+  // A stream event would open an item in a turn that closes at once, and no
+  // later frame would complete that item. The complete assistant message
+  // that follows still reports what the subagent wrote.
+  if (sdk.type === "stream_event" && agent?.stop === "stopped") return [];
   const out: Emit = [];
-  const unsolicited = state.turnId === undefined;
+  // A subagent from an earlier process may send a frame before any
+  // `task_started` in this one, and it must be introduced before its events.
+  if (agent !== undefined) introduceSubagent(state, agent, out);
+  // The introduction is not part of the message, so the raw payload never goes on it.
+  const introductionCount = out.length;
+  const unsolicited =
+    agent === undefined ? state.turnId === undefined : agent.turn.phase === "idle";
   try {
-    dispatch(state, sdk, out);
+    dispatch(state, sdk, agent, out);
   } catch {
+    // Keep what changed the state of the session or a subagent, so a turn
+    // opened before the failure is still reported as started, and drop the
+    // rest of the message's partial output.
+    const kept = out.filter(
+      (event) => event._tag === "subagent.started" || isTurnOpeningEvent(event),
+    );
     out.length = 0;
-    emitUnknownItem(state, out);
+    out.push(...kept);
+    emitUnknownItem(state, agent, out);
   }
-  if (unsolicited && state.turnId !== undefined) {
-    if (out.every((event) => event._tag === "turn.started")) {
-      // The message produced no events apart from the turn it opened, so drop
-      // that turn.
-      out.length = 0;
-      state.turnId = undefined;
-    } else if (SELF_CONTAINED.has(sdk.type)) {
-      closeTurn(state, out, state.turnId, "completed");
-    }
-  }
+  if (unsolicited) closeUnsolicitedTurn(state, sdk, agent, out);
   // There are thousands of deltas. A copy of the message on each one would
   // double the stream, and each delta already carries its text.
   if (sdk.type === "stream_event") return out;
-  const at = out.findIndex((event) => event._tag !== "turn.started");
+  const at = out.findIndex(
+    (event, index) => index >= introductionCount && !isTurnOpeningEvent(event),
+  );
   const found = out[at];
   if (found !== undefined) {
     out[at] = { ...found, raw: { source: CLAUDE_SDK_MESSAGE, payload: toJson(sdk) } };
@@ -704,25 +1088,111 @@ export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<Pr
   return out;
 };
 
-const dispatch = (state: Normalizing, sdk: SDKMessage, out: Emit): void => {
+/**
+ * Ends a turn that a message opened outside any turn, when nothing else will
+ * end it (spec 06 section 6.2, synthetic turns):
+ *
+ * - a turn of the session's own agent in which the message produced nothing
+ *   is dropped, as if it was never opened;
+ * - a turn of a subagent the harness reported stopped is closed as
+ *   `interrupted` after any message it still sends, other than a stream
+ *   event, which is ignored. After a stop, the stopped call's
+ *   `tool_result` arrives after the `task_notification` that closed the
+ *   subagent's turn, and nothing else would ever close a turn it opened;
+ * - a turn opened by a message in `SELF_CONTAINED` is closed after it.
+ */
+const closeUnsolicitedTurn = (
+  state: Normalizing,
+  sdk: SDKMessage,
+  agent: TurnOwner,
+  out: Emit,
+): void => {
+  if (agent === undefined) {
+    if (state.turnId === undefined) return;
+    if (out.every((event) => event._tag === "turn.started")) {
+      out.length = 0;
+      state.turnId = undefined;
+    } else if (SELF_CONTAINED.has(sdk.type)) {
+      closeTurn(state, out, undefined, state.turnId, "completed");
+    }
+    return;
+  }
+  if (agent.turn.phase !== "open") return;
+  if (agent.stop === "stopped") {
+    closeTurn(state, out, agent, agent.turn.turnId, "interrupted");
+  } else if (SELF_CONTAINED.has(sdk.type)) {
+    closeTurn(state, out, agent, agent.turn.turnId, "completed");
+  }
+};
+
+/**
+ * Holds a frame whose subagent is not known yet, and returns nothing. When
+ * `MAX_HELD_FRAMES` frames are already held, drops them and this frame
+ * instead, and returns the warning that counts them. Once those frames are
+ * gone, a request from the same subagent may never see its turn open, so the
+ * requests of unknown subagents are dropped too, and the adapter withdraws
+ * them.
+ */
+const holdFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
+  state.heldFrames.push(sdk);
+  if (state.heldFrames.length <= MAX_HELD_FRAMES) return [];
+  dropRequestsOfUnknownSubagents(state.subagents);
+  return [buildDroppedFramesWarning(state, state.heldFrames.splice(0).length)];
+};
+
+/** Returns the `runtime.warning` that counts the held frames the caller dropped. */
+const buildDroppedFramesWarning = (state: Normalizing, droppedFrames: number): ProviderEvent => {
+  return {
+    _tag: "runtime.warning",
+    eventId: state.mint(),
+    sessionId: state.sessionId,
+    at: state.now(),
+    ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
+    message: `dropped ${droppedFrames} ${droppedFrames === 1 ? "message" : "messages"} from a subagent the harness never reported starting`,
+  };
+};
+
+/**
+ * Normalizes the held frames whose subagent is now known, in the order they
+ * arrived, and returns their events. The frames still unknown are dropped
+ * with one `runtime.warning` that counts them: no later message would link
+ * them, because the subagent's `task_started` has come and gone. The
+ * requests of unknown subagents are dropped with them, as in `holdFrame`.
+ */
+const releaseHeldFrames = (state: Normalizing): Emit => {
+  const held = state.heldFrames.splice(0);
+  const out: Emit = [];
+  let dropped = 0;
+  for (const frame of held) {
+    if (findTurnOwner(state, frame) === "unknown") dropped += 1;
+    else out.push(...normalizeFrame(state, frame));
+  }
+  if (dropped > 0) {
+    dropRequestsOfUnknownSubagents(state.subagents);
+    out.push(buildDroppedFramesWarning(state, dropped));
+  }
+  return out;
+};
+
+const dispatch = (state: Normalizing, sdk: SDKMessage, agent: TurnOwner, out: Emit): void => {
   switch (sdk.type) {
     case "system":
-      onSystem(state, sdk, out);
+      onSystem(state, sdk, agent, out);
       return;
     case "stream_event":
-      onStreamEvent(state, sdk.event, sdk.parent_tool_use_id ?? "", out);
+      onStreamEvent(state, sdk.event, agent, out);
       return;
     case "assistant":
-      onAssistant(state, sdk, out);
+      onAssistant(state, sdk, agent, out);
       return;
     case "user":
-      onUser(state, sdk, out);
+      onUser(state, sdk, agent, out);
       return;
     case "result":
       onResult(state, sdk, out);
       return;
     default:
-      if (!TRIMMED.has(sdk.type)) emitUnknownItem(state, out);
+      if (!TRIMMED.has(sdk.type)) emitUnknownItem(state, agent, out);
       return;
   }
 };

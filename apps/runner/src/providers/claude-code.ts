@@ -1,6 +1,6 @@
 /**
- * The Claude Code provider adapter, and the only file that imports the vendor
- * SDK.
+ * The Claude Code provider adapter, and the only file that calls the vendor
+ * SDK. The other `claude-code-*` files import only its types.
  *
  * The probe sends no prompt and uses the SDK's control requests instead,
  * because a real prompt would bill the user's account just for opening a Fleet
@@ -18,7 +18,6 @@ import {
   type EffortLevel,
   type Options,
   type PermissionMode,
-  type PermissionResult,
   type PermissionUpdate,
   type Query,
   type SDKMessage,
@@ -37,7 +36,6 @@ import {
   type ProbeResult,
   type ProviderEvent,
   type QuestionAnswers,
-  type RequestResolution,
   type SendResult,
   type SessionBinding,
   type SessionSpec,
@@ -49,16 +47,32 @@ import {
   buildNormalizingState,
   openTurn,
   classifyTool,
+  isAnyAgentWorking,
   type Normalizing,
 } from "./claude-code-normalize";
+import {
+  cleanSubagentId,
+  collectDescendants,
+  deferUntilTurnOpens,
+  markStopsWanted,
+  takeStopsDue,
+  type RequestOpened,
+} from "./claude-code-subagents";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 import { truncateFact, truncateMessage } from "./text";
-import { buildUserMessage } from "./events";
-import { buildQuestionRequest, keyAnswersForVendor } from "./questions";
+import { buildUserMessage, ensureId } from "./events";
+import {
+  buildDenyResult,
+  openPark,
+  withdrawAllParks,
+  withdrawParksAskedBy,
+  type Parks,
+} from "./claude-code-parks";
+import { buildQuestionRequest } from "./questions";
 import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
@@ -92,6 +106,11 @@ export interface ClaudeStream extends AsyncIterable<SDKMessage> {
   readonly interrupt: () => Promise<void>;
   /** Switches the session's model, starting with the next turn it opens. */
   readonly setModel: (model: string) => Promise<void>;
+  /**
+   * Stops one subagent, named by its agent id. The SDK then reports the
+   * subagent's task as stopped, and the subagent cannot be continued.
+   */
+  readonly stopTask: (taskId: string) => Promise<void>;
   /** Ends the query. The CLI is a child process, and it does not exit on its own. */
   readonly close: () => void;
 }
@@ -416,63 +435,35 @@ const buildApprovalRequest = (
   return { ...common, kind: "tool_approval", detail: { toolName: truncateFact(toolName) } };
 };
 
-/** The message the model gets when the user denies a tool call; the SDK requires one. */
-const REFUSED = "the user did not allow this";
-
-const CANCELLED = "the user cancelled this turn";
-
 /**
- * Converts a user's decision into the SDK's permission result.
- *
- * - `cancel` is a deny with `interrupt: true`, so the turn ends instead of the
- *   model trying something else.
- * - `decisionClassification` tells the harness who decided.
- * - `allow_always` returns the rules the harness suggested, unchanged apart
- *   from where they are saved.
+ * Builds the request the user answers for one `canUseTool` call: a question
+ * for `AskUserQuestion`, an approval for any other tool. The request is about
+ * the tool call's item, `toolUseId`, cleaned to an id the protocol accepts:
+ * an id it does not accept would make a frame nobody can decode, which loses
+ * the event and leaves a park no client can see.
  */
-const buildPermissionResult = (
-  decision: ApprovalDecision,
-  persists: ReadonlyArray<PermissionUpdate>,
-): PermissionResult => {
-  switch (decision) {
-    case "allow":
-      return { behavior: "allow", decisionClassification: "user_temporary" };
-    case "allow_always":
-      return {
-        behavior: "allow",
-        updatedPermissions: [...persists],
-        decisionClassification: "user_permanent",
-      };
-    case "deny":
-      return { behavior: "deny", message: REFUSED, decisionClassification: "user_reject" };
-    case "cancel":
-      return {
-        behavior: "deny",
-        message: CANCELLED,
-        interrupt: true,
-        decisionClassification: "user_reject",
-      };
-  }
+const buildToolCallRequest = (
+  requestId: string,
+  toolUseId: string,
+  toolName: string,
+  input: Record<string, unknown>,
+  canPersist: boolean,
+): OpenRequest => {
+  const itemId = ensureId(toolUseId);
+  return toolName === ASK_USER_QUESTION
+    ? buildQuestionRequest({ requestId, itemId }, toolName, input["questions"], "question")
+    : buildApprovalRequest(requestId, itemId, toolName, input, canPersist);
 };
 
 /**
- * Converts the user's answers to an `AskUserQuestion` call into the SDK's
- * permission result: an allow whose input is the tool's own input with the
- * answers added, keyed by each question's full text. The SDK takes one string
- * per question, so several picks are joined with ", ", the separator the SDK
- * itself uses for a multi-select answer.
+ * Returns the rules the harness suggested saving, each redirected to the
+ * session. "Allow always" applies to this thread, not to the user's machine,
+ * so no click on it edits a settings file on disk.
  */
-const buildAnsweredResult = (
-  input: Record<string, unknown>,
-  answers: ReadonlyMap<string, ReadonlyArray<string>>,
-): PermissionResult => ({
-  behavior: "allow",
-  updatedInput: {
-    ...input,
-    answers: Object.fromEntries([...answers].map(([key, picks]) => [key, picks.join(", ")])),
-  },
-  decisionClassification: "user_temporary",
-});
+const redirectRulesToSession = (
+  suggestions: ReadonlyArray<PermissionUpdate> | undefined,
+): ReadonlyArray<PermissionUpdate> =>
+  (suggestions ?? []).map((rule) => ({ ...rule, destination: "session" as const }));
 
 const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "max"];
 
@@ -568,6 +559,12 @@ const buildSessionOptions = (
     ],
     strictMcpConfig: true,
     includePartialMessages: true,
+    // Without this, the SDK sends only a subagent's tool calls and results,
+    // and none of its text, so a subagent's transcript would have no words in
+    // it (spec 06 section 13.6).
+    forwardSubagentText: true,
+    // `perTaskStopAffordance` stays unset, so `interrupt()` also stops
+    // background subagents (spec 06 section 13.4).
     model: spec.modelSelection.model,
     ...(effort === undefined ? {} : { effort }),
     permissionMode: PERMISSION_MODES[spec.accessMode],
@@ -609,43 +606,6 @@ const resolveNativeSession = (
   };
 };
 
-/**
- * An open request the harness is waiting on for an answer. The promise the
- * harness awaits is hidden in the closures; everything else only needs the
- * request id, what the request takes, and a way to end the wait.
- *
- * An approval takes one of the decisions it offers; a question takes answers
- * only.
- */
-type Park = {
-  readonly requestId: string;
-  /**
-   * Ends the request without an answer from the user. This happens when:
-   *
-   * - the turn was interrupted;
-   * - the session stopped;
-   * - the harness withdrew the request;
-   * - the harness's stream ended.
-   *
-   * The event stream reports the request as cancelled, because the user did
-   * not deny it. The harness gets a plain deny, because there is no turn left
-   * to interrupt.
-   */
-  readonly withdraw: () => void;
-} & (
-  | {
-      readonly kind: "approval";
-      readonly decisions: ReadonlyArray<ApprovalDecision>;
-      /** Sends the decision to the harness in the SDK's terms, and the harness continues. */
-      readonly decide: (decision: ApprovalDecision) => void;
-    }
-  | {
-      readonly kind: "question";
-      /** Sends the answers to the harness in the SDK's terms, and the harness continues. */
-      readonly answer: (answers: QuestionAnswers) => void;
-    }
-);
-
 /** One session this adapter is hosting. */
 interface Live {
   readonly binding: SessionBinding;
@@ -653,13 +613,13 @@ interface Live {
   readonly stream: ClaudeStream;
   readonly state: Normalizing;
   /**
-   * The request this session is waiting on, if any. There is at most one at a
-   * time: the harness waits on a park before it runs more tools, and the
-   * clients show one approval card. The park is stored on the session entry,
-   * not in a separate map, because it is a promise inside the harness's own
-   * call, so it must go away with the session that waits on it.
+   * The requests this session is waiting on, by request id: one for each
+   * `canUseTool` call still open, from the session's own agent or a subagent.
+   * The parks are stored on the session entry, not in a separate map, because
+   * each is a promise inside the harness's own call, so they must go away with
+   * the session that waits on them.
    */
-  park: Park | undefined;
+  readonly parks: Parks;
   /** Set by `stopSession` to its reason, so the `session.exited` event can report it. */
   stopping: ExitReason | undefined;
   /** The model the harness is using. It starts as the model in the session spec. */
@@ -702,118 +662,203 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    *
    * - the user answers;
    * - the harness withdraws the request by aborting the signal;
-   * - the session ends.
+   * - the turn is interrupted or the session ends;
+   * - the turn of the subagent that asked ends;
+   * - the subagent that asked, or one above it, is stopped;
+   * - the frames of the subagent that asked are dropped, so its turn may
+   *   never open.
    *
-   * The park is stored on the session's entry, under a request id the adapter
-   * creates. Every answer comes back with that request id.
+   * Each call gets its own park, under a request id the adapter creates, and
+   * every answer comes back with that request id. Several parks can be open at
+   * once: the session's own agent and each subagent may ask at the same time
+   * (spec 06 section 13.3).
    */
   const buildCanUseTool =
     (sessionId: string): CanUseTool =>
-    (toolName, input, options) =>
-      new Promise<PermissionResult>((settle) => {
-        const held = live.get(sessionId);
-        // Deny by default, using the same check that rejects input: when the
-        // session is gone or stopping, nobody is left to answer, and the park
-        // would hold the harness for ever.
-        if (held === undefined || held.stopping !== undefined) {
-          settle(buildPermissionResult("deny", []));
-          return;
-        }
-        // Already withdrawn before it was shown: the turn is being
-        // interrupted, so there is nothing to show the user.
-        if (options.signal.aborted) {
-          settle(buildPermissionResult("deny", []));
-          return;
-        }
-        // This adapter still holds one request at a time, so a second request
-        // is denied, with a message that tells the model to ask again once
-        // the first is answered. Reporting every request at once, each with
-        // its asking subagent, is the Claude subagents ticket (#436, spec 06
-        // section 13.3).
-        if (held.park !== undefined) {
-          settle({
-            behavior: "deny",
-            message:
-              "another approval is still waiting for the user; ask again after it is answered",
-            decisionClassification: "user_reject",
-          });
-          return;
-        }
-        // "Allow always" applies to this thread, not to the user's machine.
-        // Every rule the harness suggested saving is redirected to the session,
-        // so no click here edits a settings file on disk.
-        const persists = (options.suggestions ?? []).map((rule) => ({
-          ...rule,
-          destination: "session" as const,
-        }));
-        const requestId = crypto.randomUUID();
-        // A park belongs to a turn: the turn is waiting on it, and the
-        // supervisor pauses an open turn's inactivity timer while it waits. The
-        // SDK can ask before the assistant message that starts the turn has
-        // been read from its stream, so open the turn here if none is open yet.
-        const { events } = openTurn(held.state);
-        for (const event of events) emit(event);
-        // An id the protocol does not accept would make a frame nobody can
-        // decode, which loses the event and leaves a park no client can see.
-        const itemId =
-          options.toolUseID === "" ? held.state.mint() : truncateFact(options.toolUseID);
-        const request =
-          toolName === ASK_USER_QUESTION
-            ? buildQuestionRequest({ requestId, itemId }, toolName, input["questions"], "question")
-            : buildApprovalRequest(requestId, itemId, toolName, input, persists.length > 0);
-        const endPark = (resolution: RequestResolution, told: PermissionResult): void => {
-          // End the park only if it is still this request's park, so a
-          // second answer does nothing.
-          if (held.park?.requestId !== requestId) return;
-          held.park = undefined;
-          options.signal.removeEventListener("abort", withdraw);
-          emit({
-            _tag: "request.resolved",
-            eventId: held.state.mint(),
-            sessionId,
-            at: held.state.now(),
-            requestId,
-            ...resolution,
-          });
-          settle(told);
-        };
-        // Handles every way the request can end without an answer: the harness
-        // withdraws it, the turn is interrupted, the session stops, or the
-        // harness's stream ends.
-        const withdraw = (): void =>
-          endPark({ decision: "cancel" }, buildPermissionResult("deny", []));
-        options.signal.addEventListener("abort", withdraw, { once: true });
-        held.park =
-          request.kind === "question"
-            ? {
-                requestId,
-                withdraw,
-                kind: "question",
-                answer: (answers) =>
-                  endPark(
-                    { answers },
-                    buildAnsweredResult(
-                      input,
-                      keyAnswersForVendor(answers, input["questions"], "question"),
-                    ),
-                  ),
-              }
-            : {
-                requestId,
-                withdraw,
-                kind: "approval",
-                decisions: request.decisions,
-                decide: (decision) =>
-                  endPark({ decision }, buildPermissionResult(decision, persists)),
-              };
-        emit({
-          _tag: "request.opened",
-          eventId: held.state.mint(),
-          sessionId,
-          at: held.state.now(),
-          request,
-        });
+    (toolName, input, options) => {
+      const held = live.get(sessionId);
+      // Deny by default, using the same check that rejects input: when the
+      // session is gone or stopping, nobody is left to answer, and the park
+      // would hold the harness for ever.
+      if (held === undefined || held.stopping !== undefined) {
+        return Promise.resolve(buildDenyResult());
+      }
+      // Already withdrawn before it was shown: the turn is being
+      // interrupted, so there is nothing to show the user.
+      if (options.signal.aborted) return Promise.resolve(buildDenyResult());
+      // The SDK sets `agentID` only for a call from inside a subagent. An
+      // empty one is read as the session's own agent, because the protocol
+      // does not accept an empty id.
+      const subagentId = cleanSubagentId(options.agentID);
+      // A stopped Claude subagent runs no more turns, so its request would
+      // wait for ever for a turn to be shown in.
+      if (
+        subagentId !== undefined &&
+        held.state.subagents.byId.get(subagentId)?.stop === "stopped"
+      ) {
+        return Promise.resolve(buildDenyResult());
+      }
+      // A park belongs to its asker's turn: the turn is waiting on it, and the
+      // supervisor pauses an open turn's inactivity timer while it waits. The
+      // SDK can ask before the assistant message that starts the turn of the
+      // session's own agent has been read from its stream, so open that turn
+      // here if none is open yet. A subagent's park never opens it: the
+      // session's own agent is not working just because a subagent asks
+      // (spec 06 section 13.6).
+      if (subagentId === undefined) {
+        for (const event of openTurn(held.state).events) emit(event);
+      }
+      const persists = redirectRulesToSession(options.suggestions);
+      const request = buildToolCallRequest(
+        held.state.mint(),
+        options.toolUseID,
+        toolName,
+        input,
+        persists.length > 0,
+      );
+      // A `cancel` from a subagent's request ends only that subagent's turn:
+      // the harness interrupts the agent that asked (spec 06 section 8.1).
+      const { result, opened } = openPark(held.parks, held.state, emit, {
+        request,
+        subagentId,
+        input,
+        persists,
+        signal: options.signal,
       });
+      if (subagentId === undefined) {
+        publishRequestOpened(held, opened);
+        return result;
+      }
+      // `canUseTool` can run before the pump has read the subagent's assistant
+      // frame that opens its turn. On the wire that frame always comes first,
+      // so the request waits only for its own turn's opening events.
+      for (const event of deferUntilTurnOpens(held.state.subagents, subagentId, opened)) {
+        publishRequestOpened(held, event);
+      }
+      return result;
+    };
+
+  /**
+   * Publishes a `request.opened` and marks its park reported, so the park's
+   * end is published too. Skips the event when its park has already ended:
+   * the request was never shown, so neither its start nor its end is
+   * reported.
+   */
+  const publishRequestOpened = (held: Live, opened: RequestOpened): void => {
+    const park = held.parks.get(opened.request.requestId);
+    if (park === undefined) return;
+    park.reported = true;
+    emit(opened);
+  };
+
+  /**
+   * Stops one subagent with `stopTask`. Never fails: when the harness refuses
+   * or does not answer, the subagent is reported with a `runtime.warning`,
+   * because the user asked to stop it and should know it may still run.
+   */
+  const stopSubagent = (held: Live, subagentId: SubagentId): Effect.Effect<void> =>
+    Effect.map(sendControlRequest(held.stream.stopTask(subagentId)), (refused) => {
+      // Once the session stops, the harness is going away and every subagent
+      // with it, so a refusal is no news to the user.
+      const sessionStopped =
+        held.stopping !== undefined || live.get(held.binding.sessionId) !== held;
+      if (refused === undefined || sessionStopped) return;
+      emit({
+        _tag: "runtime.warning",
+        eventId: held.state.mint(),
+        sessionId: held.binding.sessionId,
+        at: held.state.now(),
+        subagentId,
+        message: `the subagent was not stopped: ${refused}`,
+      });
+    });
+
+  /**
+   * Stops a subagent and every subagent below it (spec 06 section 13.4).
+   * Claude Code does not stop a background child when its parent stops, so
+   * each one is stopped here:
+   *
+   * - their open Requests end as cancelled;
+   * - a working one gets `stopTask`, unless it already got one;
+   * - an idle one has nothing to stop yet, so it gets `stopTask` as soon as it
+   *   works again. A subagent one of them starts later is stopped the same way.
+   *
+   * Does nothing once the session is stopping, since every subagent stops with
+   * it. An id this process does not know gets a `runtime.warning`. Never fails.
+   */
+  const stopSubagentTree = (held: Live, subagentId: SubagentId): Effect.Effect<void> => {
+    if (held.stopping !== undefined) return Effect.void;
+    const { subagents } = held.state;
+    if (!subagents.byId.has(subagentId)) {
+      emit({
+        _tag: "runtime.warning",
+        eventId: held.state.mint(),
+        sessionId: held.binding.sessionId,
+        at: held.state.now(),
+        message: truncateMessage(
+          `subagent ${subagentId} is not known to this process, so nothing was stopped`,
+        ),
+      });
+      return Effect.void;
+    }
+    const targets = [subagentId, ...collectDescendants(subagents, subagentId)];
+    // End the parks before stopping, as the session-wide interrupt does, so no
+    // card stays open for a turn that is over.
+    withdrawParksAskedBy(held.parks, new Set(targets));
+    markStopsWanted(subagents, targets);
+    return Effect.forEach(takeStopsDue(subagents), (target) => stopSubagent(held, target), {
+      concurrency: "unbounded",
+      discard: true,
+    });
+  };
+
+  /**
+   * Publishes the events of one harness message, in order. A subagent's
+   * `turn.completed` first ends the Requests that subagent asked, as
+   * cancelled, because a Request closes when its agent's turn ends, and its
+   * end must be reported before the turn's.
+   */
+  const publishMessageEvents = (held: Live, events: ReadonlyArray<ProviderEvent>): void => {
+    for (const event of events) {
+      if (event._tag === "turn.completed" && event.subagentId !== undefined) {
+        withdrawParksAskedBy(held.parks, new Set([event.subagentId]));
+      }
+      if (event._tag === "request.opened") publishRequestOpened(held, event);
+      else emit(event);
+    }
+  };
+
+  /**
+   * Sends `stopTask` to each subagent whose stop is wanted and that works
+   * again, and first ends the Requests those subagents asked, as cancelled.
+   * Does not wait for the harness to answer: the pump must keep reading its
+   * messages meanwhile.
+   */
+  const sendDueStops = (held: Live): void => {
+    const due = takeStopsDue(held.state.subagents);
+    if (due.length === 0) return;
+    withdrawParksAskedBy(held.parks, new Set(due));
+    void Effect.runPromise(
+      Effect.forEach(due, (target) => stopSubagent(held, target), {
+        concurrency: "unbounded",
+        discard: true,
+      }),
+    );
+  };
+
+  /**
+   * Withdraws each park of a subagent whose `request.opened` the normalizer
+   * dropped with that subagent's frames. Its turn may never open, so the
+   * request would never be shown. A park whose request was reported, or
+   * still waits for its turn, stays open.
+   */
+  const withdrawRequestsOfDroppedSubagents = (held: Live): void => {
+    const { waitingRequests } = held.state.subagents;
+    for (const park of [...held.parks.values()]) {
+      if (park.reported || park.subagentId === undefined) continue;
+      if (!waitingRequests.has(park.subagentId)) park.withdraw();
+    }
+  };
 
   /** Returns the hosted session. Fails when there is none, or when it is stopping. */
   const getHostedSession = (sessionId: string): Effect.Effect<Live, string> =>
@@ -832,7 +877,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     let reason: ExitReason = "process_exit";
     try {
       for await (const sdk of held.stream) {
-        for (const event of normalize(held.state, sdk)) emit(event);
+        publishMessageEvents(held, normalize(held.state, sdk));
+        sendDueStops(held);
+        withdrawRequestsOfDroppedSubagents(held);
       }
     } catch (error) {
       reason = "crash";
@@ -841,27 +888,27 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       if (held.stopping === undefined) {
         emit({
           _tag: "runtime.error",
-          eventId: crypto.randomUUID(),
+          eventId: held.state.mint(),
           sessionId,
-          at: now(),
+          at: held.state.now(),
           class: "unknown",
           message: describeError(error),
         });
       }
     } finally {
-      // Every exit passes through here, so end the park here, before the exit
-      // is reported. A park left open is a promise the harness waits on for
-      // ever, and it leaves an approval card on a session that is gone, which
-      // nobody can answer.
-      held.park?.withdraw();
+      // Every exit passes through here, so end the parks here, before the
+      // exit is reported. A park left open is a promise the harness waits on
+      // for ever, and it leaves an approval card on a session that is gone,
+      // which nobody can answer.
+      withdrawAllParks(held.parks);
       // Compare by identity: a session started again under the same id has a
       // new entry, and that entry belongs to a different pump.
       if (live.get(sessionId) === held) live.delete(sessionId);
       emit({
         _tag: "session.exited",
-        eventId: crypto.randomUUID(),
+        eventId: held.state.mint(),
         sessionId,
-        at: now(),
+        at: held.state.now(),
         reason: held.stopping ?? reason,
       });
     }
@@ -950,8 +997,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                 () => crypto.randomUUID(),
                 now,
                 spec.outputSchema,
+                spec.continue?.subagents,
               ),
-              park: undefined,
+              parks: new Map(),
               stopping: undefined,
               model: spec.modelSelection.model,
             };
@@ -962,9 +1010,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
             // hello, so it never includes a session started after that.
             emit({
               _tag: "session.started",
-              eventId: crypto.randomUUID(),
+              eventId: held.state.mint(),
               sessionId,
-              at: now(),
+              at: held.state.now(),
               providerRefs: { nativeSessionId: binding.nativeSessionId },
             });
             return binding;
@@ -1013,20 +1061,20 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
 
     interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
-        // This adapter reports no subagents yet, so no subagent id can name
-        // work it runs, and stopping the session's own turn instead would stop
-        // work the user did not ask to stop. Stopping a subagent is built
-        // together with reporting them (#436).
-        if (subagentId !== undefined) return Effect.void;
         const held = live.get(sessionId);
-        // No turn is running, so do not send the harness a control request: it
+        if (held === undefined) return Effect.void;
+        if (subagentId !== undefined) return stopSubagentTree(held, subagentId);
+        // Nothing is running, so do not send the harness a control request: it
         // would wait on the harness and hold up the connection's other frames.
-        if (held === undefined || held.state.turnId === undefined) return Effect.void;
-        // End the park before sending the interrupt, not after. The CLI
+        // A background subagent can run, or ask, while the session's own agent
+        // is idle, and the interrupt stops it too (spec 06 section 13.4).
+        if (!isAnyAgentWorking(held.state) && held.parks.size === 0) return Effect.void;
+        // End the parks before sending the interrupt, not after. The CLI
         // withdraws a pending request once the turn is interrupted, and a
         // request still open when the turn completes leaves a card on screen
-        // for a turn that is over.
-        held.park?.withdraw();
+        // for a turn that is over. The interrupt stops every subagent too, so
+        // their parks end as well.
+        withdrawAllParks(held.parks);
         // The turn completing as `interrupted` is the only report. If the
         // request fails, the harness is already gone, which has the same result.
         return Effect.asVoid(sendControlRequest(held.stream.interrupt()));
@@ -1044,8 +1092,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // same id fails while the old harness is still running. Until then,
         // `stopping` makes input fail, and gives the exit event its reason.
         held.stopping = reason;
-        // Do not end the park here: closing the stream ends the pump, and the
-        // pump's `finally` ends the park on every exit.
+        // Do not end the parks here: closing the stream ends the pump, and the
+        // pump's `finally` ends the parks on every exit.
         held.input.end();
         held.stream.close();
       }),
@@ -1056,8 +1104,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       decision: ApprovalDecision,
     ): Effect.Effect<void> =>
       Effect.sync(() => {
-        const park = live.get(sessionId)?.park;
-        if (park?.requestId !== requestId || park.kind !== "approval") return;
+        const park = live.get(sessionId)?.parks.get(requestId);
+        if (park?.kind !== "approval") return;
         // Ignore a decision the request did not offer: the harness would have
         // to replace it with something else.
         if (park.decisions.includes(decision)) park.decide(decision);
@@ -1069,8 +1117,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       answers: QuestionAnswers,
     ): Effect.Effect<void> =>
       Effect.sync(() => {
-        const park = live.get(sessionId)?.park;
-        if (park?.requestId !== requestId || park.kind !== "question") return;
+        const park = live.get(sessionId)?.parks.get(requestId);
+        if (park?.kind !== "question") return;
         park.answer(answers);
       }),
 
@@ -1134,6 +1182,7 @@ export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
       [Symbol.asyncIterator]: () => running[Symbol.asyncIterator](),
       interrupt: () => running.interrupt().then(() => undefined),
       setModel: (model) => running.setModel(model),
+      stopTask: (taskId) => running.stopTask(taskId),
       close: () => {
         // The child may already be gone, and an unhandled rejection would take
         // the whole daemon down just because one session ended.
