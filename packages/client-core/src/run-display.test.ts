@@ -3,6 +3,7 @@ import type { Run, Runner, StepRecord } from "@hercule/contract";
 import {
   describeFailureReason,
   findFailedEdge,
+  findStepLineKind,
   describeRunOrigin,
   describeReruns,
   describeRunnerWait,
@@ -189,19 +190,37 @@ describe("formatElapsed", () => {
 
 describe("describeStepDuration", () => {
   it("measures a record to its end, or to now while it runs, and is empty before it starts", () => {
-    assert.strictEqual(describeStepDuration({ startedAt: START, finishedAt: at(40) }, NOW), "40ms");
     assert.strictEqual(
-      describeStepDuration({ startedAt: START, finishedAt: at(75_000) }, NOW),
+      describeStepDuration({ startedAt: START, finishedAt: at(40) }, "action", NOW),
+      "40ms",
+    );
+    assert.strictEqual(
+      describeStepDuration({ startedAt: START, finishedAt: at(75_000) }, "action", NOW),
       "1m 15s",
     );
-    assert.strictEqual(describeStepDuration({ startedAt: START }, NOW), "4.3s");
-    assert.strictEqual(describeStepDuration({}, NOW), "");
+    assert.strictEqual(describeStepDuration({ startedAt: START }, "agent", NOW), "4.3s");
+    assert.strictEqual(describeStepDuration({}, "action", NOW), "");
   });
 
-  it("is empty for a signal's line, which fires at one moment", () => {
+  it("is empty for a signal's record, which fires at one moment", () => {
     const fired = { startedAt: START, finishedAt: at(3) };
-    assert.strictEqual(describeStepDuration({ ...fired, kind: "signal" }, NOW), "");
-    assert.strictEqual(describeStepDuration({ ...fired, kind: "agent" }, NOW), "3ms");
+    assert.strictEqual(describeStepDuration(fired, "signal", NOW), "");
+    assert.strictEqual(describeStepDuration(fired, "agent", NOW), "3ms");
+  });
+});
+
+describe("findStepLineKind", () => {
+  const plan: Pick<Run["plan"], "steps"> = {
+    steps: [
+      { id: "fetch", kind: "action", action: "http.request" },
+      { id: "implement", kind: "agent", agent: "ada", prompt: "Fix it" },
+    ],
+  };
+
+  it("returns the kind of the plan's step with the record's id, and signal for any other id", () => {
+    assert.strictEqual(findStepLineKind(plan, "fetch"), "action");
+    assert.strictEqual(findStepLineKind(plan, "implement"), "agent");
+    assert.strictEqual(findStepLineKind(plan, "pr_merged"), "signal");
   });
 });
 
@@ -390,6 +409,21 @@ describe("describeRunnerWait", () => {
     );
   });
 
+  it("names the runner under a running agent step of a run whose runner is offline", () => {
+    const agentStep: Run = {
+      ...PINNED,
+      plan: {
+        ...PINNED.plan,
+        steps: [{ id: "implement", kind: "agent", agent: "ada", prompt: "Fix it" }],
+      },
+      steps: [{ stepId: "implement", iteration: 1, status: "running", startedAt: START }],
+    };
+    assert.deepStrictEqual(describeRunnerWait(agentStep, OFFLINE, [], "UTC"), {
+      stepIds: new Set(["implement"]),
+      text: "Waiting for runner mac-mini to reconnect (offline since 24 Sep 12:02)",
+    });
+  });
+
   it("names the plan's workspace actions under a pending workspace step of a run no runner has taken yet", () => {
     const waiting: Run = {
       ...UNPINNED,
@@ -501,30 +535,47 @@ describe("listAwaitedSignals", () => {
 
 describe("describeStepSession", () => {
   const SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f00005e55";
+  const ATLAS = buildRunner("runner-atlas", "atlas");
 
   it("shows the session's title and status", () => {
     const session = buildSession({ id: SESSION_ID, title: "Implement the fix", status: "busy" });
-    assert.deepStrictEqual(describeStepSession(SESSION_ID, new Map([[SESSION_ID, session]])), {
+    assert.deepStrictEqual(describeStepSession(SESSION_ID, [session], undefined), {
       sessionId: SESSION_ID,
       title: "Implement the fix",
       status: "busy",
+      wait: undefined,
     });
   });
 
   it("shows the id's tail for a session not read yet, or one with no title", () => {
-    assert.deepStrictEqual(describeStepSession(SESSION_ID, new Map()), {
+    assert.deepStrictEqual(describeStepSession(SESSION_ID, [], undefined), {
       sessionId: SESSION_ID,
       title: "session 00005e55",
       status: undefined,
+      wait: undefined,
     });
     const untitled = buildSession({ id: SESSION_ID, title: "", status: "exited" });
     assert.strictEqual(
-      describeStepSession(SESSION_ID, new Map([[SESSION_ID, untitled]]))?.title,
+      describeStepSession(SESSION_ID, [untitled], undefined).title,
       "session 00005e55",
     );
   });
 
-  it("returns nothing for a record that drove no session", () => {
-    assert.strictEqual(describeStepSession(undefined, new Map()), undefined);
+  it("says a queued session waits for a free session slot on its online runner", () => {
+    const queued = buildSession({ id: SESSION_ID, status: "queued", runnerId: ATLAS.id });
+    assert.strictEqual(
+      describeStepSession(SESSION_ID, [queued], ATLAS).wait,
+      "Waiting for runner atlas to free a session slot",
+    );
+  });
+
+  it("gives no wait when the runner is offline or unknown, or the session is not queued", () => {
+    const queued = buildSession({ id: SESSION_ID, status: "queued", runnerId: ATLAS.id });
+    const offline: Runner = { ...ATLAS, connectivity: "offline" };
+    // The runner-wait line already says that the step waits for the runner to reconnect.
+    assert.strictEqual(describeStepSession(SESSION_ID, [queued], offline).wait, undefined);
+    assert.strictEqual(describeStepSession(SESSION_ID, [queued], undefined).wait, undefined);
+    const busy = { ...queued, status: "busy" } as const;
+    assert.strictEqual(describeStepSession(SESSION_ID, [busy], ATLAS).wait, undefined);
   });
 });

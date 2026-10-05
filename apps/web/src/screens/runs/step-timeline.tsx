@@ -6,7 +6,7 @@ import {
   isRunLive,
   type RunnerWait,
 } from "@hercule/client-core";
-import type { Run, Session } from "@hercule/contract";
+import type { Run } from "@hercule/contract";
 import { WORK_STATE_HUES, cn, useElementWidth, type WorkState } from "@hercule/ui";
 import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
 
@@ -22,12 +22,6 @@ const GRID: CSSProperties = {
   gridTemplateColumns: `${String(MARK_COLUMN)}px ${String(STEP_COLUMN)}px minmax(0, 1fr) ${String(DURATION_COLUMN)}px`,
   columnGap: COLUMN_GAP,
   paddingInline: ROW_PADDING,
-};
-
-/** The track column's edges, for the line at the end of the axis that crosses every row's track. */
-const TRACK: CSSProperties = {
-  left: ROW_PADDING + MARK_COLUMN + COLUMN_GAP + STEP_COLUMN + COLUMN_GAP,
-  right: ROW_PADDING + DURATION_COLUMN + COLUMN_GAP,
 };
 
 /**
@@ -51,8 +45,10 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
  * Renders the steps of a run on a shared time axis: one row per step record with a
  * bar from its start to its end, or to now while it runs, then the steps the
  * run has not reached. The axis ends at now while the run is live, and where
- * the run ended once it has ended; a vertical line marks that end. Under an
- * agent step's row is a link to the session it drives. Under any row is its
+ * the run ended once it has ended; a vertical line at the end of each row's
+ * track marks that end. The line stays inside the track, like the ticks, so
+ * it never crosses the lines under a row. Under an agent step's row is a link
+ * to the session it drives. Under any row is its
  * error, or, while the step waits for a runner to run it in the run's
  * workspace, a line explaining which runner it waits for.
  *
@@ -61,13 +57,10 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
  */
 export function StepTimeline({
   run,
-  sessions,
   runnerWait,
   now,
 }: {
   readonly run: Run;
-  /** The sessions the run's agent steps started, by id. */
-  readonly sessions: ReadonlyMap<string, Session>;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
@@ -104,75 +97,74 @@ export function StepTimeline({
         </span>
         <span />
       </div>
-      <div className="relative">
-        <ul>
-          {timeline.lines.map(({ line, bar, note }) => {
-            return (
-              <li key={line.key} className="border-t border-line-soft">
-                <div style={GRID} className="grid min-h-10 items-center">
-                  <StepCells line={line} />{" "}
-                  <span className="relative h-full min-h-10">
-                    {ticks.map((tick) => (
-                      <span
-                        key={tick.position}
-                        style={{ left: formatPercent(tick.position) }}
-                        className="absolute inset-y-0 w-px bg-line-soft"
-                      />
-                    ))}
-                    {note !== undefined ? (
-                      // The note ends at its position by the same fraction of
-                      // its own width as its position is of the axis, so near
-                      // the end of the axis it stays inside the track. Its
-                      // background and padding keep it clear of the gridlines.
-                      <span
-                        style={{
-                          left: formatPercent(note.position),
-                          transform: `translate(-${formatPercent(note.position)}, -50%)`,
-                        }}
-                        className="absolute top-1/2 bg-surface px-1.5 text-fine whitespace-nowrap text-faint"
-                      >
-                        {note.text}
-                      </span>
-                    ) : bar === undefined ? null : (
-                      <span
-                        // A bar is at least as wide as its round ends, so a step
-                        // of a millisecond still shows.
-                        style={{
-                          left: formatPercent(bar.start),
-                          width: `max(6px, ${formatPercent(bar.end - bar.start)})`,
-                        }}
-                        className={cn(
-                          "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full",
-                          BAR_FILL[line.state],
-                        )}
-                      />
-                    )}
-                  </span>{" "}
+      <ul>
+        {timeline.lines.map(({ line, bar, note }) => {
+          return (
+            <li key={line.key} className="border-t border-line-soft">
+              <div style={GRID} className="grid min-h-10 items-center">
+                <StepCells line={line} />{" "}
+                <span className="relative h-full min-h-10">
+                  {ticks.map((tick) => (
+                    <span
+                      key={tick.position}
+                      style={{ left: formatPercent(tick.position) }}
+                      className="absolute inset-y-0 w-px bg-line-soft"
+                    />
+                  ))}
+                  {note !== undefined ? (
+                    // The note ends at its position by the same fraction of
+                    // its own width as its position is of the axis, so near
+                    // the end of the axis it stays inside the track. Its
+                    // background and padding keep it clear of the gridlines.
+                    <span
+                      style={{
+                        left: formatPercent(note.position),
+                        transform: `translate(-${formatPercent(note.position)}, -50%)`,
+                      }}
+                      className="absolute top-1/2 bg-surface px-1.5 text-fine whitespace-nowrap text-faint"
+                    >
+                      {note.text}
+                    </span>
+                  ) : bar === undefined ? null : (
+                    <span
+                      // A bar is at least as wide as its round ends, so a step
+                      // of a millisecond still shows.
+                      style={{
+                        left: formatPercent(bar.start),
+                        width: `max(6px, ${formatPercent(bar.end - bar.start)})`,
+                      }}
+                      className={cn(
+                        "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full",
+                        BAR_FILL[line.state],
+                      )}
+                    />
+                  )}
+                  {/* The end of the axis: now while the run is live, where it
+                        ended once it has ended. It comes after the bar, so it
+                        is drawn over a running bar that reaches it. */}
                   <span
                     className={cn(
-                      "text-right font-mono text-fine tabular-nums",
-                      WORK_STATE_HUES[line.state] ?? "text-muted",
+                      "absolute inset-y-0 left-full w-px",
+                      isLive ? "bg-[color-mix(in_oklch,var(--live)_70%,transparent)]" : "bg-line",
                     )}
-                  >
-                    {describeStepDuration(line, now)}
-                  </span>
-                </div>
-                <StepSessionLine line={line} sessions={sessions} />
-                {line.error === undefined ? null : <StepErrorLine error={line.error} />}
-                <StepWaitLine line={line} runnerWait={runnerWait} />
-              </li>
-            );
-          })}
-        </ul>
-        <div aria-hidden="true" style={TRACK} className="pointer-events-none absolute inset-y-0">
-          <span
-            className={cn(
-              "absolute inset-y-0 left-full w-px",
-              isLive ? "bg-[color-mix(in_oklch,var(--live)_70%,transparent)]" : "bg-line",
-            )}
-          />
-        </div>
-      </div>
+                  />
+                </span>{" "}
+                <span
+                  className={cn(
+                    "text-right font-mono text-fine tabular-nums",
+                    WORK_STATE_HUES[line.state] ?? "text-muted",
+                  )}
+                >
+                  {describeStepDuration(line, line.kind, now)}
+                </span>
+              </div>
+              {line.sessionId === undefined ? null : <StepSessionLine sessionId={line.sessionId} />}
+              {line.error === undefined ? null : <StepErrorLine error={line.error} />}
+              <StepWaitLine line={line} runnerWait={runnerWait} />
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

@@ -711,6 +711,11 @@ describe("A run's page > the steps", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
     const start = getStepRow("start");
     expect(readStatusWords(start)).toEqual(["failed"]);
     expect(readPageText(start)).toContain(STEP_ERROR_MESSAGE);
+    // Only the error's code takes the fail hue; its sentence stays muted.
+    expect(within(start).getByText("not_found").className).toContain("text-fail");
+    expect(within(start).getByText(new RegExp(STEP_ERROR_MESSAGE)).className).not.toContain(
+      "text-fail",
+    );
   });
 
   it("shows a step's output only once its row is expanded", async () => {
@@ -990,6 +995,29 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     expect(link?.getAttribute("href")).toBe(`/threads/${IMPLEMENT_SESSION_ID}`);
   });
 
+  it("says a queued session is queued, and that it waits for its runner to free a session slot", async () => {
+    const runnerId = IMPLEMENT_SESSION.runnerId;
+    await openRunPage(SIGNAL_WAITING_RUN, {
+      sessions: [{ ...IMPLEMENT_SESSION, status: "queued" }],
+      overrides: {
+        [`GET /api/v1/runners/${runnerId}`]: {
+          body: {
+            ...buildRunner(runnerId, "mac-mini"),
+            negotiatedCapabilities: null,
+            protocolVersion: null,
+          } satisfies RunnerDetail,
+        },
+      },
+    });
+    await findPageHeader();
+
+    const row = listStepRows("implement")[0]!;
+    expect(readPageText(row)).toContain("Session Fix the login bug · queued");
+    await waitFor(() => {
+      expect(readPageText(row)).toContain("Waiting for runner mac-mini to free a session slot");
+    });
+  });
+
   it("updates the session line live when the session changes", async () => {
     const { live, holdSessions } = await openRunPage(SIGNAL_WAITING_RUN, {
       sessions: [IMPLEMENT_SESSION],
@@ -1011,15 +1039,18 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     });
   });
 
-  it("says in the live hue which signals a running run with nothing left to run waits on", async () => {
+  it("says which signals a running run with nothing left to run waits on, only their ids in the live hue", async () => {
     await openRunPage(SIGNAL_WAITING_RUN, { sessions: [IMPLEMENT_SESSION] });
 
     const header = await findPageHeader();
     expect(readPageText(header)).toMatch(
       /running [^·]+·waiting on checks_failed or pr_merged·started by/,
     );
-    const waiting = within(header).getByText(/waiting on/);
-    expect(waiting.className).toContain("text-live");
+    for (const signalId of ["checks_failed", "pr_merged"]) {
+      expect(within(header).getByText(signalId).className).toContain("text-live");
+    }
+    // The words around the ids stay in the header's own colour.
+    expect(within(header).getByText(/waiting on/).className).not.toContain("text-live");
   });
 
   it("says nothing of signals while a step still runs, or once the run has ended", async () => {

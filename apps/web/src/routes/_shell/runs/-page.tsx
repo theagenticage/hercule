@@ -1,10 +1,5 @@
 import { useMemo, useState, type JSX } from "react";
-import {
-  useMutation,
-  useQueryClient,
-  useSuspenseInfiniteQuery,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import {
   buildRunGraph,
   buildStepLines,
@@ -27,7 +22,7 @@ import {
   useElementWidth,
   useTickingClock,
 } from "@hercule/ui";
-import { runSessionsQuery, runsQuery } from "../../../app/queries";
+import { runsQuery } from "../../../app/queries";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { RunGraphView } from "../../../screens/runs/run-graph-view";
 import { RunHeader } from "../../../screens/runs/run-header";
@@ -84,9 +79,8 @@ const PAGE_PADDING = 32;
  * action, the page says why in full on a row of its own below the header's
  * lines, above any question.
  *
- * The page reads the runs that re-ran this one, which the header links, and
- * the sessions the run's agent steps started, which the steps link. The
- * route's loader has already read both, so the page does not wait for them.
+ * The page reads the runs that re-ran this one, which the header links. The
+ * route's loader has already read them, so the page does not wait for them.
  */
 export function RunPage({
   client,
@@ -149,11 +143,6 @@ export function RunPage({
   const [rerunsPage = { items: [] }] = useSuspenseInfiniteQuery(
     runsQuery(client, { originalRunId: run.id }),
   ).data.pages;
-  const runSessions = useSuspenseQuery(runSessionsQuery(client, run.id)).data.items;
-  const sessions = useMemo(
-    () => new Map(runSessions.map((session) => [session.id, session])),
-    [runSessions],
-  );
 
   // The run stays the same object until a refetch changes it, so the graph,
   // and with it the graph's layout, is built once per change of the run and
@@ -341,15 +330,9 @@ export function RunPage({
               </SegmentedControl>
             </div>
             {stepsView === "list" ? (
-              <StepList
-                lines={lines}
-                runStatus={run.status}
-                sessions={sessions}
-                runnerWait={runnerWait}
-                now={now}
-              />
+              <StepList lines={lines} runStatus={run.status} runnerWait={runnerWait} now={now} />
             ) : (
-              <StepTimeline run={run} sessions={sessions} runnerWait={runnerWait} now={now} />
+              <StepTimeline run={run} runnerWait={runnerWait} now={now} />
             )}
           </section>
           {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}

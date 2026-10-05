@@ -25,8 +25,6 @@ import type {
   WorkflowAction,
 } from "@hercule/contract";
 import { describeActor, type ActorReading, type ActorTarget } from "./actor-display";
-// A type-only import, so it adds no import cycle at runtime: run-graph imports this module.
-import type { StepLineKind } from "./run-graph";
 import { toIdTail } from "./id-tail";
 import { formatNameList } from "./name-list";
 import { formatDuration } from "./threads/duration";
@@ -230,6 +228,21 @@ const buildActorOriginReading = (
   howStarted: string | undefined,
 ): RunOriginReading => ({ kind: "actor", label: starter.label, link: starter.link, howStarted });
 
+/**
+ * What a step line is a line of: an action step, an agent step, or a signal
+ * trigger, which has a record each time it fires.
+ */
+export type StepLineKind = "action" | "agent" | "signal";
+
+/**
+ * Returns what the step record with `stepId` is a record of, from the run's
+ * plan: an action step, an agent step, or a signal trigger. A run writes
+ * records only for its plan's steps and its signal triggers, so an id that
+ * names no step of the plan is a signal trigger's.
+ */
+export const findStepLineKind = (plan: Pick<Run["plan"], "steps">, stepId: string): StepLineKind =>
+  plan.steps.find((step) => step.id === stepId)?.kind ?? "signal";
+
 /** When a run or a step record started and finished. Each is absent until it has happened. */
 export interface Timestamps {
   readonly startedAt?: string;
@@ -312,20 +325,22 @@ export const formatElapsed = (ms: number): string => {
 };
 
 /**
- * Returns how long a step ran, or has run up to `now` while it runs, such as
- * `40ms` or `1m 15s`, or an empty string for a step that has not started. The
- * web app and the CLI both show a step's duration with it, so the two never
- * disagree about the same step record.
+ * Returns how long a step record of `kind` ran, or has run up to `now` while
+ * it runs, such as `40ms` or `1m 15s`, or an empty string for a step that has
+ * not started. The web app and the CLI both show a step's duration with it,
+ * so the two never disagree about the same step record.
  *
- * A signal's line also returns an empty string: a signal fires at one moment,
- * so the time between its record's start and end is how long the controller
- * took to note it, not anything the signal did.
+ * A signal's record also returns an empty string: a signal fires at one
+ * moment, so the time between its record's start and end is how long the
+ * controller took to note it, not anything the signal did. The kind is a
+ * required argument so that no caller can forget it.
  */
 export const describeStepDuration = (
-  times: Timestamps & { readonly kind?: StepLineKind },
+  times: Timestamps,
+  kind: StepLineKind,
   now: number,
 ): string => {
-  if (times.kind === "signal") return "";
+  if (kind === "signal") return "";
   const elapsed = measureElapsed(times.startedAt, times.finishedAt, now);
   return elapsed === undefined ? "" : formatElapsed(elapsed);
 };
@@ -442,9 +457,9 @@ export const describeStepState = (state: WorkState, runStatus: RunStatus): strin
 /** The steps of a run that wait for a runner, and the line each of them shows. */
 export interface RunnerWait {
   /**
-   * The ids of the steps that wait: the running workspace steps of a run
-   * whose runner is offline, or the pending workspace steps of a run that no
-   * runner has taken yet.
+   * The ids of the steps that wait: the running agent steps and workspace
+   * steps of a run whose runner is offline, or the pending workspace steps of
+   * a run that no runner has taken yet.
    */
   readonly stepIds: ReadonlySet<string>;
   /**
@@ -456,16 +471,17 @@ export interface RunnerWait {
 
 /**
  * Returns which steps of a running run wait for a runner, and the line they
- * show, with times in `timezone`. A step waits only when its action runs in
- * the workspace, which `actions`, the action catalog, tells. A step that runs
- * on the controller, or whose action is no longer in the catalog, never
- * waits. There are two waits:
+ * show, with times in `timezone`. An action step waits only when its action
+ * runs in the workspace, which `actions`, the action catalog, tells. An
+ * action step that runs on the controller, or whose action is no longer in
+ * the catalog, never waits. There are two waits:
  *
  * - The run is pinned to a runner that is not online. Its running workspace
- *   steps wait for that runner without limit, because every workspace step
- *   of a run runs on the runner the run is pinned to. The line is "Waiting
- *   for runner mac-mini to reconnect (offline since 25 Sep 14:02)"; the part
- *   in brackets is left out when the runner has never been seen.
+ *   steps and agent steps wait for that runner without limit, because both
+ *   run on the runner the run is pinned to: an agent step's session does.
+ *   The line is "Waiting for runner mac-mini to reconnect (offline since
+ *   25 Sep 14:02)"; the part in brackets is left out when the runner has
+ *   never been seen.
  * - The run is not pinned to a runner yet. Its first workspace step stays
  *   pending until a runner that can run every workspace action of the plan
  *   is online and free to take the run. The line names those actions:
@@ -485,19 +501,25 @@ export const describeRunnerWait = (
   const workspaceActionIds = new Set(
     actions.filter((action) => action.runsIn === "workspace").map((action) => action.id),
   );
-  const listWorkspaceStepIds = (status: StepStatus): ReadonlySet<string> =>
+  /** Returns the ids of the plan's steps with a record in `status` that `waitsFor` accepts. */
+  const listWaitingStepIds = (
+    status: StepStatus,
+    waitsFor: (step: Run["plan"]["steps"][number]) => boolean,
+  ): ReadonlySet<string> =>
     new Set(
       run.steps
         .filter((record) => record.status === status)
         .map((record) => record.stepId)
         .filter((stepId) => {
           const step = run.plan.steps.find((each) => each.id === stepId);
-          return step?.kind === "action" && workspaceActionIds.has(step.action);
+          return step !== undefined && waitsFor(step);
         }),
     );
+  const isWorkspaceAction = (step: Run["plan"]["steps"][number]): boolean =>
+    step.kind === "action" && workspaceActionIds.has(step.action);
 
   if (run.runnerId === undefined) {
-    const stepIds = listWorkspaceStepIds("pending");
+    const stepIds = listWaitingStepIds("pending", isWorkspaceAction);
     if (stepIds.size === 0) return undefined;
     const planActionIds = new Set(
       run.plan.steps.flatMap((step) =>
@@ -512,7 +534,10 @@ export const describeRunnerWait = (
 
   if (runner === undefined || runner.id !== run.runnerId) return undefined;
   if (runner.connectivity === "online") return undefined;
-  const stepIds = listWorkspaceStepIds("running");
+  const stepIds = listWaitingStepIds(
+    "running",
+    (step) => step.kind === "agent" || isWorkspaceAction(step),
+  );
   if (stepIds.size === 0) return undefined;
   const waiting = `Waiting for runner ${runner.name} to reconnect`;
   const since =
@@ -554,27 +579,42 @@ export interface StepSessionReading {
   readonly title: string;
   /** The session's status, or `undefined` while the session has not been read. */
   readonly status: SessionStatus | undefined;
+  /**
+   * Why a queued session has not started, such as "Waiting for runner atlas
+   * to free a session slot", or `undefined` for a session that is not queued.
+   */
+  readonly wait: string | undefined;
 }
 
 /**
- * Returns how the line under an agent step's record shows the session the
- * record drove, looked up in `sessions`, the run's sessions by id. A session
- * missing from `sessions`, such as one that started after they were last
- * read, shows its id's tail and no status; a session with no title shows its
- * id's tail and its status. Returns `undefined` when
- * `sessionId` is `undefined`: the record is an action step's, a signal's, or
- * an agent step's that has not started a session yet.
+ * Returns how the lines under an agent step's record show the session the
+ * record drove, looked up by `sessionId` in `sessions`, the run's sessions.
+ *
+ * - A session missing from `sessions`, such as one that started after they
+ *   were last read, shows its id's tail and no status.
+ * - A session with no title shows its id's tail and its status.
+ * - A queued session on an online `runner` waits for the runner to free one
+ *   of its session slots, because the runner already runs as many sessions as
+ *   it may. A queued session on a runner that is not online waits for the
+ *   runner to reconnect instead; `describeRunnerWait` writes that line, so
+ *   this reading has no wait then. Neither has one while the runner is
+ *   unknown.
  */
 export const describeStepSession = (
-  sessionId: string | undefined,
-  sessions: ReadonlyMap<string, Session>,
-): StepSessionReading | undefined => {
-  if (sessionId === undefined) return undefined;
-  const session = sessions.get(sessionId);
+  sessionId: string,
+  sessions: readonly Session[],
+  runner: Runner | undefined,
+): StepSessionReading => {
+  const session = sessions.find((each) => each.id === sessionId);
   const title = session?.title ?? "";
+  const isWaitingForSlot =
+    session?.status === "queued" &&
+    runner?.id === session.runnerId &&
+    runner.connectivity === "online";
   return {
     sessionId,
     title: title === "" ? `session ${toIdTail(sessionId)}` : title,
     status: session?.status,
+    wait: isWaitingForSlot ? `Waiting for runner ${runner.name} to free a session slot` : undefined,
   };
 };

@@ -10,6 +10,7 @@ import {
   describeRunOrigin,
   describeStepDuration,
   findFailedEdge,
+  findStepLineKind,
   formatAge,
   describeResolution,
   describeTriggerOn,
@@ -463,17 +464,22 @@ const renderRunOutput = (run: Run): ReadonlyArray<string> => {
 /**
  * Returns the table of a run's step records, one row per record. The
  * iteration column shows only when a step has more than one record, so a run
- * with no loops reads as before.
+ * with no loops reads as before. A signal's record has no duration, as on the
+ * run's page.
  */
-const renderStepTable = (steps: Run["steps"], now: number): ReadonlyArray<string> => {
-  const stepIds = new Set(steps.map((record) => record.stepId));
-  const hasRepeats = stepIds.size < steps.length;
+const renderStepTable = (run: Run, now: number): ReadonlyArray<string> => {
+  const stepIds = new Set(run.steps.map((record) => record.stepId));
+  const hasRepeats = stepIds.size < run.steps.length;
   return renderTable(
-    steps.map((record) => ({
+    run.steps.map((record) => ({
       step: record.stepId,
       ...(hasRepeats ? { iteration: record.iteration } : {}),
       status: record.status,
-      took: describeStepDuration(readTimestamps(record), now),
+      took: describeStepDuration(
+        readTimestamps(record),
+        findStepLineKind(run.plan, record.stepId),
+        now,
+      ),
       error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
     })),
   );
@@ -507,7 +513,7 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderRunOutput(run),
   "",
   "steps",
-  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run.steps, now)),
+  ...(run.steps.length === 0 ? ["none"] : renderStepTable(run, now)),
 ];
 
 /**

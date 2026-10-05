@@ -200,7 +200,12 @@ function RunStepCard({
   const { state } = progress;
   const isUnreached = state === "unreached";
   const isFlat = isUnreached || state === "skipped";
-  const duration = describeStepDuration(progress, run.now);
+  // A card with progress is a step's: a signal trigger's card has none.
+  const duration = describeStepDuration(
+    progress,
+    node.kind === "agent" ? "agent" : "action",
+    run.now,
+  );
   return (
     <div
       role="group"

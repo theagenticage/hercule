@@ -333,7 +333,14 @@ describe("hercule run", () => {
     const failed = {
       id: RUN,
       workflowId: null,
-      plan: { name: "File a task", steps: [] },
+      // A step record's duration is printed only for a step its plan holds.
+      plan: {
+        name: "File a task",
+        steps: [
+          { id: "file_task", kind: "action", action: "task.create" },
+          { id: "start_task", kind: "action", action: "task.start" },
+        ],
+      },
       inputs: { title: "Fix login", count: 3, account: CONNECTION, reviewers: [CONNECTION] },
       origin: { kind: "manual", actor: "user" },
       status: "failed",
@@ -476,7 +483,11 @@ describe("hercule run", () => {
   /** A plan whose `file` and `count` steps loop, with `escalate` after the loop. */
   const LOOP_PLAN = {
     name: "File a batch",
-    steps: [],
+    steps: ["lookup", "file", "count", "escalate"].map((id) => ({
+      id,
+      kind: "action",
+      action: "task.create",
+    })),
     edges: [
       { from: "lookup", to: "file" },
       { from: "file", to: "count" },

@@ -5,7 +5,7 @@ import {
   type RunnerWait,
   type StepLine,
 } from "@hercule/client-core";
-import type { RunStatus, Session } from "@hercule/contract";
+import type { RunStatus } from "@hercule/contract";
 import { WORK_STATE_HUES, cn } from "@hercule/ui";
 import { JsonText } from "./json-text";
 import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
@@ -22,14 +22,11 @@ import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-
 export function StepList({
   lines,
   runStatus,
-  sessions,
   runnerWait,
   now,
 }: {
   readonly lines: ReadonlyArray<StepLine>;
   readonly runStatus: RunStatus;
-  /** The sessions the run's agent steps started, by id. */
-  readonly sessions: ReadonlyMap<string, Session>;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
@@ -53,7 +50,7 @@ export function StepList({
                 WORK_STATE_HUES[line.state] ?? "text-muted",
               )}
             >
-              {describeStepDuration(line, now)}
+              {describeStepDuration(line, line.kind, now)}
             </span>{" "}
             <span className="flex justify-end text-faint" aria-hidden="true">
               {output === undefined ? null : <Chevron isOpen={isOpen} />}
@@ -82,7 +79,7 @@ export function StepList({
                 {cells}
               </button>
             )}
-            <StepSessionLine line={line} sessions={sessions} />
+            {line.sessionId === undefined ? null : <StepSessionLine sessionId={line.sessionId} />}
             {line.error === undefined ? null : <StepErrorLine error={line.error} />}
             <StepWaitLine line={line} runnerWait={runnerWait} />
             {isOpen ? (

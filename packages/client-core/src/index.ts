@@ -104,6 +104,7 @@ export {
   describeStepDuration,
   describeStepState,
   findFailedEdge,
+  findStepLineKind,
   formatElapsed,
   isRunLive,
   listAwaitedSignals,
@@ -111,6 +112,7 @@ export {
   readTimestamps,
   shouldRunRecede,
   describeStepSession,
+  type StepLineKind,
   type StepSessionReading,
 } from "./run-display";
 export {
@@ -123,7 +125,6 @@ export {
   type RunGraphNode,
   type StepProgress,
   type StepLine,
-  type StepLineKind,
 } from "./run-graph";
 export { describeRunWorkspace, type RunWorkspaceReading } from "./run-workspace";
 export {

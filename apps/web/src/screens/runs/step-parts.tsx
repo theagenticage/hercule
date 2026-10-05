@@ -1,5 +1,6 @@
 import type { JSX } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useParams, useRouteContext } from "@tanstack/react-router";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   describeFailureReason,
   describeStepSession,
@@ -7,8 +8,9 @@ import {
   type StepLine,
   type StepLineKind,
 } from "@hercule/client-core";
-import type { FailureReason, Session, StepError } from "@hercule/contract";
+import type { FailureReason, StepError } from "@hercule/contract";
 import { WorkStateMark, cn } from "@hercule/ui";
+import { runSessionsQuery, runnerQuery } from "../../app/queries";
 import { INLINE_LINK } from "../actor-link";
 
 /** The words in place of an action on a line that is not an action step's. */
@@ -58,11 +60,15 @@ export function StepCells({ line }: { readonly line: StepLine }): JSX.Element {
   );
 }
 
-/** Renders a failed step's error, under its row: the code a program acts on, then the sentence. */
+/**
+ * Renders a failed step's error, under its row: the code a program acts on,
+ * in the fail hue, then the sentence, muted. Colour stays at the scale of a
+ * word, so only the code is coloured.
+ */
 export function StepErrorLine({ error }: { readonly error: StepError }): JSX.Element {
   return (
-    <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-fail">
-      <span className="font-mono">{error.code}</span>
+    <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">
+      <span className="font-mono text-fail">{error.code}</span>
       {` · ${error.message}`}
     </p>
   );
@@ -88,33 +94,48 @@ export function StepWaitLine({
 /**
  * Renders the line under an agent step's record that names the session the
  * record drives, as a link to the session's thread, followed by the session's
- * status, such as "Session Fix the login bug · busy". A session that has not
- * been read yet is named by the tail of its id and shows no status. Renders
- * nothing for a line with no session: any line but an agent step's, and an
- * agent step's before its session starts.
+ * status, such as "Session Fix the login bug · busy". A long title is cut
+ * short so the status stays in view. A session that has not been read yet is
+ * named by the tail of its id and shows no status. A queued session adds a
+ * second line that says what it waits for, such as "Waiting for runner atlas
+ * to free a session slot", as a step that waits for a runner does.
+ *
+ * It reads the run's sessions from the query cache itself, which the run's
+ * page fills before it renders. Only a queued session's runner is read, and
+ * its wait line shows once that read returns. Fails when it is rendered
+ * outside a run's page.
  */
-export function StepSessionLine({
-  line,
-  sessions,
-}: {
-  readonly line: StepLine;
-  /** The sessions the run's agent steps started, by id. */
-  readonly sessions: ReadonlyMap<string, Session>;
-}): JSX.Element | null {
-  const reading = describeStepSession(line.sessionId, sessions);
-  if (reading === undefined) return null;
+export function StepSessionLine({ sessionId }: { readonly sessionId: string }): JSX.Element {
+  const { client } = useRouteContext({ from: "/_shell" });
+  const { runId } = useParams({ from: "/_shell/runs/$runId" });
+  const sessions = useSuspenseQuery(runSessionsQuery(client, runId)).data.items;
+  const session = sessions.find((candidate) => candidate.id === sessionId);
+  const runner = useQuery({
+    ...runnerQuery(client, session?.runnerId ?? ""),
+    enabled: session?.status === "queued",
+  }).data;
+  const reading = describeStepSession(sessionId, sessions, runner);
   return (
-    <p className="truncate pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">
-      {"Session "}
-      <Link
-        to="/threads/$sessionId"
-        params={{ sessionId: reading.sessionId }}
-        className={INLINE_LINK}
-      >
-        {reading.title}
-      </Link>
-      {reading.status === undefined ? null : ` · ${reading.status}`}
-    </p>
+    <>
+      {/* The words beside the link keep their spaces with `whitespace-pre`:
+          a flex item drops the spaces at its edges. */}
+      <p className="flex min-w-0 pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">
+        <span className="shrink-0 whitespace-pre">{"Session "}</span>
+        <Link
+          to="/threads/$sessionId"
+          params={{ sessionId: reading.sessionId }}
+          className={cn(INLINE_LINK, "min-w-0 truncate")}
+        >
+          {reading.title}
+        </Link>
+        {reading.status === undefined ? null : (
+          <span className="shrink-0 whitespace-pre">{` · ${reading.status}`}</span>
+        )}
+      </p>
+      {reading.wait === undefined ? null : (
+        <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">{reading.wait}</p>
+      )}
+    </>
   );
 }
 

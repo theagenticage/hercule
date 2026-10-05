@@ -15,8 +15,10 @@ import {
 } from "@hercule/contract";
 import {
   describeUnstartedStep,
+  findStepLineKind,
   isRunLive,
   readTimestamps,
+  type StepLineKind,
   type Timestamps,
   type WorkState,
 } from "./run-display";
@@ -209,12 +211,6 @@ export const buildRunGraph = (run: Run): RunGraph => {
 type StepOutput = Extract<StepRecord, { readonly status: "completed" }>["output"];
 
 /**
- * What a step line is a line of: an action step, an agent step, or a signal
- * trigger, which has a record each time it fires.
- */
-export type StepLineKind = "action" | "agent" | "signal";
-
-/**
  * One line of a run's step list and timeline: a step record, or a step that
  * has none, with its state and times. A signal's record is a line too, under
  * the signal trigger's id.
@@ -259,9 +255,7 @@ export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<
       return {
         key: `${record.stepId}#${String(record.iteration)}`,
         stepId: record.stepId,
-        // A record whose id is not a step's is a signal's: the run writes
-        // records only for the plan's steps and its signal triggers.
-        kind: step?.kind ?? "signal",
+        kind: findStepLineKind(run.plan, record.stepId),
         iterationLabel:
           (records.get(record.stepId)?.length ?? 0) > 1
             ? `#${String(record.iteration)}`
