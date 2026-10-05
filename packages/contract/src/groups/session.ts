@@ -6,7 +6,7 @@
  * `requestedAccessMode` and `accessMode` are both on the record because the
  * access-mode fallback of [06-providers section 8.4] must never be silent.
  */
-import { Schema, Tuple } from "effect";
+import { Schema, SchemaGetter, Tuple } from "effect";
 import {
   AccessMode,
   ApprovalDecision,
@@ -234,6 +234,20 @@ export const SessionInterruptInput = closedStruct({
 
 export type SessionInterruptInput = Schema.Schema.Type<typeof SessionInterruptInput>;
 
+/**
+ * Decodes a `session.interrupt` request with no body to `{}`, which interrupts
+ * all work in the session. A bare `POST /sessions/:id/interrupt` is how agents,
+ * scripts and older clients ask for an interrupt, and an empty body reaches
+ * the payload decoder as `null`. Clients never send this form: `{}` encodes
+ * with `SessionInterruptInput` first.
+ */
+const SessionInterruptWithoutBody = Schema.Null.pipe(
+  Schema.decodeTo(SessionInterruptInput, {
+    decode: SchemaGetter.transform(() => ({})),
+    encode: SchemaGetter.transform(() => null),
+  }),
+);
+
 /** The most repos one thread's workspace may hold. */
 export const MAX_SPAWN_CHECKOUTS = 32;
 
@@ -375,9 +389,9 @@ export const SessionInputOutcome = Schema.Struct({
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
 
 /**
- * The decision on the approval a session is parked on. `requestId` is the
- * open request's own id, so a decision that arrives after the harness moved on
- * is rejected rather than applied to whatever request is open now.
+ * The decision on an approval one of a session's agents is parked on.
+ * `requestId` is that Request's own id, so a decision that arrives after the
+ * harness moved on is rejected rather than applied to another open Request.
  */
 export const SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS = {
   requestId: Fact,
@@ -408,9 +422,9 @@ export type SessionRespondToApprovalRequestCall = Schema.Schema.Type<
 >;
 
 /**
- * The answers to the questions a session is parked on, keyed by each
- * question's header. `requestId` is the open request's own id, for the same
- * reason as a decision's.
+ * The answers to the questions one of a session's agents is parked on, keyed
+ * by each question's header. `requestId` is that Request's own id, for the
+ * same reason as a decision's.
  */
 export const SESSION_RESPOND_TO_QUESTION_FIELDS = {
   requestId: Fact,
@@ -505,7 +519,7 @@ export const session = HttpApiGroup.make("session")
     }),
     HttpApiEndpoint.post("interrupt", "/sessions/:id/interrupt", {
       params: { id: Id },
-      payload: SessionInterruptInput,
+      payload: [SessionInterruptInput, SessionInterruptWithoutBody],
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
