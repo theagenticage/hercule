@@ -2603,6 +2603,66 @@ describe("an agent step's turn", () => {
     });
   });
 
+  it("reads only the session's own agent: a subagent's turn end and text do not settle the step", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const subagent = { subagentId: SUBAGENT };
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() => {
+          emitText(fake, "i-1", "Asked a helper.");
+          // A Claude Code subagent writes inside its parent's turn; a Codex
+          // subagent runs a turn of its own.
+          fake.emit({
+            _tag: "content.delta",
+            eventId: "e-sub-text",
+            sessionId: SESSION,
+            at,
+            turnId: TURN,
+            itemId: "i-sub",
+            streamKind: "assistant_text",
+            delta: "The helper's answer.",
+            ...subagent,
+          });
+          fake.emit({
+            _tag: "turn.started",
+            eventId: "e-sub-turn",
+            sessionId: SESSION,
+            at,
+            turnId: "t-sub",
+            ...subagent,
+          });
+          fake.emit({
+            _tag: "turn.completed",
+            eventId: "e-sub-turn-done",
+            sessionId: SESSION,
+            at,
+            turnId: "t-sub",
+            state: "completed",
+            ...subagent,
+          });
+        });
+        yield* waitUntil(
+          "sent the subagent's turn end",
+          () => findEventIndex(sent, "turn.completed") >= 0,
+        );
+        expect(listStepResults(sent)).toEqual([]);
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+      }),
+    );
+
+    expect(listStepResults(sent)[0]?.outcome).toEqual({
+      status: "completed",
+      output: { text: "Asked a helper.", exitStatus: "completed" },
+    });
+  });
+
   it("fails the step with schema_failure when the result does not match the schema", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
