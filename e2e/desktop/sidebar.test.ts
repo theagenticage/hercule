@@ -149,8 +149,8 @@ describe("the sidebar", () => {
     await waitForStatus(waiting!.id, "busy");
     studio.openRequest(waiting!.id, "command_approval");
     await expect
-      .poll(async () => (await client.session.read({ params: { id: waiting!.id } })).openRequest)
-      .not.toBeNull();
+      .poll(async () => (await client.session.read({ params: { id: waiting!.id } })).openRequests)
+      .not.toEqual([]);
     // The studio's three slots are taken, so this thread waits for one.
     const [queued] = await fleet.spawnThreads(1, { runner: studio, projectId: payments.id });
     await waitForStatus(queued!.id, "queued");
