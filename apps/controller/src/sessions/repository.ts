@@ -474,6 +474,21 @@ const make = Effect.gen(function* () {
         (rows) => rows.map(toSession),
       ),
 
+    /**
+     * Checks whether the session was started by an agent step whose run has
+     * ended: completed, failed or cancelled. Returns `false` for a session no
+     * run started, and for one whose run is still pending or running.
+     */
+    belongsToEndedRun: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT sessions.id FROM sessions JOIN runs ON runs.id = sessions.run_id
+          WHERE sessions.id = ${uuidFromString(sessionId)}
+            AND runs.status NOT IN ('pending', 'running')
+        `,
+        (rows) => rows.length > 0,
+      ),
+
     /** Returns the ids of the exited sessions of one conversation that have a workspace. */
     listExitedWithWorkspaceInConversation: (
       conversationId: string,

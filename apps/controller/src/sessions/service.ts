@@ -339,8 +339,11 @@ const STEP_INPUT_FIXED =
   "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
   "it is sent when the session is next idle; to stop the step, cancel the run with run.cancel";
 
-/** Why a step prompt was cancelled when its run ended before the prompt was sent. */
-const STEP_RUN_ENDED = "the step's run ended before this prompt was sent";
+/**
+ * Why a step prompt was cancelled when its run ended before a runner took
+ * it: the prompt was never sent, or the runner refused it.
+ */
+const STEP_RUN_ENDED = "the step's run ended before a runner took this prompt";
 
 /** Why an input was cancelled on a session that `endOnLostRunners` ended. */
 const RUNNER_LOST =
@@ -430,8 +433,9 @@ const keepsInputsOnExit = (
  * Otherwise the prompt is cancelled, and the runs domain fails the step. Any
  * other exit, such as a stop or a timeout, ends the step's session for good.
  * When the step's run ends, the run cancels the prompts it still has waiting
- * (`cancelStepPromptsOfEndedRun`), so a kept prompt never resumes a session
- * for a run that has ended.
+ * (`cancelStepPromptsOfEndedRun`), and a prompt the runner refuses after
+ * that is cancelled rather than put back to waiting (`requeueOrCancel`). So
+ * a kept prompt never resumes a session for a run that has ended.
  */
 const keepsStepPromptOnExit = (
   exited: Pick<StoredSession, "runId" | "exitReason" | "resumable" | "crashGuardArmed">,
@@ -633,12 +637,22 @@ const make = Effect.gen(function* () {
 
   /**
    * Puts an input whose delivery failed back to waiting with `reason`,
-   * except when the session exited in the meantime and does not keep its
-   * input through that exit: then it is cancelled. The rule is the same as
-   * for the inputs not yet sent when the session exited
-   * (`keepsInputsOnExit`, `keepsStepPromptOnExit`). Joins the caller's
-   * transaction, and reads the session inside it, so the check cannot race
-   * the write that exits the session.
+   * except in two cases, where it is cancelled instead:
+   *
+   * - The input is an agent step's prompt and the step's run has ended. The
+   *   run's end cancelled the step's prompts still waiting
+   *   (`cancelStepPromptsOfEndedRun`), but not this one, because it was on
+   *   the wire. Put back to waiting, it could resume the session for a turn
+   *   the run no longer wants. It is cancelled with `STEP_RUN_ENDED`, and
+   *   `SessionObserver` is not told, because the run's end already settled
+   *   the step.
+   * - The session exited in the meantime and does not keep its input
+   *   through that exit. The rule is the same as for the inputs not yet sent
+   *   when the session exited (`keepsInputsOnExit`, `keepsStepPromptOnExit`).
+   *
+   * Joins the caller's transaction, and reads the session and its run inside
+   * it, so the checks cannot race the write that exits the session or ends
+   * the run.
    *
    * The caller must know the runner did not take the input: the runner
    * refused it, the frame never left the controller, or the input is an
@@ -646,10 +660,10 @@ const make = Effect.gen(function* () {
    * runner never answered never comes here, because the runner may have run
    * it (`recordNoAnswer`).
    *
-   * When an agent step's prompt is cancelled here, `SessionObserver` is
-   * told, and the step fails. A step prompt that goes back to waiting on an
-   * exited session resumes it, like any kept input: the next delivery pass
-   * does that.
+   * When an agent step's prompt is cancelled because its session exited,
+   * `SessionObserver` is told, and the step fails. A step prompt that goes
+   * back to waiting on an exited session resumes it, like any kept input:
+   * the next delivery pass does that.
    */
   const requeueOrCancel = (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -659,7 +673,9 @@ const make = Effect.gen(function* () {
         now.value.status === "exited" &&
         !keepsInputsOnExit(now.value) &&
         !keepsStepPromptOnExit(now.value);
-      if (dropped) {
+      if (row.stepIteration !== null && (yield* sessions.belongsToEndedRun(row.sessionId))) {
+        yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
+      } else if (dropped) {
         yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
         if (row.stepIteration !== null) {
           yield* observer.inputsDropped({

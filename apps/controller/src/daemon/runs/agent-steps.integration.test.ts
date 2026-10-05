@@ -90,6 +90,9 @@ const answerText = (text: string): WorkspaceStepOutcome =>
 const PROMPT_NOT_SENT =
   "that session's runner is not connected; the input stays queued and is sent when the runner connects";
 
+/** The reason stored on a step's prompt that was cancelled because its run ended. */
+const PROMPT_RUN_ENDED = "the step's run ended before a runner took this prompt";
+
 /** The message of a step input that the user may not change, cancel or steer. */
 const STEP_INPUT_FIXED =
   "this input is the prompt of a workflow run's agent step, so it cannot be changed, cancelled or steered; " +
@@ -819,7 +822,7 @@ describe("agent steps over the runner socket", () => {
           await waitForRunEnded(arranged, runId, "cancelled");
           expect((await listInputs(arranged, sessionId)).at(-1)).toMatchObject({
             status: "cancelled",
-            reason: "the step's run ended before this prompt was sent",
+            reason: PROMPT_RUN_ENDED,
           });
         },
         { eventRoutingInterval: Duration.hours(1) },
@@ -828,9 +831,33 @@ describe("agent steps over the runner socket", () => {
     WAIT_DEADLINE_MS * 2,
   );
 
-  it(
-    "cancels a step's prompt the runner refused because the step's settle overtook it, once the run's stop ends the session",
-    async () => {
+  it.each([
+    {
+      ending: "the run's stop ends the session",
+      endSession: (
+        arranged: Arranged,
+        player: SessionPlayer,
+        sessionId: string,
+      ): Promise<ReadonlyArray<Wire>> => {
+        player.report(arranged.wire, sessionId, { _tag: "session.exited", reason: "stopped" });
+        return Promise.resolve([arranged.wire]);
+      },
+    },
+    {
+      // The restarted runner no longer knows the step is settled, so it
+      // would run the prompt if the session were resumed for it.
+      ending: "the runner restarts before it handles the run's stop",
+      endSession: async (arranged: Arranged): Promise<ReadonlyArray<Wire>> => {
+        arranged.wire.close();
+        await waitForRunnerGone(arranged);
+        const back = await arranged.reconnect();
+        back.send({ _tag: "sessionsReport", sessions: [] });
+        return [arranged.wire, back];
+      },
+    },
+  ])(
+    "cancels at once a step's prompt the runner refused after its run ended, and never resumes the session for it, when $ending",
+    async ({ endSession }) => {
       await withAgentStepFleet(
         async (arranged) => {
           const { wire } = arranged;
@@ -855,7 +882,7 @@ describe("agent steps over the runner socket", () => {
             stopsSession(frame, sessionId),
           );
           // The settle reached the runner before the prompt did, so the runner
-          // refuses the prompt and runs no turn, then the stop ends the session.
+          // refuses the prompt and runs no turn.
           wire.send({
             _tag: "sessionInputResult",
             requestId: sent.requestId,
@@ -863,23 +890,23 @@ describe("agent steps over the runner socket", () => {
             message:
               "the step ended before its prompt reached the harness, so the prompt was not run",
           });
-          await waitUntil("put the refused prompt back to wait", async () =>
-            (await listInputs(arranged, sessionId)).find((one) => one.status === "queued"),
+          await waitUntil("cancelled the refused prompt", async () =>
+            (await listInputs(arranged, sessionId)).find((one) => one.status === "cancelled"),
           );
-          player.report(wire, sessionId, { _tag: "session.exited", reason: "stopped" });
-
-          await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
           expect(await listInputs(arranged, sessionId)).toEqual([
-            expect.objectContaining({ status: "cancelled" }),
+            expect.objectContaining({ status: "cancelled", reason: PROMPT_RUN_ENDED }),
           ]);
+
+          const wires = await endSession(arranged, player, sessionId);
+          await waitForSessionTo(arranged, sessionId, "exited", (one) => one.status === "exited");
           const ended = await waitForRunEnded(arranged, runId, "cancelled");
           expect(findStepRecords(ended, IMPLEMENT)[0]?.status).toBe("cancelled");
-          expect(countStepInputs([wire], key)).toBe(1);
+          expect(countStepInputs(wires, key)).toBe(1);
+          expect(wires.flatMap((one) => listSessionStarts(one, sessionId))).toHaveLength(1);
         },
-        // No delivery pass runs between the refusal and the exit, so the
-        // prompt is not sent again in between: a real runner would refuse it
-        // again anyway.
-        { eventRoutingInterval: Duration.hours(1) },
+        // A delivery pass runs every 50 ms, so a prompt left waiting would
+        // be sent again, or would resume the exited session.
+        { eventRoutingInterval: Duration.millis(50) },
       );
     },
     WAIT_DEADLINE_MS * 2,
