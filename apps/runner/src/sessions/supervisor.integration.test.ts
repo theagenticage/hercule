@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
@@ -97,6 +97,13 @@ interface Fake {
   /** How many markers have reached a relay. A count above zero proves a relay is listening. */
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
+  /** How many `sendInput` calls have begun, including ones still waiting on `inputGate`. */
+  readonly inputsBegun: () => number;
+  /**
+   * When set, `sendInput` waits for it to complete before the harness takes
+   * the input, like a harness that is slow to answer.
+   */
+  inputGate: Deferred.Deferred<void> | undefined;
   readonly interrupted: Array<string>;
   /** The arguments of every `respondToApprovalRequest` and `respondToQuestion` call. */
   readonly answered: Array<readonly [string, string, RequestResolution]>;
@@ -117,6 +124,7 @@ interface Fake {
 const createFake = (): Fake => {
   const events = Effect.runSync(PubSub.unbounded<ProviderEvent>());
   let heard = 0;
+  let inputsBegun = 0;
   const contexts: Array<ProviderRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
   const interrupted: Array<string> = [];
@@ -127,6 +135,8 @@ const createFake = (): Fake => {
     contexts,
     heard: () => heard,
     inputs,
+    inputsBegun: () => inputsBegun,
+    inputGate: undefined,
     interrupted,
     answered,
     stops,
@@ -169,11 +179,18 @@ const createFake = (): Fake => {
         }),
       sendInput: (sessionId, input): Effect.Effect<SendResult, string> =>
         Effect.suspend(() => {
-          if (!held.has(sessionId)) return Effect.fail(`session ${sessionId} is not running here`);
-          if (fake.fails !== undefined) return Effect.fail(fake.fails);
-          inputs.push(input);
-          return Effect.succeed({ turnId: TURN, delivery: "opened" });
-        }),
+          inputsBegun += 1;
+          return fake.inputGate === undefined ? Effect.void : Deferred.await(fake.inputGate);
+        }).pipe(
+          Effect.andThen(() => {
+            if (!held.has(sessionId)) {
+              return Effect.fail(`session ${sessionId} is not running here`);
+            }
+            if (fake.fails !== undefined) return Effect.fail(fake.fails);
+            inputs.push(input);
+            return Effect.succeed({ turnId: TURN, delivery: "opened" } as const);
+          }),
+        ),
       interrupt: (sessionId) => Effect.sync(() => void interrupted.push(sessionId)),
       /**
        * No session in this fake is really parked: the tests emit request events
@@ -1961,6 +1978,43 @@ describe("an agent step's turn", () => {
     );
 
     expect(listStepResults(sent)).toHaveLength(1);
+  });
+
+  it("delivers a step's input in full when its connection closes while the harness takes it, and answers the step at the turn's end", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+    const gate = Deferred.makeUnsafe<void>();
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
+        fake.inputGate = gate;
+        // The connection handles each frame in a fiber, and interrupts that
+        // fiber when its socket closes.
+        const handling = yield* Effect.forkChild(supervisor.input(STEP_INPUT));
+        yield* waitUntil("passed the input to the harness", () => fake.inputsBegun() === 1);
+        // Signal the interrupt now, before the harness answers, as a socket
+        // closing mid-input would. `Fiber.interrupt` forked here might only
+        // run after the gate opens.
+        handling.interruptUnsafe();
+        yield* Deferred.succeed(gate, undefined);
+        yield* Fiber.await(handling);
+        expect(fake.inputs).toHaveLength(1);
+        expect(listInputResults(sent)).toMatchObject([{ ok: true }]);
+
+        // The controller asks for the step's result once the runner is back.
+        // The turn still runs, so the turn's end answers it.
+        yield* steps.start(STEP_START);
+        expect(listStepResults(sent)).toEqual([]);
+        yield* Effect.sync(() => emitStepTurnEnd(fake, { state: "completed" }));
+        yield* waitUntil("sent the step result", () => listStepResults(sent).length === 1);
+      }),
+    );
+
+    expect(listStepResults(sent)[0]?.outcome).toMatchObject({ status: "completed" });
   });
 
   it("refuses the input of a step settled before its input arrived, so no turn runs for it", async () => {

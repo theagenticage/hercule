@@ -770,8 +770,17 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // The controller puts a refused prompt back to wait. The stop it sends
         // when the step's run ends makes the session exit, and that exit
         // cancels the prompt.
-        return Effect.flatMap(beginStep, (recorded) =>
-          recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
+        //
+        // Uninterruptible, because a closing socket interrupts the frame's
+        // fiber. Interrupted between recording the step and the harness's
+        // answer, the step would stay recorded with no turn, and its result
+        // request after the reconnect would wait for a turn end that never
+        // comes. The close waits for this block instead, at most as long as
+        // the adapter's own timeout on the input.
+        return Effect.uninterruptible(
+          Effect.flatMap(beginStep, (recorded) =>
+            recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
+          ),
         );
       },
 
