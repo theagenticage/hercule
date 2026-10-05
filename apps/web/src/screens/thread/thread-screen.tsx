@@ -14,7 +14,7 @@ import {
   buildSiblingTabs,
   buildTurns,
   chooseStamps,
-  describeStartingStep,
+  describeStartingRun,
   findAnsweredAssistantId,
   isJoinable,
   mayBeRunningTurn,
@@ -92,8 +92,8 @@ export function ThreadScreen({
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
   const project = projects.find((each) => each.id === session.projectId);
   const assistantId = findAnsweredAssistantId(session);
-  // A step session's crumb names the step and the run that started it.
-  const startingStep = describeStartingStep(session);
+  // A step session's crumb names the run that started it.
+  const startingRun = describeStartingRun(session);
 
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
@@ -112,8 +112,8 @@ export function ThreadScreen({
         crumb={
           assistantId !== null ? (
             <AssistantCrumb client={client} assistantId={assistantId} />
-          ) : session.runId !== null && startingStep !== undefined ? (
-            <StepSessionCrumb runId={session.runId} label={startingStep} />
+          ) : session.runId !== null && startingRun !== undefined ? (
+            <StepSessionCrumb runId={session.runId} label={startingRun} />
           ) : (
             project?.name
           )

@@ -9,7 +9,7 @@ import { HeaderRow } from "../header-row";
  * the actions on the right. A thread with no project shows `Threads /` as its
  * crumb. An assistant's session shows `Assistants / <name> /`, the name
  * linking to the assistant's conversation. A step session shows
- * `step implement · run 3db7d6bb /`, linking to the run.
+ * `run 3db7d6bb /`, linking to the run.
  *
  * When the thread's workspace holds more than one thread, the title becomes
  * the active tab, with the other threads beside it in the workspace's order.

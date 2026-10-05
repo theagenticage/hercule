@@ -16,8 +16,7 @@ import { ThreadRowView } from "../../../screens/thread-row";
  * sessions, or nothing when there are none. It starts closed, showing only
  * how many there are, such as "show 6 · 2 running · 1 queued · 6 today", and
  * stays open across page loads in this tab once opened, like the pulse.
- * Open, it lists the step sessions, each with the step and the run that
- * started it.
+ * Open, it lists the step sessions, each with the run that started it.
  *
  * It reads the sessions, the runners and the settings from the query cache,
  * which the route's loader and the entry guard have filled, so it never

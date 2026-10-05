@@ -157,7 +157,7 @@ const ANSWERING: readonly Session[] = [
 const FROM_WORKFLOWS: readonly Session[] = [
   buildSession({
     id: "01a06d02-2000-7000-8000-000000000021",
-    title: "Implement the retry policy",
+    title: "Fix and ship a pull request · implement",
     status: "busy",
     agentId: "01a06d02-a000-7000-8000-000000000021",
     runId: "01a06d02-e000-7000-8000-00011f3a9c2e",
@@ -167,7 +167,7 @@ const FROM_WORKFLOWS: readonly Session[] = [
   }),
   buildSession({
     id: "01a06d02-2000-7000-8000-000000000022",
-    title: "Review the nightly report",
+    title: "Review the nightly build · review",
     status: "exited",
     agentId: "01a06d02-a000-7000-8000-000000000022",
     runId: "01a06d02-e000-7000-8000-00024e5f6a7b",
@@ -178,7 +178,7 @@ const FROM_WORKFLOWS: readonly Session[] = [
   }),
   buildSession({
     id: "01a06d02-2000-7000-8000-000000000023",
-    title: "Triage the new issues",
+    title: "Triage new issues · triage",
     status: "queued",
     agentId: "01a06d02-a000-7000-8000-000000000023",
     runId: "01a06d02-e000-7000-8000-0003a1b2c3d4",
@@ -371,7 +371,7 @@ describe("All sessions' fold of the sessions workflows started", () => {
     }
   });
 
-  it("opens to list each session with the step and the run that started it, linked to its thread", async () => {
+  it("opens to list each session with the run that started it, linked to its thread", async () => {
     // Only the clock is faked: the click and the render after it still wait
     // on real timers, which a fully faked timer queue would never run.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -386,14 +386,18 @@ describe("All sessions' fold of the sessions workflows started", () => {
       expect(button.getAttribute("aria-expanded")).toBe("true");
       expect(readPageText(button)).toContain("hide 3 · 1 running · 1 queued · 2 today");
       const fold = button.closest("section")!;
-      const implement = within(fold).getByRole("link", { name: /Implement the retry policy/ });
+      const implement = within(fold).getByRole("link", {
+        name: /Fix and ship a pull request · implement/,
+      });
       expect(implement.getAttribute("href")).toBe(`/threads/${FROM_WORKFLOWS[0]!.id}`);
-      expect(readPageText(implement)).toContain("step implement · run 1f3a9c2e");
-      const review = within(fold).getByRole("link", { name: /Review the nightly report/ });
-      expect(readPageText(review)).toContain("step review · run 4e5f6a7b");
+      expect(readPageText(implement)).toContain("run 1f3a9c2e");
+      // The title already names the step, so the second line does not repeat it.
+      expect(readPageText(implement)).not.toContain("step implement");
+      const review = within(fold).getByRole("link", { name: /Review the nightly build · review/ });
+      expect(readPageText(review)).toContain("run 4e5f6a7b");
       // A queued session ends in "queued" where the others show their age.
-      const triage = within(fold).getByRole("link", { name: /Triage the new issues/ });
-      expect(readPageText(triage)).toContain("step triage · run a1b2c3d4");
+      const triage = within(fold).getByRole("link", { name: /Triage new issues · triage/ });
+      expect(readPageText(triage)).toContain("run a1b2c3d4");
       expect(readPageText(triage)).toContain("queued");
       expect(readPageText(implement)).toContain("2m");
       // The threads in the lanes stay out of the fold.
@@ -414,7 +418,9 @@ describe("All sessions' fold of the sessions workflows started", () => {
 
     expect(getFoldButton().getAttribute("aria-expanded")).toBe("true");
     expect(
-      screen.getAllByText("Implement the retry policy").filter((el) => el.closest("nav") === null),
+      screen
+        .getAllByText("Fix and ship a pull request · implement")
+        .filter((el) => el.closest("nav") === null),
     ).toHaveLength(1);
   });
 

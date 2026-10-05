@@ -10,7 +10,7 @@ import {
   buildHeadline,
   buildLanes,
   buildStepSessionRows,
-  describeStartingStep,
+  describeStartingRun,
   summarizeStepSessions,
 } from "./lanes";
 
@@ -234,6 +234,7 @@ describe("step sessions", () => {
   const buildStepSession = (id: string, status: Session["status"], createdAt: string): Session =>
     buildSession({
       id,
+      title: "Fix and ship a pull request · implement",
       status,
       createdAt,
       lastActivityAt: createdAt,
@@ -270,19 +271,19 @@ describe("step sessions", () => {
     expect(summarizeStepSessions([], now, ZONE)).toBeUndefined();
   });
 
-  it("names the step and the run that started a session", () => {
-    expect(describeStartingStep(STARTED[0]!)).toBe("step implement · run 1f3a9c2e");
-    expect(describeStartingStep(THREAD)).toBeUndefined();
+  it("names the run that started a session by the tail of its id", () => {
+    expect(describeStartingRun(STARTED[0]!)).toBe("run 1f3a9c2e");
+    expect(describeStartingRun(THREAD)).toBeUndefined();
   });
 
-  it("lists only the step sessions as rows, newest first, each with its step and run", () => {
+  it("lists only the step sessions as rows, newest first, each with its run", () => {
     const rows = buildStepSessionRows([THREAD, ...STARTED], []);
 
     expect(rows.map((row) => [row.id, row.secondLine, row.end.kind])).toEqual([
-      ["w-busy", "step implement · run 1f3a9c2e", "mark"],
-      ["w-idle", "step implement · run 1f3a9c2e", "age"],
-      ["w-queued", "step implement · run 1f3a9c2e", "word"],
-      ["w-exited", "step implement · run 1f3a9c2e", "age"],
+      ["w-busy", "run 1f3a9c2e", "mark"],
+      ["w-idle", "run 1f3a9c2e", "age"],
+      ["w-queued", "run 1f3a9c2e", "word"],
+      ["w-exited", "run 1f3a9c2e", "age"],
     ]);
   });
 });

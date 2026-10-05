@@ -126,27 +126,25 @@ export const summarizeStepSessions = (
 };
 
 /**
- * Returns which step and run started a session, as the second line of its
- * row and the crumb of its page show it: "step implement · run 1f3a9c2e".
+ * Returns the run that started a step session, as the second line of its row
+ * and the crumb of its page show it: "run 1f3a9c2e", the tail of the run's id.
  * Returns `undefined` for a session that is not a step session.
+ *
+ * The step is left out because the session's title, such as "Fix and ship a
+ * pull request · implement", already names the workflow and the step.
  */
-export const describeStartingStep = (session: Session): string | undefined =>
-  // A step session has both ids and any other session has neither. Checking
-  // both tells the type checker that both are set.
-  session.runId === null || session.stepId === null
-    ? undefined
-    : `step ${session.stepId} · run ${toIdTail(session.runId)}`;
+export const describeStartingRun = (session: Session): string | undefined =>
+  session.runId === null ? undefined : `run ${toIdTail(session.runId)}`;
 
 /**
  * Returns the rows of the step sessions among `sessions`, most recently
- * active first, each with the step and run that started it on its second
- * line. A session whose runner `runners` lists as disconnected ends in
- * "offline".
+ * active first, each with the run that started it on its second line. A
+ * session whose runner `runners` lists as disconnected ends in "offline".
  */
 export const buildStepSessionRows = (
   sessions: readonly Session[],
   runners: readonly Runner[],
 ): readonly ThreadRow[] =>
   listStepSessions(sessions)
-    .map((session) => buildThreadRow(session, describeStartingStep(session) ?? null, runners))
+    .map((session) => buildThreadRow(session, describeStartingRun(session) ?? null, runners))
     .sort(compareNewestFirst);

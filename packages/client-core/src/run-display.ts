@@ -25,7 +25,6 @@ import type {
   WorkflowAction,
 } from "@hercule/contract";
 import { describeActor, type ActorReading, type ActorTarget } from "./actor-display";
-import { toIdTail } from "./id-tail";
 import { formatNameList } from "./name-list";
 import { formatDuration } from "./threads/duration";
 import { formatStamp } from "./time-context";
@@ -575,8 +574,6 @@ export const listAwaitedSignals = (
 /** The session an agent step's record drove, as the line under the record shows it. */
 export interface StepSessionReading {
   readonly sessionId: string;
-  /** The session's title, or "session 1f3a9c2e" while the session has not been read or has no title. */
-  readonly title: string;
   /** The session's status, or `undefined` while the session has not been read. */
   readonly status: SessionStatus | undefined;
   /**
@@ -589,10 +586,12 @@ export interface StepSessionReading {
 /**
  * Returns how the lines under an agent step's record show the session the
  * record drove, looked up by `sessionId` in `sessions`, the run's sessions.
+ * The line names the session by the tail of its id, not by its title: a step
+ * session's title, such as "Fix and ship a pull request · implement", only
+ * repeats the workflow and the step the run's page already shows.
  *
  * - A session missing from `sessions`, such as one that started after they
- *   were last read, shows its id's tail and no status.
- * - A session with no title shows its id's tail and its status.
+ *   were last read, has no status.
  * - A queued session on an online `runner` waits for the runner to free one
  *   of its session slots, because the runner already runs as many sessions as
  *   it may. A queued session on a runner that is not online waits for the
@@ -606,14 +605,12 @@ export const describeStepSession = (
   runner: Runner | undefined,
 ): StepSessionReading => {
   const session = sessions.find((each) => each.id === sessionId);
-  const title = session?.title ?? "";
   const isWaitingForSlot =
     session?.status === "queued" &&
     runner?.id === session.runnerId &&
     runner.connectivity === "online";
   return {
     sessionId,
-    title: title === "" ? `session ${toIdTail(sessionId)}` : title,
     status: session?.status,
     wait: isWaitingForSlot ? `Waiting for runner ${runner.name} to free a session slot` : undefined,
   };

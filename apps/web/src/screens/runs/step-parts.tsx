@@ -4,6 +4,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   describeFailureReason,
   describeStepSession,
+  toIdTail,
   type RunnerWait,
   type StepLine,
   type StepLineKind,
@@ -93,12 +94,13 @@ export function StepWaitLine({
 
 /**
  * Renders the line under an agent step's record that names the session the
- * record drives, as a link to the session's thread, followed by the session's
- * status, such as "Session Fix the login bug · busy". A long title is cut
- * short so the status stays in view. A session that has not been read yet is
- * named by the tail of its id and shows no status. A queued session adds a
- * second line that says what it waits for, such as "Waiting for runner atlas
- * to free a session slot", as a step that waits for a runner does.
+ * record drives by the tail of its id, in mono and linked to the session's
+ * thread, followed by the session's status, such as "Session 3f2a91c0 ·
+ * busy". The header names the run the same way, and the records of one step
+ * that drive one session show the same id. A session that has not been read
+ * yet shows no status. A queued session adds a second line that says what it
+ * waits for, such as "Waiting for runner atlas to free a session slot", as a
+ * step that waits for a runner does.
  *
  * It reads the run's sessions from the query cache itself, which the run's
  * page fills before it renders. Only a queued session's runner is read, and
@@ -117,20 +119,16 @@ export function StepSessionLine({ sessionId }: { readonly sessionId: string }): 
   const reading = describeStepSession(sessionId, sessions, runner);
   return (
     <>
-      {/* The words beside the link keep their spaces with `whitespace-pre`:
-          a flex item drops the spaces at its edges. */}
-      <p className="flex min-w-0 pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">
-        <span className="shrink-0 whitespace-pre">{"Session "}</span>
+      <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">
+        {"Session "}
         <Link
           to="/threads/$sessionId"
           params={{ sessionId: reading.sessionId }}
-          className={cn(INLINE_LINK, "min-w-0 truncate")}
+          className={cn(INLINE_LINK, "font-mono")}
         >
-          {reading.title}
+          {toIdTail(reading.sessionId)}
         </Link>
-        {reading.status === undefined ? null : (
-          <span className="shrink-0 whitespace-pre">{` · ${reading.status}`}</span>
-        )}
+        {reading.status === undefined ? null : ` · ${reading.status}`}
       </p>
       {reading.wait === undefined ? null : (
         <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">{reading.wait}</p>

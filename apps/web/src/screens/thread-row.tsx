@@ -8,8 +8,7 @@ import { DoneMark, WorkingMark, cn } from "@hercule/ui";
  * `buildThreadRows` with it. They differ only in:
  *
  * - the second line: a model slug in the sidebar's meta mode, a provider
- *   display name on All sessions, the step and run that started a step
- *   session;
+ *   display name on All sessions, the run that started a step session;
  * - whether a row can be marked as the open thread.
  *
  * A row whose end is a word, "queued" or "offline", shows that word in place

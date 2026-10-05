@@ -421,7 +421,7 @@ const IMPLEMENT_SESSION = buildSession({
   permissionProfileId: "0199c0ff-aaaa-7000-8000-000000000001",
   instanceId: "0199c0ff-bbbb-7000-8000-000000000001",
   runnerId: "0199c0ff-cccc-7000-8000-000000000001",
-  title: "Fix the login bug",
+  title: `${WORKFLOW_NAME} · implement`,
   status: "idle",
   agentId: AGENT_ID,
   runId: SIGNAL_WAITING_RUN.id,
@@ -953,8 +953,10 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     within(element)
       .queryAllByRole("link")
       .filter((link) => link.getAttribute("href")?.startsWith("/threads/") === true);
+  /** The tail of the id of the session `implement` drives, which names the session on its line. */
+  const SESSION_TAIL = toIdTail(IMPLEMENT_SESSION_ID);
 
-  it("links each record of an agent step to its session, with the session's title and status", async () => {
+  it("links each record of an agent step to its session, named by the tail of its id, with its status", async () => {
     await openRunPage(SIGNAL_WAITING_RUN, { sessions: [IMPLEMENT_SESSION] });
     await findPageHeader();
 
@@ -964,9 +966,9 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
       expect(readPageText(row)).toContain("Agent step");
       const [link, ...others] = listSessionLinks(row);
       expect(others).toEqual([]);
-      expect(link?.textContent).toBe("Fix the login bug");
+      expect(link?.textContent).toBe(SESSION_TAIL);
       expect(link?.getAttribute("href")).toBe(`/threads/${IMPLEMENT_SESSION_ID}`);
-      expect(readPageText(row)).toMatch(/Session Fix the login bug · idle/);
+      expect(readPageText(row)).toContain(`Session ${SESSION_TAIL} · idle`);
     }
     // An action step's row and a signal's row have no session.
     expect(listSessionLinks(listStepRows("open_pr")[0]!)).toEqual([]);
@@ -983,16 +985,18 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     await waitFor(() => {
       expect(listSessionLinks(getStepsRegion())).toHaveLength(3);
     });
-    expect(readPageText(getStepsRegion())).toContain("Session Fix the login bug · idle");
+    expect(readPageText(getStepsRegion())).toContain(`Session ${SESSION_TAIL} · idle`);
   });
 
-  it("names a session it has not read by the tail of its id", async () => {
+  it("links a session it has not read, with no status", async () => {
     await openRunPage(SIGNAL_WAITING_RUN);
     await findPageHeader();
 
-    const [link] = listSessionLinks(listStepRows("implement")[0]!);
-    expect(link?.textContent).toBe(`session ${toIdTail(IMPLEMENT_SESSION_ID)}`);
+    const row = listStepRows("implement")[0]!;
+    const [link] = listSessionLinks(row);
+    expect(link?.textContent).toBe(SESSION_TAIL);
     expect(link?.getAttribute("href")).toBe(`/threads/${IMPLEMENT_SESSION_ID}`);
+    expect(readPageText(row)).not.toContain(`Session ${SESSION_TAIL} ·`);
   });
 
   it("says a queued session is queued, and that it waits for its runner to free a session slot", async () => {
@@ -1012,7 +1016,7 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     await findPageHeader();
 
     const row = listStepRows("implement")[0]!;
-    expect(readPageText(row)).toContain("Session Fix the login bug · queued");
+    expect(readPageText(row)).toContain(`Session ${SESSION_TAIL} · queued`);
     await waitFor(() => {
       expect(readPageText(row)).toContain("Waiting for runner mac-mini to free a session slot");
     });
@@ -1024,7 +1028,7 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
     });
     await findPageHeader();
 
-    holdSessions([{ ...IMPLEMENT_SESSION, title: "Fix the login redirect", status: "busy" }]);
+    holdSessions([{ ...IMPLEMENT_SESSION, status: "busy" }]);
     await waitFor(() => {
       expect(live.topics()).toContain("session");
     });
@@ -1034,7 +1038,7 @@ describe("A run's page > agent steps and signals", { timeout: GRAPH_TEST_TIMEOUT
 
     await waitFor(() => {
       expect(readPageText(listStepRows("implement")[0])).toContain(
-        "Session Fix the login redirect · busy",
+        `Session ${SESSION_TAIL} · busy`,
       );
     });
   });

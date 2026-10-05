@@ -537,28 +537,25 @@ describe("describeStepSession", () => {
   const SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f00005e55";
   const ATLAS = buildRunner("runner-atlas", "atlas");
 
-  it("shows the session's title and status", () => {
-    const session = buildSession({ id: SESSION_ID, title: "Implement the fix", status: "busy" });
+  it("shows the session's status", () => {
+    const session = buildSession({
+      id: SESSION_ID,
+      title: "Fix and ship a pull request · implement",
+      status: "busy",
+    });
     assert.deepStrictEqual(describeStepSession(SESSION_ID, [session], undefined), {
       sessionId: SESSION_ID,
-      title: "Implement the fix",
       status: "busy",
       wait: undefined,
     });
   });
 
-  it("shows the id's tail for a session not read yet, or one with no title", () => {
+  it("shows no status for a session not read yet", () => {
     assert.deepStrictEqual(describeStepSession(SESSION_ID, [], undefined), {
       sessionId: SESSION_ID,
-      title: "session 00005e55",
       status: undefined,
       wait: undefined,
     });
-    const untitled = buildSession({ id: SESSION_ID, title: "", status: "exited" });
-    assert.strictEqual(
-      describeStepSession(SESSION_ID, [untitled], undefined).title,
-      "session 00005e55",
-    );
   });
 
   it("says a queued session waits for a free session slot on its online runner", () => {

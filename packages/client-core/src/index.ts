@@ -278,7 +278,7 @@ export {
   buildHeadline,
   buildLanes,
   buildStepSessionRows,
-  describeStartingStep,
+  describeStartingRun,
   summarizeStepSessions,
   type LaneKind,
 } from "./threads/lanes";
