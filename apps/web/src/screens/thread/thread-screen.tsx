@@ -33,6 +33,7 @@ import { ContentColumn } from "../content-column";
 import { AssistantCrumb } from "./assistant-crumb";
 import { ConversationSessionNotice } from "./conversation-session-notice";
 import { PermissionCard } from "./permission-card";
+import { prototypeHooks } from "./prototype-hooks";
 import { QueuedInputs } from "./queued-inputs";
 import { ChromeAction, NewThreadHere, ThreadChrome } from "./thread-chrome";
 import { useStickToBottom } from "../use-stick-to-bottom";
@@ -101,7 +102,7 @@ export function ThreadScreen({
     // column just like a queued row, so it also triggers a follow.
   }, [rows.length, queuedCount, session.openRequest?.requestId, followIfAtBottom]);
 
-  return (
+  const screen = (
     <div className="flex flex-1 flex-col">
       <ThreadChrome
         crumb={
@@ -121,6 +122,8 @@ export function ThreadScreen({
             <ChromeAction title="More (not built)" icon disabled>
               …
             </ChromeAction>
+            {/* PROTOTYPE (#354): the side pane's toggle. */}
+            {prototypeHooks.renderHeaderActions?.()}
           </>
         }
       />
@@ -158,8 +161,12 @@ export function ThreadScreen({
           })}
         </div>
         <div className="sticky bottom-0 flex flex-col gap-2">
+          {/* PROTOTYPE (#354): the subagents tally. */}
+          {prototypeHooks.renderAboveComposer?.()}
           <QueuedInputs client={client} sessionId={sessionId} />
           <div className="flex flex-col">
+            {/* PROTOTYPE (#354): whose Request the card shows. */}
+            {session.openRequest === null ? null : prototypeHooks.renderAboveRequest?.()}
             {session.openRequest === null ? null : (
               <PermissionCard
                 // A new request gets a new card, so the answered state of the
@@ -185,4 +192,6 @@ export function ThreadScreen({
       </ContentColumn>
     </div>
   );
+  // PROTOTYPE (#354): a subagent's page takes the thread's place.
+  return <>{prototypeHooks.wrapThreadScreen?.(screen) ?? screen}</>;
 }

@@ -15,6 +15,7 @@ import { showsTurnDivider, type ThreadTurn } from "@hercule/client-core";
 import { OwnerBubble } from "../bubble";
 import { TimeSeparator } from "../time-separator";
 import { Markdown } from "../markdown";
+import { prototypeHooks } from "./prototype-hooks";
 import { TurnDivider } from "./turn-divider";
 
 export function Turn({
@@ -39,6 +40,8 @@ export function Turn({
           <OwnerBubble text={turn.user} />
         </div>
       )}
+      {/* PROTOTYPE (#354): the subagents this turn started. */}
+      {prototypeHooks.renderSpawnLines?.(turn)}
       {turn.assistantText === "" && !live ? null : (
         // Until the first word streams into the tail, the prose is hidden, so
         // the flex gap above it does not count. The divider under the turn

@@ -4,6 +4,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Live } from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
 import { cn } from "@hercule/ui";
+import { prototypeHooks } from "../screens/thread/prototype-hooks";
 import { Sidebar } from "./sidebar";
 import { TopBar, ownsItsTopBar } from "./top-bar";
 
@@ -44,6 +45,8 @@ export function Shell({
           {children}
         </main>
       </div>
+      {/* PROTOTYPE (#354): the side pane. */}
+      {prototypeHooks.renderSidePane?.()}
     </div>
   );
 }
