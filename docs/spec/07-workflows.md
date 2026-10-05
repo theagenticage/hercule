@@ -351,7 +351,8 @@ Iterations: when an edge brings the graph back to an agent step (a cycle, or a s
   - The turn failed or was interrupted, or the session exited, crashed, timed out or was stopped during the turn: the step fails with `session_failed`, and the message names the reason. The run fails with `session-failed`.
 - **The result reaches the controller as a workspace action's does** ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). The runner saves it under the step key and sends it. The controller completes the record and follows the edges, and then the runner deletes the saved result.
 - **A session the controller ends** because its runner was lost or retired fails a step whose turn was running, with `session-failed`. So does a step prompt that is dropped before it reaches the runner. There is no automatic retry.
-- **Every run ending stops the run's live sessions**, after the commit, whether the run completed, failed or was cancelled. Their leases are released, so an ephemeral workspace can be deleted.
+- **Every run ending stops the run's live sessions**, after the commit, whether the run completed, failed or was cancelled. Their leases are released, so an ephemeral workspace can be deleted. The step prompts still queued on those sessions are cancelled in the transaction that ends the run, so an ended run never resumes a session. A stop that cannot reach a runner, because it is disconnected, is sent again when the runner connects.
+- **A step session is titled `<workflow name> · <step id>`**, such as "Fix and ship a pull request · implement", so it reads the same wherever sessions are listed.
 
 ### 4.3 Routing and cycles
 
@@ -743,7 +744,7 @@ interface StepRecord {
   - **Error codes of an agent step**, and the run's failure reason for each:
     - `schema_failure`: the step has an `outputSchema` and the turn gave no valid structured result. The run fails with `schema-failure`.
     - `session_failed`: the turn failed or was interrupted, or the session ended during the turn. The message names how. The run fails with `session-failed`.
-    - `interrupted`: the runner restarted while the step's turn ran ("the runner restarted while the step's turn ran"). The run fails with `session-failed`. The step is not run again.
+    - `interrupted`: the runner has no record of the step's turn ("The runner has no record of this step's turn: the runner restarted, the step's session ended while the runner was disconnected from the controller, or the runner never received the step's prompt."). The run fails with `session-failed`. The step is not run again, because the lost turn may already have made changes, such as a push, that a second turn would repeat.
   - **Waiting on a signal.** A run waits on its signal triggers when it is `running`, no step record is `running` or `pending`, and its plan has a signal trigger. The web app derives "waiting on `pr_merged`" from that ([./14-web-app.md](./14-web-app.md) §Runs). There is still no waiting status.
   - **A signal record** is written `pending` when an event matches, holding the output, and the run marks it `completed` as it fires the node's edges.
 - Every committed change to a run or a step record publishes the run's id on the live topic `run` ([./14-web-app.md](./14-web-app.md)).
