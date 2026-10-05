@@ -1643,3 +1643,225 @@ describe("what a session's tap subscription receives", () => {
     });
   });
 });
+
+/** Builds a subagent's live topic: its transcript (`stream`) or its token deltas (`tap`). */
+const buildSubagentTopic = (sessionId: string, subagentId: string, kind: "stream" | "tap") =>
+  `session:${sessionId}:subagent:${subagentId}:${kind}` as const;
+
+/**
+ * Reports `session.started` and then the introduction of subagent `a1`, and
+ * waits until both rows are written. The introduction creates the subagent's
+ * record, which its topics need before a subscription is accepted.
+ */
+const introduceSubagent = async (arranged: Arranged, sessionId: string): Promise<void> => {
+  const base = { sessionId, at: AT } as const;
+  reportEvent(arranged.wire, 1, {
+    ...base,
+    eventId: crypto.randomUUID(),
+    _tag: "session.started",
+  });
+  reportEvent(arranged.wire, 2, {
+    ...base,
+    eventId: crypto.randomUUID(),
+    _tag: "subagent.started",
+    subagentId: "a1",
+  });
+  await waitForStreamRows(arranged.harness, sessionId, 2);
+};
+
+/** Reports a `turn.started`, the session's own agent's without `subagentId`. */
+const reportTurnStarted = (
+  arranged: Arranged,
+  seq: number,
+  sessionId: string,
+  turnId: string,
+  subagentId?: string,
+): void =>
+  reportEvent(arranged.wire, seq, {
+    eventId: crypto.randomUUID(),
+    sessionId,
+    at: AT,
+    _tag: "turn.started",
+    turnId,
+    ...(subagentId === undefined ? {} : { subagentId }),
+  });
+
+/** Returns the turn ids of the `turn.started` rows a collector received, in order. */
+const listStartedTurns = (collected: Collected): ReadonlyArray<string> =>
+  listDeltas(collected)
+    .flatMap(listTranscriptItems)
+    .flatMap((row) => (row.event._tag === "turn.started" ? [row.event.turnId] : []));
+
+describe("what a subagent's stream subscription receives", () => {
+  it("carries the subagent's rows alone, and the session's stream carries none of them", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
+      await introduceSubagent(arranged, session.id);
+
+      const ticket = await fetchTicket(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const main = yield* collectMessages(client, { topic: `session:${session.id}:stream` });
+          const sub = yield* collectMessages(client, {
+            topic: buildSubagentTopic(session.id, "a1", "stream"),
+          });
+          // Each subscription first receives the empty delta that sets its
+          // position at the end of its own transcript. The subagent's is
+          // still empty, because its introduction is in the session's.
+          expect(
+            yield* Effect.promise(() =>
+              waitWithin(1000, () => main.received.length >= 1 && sub.received.length >= 1),
+            ),
+          ).toBe(true);
+
+          // Events are stored in the order they are reported. So once the
+          // last event of an agent has arrived on its topic, every event
+          // reported before it has been published too, and an event missing
+          // from a topic is missing for good.
+          reportTurnStarted(arranged, 3, session.id, "s1", "a1");
+          reportTurnStarted(arranged, 4, session.id, "t1");
+          reportTurnStarted(arranged, 5, session.id, "s2", "a1");
+          expect(
+            yield* Effect.promise(() =>
+              waitWithin(
+                2000,
+                () => listStartedTurns(main).length >= 1 && listStartedTurns(sub).length >= 2,
+              ),
+            ),
+          ).toBe(true);
+
+          expect(listStartedTurns(sub)).toEqual(["s1", "s2"]);
+          expect(listDeltas(sub).map((delta) => delta.cursor)).toEqual(["0", "3", "5"]);
+          expect(listStartedTurns(main)).toEqual(["t1"]);
+          expect(listDeltas(main).map((delta) => delta.cursor)).toEqual(["2", "4"]);
+
+          yield* Fiber.interrupt(main.fiber);
+          yield* Fiber.interrupt(sub.fiber);
+        }),
+      );
+    });
+  });
+
+  it("replays the subagent's rows after a cursor, skipping the session's own", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
+      await introduceSubagent(arranged, session.id);
+      reportTurnStarted(arranged, 3, session.id, "s1", "a1");
+      reportTurnStarted(arranged, 4, session.id, "t1");
+      reportTurnStarted(arranged, 5, session.id, "s2", "a1");
+      await waitForStreamRows(arranged.harness, session.id, 5);
+
+      const ticket = await fetchTicket(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const replay = yield* collectMessages(client, {
+            topic: buildSubagentTopic(session.id, "a1", "stream"),
+            cursor: "3",
+          });
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => replay.received.length >= 1)),
+          ).toBe(true);
+          const caught = expectPresent(listDeltas(replay)[0]);
+          expect(listStartedTurns(replay)).toEqual(["s2"]);
+          expect(caught.cursor).toBe("5");
+          yield* Fiber.interrupt(replay.fiber);
+        }),
+      );
+    });
+  });
+
+  it("fails with not_found for a subagent the session does not have, on stream and tap alike", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
+      await introduceSubagent(arranged, session.id);
+
+      const ticket = await fetchTicket(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          for (const kind of ["stream", "tap"] as const) {
+            const refused = yield* awaitOutcome(
+              readFirstItem(client, { topic: buildSubagentTopic(session.id, "ghost", kind) }),
+            );
+            expect(refused, kind).toBeInstanceOf(NotFound);
+            expect((refused as NotFound).error.code).toBe("not_found");
+          }
+        }),
+      );
+    });
+  });
+});
+
+describe("what a subagent's tap subscription receives", () => {
+  it("carries the subagent's content deltas alone, and the session's tap carries none of them", async () => {
+    await withSessionTopicFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
+      await introduceSubagent(arranged, session.id);
+
+      const ticket = await fetchTicket(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const mainTopic = `session:${session.id}:tap` as const;
+          const subTopic = buildSubagentTopic(session.id, "a1", "tap");
+          const main = yield* collectMessages(client, { topic: mainTopic });
+          const sub = yield* collectMessages(client, { topic: subTopic });
+          yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, mainTopic));
+          yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, subTopic));
+
+          const reportDelta = (seq: number, delta: string, subagentId?: string): void =>
+            reportEvent(arranged.wire, seq, {
+              eventId: crypto.randomUUID(),
+              sessionId: session.id,
+              at: AT,
+              _tag: "content.delta",
+              turnId: subagentId === undefined ? "t1" : "s1",
+              itemId: subagentId === undefined ? "i1" : "j1",
+              streamKind: "assistant_text",
+              delta,
+              ...(subagentId === undefined ? {} : { subagentId }),
+            });
+          // As with the stream, the last delta of each agent arriving means
+          // every delta reported before it has been sent already.
+          reportDelta(3, "sub-1", "a1");
+          reportDelta(4, "main-1");
+          reportDelta(5, "sub-2", "a1");
+          expect(
+            yield* Effect.promise(() =>
+              waitWithin(1000, () => main.received.length >= 1 && sub.received.length >= 2),
+            ),
+          ).toBe(true);
+
+          expect(listDeltas(sub).flatMap(listTapItems)).toEqual([
+            {
+              turnId: "s1",
+              itemId: "j1",
+              streamKind: "assistant_text",
+              delta: "sub-1",
+              subagentId: "a1",
+            },
+            {
+              turnId: "s1",
+              itemId: "j1",
+              streamKind: "assistant_text",
+              delta: "sub-2",
+              subagentId: "a1",
+            },
+          ]);
+          expect(listDeltas(main).flatMap(listTapItems)).toEqual([
+            { turnId: "t1", itemId: "i1", streamKind: "assistant_text", delta: "main-1" },
+          ]);
+
+          yield* Fiber.interrupt(main.fiber);
+          yield* Fiber.interrupt(sub.fiber);
+        }),
+      );
+    });
+  });
+});
