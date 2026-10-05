@@ -604,7 +604,7 @@ const make = Effect.gen(function* () {
             },
             at: yield* nowIso,
           });
-          yield* sessions.withdrawApprovalNotification(session.id, "interrupted", subagentId);
+          yield* sessions.withdrawApprovalNotifications(session.id, "interrupted", subagentId);
         }),
       );
     });
@@ -696,7 +696,7 @@ const make = Effect.gen(function* () {
   /**
    * Stops a session that has not exited, as the actor behind the current
    * request, and writes the `session.stopped` audit entry. Also withdraws the
-   * approval notification about the request the session waits on, if any.
+   * approval notifications about every Request the session waits on.
    * Returns what happened:
    *
    * - `ended`: the session was queued, so no runner held it, and it has
@@ -742,7 +742,7 @@ const make = Effect.gen(function* () {
         sessions.stopping(session.id),
         Effect.gen(function* () {
           yield* audit.append({ kind: "session.stopped", actor, payload, at: yield* nowIso });
-          yield* sessions.withdrawApprovalNotification(session.id, "stopped");
+          yield* sessions.withdrawApprovalNotifications(session.id, "stopped", undefined);
         }),
       ).pipe(
         Effect.as("told" as const),
@@ -940,11 +940,16 @@ const make = Effect.gen(function* () {
      * has already passed. The adapter knows, and its interrupt does nothing
      * when there is nothing to end.
      */
-    interrupt: (id: Id, input: SessionInterruptInput): Effect.Effect<Session, InputError> =>
+    interrupt: ({
+      id,
+      ...payload
+    }: { readonly id: Id } & SessionInterruptInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.interrupt");
+        // The id comes from the path and is decoded there, so only the
+        // payload is decoded here.
         const { subagentId } = yield* Effect.mapError(
-          decodeInterrupt(input),
+          decodeInterrupt(payload),
           createDecodeValidationError,
         );
         const session = yield* readSession(id);
@@ -964,7 +969,7 @@ const make = Effect.gen(function* () {
      * must never make. It fails when:
      *
      * - the session has exited;
-     * - the session has no open request, or waits on a different request;
+     * - the session waits on no Request, or not on this one;
      * - the request is a question, or does not offer the decision (see
      *   `validateDecision`);
      * - the approval was already decided, or its wait already ended.
@@ -1015,7 +1020,7 @@ const make = Effect.gen(function* () {
      * Every check runs before anything is sent to the runner. It fails when:
      *
      * - the session has exited;
-     * - the session has no open request, or waits on a different request;
+     * - the session waits on no Request, or not on this one;
      * - the request is an approval, or the answers do not fit its questions
      *   (see `validateAnswers`).
      *

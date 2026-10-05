@@ -504,7 +504,7 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
         withApiErrors(live.input({ id: params.id, ...payload })),
       )
       .handle("interrupt", ({ params, payload }) =>
-        withApiErrors(live.interrupt(params.id, payload)),
+        withApiErrors(live.interrupt({ id: params.id, ...payload })),
       )
       .handle("respondToApprovalRequest", ({ params, payload }) =>
         withApiErrors(live.respondToApprovalRequest({ id: params.id, ...payload })),

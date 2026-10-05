@@ -599,6 +599,41 @@ describe("session.querySubagents", () => {
   });
 });
 
+describe("a subagent's description", () => {
+  it("comes from its first turn's brief, never from a later turn's message", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      const userMessage = (subagentId: string, turnId: string, text: string): ProviderEvent => ({
+        ...buildBase(id, subagentId),
+        _tag: "item.started",
+        turnId,
+        itemId: `brief-${turnId}`,
+        kind: "user_message",
+        detail: { text },
+      });
+      reportEvents(arranged, 2, [
+        { ...buildBase(id, "briefed"), _tag: "turn.started", turnId: "b1" },
+        userMessage("briefed", "b1", "Find the flaky test\nin the suite"),
+        // Its first turn had no message, so a later turn's message is not its brief.
+        { ...buildBase(id, "unbriefed"), _tag: "turn.started", turnId: "u1" },
+        { ...buildBase(id, "unbriefed"), _tag: "turn.completed", turnId: "u1", state: "completed" },
+        { ...buildBase(id, "unbriefed"), _tag: "turn.started", turnId: "u2" },
+        userMessage("unbriefed", "u2", "Now also fix the lint"),
+      ]);
+      const unbriefed = await waitForSubagent(
+        arranged,
+        id,
+        "unbriefed",
+        (one) => one.activity === "Reading its brief",
+      );
+      expect(unbriefed).not.toHaveProperty("description");
+      const briefed = await waitForSubagent(arranged, id, "briefed", () => true);
+      expect(briefed.description).toBe("Find the flaky test");
+    });
+  });
+});
+
 describe("transcript.read of one agent", () => {
   it("reads the session's own transcript or one subagent's, and keeps their cursors apart", async () => {
     await withAgentFleet(async (arranged) => {

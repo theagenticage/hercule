@@ -4,8 +4,10 @@ import {
   buildSubagentActivity,
   collectSubagentTree,
   computeSubagentAfter,
+  computeSubagentsAfter,
   createBareSubagent,
   findSubagentsNamedBy,
+  findSubagentsToRead,
   stopSubagent,
   toSubagentRecord,
   type StoredSubagent,
@@ -91,7 +93,7 @@ describe("computeSubagentAfter", () => {
         subagentId: "a1",
         state: "interrupted",
       },
-      "All tests pass.\nDetails follow.",
+      { lastAssistantText: "All tests pass.\nDetails follow." },
     );
     expect(done).toMatchObject({ status: "stopped", endedAt: later, result: "All tests pass." });
     expect(done.activity).toBeUndefined();
@@ -158,16 +160,45 @@ describe("computeSubagentAfter", () => {
     expect(counted.toolCalls).toBe(5);
   });
 
-  it("takes an empty description from the first line of its brief", () => {
-    const briefed = computeSubagentAfter(
-      bare,
-      itemStarted("user_message", { text: "\nFind the flaky test\nin the suite" }),
-    );
+  it("takes an empty description from the first line of its first turn's brief", () => {
+    const brief = itemStarted("user_message", { text: "\nFind the flaky test\nin the suite" });
+    const briefed = computeSubagentAfter(bare, brief, { inFirstTurn: true });
     expect(briefed.description).toBe("Find the flaky test");
     const named = { ...bare, description: "Given name" };
     expect(
-      computeSubagentAfter(named, itemStarted("user_message", { text: "Brief" })).description,
+      computeSubagentAfter(named, itemStarted("user_message", { text: "Brief" }), {
+        inFirstTurn: true,
+      }).description,
     ).toBe("Given name");
+  });
+
+  it("never takes its description from a later turn's message", () => {
+    const followUp = itemStarted("user_message", { text: "Now also fix the lint" });
+    expect(computeSubagentAfter(bare, followUp, { inFirstTurn: false }).description).toBe(
+      undefined,
+    );
+    expect(computeSubagentAfter(bare, followUp).description).toBe(undefined);
+  });
+
+  it("cuts every text the harness or the parent wrote to one short line", () => {
+    const hostile = `# Heading\n\`\`\`\n${"x".repeat(300)}`;
+    const introduced = computeSubagentAfter(bare, {
+      ...base,
+      _tag: "subagent.started",
+      subagentId: "a1",
+      description: "Fix [it](https://evil.example)\n# Injected",
+      agentType: `${"t".repeat(300)}\nmore`,
+    });
+    expect(introduced.description).toBe("Fix [it](https://evil.example)");
+    expect(introduced.agentType).toHaveLength(200);
+    const modelled = computeSubagentAfter(bare, {
+      ...base,
+      _tag: "turn.started",
+      turnId: "t1",
+      subagentId: "a1",
+      model: hostile,
+    });
+    expect(modelled.model).toBe("# Heading");
   });
 
   it("fills an empty itemId from a subagent item that lists it, whoever reported the item", () => {
@@ -209,11 +240,73 @@ describe("computeSubagentAfter", () => {
     expect(computeSubagentAfter(bare, main)).toBe(bare);
   });
 
-  it("stops a running subagent when its session's process exits", () => {
+  it("leaves a session's exit to the cleanup that stops running subagents", () => {
     const exited = { ...base, at: later, _tag: "session.exited", reason: "stopped" } as const;
-    expect(computeSubagentAfter(bare, exited)).toMatchObject({ status: "stopped", endedAt: later });
-    const completed = { ...bare, status: "completed" as const, endedAt: base.at };
-    expect(computeSubagentAfter(completed, exited)).toBe(completed);
+    expect(computeSubagentAfter(bare, exited)).toBe(bare);
+  });
+});
+
+describe("findSubagentsToRead", () => {
+  it("reads no subagent for the session's own agent's events", () => {
+    const delta = {
+      ...base,
+      _tag: "content.delta",
+      turnId: "t",
+      itemId: "i",
+      streamKind: "assistant_text",
+      delta: "Hello",
+    } as const;
+    expect(findSubagentsToRead(delta)).toEqual([]);
+    expect(findSubagentsToRead({ ...base, _tag: "turn.started", turnId: "t" })).toEqual([]);
+    expect(findSubagentsToRead({ ...base, _tag: "session.exited", reason: "stopped" })).toEqual([]);
+  });
+
+  it("reads the subagents an event names, and every one when a process starts", () => {
+    expect(
+      findSubagentsToRead({
+        ...base,
+        _tag: "item.started",
+        subagentId: "a1",
+        turnId: "t",
+        itemId: "i",
+        kind: "subagent",
+        detail: { subagentIds: ["a2"] },
+      }),
+    ).toEqual(["a1", "a2"]);
+    expect(findSubagentsToRead({ ...base, _tag: "session.started" })).toBe("all");
+  });
+});
+
+describe("computeSubagentsAfter", () => {
+  const delta = {
+    ...base,
+    _tag: "content.delta",
+    subagentId: "a1",
+    turnId: "t",
+    itemId: "i",
+    streamKind: "assistant_text",
+    delta: "Hi",
+  } as const;
+
+  it("creates a bare record for a subagent it has no record of", () => {
+    expect(computeSubagentsAfter(SESSION, delta, new Map())).toEqual([bare]);
+  });
+
+  it("returns only the records the event changed", () => {
+    expect(computeSubagentsAfter(SESSION, delta, new Map([["a1", bare]]))).toEqual([]);
+    const started = { ...base, _tag: "session.started" } as const;
+    const counted = { ...bare, usageProcess: { inputTokens: 1, outputTokens: 1 } };
+    const idle = { ...bare, id: "a2" };
+    expect(
+      computeSubagentsAfter(
+        SESSION,
+        started,
+        new Map<string, StoredSubagent>([
+          ["a1", counted],
+          ["a2", idle],
+        ]),
+      ),
+    ).toEqual([{ ...counted, usageProcess: undefined }]);
   });
 });
 
@@ -252,9 +345,20 @@ describe("buildSubagentActivity", () => {
   it("names the item's kind and what it works on", () => {
     expect(buildSubagentActivity("file_change", { path: "src/a.ts" })).toBe("Editing src/a.ts");
     expect(buildSubagentActivity("reasoning", undefined)).toBe("Thinking");
+    expect(buildSubagentActivity("tool_call", { name: "Read" })).toBe("Using Read");
+    expect(buildSubagentActivity("web_search", { description: "effect 4 schema" })).toBe(
+      "Searching effect 4 schema",
+    );
     expect(buildSubagentActivity("command_execution", { command: "x".repeat(500) })).toHaveLength(
       200,
     );
+  });
+
+  it("names a delegation by its task, never by the delegating tool", () => {
+    expect(
+      buildSubagentActivity("subagent", { name: "Agent", description: "Chase the flaky test" }),
+    ).toBe("Delegating: Chase the flaky test");
+    expect(buildSubagentActivity("subagent", { name: "spawn_agent" })).toBe("Delegating");
   });
 });
 

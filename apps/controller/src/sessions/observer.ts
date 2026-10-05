@@ -63,8 +63,12 @@ export class SessionObserver extends Context.Service<
   SessionObserver,
   {
     /**
-     * Handles one runner report about a session. It runs after the report's
-     * transcript rows are written, so it can read them.
+     * Handles one runner report about a session's own agent. It runs after
+     * the report's transcript rows are written, so it can read them.
+     *
+     * An event attributed to a subagent is never passed here: a subagent's
+     * work changes nothing the session's own agent owns, such as an
+     * assistant's reply (spec 06 section 13.1).
      */
     readonly sessionReported: (
       session: StoredSession,

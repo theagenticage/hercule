@@ -111,21 +111,21 @@ import {
   isRequestEvent,
   startTracking,
   type Folded,
-  type RequestClosingEvent,
+  type RequestEvent,
   type Tracked,
 } from "./stream";
 import { subagentRepository } from "./subagent-repository";
 import {
   collectSubagentTree,
-  computeSubagentAfter,
-  createBareSubagent,
-  findSubagentsNamedBy,
+  computeSubagentsAfter,
+  findSubagentsToRead,
   stopSubagent,
   toSubagentRecord,
   type StoredSubagent,
+  type SubagentEventFacts,
 } from "./subagents";
-import { readAssistantTexts } from "./transcript-log";
-import { addUsageSnapshot } from "./usage";
+import { hasOtherTurn, readAssistantTexts } from "./transcript-log";
+import { addUsageSnapshot, clearProcessShare } from "./usage";
 
 const QueryInput = Schema.Struct({
   ...SessionFilter.fields,
@@ -621,7 +621,7 @@ const make = Effect.gen(function* () {
    *   with the reason that names the event;
    * - each approval Request the event opened raises a notification. When a
    *   subagent asked it, the notification names the subagent by its
-   *   description, from `askers`.
+   *   description, from `askers`, which holds the subagents the event names.
    *
    * `session` is the row as it was before the event, and `after` is the list
    * `computeOpenRequestsAfter` returned for it.
@@ -629,16 +629,16 @@ const make = Effect.gen(function* () {
   const replaceOpenRequests = (
     session: StoredSession,
     after: ReadonlyArray<SessionRequest>,
-    event: ProviderEvent,
+    event: RequestEvent,
     askers: ReadonlyMap<SubagentId, StoredSubagent>,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       yield* sessions.setOpenRequests(session.id, after);
       const { closed, opened } = compareOpenRequests(session.openRequests, after);
-      if (closed.length > 0) {
-        // Only an event that closes a Request removes one from the list.
-        const reason = buildWithdrawReason(event as RequestClosingEvent);
-        yield* withdrawRequestNotifications(session.id, closed, reason);
+      // A new Request never closes an older one, so only the other events
+      // can have closed any.
+      if (closed.length > 0 && event._tag !== "request.opened") {
+        yield* withdrawRequestNotifications(session.id, closed, buildWithdrawReason(event));
       }
       for (const request of opened) {
         const asker = request.subagentId === undefined ? undefined : askers.get(request.subagentId);
@@ -648,57 +648,85 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Applies one reported event to the subagent records it touches, and
-   * writes back each one it changed. Returns the session's subagents as they
-   * are after the event, by id, for the Requests the event opens.
+   * Applies one reported event to the subagent records it changes, and
+   * writes back each one it changed. Returns the subagents the event names,
+   * by id, as they are after the event: the asker of a Request the event
+   * opens is among them.
    *
-   * - `session.started` and `session.exited` touch every record: a new
-   *   process counts its usage from zero, and an exit stops every running
-   *   subagent.
-   * - Any other event touches the subagent it names and the ones a
-   *   `subagent` item lists. A subagent the controller has no record of yet
-   *   gets a bare one, which its `subagent.started` fills in later.
+   * Reads only what the event can change (`findSubagentsToRead`): nothing
+   * for the many events of the session's own agent, the named records for a
+   * subagent's events, and every record only for `session.started`. A
+   * session's exit is handled by `endSessions`, like every other end.
    *
-   * A changed record is announced on the `subagent` topic by its session's id.
+   * A visible change is announced on the `subagent` topic by its session's
+   * id. Clearing the process's share of Token Usage is not announced,
+   * because the API does not show it.
    */
   const applySubagentEvent = (
     sessionId: string,
     event: ProviderEvent,
   ): Effect.Effect<ReadonlyMap<SubagentId, StoredSubagent>, SqlError> =>
     Effect.gen(function* () {
-      const records = new Map((yield* subagents.listAll(sessionId)).map((one) => [one.id, one]));
-      const touched: Array<StoredSubagent> = [];
-      if (event._tag === "session.started" || event._tag === "session.exited") {
-        touched.push(...records.values());
-      } else {
-        const { owner, listed } = findSubagentsNamedBy(event);
-        if (owner !== undefined) {
-          touched.push(records.get(owner) ?? createBareSubagent(sessionId, owner, event.at));
-        }
-        for (const id of listed) {
-          const record = records.get(id);
-          if (record !== undefined) touched.push(record);
-        }
+      const toRead = findSubagentsToRead(event);
+      if (toRead !== "all" && toRead.length === 0) return new Map();
+      const read =
+        toRead === "all"
+          ? yield* subagents.listAll(sessionId)
+          : yield* subagents.listByIds(sessionId, toRead);
+      const records = new Map(read.map((record) => [record.id, record]));
+      const changed = computeSubagentsAfter(
+        sessionId,
+        event,
+        records,
+        yield* readSubagentEventFacts(sessionId, event, records),
+      );
+      for (const record of changed) {
+        yield* subagents.save(record);
+        records.set(record.id, record);
       }
-      let changed = false;
-      for (const record of touched) {
-        const next = computeSubagentAfter(
-          record,
-          event,
-          event._tag === "turn.completed" && event.subagentId === record.id
-            ? yield* readLastAssistantText(sessionId, record.id, event.turnId)
-            : undefined,
-        );
-        // A bare record is new even when the event changes nothing else on it.
-        if (next === record && records.has(record.id)) continue;
-        yield* subagents.save(next);
-        records.set(next.id, next);
-        changed = true;
-      }
-      if (changed) {
+      if (changed.length > 0 && event._tag !== "session.started") {
         yield* announce({ _tag: "record", topic: "subagent", id: sessionId, kind: "updated" });
       }
       return records;
+    });
+
+  /**
+   * Reads from the transcript what an event of a subagent does not carry
+   * itself, and only when the event needs it:
+   *
+   * - for a `turn.completed`, the turn's last assistant text, the result;
+   * - for a `user_message` while the description is empty, whether the
+   *   message belongs to the subagent's first turn, whose input is the brief.
+   */
+  const readSubagentEventFacts = (
+    sessionId: string,
+    event: ProviderEvent,
+    records: ReadonlyMap<SubagentId, StoredSubagent>,
+  ): Effect.Effect<SubagentEventFacts, SqlError> =>
+    Effect.gen(function* () {
+      if (event._tag === "turn.completed" && event.subagentId !== undefined) {
+        return {
+          lastAssistantText: yield* readLastAssistantText(
+            sessionId,
+            event.subagentId,
+            event.turnId,
+          ),
+        };
+      }
+      if (
+        event._tag === "item.started" &&
+        event.kind === "user_message" &&
+        event.subagentId !== undefined &&
+        records.get(event.subagentId)?.description === undefined
+      ) {
+        const later = yield* hasOtherTurn(sql, {
+          sessionId,
+          subagentId: event.subagentId,
+          turnId: event.turnId,
+        });
+        return { inFirstTurn: !later };
+      }
+      return {};
     });
 
   /**
@@ -709,7 +737,7 @@ const make = Effect.gen(function* () {
    *   process's share is cleared. The total does not change.
    * - `session.usage.updated` from the session's own agent replaces the
    *   process's share of the total. A subagent's snapshot feeds only that
-   *   subagent's record (`computeSubagentAfter`).
+   *   subagent's record (`computeSubagentsAfter`).
    */
   const applySessionUsage = (
     session: StoredSession,
@@ -718,7 +746,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (event._tag === "session.started") {
         if (session.usageProcess !== undefined) {
-          yield* sessions.setUsage(session.id, { usage: session.usage, usageProcess: undefined });
+          yield* sessions.setUsage(session.id, clearProcessShare(session));
         }
         return false;
       }
@@ -728,20 +756,15 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Stops every running subagent of a session that ended, at `at`. For an
-   * exit the harness reported, `applySubagentEvent` has already stopped them,
-   * and this finds none running.
+   * Stops every running subagent of a session that ended, at `at`. This is
+   * the one place that does so: `endSessions` calls it for every way a
+   * session ends, an exit the harness reported included.
    */
   const stopRunningSubagents = (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      let changed = false;
-      for (const record of yield* subagents.listAll(sessionId)) {
-        const stopped = stopSubagent(record, at);
-        if (stopped === record) continue;
-        yield* subagents.save(stopped);
-        changed = true;
-      }
-      if (changed) {
+      const running = yield* subagents.listRunning(sessionId);
+      for (const record of running) yield* subagents.save(stopSubagent(record, at));
+      if (running.length > 0) {
         yield* announce({ _tag: "record", topic: "subagent", id: sessionId, kind: "updated" });
       }
     });
@@ -757,7 +780,7 @@ const make = Effect.gen(function* () {
     turnId: string,
   ): Effect.Effect<string | undefined, SqlError> =>
     Effect.map(
-      readAssistantTexts(sql, sessionId, subagentId, turnId),
+      readAssistantTexts(sql, { sessionId, subagentId, turnId }),
       (texts) => texts.at(-1)?.text,
     );
 
@@ -785,8 +808,9 @@ const make = Effect.gen(function* () {
    * - releases its lease on its workspace: `idle` when it can be resumed,
    *   so a thread the user may come back to keeps its files for the long
    *   window, and `orphan` when it cannot;
-   * - withdraws the approval notification about the request it was waiting
-   *   on;
+   * - withdraws the approval notifications about the Requests it was
+   *   waiting on;
+   * - stops its running subagents;
    * - tells `SessionObserver` that the session exited, and whether the
    *   crash-loop guard now holds it back from a resume;
    * - forgets its token and ingest state, and announces it once.
@@ -1497,10 +1521,10 @@ const make = Effect.gen(function* () {
      * open when the transaction runs. Does nothing for a Request whose
      * notification is already resolved.
      */
-    withdrawApprovalNotification: (
+    withdrawApprovalNotifications: (
       sessionId: string,
       endedBy: WaitEndedBy,
-      subagentId?: SubagentId,
+      subagentId: SubagentId | undefined,
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
@@ -2016,7 +2040,7 @@ const make = Effect.gen(function* () {
      * the caller sends, and whether the session exited holding input.
      *
      * The session is read again here, inside the transaction, and every
-     * decision about its status and its open request is made from that read.
+     * decision about its status and its open Requests is made from that read.
      * Something else, such as a retired runner, can end the session between
      * `foldReport` and this write. A report that arrives that late is still
      * recorded, but it never moves the session or opens a request on it, so
@@ -2034,7 +2058,7 @@ const make = Effect.gen(function* () {
         const before = session.status;
         // An event for a session that has already exited is still recorded,
         // but changes nothing else: no Request, no subagent, no usage.
-        const live = before !== "exited";
+        const sessionAcceptsChanges = before !== "exited";
         const at = yield* nowIso;
         for (const row of folded.rows) yield* sessions.append(id, row);
         // Each agent has its own transcript topic, so each agent whose
@@ -2048,7 +2072,9 @@ const make = Effect.gen(function* () {
           });
         }
         // After the rows, so the observer can read what this report wrote.
-        yield* observer.sessionReported(session, event);
+        // Only the session's own agent's events: a subagent's work never
+        // changes what the observer keeps, such as an assistant's reply.
+        if (attributeEvent(event) === undefined) yield* observer.sessionReported(session, event);
         // Written together with the status change from the same event, so a
         // session that reads `idle` already has its provider-native id.
         const native = findNativeId(event);
@@ -2057,14 +2083,16 @@ const make = Effect.gen(function* () {
         }
         // Before the Requests, so a Request a subagent opens can name it by
         // the description this same event may have filled in.
-        const askers = live ? yield* applySubagentEvent(id, event) : new Map();
-        const openRequests =
-          live && isRequestEvent(event)
-            ? computeOpenRequestsAfter(event, session.openRequests)
-            : session.openRequests;
-        const requestsChanged = openRequests !== session.openRequests;
-        if (requestsChanged) yield* replaceOpenRequests(session, openRequests, event, askers);
-        const usageChanged = live && (yield* applySessionUsage(session, event));
+        const askers = sessionAcceptsChanges
+          ? yield* applySubagentEvent(id, event)
+          : new Map<SubagentId, StoredSubagent>();
+        let requestsChanged = false;
+        if (sessionAcceptsChanges && isRequestEvent(event)) {
+          const openRequests = computeOpenRequestsAfter(event, session.openRequests);
+          requestsChanged = openRequests !== session.openRequests;
+          if (requestsChanged) yield* replaceOpenRequests(session, openRequests, event, askers);
+        }
+        const usageChanged = sessionAcceptsChanges && (yield* applySessionUsage(session, event));
         // A session starting or exiting is what counts as use of its
         // workspace. The time is shown to the user; how long the workspace is
         // kept is decided by its leases, not by this time.
@@ -2268,8 +2296,9 @@ const make = Effect.gen(function* () {
  * method wired where the other kind belongs:
  *
  * - `query`, `read`, `transcript`, `querySubagents`, `queryInputs`,
- *   `updateInput` and `cancelInput` are operations. Each checks its own grant and decodes any
- *   input object it takes, and a route handler calls it directly.
+ *   `updateInput` and `cancelInput` are operations. Each checks its own
+ *   grant and decodes any input object it takes, and a route handler calls
+ *   it directly.
  * - Every other method changes rows or builds a frame, and checks no grant.
  *   Only the controller daemon calls them, after checking the grant for the
  *   operation it is running. Putting one of them on a route would expose it

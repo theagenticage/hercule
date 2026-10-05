@@ -244,6 +244,14 @@ const buildColumnList = (): string =>
   "WHERE conversations.id = sessions.conversation_id)) AS conversation_deleted, " +
   `(${buildResumableClause("sessions")}) AS resumable`;
 
+/**
+ * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
+ * for `NULL`, which means no harness has reported usage yet. Shared by the
+ * session and subagent repositories, which store usage the same way.
+ */
+export const parseUsage = (column: string | null): Usage | undefined =>
+  column === null ? undefined : (JSON.parse(column) as Usage);
+
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
   title: row.title,
@@ -264,8 +272,8 @@ const toSession = (row: SessionRow): StoredSession => ({
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
   openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
-  usage: row.usage === null ? undefined : (JSON.parse(row.usage) as Usage),
-  usageProcess: row.usage_process === null ? undefined : (JSON.parse(row.usage_process) as Usage),
+  usage: parseUsage(row.usage),
+  usageProcess: parseUsage(row.usage_process),
   createdAt: row.created_at,
   startedAt: row.started_at,
   exitedAt: row.exited_at,

@@ -1,9 +1,13 @@
 /**
  * Works out what one reported event does to a session's subagent records
  * (spec 02 Subagent, spec 06 section 13.2). The code is pure: the service
- * reads the records an event names, passes each through
- * `computeSubagentAfter`, and writes back the ones that changed, in the
+ * reads the records `findSubagentsToRead` asks for, passes them through
+ * `computeSubagentsAfter`, and writes back the ones that changed, in the
  * transaction that appends the event.
+ *
+ * A session's exit is not handled here. Every way a session ends, a reported
+ * exit included, goes through the service's one cleanup step, which stops the
+ * session's running subagents with `stopSubagent`.
  *
  * A record is filled from several events, and a resumed process may know
  * less than an earlier one. So the introduction, `subagent.started`, fills a
@@ -12,7 +16,7 @@
 import type { ItemKind, ProviderEvent, SubagentId, Usage } from "@hercule/protocol";
 import type { Subagent, SubagentStatus } from "@hercule/contract";
 import { attributeEvent } from "./stream";
-import { addUsageSnapshot } from "./usage";
+import { addUsageSnapshot, clearProcessShare } from "./usage";
 
 /**
  * A subagent record as stored. Absent fields are `undefined` rather than
@@ -38,8 +42,9 @@ export interface StoredSubagent {
 }
 
 /**
- * The longest `description`, `activity` or `result` line kept. Each is shown
- * as one line in a list row, and the full text is in the transcript.
+ * The longest line kept in a text field of a record: `description`,
+ * `agentType`, `model`, `activity` or `result`. Each is shown as one line in a
+ * list row, and the full text, when there is one, is in the transcript.
  */
 const MAX_LINE_LENGTH = 200;
 
@@ -73,11 +78,15 @@ const ACTIVITY_VERBS: Readonly<Record<ItemKind, string>> = {
  * ending in an ellipsis when it was cut. Returns `undefined` when the first
  * line is blank, so a record never stores an empty line.
  */
-const readFirstLine = (text: string): string | undefined => {
+const truncateToFirstLine = (text: string): string | undefined => {
   const line = (text.trimStart().split("\n")[0] ?? "").trimEnd();
   if (line === "") return undefined;
   return line.length > MAX_LINE_LENGTH ? `${line.slice(0, MAX_LINE_LENGTH - 1)}…` : line;
 };
+
+/** Returns `truncateToFirstLine` of `text`, or `undefined` when there is no text. */
+const truncateOptional = (text: string | undefined): string | undefined =>
+  text === undefined ? undefined : truncateToFirstLine(text);
 
 /** Returns an item's `detail` as an object, or an empty one when it is not an object. */
 const readDetail = (detail: unknown): Readonly<Record<string, unknown>> =>
@@ -89,20 +98,33 @@ const readDetail = (detail: unknown): Readonly<Record<string, unknown>> =>
  * Returns the part of an item's `detail` worth naming in `activity`: the
  * command, the path, the search, the tool's name or its description. Each
  * adapter shapes `detail` its own way, so each field is optional.
+ *
+ * A `subagent` item is named only by the task it hands over, its
+ * `description`. Its `name` is the delegating tool, such as Claude's `Agent`
+ * or Codex's `spawn_agent`, which says nothing about the work.
  */
-const findDetailTarget = (detail: unknown): string | undefined => {
+const findDetailTarget = (kind: ItemKind, detail: unknown): string | undefined => {
   const fields = readDetail(detail);
-  const candidate = [fields.command, fields.path, fields.description, fields.name].find(
-    (value) => typeof value === "string",
-  );
-  return candidate;
+  const candidates =
+    kind === "subagent"
+      ? [fields.description]
+      : [fields.command, fields.path, fields.description, fields.name];
+  return candidates.find((value): value is string => typeof value === "string");
 };
 
-/** Builds the one line that says what a subagent is doing now, from the item it just started. */
+/**
+ * Builds the one line that says what a subagent is doing now, from the item it
+ * just started, such as "Running npm test" or "Delegating: Chase the flaky
+ * test". Returns the bare verb when the item names nothing.
+ */
 export const buildSubagentActivity = (kind: ItemKind, detail: unknown): string => {
   const verb = ACTIVITY_VERBS[kind];
-  const target = findDetailTarget(detail);
-  const line = target === undefined ? undefined : readFirstLine(`${verb} ${target}`);
+  const target = findDetailTarget(kind, detail);
+  // The colon keeps a delegated task, which is a phrase of its own, apart
+  // from the verb.
+  const separator = kind === "subagent" ? ": " : " ";
+  const line =
+    target === undefined ? undefined : truncateToFirstLine(`${verb}${separator}${target}`);
   return line ?? verb;
 };
 
@@ -138,8 +160,8 @@ export const createBareSubagent = (
 });
 
 /**
- * Returns the subagents an event names, apart from the session-wide
- * `session.started` and `session.exited`, which change every record:
+ * Returns the subagents an event names. `session.started` names none, though
+ * it changes every record (`findSubagentsToRead`).
  *
  * - `owner` is the subagent the event is about: the one a `subagent.started`
  *   introduces, or the one an event is attributed to. A record is created for
@@ -157,6 +179,19 @@ export const findSubagentsNamedBy = (
       ? readListedSubagentIds(event.detail)
       : [];
   return { owner, listed: listed.filter((id) => id !== owner) };
+};
+
+/**
+ * Returns the subagent records an event can change, so the service reads only
+ * those: `"all"` for `session.started`, which clears every record's process
+ * share of Token Usage, and otherwise the ids the event names. Most events
+ * come from the session's own agent and name no subagent, so for them the
+ * list is empty and nothing is read.
+ */
+export const findSubagentsToRead = (event: ProviderEvent): "all" | ReadonlyArray<SubagentId> => {
+  if (event._tag === "session.started") return "all";
+  const { owner, listed } = findSubagentsNamedBy(event);
+  return owner === undefined ? listed : [owner, ...listed];
 };
 
 /** Returns the subagent ids a `subagent` item's `detail.subagentIds` holds. */
@@ -177,20 +212,70 @@ export const stopSubagent = (record: StoredSubagent, at: string): StoredSubagent
     : record;
 
 /**
+ * What the service reads from the transcript for an event, because the event
+ * alone does not carry it. Both are about the event's owner (`findSubagentsNamedBy`).
+ */
+export interface SubagentEventFacts {
+  /**
+   * The text of the last assistant message in the turn a `turn.completed`
+   * ends. It becomes the record's `result`; without it the result stays as
+   * it was.
+   */
+  readonly lastAssistantText?: string | undefined;
+  /**
+   * Whether a `user_message` item belongs to the subagent's first turn. Only
+   * the first turn's input is the brief its parent gave it, which fills an
+   * empty `description` (spec 06 section 13.2).
+   */
+  readonly inFirstTurn?: boolean | undefined;
+}
+
+/**
+ * Returns the records one event changes, among `records`, the ones
+ * `findSubagentsToRead` asked for. A subagent the event is about that has no
+ * record yet gets a bare one, which is returned even when the event changes
+ * nothing else on it. Records the event leaves as they were are not returned.
+ */
+export const computeSubagentsAfter = (
+  sessionId: string,
+  event: ProviderEvent,
+  records: ReadonlyMap<SubagentId, StoredSubagent>,
+  facts: SubagentEventFacts = {},
+): ReadonlyArray<StoredSubagent> => {
+  if (event._tag === "session.started") {
+    return [...records.values()].flatMap((record) => {
+      const next = computeSubagentAfter(record, event);
+      return next === record ? [] : [next];
+    });
+  }
+  const { owner, listed } = findSubagentsNamedBy(event);
+  const changed: Array<StoredSubagent> = [];
+  if (owner !== undefined) {
+    const stored = records.get(owner);
+    const record = stored ?? createBareSubagent(sessionId, owner, event.at);
+    const next = computeSubagentAfter(record, event, facts);
+    if (next !== record || stored === undefined) changed.push(next);
+  }
+  for (const id of listed) {
+    const record = records.get(id);
+    if (record === undefined) continue;
+    const next = computeSubagentAfter(record, event);
+    if (next !== record) changed.push(next);
+  }
+  return changed;
+};
+
+/**
  * Returns a subagent's record after one event. Returns `record` itself when
  * the event changes nothing, so a caller writes and announces only a real
- * change.
- *
- * `lastAssistantText` is the text of the last assistant message in the turn a
- * `turn.completed` ends, read from the transcript of the agent that ran it.
- * It becomes the record's `result`; without it the result stays as it was.
+ * change. `facts` holds what the transcript adds about the event.
  */
 export const computeSubagentAfter = (
   record: StoredSubagent,
   event: ProviderEvent,
-  lastAssistantText?: string,
+  facts: SubagentEventFacts = {},
 ): StoredSubagent => {
-  const next = applyEvent(record, event, lastAssistantText);
+  const next = applyEventToSubagent(record, event, facts);
   const changed = (Object.keys(next) as Array<keyof StoredSubagent>).some(
     (key) => next[key] !== record[key],
   );
@@ -198,25 +283,24 @@ export const computeSubagentAfter = (
 };
 
 /** Applies one event to a record, without checking whether anything changed. */
-const applyEvent = (
+const applyEventToSubagent = (
   record: StoredSubagent,
   event: ProviderEvent,
-  lastAssistantText: string | undefined,
+  facts: SubagentEventFacts,
 ): StoredSubagent => {
   switch (event._tag) {
     case "session.started":
-      // A new process counts its usage from zero again.
-      return { ...record, usageProcess: undefined };
-    case "session.exited":
-      return stopSubagent(record, event.at);
+      return { ...record, ...clearProcessShare(record) };
     case "subagent.started":
       if (event.subagentId !== record.id) return record;
+      // The harness and the parent agent wrote these, so each is cut to one
+      // short line like every other text field of the record.
       return {
         ...record,
         parentSubagentId: record.parentSubagentId ?? event.parentSubagentId,
         itemId: record.itemId ?? event.itemId,
-        description: record.description ?? event.description,
-        agentType: record.agentType ?? event.agentType,
+        description: record.description ?? truncateOptional(event.description),
+        agentType: record.agentType ?? truncateOptional(event.agentType),
       };
     default:
       break;
@@ -236,18 +320,18 @@ const applyEvent = (
         ...record,
         status: "running",
         endedAt: undefined,
-        model: event.model ?? record.model,
+        model: truncateOptional(event.model) ?? record.model,
       };
     case "item.started": {
       const brief =
-        event.kind === "user_message" && record.description === undefined
+        event.kind === "user_message" && record.description === undefined && facts.inFirstTurn
           ? readDetail(event.detail).text
           : undefined;
       return {
         ...record,
         toolCalls: record.toolCalls + (TOOL_CALL_KINDS.has(event.kind) ? 1 : 0),
         activity: buildSubagentActivity(event.kind, event.detail),
-        description: typeof brief === "string" ? readFirstLine(brief) : record.description,
+        description: typeof brief === "string" ? truncateToFirstLine(brief) : record.description,
       };
     }
     case "turn.completed":
@@ -257,9 +341,9 @@ const applyEvent = (
         endedAt: event.at,
         activity: undefined,
         result:
-          lastAssistantText === undefined
+          facts.lastAssistantText === undefined
             ? record.result
-            : (readFirstLine(lastAssistantText) ?? record.result),
+            : (truncateToFirstLine(facts.lastAssistantText) ?? record.result),
       };
     case "session.usage.updated":
       return { ...record, ...addUsageSnapshot(record, event.usage) };

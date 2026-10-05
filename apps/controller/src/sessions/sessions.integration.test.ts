@@ -4405,7 +4405,7 @@ describe("session.respondToApprovalRequest", () => {
     },
   );
 
-  it("clears the open request when the runner reports it resolved", async () => {
+  it("closes the Request when the runner reports it resolved", async () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
       const response = await respondToApprovalRequest(arranged, session.id, {
@@ -4437,7 +4437,7 @@ describe("session.respondToApprovalRequest", () => {
     });
   });
 
-  it("clears the open request when the runner reports it no longer has the session", async () => {
+  it("closes the Request when the runner reports it no longer has the session", async () => {
     await withFleet(async (arranged) => {
       const session = await startParkedSession(arranged);
       arranged.wire.close();
@@ -4493,7 +4493,7 @@ describe("session.respondToApprovalRequest", () => {
     });
   });
 
-  it("rejects a decision the open request does not offer, and sends nothing", async () => {
+  it("rejects a decision the Request does not offer, and sends nothing", async () => {
     await withFleet(async (arranged) => {
       // A request that cannot store a rule does not offer `allow_always`. An
       // `allow_always` answer must not be silently turned into a plain allow.
@@ -5214,7 +5214,7 @@ describe("a frame whose caller's transaction rolls back", () => {
     await withFleet(async (arranged) => {
       const session = await startSession(arranged, "hello");
 
-      const exit = await runThenRollBack(arranged, (live) => live.interrupt(session.id, {}));
+      const exit = await runThenRollBack(arranged, (live) => live.interrupt({ id: session.id }));
 
       expect(Exit.isFailure(exit)).toBe(true);
       await delay(250);

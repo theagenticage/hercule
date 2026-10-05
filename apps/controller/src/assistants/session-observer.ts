@@ -33,12 +33,7 @@ import type { ProviderEvent } from "@hercule/protocol";
 import type { AssistantReply } from "@hercule/contract";
 import { buildSessionStamp } from "../actor";
 import type { ConversationMessages } from "../conversations";
-import {
-  attributeEvent,
-  readAssistantTexts,
-  SessionObserver,
-  type StoredSession,
-} from "../sessions";
+import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
 import {
   buildInterruptedText,
   buildTurnFailedText,
@@ -75,9 +70,10 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.gen(function* () {
       if (reply === "turn-end" && event._tag === "turn.completed") {
-        const texts = (yield* readAssistantTexts(sql, session.id, undefined, event.turnId)).map(
-          (item) => item.text,
-        );
+        const texts = (yield* readAssistantTexts(sql, {
+          sessionId: session.id,
+          turnId: event.turnId,
+        })).map((item) => item.text);
         if (event.state === "completed") return texts.slice(-1);
         const partialReply = texts.filter((text) => text !== "").join("\n\n");
         return partialReply === "" ? [] : [partialReply];
@@ -88,13 +84,11 @@ const make = Effect.gen(function* () {
         event.kind === "assistant_message" &&
         event.status === "completed"
       ) {
-        const texts = yield* readAssistantTexts(
-          sql,
-          session.id,
-          undefined,
-          event.turnId,
-          event.itemId,
-        );
+        const texts = yield* readAssistantTexts(sql, {
+          sessionId: session.id,
+          turnId: event.turnId,
+          itemId: event.itemId,
+        });
         return texts.map((item) => item.text);
       }
       return [];
@@ -103,9 +97,6 @@ const make = Effect.gen(function* () {
   return SessionObserver.of({
     sessionReported: (session, event) =>
       Effect.gen(function* () {
-        // A subagent's work is not the assistant speaking: its turns and
-        // messages go to its parent, never to the conversation.
-        if (attributeEvent(event) !== undefined) return;
         // Only a turn's end and a completed assistant message can produce a
         // reply, so every other report returns before anything is read.
         const mayProduceReplies =

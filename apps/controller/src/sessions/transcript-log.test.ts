@@ -93,7 +93,7 @@ const readTexts = (
           event: buildEvent(sessionId, row),
         });
       }
-      return yield* readAssistantTexts(sql, sessionId, subagentId, turnId, itemId);
+      return yield* readAssistantTexts(sql, { sessionId, subagentId, turnId, itemId });
     }).pipe(Effect.provide(TestDatabase), Effect.orDie),
   );
 

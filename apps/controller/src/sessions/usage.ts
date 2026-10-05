@@ -37,16 +37,22 @@ const replaceProcessShare = (total: number, process: number, snapshot: number): 
  *
  * An optional count is in the result when the total or the snapshot has it,
  * so a count the harness never reported stays absent instead of reading 0.
+ * A snapshot that leaves out an optional count the process reported before
+ * keeps that count's earlier share: a cumulative count never goes down, so
+ * the missing count is read as unchanged rather than as 0.
  */
 export const addUsageSnapshot = (stored: StoredUsage, snapshot: Usage): StoredUsage => {
   const { usage, usageProcess } = stored;
   const optional: Partial<Record<(typeof OPTIONAL_COUNTS)[number], number>> = {};
+  const share: Partial<Record<(typeof OPTIONAL_COUNTS)[number], number>> = {};
   for (const count of OPTIONAL_COUNTS) {
-    if (usage?.[count] === undefined && snapshot[count] === undefined) continue;
+    const reported = snapshot[count] ?? usageProcess?.[count];
+    if (reported !== undefined) share[count] = reported;
+    if (usage?.[count] === undefined && reported === undefined) continue;
     optional[count] = replaceProcessShare(
       usage?.[count] ?? 0,
       usageProcess?.[count] ?? 0,
-      snapshot[count] ?? 0,
+      reported ?? 0,
     );
   }
   return {
@@ -63,6 +69,20 @@ export const addUsageSnapshot = (stored: StoredUsage, snapshot: Usage): StoredUs
       ),
       ...optional,
     },
-    usageProcess: snapshot,
+    usageProcess: {
+      inputTokens: snapshot.inputTokens,
+      outputTokens: snapshot.outputTokens,
+      ...share,
+    },
   };
 };
+
+/**
+ * Returns an agent's stored Token Usage as a new process starts: the total is
+ * kept and the process's share is cleared, because the new process counts
+ * from zero again.
+ */
+export const clearProcessShare = (stored: StoredUsage): StoredUsage => ({
+  usage: stored.usage,
+  usageProcess: undefined,
+});

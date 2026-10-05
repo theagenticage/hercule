@@ -96,9 +96,41 @@ interface AssistantText {
   readonly text: string;
 }
 
+/** One turn, or one item of a turn, of one agent of a session. */
+export interface AgentTurn {
+  readonly sessionId: string;
+  /** The subagent whose turn it is, or absent for the session's own agent. */
+  readonly subagentId?: SubagentId | undefined;
+  readonly turnId: string;
+  /** The item within the turn, when only that item is meant. */
+  readonly itemId?: string | undefined;
+}
+
+/**
+ * Checks whether an agent started any turn other than `turnId`. Used to tell
+ * a subagent's first turn, whose input is the brief its parent gave it, from
+ * a later one. Reads the agent's rows already written, so inside the
+ * transaction that applies an event it sees that event's rows too.
+ */
+export const hasOtherTurn = (
+  sql: SqlClient.SqlClient,
+  turn: Omit<AgentTurn, "itemId">,
+): Effect.Effect<boolean, SqlError> =>
+  Effect.map(
+    sql<{ readonly found: number }>`
+      SELECT 1 AS found FROM session_stream
+      WHERE session_id = ${uuidFromString(turn.sessionId)}
+        AND ${buildAgentClause(sql, turn.subagentId)}
+        AND json_extract(event, '$._tag') = 'turn.started'
+        AND json_extract(event, '$.turnId') <> ${turn.turnId}
+      LIMIT 1
+    `,
+    (rows) => rows.length > 0,
+  );
+
 /**
  * Returns the assistant text one agent streamed so far, one entry per item, in
- * the order the items began. `subagentId` picks the agent: `undefined` reads
+ * the order the items began. `subagentId` picks the agent: absent reads
  * the session's own agent, which is what an assistant's reply is made of, and
  * never a subagent's text. Each entry joins the item's stored delta rows,
  * because an item longer than the delta flush size is stored as several rows.
@@ -121,10 +153,7 @@ interface AssistantText {
  */
 export const readAssistantTexts = (
   sql: SqlClient.SqlClient,
-  sessionId: string,
-  subagentId: SubagentId | undefined,
-  turnId: string,
-  itemId?: string,
+  { sessionId, subagentId, turnId, itemId }: AgentTurn,
 ): Effect.Effect<ReadonlyArray<AssistantText>, SqlError> =>
   Effect.gen(function* () {
     const session = uuidFromString(sessionId);

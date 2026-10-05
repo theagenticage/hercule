@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { SubagentId, Usage } from "@hercule/protocol";
+import type { SubagentId } from "@hercule/protocol";
 import type { SortDirection, SubagentStatus } from "@hercule/contract";
 import {
   buildKeyset,
@@ -23,8 +23,10 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
+import { parseUsage } from "./repository";
 import type { StoredSubagent } from "./subagents";
 
+/** What `subagentRepository.list` reads: one page of one session's subagents, in `direction` by `startedAt`. */
 export interface SubagentPageRequest {
   readonly sessionId: string;
   readonly limit: number;
@@ -54,11 +56,8 @@ const COLUMNS =
   "session_id, subagent_id, parent_subagent_id, item_id, description, agent_type, model, " +
   "status, tool_calls, activity, result, usage, usage_process, started_at, ended_at";
 
-/** Parses a nullable JSON usage column. */
-const parseUsage = (column: string | null): Usage | undefined =>
-  column === null ? undefined : (JSON.parse(column) as Usage);
-
-const toSubagent = (row: SubagentRow): StoredSubagent => ({
+/** Converts one `session_subagents` row into the record the rest of the domain works with. */
+const toStoredSubagent = (row: SubagentRow): StoredSubagent => ({
   sessionId: uuidToString(row.session_id),
   id: row.subagent_id,
   parentSubagentId: row.parent_subagent_id ?? undefined,
@@ -77,9 +76,12 @@ const toSubagent = (row: SubagentRow): StoredSubagent => ({
 });
 
 /**
- * Builds the cursor scope for one session's subagent list. The list is per
- * session, so the session id is part of the scope. Without it, a cursor from
- * one session's list would silently skip rows on another session's list.
+ * Builds the cursor scope for one session's subagent list.
+ *
+ * The session id goes into the scope's sort field because the list is per
+ * session, and the cursor holds only a position within one list. Without the
+ * id, a cursor from one session's list would be accepted on another session's
+ * list and silently skip rows there; with it, that cursor is refused.
  */
 const buildCursorScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "session.querySubagents",
@@ -100,13 +102,41 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(COLUMNS)} FROM session_subagents
           WHERE session_id = ${uuidFromString(sessionId)} AND subagent_id = ${subagentId}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toSubagent),
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toStoredSubagent),
+      ),
+
+    /**
+     * Returns the subagents of a session with the given ids, in no set order.
+     * An id the session has no record of is left out of the result.
+     */
+    listByIds: (
+      sessionId: string,
+      ids: ReadonlyArray<SubagentId>,
+    ): Effect.Effect<ReadonlyArray<StoredSubagent>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<SubagentRow>`
+              SELECT ${sql.literal(COLUMNS)} FROM session_subagents
+              WHERE session_id = ${uuidFromString(sessionId)} AND subagent_id IN ${sql.in(ids)}
+            `,
+            (rows) => rows.map(toStoredSubagent),
+          ),
+
+    /** Returns the subagents of a session whose status is `running`. */
+    listRunning: (sessionId: string): Effect.Effect<ReadonlyArray<StoredSubagent>, SqlError> =>
+      Effect.map(
+        sql<SubagentRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_subagents
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'running'
+        `,
+        (rows) => rows.map(toStoredSubagent),
       ),
 
     /**
      * Returns every subagent of a session, oldest first. Used where every
-     * record matters at once: a process starting or exiting, a stop that
-     * cascades down the tree, and a resume.
+     * record matters at once: a process starting, a stop that cascades down
+     * the tree, and a resume.
      */
     listAll: (sessionId: string): Effect.Effect<ReadonlyArray<StoredSubagent>, SqlError> =>
       Effect.map(
@@ -115,7 +145,7 @@ const make = Effect.gen(function* () {
           WHERE session_id = ${uuidFromString(sessionId)}
           ORDER BY started_at, subagent_id
         `,
-        (rows) => rows.map(toSubagent),
+        (rows) => rows.map(toStoredSubagent),
       ),
 
     /** Returns one page of a session's subagents, sorted by `startedAt`, ties broken by id. */
@@ -142,7 +172,7 @@ const make = Effect.gen(function* () {
         return yield* buildPage(
           rows,
           request.limit,
-          (found) => Effect.succeed(found.map(toSubagent)),
+          (found) => Effect.succeed(found.map(toStoredSubagent)),
           (last) => encodeOwnedCursor(scope, last.startedAt, last.sessionId, last.id),
         );
       }),
@@ -181,5 +211,3 @@ const make = Effect.gen(function* () {
 
 /** Builds the subagent repository over the ambient SQL client. */
 export const subagentRepository = make;
-
-export type SubagentRows = Effect.Success<typeof make>;

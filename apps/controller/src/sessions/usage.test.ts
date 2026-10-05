@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addUsageSnapshot } from "./usage";
+import { addUsageSnapshot, clearProcessShare } from "./usage";
 
 describe("addUsageSnapshot", () => {
   it("starts the total at the first snapshot", () => {
@@ -42,5 +42,48 @@ describe("addUsageSnapshot", () => {
     expect(
       addUsageSnapshot(stored, { inputTokens: 2, outputTokens: 2, cacheReadTokens: 7 }).usage,
     ).toEqual({ inputTokens: 3, outputTokens: 3, cacheReadTokens: 7 });
+  });
+
+  it("never lowers the total when a snapshot leaves out a count it reported before", () => {
+    const first = addUsageSnapshot(
+      { usage: undefined, usageProcess: undefined },
+      { inputTokens: 10, outputTokens: 2, cacheReadTokens: 40, costUsd: 0.5 },
+    );
+    const silent = addUsageSnapshot(first, { inputTokens: 12, outputTokens: 3 });
+    expect(silent.usage).toEqual({
+      inputTokens: 12,
+      outputTokens: 3,
+      cacheReadTokens: 40,
+      costUsd: 0.5,
+    });
+    // The share carried forward is what the next snapshot replaces.
+    expect(silent.usageProcess).toEqual({
+      inputTokens: 12,
+      outputTokens: 3,
+      cacheReadTokens: 40,
+      costUsd: 0.5,
+    });
+    const next = addUsageSnapshot(silent, {
+      inputTokens: 15,
+      outputTokens: 4,
+      cacheReadTokens: 60,
+      costUsd: 0.7,
+    });
+    expect(next.usage).toEqual({
+      inputTokens: 15,
+      outputTokens: 4,
+      cacheReadTokens: 60,
+      costUsd: 0.7,
+    });
+  });
+});
+
+describe("clearProcessShare", () => {
+  it("keeps the total and clears the process's share", () => {
+    const usage = { inputTokens: 5, outputTokens: 1 };
+    expect(clearProcessShare({ usage, usageProcess: usage })).toEqual({
+      usage,
+      usageProcess: undefined,
+    });
   });
 });
