@@ -1637,11 +1637,11 @@ const make = Effect.gen(function* () {
     /**
      * Handles a claimed input the runner did not take: the runner refused it,
      * or its frame never left the controller because the runner had no
-     * connection. Either way the runner cannot have run it, so an agent
-     * step's prompt is handled like any input. It goes back to waiting with
-     * `reason`, and is sent again on the next delivery, except when the
-     * session exited in the meantime and does not keep its input through
-     * that exit: then it is cancelled (see `requeueOrCancel`). Runs in its own
+     * connection. Either way the runner cannot have run it. It goes back to
+     * waiting with `reason`, and is sent again on the next delivery. It is
+     * cancelled instead when the session exited in the meantime and does not
+     * keep its input through that exit, or when it is an agent step's prompt
+     * whose run has ended (see `requeueOrCancel`). Runs in its own
      * transaction.
      */
     recordNotTaken: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
