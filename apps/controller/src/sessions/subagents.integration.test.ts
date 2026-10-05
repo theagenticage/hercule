@@ -790,7 +790,7 @@ describe("transcript.read of one agent", () => {
 });
 
 describe("Token Usage across a resume", () => {
-  it("adds the resumed process's usage to the session's and to a subagent's, and resumes the subagent", async () => {
+  it("adds the resumed process's usage to the session's and to a subagent's, and resumes the subagents with their parents", async () => {
     await withAgentFleet(async (arranged) => {
       const session = await startSession(arranged);
       const id = session.id;
@@ -806,8 +806,10 @@ describe("Token Usage across a resume", () => {
           _tag: "session.usage.updated",
           usage: { inputTokens: 100, outputTokens: 10 },
         },
+        { ...buildBase(id), _tag: "subagent.started", subagentId: "a2", parentSubagentId: "a1" },
       ]);
       await waitForSubagent(arranged, id, "a1", (one) => one.usage !== undefined);
+      await waitForSubagent(arranged, id, "a2", () => true);
       arranged.wire.send({
         _tag: "sessionsReport",
         sessions: [
@@ -819,7 +821,7 @@ describe("Token Usage across a resume", () => {
         ],
       });
       await waitForSession(arranged, id, (one) => one.nativeSessionId !== null);
-      reportEvent(arranged.wire, 5, {
+      reportEvent(arranged.wire, 6, {
         ...buildBase(id),
         _tag: "session.exited",
         reason: "stopped",
@@ -838,11 +840,15 @@ describe("Token Usage across a resume", () => {
       expect(starts[1]!.spec.continue).toEqual({
         nativeSessionId: "native-1",
         mode: "resume",
-        subagents: [{ subagentId: "a1", itemId: "call-1" }],
+        // The nested subagent names its parent; the top-level one names none.
+        subagents: [
+          { subagentId: "a1", itemId: "call-1" },
+          { subagentId: "a2", parentSubagentId: "a1" },
+        ],
       });
 
       // The new process counts from zero again.
-      reportEvents(arranged, 6, [
+      reportEvents(arranged, 7, [
         { ...buildBase(id), _tag: "session.started" },
         {
           ...buildBase(id),
