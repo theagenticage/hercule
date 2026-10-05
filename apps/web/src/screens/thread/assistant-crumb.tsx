@@ -24,7 +24,7 @@ export function AssistantCrumb({
   if (assistant === null) return <>Assistants</>;
   return (
     <>
-      Assistants /{" "}
+      Assistants <span aria-hidden="true">/</span>{" "}
       <Link
         to="/assistants/$assistantId"
         params={{ assistantId }}

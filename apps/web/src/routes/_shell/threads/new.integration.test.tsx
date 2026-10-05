@@ -1242,8 +1242,8 @@ describe("Draft: the header is the screen's first row", () => {
   it("shows Threads / New thread, with no … button and no shell h1", async () => {
     await openApp([INSTANCE_A]);
 
-    const crumb = await waitFor(() => screen.getByText("Threads /"));
-    expect(readPageText(crumb.parentElement)).toBe("Threads / New thread");
+    const slash = await waitFor(() => screen.getByText("/"));
+    expect(readPageText(slash.parentElement)).toBe("Threads / New thread");
 
     expect(screen.queryByRole("button", { name: "…" })).toBeNull();
     // The prompt "What should the agent do?" is an h2, and the shell's top bar
