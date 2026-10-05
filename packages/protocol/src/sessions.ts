@@ -442,10 +442,13 @@ const Tokens = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Money = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
- * A cumulative token snapshot for the session, not a per-turn delta: harnesses
- * report at different intervals, and a snapshot works for all of them. The
- * optional fields are the ones only some harnesses report (spec 06 section
- * 6.6).
+ * A token snapshot counting everything the agent used since this process
+ * started, not a per-turn delta: harnesses report at different intervals, and
+ * a snapshot works for all of them. The controller adds each process's count
+ * to the session's running total, so a resumed session is not counted twice.
+ * The four token counts never overlap: `inputTokens` is the input not read
+ * from cache. The optional fields are the ones only some harnesses report
+ * (spec 06 section 6.6).
  */
 export const Usage = Schema.Struct({
   inputTokens: Tokens,
@@ -527,7 +530,10 @@ const TurnCompleted = defineEvent("turn.completed", {
   turnId: Fact,
   state: TurnState,
   usage: Schema.optionalKey(Usage),
-  /** This turn's cost, where the harness prices a turn; `usage` is cumulative. */
+  /**
+   * This turn's cost, where the harness prices a turn. `usage` counts since
+   * this process started.
+   */
   costUsd: Schema.optionalKey(Money),
   error: Schema.optionalKey(Message),
   /**

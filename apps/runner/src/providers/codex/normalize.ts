@@ -10,6 +10,9 @@
  *   the adapter opened the turn with.
  * - One reasoning item arrives on two channels, raw and summary, and only one
  *   of them is streamed, so the text is not doubled.
+ * - Codex reports the thread's usage over its whole history, but a usage
+ *   snapshot counts only what this process spent, so the state holds the
+ *   thread's usage from before this process started.
  *
  * A notification this build does not handle produces no events: the
  * app-server adds methods between releases, and a live session must survive
@@ -68,6 +71,18 @@ export interface Normalizing {
    * the answer is that message, and only if the turn ended on it.
    */
   lastCompletedItem: ThreadItem | undefined;
+  /**
+   * Whether a turn has started in this process. On a resume or a fork, Codex
+   * reports the thread's restored usage before any turn starts. An earlier
+   * process already reported those tokens, so reports before the first turn
+   * are dropped.
+   */
+  turnStarted: boolean;
+  /**
+   * The thread's usage from before this process started, subtracted from
+   * every report. It is unknown until the first report after a turn starts.
+   */
+  usageBaseline: TokenCounts | undefined;
 }
 
 export const buildNormalizingState = (
@@ -81,6 +96,8 @@ export const buildNormalizingState = (
   reasoning: new Map(),
   outputSchema,
   lastCompletedItem: undefined,
+  turnStarted: false,
+  usageBaseline: undefined,
 });
 
 const buildSessionEnvelope = (state: Normalizing): Envelope =>
@@ -234,12 +251,50 @@ const buildReasoningDelta = (
   return buildContentDelta(state, params, "reasoning_text");
 };
 
-const toUsage = (usage: ThreadTokenUsageUpdatedNotification["tokenUsage"]): Usage => ({
-  inputTokens: clampCount(usage.total.inputTokens),
-  outputTokens: clampCount(usage.total.outputTokens),
-  cacheReadTokens: clampCount(usage.total.cachedInputTokens),
-  cacheWriteTokens: clampCount(usage.total.cacheWriteInputTokens),
+/** Codex's usage report for a thread: its whole total and its last model call. */
+type ThreadTokenUsage = ThreadTokenUsageUpdatedNotification["tokenUsage"];
+
+/** Codex's token counts for a thread, as it reports them. */
+type TokenCounts = Pick<
+  ThreadTokenUsage["total"],
+  "inputTokens" | "cachedInputTokens" | "cacheWriteInputTokens" | "outputTokens"
+>;
+
+/** Returns `total` minus `earlier`, count by count. */
+const subtractTokenCounts = (total: TokenCounts, earlier: TokenCounts): TokenCounts => ({
+  inputTokens: total.inputTokens - earlier.inputTokens,
+  cachedInputTokens: total.cachedInputTokens - earlier.cachedInputTokens,
+  cacheWriteInputTokens: total.cacheWriteInputTokens - earlier.cacheWriteInputTokens,
+  outputTokens: total.outputTokens - earlier.outputTokens,
 });
+
+/**
+ * Builds a usage snapshot from Codex's counts. Codex counts cached reads
+ * inside its input, while the four parts of a snapshot never overlap (spec 06
+ * section 6.6), so the cached reads are subtracted from the input.
+ */
+const buildUsage = (counts: TokenCounts): Usage => ({
+  inputTokens: clampCount(counts.inputTokens - counts.cachedInputTokens),
+  outputTokens: clampCount(counts.outputTokens),
+  cacheReadTokens: clampCount(counts.cachedInputTokens),
+  cacheWriteTokens: clampCount(counts.cacheWriteInputTokens),
+});
+
+/**
+ * Returns the tokens the thread used since this process started, or
+ * `undefined` for a report that comes before the first turn: that report is
+ * the restored history of a resumed or forked thread.
+ *
+ * The first report after a turn starts sets the baseline to `total - last`,
+ * the thread's usage before the model call it reports. That one rule covers a
+ * fresh thread (the baseline is zero), a resume, and a fork, which starts
+ * from its parent's total (spec 06 section 13.5).
+ */
+const computeUsageSinceStart = (state: Normalizing, usage: ThreadTokenUsage): Usage | undefined => {
+  if (!state.turnStarted) return undefined;
+  state.usageBaseline ??= subtractTokenCounts(usage.total, usage.last);
+  return buildUsage(subtractTokenCounts(usage.total, state.usageBaseline));
+};
 
 /**
  * Returns the error class from Codex's error info. The plain variants are a
@@ -392,6 +447,7 @@ export const normalize = (
       // completion never arrived or could not be read, its last item must not
       // be used as this turn's answer.
       state.lastCompletedItem = undefined;
+      state.turnStarted = true;
       return [
         {
           _tag: "turn.started",
@@ -460,14 +516,14 @@ export const normalize = (
     }
     case "thread/tokenUsage/updated": {
       const params = frame.params as ThreadTokenUsageUpdatedNotification;
+      const usage = computeUsageSinceStart(state, params.tokenUsage);
+      if (usage === undefined) return [];
       return [
         {
           _tag: "session.usage.updated",
           ...buildSessionEnvelope(state),
           ...buildNotificationRaw(params),
-          // The session's running total, not the last turn's usage: a snapshot
-          // taken from `last` would make the session look like it never grew.
-          usage: toUsage(params.tokenUsage),
+          usage,
         },
       ];
     }
