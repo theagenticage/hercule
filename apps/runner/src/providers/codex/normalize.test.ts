@@ -434,7 +434,7 @@ describe("what a session reports about its usage and its errors", () => {
     ]);
   });
 
-  it("counts a forked thread from its parent's total, with no restored report", () => {
+  it("counts a forked thread from its parent's total, even with no restored report before the turn", () => {
     const events = normalizeFromStart([
       TURN_STARTED,
       buildUsageNote(buildTokenBreakdown(40_000, 0, 4_000), buildTokenBreakdown(3_000, 0, 200)),
