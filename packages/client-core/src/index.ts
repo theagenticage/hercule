@@ -148,7 +148,12 @@ export { createLive, type Live } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
 export { isMutationRunning } from "./mutation-running";
-export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
+export {
+  queryKeys,
+  buildQueryKeys,
+  buildConversationSessionKeys,
+  type LiveQueryKey,
+} from "./live/keys";
 export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
   buildBoundActionRows,

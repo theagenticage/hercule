@@ -417,7 +417,11 @@ describe("createLive", () => {
     const started = createSupervisor(fetch);
 
     const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
-    started.subscribe("task", (keys) => invalidations.push(keys));
+    const namedIds: Array<ReadonlyArray<string>> = [];
+    started.subscribe("task", (keys, ids) => {
+      invalidations.push(keys);
+      namedIds.push(ids);
+    });
 
     started.start();
     await settleTimers();
@@ -436,6 +440,9 @@ describe("createLive", () => {
       sortKeys(invalidations[1] ?? []),
       sortKeys(buildQueryKeys("task", ["task-1"])),
     );
+    // The handler also receives the ids the push names, and none when it is
+    // told that everything may have changed.
+    assert.deepStrictEqual(namedIds, [[], ["task-1"]]);
   });
 
   it("invalidates everything for a subscriber that subscribed while the connection was down", async () => {

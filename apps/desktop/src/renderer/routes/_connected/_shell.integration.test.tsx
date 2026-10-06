@@ -76,6 +76,25 @@ const ADA_SESSION = buildFixtureAssistantSession(ADA, {
 const readsConversation = (call: Call): boolean =>
   call.path === "/api/v1/sessions" && new URLSearchParams(call.search).has("conversationId");
 
+/** Counts the reads of one conversation's current session among `calls`. */
+const countConversationReads = (calls: readonly Call[], conversationId: string): number =>
+  calls.filter(
+    (call) =>
+      readsConversation(call) &&
+      new URLSearchParams(call.search).get("conversationId") === conversationId,
+  ).length;
+
+/** Milo, an assistant whose current session is idle. */
+const MILO = buildFixtureAssistant({
+  id: "01a06d02-7700-7000-8000-000000000003",
+  name: "Milo",
+  mainConversationId: "01a06d02-7800-7000-8000-000000000003",
+});
+const MILO_SESSION = buildFixtureAssistantSession(MILO, {
+  id: "01a06d02-7400-7000-8000-000000000103",
+  status: "idle",
+});
+
 /** The sidebar fixture's handlers, with Ada and her waiting session added. */
 const WITH_ADA = buildSidebarHandlers({
   ...SIDEBAR_FIXTURE,
@@ -666,6 +685,84 @@ describe("the assistants", () => {
 
     await waitFor(() => {
       expect(countReads(calls, "/api/v1/assistants")).toBe(reads + 1);
+    });
+  });
+
+  describe("on a session push, read an assistant's current session again", () => {
+    /** Starts the shell with Ada and Milo, and returns how often each one's current session was read. */
+    const startWithAdaAndMilo = async () => {
+      const shell = await startShell({
+        handlers: buildSidebarHandlers({
+          ...SIDEBAR_FIXTURE,
+          assistants: [
+            { assistant: ADA, session: ADA_SESSION },
+            { assistant: MILO, session: MILO_SESSION },
+          ],
+        }),
+      });
+      const countReadsOf = () => ({
+        ada: countConversationReads(shell.calls, ADA.mainConversationId),
+        milo: countConversationReads(shell.calls, MILO.mainConversationId),
+      });
+      return { ...shell, countReadsOf };
+    };
+
+    /** Pushes a `session` change and waits until every read it starts has settled. */
+    const pushAndSettle = async (
+      { calls, live, context }: Awaited<ReturnType<typeof startWithAdaAndMilo>>,
+      ids?: readonly string[],
+    ) => {
+      const threadReads =
+        countReads(calls, "/api/v1/sessions") - calls.filter(readsConversation).length;
+      act(() => {
+        live.pushInvalidation("session", ids);
+      });
+      // The thread list is read again on every push, so its read marks the
+      // push as handled.
+      await waitFor(() => {
+        expect(countReads(calls, "/api/v1/sessions") - calls.filter(readsConversation).length).toBe(
+          threadReads + 1,
+        );
+        expect(context.queryClient.isFetching()).toBe(0);
+      });
+    };
+
+    it("for no assistant, when the push names only threads", async () => {
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [FIXTURE_THREAD_IDS.flaky, FIXTURE_THREAD_IDS.bunPin]);
+
+      expect(shell.countReadsOf()).toEqual(before);
+    });
+
+    it("for that assistant only, when the push names its current session", async () => {
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [ADA_SESSION.id, FIXTURE_THREAD_IDS.flaky]);
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo });
+    });
+
+    it("for every assistant, when the push names a session the app does not know", async () => {
+      // An unknown session may be a new one in an assistant's conversation,
+      // which then becomes that assistant's current session.
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, ["01a06d02-7400-7000-8000-000000000999"]);
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo + 1 });
+    });
+
+    it("for every assistant, when the push names no session", async () => {
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell);
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo + 1 });
     });
   });
 

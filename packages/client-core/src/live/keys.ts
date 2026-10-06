@@ -14,6 +14,7 @@ import type {
   NotificationFilter,
   RunFilter,
   Runner,
+  Session,
   TaskFilter,
 } from "@hercule/contract";
 import { listLoopbackEndpoints } from "../local-runner";
@@ -52,7 +53,6 @@ export const queryKeys = {
    * A filtered listing is keyed on its filter:
    *
    * - one runner's sessions, for its page;
-   * - one conversation's sessions, for its activity row;
    * - one run's sessions, the ones its agent steps started, for the run's page;
    * - `{ thread: true }`, every Thread and no Agent's session, for the
    *   desktop app's sidebar.
@@ -61,15 +61,25 @@ export const queryKeys = {
    * invalidates them all.
    */
   sessions: (
-    filter?:
-      | { readonly runnerId: string }
-      | { readonly conversationId: string }
-      | { readonly runId: string }
-      | { readonly thread: true },
+    filter?: { readonly runnerId: string } | { readonly runId: string } | { readonly thread: true },
   ): LiveQueryKey => (filter === undefined ? ["sessions"] : ["sessions", filter]),
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
+  /**
+   * A conversation's current session: the newest session that answers it,
+   * which an assistant's pose is drawn from. Without the id, the prefix of
+   * every conversation's.
+   *
+   * It is kept out of the `sessions` prefix on purpose. A `session` push
+   * reaches it only through `buildConversationSessionKeys`, which re-reads a
+   * conversation's current session only when the push could have changed it,
+   * rather than once per assistant on every push.
+   */
+  conversationSession: (conversationId?: string): LiveQueryKey =>
+    conversationId === undefined
+      ? ["conversation-session"]
+      : ["conversation-session", conversationId],
   /**
    * One agent's whole transcript, in ascending order: the session's own
    * agent's without `subagentId`, else that subagent's. A delta on the
@@ -186,6 +196,8 @@ export const buildQueryKeys = (
   // The queued-input list is included because it changes whenever the session
   // does (an input is delivered or queued). The transcript is not listed: it
   // is never invalidated, only appended to from the `:stream` topic's deltas.
+  // Nor is a conversation's current session: it needs the cache to decide,
+  // see `buildConversationSessionKeys`.
   if (topic === "session") {
     return ids.length === 0
       ? [queryKeys.sessions(), queryKeys.session(), queryKeys.inputs()]
@@ -260,4 +272,42 @@ export const buildQueryKeys = (
   // provider), so the whole list is refetched whichever instance changed.
   if (topic === "provider") return [queryKeys.providers()];
   return [];
+};
+
+/**
+ * Returns the `conversationSession` keys to invalidate for a push on the
+ * `session` topic that names `ids`. `knownSessions` are the sessions the
+ * app's cache holds, such as the thread list and each conversation's current
+ * session.
+ *
+ * A conversation's current session is its newest session, so a push can
+ * change it in only two ways: the current session itself changed, or a new
+ * session started in the conversation. For each id:
+ *
+ * - a known session in a conversation makes that conversation's key stale;
+ * - a known session in no conversation, such as a thread, makes nothing
+ *   stale;
+ * - an unknown session may be a new session in any conversation, because the
+ *   push does not say which, so every conversation's key is stale and the
+ *   prefix is returned.
+ *
+ * A push with no ids means every session may have changed, as after a
+ * reconnect, so it returns the prefix too.
+ */
+export const buildConversationSessionKeys = (
+  ids: ReadonlyArray<string>,
+  knownSessions: Iterable<Session>,
+): ReadonlyArray<LiveQueryKey> => {
+  if (ids.length === 0) return [queryKeys.conversationSession()];
+  const known = new Map<string, Session>();
+  for (const session of knownSessions) known.set(session.id, session);
+  const staleConversationIds = new Set<string>();
+  for (const id of ids) {
+    const session = known.get(id);
+    if (session === undefined) return [queryKeys.conversationSession()];
+    if (session.conversationId !== null) staleConversationIds.add(session.conversationId);
+  }
+  return [...staleConversationIds].map((conversationId) =>
+    queryKeys.conversationSession(conversationId),
+  );
 };
