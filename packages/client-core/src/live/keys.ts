@@ -10,6 +10,7 @@
  * would be a screen that silently stops updating.
  */
 import type {
+  Invalidate,
   MutableLiveTopic,
   NotificationFilter,
   RunFilter,
@@ -52,7 +53,6 @@ export const queryKeys = {
    * A filtered listing is keyed on its filter:
    *
    * - one runner's sessions, for its page;
-   * - one conversation's sessions, for its activity row;
    * - one run's sessions, the ones its agent steps started, for the run's page;
    * - `{ thread: true }`, every Thread and no Agent's session, for the
    *   desktop app's sidebar.
@@ -61,15 +61,25 @@ export const queryKeys = {
    * invalidates them all.
    */
   sessions: (
-    filter?:
-      | { readonly runnerId: string }
-      | { readonly conversationId: string }
-      | { readonly runId: string }
-      | { readonly thread: true },
+    filter?: { readonly runnerId: string } | { readonly runId: string } | { readonly thread: true },
   ): LiveQueryKey => (filter === undefined ? ["sessions"] : ["sessions", filter]),
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
+  /**
+   * A conversation's current session: the newest session that answers it,
+   * which an assistant's pose is drawn from. Without the id, the prefix of
+   * every conversation's.
+   *
+   * It is kept out of the `sessions` prefix on purpose. A `session` push
+   * reaches it only for the conversations the push names (see
+   * `buildConversationSessionKeys`), rather than once per assistant on every
+   * push.
+   */
+  conversationSession: (conversationId?: string): LiveQueryKey =>
+    conversationId === undefined
+      ? ["conversation-session"]
+      : ["conversation-session", conversationId],
   /**
    * One agent's whole transcript, in ascending order: the session's own
    * agent's without `subagentId`, else that subagent's. A delta on the
@@ -85,18 +95,6 @@ export const queryKeys = {
   /** Every page of one session's subagents, whatever the sort; without it, the prefix of all of them. */
   subagents: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["subagents"] : ["subagents", sessionId],
-  /**
-   * The subagent `subagentId` of one session, read to name it in the
-   * notification of the Request it asked. A subagent's description never
-   * changes, so this read needs no refetch when the `subagent` topic nudges:
-   * the key sits outside the `subagents` prefix on purpose, so a push never
-   * reaches it.
-   */
-  askingSubagent: (sessionId: string, subagentId: string): LiveQueryKey => [
-    "asking-subagent",
-    sessionId,
-    subagentId,
-  ],
   /** A session's input history, including queued inputs. The composer's queued list reads it. */
   inputs: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["inputs"] : ["inputs", sessionId],
@@ -172,11 +170,13 @@ export const queryKeys = {
  * Returns the query keys to invalidate for a push on a mutable topic. A push
  * with no ids means every record of the topic may have changed (a reconnect
  * assumes this), so it returns the list and record prefixes rather than one
- * key per record.
+ * key per record. `conversationIds` is the push's map from each session to its
+ * conversation, which only a `session` push carries.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
   ids: ReadonlyArray<string>,
+  conversationIds?: Invalidate["conversationIds"],
 ): ReadonlyArray<LiveQueryKey> => {
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
@@ -198,13 +198,21 @@ export const buildQueryKeys = (
   // The queued-input list is included because it changes whenever the session
   // does (an input is delivered or queued). The transcript is not listed: it
   // is never invalidated, only appended to from the `:stream` topic's deltas.
+  // A conversation's current session is refetched only for the conversations
+  // the push names, see `buildConversationSessionKeys`.
   if (topic === "session") {
     return ids.length === 0
-      ? [queryKeys.sessions(), queryKeys.session(), queryKeys.inputs()]
+      ? [
+          queryKeys.sessions(),
+          queryKeys.session(),
+          queryKeys.inputs(),
+          queryKeys.conversationSession(),
+        ]
       : [
           queryKeys.sessions(),
           ...ids.map((id) => queryKeys.session(id)),
           ...ids.map((id) => queryKeys.inputs(id)),
+          ...buildConversationSessionKeys(ids, conversationIds),
         ];
   }
   // Any connection change refetches the list. A connection's own page is
@@ -272,4 +280,32 @@ export const buildQueryKeys = (
   // provider), so the whole list is refetched whichever instance changed.
   if (topic === "provider") return [queryKeys.providers()];
   return [];
+};
+
+/**
+ * Returns the `conversationSession` keys a `session` push makes stale, from
+ * the conversation it names for each session in `ids`.
+ *
+ * A conversation's current session is its newest session, so a push changes
+ * it only when one of the conversation's sessions changed or a new one
+ * started there. Either way the push names that conversation, so:
+ *
+ * - each conversation the push names is stale, once;
+ * - a session in no conversation, such as a thread or a workflow run's
+ *   session, makes nothing stale;
+ * - a session the push names no conversation for, as from a controller that
+ *   predates `conversationIds`, may be in any conversation, so every
+ *   conversation is stale and the prefix is returned.
+ */
+const buildConversationSessionKeys = (
+  ids: ReadonlyArray<string>,
+  conversationIds: Invalidate["conversationIds"],
+): ReadonlyArray<LiveQueryKey> => {
+  const stale = new Set<string>();
+  for (const id of ids) {
+    const conversationId = conversationIds?.[id];
+    if (conversationId === undefined) return [queryKeys.conversationSession()];
+    if (conversationId !== null) stale.add(conversationId);
+  }
+  return [...stale].map((conversationId) => queryKeys.conversationSession(conversationId));
 };

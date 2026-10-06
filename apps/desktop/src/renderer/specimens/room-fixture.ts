@@ -34,7 +34,9 @@ const CLOSED: RoomContents = {
 const WING = { runnerName: "studio-mac", note: "this Mac", deskCount: 0, firstThread: null };
 
 const ACCOUNT: RoomContents = { ...CLOSED, lightsOn: true, wing: WING };
-const PROVIDERS: RoomContents = { ...ACCOUNT, yourDesk: true, assistant: { name: "Hercule" } };
+/** Hercule, with the id the first-run fixture gives it, so both specimens draw the same face. */
+const HERCULE = { id: "01a06d02-a000-7000-8000-000000000001", name: "Hercule" };
+const PROVIDERS: RoomContents = { ...ACCOUNT, yourDesk: true, assistant: HERCULE };
 /** The same wing once studio-mac's six desks are set out. */
 const FURNISHED_WING = { ...WING, note: "this Mac · 6 desks", deskCount: 6 };
 

@@ -291,7 +291,7 @@ describe("the default assistant", () => {
       const response = await post(harness.base, "/api/v1/assistants", { name: "Ada" }, token);
       expect(response.ok, await response.clone().text()).toBe(true);
       const ada = (await response.json()) as Assistant;
-      const identity = ["id", "name", "createdAt", "updatedAt"];
+      const identity = ["id", "name", "mainConversationId", "createdAt", "updatedAt"];
       const withoutIdentity = (assistant: Assistant) =>
         Object.fromEntries(Object.entries(assistant).filter(([key]) => !identity.includes(key)));
       expect(withoutIdentity(hercule)).toEqual(withoutIdentity(ada));
@@ -309,6 +309,7 @@ describe("the default assistant", () => {
         channel: "web",
         containerKey: null,
       });
+      expect(hercule.mainConversationId).toBe(items[0]!.id);
     });
   });
 

@@ -37,8 +37,9 @@ import {
   MoreRow,
   ProjectHeader,
   ThreadRow,
+  WaitingAssistantRow,
   WaitingHeader,
-  WaitingRow,
+  WaitingThreadRow,
   WorkspaceLabel,
 } from "./sidebar-rows";
 
@@ -89,9 +90,9 @@ const renderItem = (
           count={item.count}
         />
       );
-    case "waiting-row":
+    case "waiting-thread-row":
       return (
-        <WaitingRow
+        <WaitingThreadRow
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
@@ -99,6 +100,17 @@ const renderItem = (
           title={item.title}
           question={item.question}
           officeOpen={officeOpen}
+        />
+      );
+    case "waiting-assistant-row":
+      return (
+        <WaitingAssistantRow
+          key={item.key}
+          itemKey={item.key}
+          leading={item.leading}
+          assistantId={item.assistantId}
+          name={item.name}
+          question={item.question}
         />
       );
     case "project-header":

@@ -80,7 +80,17 @@ describe("buildRequestDock", () => {
     );
   });
 
-  it("names an asker whose record is not read yet as A subagent, with no known parent", () => {
+  it("names an asker whose record is not read yet by the name on its Request, with no known parent", () => {
+    const named = { ...FROM_CHILD, subagentName: "Read the docs" };
+    expect(buildRequestDock([named], [], undefined, undefined)?.asker).toEqual({
+      kind: "subagent",
+      subagentId: "a1",
+      name: "Read the docs",
+      parentName: null,
+    });
+  });
+
+  it("names an asker with no record read and no name on its Request as A subagent", () => {
     expect(buildRequestDock([FROM_CHILD], [], undefined, undefined)?.asker).toEqual({
       kind: "subagent",
       subagentId: "a1",

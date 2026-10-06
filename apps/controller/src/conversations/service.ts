@@ -12,6 +12,10 @@
  * along. It never reads the assistant, so it does not depend on the
  * assistants domain.
  *
+ * An assistant's main conversation is the one every Hercule app shows for it.
+ * Today that is its conversation on the web channel, which is created with
+ * the assistant and deleted only with it.
+ *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract.
  */
@@ -248,6 +252,16 @@ const make = Effect.gen(function* () {
      */
     listForAssistant: (assistantId: string): Effect.Effect<ReadonlyArray<Conversation>, SqlError> =>
       conversations.listForAssistant(assistantId),
+
+    /**
+     * Returns, by assistant id, the id of each assistant's main conversation,
+     * using one query. An assistant with none is not in the map. It is not an
+     * operation, so it checks no grant: its caller has checked its own.
+     */
+    readMainConversationIds: (
+      assistantIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      conversations.readMainConversationIds(assistantIds),
 
     /**
      * Deletes the conversation and its messages, and nudges the

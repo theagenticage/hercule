@@ -7,8 +7,11 @@ import {
 } from "./contract";
 
 /** Builds the Go menu's list of `length` threads. */
-const buildGoMenuThreads = (length: number) =>
-  Array.from({ length }, (_, index) => ({ sessionId: `s-${String(index)}`, title: "A thread" }));
+const buildGoMenuItems = (length: number) =>
+  Array.from({ length }, (_, index) => ({
+    destination: { kind: "thread", sessionId: `s-${String(index)}` },
+    title: "A thread",
+  }));
 
 describe("the requests of the renderer-to-main channels", () => {
   const cases: ReadonlyArray<{
@@ -28,22 +31,63 @@ describe("the requests of the renderer-to-main channels", () => {
     { name: "runnerIdentity.read", valid: { port: 4948 }, invalid: { port: 4949 } },
     { name: "runnerIdentity.read", valid: { port: 4940 }, invalid: { port: 22 } },
     // The Go menu has a shortcut for each of the first nine threads only.
-    { name: "goMenu.set", valid: buildGoMenuThreads(9), invalid: buildGoMenuThreads(10) },
+    { name: "goMenu.set", valid: buildGoMenuItems(9), invalid: buildGoMenuItems(10) },
     {
-      name: "waitingThreads.set",
+      name: "goMenu.set",
+      valid: [{ destination: { kind: "assistant", assistantId: "a-1" }, title: "Ada" }],
+      invalid: [{ destination: { kind: "assistant", sessionId: "s-1" }, title: "Ada" }],
+    },
+    {
+      name: "waiting.set",
       valid: [
-        { sessionId: "s-1", title: "A thread", body: "Run git push?", openRequestIds: ["r-1"] },
+        {
+          destination: { kind: "thread", sessionId: "s-1" },
+          requestId: "r-1",
+          openRequestIds: ["r-1"],
+          title: "A thread",
+          body: "Run git push?",
+        },
+        {
+          destination: { kind: "assistant", assistantId: "a-1" },
+          requestId: "r-3",
+          openRequestIds: ["r-2", "r-3"],
+          title: "Ada",
+          body: "Book the train?\n+1 more waiting",
+        },
       ],
       invalid: [
-        { sessionId: "s-1", title: "A thread", body: "Run git push?", openRequestIds: "r-1" },
+        {
+          destination: { kind: "thread", sessionId: "s-1" },
+          openRequestIds: ["r-1"],
+          title: "A thread",
+          body: "Run git push?",
+        },
       ],
     },
-    // A thread waits only while a Request is open, so its list of open
-    // Requests is never empty. A body still being worked out is null.
     {
-      name: "waitingThreads.set",
-      valid: [{ sessionId: "s-1", title: "A thread", body: null, openRequestIds: ["r-1"] }],
-      invalid: [{ sessionId: "s-1", title: "A thread", body: null, openRequestIds: [] }],
+      name: "waiting.set",
+      valid: [],
+      invalid: [
+        {
+          destination: { kind: "thread", sessionId: "s-1" },
+          requestId: "r-1",
+          title: "A thread",
+          body: "Run git push?",
+        },
+      ],
+    },
+    {
+      name: "waiting.set",
+      valid: [],
+      invalid: [
+        {
+          destination: { kind: "office" },
+          requestId: "r-1",
+          openRequestIds: ["r-1"],
+          title: "The office",
+          body: "Run git push?",
+        },
+      ],
     },
     { name: "localController.find", valid: undefined, invalid: "now" },
     { name: "localController.start", valid: undefined, invalid: "now" },

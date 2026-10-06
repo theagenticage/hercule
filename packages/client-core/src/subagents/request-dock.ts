@@ -48,14 +48,19 @@ export interface RequestDockState {
   readonly showsAskerLine: boolean;
 }
 
-/** Returns the asker of a subagent's Request, read from `subagents`. */
+/**
+ * Returns the asker of a subagent's Request, read from `subagents`. Until
+ * the subagent's record has been read, its name is `subagentName`, the one
+ * the controller put on the Request, else "A subagent".
+ */
 const buildSubagentAsker = (
   subagentId: SubagentId,
+  subagentName: string | undefined,
   subagents: readonly Subagent[],
 ): RequestAsker => {
   const subagent = subagents.find((each) => each.id === subagentId);
   if (subagent === undefined) {
-    return { kind: "subagent", subagentId, name: "A subagent", parentName: null };
+    return { kind: "subagent", subagentId, name: subagentName ?? "A subagent", parentName: null };
   }
   return {
     kind: "subagent",
@@ -95,7 +100,7 @@ export const buildRequestDock = (
       ? null
       : request.subagentId === undefined
         ? { kind: "main agent" }
-        : buildSubagentAsker(request.subagentId, subagents);
+        : buildSubagentAsker(request.subagentId, request.subagentName, subagents);
   return {
     request,
     position: requests.length > 1 ? { at: index + 1, of: requests.length } : null,

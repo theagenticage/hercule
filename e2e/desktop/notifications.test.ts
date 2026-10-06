@@ -12,36 +12,25 @@
  * - clicking a notification shows the window and opens its thread;
  * - signing out hides the badge, removes the notifications and empties Go.
  *
- * The harness records main's thread notifications instead of showing them
+ * The harness records main's notifications instead of showing them
  * (see `launchForTest`), so a test hides the window to have main make one,
- * and clicks it through `clickThreadNotification`.
+ * and clicks it through `clickWaitingNotification`.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
-import type { ElectronApplication } from "playwright";
 import { describe, expect, it } from "vitest";
 import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
   chooseMenuItem,
-  clickThreadNotification,
+  clickWaitingNotification,
+  hideWindow,
   openSignedIn,
+  readBadgeCount,
   readMenuItems,
   readOpenThreadTitle,
-  readThreadNotifications,
+  readWaitingNotifications,
 } from "./harness";
-
-/** Returns the count on the dock badge; 0 when the badge is hidden. */
-function readBadgeCount(app: ElectronApplication): Promise<number> {
-  return app.evaluate(({ app: electronApp }) => electronApp.getBadgeCount());
-}
-
-/** Hides the app's window, as ⌘W does. The window is then no longer focused. */
-async function hideWindow(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.hide();
-  });
-}
 
 /**
  * Starts a controller with one busy thread, "Thread 1", on a scripted runner,
@@ -66,7 +55,7 @@ describe("the dock badge and the threads' notifications", () => {
 
     await expect.poll(() => readBadgeCount(app)).toBe(1);
     await expect
-      .poll(() => readThreadNotifications(app))
+      .poll(() => readWaitingNotifications(app))
       .toEqual([{ title: "Thread 1", body: "Run pnpm test?", state: "shown" }]);
 
     await client.session.respondToApprovalRequest({
@@ -76,14 +65,14 @@ describe("the dock badge and the threads' notifications", () => {
 
     await expect.poll(() => readBadgeCount(app)).toBe(0);
     await expect
-      .poll(() => readThreadNotifications(app))
+      .poll(() => readWaitingNotifications(app))
       .toEqual([{ title: "Thread 1", body: "Run pnpm test?", state: "closed" }]);
   });
 
   it("replaces a thread's notification with the newest Request, named after the subagent that asked it, and shows nothing again once it is answered", async () => {
     const { app, client, runner, thread } = await arrangeHiddenApp();
     runner.openRequest(thread.id, "command_approval");
-    await expect.poll(() => readThreadNotifications(app)).toHaveLength(1);
+    await expect.poll(() => readWaitingNotifications(app)).toHaveLength(1);
 
     const played = runner.playScript(thread.id, [
       {
@@ -97,12 +86,12 @@ describe("the dock badge and the threads' notifications", () => {
     ]);
 
     await expect
-      .poll(() => readThreadNotifications(app))
+      .poll(() => readWaitingNotifications(app))
       .toEqual([
         { title: "Thread 1", body: "Run pnpm test?", state: "closed" },
         {
           title: "Thread 1",
-          body: "Check the lint rules asks: Run pnpm lint? +1 more waiting",
+          body: "Check the lint rules asks: Run pnpm lint?\n+1 more waiting",
           state: "shown",
         },
       ]);
@@ -120,7 +109,7 @@ describe("the dock badge and the threads' notifications", () => {
     // The older Request still waits, so the badge stays, but the user has
     // already been told about it.
     await expect
-      .poll(async () => (await readThreadNotifications(app)).map(({ state }) => state))
+      .poll(async () => (await readWaitingNotifications(app)).map(({ state }) => state))
       .toEqual(["closed", "closed"]);
     expect(await readBadgeCount(app)).toBe(1);
   });
@@ -128,9 +117,9 @@ describe("the dock badge and the threads' notifications", () => {
   it("shows the window and opens the thread when its notification is clicked", async () => {
     const { app, page, runner, thread } = await arrangeHiddenApp();
     runner.openRequest(thread.id, "command_approval");
-    await expect.poll(() => readThreadNotifications(app)).toHaveLength(1);
+    await expect.poll(() => readWaitingNotifications(app)).toHaveLength(1);
 
-    await clickThreadNotification(app, 0);
+    await clickWaitingNotification(app, 0);
 
     await page.locator('section[aria-label="Transcript"]').waitFor();
     expect(await isWindowVisible(app)).toBe(true);
@@ -140,7 +129,7 @@ describe("the dock badge and the threads' notifications", () => {
   it("hides the badge, removes the notifications and empties Go when the user signs out", async () => {
     const { app, page, runner, thread } = await arrangeHiddenApp();
     runner.openRequest(thread.id, "command_approval");
-    await expect.poll(() => readThreadNotifications(app)).toHaveLength(1);
+    await expect.poll(() => readWaitingNotifications(app)).toHaveLength(1);
     expect(await readBadgeCount(app)).toBe(1);
     await expect
       .poll(async () => (await readMenuItems(app, "Go")).map((item) => item.label))
@@ -150,7 +139,7 @@ describe("the dock badge and the threads' notifications", () => {
 
     await page.getByRole("button", { name: "Sign in" }).waitFor();
     await expect.poll(() => readBadgeCount(app)).toBe(0);
-    expect(await readThreadNotifications(app)).toEqual([
+    expect(await readWaitingNotifications(app)).toEqual([
       { title: "Thread 1", body: "Run pnpm test?", state: "closed" },
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([

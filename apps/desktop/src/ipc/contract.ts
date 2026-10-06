@@ -226,26 +226,45 @@ export const MenuCommand = Schema.Literals([
 ]);
 export type MenuCommand = typeof MenuCommand.Type;
 
-/** A thread the Go menu lists: the session it opens, and the title its item shows. */
-export const GoMenuThread = Schema.Struct({ sessionId: Schema.String, title: Schema.String });
-export type GoMenuThread = typeof GoMenuThread.Type;
+/**
+ * Where the page goes when the user chooses something outside the window,
+ * such as a notification or a Go menu item:
+ *
+ * - `thread`: the thread of the session `sessionId`;
+ * - `assistant`: the screen of the assistant `assistantId`.
+ *
+ * Main passes a destination back to the page as it was sent, and never acts
+ * on its kind: only the page knows how to open each one.
+ */
+export const Destination = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("thread"), sessionId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("assistant"), assistantId: Schema.String }),
+]);
+export type Destination = typeof Destination.Type;
+
+/** An item the Go menu lists: where it goes, and the title it shows. */
+export const GoMenuItem = Schema.Struct({ destination: Destination, title: Schema.String });
+export type GoMenuItem = typeof GoMenuItem.Type;
 
 /**
- * A thread waiting on the user, as client-core's `listWaitingThreads` returns
- * it. The schema's fields must match client-core's type one for one, so a
- * field added to one and not the other fails the typecheck.
+ * A thread or an assistant waiting on the user, as its notification needs
+ * it. The renderer sends one for each destination that waits, so a
+ * destination is in the list once.
+ *
+ * - `destination`: where the notification goes when it is clicked.
+ * - `requestId`: the newest open Request, the one the notification shows.
+ * - `openRequestIds`: every open Request of the destination, `requestId`
+ *   included, so main can tell a Request that opened from one that closed.
+ * - `title` and `body`: the notification's text, ready to show.
  */
-export const WaitingThread = Schema.Struct({
-  sessionId: Schema.String,
+export const WaitingRequest = Schema.Struct({
+  destination: Destination,
+  requestId: Schema.String,
+  openRequestIds: Schema.Array(Schema.String),
   title: Schema.String,
-  body: Schema.NullOr(Schema.String),
-  // A thread waits on the user only while a Request is open, so the list is
-  // never empty, and main can always find the newest Request in it.
-  openRequestIds: Schema.NonEmptyArray(Schema.String),
-} satisfies {
-  readonly [Field in keyof ClientCore.WaitingThread]: Schema.Codec<ClientCore.WaitingThread[Field]>;
+  body: Schema.String,
 });
-export type WaitingThread = ClientCore.WaitingThread;
+export type WaitingRequest = typeof WaitingRequest.Type;
 
 /**
  * The IPC channels from the renderer to main, keyed by name. A name is
@@ -317,25 +336,25 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     response: Schema.Void,
   },
   /**
-   * Sends the first nine threads the sidebar shows, top to bottom, each once,
-   * for the Go menu: one per shortcut, ⌘1 to ⌘9. Choosing one shows the
-   * window and opens it through `thread.open`. Main cannot read the sidebar,
-   * so the renderer sends the list each time it changes.
+   * Sends the first nine items the Go menu lists, top to bottom, each once:
+   * one per shortcut, ⌘1 to ⌘9. Choosing one shows the window and opens its
+   * destination through `destination.open`. Main cannot read the sidebar, so
+   * the renderer sends the list each time it changes.
    */
   "goMenu.set": {
-    request: Schema.Array(GoMenuThread).check(Schema.isMaxLength(9)),
+    request: Schema.Array(GoMenuItem).check(Schema.isMaxLength(9)),
     response: Schema.Void,
   },
   /**
-   * Sends every thread waiting on the user, whenever the thread list
-   * changes. Main counts them on the dock badge and shows a native
-   * notification for each Request that opens (see `ThreadNotifications`).
-   * Main cannot read the thread list, so the renderer sends it; main keeps
-   * what it has shown, so a list sent twice, as after a reload, shows
-   * nothing twice.
+   * Sends every Request waiting on the user, whenever one opens or is
+   * answered. Main counts them on the dock badge and shows a native
+   * notification for each Request that opens (see `WaitingNotifications`).
+   * Main cannot read the threads or the assistants, so the renderer sends
+   * the list; main keeps what it has shown, so a list sent twice, as after a
+   * reload, shows nothing twice.
    */
-  "waitingThreads.set": {
-    request: Schema.Array(WaitingThread),
+  "waiting.set": {
+    request: Schema.Array(WaitingRequest),
     response: Schema.Void,
   },
   /**
@@ -454,9 +473,12 @@ export const MAIN_TO_RENDERER_IPC_CHANNELS = {
   "menu.command": {
     payload: MenuCommand,
   },
-  /** Asks the renderer to open a thread: its notification or its Go menu item was chosen. */
-  "thread.open": {
-    payload: Schema.Struct({ sessionId: Schema.String }),
+  /**
+   * Asks the renderer to open a destination, a thread or an assistant: its
+   * notification or its Go menu item was chosen.
+   */
+  "destination.open": {
+    payload: Destination,
   },
 } as const satisfies Record<`${string}.${string}`, MainToRendererIpcChannel>;
 

@@ -23,7 +23,7 @@ import {
   MAX_PAGE_LIMIT,
   type Input,
   type Runner,
-  type Subagent,
+  type Session,
   type Task,
 } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
@@ -323,11 +323,52 @@ export const connectionsQuery = (client: HerculeClient) =>
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** Reads every assistant, for the one the first run's room seats in the lobby. */
+/**
+ * Reads every assistant: for the sidebar, the assistant screen, and the one
+ * the first run's room seats in the lobby.
+ */
 export const assistantsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.assistants(),
     queryFn: () => readEveryPage((page) => client.assistant.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Checks whether a failed read of a thread's records, or of an assistant's
+ * current session, is worth trying again. Returns `true` for the first three
+ * failures that got no answer from the controller, such as a dropped
+ * connection, and `false` for an `ApiError`.
+ *
+ * An `ApiError` is the controller's answer, and asking again gets the same
+ * answer: a thread that does not exist keeps not existing, and a read that is
+ * forbidden stays forbidden. The not-found screen and the render failure then
+ * show at once, rather than after several seconds of retries.
+ */
+const isWorthRetrying = (failureCount: number, error: Error): boolean =>
+  !(error instanceof ApiError) && failureCount < 3;
+
+/**
+ * Reads a conversation's current session: the newest session that answers
+ * it, or null when none has started yet. An assistant's pose is drawn from
+ * the current session of its main conversation. The server picks the newest,
+ * because a list filtered here could be cut off at its page size and then
+ * return an older session.
+ *
+ * A push on the `session` topic reads it again only when the push names a
+ * session of this conversation, since only such a session can be or replace
+ * its current one. The web app keys the same read the same way.
+ */
+export const currentConversationSessionQuery = (client: HerculeClient, conversationId: string) =>
+  queryOptions({
+    queryKey: queryKeys.conversationSession(conversationId),
+    queryFn: async (): Promise<Session | null> => {
+      const page = await client.session.query({
+        query: { conversationId, sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
+      });
+      return page.items[0] ?? null;
+    },
+    retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
@@ -338,19 +379,6 @@ export const userQuery = (client: HerculeClient) =>
     queryFn: () => client.user.read(),
     ...LIVE_KEPT_READ_OPTIONS,
   });
-
-/**
- * Checks whether a failed read of one thread's records is worth trying again.
- * Returns `true` for the first three failures that got no answer from the
- * controller, such as a dropped connection, and `false` for an `ApiError`.
- *
- * An `ApiError` is the controller's answer, and asking again gets the same
- * answer: a thread that does not exist keeps not existing, and a read that is
- * forbidden stays forbidden. The not-found screen and the render failure then
- * show at once, rather than after several seconds of retries.
- */
-const isWorthRetrying = (failureCount: number, error: Error): boolean =>
-  !(error instanceof ApiError) && failureCount < 3;
 
 /**
  * Reads one thread's session, for the thread screen. A push on the `session`
@@ -392,15 +420,6 @@ export const transcriptQuery = (client: HerculeClient, sessionId: string, subage
   });
 
 /**
- * Reads every subagent of the session `sessionId`, oldest first, following
- * the cursor to the last page.
- */
-const readSubagents = (client: HerculeClient, sessionId: string): Promise<readonly Subagent[]> =>
-  readEveryPage((page) =>
-    client.session.querySubagents({ params: { id: sessionId }, query: page }),
-  );
-
-/**
  * Reads every subagent of one session, oldest first. Every page is read,
  * because the Subagents surface draws the whole tree and a list cut short
  * would hide subagents without telling the user. While a thread is open, the
@@ -410,39 +429,12 @@ const readSubagents = (client: HerculeClient, sessionId: string): Promise<readon
 export const subagentsQuery = (client: HerculeClient, sessionId: string) =>
   queryOptions({
     queryKey: queryKeys.subagents(sessionId),
-    queryFn: () => readSubagents(client, sessionId),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.session.querySubagents({ params: { id: sessionId }, query: page }),
+      ),
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
-  });
-
-/**
- * Reads the subagent `subagentId` of the session `sessionId`, for the shell
- * to name it in the thread's notification when it asks the user something.
- * The result is `undefined` when the session has no such subagent.
- *
- * There is no read of one subagent, so this reads the session's whole list
- * and picks the subagent from it. A list of the session already cached that
- * holds the subagent is used at once, with no read. The key holds the asking
- * subagent, so a subagent that was not in a cached list is read after it
- * asked, and is then in the list. A subagent's name never changes, so one
- * read per asker is enough and the result never goes stale.
- */
-export const askingSubagentQuery = (
-  client: HerculeClient,
-  queryClient: QueryClient,
-  sessionId: string,
-  subagentId: string,
-) =>
-  queryOptions({
-    queryKey: queryKeys.askingSubagent(sessionId, subagentId),
-    queryFn: () => readSubagents(client, sessionId),
-    initialData: () => {
-      const cached = queryClient.getQueryData(subagentsQuery(client, sessionId).queryKey);
-      return cached?.some((subagent) => subagent.id === subagentId) === true ? cached : undefined;
-    },
-    select: (subagents) => subagents.find((subagent) => subagent.id === subagentId),
-    retry: isWorthRetrying,
-    staleTime: Infinity,
   });
 
 /**
@@ -472,8 +464,13 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
 
 /**
  * Reads everything the shell shows into `queryClient`: the sidebar's records,
+ * the assistants and the current session of each one's main conversation,
  * the Connections and the signed-in user. Resolves once every read is cached,
  * and fails with the first read that fails.
+ *
+ * The current sessions can only be read once the assistants are, because
+ * each read names an assistant's main conversation. They start as soon as
+ * the assistants arrive, without waiting for the other reads.
  *
  * The New project form and the starter threads read the Connections, to know
  * whether a GitHub Connection exists, so neither waits for them when it opens.
@@ -494,6 +491,17 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(providersQuery(client)),
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
+    queryClient
+      .ensureQueryData(assistantsQuery(client))
+      .then((assistants) =>
+        Promise.all(
+          assistants.map(({ mainConversationId }) =>
+            queryClient.ensureQueryData(
+              currentConversationSessionQuery(client, mainConversationId),
+            ),
+          ),
+        ),
+      ),
   ]);
 };
 

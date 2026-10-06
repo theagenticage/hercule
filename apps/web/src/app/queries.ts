@@ -580,12 +580,12 @@ export const conversationMessagesQuery = (client: HerculeClient, conversationId:
  * a list filtered in the browser could be cut off at its page size and then
  * return an older session.
  *
- * The key sits under the `sessions` prefix, so every `session` push refetches
- * it, as it does the runner page's list.
+ * A `session` push refetches it only when the push names a session of this
+ * conversation, since only such a session can be or replace its current one.
  */
 export const currentConversationSessionQuery = (client: HerculeClient, conversationId: string) =>
   queryOptions({
-    queryKey: queryKeys.sessions({ conversationId }),
+    queryKey: queryKeys.conversationSession(conversationId),
     queryFn: async () =>
       (
         await client.session.query({

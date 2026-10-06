@@ -1,0 +1,65 @@
+/* The assistant's page (assistant-screen.tsx). The header and the view under
+   it are the thread screen's `.top`, `.pill` and `.transcript`
+   (thread-header.css, thread.css); these rules are what the Bureau book's
+   desktop/assistant.html adds to them. */
+
+/* The header's one pill: the assistant's face, name and pose word. */
+.pill--who {
+  gap: 8px;
+  padding: 0 6px;
+}
+/* Not in the book, whose names are short. A name may be up to 128
+   characters, so the pill shrinks to the header's width and the name
+   ellipsizes; the face and the pose word keep their size. */
+.top > .pill--who {
+  min-width: 0;
+}
+.pill--who > * {
+  flex: none;
+}
+.pill--who b {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+}
+.pill--who .presence {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* The assistant waits on the user, as the sidebar marks it too. */
+.pill--who .presence.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* A Conversation with no messages yet: the assistant's face and name,
+   centred, and how to start. */
+.hello-who {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: calc(100% - 140px);
+  padding: 0 48px;
+  text-align: center;
+}
+.hello-who h2 {
+  /* Not in the book, whose names are short. A long name wraps in a column
+     not much wider than the line under it, and a name with no space in it
+     wraps rather than overflowing the pane. */
+  max-width: 480px;
+  margin: 10px 0 0;
+  overflow-wrap: anywhere;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.hello-who p {
+  max-width: 340px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}

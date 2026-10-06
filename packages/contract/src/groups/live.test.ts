@@ -15,6 +15,7 @@ import {
   buildSubagentStreamTopic,
   buildSubagentTapTopic,
   isAppendOnlyLiveTopic,
+  LiveMessage,
   LiveTopic,
   parseSessionTopic,
 } from "./live";
@@ -76,5 +77,35 @@ describe("a session topic", () => {
   it("leaves subagent as a mutable topic, refetched through the session", () => {
     expect(isAccepted("subagent")).toBe(true);
     expect(isAppendOnlyLiveTopic("subagent")).toBe(false);
+  });
+});
+
+describe("an invalidation", () => {
+  const decode = (message: unknown) => Schema.decodeUnknownExit(LiveMessage)(message);
+
+  it("carries the conversation of each session it names, null for a session in none", () => {
+    const message = {
+      _tag: "invalidate",
+      ids: ["s1", "s2"],
+      kind: "updated",
+      conversationIds: { s1: "c1", s2: null },
+    };
+    const decoded = decode(message);
+    expect(decoded._tag).toBe("Success");
+    if (decoded._tag === "Success") expect(decoded.value).toEqual(message);
+  });
+
+  it("decodes without conversations, as every topic but session sends it", () => {
+    expect(decode({ _tag: "invalidate", ids: ["t1"], kind: "created" })._tag).toBe("Success");
+  });
+
+  it("refuses a conversation id that is neither a string nor null", () => {
+    const message = {
+      _tag: "invalidate",
+      ids: ["s1"],
+      kind: "updated",
+      conversationIds: { s1: 7 },
+    };
+    expect(decode(message)._tag).toBe("Failure");
   });
 });

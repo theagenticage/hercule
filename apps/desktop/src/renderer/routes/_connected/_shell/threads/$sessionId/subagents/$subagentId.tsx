@@ -3,7 +3,7 @@ import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import type { Subagent } from "@hercule/contract";
 import { subagentsQuery, transcriptQuery } from "../../../../../../app/queries";
 import { SubagentPage } from "../../../../../../screens/subagents/subagent-page";
-import "../../../../../../screens/thread/not-found.css";
+import { NotFound } from "../../../../../../screens/not-found";
 
 /**
  * One subagent's page, in the main pane in place of the thread's own page:
@@ -58,21 +58,15 @@ function SubagentPageRoute(): JSX.Element {
 
 /**
  * Renders what the subagent's route shows when the thread has no subagent
- * with the id in the link, laid out as `ThreadNotFound`, with a link back to
- * the thread.
+ * with the id in the link, with a link back to the thread.
  */
 function SubagentNotFound(): JSX.Element {
   const { sessionId } = Route.useParams();
   return (
-    <div className="thread-not-found">
-      <h1 className="thread-not-found-headline">This thread has no subagent with this id.</h1>
-      <Link
-        to="/threads/$sessionId"
-        params={{ sessionId }}
-        className="btn btn--accent thread-not-found-link"
-      >
+    <NotFound headline="This thread has no subagent with this id.">
+      <Link to="/threads/$sessionId" params={{ sessionId }} className="btn btn--accent">
         Go to the thread
       </Link>
-    </div>
+    </NotFound>
   );
 }

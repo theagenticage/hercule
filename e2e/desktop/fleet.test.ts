@@ -324,9 +324,11 @@ describe("the scripted fleet", () => {
     const settled = pushes.length;
 
     runner.openRequest(thread!.id, "command_approval");
+    // A thread is in no conversation, so the push names none and no
+    // assistant's current session is read again.
     await expect
       .poll(() => pushes.slice(settled))
-      .toContainEqual(buildQueryKeys("session", [thread!.id]));
+      .toContainEqual(buildQueryKeys("session", [thread!.id], { [thread!.id]: null }));
   });
 
   it("spawns 500 threads over two runners and lists them in one page", async () => {

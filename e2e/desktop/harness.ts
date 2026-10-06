@@ -114,8 +114,8 @@ export interface LaunchedApp {
  * before the wait for its page to load. A test that must act before the
  * window shows does it there; the window can still show while it runs.
  *
- * The app shows no thread notification: main's are only recorded, for
- * `readThreadNotifications`, so that a test run puts no banner on the
+ * The app shows no notification of a thread or an assistant waiting on the
+ * user: main's are only recorded, for `readWaitingNotifications`, so that a test run puts no banner on the
  * developer's screen. The first run on a Mac that signs in still has macOS
  * ask, once, whether the app may notify.
  *
@@ -146,7 +146,7 @@ export async function launchForTest(
   app.process().stdout?.on("data", appendMainOutput);
   app.process().stderr?.on("data", appendMainOutput);
 
-  await recordThreadNotifications(app);
+  await recordWaitingNotifications(app);
 
   const page = await app.firstWindow();
   await prepareFirstWindow?.(app, page);
@@ -353,8 +353,11 @@ export async function recordExternalOpens(
     app.evaluate(() => (globalThis as { openedExternally?: string[] }).openedExternally ?? []);
 }
 
-/** A thread notification main made, as `readThreadNotifications` returns it. */
-export interface RecordedThreadNotification {
+/**
+ * A notification main made about a thread or an assistant waiting on the
+ * user, as `readWaitingNotifications` returns it.
+ */
+export interface RecordedWaitingNotification {
   readonly title: string;
   readonly body: string;
   /** "shown" once main has shown it, and "closed" once main has removed it. */
@@ -365,14 +368,14 @@ export interface RecordedThreadNotification {
  * Replaces `show` and `close` on Electron's notifications with functions that
  * only record what main did, and keeps each notification main shows on
  * main's `globalThis`, as a function handed to `app.evaluate` cannot close
- * over anything in this file. Main makes its thread notifications from
+ * over anything in this file. Main makes these notifications from
  * Electron's own class, whose methods live on its prototype, so the
  * replacements apply to every notification main makes from now on.
  */
-async function recordThreadNotifications(app: ElectronApplication): Promise<void> {
+async function recordWaitingNotifications(app: ElectronApplication): Promise<void> {
   await app.evaluate(({ Notification }) => {
     const shown: Array<Electron.Notification & { closedForTest?: true }> = [];
-    (globalThis as { shownThreadNotifications?: typeof shown }).shownThreadNotifications = shown;
+    (globalThis as { shownWaitingNotifications?: typeof shown }).shownWaitingNotifications = shown;
     Notification.prototype.show = function (this: (typeof shown)[number]) {
       shown.push(this);
     };
@@ -382,17 +385,20 @@ async function recordThreadNotifications(app: ElectronApplication): Promise<void
   });
 }
 
-/** Returns every thread notification main has shown since the app started, oldest first. */
-export function readThreadNotifications(
+/**
+ * Returns every notification main has shown since the app started about a
+ * thread or an assistant waiting on the user, oldest first.
+ */
+export function readWaitingNotifications(
   app: ElectronApplication,
-): Promise<RecordedThreadNotification[]> {
+): Promise<RecordedWaitingNotification[]> {
   return app.evaluate(() =>
     (
       (
         globalThis as {
-          shownThreadNotifications?: Array<Electron.Notification & { closedForTest?: true }>;
+          shownWaitingNotifications?: Array<Electron.Notification & { closedForTest?: true }>;
         }
-      ).shownThreadNotifications ?? []
+      ).shownWaitingNotifications ?? []
     ).map(({ title, body, closedForTest }) => ({
       title,
       body,
@@ -402,20 +408,32 @@ export function readThreadNotifications(
 }
 
 /**
- * Clicks the thread notification main showed at `index`, counting from the
+ * Clicks the notification main showed at `index`, counting from the
  * oldest, as the user does. Fails when main has shown no notification at
  * `index`.
  */
-export async function clickThreadNotification(
+export async function clickWaitingNotification(
   app: ElectronApplication,
   index: number,
 ): Promise<void> {
   const clicked = await app.evaluate((_electron, at) => {
-    const shown = (globalThis as { shownThreadNotifications?: Electron.Notification[] })
-      .shownThreadNotifications;
+    const shown = (globalThis as { shownWaitingNotifications?: Electron.Notification[] })
+      .shownWaitingNotifications;
     return shown?.[at]?.emit("click") ?? false;
   }, index);
-  if (!clicked) throw new Error(`main has shown no thread notification at ${String(index)}`);
+  if (!clicked) throw new Error(`main has shown no notification at ${String(index)}`);
+}
+
+/** Returns the count on the dock badge; 0 when the badge is hidden. */
+export function readBadgeCount(app: ElectronApplication): Promise<number> {
+  return app.evaluate(({ app: electronApp }) => electronApp.getBadgeCount());
+}
+
+/** Hides the app's window, as ⌘W does. The window is then no longer focused. */
+export async function hideWindow(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.hide();
+  });
 }
 
 /** An item of the menu bar, as `readMenuItems` returns it. */

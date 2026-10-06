@@ -66,8 +66,15 @@ describe("the pace of record changes", () => {
         const topics = yield* LiveTopics;
         const queue = yield* topics.subscribe("session");
         yield* topics.publish([
-          { _tag: "record", topic: "session", id: "usage", kind: "updated", usageOnly: true },
-          { _tag: "record", topic: "session", id: "status", kind: "updated" },
+          {
+            _tag: "record",
+            topic: "session",
+            id: "usage",
+            conversationId: null,
+            kind: "updated",
+            usageOnly: true,
+          },
+          { _tag: "record", topic: "session", id: "status", conversationId: null, kind: "updated" },
         ]);
         yield* advance(COALESCE_WINDOW_MS);
         const early = yield* Queue.clear(queue);
@@ -76,7 +83,52 @@ describe("the pace of record changes", () => {
       }),
     );
 
-    expect(afterShortWindow).toEqual([{ _tag: "invalidate", ids: ["status"], kind: "updated" }]);
-    expect(afterLongWindow).toEqual([{ _tag: "invalidate", ids: ["usage"], kind: "updated" }]);
+    expect(afterShortWindow).toEqual([
+      { _tag: "invalidate", ids: ["status"], kind: "updated", conversationIds: { status: null } },
+    ]);
+    expect(afterLongWindow).toEqual([
+      { _tag: "invalidate", ids: ["usage"], kind: "updated", conversationIds: { usage: null } },
+    ]);
+  });
+});
+
+describe("the conversation of a session change", () => {
+  it("is sent with each session id, through a batch of several changes, and only on the session topic", async () => {
+    const [sessionMessages, taskMessages] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const sessionQueue = yield* topics.subscribe("session");
+        const taskQueue = yield* topics.subscribe("task");
+        // Three sessions in one window, one of them changed twice, plus a
+        // change on another topic.
+        yield* topics.publish([
+          { _tag: "record", topic: "session", id: "ada", conversationId: "c-ada", kind: "updated" },
+          { _tag: "record", topic: "session", id: "thread", conversationId: null, kind: "updated" },
+          { _tag: "record", topic: "task", id: "t1", kind: "created" },
+        ]);
+        yield* topics.publish([
+          {
+            _tag: "record",
+            topic: "session",
+            id: "milo",
+            conversationId: "c-milo",
+            kind: "updated",
+          },
+          { _tag: "record", topic: "session", id: "ada", conversationId: "c-ada", kind: "updated" },
+        ]);
+        yield* advance(COALESCE_WINDOW_MS);
+        return [yield* Queue.clear(sessionQueue), yield* Queue.clear(taskQueue)] as const;
+      }),
+    );
+
+    expect(sessionMessages).toEqual([
+      {
+        _tag: "invalidate",
+        ids: ["ada", "thread", "milo"],
+        kind: "updated",
+        conversationIds: { ada: "c-ada", thread: null, milo: "c-milo" },
+      },
+    ]);
+    expect(taskMessages).toEqual([{ _tag: "invalidate", ids: ["t1"], kind: "created" }]);
   });
 });

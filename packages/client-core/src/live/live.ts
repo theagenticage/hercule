@@ -84,7 +84,7 @@ export interface LiveOptions {
   readonly webSocket?: LiveWebSocketConstructor;
 }
 
-/** Receives a mutable topic's push, as the query keys to invalidate. */
+/** Receives a mutable topic's push as the query keys to invalidate. */
 export type LiveInvalidateHandler = (keys: ReadonlyArray<LiveQueryKey>) => void;
 
 /**
@@ -283,7 +283,11 @@ export const createLive = (options: LiveOptions): Live => {
         return;
       }
       (subscription.handler as LiveInvalidateHandler)(
-        buildQueryKeys(subscription.topic as MutableLiveTopic, message.ids),
+        buildQueryKeys(
+          subscription.topic as MutableLiveTopic,
+          message.ids,
+          message.conversationIds,
+        ),
       );
     });
   };

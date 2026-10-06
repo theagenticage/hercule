@@ -43,7 +43,8 @@ const SidePane = lazy(() =>
  * When the thread does not exist, the loader clears the last open thread,
  * whichever it is, because the screen now shows no thread, and:
  *
- * - shows `ThreadNotFound` when the user opened the thread;
+ * - shows `ThreadNotFound` when the user opened the thread, with a link to
+ *   the new-thread screen;
  * - goes to the new-thread screen when the app opened it at launch, because
  *   the user did not ask for it this time.
  *

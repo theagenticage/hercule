@@ -306,6 +306,8 @@ export const SPECIMEN_RECORDS: SidebarRecords = {
     ({ id, title, projectId, status, minutesAgo, model, openRequests }) =>
       buildSpecimenSession({ id, title, projectId, status, minutesAgo, model, openRequests }),
   ),
+  // The book's sidebar page draws no Assistants section.
+  assistants: [],
   projects: PROJECTS,
   workspaces: [],
   resources: [],

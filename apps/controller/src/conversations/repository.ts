@@ -102,6 +102,25 @@ const make = Effect.gen(function* () {
         (rows) => rows.map(toConversation),
       ),
 
+    /**
+     * Returns, by assistant id, the id of each assistant's main conversation,
+     * using one query. An assistant with no main conversation is not in the
+     * map.
+     */
+    readMainConversationIds: (
+      assistantIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      assistantIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<Pick<ConversationRow, "id" | "assistant_id">>`
+              SELECT id, assistant_id FROM conversations
+              WHERE channel = 'web' AND assistant_id IN ${sql.in(assistantIds.map(uuidFromString))}
+            `,
+            (rows) =>
+              new Map(rows.map((row) => [uuidToString(row.assistant_id), uuidToString(row.id)])),
+          ),
+
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM conversations WHERE id = ${uuidFromString(id)}`),
 

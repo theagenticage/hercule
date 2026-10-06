@@ -66,10 +66,10 @@ const bridge: Bridge = {
     report: () => invokeChannel("firstScreen.report"),
   },
   goMenu: {
-    set: (threads) => invokeChannel("goMenu.set", threads),
+    set: (items) => invokeChannel("goMenu.set", items),
   },
-  waitingThreads: {
-    set: (threads) => invokeChannel("waitingThreads.set", threads),
+  waiting: {
+    set: (requests) => invokeChannel("waiting.set", requests),
   },
   localController: {
     find: () => invokeChannel("localController.find"),
@@ -97,8 +97,8 @@ const bridge: Bridge = {
   menu: {
     onCommand: (listener) => subscribeToChannel("menu.command", listener),
   },
-  thread: {
-    onOpen: (listener) => subscribeToChannel("thread.open", listener),
+  destination: {
+    onOpen: (listener) => subscribeToChannel("destination.open", listener),
   },
 };
 

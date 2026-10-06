@@ -10,9 +10,8 @@ import type { Session, SessionRequest } from "@hercule/contract";
  *
  * Every screen that shows one Request for a thread shows this one, so the
  * dock, the sidebar and the Office agree. When it is answered, the next
- * oldest takes its place. The desktop notifications are the exception: they
- * follow the newest Request, because a notification announces what just
- * arrived (see `listWaitingThreads`).
+ * oldest takes its place. The desktop app's notification is the exception:
+ * it shows the newest Request, the one that just opened.
  */
 export const findOldestOpenRequest = (session: Session): SessionRequest | null =>
   session.openRequests[0] ?? null;

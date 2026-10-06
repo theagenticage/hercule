@@ -51,7 +51,7 @@ describe("buildApprovalNotification", () => {
     });
   });
 
-  it("starts the body with the subagent that asked, or with a subagent when it has no description", () => {
+  it("starts the body with the subagent that asked, or with a subagent when it has no name", () => {
     const asked = { ...COMMAND, subagentId: "a1" };
     expect(buildApprovalNotification(SESSION, asked, "Review the diff")?.body).toMatch(
       /^Asked by ` Review the diff `\n\nThe session "Fix the login" is waiting/,
@@ -59,7 +59,7 @@ describe("buildApprovalNotification", () => {
     expect(buildApprovalNotification(SESSION, asked)?.body).toMatch(
       /^Asked by a subagent\n\nThe session/,
     );
-    // A description is the parent agent's text, so it cannot format the body.
+    // A name is the parent agent's text, so it cannot format the body.
     const hostile = "# Fix [it](https://x.example) `now` *please*";
     expect(buildApprovalNotification(SESSION, asked, hostile)?.body?.split("\n\n")[0]).toBe(
       "Asked by `` # Fix [it](https://x.example) `now` *please* ``",

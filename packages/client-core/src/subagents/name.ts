@@ -1,9 +1,3 @@
-/**
- * The name a screen shows for a subagent. It sits in a module of its own
- * because the desktop app's first screen names the subagent that asked a
- * thread's newest Request in that thread's notification, and needs nothing
- * else about subagents. The rest of their words load with the thread.
- */
 import type { Subagent } from "@hercule/contract";
 
 /**
