@@ -5,7 +5,7 @@
  * last one, wherever it is answered, ends the wait.
  */
 import type { Session, Subagent } from "@hercule/contract";
-import { nameSubagent } from "../subagents/describe";
+import { nameSubagent } from "../subagents/name";
 import { formatRequestQuestion } from "./request-question";
 
 /** A thread waiting on the user, and the text of its notification. */

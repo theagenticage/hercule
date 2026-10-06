@@ -1,9 +1,8 @@
 /**
- * Tests the words a screen shows for one subagent: `nameSubagent`,
- * `nameSubagentParent`, `isSubagentWaiting`, `decideSubagentMark`, `decideSubagentPose`,
- * `describeSubagentState`,
- * `describeSubagentLine`, `formatTokenCount`, `formatSubagentTokens`,
- * `describeSubagentMeta` and `describeSubagentStop`.
+ * Tests the words a screen shows for one subagent: `nameSubagentParent`,
+ * `isSubagentWaiting`, `decideSubagentMark`, `decideSubagentPose`,
+ * `describeSubagentState`, `describeSubagentLine`, `formatTokenCount`,
+ * `formatSubagentTokens`, `describeSubagentMeta` and `describeSubagentStop`.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionRequest } from "@hercule/contract";
@@ -17,25 +16,11 @@ import {
   formatSubagentTokens,
   formatTokenCount,
   isSubagentWaiting,
-  nameSubagent,
   nameSubagentParent,
 } from "./describe";
 import { buildRequest, buildSubagent } from "./subagents.testing";
 
 const NOW = new Date("2026-10-05T09:16:02.000Z");
-
-describe("nameSubagent", () => {
-  it("names a subagent by its description", () => {
-    expect(
-      nameSubagent(buildSubagent({ id: "a", description: "Read the docs", agentType: "Explore" })),
-    ).toBe("Read the docs");
-  });
-
-  it("falls back to its agent type, then to Subagent, while it has no description", () => {
-    expect(nameSubagent(buildSubagent({ id: "a", agentType: "Explore" }))).toBe("Explore");
-    expect(nameSubagent(buildSubagent({ id: "a" }))).toBe("Subagent");
-  });
-});
 
 describe("nameSubagentParent", () => {
   const planner = buildSubagent({ id: "p", description: "Plan the migration" });

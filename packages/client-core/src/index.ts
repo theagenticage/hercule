@@ -254,7 +254,6 @@ export {
   describeSubagentStop,
   formatTokenCount,
   isSubagentWaiting,
-  nameSubagent,
   nameSubagentParent,
   type SubagentHue,
   type SubagentLine,
@@ -262,6 +261,7 @@ export {
   type SubagentState,
   type SubagentStop,
 } from "./subagents/describe";
+export { nameSubagent } from "./subagents/name";
 export {
   buildRequestDock,
   describeRequestAsker,

@@ -1,12 +1,15 @@
 /**
- * The words every screen shows for one subagent: its name, its state, the
- * one line under its name and the facts about it. They are read from the
- * Subagent record alone, so a screen needs no transcript to draw a subagent.
+ * The words every screen shows for one subagent: the name of the agent that
+ * started it, its state, the one line under its name and the facts about it.
+ * They are read from the Subagent record alone, so a screen needs no
+ * transcript to draw a subagent. The subagent's own name is `nameSubagent`,
+ * in `./name`.
  */
 import type { SessionRequest, Subagent, SubagentStatus } from "@hercule/contract";
 import { formatDuration } from "../threads/duration";
 import type { Pose } from "../threads/pose";
 import { countUsedTokens } from "../token-usage";
+import { nameSubagent } from "./name";
 import { listSubagentDescendants } from "./tree";
 
 /**
@@ -28,15 +31,6 @@ export interface SubagentLine {
   readonly text: string;
   readonly hue: SubagentHue;
 }
-
-/**
- * Returns the name a screen shows for a subagent: its `description`, which
- * is the task name its parent gave it or the first line of its brief. Until
- * the controller has read either, it falls back to the subagent's agent
- * type, such as "Explore", and then to "Subagent".
- */
-export const nameSubagent = (subagent: Subagent): string =>
-  subagent.description ?? subagent.agentType ?? "Subagent";
 
 /**
  * Returns the name a screen shows for the agent that started `subagent`:

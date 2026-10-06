@@ -3,7 +3,8 @@
  * pages to the others, and which agent asked it.
  */
 import type { SessionRequest, Subagent, SubagentId } from "@hercule/contract";
-import { nameSubagent, nameSubagentParent } from "./describe";
+import { nameSubagentParent } from "./describe";
+import { nameSubagent } from "./name";
 
 /**
  * The agent that asked the shown Request: the session's own agent, or a

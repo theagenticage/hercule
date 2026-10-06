@@ -7,10 +7,10 @@ import type { ThreadItem } from "../threads/turns";
 import {
   describeSubagentState,
   isSubagentWaiting,
-  nameSubagent,
   type SubagentLine,
   type SubagentState,
 } from "./describe";
+import { nameSubagent } from "./name";
 import { compareSubagentStarts, listSubagentDescendants } from "./tree";
 
 /** One subagent a turn started, as its spawn line shows it. */
