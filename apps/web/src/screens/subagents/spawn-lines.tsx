@@ -1,18 +1,70 @@
 import type { JSX } from "react";
-import type { ThreadTurn } from "@hercule/client-core";
+import { Link } from "@tanstack/react-router";
+import { buildSpawnLines, type ThreadTurn } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
+import { useDurationClock } from "../use-duration-clock";
+import { SUBAGENT_HUE_CLASSES, SubagentMark } from "./subagent-mark";
 
 /**
- * The lines in a turn, one per subagent the turn started: `↳`, its state
- * mark, its name, its state and duration, "N below" and "one waits on you".
- * A click opens the subagent's page (spec 14 §Subagents on the thread
- * surface).
+ * Renders the lines in a turn, one per subagent the turn started: `↳`, its
+ * state mark, its name, its state and duration, "N below" when it started
+ * subagents of its own, and "one waits on you" when it, or one below it,
+ * asks the user something. A line links to the subagent's page (spec 14
+ * §Subagents on the thread surface). Renders nothing for a turn that started
+ * no subagent.
  *
- * Not built yet: it renders nothing.
+ * A running subagent's duration counts up while the line is shown.
  */
-export const SpawnLines: (props: {
+export function SpawnLines({
+  session,
+  subagents,
+  turn,
+}: {
   readonly session: Session;
   /** Every subagent of the session, oldest first. */
   readonly subagents: readonly Subagent[];
   readonly turn: ThreadTurn;
-}) => JSX.Element | null = () => null;
+}): JSX.Element | null {
+  const now = useDurationClock(
+    subagents
+      .filter(
+        (subagent) =>
+          subagent.status === "running" &&
+          turn.items.some((item) => item.itemId === subagent.itemId),
+      )
+      .map((subagent) => subagent.startedAt),
+  );
+  const lines = buildSpawnLines(turn, subagents, session.openRequests, now);
+  if (lines.length === 0) return null;
+
+  return (
+    <ul aria-label="Subagents started here" className="-mx-2 flex flex-col">
+      {lines.map((line) => (
+        <li key={line.subagentId}>
+          <Link
+            to="/threads/$sessionId/subagents/$subagentId"
+            params={{ sessionId: session.id, subagentId: line.subagentId }}
+            className="flex w-full items-center gap-2 rounded-control px-2 py-[3px] text-row hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-live"
+          >
+            <span aria-hidden="true" className="text-faint">
+              ↳
+            </span>
+            <span className="flex w-3 shrink-0 justify-center">
+              <SubagentMark status={line.status} waiting={line.waiting} />
+            </span>
+            <span title={line.name} className="min-w-0 truncate font-emph text-ink">
+              {line.name}
+            </span>
+            <span className="shrink-0 text-meta whitespace-nowrap text-muted">
+              <span className={SUBAGENT_HUE_CLASSES[line.state.hue]}>{line.state.word}</span>
+              {" · "}
+              <span className="font-mono text-fine tabular-nums">{line.state.duration}</span>
+              {line.below > 0 ? ` · ${String(line.below)} below` : null}
+              {line.waitsOnYou ? <span className="text-attn"> · one waits on you</span> : null}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}

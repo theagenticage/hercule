@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { ThreadRow } from "@hercule/client-core";
-import { DoneMark, WorkingMark, cn } from "@hercule/ui";
+import { DecisionMark, DoneMark, WorkingMark, cn } from "@hercule/ui";
 
 /**
  * One thread row. The sidebar and All sessions both render the rows of
@@ -15,6 +15,10 @@ import { DoneMark, WorkingMark, cn } from "@hercule/ui";
  * of its age, and the hollow circle in place of its mark: the session is not
  * working, whatever its status says, because it is waiting for a session slot
  * or for its runner.
+ *
+ * A row that waits on the user, because one of the thread's agents has an
+ * open Request, shows the decision mark in place of its mark, whether the
+ * thread is working or idle.
  */
 export function ThreadRowView({
   mark,
@@ -48,7 +52,9 @@ export function ThreadRowView({
     >
       <span className="flex items-center gap-2">
         <span className="flex w-3 shrink-0 justify-center">
-          {word === undefined && mark === "working" ? (
+          {end.kind === "mark" && end.mark === "waiting" ? (
+            <DecisionMark />
+          ) : word === undefined && mark === "working" ? (
             <WorkingMark />
           ) : word === undefined && mark === "exited" ? (
             <DoneMark />
