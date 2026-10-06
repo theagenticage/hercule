@@ -13,6 +13,10 @@ import type { JSX, ReactNode, Ref } from "react";
  * size. The row is one title line high, so a taller tab or action button
  * beside the title cannot push the title down out of line with other screens.
  *
+ * With no `crumb`, the row draws neither the crumb nor its slash, for a
+ * screen whose crumb must shrink with its title and so draws both inside
+ * `title`. A crumb given here never shrinks.
+ *
  * The row stays at the top of the page while the column under it scrolls, so
  * the crumb and the presence word never scroll out of view. Its background is
  * the page's, so the column scrolls out of sight beneath it.
@@ -23,7 +27,7 @@ export function HeaderRow({
   actions,
   rowRef,
 }: {
-  readonly crumb: ReactNode;
+  readonly crumb?: ReactNode;
   readonly title: ReactNode;
   readonly actions?: ReactNode;
   /** Receives the row's element, for a screen that lays the row out by its width. */
@@ -37,10 +41,14 @@ export function HeaderRow({
       >
         {/* The spaces keep the crumb and the title apart in the text a screen
             reader or a copy reads; the gap does it on screen. */}
-        <span className="flex shrink-0 items-center gap-2 font-normal text-faint">{crumb}</span>{" "}
-        <span aria-hidden="true" className="shrink-0 font-normal text-faint">
-          /
-        </span>{" "}
+        {crumb === undefined ? null : (
+          <>
+            <span className="flex shrink-0 items-center gap-2 font-normal text-faint">{crumb}</span>{" "}
+            <span aria-hidden="true" className="shrink-0 font-normal text-faint">
+              /
+            </span>{" "}
+          </>
+        )}
         {title}
         {actions === undefined ? null : (
           <span className="ml-auto flex shrink-0 items-center gap-1.5 tracking-normal">

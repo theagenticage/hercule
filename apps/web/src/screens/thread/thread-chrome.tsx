@@ -1,4 +1,4 @@
-import type { JSX, ReactNode, Ref } from "react";
+import { Fragment, type JSX, type ReactNode, type Ref } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -140,33 +140,36 @@ function SubagentChrome({
   const name = nameSubagent(subagent);
   return (
     <HeaderRow
-      crumb={
-        <>
+      title={
+        // The crumb sits in the title's box rather than the row's crumb,
+        // which never shrinks, so that a narrow row cuts the crumb's links
+        // short before it cuts the subagent's own name. Each link starts at
+        // no width and grows into the room the name leaves, up to its text
+        // or 120px, so the name keeps its full width until every link is
+        // down to 32px, about one letter and an ellipsis.
+        <span className="flex min-w-0 items-center gap-2">
           <Link
             to="/threads/$sessionId"
             params={{ sessionId: session.id }}
             title={session.title}
             className={CRUMB_LINK}
           >
-            {session.title}
-          </Link>
+            <span className={CRUMB_TEXT}>{session.title}</span>
+          </Link>{" "}
+          {CRUMB_SLASH}{" "}
           {listSubagentAncestors(subagent, subagents).map((ancestor) => (
-            <span key={ancestor.id} className="flex items-center gap-2">
-              <span aria-hidden="true">/</span>{" "}
+            <Fragment key={ancestor.id}>
               <Link
                 to="/threads/$sessionId/subagents/$subagentId"
                 params={{ sessionId: session.id, subagentId: ancestor.id }}
                 title={nameSubagent(ancestor)}
                 className={CRUMB_LINK}
               >
-                {nameSubagent(ancestor)}
-              </Link>
-            </span>
+                <span className={CRUMB_TEXT}>{nameSubagent(ancestor)}</span>
+              </Link>{" "}
+              {CRUMB_SLASH}{" "}
+            </Fragment>
           ))}
-        </>
-      }
-      title={
-        <span className="flex min-w-0 items-center gap-2">
           <span className="flex w-3 shrink-0 justify-center">
             <SubagentMark
               status={subagent.status}
@@ -186,9 +189,19 @@ function SubagentChrome({
   );
 }
 
-/** One link of a subagent page's crumb, cut short so a deep chain still fits. */
+/** The slash after each link of a subagent page's crumb. */
+const CRUMB_SLASH = (
+  <span aria-hidden="true" className="shrink-0 font-normal text-faint">
+    /
+  </span>
+);
+
+/** One link of a subagent page's crumb, which gives up its room before the name does. */
 const CRUMB_LINK =
-  "inline-block max-w-[120px] truncate rounded-control align-bottom hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live";
+  "flex min-w-8 max-w-fit grow basis-0 rounded-control font-normal text-faint hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live";
+
+/** The text of one crumb link, cut short so a deep chain still fits. */
+const CRUMB_TEXT = "max-w-[120px] truncate";
 
 /**
  * Renders the thread's header row: the project crumb, then the title, then

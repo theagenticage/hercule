@@ -370,4 +370,19 @@ describe("Header: giving way as the row narrows", () => {
     );
     expect(screen.getByText("Subagent")).toBeDefined();
   });
+
+  it("lets a narrow row cut the crumb's links short before the subagent's own name", async () => {
+    await openThread({ path: `/threads/${SESSION_ID}/subagents/${READER.id}` });
+
+    const thread = await screen.findByRole("link", { name: "Fix the login bug" });
+    const ancestor = screen.getByRole("link", { name: "Explore the auth module" });
+    const name = screen.getByTitle("Read the auth tests");
+    // jsdom lays nothing out, so the flex sizing is what can be checked:
+    // each link shares the name's box, starts at no width and grows into
+    // the room the name leaves.
+    for (const link of [thread, ancestor]) {
+      expect(link.parentElement).toBe(name.parentElement);
+      expect(link.className).toContain("basis-0");
+    }
+  });
 });
