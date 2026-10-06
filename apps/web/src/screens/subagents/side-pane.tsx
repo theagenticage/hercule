@@ -10,9 +10,9 @@ import {
 import {
   MIN_SIDE_PANE_WIDTH,
   SIDE_PANE_SURFACES,
-  closeSurface,
+  closeSidePaneSurface,
   fitSidePaneWidth,
-  openSurface,
+  openSidePaneSurface,
   type SidePaneSurface,
 } from "@hercule/client-core";
 import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
@@ -123,17 +123,17 @@ export function SidePane({
                 selected={surface === shown}
                 panelId={panelId}
                 onSelect={() => {
-                  changeLayout((current) => openSurface(current, surface));
+                  changeLayout((current) => openSidePaneSurface(current, surface));
                 }}
                 onClose={() => {
-                  changeLayout((current) => closeSurface(current, surface));
+                  changeLayout((current) => closeSidePaneSurface(current, surface));
                 }}
               />
             ))}
           </div>
           <SurfacePicker
             onPick={(surface) => {
-              changeLayout((current) => openSurface(current, surface));
+              changeLayout((current) => openSidePaneSurface(current, surface));
             }}
           />
           <span className="ml-auto flex">

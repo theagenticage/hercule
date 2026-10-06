@@ -63,9 +63,9 @@ export interface RenderedThreadPart {
  * bridge and the controller in its route context, the app's paths `/` and
  * `/threads/$sessionId`, so the part's links resolve, and the app's id for
  * the thread's route under `_shell`, so a part that matches that route finds
- * it. It starts at the
- * thread, whose loader makes the reads the shell's and the thread's loaders
- * make. So, as in the app, nothing waits once this returns.
+ * it. It starts at the thread, whose loader makes the reads the shell's and
+ * the thread's loaders make. So, as in the app, nothing waits once this
+ * returns.
  */
 export const renderThreadPart = async (
   Part: ThreadPart,

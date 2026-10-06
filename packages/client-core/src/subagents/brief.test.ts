@@ -1,7 +1,7 @@
 /**
  * Tests `findSubagentBrief` and `splitSubagentBrief`, which find the brief a
- * subagent's page opens with, and `describeBriefSource`, which says who
- * handed it over.
+ * subagent's page opens with, and `describeBriefSource`, which returns who
+ * handed the brief over: the parent's name and the agent type.
  */
 import { describe, expect, it } from "vitest";
 import type { ThreadBlock } from "../threads/blocks";

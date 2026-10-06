@@ -58,13 +58,7 @@ import {
   queryKeys,
   type Live,
 } from "@hercule/client-core";
-import {
-  buildSessionStreamTopic,
-  buildSessionTapTopic,
-  buildSubagentStreamTopic,
-  buildSubagentTapTopic,
-  type TranscriptRow,
-} from "@hercule/contract";
+import { buildAgentStreamTopic, buildAgentTapTopic, type TranscriptRow } from "@hercule/contract";
 
 export const useAgentLive = (
   live: Live,
@@ -122,9 +116,7 @@ export const useAgentLive = (
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(key) ?? [];
     const unsubscribe = live.subscribe(
-      subagentId === undefined
-        ? buildSessionStreamTopic(sessionId)
-        : buildSubagentStreamTopic(sessionId, subagentId),
+      buildAgentStreamTopic(sessionId, subagentId),
       (delta) => {
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
@@ -167,25 +159,20 @@ export const useAgentLive = (
   useEffect(() => {
     let frame: number | null = null;
     skipOpenItems();
-    const unsubscribe = live.subscribe(
-      subagentId === undefined
-        ? buildSessionTapTopic(sessionId)
-        : buildSubagentTapTopic(sessionId, subagentId),
-      (delta) => {
-        const delivery = decideTapDelivery(delta);
-        if (delivery.kind === "gone") {
-          unsubscribe();
-        } else if (delivery.kind === "reset") {
-          skipOpenItems();
-        } else {
-          for (const tap of delivery.taps) tail.appendTap(tap);
-          frame ??= requestAnimationFrame(() => {
-            frame = null;
-            if (!rowsLandingRef.current) paintTail();
-          });
-        }
-      },
-    );
+    const unsubscribe = live.subscribe(buildAgentTapTopic(sessionId, subagentId), (delta) => {
+      const delivery = decideTapDelivery(delta);
+      if (delivery.kind === "gone") {
+        unsubscribe();
+      } else if (delivery.kind === "reset") {
+        skipOpenItems();
+      } else {
+        for (const tap of delivery.taps) tail.appendTap(tap);
+        frame ??= requestAnimationFrame(() => {
+          frame = null;
+          if (!rowsLandingRef.current) paintTail();
+        });
+      }
+    });
     return () => {
       unsubscribe();
       if (frame !== null) cancelAnimationFrame(frame);

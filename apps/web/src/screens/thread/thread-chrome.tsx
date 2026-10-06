@@ -9,7 +9,7 @@ import {
   isSubagentWaiting,
   listSubagentAncestors,
   nameSubagent,
-  togglePane,
+  toggleSidePane,
   type HerculeClient,
   type ThreadTab,
 } from "@hercule/client-core";
@@ -327,7 +327,7 @@ function PaneToggle(): JSX.Element {
       title={label}
       aria-pressed={layout.open}
       onClick={() => {
-        changeLayout(togglePane);
+        changeLayout(toggleSidePane);
       }}
       className={cn(
         ACTION,

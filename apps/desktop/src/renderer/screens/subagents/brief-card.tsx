@@ -6,8 +6,8 @@
 import { useState, type JSX } from "react";
 import { describeBriefSource } from "@hercule/client-core";
 import type { Subagent } from "@hercule/contract";
-import { Face, buildLook } from "../../faces";
-import { buildSubagentFaceSeed, buildSubagentLook } from "./subagent-face";
+import { Face, buildHueStyle, buildLook } from "../../faces";
+import { buildAgentFaceSeed, buildSubagentLook } from "./subagent-face";
 import "./brief-card.css";
 
 /** The size of the parent's face in the card's top line, in CSS pixels, as the prototype draws it. */
@@ -37,17 +37,11 @@ export function BriefCard({
 }): JSX.Element {
   const [isWhole, setIsWhole] = useState(false);
   const source = describeBriefSource(subagent, subagents);
-  const parentSeed =
-    subagent.parentSubagentId === undefined
-      ? subagent.sessionId
-      : buildSubagentFaceSeed(subagent.sessionId, subagent.parentSubagentId);
+  const parentLook = buildLook(buildAgentFaceSeed(subagent.sessionId, subagent.parentSubagentId));
   return (
-    <div
-      className="brief-card"
-      style={{ "--hue": `var(--hue-${buildSubagentLook(subagent).hue})` }}
-    >
+    <div className="brief-card" style={buildHueStyle(buildSubagentLook(subagent).hue)}>
       <div className="brief-card-source">
-        <Face look={buildLook(parentSeed)} pose="idle" size={PARENT_FACE_SIZE} />
+        <Face look={parentLook} pose="idle" size={PARENT_FACE_SIZE} />
         <span>
           Brief from <b>{source.parent}</b>
           {source.agentType === undefined ? null : ` · ${source.agentType} agent`}

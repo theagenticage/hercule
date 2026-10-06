@@ -4,8 +4,8 @@
  * `localStorage`.
  */
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { CLOSED_SIDE_PANE, DEFAULT_SIDE_PANE_WIDTH, togglePane } from "@hercule/client-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CLOSED_SIDE_PANE, DEFAULT_SIDE_PANE_WIDTH, toggleSidePane } from "@hercule/client-core";
 import { forgetSidePaneLayouts, useSidePaneLayout, useSidePaneWidth } from "./use-side-pane";
 
 afterEach(() => {
@@ -25,7 +25,7 @@ describe("useSidePaneLayout", () => {
     const second = renderHook(() => useSidePaneLayout("ses_1"));
     const other = renderHook(() => useSidePaneLayout("ses_2"));
     act(() => {
-      first.result.current.changeLayout(togglePane);
+      first.result.current.changeLayout(toggleSidePane);
     });
     expect(second.result.current.layout.open).toBe(true);
     expect(other.result.current.layout.open).toBe(false);
@@ -41,5 +41,16 @@ describe("useSidePaneWidth", () => {
     });
     expect(result.current[0]).toBe(480);
     expect(localStorage.getItem("hercule.side-pane.width")).toBe("480");
+  });
+
+  it("does not read the storage again when only the layout changes", () => {
+    renderHook(() => useSidePaneWidth());
+    const layout = renderHook(() => useSidePaneLayout("ses_1"));
+    const getItem = vi.spyOn(Storage.prototype, "getItem");
+    act(() => {
+      layout.result.current.changeLayout(toggleSidePane);
+    });
+    expect(getItem).not.toHaveBeenCalled();
+    getItem.mockRestore();
   });
 });

@@ -1,3 +1,9 @@
+/**
+ * The one stop the desktop app sends for a session's agents, shared by every
+ * control that offers it: the composer's Stop, a subagent's Stop and Stop
+ * all. Sharing one hook keeps the request, the guard against a second stop
+ * and the failure the user sees the same in every one of them.
+ */
 import { useMutation } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 

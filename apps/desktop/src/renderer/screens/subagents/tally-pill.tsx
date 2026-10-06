@@ -6,7 +6,7 @@
 import type { JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { describeSubagentTally, toggleSurface } from "@hercule/client-core";
+import { describeSubagentTally, toggleSidePaneSurface } from "@hercule/client-core";
 import { sessionQuery, subagentsQuery } from "../../app/queries";
 import { Mark } from "../../marks";
 import { useHasSidePane, useSidePaneLayout } from "./use-side-pane";
@@ -41,7 +41,7 @@ export function TallyPill({ sessionId }: { readonly sessionId: string }): JSX.El
         aria-pressed={shown}
         title={shown ? "Hide the side pane" : "Show the subagents in the side pane"}
         onClick={() => {
-          changeLayout((current) => toggleSurface(current, "subagents"));
+          changeLayout((current) => toggleSidePaneSurface(current, "subagents"));
         }}
       >
         <Mark state={tally.mark} />

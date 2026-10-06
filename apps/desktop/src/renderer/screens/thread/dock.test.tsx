@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildApprovalCard, formatDescribeLine } from "@hercule/client-core";
+import { buildApprovalCard, formatDescribeLine, queryKeys } from "@hercule/client-core";
 import type { OpenRequest } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -297,6 +297,27 @@ describe("the dock", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("The request is no longer open.");
     for (const answer of within(readDock()).getAllByRole("button")) {
       expect(answer.getAttribute("aria-disabled")).toBeNull();
+    }
+  });
+
+  it("keeps a Request locked when its send fails after the Request closed", async () => {
+    const user = userEvent.setup();
+    const held = holdAnswer();
+    const { queryClient } = await renderDock(COMMAND, held.handler);
+
+    await user.click(within(readDock()).getByRole("button", { name: "Allow" }));
+    // The live session push closes the Request while the answer is on its way.
+    act(() => {
+      queryClient.setQueryData(queryKeys.session(FIXTURE_THREAD_IDS.runbook), {
+        ...THREAD_FIXTURES.waiting.session,
+        openRequests: [],
+      });
+    });
+    held.answer({ status: 409, body: buildErrorBody("invalid_state", "Already closed.") });
+
+    await screen.findByRole("alert");
+    for (const answer of within(readDock()).getAllByRole("button")) {
+      expect(answer.getAttribute("aria-disabled")).toBe("true");
     }
   });
 

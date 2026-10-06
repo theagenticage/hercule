@@ -38,7 +38,7 @@ interface TreeContext {
   readonly subagents: readonly Subagent[];
   readonly openRequests: readonly SessionRequest[];
   /** The subagent whose page is open in the main pane, whose row is marked current. */
-  readonly subagentId: string | undefined;
+  readonly openSubagentId: string | undefined;
   readonly now: Date;
 }
 
@@ -49,11 +49,11 @@ interface TreeContext {
  */
 export function SubagentsSurface({
   sessionId,
-  subagentId,
+  openSubagentId,
 }: {
   readonly sessionId: string;
   /** The subagent whose page is open in the main pane; undefined on the thread's own page. */
-  readonly subagentId: string | undefined;
+  readonly openSubagentId: string | undefined;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_shell" });
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
@@ -80,7 +80,7 @@ export function SubagentsSurface({
     sessionId,
     subagents,
     openRequests: session.openRequests,
-    subagentId,
+    openSubagentId,
     now,
   };
   return (
@@ -148,7 +148,7 @@ function SubagentRow({
   // blocks another row's Stop nor shows its failure there.
   const stopAgent = useStopAgent(client, sessionId);
   const stop = describeSubagentStop(subagent, subagents);
-  const current = subagent.id === context.subagentId;
+  const current = subagent.id === context.openSubagentId;
   const name = nameSubagent(subagent);
 
   return (

@@ -1,0 +1,45 @@
+/* A subagent's page: a crumb from the thread down to the subagent. The
+   rules are the subagents prototype's `.proto-crumbs`, `.proto-crumb-here`
+   and `.proto-tag` (commit 6253a529, variant D, the tinted crumb). The
+   pills, the tabs and how a tab that is not open gives way are the thread
+   header's (thread-header.css). */
+.subagent-crumb {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+/* Not in the prototype: an ancestor gives way before the subagent's own
+   name, as the thread's crumb does (see `.ptab:not(.is-on)` in
+   thread-header.css). The ancestor's own tab holds the floor, so its
+   crumb, with the separator, never gets narrower than that tab. */
+.subagent-crumb:not(:last-child) {
+  flex-shrink: 1000;
+  min-width: auto;
+}
+.subagent-crumb-sep {
+  padding: 0 2px;
+  color: var(--faint);
+}
+.subagent-crumbs .ptab {
+  max-width: 260px;
+}
+/* Three classes deep, so the tint wins over the backgrounds of
+   `.ptab.is-on` and `.ptab:hover` whatever order the two style sheets load
+   in. The prototype wins with a page class. */
+.subagent-crumbs .ptab.subagent-crumb-here {
+  max-width: 340px;
+  color: var(--ink);
+  background: var(--who-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 55%, transparent);
+}
+/* Two classes deep, so it wins over `.ptab small` without the prototype's
+   `!important`. */
+.ptab .subagent-tag {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--who);
+  color: var(--face-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+}

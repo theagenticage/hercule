@@ -39,7 +39,10 @@ export const MIN_SIDE_PANE_WIDTH = 300;
 export const MIN_MAIN_PANE_WIDTH = 520;
 
 /** Returns `layout` with the pane open on `surface`, adding its tab when it has none. */
-export const openSurface = (layout: SidePaneLayout, surface: SidePaneSurface): SidePaneLayout => ({
+export const openSidePaneSurface = (
+  layout: SidePaneLayout,
+  surface: SidePaneSurface,
+): SidePaneLayout => ({
   open: true,
   surfaces: layout.surfaces.includes(surface) ? layout.surfaces : [...layout.surfaces, surface],
   shown: surface,
@@ -49,7 +52,10 @@ export const openSurface = (layout: SidePaneLayout, surface: SidePaneSurface): S
  * Returns `layout` without the tab of `surface`. Closing the last tab closes
  * the pane. Closing the shown tab shows the last of the tabs that remain.
  */
-export const closeSurface = (layout: SidePaneLayout, surface: SidePaneSurface): SidePaneLayout => {
+export const closeSidePaneSurface = (
+  layout: SidePaneLayout,
+  surface: SidePaneSurface,
+): SidePaneLayout => {
   const surfaces = layout.surfaces.filter((each) => each !== surface);
   if (surfaces.length === 0) return CLOSED_SIDE_PANE;
   return { ...layout, surfaces, shown: layout.shown === surface ? surfaces.at(-1) : layout.shown };
@@ -60,9 +66,9 @@ export const closeSurface = (layout: SidePaneLayout, surface: SidePaneSurface): 
  * closed. A pane that holds no tabs opens on the Subagents surface, so it
  * never opens empty.
  */
-export const togglePane = (layout: SidePaneLayout): SidePaneLayout => {
+export const toggleSidePane = (layout: SidePaneLayout): SidePaneLayout => {
   if (layout.open) return { ...layout, open: false };
-  if (layout.surfaces.length === 0) return openSurface(layout, "subagents");
+  if (layout.surfaces.length === 0) return openSidePaneSurface(layout, "subagents");
   return { ...layout, open: true };
 };
 
@@ -71,10 +77,13 @@ export const togglePane = (layout: SidePaneLayout): SidePaneLayout => {
  * otherwise open on `surface`. The tally pill toggles the Subagents surface
  * this way.
  */
-export const toggleSurface = (layout: SidePaneLayout, surface: SidePaneSurface): SidePaneLayout =>
+export const toggleSidePaneSurface = (
+  layout: SidePaneLayout,
+  surface: SidePaneSurface,
+): SidePaneLayout =>
   layout.open && layout.shown === surface
     ? { ...layout, open: false }
-    : openSurface(layout, surface);
+    : openSidePaneSurface(layout, surface);
 
 /** Checks whether `value` names a surface the pane knows. */
 const isSidePaneSurface = (value: unknown): value is SidePaneSurface =>

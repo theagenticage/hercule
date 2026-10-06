@@ -46,3 +46,11 @@
 .status-card-stop:hover {
   background: var(--fail-tint);
 }
+/* The transcript fades out above the composer's lip (composer.css). The
+   status card has no lip, so the transcript is hidden only below the card,
+   over the wrap's 18px bottom padding, and fades in over the card's lower
+   edge as it does over the composer's. Five classes deep, so it wins over
+   the composer's four-class rule whatever order the style sheets load in. */
+.transcript:has(~ .composer-wrap > .composer > .composer-card.status-card) {
+  --lip-clearance: 18px;
+}

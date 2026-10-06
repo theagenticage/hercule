@@ -238,8 +238,10 @@ export type GoMenuThread = typeof GoMenuThread.Type;
 export const WaitingThread = Schema.Struct({
   sessionId: Schema.String,
   title: Schema.String,
-  body: Schema.String,
-  openRequestIds: Schema.Array(Schema.String),
+  body: Schema.NullOr(Schema.String),
+  // A thread waits on the user only while a Request is open, so the list is
+  // never empty, and main can always find the newest Request in it.
+  openRequestIds: Schema.NonEmptyArray(Schema.String),
 } satisfies {
   readonly [Field in keyof ClientCore.WaitingThread]: Schema.Codec<ClientCore.WaitingThread[Field]>;
 });

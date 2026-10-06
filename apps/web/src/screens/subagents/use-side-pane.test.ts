@@ -5,7 +5,7 @@ import {
   CLOSED_SIDE_PANE,
   DEFAULT_SIDE_PANE_WIDTH,
   parseSidePaneLayout,
-  togglePane,
+  toggleSidePane,
   type SidePaneLayout,
 } from "@hercule/client-core";
 import { useSidePaneLayout, useSidePaneWidth } from "./use-side-pane";
@@ -28,7 +28,7 @@ describe("useSidePaneLayout", () => {
     expect(first.result.current.layout).toEqual(CLOSED_SIDE_PANE);
 
     act(() => {
-      first.result.current.changeLayout(togglePane);
+      first.result.current.changeLayout(toggleSidePane);
     });
 
     expect(second.result.current.layout).toEqual(OPEN_ON_SUBAGENTS);
@@ -50,7 +50,7 @@ describe("useSidePaneLayout", () => {
     const { result } = renderHook(() => useSidePaneLayout());
 
     act(() => {
-      result.current.changeLayout(togglePane);
+      result.current.changeLayout(toggleSidePane);
     });
 
     expect(result.current.layout).toEqual(OPEN_ON_SUBAGENTS);

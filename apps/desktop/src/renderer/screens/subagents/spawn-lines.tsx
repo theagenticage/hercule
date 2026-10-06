@@ -3,7 +3,7 @@
  * subagent the stretch started, each a link to that subagent's page (spec 17
  * §Thread, Subagents).
  */
-import { memo, type CSSProperties, type JSX } from "react";
+import { memo, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import {
@@ -16,6 +16,7 @@ import {
 import type { Subagent } from "@hercule/contract";
 import { ageClock, useDurationText } from "../../app/age-clock";
 import { sessionQuery, subagentsQuery } from "../../app/queries";
+import { buildHueStyle } from "../../faces";
 import { buildSubagentLook, SubagentFace } from "./subagent-face";
 import "./spawn-lines.css";
 
@@ -36,7 +37,9 @@ const FACE_SIZE = 18;
  *
  * It reads the session and its subagents from the cache, which the thread's
  * loader and the Office's loader fill before the page renders. It is `memo`,
- * so the transcript drawing again on a scroll does not draw it again.
+ * so the transcript drawing again on a scroll does not draw it again. That
+ * holds because the transcript passes each block's own `items`, which stay
+ * the same array until the agent's page builds its blocks again.
  */
 export const SpawnLines = memo(function SpawnLines({
   sessionId,
@@ -58,13 +61,15 @@ export const SpawnLines = memo(function SpawnLines({
   // The words and notes do not change with the time; each line reads its
   // own duration from the age clock below.
   const lines = buildSpawnLines(spawned, subagents, session.openRequests, ageClock.readNow());
+  // Each line is built from one of `spawned`, so its subagent is always found.
+  const spawnedById = new Map(spawned.map((subagent) => [subagent.id, subagent]));
   return (
     <ul className="spawn-lines" aria-label="Subagents started here">
-      {lines.map((line, index) => (
+      {lines.map((line) => (
         <SpawnLineRow
           key={line.subagentId}
           sessionId={sessionId}
-          subagent={spawned[index]!}
+          subagent={spawnedById.get(line.subagentId)!}
           line={line}
           onScreen={onScreen}
         />
@@ -98,14 +103,13 @@ function SpawnLineRow({
     subagent.status === "running" && onScreen,
     (now) => describeSubagentState(subagent, line.waiting, new Date(now)).duration,
   );
-  const hue = { "--hue": `var(--hue-${buildSubagentLook(subagent).hue})` } as CSSProperties;
   return (
     <li>
       <Link
         to="/threads/$sessionId/subagents/$subagentId"
         params={{ sessionId, subagentId: line.subagentId }}
         className="spawn-line"
-        style={hue}
+        style={buildHueStyle(buildSubagentLook(subagent).hue)}
       >
         <span aria-hidden="true" className="spawn-line-arrow">
           ↳

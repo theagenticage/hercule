@@ -1,4 +1,4 @@
-export { Face } from "./face";
+export { buildHueStyle, Face } from "./face";
 export {
   buildLook,
   HUES,

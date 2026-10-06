@@ -26,9 +26,9 @@ export interface SpawnLine {
    *
    * - "N below", in `muted`, when it has subagents of its own, counted at
    *   any depth;
-   * - "one waits on you", in `attn`, when a subagent below it waits on the
-   *   user. The subagent's own waiting is left out, because its state
-   *   already reads "waiting on you".
+   * - "one waits on you", or "N wait on you" when several do, in `attn`,
+   *   when subagents below it wait on the user. The subagent's own waiting
+   *   is left out, because its state already reads "waiting on you".
    */
   readonly notes: readonly SubagentLine[];
 }
@@ -86,8 +86,11 @@ export const buildSpawnLines = (
     if (descendants.length > 0) {
       notes.push({ text: `${String(descendants.length)} below`, hue: "muted" });
     }
-    if (descendants.some((each) => isSubagentWaiting(each, openRequests))) {
+    const waitingBelow = descendants.filter((each) => isSubagentWaiting(each, openRequests)).length;
+    if (waitingBelow === 1) {
       notes.push({ text: "one waits on you", hue: "attn" });
+    } else if (waitingBelow > 1) {
+      notes.push({ text: `${String(waitingBelow)} wait on you`, hue: "attn" });
     }
     return {
       subagentId: subagent.id,

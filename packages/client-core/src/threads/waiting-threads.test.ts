@@ -1,12 +1,13 @@
 /**
  * Tests `listWaitingThreads`, which decides the threads the desktop app counts
- * on its dock badge and the text of their notifications.
+ * on its dock badge and the text of their notifications, and
+ * `listAskingSubagents`, which finds the subagents those notifications name.
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest, Subagent } from "@hercule/contract";
 import { buildSubagent } from "../subagents/subagents.testing";
 import { buildSession } from "./workspaces.testing";
-import { listWaitingThreads } from "./waiting-threads";
+import { listAskingSubagents, listWaitingThreads } from "./waiting-threads";
 
 const buildCommandRequest = (
   requestId: string,
@@ -21,7 +22,7 @@ const buildCommandRequest = (
   ...(subagentId === undefined ? {} : { subagentId }),
 });
 
-const NO_SUBAGENTS = new Map<string, readonly Subagent[]>();
+const NO_ASKER_READS = new Map<string, Subagent | undefined>();
 
 describe("listWaitingThreads", () => {
   it("lists the threads with an open Request, in list order, with their question", () => {
@@ -40,7 +41,7 @@ describe("listWaitingThreads", () => {
             openRequests: [buildCommandRequest("r-3", "pnpm test")],
           }),
         ],
-        NO_SUBAGENTS,
+        NO_ASKER_READS,
       ),
     ).toEqual([
       {
@@ -58,7 +59,7 @@ describe("listWaitingThreads", () => {
     ]);
   });
 
-  it("is about the newest Request, counts the others, and lists every id oldest first", () => {
+  it("writes the body about the newest Request, counts the others, and lists every id oldest first", () => {
     expect(
       listWaitingThreads(
         [
@@ -72,7 +73,7 @@ describe("listWaitingThreads", () => {
             ],
           }),
         ],
-        NO_SUBAGENTS,
+        NO_ASKER_READS,
       ),
     ).toEqual([
       {
@@ -85,8 +86,8 @@ describe("listWaitingThreads", () => {
   });
 
   it("names the subagent that asked the newest Request", () => {
-    const subagents = new Map([
-      ["s-1", [buildSubagent({ id: "agent-1", description: "Explore the auth module" })]],
+    const askerReads = new Map([
+      ["s-1", buildSubagent({ id: "agent-1", description: "Explore the auth module" })],
     ]);
     expect(
       listWaitingThreads(
@@ -100,24 +101,41 @@ describe("listWaitingThreads", () => {
             ],
           }),
         ],
-        subagents,
+        askerReads,
       ).map((thread) => thread.body),
     ).toEqual(["Explore the auth module asks: Run git push? +1 more waiting"]);
   });
 
-  it('names a subagent whose record is not there "A subagent"', () => {
-    const otherSubagents = new Map([["s-1", [buildSubagent({ id: "agent-2" })]]]);
+  it('names "A subagent" when the read of the asking subagent found no record of it', () => {
     const session = buildSession({
       id: "s-1",
       title: "Fix the login bug",
       openRequests: [buildCommandRequest("r-1", "git push", "agent-1")],
     });
-    expect(listWaitingThreads([session], NO_SUBAGENTS)[0]?.body).toBe(
+    const notFound = new Map([["s-1", undefined]]);
+    const otherSubagent = new Map([["s-1", buildSubagent({ id: "agent-2" })]]);
+
+    expect(listWaitingThreads([session], notFound)[0]?.body).toBe("A subagent asks: Run git push?");
+    expect(listWaitingThreads([session], otherSubagent)[0]?.body).toBe(
       "A subagent asks: Run git push?",
     );
-    expect(listWaitingThreads([session], otherSubagents)[0]?.body).toBe(
-      "A subagent asks: Run git push?",
-    );
+  });
+
+  it("leaves the body out while the asking subagent is still being read, and still lists the thread", () => {
+    expect(
+      listWaitingThreads(
+        [
+          buildSession({
+            id: "s-1",
+            title: "Fix the login bug",
+            openRequests: [buildCommandRequest("r-1", "git push", "agent-1")],
+          }),
+        ],
+        NO_ASKER_READS,
+      ),
+    ).toEqual([
+      { sessionId: "s-1", title: "Fix the login bug", body: null, openRequestIds: ["r-1"] },
+    ]);
   });
 
   it("lists a thread parked on a question, with its first question as its body", () => {
@@ -149,7 +167,7 @@ describe("listWaitingThreads", () => {
     expect(
       listWaitingThreads(
         [buildSession({ id: "s-1", title: "Save drafts", openRequests: [question] })],
-        NO_SUBAGENTS,
+        NO_ASKER_READS,
       ),
     ).toEqual([
       {
@@ -159,5 +177,30 @@ describe("listWaitingThreads", () => {
         openRequestIds: ["r-1"],
       },
     ]);
+  });
+});
+
+describe("listAskingSubagents", () => {
+  it("lists the subagent that asked each thread's newest Request, and leaves out the other threads", () => {
+    expect(
+      listAskingSubagents([
+        buildSession({
+          id: "s-1",
+          openRequests: [
+            buildCommandRequest("r-1", "ls", "agent-1"),
+            buildCommandRequest("r-2", "git push", "agent-2"),
+          ],
+        }),
+        // The newest Request is the session's own agent's.
+        buildSession({
+          id: "s-2",
+          openRequests: [
+            buildCommandRequest("r-3", "ls", "agent-3"),
+            buildCommandRequest("r-4", "pnpm test"),
+          ],
+        }),
+        buildSession({ id: "s-3" }),
+      ]),
+    ).toEqual([{ sessionId: "s-1", subagentId: "agent-2" }]);
   });
 });

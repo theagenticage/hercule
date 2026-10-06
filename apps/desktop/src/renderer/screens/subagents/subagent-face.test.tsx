@@ -1,12 +1,12 @@
 /**
- * Tests `SubagentFace` and its seed: a subagent's look follows its session
- * and its id, and its face never moves.
+ * Tests `SubagentFace` and the agents' face seeds: a subagent's look
+ * follows its session and its id, and its face never moves.
  */
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Subagent } from "@hercule/contract";
 import { buildLook } from "../../faces";
-import { SubagentFace, buildSubagentFaceSeed, buildSubagentLook } from "./subagent-face";
+import { SubagentFace, buildAgentFaceSeed, buildSubagentLook } from "./subagent-face";
 
 const SUBAGENT: Subagent = {
   sessionId: "ses_1",
@@ -16,9 +16,13 @@ const SUBAGENT: Subagent = {
   toolCalls: 0,
 };
 
-describe("buildSubagentFaceSeed", () => {
-  it("joins the session id and the subagent id", () => {
-    expect(buildSubagentFaceSeed("ses_1", "toolu_a")).toBe("ses_1:toolu_a");
+describe("buildAgentFaceSeed", () => {
+  it("joins the session id and the subagent id for a subagent", () => {
+    expect(buildAgentFaceSeed("ses_1", "toolu_a")).toBe("ses_1:toolu_a");
+  });
+
+  it("is the session id alone for the session's own agent", () => {
+    expect(buildAgentFaceSeed("ses_1", undefined)).toBe("ses_1");
   });
 });
 

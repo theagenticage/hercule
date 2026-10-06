@@ -1,10 +1,16 @@
 /**
- * Tests `dropClosedRequestDrafts`, which drops the drafts of Requests the
+ * Tests `changeRequestDraft`, which changes the draft of one Request, and
+ * `dropClosedRequestDrafts`, which drops the drafts of Requests the
  * controller has closed.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionRequest } from "@hercule/contract";
-import { dropClosedRequestDrafts } from "./request-drafts";
+import {
+  EMPTY_REQUEST_DRAFT,
+  changeRequestDraft,
+  dropClosedRequestDrafts,
+  type RequestDraft,
+} from "./request-drafts";
 
 const buildRequest = (requestId: string): SessionRequest => ({
   requestId,
@@ -12,6 +18,34 @@ const buildRequest = (requestId: string): SessionRequest => ({
   kind: "command_approval",
   decisions: ["allow", "deny"],
   detail: { command: "ls" },
+});
+
+describe("changeRequestDraft", () => {
+  it("starts an untouched Request from the empty draft", () => {
+    const drafts = { requests: new Map<string, RequestDraft>() };
+
+    const changed = changeRequestDraft(drafts, "r-1", (draft) => ({ ...draft, answered: true }));
+
+    expect(changed.requests.get("r-1")).toEqual({ ...EMPTY_REQUEST_DRAFT, answered: true });
+    expect(drafts.requests.size).toBe(0);
+  });
+
+  it("changes the draft already there, and keeps the other drafts and fields as they were", () => {
+    const other: RequestDraft = { ...EMPTY_REQUEST_DRAFT, shownQuestionIndex: 2 };
+    const drafts = {
+      shownRequestId: "r-2",
+      requests: new Map<string, RequestDraft>([
+        ["r-1", { ...EMPTY_REQUEST_DRAFT, answered: true }],
+        ["r-2", other],
+      ]),
+    };
+
+    const changed = changeRequestDraft(drafts, "r-1", (draft) => ({ ...draft, answered: false }));
+
+    expect(changed.requests.get("r-1")).toEqual(EMPTY_REQUEST_DRAFT);
+    expect(changed.requests.get("r-2")).toBe(other);
+    expect(changed.shownRequestId).toBe("r-2");
+  });
 });
 
 describe("dropClosedRequestDrafts", () => {

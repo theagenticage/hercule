@@ -242,7 +242,7 @@ export {
   findSubagentBrief,
   splitSubagentBrief,
   type BriefSource,
-  type SplitSubagentBrief,
+  type SubagentBriefSplit,
   type SubagentBrief,
 } from "./subagents/brief";
 export {
@@ -264,26 +264,12 @@ export {
 } from "./subagents/describe";
 export {
   buildRequestDock,
+  describeRequestAsker,
   type RequestAsker,
+  type RequestAskerWords,
   type RequestDockState,
 } from "./subagents/request-dock";
 export { buildSpawnLines, findSpawnedSubagents, type SpawnLine } from "./subagents/spawn-lines";
-export {
-  CLOSED_SIDE_PANE,
-  DEFAULT_SIDE_PANE_WIDTH,
-  MIN_MAIN_PANE_WIDTH,
-  MIN_SIDE_PANE_WIDTH,
-  SIDE_PANE_SURFACES,
-  closeSurface,
-  fitSidePaneWidth,
-  openSurface,
-  parseSidePaneLayout,
-  parseSidePaneWidth,
-  togglePane,
-  toggleSurface,
-  type SidePaneLayout,
-  type SidePaneSurface,
-} from "./subagents/side-pane";
 export { describeStatusCard, type StatusCardText } from "./subagents/status-card";
 export { describeSubagentTally, summarizeSubagents, type SubagentTally } from "./subagents/tally";
 export {
@@ -378,7 +364,12 @@ export {
 export { decideRelatedReads } from "./threads/related-reads";
 export { findOldestOpenRequest } from "./threads/oldest-request";
 export { formatRequestQuestion } from "./threads/request-question";
-export { dropClosedRequestDrafts } from "./threads/request-drafts";
+export {
+  changeRequestDraft,
+  dropClosedRequestDrafts,
+  EMPTY_REQUEST_DRAFT,
+  type RequestDraft,
+} from "./threads/request-drafts";
 export {
   buildQuestionAnswers,
   buildQuestionDraft,
@@ -410,6 +401,22 @@ export {
   listWorkspaceThreads,
   type ThreadTab,
 } from "./threads/siblings";
+export {
+  CLOSED_SIDE_PANE,
+  DEFAULT_SIDE_PANE_WIDTH,
+  MIN_MAIN_PANE_WIDTH,
+  MIN_SIDE_PANE_WIDTH,
+  SIDE_PANE_SURFACES,
+  closeSidePaneSurface,
+  fitSidePaneWidth,
+  openSidePaneSurface,
+  parseSidePaneLayout,
+  parseSidePaneWidth,
+  toggleSidePane,
+  toggleSidePaneSurface,
+  type SidePaneLayout,
+  type SidePaneSurface,
+} from "./threads/side-pane";
 export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
 export { pickProjectHue, type ProjectTone } from "./threads/tone";
 export { buildBranchField, type BranchField } from "./threads/branch-menu";
@@ -456,7 +463,12 @@ export {
   showsTurnDivider,
 } from "./threads/turn-divider";
 export { buildTurns, mayBeRunningTurn, type ThreadItem, type ThreadTurn } from "./threads/turns";
-export { listWaitingThreads, type WaitingThread } from "./threads/waiting-threads";
+export {
+  listAskingSubagents,
+  listWaitingThreads,
+  type AskingSubagent,
+  type WaitingThread,
+} from "./threads/waiting-threads";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

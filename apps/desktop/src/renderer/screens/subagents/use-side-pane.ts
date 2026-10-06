@@ -26,18 +26,33 @@ import {
 const WIDTH_KEY = "hercule.side-pane.width";
 
 const layouts = new Map<string, SidePaneLayout>();
-const listeners = new Set<() => void>();
 
-const subscribe = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
+/**
+ * Returns a set of listeners with a `subscribe` for `useSyncExternalStore`
+ * and a `notify` that calls them all. The layout and the width each keep
+ * their own, so a layout change never makes the width's readers read
+ * `localStorage` again.
+ */
+const createListeners = (): {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly notify: () => void;
+} => {
+  const listeners = new Set<() => void>();
+  return {
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    notify: () => {
+      for (const listener of listeners) listener();
+    },
   };
 };
 
-const notifyListeners = (): void => {
-  for (const listener of listeners) listener();
-};
+const layoutListeners = createListeners();
+const widthListeners = createListeners();
 
 /** Returns the layout of the side pane of the thread `sessionId`, closed until the user opens it. */
 const readLayout = (sessionId: string): SidePaneLayout =>
@@ -69,19 +84,19 @@ export function useHasSidePane(): boolean {
 
 /**
  * Returns the layout of the side pane of the thread `sessionId`, and a
- * function that changes it, such as `changeLayout(togglePane)`. Renders the
+ * function that changes it, such as `changeLayout(toggleSidePane)`. Renders the
  * caller again when the layout changes.
  */
 export function useSidePaneLayout(sessionId: string): {
   readonly layout: SidePaneLayout;
   readonly changeLayout: (change: (layout: SidePaneLayout) => SidePaneLayout) => void;
 } {
-  const layout = useSyncExternalStore(subscribe, () => readLayout(sessionId));
+  const layout = useSyncExternalStore(layoutListeners.subscribe, () => readLayout(sessionId));
   return {
     layout,
     changeLayout: (change) => {
       layouts.set(sessionId, change(readLayout(sessionId)));
-      notifyListeners();
+      layoutListeners.notify();
     },
   };
 }
@@ -92,7 +107,7 @@ export function useSidePaneLayout(sessionId: string): {
  * keeps the width it had, which loses nothing that matters.
  */
 export function useSidePaneWidth(): readonly [number, (width: number) => void] {
-  const width = useSyncExternalStore(subscribe, readWidth);
+  const width = useSyncExternalStore(widthListeners.subscribe, readWidth);
   return [
     width,
     (next) => {
@@ -101,7 +116,7 @@ export function useSidePaneWidth(): readonly [number, (width: number) => void] {
       } catch {
         // The storage is full or denied, so the pane keeps the width it had.
       }
-      notifyListeners();
+      widthListeners.notify();
     },
   ];
 }
@@ -109,5 +124,5 @@ export function useSidePaneWidth(): readonly [number, (width: number) => void] {
 /** Forgets every thread's side pane layout, so each test starts with every pane closed. */
 export const forgetSidePaneLayouts = (): void => {
   layouts.clear();
-  notifyListeners();
+  layoutListeners.notify();
 };

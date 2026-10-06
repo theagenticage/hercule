@@ -103,6 +103,20 @@ describe("buildSpawnLines", () => {
     });
   });
 
+  it("counts the subagents below it that wait on the user when there are several", () => {
+    const [a] = buildSpawnLines(
+      [A],
+      SUBAGENTS,
+      [buildRequest("r-1", "a1x"), buildRequest("r-2", "a2")],
+      NOW,
+    );
+
+    expect(a?.notes).toEqual([
+      { text: "3 below", hue: "muted" },
+      { text: "2 wait on you", hue: "attn" },
+    ]);
+  });
+
   it("marks a subagent that asks itself as waiting on you, without saying one below waits", () => {
     const [a] = buildSpawnLines([A], SUBAGENTS, [buildRequest("r-1", "a")], NOW);
 

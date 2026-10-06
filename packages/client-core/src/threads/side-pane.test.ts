@@ -1,19 +1,19 @@
 /**
- * Tests the side pane's layout changes and width rules: `openSurface`,
- * `closeSurface`, `togglePane`, `toggleSurface`, `parseSidePaneLayout`,
+ * Tests the side pane's layout changes and width rules: `openSidePaneSurface`,
+ * `closeSidePaneSurface`, `toggleSidePane`, `toggleSidePaneSurface`, `parseSidePaneLayout`,
  * `parseSidePaneWidth` and `fitSidePaneWidth`.
  */
 import { describe, expect, it } from "vitest";
 import {
   CLOSED_SIDE_PANE,
   DEFAULT_SIDE_PANE_WIDTH,
-  closeSurface,
+  closeSidePaneSurface,
   fitSidePaneWidth,
-  openSurface,
+  openSidePaneSurface,
   parseSidePaneLayout,
   parseSidePaneWidth,
-  togglePane,
-  toggleSurface,
+  toggleSidePane,
+  toggleSidePaneSurface,
   type SidePaneLayout,
 } from "./side-pane";
 
@@ -25,26 +25,26 @@ const OPEN_ON_SUBAGENTS: SidePaneLayout = {
 
 describe("side pane layout changes", () => {
   it("opens a surface, adding its tab once", () => {
-    expect(openSurface(CLOSED_SIDE_PANE, "subagents")).toEqual(OPEN_ON_SUBAGENTS);
-    expect(openSurface(OPEN_ON_SUBAGENTS, "subagents")).toEqual(OPEN_ON_SUBAGENTS);
+    expect(openSidePaneSurface(CLOSED_SIDE_PANE, "subagents")).toEqual(OPEN_ON_SUBAGENTS);
+    expect(openSidePaneSurface(OPEN_ON_SUBAGENTS, "subagents")).toEqual(OPEN_ON_SUBAGENTS);
   });
 
   it("closes the pane when the last tab closes", () => {
-    expect(closeSurface(OPEN_ON_SUBAGENTS, "subagents")).toEqual(CLOSED_SIDE_PANE);
+    expect(closeSidePaneSurface(OPEN_ON_SUBAGENTS, "subagents")).toEqual(CLOSED_SIDE_PANE);
   });
 
   it("opens a pane with no tabs on Subagents, and keeps the tabs when it closes", () => {
-    expect(togglePane(CLOSED_SIDE_PANE)).toEqual(OPEN_ON_SUBAGENTS);
-    expect(togglePane(OPEN_ON_SUBAGENTS)).toEqual({ ...OPEN_ON_SUBAGENTS, open: false });
-    expect(togglePane({ ...OPEN_ON_SUBAGENTS, open: false })).toEqual(OPEN_ON_SUBAGENTS);
+    expect(toggleSidePane(CLOSED_SIDE_PANE)).toEqual(OPEN_ON_SUBAGENTS);
+    expect(toggleSidePane(OPEN_ON_SUBAGENTS)).toEqual({ ...OPEN_ON_SUBAGENTS, open: false });
+    expect(toggleSidePane({ ...OPEN_ON_SUBAGENTS, open: false })).toEqual(OPEN_ON_SUBAGENTS);
   });
 
   it("hides the pane when the surface is already shown, and shows it otherwise", () => {
-    expect(toggleSurface(OPEN_ON_SUBAGENTS, "subagents")).toEqual({
+    expect(toggleSidePaneSurface(OPEN_ON_SUBAGENTS, "subagents")).toEqual({
       ...OPEN_ON_SUBAGENTS,
       open: false,
     });
-    expect(toggleSurface(CLOSED_SIDE_PANE, "subagents")).toEqual(OPEN_ON_SUBAGENTS);
+    expect(toggleSidePaneSurface(CLOSED_SIDE_PANE, "subagents")).toEqual(OPEN_ON_SUBAGENTS);
   });
 });
 

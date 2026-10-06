@@ -10,9 +10,9 @@ import {
   MIN_MAIN_PANE_WIDTH,
   MIN_SIDE_PANE_WIDTH,
   SIDE_PANE_SURFACES,
-  closeSurface,
+  closeSidePaneSurface,
   fitSidePaneWidth,
-  openSurface,
+  openSidePaneSurface,
   type SidePaneSurface,
 } from "@hercule/client-core";
 import { CloseIcon } from "../../icons/close";
@@ -46,7 +46,7 @@ const nameSurface = (surface: SidePaneSurface): string =>
 /**
  * Renders the side pane of the thread `sessionId` while its layout is open:
  * the tabs of its surfaces, a "+" that opens another, a button that closes
- * the pane, and the shown surface. `subagentId` is the subagent whose page
+ * the pane, and the shown surface. `openSubagentId` is the subagent whose page
  * is open in the main pane, whose row the Subagents surface marks.
  *
  * The user resizes the pane by dragging its left edge, or with the arrow
@@ -62,10 +62,10 @@ const nameSurface = (surface: SidePaneSurface): string =>
  */
 export function SidePane({
   sessionId,
-  subagentId,
+  openSubagentId,
 }: {
   readonly sessionId: string;
-  readonly subagentId: string | undefined;
+  readonly openSubagentId: string | undefined;
 }): JSX.Element {
   const { layout, changeLayout } = useSidePaneLayout(sessionId);
   const [width, storeWidth] = useSidePaneWidth();
@@ -153,17 +153,17 @@ export function SidePane({
                 selected={surface === shown}
                 panelId={panelId}
                 onSelect={() => {
-                  changeLayout((current) => openSurface(current, surface));
+                  changeLayout((current) => openSidePaneSurface(current, surface));
                 }}
                 onClose={() => {
-                  changeLayout((current) => closeSurface(current, surface));
+                  changeLayout((current) => closeSidePaneSurface(current, surface));
                 }}
               />
             ))}
           </div>
           <SurfacePicker
             onPick={(surface) => {
-              changeLayout((current) => openSurface(current, surface));
+              changeLayout((current) => openSidePaneSurface(current, surface));
             }}
           />
         </div>
@@ -180,7 +180,7 @@ export function SidePane({
         </button>
       </header>
       <div id={panelId} role="tabpanel" aria-label={nameSurface(shown)} className="side-pane-panel">
-        <SubagentsSurface sessionId={sessionId} subagentId={subagentId} />
+        <SubagentsSurface sessionId={sessionId} openSubagentId={openSubagentId} />
       </div>
     </aside>
   );

@@ -3,15 +3,20 @@
  * above it the pager line that pages between the open Requests and names
  * the agent that asked (spec 17 §Thread, Subagents).
  */
-import type { CSSProperties, JSX } from "react";
+import type { JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
-import { buildRequestDock, type RequestDockState } from "@hercule/client-core";
+import {
+  buildRequestDock,
+  describeRequestAsker,
+  type RequestAsker,
+  type RequestDockState,
+} from "@hercule/client-core";
 import { sessionQuery, subagentsQuery } from "../../app/queries";
 import { useShownRequestId } from "../../app/thread-drafts";
-import { buildLook } from "../../faces";
+import { buildHueStyle, buildLook } from "../../faces";
 import { ChevronRightIcon } from "../../icons/chevron-right";
-import { buildSubagentFaceSeed } from "../subagents/subagent-face";
+import { buildAgentFaceSeed } from "../subagents/subagent-face";
 import { RequestDock } from "./dock";
 import "./agent-request-dock.css";
 
@@ -84,9 +89,7 @@ function RequestPager({
   const { asker, position, previousRequestId, nextRequestId } = dock;
   const hue =
     asker?.kind === "subagent"
-      ? ({
-          "--hue": `var(--hue-${buildLook(buildSubagentFaceSeed(sessionId, asker.subagentId)).hue})`,
-        } as CSSProperties)
+      ? buildHueStyle(buildLook(buildAgentFaceSeed(sessionId, asker.subagentId)).hue)
       : undefined;
   return (
     <div className={REQUEST_PAGER_CLASS} style={hue}>
@@ -105,16 +108,9 @@ function RequestPager({
           </PagerButton>
         </span>
       )}
-      {asker === null ? null : asker.kind === "main agent" ? (
-        <span className="request-pager-who">The main agent asks</span>
-      ) : (
+      {asker === null ? null : <AskerWords asker={asker} />}
+      {asker?.kind === "subagent" ? (
         <>
-          <span className="request-pager-who">
-            <span className="request-pager-name">{asker.name}</span> asks
-            {asker.parentName === null ? null : (
-              <span className="request-pager-parent"> · subagent of {asker.parentName}</span>
-            )}
-          </span>
           <span className="spacer" />
           <Link
             to="/threads/$sessionId/subagents/$subagentId"
@@ -124,8 +120,30 @@ function RequestPager({
             Open subagent <span aria-hidden="true">›</span>
           </Link>
         </>
-      )}
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Renders which agent asks the shown Request, as `describeRequestAsker`
+ * words it: a subagent's name in its hue, then "asks" and whose subagent it
+ * is, or "The main agent asks".
+ */
+function AskerWords({ asker }: { readonly asker: RequestAsker }): JSX.Element {
+  const words = describeRequestAsker(asker);
+  return (
+    <span className="request-pager-who">
+      {words.name === null ? null : (
+        <>
+          <span className="request-pager-name">{words.name}</span>{" "}
+        </>
+      )}
+      {words.asks}
+      {words.parent === null ? null : (
+        <span className="request-pager-parent"> · {words.parent}</span>
+      )}
+    </span>
   );
 }
 

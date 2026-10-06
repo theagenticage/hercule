@@ -1,9 +1,10 @@
 /**
  * Tests `buildRequestDock`, which decides which open Request the dock shows,
- * the pager around it, and who asked it.
+ * the pager around it, and who asked it, and `describeRequestAsker`, which
+ * words the asker.
  */
 import { describe, expect, it } from "vitest";
-import { buildRequestDock } from "./request-dock";
+import { buildRequestDock, describeRequestAsker } from "./request-dock";
 import { buildRequest, buildSubagent } from "./subagents.testing";
 
 const PARENT = buildSubagent({ id: "a", description: "Check the iDEAL redirect" });
@@ -112,5 +113,37 @@ describe("buildRequestDock", () => {
 
   it("returns null on a subagent's page when none of the open Requests is its own", () => {
     expect(buildRequestDock([MAIN, FROM_PARENT], SUBAGENTS, "a1", undefined)).toBeNull();
+  });
+});
+
+describe("describeRequestAsker", () => {
+  it("words the main agent as one phrase, with no name", () => {
+    expect(describeRequestAsker({ kind: "main agent" })).toEqual({
+      name: null,
+      asks: "The main agent asks",
+      parent: null,
+    });
+  });
+
+  it("words a subagent by its name and the agent that started it", () => {
+    expect(
+      describeRequestAsker({
+        kind: "subagent",
+        subagentId: "a1",
+        name: "Read the docs",
+        parentName: "the main agent",
+      }),
+    ).toEqual({ name: "Read the docs", asks: "asks", parent: "subagent of the main agent" });
+  });
+
+  it("leaves out the parent while the asker's record has not been read", () => {
+    expect(
+      describeRequestAsker({
+        kind: "subagent",
+        subagentId: "a1",
+        name: "A subagent",
+        parentName: null,
+      }),
+    ).toEqual({ name: "A subagent", asks: "asks", parent: null });
   });
 });

@@ -26,7 +26,7 @@ export const findSubagentBrief = (turns: readonly ThreadTurn[]): SubagentBrief |
 };
 
 /** A subagent's transcript blocks with its brief taken out of them. */
-export interface SplitSubagentBrief {
+export interface SubagentBriefSplit {
   /** The brief's text, or undefined while the first turn has not been read or holds no user message. */
   readonly brief: string | undefined;
   /** The blocks to draw below the brief card: every block but the brief's own message. */
@@ -45,7 +45,7 @@ export interface SplitSubagentBrief {
  * This is `findSubagentBrief` for a screen that draws blocks rather than
  * turns.
  */
-export const splitSubagentBrief = (blocks: readonly ThreadBlock[]): SplitSubagentBrief => {
+export const splitSubagentBrief = (blocks: readonly ThreadBlock[]): SubagentBriefSplit => {
   const first = blocks[0];
   if (first?.kind !== "user" || first.text === "") return { brief: undefined, blocks };
   return { brief: first.text, blocks: blocks.slice(1) };

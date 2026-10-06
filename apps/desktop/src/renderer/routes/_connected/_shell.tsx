@@ -1,7 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type JSX } from "react";
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useMatch, useNavigate } from "@tanstack/react-router";
-import { decideThreadPose, isSeatedPose, listWaitingThreads } from "@hercule/client-core";
+import {
+  decideThreadPose,
+  isSeatedPose,
+  listAskingSubagents,
+  listWaitingThreads,
+} from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
@@ -98,35 +103,37 @@ function ShellLayout(): JSX.Element {
   }, []);
 
   // A notification names the subagent that asked a thread's newest Request,
-  // so the shell reads the subagents of those threads only, once per asker.
+  // so the shell reads that subagent for those threads only, once per asker.
   // The shell holds no `subagent` topic of its own (spec 17 §What subagents
   // cost).
-  const askers = threads.flatMap((session) => {
-    const subagentId = session.openRequests.at(-1)?.subagentId;
-    return subagentId === undefined ? [] : [{ sessionId: session.id, subagentId }];
-  });
+  const askers = listAskingSubagents(threads);
   const askerReads = useQueries({
     queries: askers.map(({ sessionId, subagentId }) =>
-      askingSubagentQuery(controller.client, sessionId, subagentId),
+      askingSubagentQuery(controller.client, queryClient, sessionId, subagentId),
     ),
+    // `useQueries` returns one result per query, in the order of `queries`,
+    // so each result is paired with its asker here, once, and everything
+    // after looks the read up by session id. A read still running leaves its
+    // thread out; one that failed names the subagent "A subagent".
+    combine: (results) =>
+      new Map(
+        askers.flatMap(({ sessionId }, index) => {
+          const read = results[index];
+          return read === undefined || read.isPending ? [] : [[sessionId, read.data] as const];
+        }),
+      ),
   });
-  const subagentsBySession = new Map(
-    askers.flatMap(({ sessionId }, index) => {
-      const subagents = askerReads[index]?.data;
-      return subagents === undefined ? [] : [[sessionId, subagents] as const];
-    }),
-  );
 
   // Main shows the badge and the notifications, and keeps which it has
-  // shown, but only the page holds the thread list. Main shows a Request's
-  // notification once and never changes its words, so the list waits until
-  // every asking subagent has been read: sent sooner, its notification would
-  // read "A subagent asks:" for good. A read that fails sends the list with
-  // that name.
-  const namesPending = askerReads.some((read) => read.isPending);
+  // shown, but only the page holds the thread list. The list is sent as soon
+  // as it changes, so the badge and the removal of answered Requests'
+  // notifications never wait. A thread whose asking subagent is still being
+  // read goes without a body, and main holds back only that thread's new
+  // notification until the name is read: main never changes a notification's
+  // words, so one sent sooner would read "A subagent asks:" for good.
   useSendOnChange(
-    namesPending ? null : listWaitingThreads(threads, subagentsBySession),
-    (waiting) => (waiting === null ? Promise.resolve() : bridge.waitingThreads.set(waiting)),
+    listWaitingThreads(threads, askerReads),
+    (waiting) => bridge.waitingThreads.set(waiting),
     "Could not update the dock badge and the threads' notifications:",
   );
 

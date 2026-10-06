@@ -17,7 +17,7 @@ import {
   isSubagentWaiting,
   splitSubagentBrief,
 } from "@hercule/client-core";
-import type { SessionRequest, Subagent } from "@hercule/contract";
+import type { Session, Subagent } from "@hercule/contract";
 import {
   providersQuery,
   runnersQuery,
@@ -29,12 +29,14 @@ import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
 import { SpawnLines } from "../subagents/spawn-lines";
-import { buildSubagentFaceSeed } from "../subagents/subagent-face";
+import { buildAgentFaceSeed } from "../subagents/subagent-face";
 import { useAgentLive } from "./use-agent-live";
 import "./thread.css";
 
 /** What a subagent's page draws of its own, from the records the page reads. */
 export interface SubagentParts {
+  /** Drawn in the thread header's place: the crumb down to the subagent. */
+  readonly header: ReactNode;
   /** Drawn above the transcript's first block: the brief card. */
   readonly lead: ReactNode;
   /** Drawn in the composer's place: the status card and what sits on it. */
@@ -43,13 +45,13 @@ export interface SubagentParts {
 
 /**
  * Returns what a subagent's page draws of its own, for `subagent`, given the
- * session's subagents, its open Requests, and the brief the subagent's parent
- * gave it (undefined while the transcript does not hold it yet).
+ * thread's session, its subagents, and the brief the subagent's parent gave
+ * it (undefined while the transcript does not hold it yet).
  */
 export type DrawSubagentParts = (records: {
+  readonly session: Session;
   readonly subagent: Subagent;
   readonly subagents: readonly Subagent[];
-  readonly openRequests: readonly SessionRequest[];
   readonly brief: string | undefined;
 }) => SubagentParts;
 
@@ -59,11 +61,11 @@ export type DrawSubagentParts = (records: {
  *
  * - The session's own agent's page has the header, the transcript and the
  *   composer.
- * - A subagent's page has the header, its transcript, with faces seeded
+ * - A subagent's page has its transcript, with faces seeded
  *   `<sessionId>:<subagentId>`, and the parts `drawSubagentParts` returns:
- *   the brief above the transcript and the status card in the composer's
- *   place. The subagent's page passes them in, so they load with that page
- *   rather than with the thread's.
+ *   its own header, the brief above the transcript and the status card in
+ *   the composer's place. The subagent's page passes them in, so they load
+ *   with that page rather than with the thread's.
  *
  * Under each work stretch that started subagents, the transcript draws
  * their spawn lines, which link to their pages.
@@ -144,15 +146,13 @@ export function AgentPage({
   const subagentParts =
     subagent === undefined || drawSubagentParts === undefined
       ? undefined
-      : drawSubagentParts({ subagent, subagents, openRequests: session.openRequests, brief });
+      : drawSubagentParts({ session, subagent, subagents, brief });
 
   return (
     <>
-      <ThreadHeader sessionId={sessionId} subagentId={subagentId} />
+      {subagentParts === undefined ? <ThreadHeader sessionId={sessionId} /> : subagentParts.header}
       <Transcript
-        faceSeed={
-          subagentId === undefined ? sessionId : buildSubagentFaceSeed(sessionId, subagentId)
-        }
+        faceSeed={buildAgentFaceSeed(sessionId, subagentId)}
         blocks={blocks}
         lead={subagentParts?.lead}
         pose={

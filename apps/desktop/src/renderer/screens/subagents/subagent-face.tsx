@@ -8,13 +8,17 @@ import { decideSubagentPose } from "@hercule/client-core";
 import type { Subagent } from "@hercule/contract";
 import { Face, buildLook, type Look } from "../../faces";
 
-/** Builds the seed of the face of the subagent `subagentId` of the session `sessionId`. */
-export const buildSubagentFaceSeed = (sessionId: string, subagentId: string): string =>
-  `${sessionId}:${subagentId}`;
+/**
+ * Builds the seed of the face of one agent of the session `sessionId`: the
+ * session id itself for the session's own agent, when `subagentId` is
+ * undefined, else `<sessionId>:<subagentId>`.
+ */
+export const buildAgentFaceSeed = (sessionId: string, subagentId: string | undefined): string =>
+  subagentId === undefined ? sessionId : `${sessionId}:${subagentId}`;
 
 /** Builds the look of `subagent`'s face, whose hue also tints its crumb and its brief. */
 export const buildSubagentLook = (subagent: Subagent): Look =>
-  buildLook(buildSubagentFaceSeed(subagent.sessionId, subagent.id));
+  buildLook(buildAgentFaceSeed(subagent.sessionId, subagent.id));
 
 /**
  * Renders `subagent`'s face, `size` CSS pixels square, in the pose its status

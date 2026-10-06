@@ -39,6 +39,22 @@ declare module "react" {
   }
 }
 
+/** The size of each row's face, in pixels. */
+const FACE_SIZE = 22;
+
+/** The left padding of a top-level row, in pixels. */
+const ROW_PADDING = 10;
+
+/** How much further right each level of the tree starts, in pixels. */
+const INDENT_STEP = 20;
+
+/**
+ * How far from the left edge of a top-level row's nested list the rail runs,
+ * in pixels: under the middle of the row's face, less about half the rail's
+ * 1.5px width so the rail is centred there. Each level adds `INDENT_STEP`.
+ */
+const RAIL_X = ROW_PADDING + FACE_SIZE / 2 - 1;
+
 /** What every row of the tree reads besides its own subagent. */
 interface TreeContext {
   readonly client: HerculeClient;
@@ -47,7 +63,7 @@ interface TreeContext {
   readonly subagents: readonly Subagent[];
   readonly openRequests: readonly SessionRequest[];
   /** The subagent whose page is open in the main pane, whose row is marked current. */
-  readonly subagentId: string | undefined;
+  readonly openSubagentId: string | undefined;
   readonly watchScreen: ScreenWatcher;
 }
 
@@ -102,7 +118,7 @@ const useScreenWatcher = (scrollerRef: RefObject<HTMLElement | null>): ScreenWat
 
 /**
  * Renders the Subagents surface of the session `sessionId`. With no
- * subagents yet, it says so and what will appear. `subagentId` is the
+ * subagents yet, it says so and what will appear. `openSubagentId` is the
  * subagent whose page is open in the main pane; undefined on the thread's
  * own page.
  *
@@ -111,10 +127,10 @@ const useScreenWatcher = (scrollerRef: RefObject<HTMLElement | null>): ScreenWat
  */
 export function SubagentsSurface({
   sessionId,
-  subagentId,
+  openSubagentId,
 }: {
   readonly sessionId: string;
-  readonly subagentId: string | undefined;
+  readonly openSubagentId: string | undefined;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
@@ -142,7 +158,7 @@ export function SubagentsSurface({
     sessionId,
     subagents,
     openRequests: session.openRequests,
-    subagentId,
+    openSubagentId,
     watchScreen,
   };
   return (
@@ -168,7 +184,9 @@ export function SubagentsSurface({
           <button
             type="button"
             className="btn btn--quiet btn--sm subagents-stop"
-            disabled={stopAgent.isPending}
+            // Not `disabled`, so the button keeps the focus while the stop
+            // is on its way. `stop` ignores a second click meanwhile.
+            aria-disabled={stopAgent.isPending || undefined}
             onClick={() => {
               stopAgent.stop();
             }}
@@ -235,7 +253,7 @@ function SubagentRow({
   // blocks another row's Stop nor shows its failure there.
   const stopAgent = useStopAgent(client, sessionId);
   const stop = describeSubagentStop(subagent, subagents);
-  const current = subagent.id === context.subagentId;
+  const current = subagent.id === context.openSubagentId;
   const name = nameSubagent(subagent);
 
   return (
@@ -243,9 +261,9 @@ function SubagentRow({
       <div
         ref={rowRef}
         className={current ? "subagent-row is-on" : "subagent-row"}
-        style={{ paddingLeft: 10 + depth * 20 }}
+        style={{ paddingLeft: ROW_PADDING + depth * INDENT_STEP }}
       >
-        <SubagentFace subagent={subagent} waiting={waiting} size={22} />
+        <SubagentFace subagent={subagent} waiting={waiting} size={FACE_SIZE} />
         <span className="subagent-row-body">
           <span className="subagent-row-top">
             {/* The link's box covers the whole row, so a click anywhere on
@@ -282,7 +300,9 @@ function SubagentRow({
             type="button"
             className="btn btn--quiet btn--sm subagents-stop subagent-row-stop"
             title={stop.title}
-            disabled={stopAgent.isPending}
+            // Not `disabled`, so the button keeps the focus while the stop
+            // is on its way. `stop` ignores a second click meanwhile.
+            aria-disabled={stopAgent.isPending || undefined}
             onClick={() => {
               stopAgent.stop(subagent.id);
             }}
@@ -295,7 +315,7 @@ function SubagentRow({
       {children.length === 0 ? null : (
         <ul
           className="subagents-tree subagents-tree--nested"
-          style={{ "--rail-x": `${String(20 + depth * 20)}px` }}
+          style={{ "--rail-x": `${String(RAIL_X + depth * INDENT_STEP)}px` }}
         >
           {children.map((child) => (
             <SubagentRow key={child.subagent.id} node={child} depth={depth + 1} context={context} />

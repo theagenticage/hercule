@@ -38,6 +38,13 @@ describe("the requests of the renderer-to-main channels", () => {
         { sessionId: "s-1", title: "A thread", body: "Run git push?", openRequestIds: "r-1" },
       ],
     },
+    // A thread waits only while a Request is open, so its list of open
+    // Requests is never empty. A body still being worked out is null.
+    {
+      name: "waitingThreads.set",
+      valid: [{ sessionId: "s-1", title: "A thread", body: null, openRequestIds: ["r-1"] }],
+      invalid: [{ sessionId: "s-1", title: "A thread", body: null, openRequestIds: [] }],
+    },
     { name: "localController.find", valid: undefined, invalid: "now" },
     { name: "localController.start", valid: undefined, invalid: "now" },
     {

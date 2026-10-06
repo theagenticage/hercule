@@ -1,13 +1,12 @@
 /**
  * Tests the thread header against the stubbed controller: the tabs of the
  * thread's workspace, how each tab ends, the link to a new thread in the
- * workspace, the two buttons that are drawn but do nothing yet, the crumb
- * on a subagent's page, and the side pane's toggle.
+ * workspace, the two buttons that are drawn but do nothing yet, and the side
+ * pane's toggle, on the thread's page and on a subagent's page.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Subagent } from "@hercule/contract";
 import {
   buildSidebarHandlers,
   buildThreadHandlers,
@@ -142,59 +141,6 @@ describe("the thread header", () => {
     }
     expect(calls).toHaveLength(sent);
     expect(readLinkNames()).toEqual(["Bump the Bun pin, idle", "New thread in this workspace"]);
-  });
-});
-
-describe("the header of a subagent's page", () => {
-  /** A subagent that `FIXTURE_SUBAGENT` started. */
-  const CHILD: Subagent = {
-    id: "agent-2",
-    sessionId: FIXTURE_THREAD_IDS.flaky,
-    parentSubagentId: FIXTURE_SUBAGENT.id,
-    description: "Read the retry test",
-    status: "running",
-    toolCalls: 0,
-    startedAt: "2026-09-10T09:04:00.000Z",
-  };
-
-  /** Renders the header of the page of the subagent `subagentId` of the delegating thread. */
-  const renderSubagentHeader = (subagentId: string) =>
-    renderThreadPart(
-      ({ sessionId }) => <ThreadHeader sessionId={sessionId} subagentId={subagentId} />,
-      { thread: { ...THREAD_FIXTURES.delegating, subagents: [FIXTURE_SUBAGENT, CHILD] } },
-    );
-
-  it("draws the crumb from the thread down through the ancestors, each linking to its page", async () => {
-    await renderSubagentHeader(CHILD.id);
-
-    const crumbs = screen.getByRole("navigation", { name: "Subagent of" });
-    const links = within(crumbs).getAllByRole("link");
-    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
-      ["Fix flaky webhook tests", `/threads/${FIXTURE_THREAD_IDS.flaky}`],
-      [
-        "Find the flaky webhook test",
-        `/threads/${FIXTURE_THREAD_IDS.flaky}/subagents/${FIXTURE_SUBAGENT.id}`,
-      ],
-    ]);
-    // The subagent itself comes last, not as a link, with its tag.
-    const here = crumbs.querySelector(".subagent-crumb-here");
-    expect(here?.textContent).toBe("Read the retry testsubagent");
-    expect(here?.getAttribute("style")).toMatch(/--hue: var\(--hue-/);
-    expect(here?.querySelector("svg")).not.toBeNull();
-    // The thread's tabs, Open in editor and More belong to the thread's own page.
-    expect(screen.queryByRole("navigation", { name: "Threads in this workspace" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
-  });
-
-  it("draws a subagent the thread started with the thread as its only earlier crumb", async () => {
-    await renderSubagentHeader(FIXTURE_SUBAGENT.id);
-
-    const crumbs = screen.getByRole("navigation", { name: "Subagent of" });
-    expect(
-      within(crumbs)
-        .getAllByRole("link")
-        .map((link) => link.textContent),
-    ).toEqual(["Fix flaky webhook tests"]);
   });
 });
 

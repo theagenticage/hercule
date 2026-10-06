@@ -1,7 +1,7 @@
 /**
- * The thread's transcript: the blocks `buildThreadBlocks` returns, in the
- * region "Transcript", virtualized, opening at the bottom and following new
- * content while the reader is there.
+ * One agent's transcript, the session's own agent's or a subagent's: the
+ * blocks `buildThreadBlocks` returns, in the region "Transcript", virtualized,
+ * opening at the bottom and following new content while the reader is there.
  *
  * Only the blocks in and near the visible part are mounted. Each mounted block
  * is measured (`measureElement`), and an empty spacer stands in for the
@@ -94,9 +94,8 @@ const USER_LINE_HEIGHT = 21.7;
 /**
  * Estimates a block's height before it is measured, from the book's
  * measurements: the lines of text, a meta line 20.4px with its margin, a
- * divider or a note 17.4px, a bubble's padding and time 40px, and the
- * spawn lines under a divider. Only blocks
- * that were never mounted use the estimate.
+ * divider or a note 17.4px, a bubble's padding and time 40px, and the spawn
+ * lines under a divider. Only blocks that were never mounted use the estimate.
  */
 const estimateBlockHeight = (block: ThreadBlock): number => {
   switch (block.kind) {
@@ -111,11 +110,12 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
     case "live":
       return 42.8;
     case "work": {
-      // The divider, then a spawn line per subagent the stretch started,
-      // after their 22px margin. A subagent whose record is not read yet
-      // draws no line, so such a stretch is estimated a little tall.
+      // The divider, then a spawn line per subagent the stretch started. The
+      // lines sit in the divider's item, so the block gap above them is a
+      // margin. A subagent whose record is not read yet draws no line, so
+      // such a stretch is estimated a little tall.
       const spawned = block.items.filter((item) => item.kind === "subagent").length;
-      return spawned === 0 ? 17.4 : 17.4 + 22 + SPAWN_LINE_HEIGHT_ESTIMATE * spawned;
+      return spawned === 0 ? 17.4 : 17.4 + BLOCK_GAP + SPAWN_LINE_HEIGHT_ESTIMATE * spawned;
     }
     case "ending":
     case "waiting":
@@ -159,8 +159,8 @@ export interface TranscriptHandle {
  *
  * - `faceSeed` seeds the agent's face: the session id for the session's own
  *   agent, `<sessionId>:<subagentId>` for a subagent.
- * - `blocks` are the thread's blocks in reading order.
- * - `pose` is the thread's pose, drawn on the block that holds the working face.
+ * - `blocks` are the agent's blocks in reading order.
+ * - `pose` is the agent's pose, drawn on the block that holds the working face.
  * - `describeAgent` returns the start of an agent message's meta line, such
  *   as "Claude Code · Opus 5.5", for the model slug the message ran on.
  * - `attachOpenParagraph` attaches the element an open message's paragraph
@@ -170,7 +170,7 @@ export interface TranscriptHandle {
  *   `null` until the composer is mounted, and while the composer is shrunk:
  *   the space then stays as the expanded composer needs it, so shrinking
  *   changes nothing the reader can scroll to.
- * - `onBottomChange` is told when the reader reaches the bottom, or leaves
+ * - `onBottomChange` is called when the reader reaches the bottom, or leaves
  *   it. The transcript opens at the bottom.
  * - `lead`, when set, is drawn above the first block, and scrolls with the
  *   blocks.

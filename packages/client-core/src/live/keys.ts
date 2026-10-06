@@ -85,6 +85,18 @@ export const queryKeys = {
   /** Every page of one session's subagents, whatever the sort; without it, the prefix of all of them. */
   subagents: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["subagents"] : ["subagents", sessionId],
+  /**
+   * The subagent `subagentId` of one session, read to name it in the
+   * notification of the Request it asked. A subagent's description never
+   * changes, so this read needs no refetch when the `subagent` topic nudges:
+   * the key sits outside the `subagents` prefix on purpose, so a push never
+   * reaches it.
+   */
+  askingSubagent: (sessionId: string, subagentId: string): LiveQueryKey => [
+    "asking-subagent",
+    sessionId,
+    subagentId,
+  ],
   /** A session's input history, including queued inputs. The composer's queued list reads it. */
   inputs: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["inputs"] : ["inputs", sessionId],

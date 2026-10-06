@@ -4,10 +4,10 @@
  * surface, spec 17 §Thread, Subagents).
  */
 import type { JSX } from "react";
-import { Link, useRouteContext } from "@tanstack/react-router";
+import { Link, linkOptions, useRouteContext } from "@tanstack/react-router";
 import { describeStatusCard, isSubagentWaiting, readErrorMessage } from "@hercule/client-core";
 import type { SessionRequest, Subagent } from "@hercule/contract";
-import { useDurationText } from "../../app/age-clock";
+import { ageClock, useDurationText } from "../../app/age-clock";
 import { StopIcon } from "../../icons/stop";
 import { useStopAgent } from "../use-stop-agent";
 import { SubagentFace } from "./subagent-face";
@@ -25,8 +25,8 @@ const FACE_SIZE = 26;
  * - who started it, its tokens, and that it takes no messages;
  * - Open parent, to the page of the subagent that started it, or to the
  *   thread's own page when the session's own agent started it;
- * - Stop while it runs, which also stops every subagent below it. A Stop
- *   that fails says why under the words.
+ * - Stop while it runs, which also stops every subagent below it. When a
+ *   Stop fails, the card shows the error's message under the words.
  *
  * `subagents` are the session's subagents and `openRequests` its open
  * Requests. Stop is how the user turns down a subagent's question, so the
@@ -48,10 +48,16 @@ export function StatusCard({
     subagent.status === "running",
     (now) => describeStatusCard(subagent, subagents, openRequests, new Date(now)).headline,
   );
-  // Everything but the headline does not depend on the time, so any moment
-  // will do, and reading the clock while rendering would make the render
-  // impure.
-  const card = describeStatusCard(subagent, subagents, openRequests, new Date(subagent.startedAt));
+  // The headline above keeps itself current. The rest of the card does not
+  // change with the time, so it is read at the age clock's last reading.
+  const card = describeStatusCard(subagent, subagents, openRequests, ageClock.readNow());
+  const parentLink =
+    subagent.parentSubagentId === undefined
+      ? linkOptions({ to: "/threads/$sessionId", params: { sessionId: subagent.sessionId } })
+      : linkOptions({
+          to: "/threads/$sessionId/subagents/$subagentId",
+          params: { sessionId: subagent.sessionId, subagentId: subagent.parentSubagentId },
+        });
 
   return (
     <div className="composer-card status-card">
@@ -69,23 +75,9 @@ export function StatusCard({
           </span>
         )}
       </span>
-      {subagent.parentSubagentId === undefined ? (
-        <Link
-          to="/threads/$sessionId"
-          params={{ sessionId: subagent.sessionId }}
-          className="btn btn--sm"
-        >
-          Open parent
-        </Link>
-      ) : (
-        <Link
-          to="/threads/$sessionId/subagents/$subagentId"
-          params={{ sessionId: subagent.sessionId, subagentId: subagent.parentSubagentId }}
-          className="btn btn--sm"
-        >
-          Open parent
-        </Link>
-      )}
+      <Link {...parentLink} className="btn btn--sm">
+        Open parent
+      </Link>
       {card.stop === null ? null : (
         <button
           type="button"

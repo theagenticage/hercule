@@ -12,8 +12,10 @@
  */
 import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
 import {
+  EMPTY_REQUEST_DRAFT,
+  changeRequestDraft,
   dropClosedRequestDrafts,
-  type QuestionDraft,
+  type RequestDraft,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionRequest } from "@hercule/contract";
@@ -22,20 +24,6 @@ import type { SessionRequest } from "@hercule/contract";
 export interface ComposerDraft {
   readonly message: string;
   readonly picks: ThreadPicks;
-}
-
-/** What the user has done so far on one open Request. */
-export interface RequestDraft {
-  /**
-   * Whether an answer was sent. It stays true until the controller closes the
-   * Request, so the Request is not answered twice, and turns false again when
-   * sending fails.
-   */
-  readonly answered: boolean;
-  /** The answers to a `question` Request typed so far; null until the user gives one. */
-  readonly question: QuestionDraft | null;
-  /** The question of a `question` Request that is shown, from 0. */
-  readonly shownQuestionIndex: number;
 }
 
 interface ThreadDrafts {
@@ -50,12 +38,6 @@ interface ThreadDraftsStore {
 }
 
 const EMPTY_COMPOSER_DRAFT: ComposerDraft = { message: "", picks: {} };
-
-const EMPTY_REQUEST_DRAFT: RequestDraft = {
-  answered: false,
-  question: null,
-  shownQuestionIndex: 0,
-};
 
 const ThreadDraftsContext = createContext<ThreadDraftsStore | null>(null);
 
@@ -133,11 +115,7 @@ export function useRequestDraft(
   return [
     store.drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT,
     (change) => {
-      store.update((drafts) => {
-        const requests = new Map(drafts.requests);
-        requests.set(requestId, change(drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT));
-        return { ...drafts, requests };
-      });
+      store.update((drafts) => changeRequestDraft(drafts, requestId, change));
     },
   ];
 }

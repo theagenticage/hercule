@@ -23,10 +23,9 @@ import {
 } from "@hercule/client-core/testing";
 import { buildSession, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
+  buildAgentStreamTopic,
+  buildAgentTapTopic,
   buildSessionStreamTopic,
-  buildSessionTapTopic,
-  buildSubagentStreamTopic,
-  buildSubagentTapTopic,
   GITHUB_CONNECTION_TYPE,
   type Connection,
   type Input,
@@ -1052,12 +1051,6 @@ export interface LiveStub {
   readonly drop: () => void;
 }
 
-/** Returns the stream topic of the session's own agent, or of its subagent `subagentId`. */
-const buildStreamTopic = (sessionId: string, subagentId: string | undefined): string =>
-  subagentId === undefined
-    ? buildSessionStreamTopic(sessionId)
-    : buildSubagentStreamTopic(sessionId, subagentId);
-
 /**
  * The live connections the current test's app built. A connection keeps its
  * keepalive and its reconnects running even after the app that started it
@@ -1109,7 +1102,7 @@ const buildTestContext = async (
     },
     pushStreamRows: (sessionId, rows, subagentId) => {
       const last = rows.at(-1);
-      readSocket().push(buildStreamTopic(sessionId, subagentId), {
+      readSocket().push(buildAgentStreamTopic(sessionId, subagentId), {
         _tag: "delta",
         ...(last === undefined ? {} : { cursor: String(last.position) }),
         items: rows,
@@ -1117,16 +1110,12 @@ const buildTestContext = async (
     },
     pushEmptyReplay: (sessionId, subagentId) => {
       const socket = readSocket();
-      const topic = buildStreamTopic(sessionId, subagentId);
+      const topic = buildAgentStreamTopic(sessionId, subagentId);
       const { cursor } = socket.findSubscription(topic);
       socket.push(topic, { _tag: "delta", cursor, items: [] });
     },
     pushTaps: (sessionId, taps, subagentId) => {
-      const topic =
-        subagentId === undefined
-          ? buildSessionTapTopic(sessionId)
-          : buildSubagentTapTopic(sessionId, subagentId);
-      readSocket().push(topic, { _tag: "delta", items: taps });
+      readSocket().push(buildAgentTapTopic(sessionId, subagentId), { _tag: "delta", items: taps });
     },
     resetStream: (sessionId) => {
       const socket = readSocket();

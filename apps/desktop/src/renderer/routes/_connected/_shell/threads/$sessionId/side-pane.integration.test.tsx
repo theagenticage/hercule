@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { togglePane } from "@hercule/client-core";
+import { toggleSidePane } from "@hercule/client-core";
 import type { Subagent } from "@hercule/contract";
 import {
   buildSidebarHandlers,
@@ -154,11 +154,33 @@ const openApp = async (path: string) => {
   return { ...app, calls };
 };
 
-/** Opens the side pane of the delegating thread, as the header's toggle does. */
+/**
+ * Opens the side pane of the delegating thread, as the header's toggle does.
+ * It changes the layout directly rather than clicking the toggle, because
+ * this file tests the pane; `thread-header.test.tsx` tests the toggle's click.
+ */
 const openPane = (): void => {
   const { result } = renderHook(() => useSidePaneLayout(SESSION_ID));
   act(() => {
-    result.current.changeLayout(togglePane);
+    result.current.changeLayout(toggleSidePane);
+  });
+};
+
+/**
+ * Fakes `setTimeout` as well as `Date`, so the age clock's timer fires only
+ * when the test moves the clock, with no real wait. The app needs real timers
+ * while it loads, so they are faked only once it has. The focus event makes
+ * the clock clear the timer it set with the real `setTimeout` and set a faked
+ * one instead.
+ */
+const fakeClockTimers = (): void => {
+  vi.useFakeTimers({
+    now: Date.now(),
+    toFake: ["Date", "setTimeout", "clearTimeout"],
+    shouldClearNativeTimers: true,
+  });
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
   });
 };
 
@@ -324,31 +346,33 @@ describe("the thread's side pane", () => {
     await screen.findByRole("textbox");
     openPane();
     await findPane();
-    const readDuration = async (name: string) =>
-      (await findRow(name)).querySelector(".subagent-row-end")?.textContent;
+    // A synchronous read, because Testing Library's async queries wait on
+    // `setTimeout`, which never fires on its own once it is faked.
+    const readDuration = (name: string) =>
+      screen
+        .getByRole("link", { name })
+        .closest(".subagent-row")
+        ?.querySelector(".subagent-row-end")?.textContent;
 
-    expect(await readDuration("Find the flaky webhook test")).toBe("working ·1m 20s");
-    expect(await readDuration("List the webhook tests")).toBe("done ·30s");
+    expect(readDuration("Find the flaky webhook test")).toBe("working ·1m 20s");
+    expect(readDuration("List the webhook tests")).toBe("done ·30s");
 
-    // Only `Date` is faked, so the age clock's one timer runs in real time
-    // and reads the moved clock when it fires.
-    vi.setSystemTime(new Date("2026-09-10T09:05:10.000Z"));
-    await waitFor(
-      async () => {
-        expect(await readDuration("Find the flaky webhook test")).toBe("working ·1m 30s");
-      },
-      { timeout: 2_000 },
-    );
+    fakeClockTimers();
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(readDuration("Find the flaky webhook test")).toBe("working ·1m 30s");
 
     setVisibility("hidden");
-    vi.setSystemTime(new Date("2026-09-10T09:05:40.000Z"));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_200)));
-    expect(await readDuration("Find the flaky webhook test")).toBe("working ·1m 30s");
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(readDuration("Find the flaky webhook test")).toBe("working ·1m 30s");
 
     // Shown again, the duration catches up at once. An ended one never moves.
     setVisibility("visible");
-    expect(await readDuration("Find the flaky webhook test")).toBe("working ·2m 0s");
-    expect(await readDuration("List the webhook tests")).toBe("done ·30s");
+    expect(readDuration("Find the flaky webhook test")).toBe("working ·2m 0s");
+    expect(readDuration("List the webhook tests")).toBe("done ·30s");
   });
 
   it("stops counting a running subagent's duration while its row is scrolled out of view", async () => {
@@ -362,19 +386,18 @@ describe("the thread's side pane", () => {
     expect(readDuration(FIXTURE_SUBAGENT.id)).toBe("1m 20s");
     expect(readDuration(NESTED_SUBAGENT.id)).toBe("1m 0s");
 
-    reportOnScreen(await findRow("Find the flaky webhook test"), false);
-    vi.setSystemTime(new Date("2026-09-10T09:05:10.000Z"));
+    const row = await findRow("Find the flaky webhook test");
+    reportOnScreen(row, false);
+    fakeClockTimers();
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
     // The row still on screen shows the clock fired; the one off screen kept its text.
-    await waitFor(
-      () => {
-        expect(readDuration(NESTED_SUBAGENT.id)).toBe("1m 10s");
-      },
-      { timeout: 2_000 },
-    );
+    expect(readDuration(NESTED_SUBAGENT.id)).toBe("1m 10s");
     expect(readDuration(FIXTURE_SUBAGENT.id)).toBe("1m 20s");
 
     // Back in view, it catches up at once.
-    reportOnScreen(await findRow("Find the flaky webhook test"), true);
+    reportOnScreen(row, true);
     expect(readDuration(FIXTURE_SUBAGENT.id)).toBe("1m 30s");
   });
 });

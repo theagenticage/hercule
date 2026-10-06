@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, type QueryClient } from "@tanstack/react-query";
-import { invalidateWithoutCancelling } from "@hercule/client-core";
-import type { OpenRequest, Session, SessionRequest } from "@hercule/contract";
+import { invalidateWithoutCancelling, queryKeys } from "@hercule/client-core";
+import type { OpenRequest, Session, SessionRequest, Subagent } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
 import { projectsQuery, threadsQuery } from "../../app/queries";
 import {
@@ -473,7 +473,7 @@ describe("the threads waiting on the user", () => {
     });
   });
 
-  it("are sent once the subagent that asks is read, so its notification names it", async () => {
+  it("are sent at once when a subagent asks, and again with its name once it is read", async () => {
     const SUBAGENT_REQUEST: SessionRequest = {
       requestId: "req-3",
       itemId: "tool-3",
@@ -483,25 +483,38 @@ describe("the threads waiting on the user", () => {
       subagentId: "agent-1",
     };
     let threads = SIDEBAR_FIXTURE.threads;
+    let answerSubagents: () => void = () => undefined;
     const { calls, fake, live } = await startShell({
       handlers: {
         "GET /api/v1/sessions": () => ({ body: { items: threads } }),
-        [`GET /api/v1/sessions/${FIXTURE_THREAD_IDS.flaky}/subagents`]: {
-          body: {
-            items: [
-              {
-                id: "agent-1",
-                sessionId: FIXTURE_THREAD_IDS.flaky,
-                status: "running",
-                description: "Check the lint rules",
-                toolCalls: 2,
-                startedAt: "2026-09-10T09:04:30.000Z",
-              },
-            ],
-          },
-        },
+        // The read waits until the test answers it, so the test sees what is
+        // sent while the subagent's name is not known yet.
+        [`GET /api/v1/sessions/${FIXTURE_THREAD_IDS.flaky}/subagents`]: () =>
+          new Promise((resolve) => {
+            answerSubagents = () => {
+              resolve({
+                body: {
+                  items: [
+                    {
+                      id: "agent-1",
+                      sessionId: FIXTURE_THREAD_IDS.flaky,
+                      status: "running",
+                      description: "Check the lint rules",
+                      toolCalls: 2,
+                      startedAt: "2026-09-10T09:04:30.000Z",
+                    },
+                  ],
+                },
+              });
+            };
+          }),
       },
     });
+    const FLAKY_WAITING = {
+      sessionId: FIXTURE_THREAD_IDS.flaky,
+      title: "Fix flaky webhook tests",
+      openRequestIds: ["req-3"],
+    };
 
     threads = threads.map((thread) =>
       thread.id === FIXTURE_THREAD_IDS.flaky
@@ -511,22 +524,86 @@ describe("the threads waiting on the user", () => {
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
     });
+    // The badge counts the thread at once; its notification waits for a body.
     await waitFor(() => {
-      expect(fake.waitingThreadLists).toHaveLength(2);
+      expect(fake.waitingThreadLists.at(-1)).toEqual([
+        RUNBOOK_WAITING,
+        { ...FLAKY_WAITING, body: null },
+      ]);
     });
-    expect(fake.waitingThreadLists.at(-1)).toEqual([
-      RUNBOOK_WAITING,
-      {
-        sessionId: FIXTURE_THREAD_IDS.flaky,
-        title: "Fix flaky webhook tests",
-        body: "Check the lint rules asks: Run pnpm lint?",
-        openRequestIds: ["req-3"],
-      },
-    ]);
+
+    // Another thread's Request answered elsewhere does not wait for the name.
+    threads = threads.map((thread) =>
+      thread.id === FIXTURE_THREAD_IDS.runbook ? { ...thread, openRequests: [] } : thread,
+    );
+    act(() => {
+      live.pushInvalidation("session", [FIXTURE_THREAD_IDS.runbook]);
+    });
+    await waitFor(() => {
+      expect(fake.waitingThreadLists.at(-1)).toEqual([{ ...FLAKY_WAITING, body: null }]);
+    });
+
+    act(() => {
+      answerSubagents();
+    });
+    await waitFor(() => {
+      expect(fake.waitingThreadLists.at(-1)).toEqual([
+        { ...FLAKY_WAITING, body: "Check the lint rules asks: Run pnpm lint?" },
+      ]);
+    });
     // Only the thread whose newest Request a subagent asked is read.
     expect(
       calls.filter((call) => call.method === "GET" && call.path.endsWith("/subagents")),
     ).toHaveLength(1);
+  });
+
+  it("name a subagent from the thread's cached subagent list without reading it again", async () => {
+    let threads = SIDEBAR_FIXTURE.threads;
+    const { calls, context, fake, live } = await startShell({
+      handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
+    });
+    // The thread was opened before, which cached its subagents.
+    context.queryClient.setQueryData(queryKeys.subagents(FIXTURE_THREAD_IDS.flaky), [
+      {
+        id: "agent-1",
+        sessionId: FIXTURE_THREAD_IDS.flaky,
+        status: "running",
+        description: "Check the lint rules",
+        toolCalls: 2,
+        startedAt: "2026-09-10T09:04:30.000Z",
+      },
+    ] satisfies Subagent[]);
+
+    threads = threads.map((thread) =>
+      thread.id === FIXTURE_THREAD_IDS.flaky
+        ? {
+            ...thread,
+            openRequests: [
+              {
+                requestId: "req-3",
+                itemId: "tool-3",
+                kind: "command_approval",
+                decisions: ["allow", "deny"],
+                detail: { command: "pnpm lint" },
+                subagentId: "agent-1",
+              },
+            ],
+          }
+        : thread,
+    );
+    act(() => {
+      live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
+    });
+
+    await waitFor(() => {
+      expect(fake.waitingThreadLists.at(-1)?.at(-1)).toEqual({
+        sessionId: FIXTURE_THREAD_IDS.flaky,
+        title: "Fix flaky webhook tests",
+        body: "Check the lint rules asks: Run pnpm lint?",
+        openRequestIds: ["req-3"],
+      });
+    });
+    expect(calls.some((call) => call.path.endsWith("/subagents"))).toBe(false);
   });
 
   it("are not sent again when a change leaves them as they were", async () => {

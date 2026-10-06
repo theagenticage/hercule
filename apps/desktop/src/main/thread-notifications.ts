@@ -69,14 +69,19 @@ export class ThreadNotifications extends Context.Service<
      * - the badge counts the threads;
      * - a notification is removed once its Request is no longer open,
      *   wherever the Request was answered;
-     * - a thread whose newest Request the last list did not hold has a new
+     * - a thread whose newest Request main has not heard of has a new
      *   Request: its old notification is removed, and a new one shows while
      *   the window is not focused. A user who has the window in front sees
      *   the thread wait in the sidebar;
-     * - a thread whose newest Request the last list already held shows
-     *   nothing new. That includes a thread whose newest Request was
+     * - a thread whose newest Request main has heard of in the last list
+     *   shows nothing new. That includes a thread whose newest Request was
      *   answered while older ones stay open: the user has already been told
-     *   about those.
+     *   about those;
+     * - a thread with a new Request but no body yet keeps its old
+     *   notification, and its new Request counts as new until a list gives
+     *   the body. The page leaves the body out while it is still working out
+     *   the words, and main shows a notification's words once and never
+     *   changes them.
      *
      * The first list after signing in shows no notification, so that
      * launching the app or signing in does not repeat every thread that
@@ -115,9 +120,12 @@ export const makeThreadNotificationsLayer = (
       // starts from the stored token instead, because its Sign Out shows
       // before the page loads.
       let signedIn = false;
-      // The last list of waiting threads since the user signed in, or null
-      // before the first one.
-      let lastWaiting: ReadonlyArray<WaitingThread> | null = null;
+      // The Requests main has dealt with, by the session id of their thread,
+      // for the threads of the last list since the user signed in, or null
+      // before the first list. A Request is dealt with once main has shown
+      // its notification or decided not to; it is left out while its
+      // thread's body is null, so its notification can still show.
+      let heardOfRequestIds: Map<string, Set<string>> | null = null;
 
       const closeThreadNotification = (sessionId: string): void => {
         shown.get(sessionId)?.notification.close();
@@ -125,7 +133,8 @@ export const makeThreadNotificationsLayer = (
       };
 
       const showThreadNotification = (
-        { sessionId, title, body }: WaitingThread,
+        { sessionId, title }: WaitingThread,
+        body: string,
         requestId: string,
       ): void => {
         const notification = new platform.Notification({ title, body });
@@ -154,7 +163,7 @@ export const makeThreadNotificationsLayer = (
             if (next === signedIn) return;
             signedIn = next;
             if (next) return platform.askToNotify();
-            lastWaiting = null;
+            heardOfRequestIds = null;
             platform.setBadgeCount(0);
             for (const sessionId of [...shown.keys()]) closeThreadNotification(sessionId);
           }),
@@ -162,35 +171,37 @@ export const makeThreadNotificationsLayer = (
           Effect.gen(function* () {
             if (!signedIn) return;
             platform.setBadgeCount(threads.length);
-            const previous = lastWaiting;
-            lastWaiting = threads;
+            const previous = heardOfRequestIds;
+            const next = new Map(
+              threads.map((thread) => [thread.sessionId, new Set(thread.openRequestIds)]),
+            );
+            heardOfRequestIds = next;
+            // The first list after signing in shows no notification, so main
+            // counts every Request in it as heard of.
             if (previous === null) return;
-            const openRequestIds = new Map(
-              threads.map((thread) => [thread.sessionId, thread.openRequestIds]),
-            );
             for (const [sessionId, { requestId }] of [...shown]) {
-              if (openRequestIds.get(sessionId)?.includes(requestId) !== true) {
-                closeThreadNotification(sessionId);
-              }
+              if (next.get(sessionId)?.has(requestId) !== true) closeThreadNotification(sessionId);
             }
-            const previousRequestIds = new Map(
-              previous.map((thread) => [thread.sessionId, thread.openRequestIds]),
-            );
-            // A thread has a new Request when its newest one was not open
-            // before. Every list holds only threads with an open Request, so
-            // the newest is always there.
+            // A thread has a new Request when main has not heard of its
+            // newest one before.
             const opened = threads.flatMap((thread) => {
-              const newest = thread.openRequestIds.at(-1)!;
-              return previousRequestIds.get(thread.sessionId)?.includes(newest) === true
-                ? []
-                : [{ thread, newest }];
+              const [oldest, ...newer] = thread.openRequestIds;
+              const newest = newer.at(-1) ?? oldest;
+              if (previous.get(thread.sessionId)?.has(newest) === true) return [];
+              if (thread.body === null) {
+                next.get(thread.sessionId)?.delete(newest);
+                return [];
+              }
+              return [{ thread, body: thread.body, newest }];
             });
             // The new Request replaces the old notification even while the
             // window is focused, so no notification is left about an older
             // Request.
             for (const { thread } of opened) closeThreadNotification(thread.sessionId);
             if (opened.length === 0 || (yield* window.isFocused)) return;
-            for (const { thread, newest } of opened) showThreadNotification(thread, newest);
+            for (const { thread, body, newest } of opened) {
+              showThreadNotification(thread, body, newest);
+            }
           }),
       };
     }),

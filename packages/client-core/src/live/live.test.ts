@@ -851,6 +851,14 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("subagent", []), [["subagents"]]);
   });
 
+  it("keys the read of an asking subagent outside the prefix a subagent push invalidates", () => {
+    const asker = queryKeys.askingSubagent("s1", "agent-1");
+    const [everySubagentList] = buildQueryKeys("subagent", []);
+
+    assert.deepStrictEqual(asker, ["asking-subagent", "s1", "agent-1"]);
+    assert.notDeepEqual(asker.slice(0, everySubagentList?.length), everySubagentList);
+  });
+
   it("keys each agent's transcript of a session apart, under the session's prefix", () => {
     const own = queryKeys.transcript("s1");
     const subagent = queryKeys.transcript("s1", "agent-1");

@@ -100,7 +100,7 @@ const useStoredValue = <T>(stored: StoredValue<T>): T =>
 
 /**
  * Returns the side pane's layout in this browser tab, and a function that
- * changes it, such as `changeLayout(togglePane)`.
+ * changes it, such as `changeLayout(toggleSidePane)`.
  */
 export function useSidePaneLayout(): {
   readonly layout: SidePaneLayout;

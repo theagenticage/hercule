@@ -19,7 +19,13 @@ import {
   readEveryPage,
   type HerculeClient,
 } from "@hercule/client-core";
-import { MAX_PAGE_LIMIT, type Input, type Runner, type Task } from "@hercule/contract";
+import {
+  MAX_PAGE_LIMIT,
+  type Input,
+  type Runner,
+  type Subagent,
+  type Task,
+} from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
 
 /**
@@ -386,39 +392,55 @@ export const transcriptQuery = (client: HerculeClient, sessionId: string, subage
   });
 
 /**
+ * Reads every subagent of the session `sessionId`, oldest first, following
+ * the cursor to the last page.
+ */
+const readSubagents = (client: HerculeClient, sessionId: string): Promise<readonly Subagent[]> =>
+  readEveryPage((page) =>
+    client.session.querySubagents({ params: { id: sessionId }, query: page }),
+  );
+
+/**
  * Reads every subagent of one session, oldest first. Every page is read,
  * because the Subagents surface draws the whole tree and a list cut short
  * would hide subagents without telling the user. While a thread is open, the
- * `subagent` live topic reads it again whenever one of its subagents changes.
+ * `subagent` live topic reads it again whenever one of its subagents changes
+ * (see `useSubagentsLive`).
  */
 export const subagentsQuery = (client: HerculeClient, sessionId: string) =>
   queryOptions({
     queryKey: queryKeys.subagents(sessionId),
-    queryFn: () =>
-      readEveryPage((page) =>
-        client.session.querySubagents({ params: { id: sessionId }, query: page }),
-      ),
+    queryFn: () => readSubagents(client, sessionId),
     retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
   });
 
 /**
- * Reads every subagent of the session `sessionId` once, for the shell to name
- * the subagent `subagentId` in the thread's notification when it asks the
- * user something.
+ * Reads the subagent `subagentId` of the session `sessionId`, for the shell
+ * to name it in the thread's notification when it asks the user something.
+ * The result is `undefined` when the session has no such subagent.
  *
- * The key holds the asking subagent, so a subagent that starts asking is
- * always read after it asked and is in the list. A subagent's name never
- * changes, so one read per asker is enough, and the result never goes
- * stale. The key sits outside `queryKeys.subagents`, where the `subagent`
- * live topic of an open thread would read it again on every change.
+ * There is no read of one subagent, so this reads the session's whole list
+ * and picks the subagent from it. A list of the session already cached that
+ * holds the subagent is used at once, with no read. The key holds the asking
+ * subagent, so a subagent that was not in a cached list is read after it
+ * asked, and is then in the list. A subagent's name never changes, so one
+ * read per asker is enough and the result never goes stale.
  */
-export const askingSubagentQuery = (client: HerculeClient, sessionId: string, subagentId: string) =>
+export const askingSubagentQuery = (
+  client: HerculeClient,
+  queryClient: QueryClient,
+  sessionId: string,
+  subagentId: string,
+) =>
   queryOptions({
-    queryKey: ["asking subagent", sessionId, subagentId],
-    queryFn: () =>
-      readEveryPage((page) =>
-        client.session.querySubagents({ params: { id: sessionId }, query: page }),
-      ),
+    queryKey: queryKeys.askingSubagent(sessionId, subagentId),
+    queryFn: () => readSubagents(client, sessionId),
+    initialData: () => {
+      const cached = queryClient.getQueryData(subagentsQuery(client, sessionId).queryKey);
+      return cached?.some((subagent) => subagent.id === subagentId) === true ? cached : undefined;
+    },
+    select: (subagents) => subagents.find((subagent) => subagent.id === subagentId),
     retry: isWorthRetrying,
     staleTime: Infinity,
   });

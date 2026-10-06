@@ -95,21 +95,30 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
 };
 
 /**
- * Subscribes to `topic` while the calling component is mounted, and
- * invalidates the query keys each push lists. For a topic only one screen
- * needs, such as `subagent` while a thread is open: the shell keeps its own
- * topics with `useLiveConnection`.
+ * Keeps the subagents of the thread `sessionId` current while the calling
+ * component is mounted: subscribes to the `subagent` topic, whose pushes
+ * invalidate the subagent lists they name, and reads the thread's list again
+ * once subscribed. Does nothing while `sessionId` is null.
+ *
+ * The topic is held only while a thread is open, because only a thread shows
+ * subagents (spec 17 §What subagents cost). The list is read again because
+ * pushes sent while the topic was not held were lost, and a subscription
+ * made after the live connection connected gets no read of its own from it
+ * (see `useLiveConnection`). A list cached by an earlier visit would
+ * otherwise stay as it was. The cost is one more read each time a thread
+ * opens, right after its loader read the list.
  */
-export const useLiveInvalidation = (
+export const useSubagentsLive = (
   live: Live,
   queryClient: QueryClient,
-  topic: MutableLiveTopic,
+  sessionId: string | null,
 ): void => {
-  useEffect(
-    () =>
-      live.subscribe(topic, (keys) => {
-        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
-      }),
-    [live, queryClient, topic],
-  );
+  useEffect(() => {
+    if (sessionId === null) return;
+    const unsubscribe = live.subscribe("subagent", (keys) => {
+      for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+    });
+    invalidateWithoutCancelling(queryClient, queryKeys.subagents(sessionId));
+    return unsubscribe;
+  }, [live, queryClient, sessionId]);
 };

@@ -61,20 +61,11 @@ interface SentSubmission {
 }
 
 /**
- * Checks that focus on `element` keeps the composer expanded. Focus inside
- * `composer` does, unless it is on `dock-mini` or the Request pager line:
- * there it keeps the composer at the size it has, `shrunk` or not, so a
- * user who answers or pages a Request from the shrunk composer keeps
- * reading the transcript.
+ * Checks that `element` is on one of the two lines the shrunk composer keeps
+ * of a Request: `dock-mini` or the Request pager line.
  */
-const keepsComposerExpanded = (
-  composer: Element,
-  element: EventTarget | null,
-  shrunk: boolean,
-): boolean =>
-  element instanceof Element &&
-  composer.contains(element) &&
-  (element.closest(`.dock-mini, .${REQUEST_PAGER_CLASS}`) === null || !shrunk);
+const isOnRequestLines = (element: Element): boolean =>
+  element.closest(`.dock-mini, .${REQUEST_PAGER_CLASS}`) !== null;
 
 /**
  * Checks that a click on `target` leaves the shrunk composer shrunk: it is
@@ -122,8 +113,8 @@ const keepsComposerShrunk = (target: EventTarget): boolean =>
  * - `shrunk` draws the composer as the book's `.is-scrolled`: narrower, one
  *   line high, with only the field, the Request's pager line and its
  *   one-line `dock-mini` left. The thread screen decides it.
- * - `onFocusChange` is told whether the focus is in the composer, which
- *   keeps the composer expanded. Focus on `dock-mini` or the pager line
+ * - `onFocusChange` is called with whether the focus is in the composer,
+ *   which keeps the composer expanded. Focus on `dock-mini` or the pager line
  *   keeps the size the composer has.
  * - `scrollTranscriptToBottom` is called when a message is sent, and when a
  *   click on the shrunk composer expands it.
@@ -164,8 +155,8 @@ export function ThreadComposer({
   const sendKey = ["thread-input", sessionId];
   const sending = useIsMutating({ mutationKey: sendKey }) > 0;
   // Whether the pointer went down on the shrunk composer, anywhere but on
-  // `dock-mini`'s answers or the pager line. By the time the click arrives, the focus it moved
-  // has already expanded the composer.
+  // `dock-mini`'s answers or the pager line. By the time the click arrives,
+  // the focus it moved has already expanded the composer.
   const expandOnClickRef = useRef(false);
 
   // No runner is local to the desktop app. A started thread names its own
@@ -244,13 +235,23 @@ export function ThreadComposer({
   };
   useSendOnMenuCommand(submit);
   const stop = (): void => {
+    // `useStopAgent` already ignores a second stop, but Stop is only
+    // `aria-disabled` while one is in flight, so it can still be clicked:
+    // such a click must not clear the send failure either.
     if (stopAgent.isPending) return;
     pendingSubmissions.clearFailure(sessionId);
     stopAgent.stop();
   };
 
+  // Focus inside the composer keeps it expanded. Focus on the Request lines
+  // keeps the size the composer has instead, so a user who answers or pages a
+  // Request from the shrunk composer keeps reading the transcript.
   const reportFocus = (event: FocusEvent<HTMLDivElement>, element: EventTarget | null): void => {
-    onFocusChange(keepsComposerExpanded(event.currentTarget, element, shrunk));
+    onFocusChange(
+      element instanceof Element &&
+        event.currentTarget.contains(element) &&
+        !(shrunk && isOnRequestLines(element)),
+    );
   };
 
   return (

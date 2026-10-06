@@ -43,13 +43,7 @@ import {
   splitStreamingText,
   type Live,
 } from "@hercule/client-core";
-import {
-  buildSessionStreamTopic,
-  buildSessionTapTopic,
-  buildSubagentStreamTopic,
-  buildSubagentTapTopic,
-  type TranscriptRow,
-} from "@hercule/contract";
+import { buildAgentStreamTopic, buildAgentTapTopic, type TranscriptRow } from "@hercule/contract";
 
 /**
  * A message the agent is still writing, as it attaches the element that its
@@ -228,9 +222,7 @@ export const useAgentLive = (
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(queryKey) ?? [];
     const unsubscribe = live.subscribe(
-      subagentId === undefined
-        ? buildSessionStreamTopic(sessionId)
-        : buildSubagentStreamTopic(sessionId, subagentId),
+      buildAgentStreamTopic(sessionId, subagentId),
       (delta) => {
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
@@ -258,11 +250,7 @@ export const useAgentLive = (
   useEffect(() => {
     if (live === null || !visible) return;
     skipOpenItems();
-    const topic =
-      subagentId === undefined
-        ? buildSessionTapTopic(sessionId)
-        : buildSubagentTapTopic(sessionId, subagentId);
-    const unsubscribe = live.subscribe(topic, (delta) => {
+    const unsubscribe = live.subscribe(buildAgentTapTopic(sessionId, subagentId), (delta) => {
       const delivery = decideTapDelivery(delta);
       if (delivery.kind === "gone") {
         unsubscribe();

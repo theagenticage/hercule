@@ -1,24 +1,19 @@
 import { useId, type JSX, type ReactNode } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, notFound, useRouteContext } from "@tanstack/react-router";
+import { Link, useRouteContext } from "@tanstack/react-router";
 import {
-  decideSubagentPose,
   decideThreadPose,
   decideThreadRowEnd,
   describePose,
   isJoinable,
-  isSubagentWaiting,
-  listSubagentAncestors,
   listThreadTabs,
-  nameSubagent,
-  togglePane,
+  toggleSidePane,
 } from "@hercule/client-core";
 import type { Project, Runner, Session } from "@hercule/contract";
 import {
   projectsQuery,
   runnersQuery,
   sessionQuery,
-  subagentsQuery,
   threadsQuery,
   workspacesQuery,
 } from "../../app/queries";
@@ -29,7 +24,6 @@ import { SidebarIcon } from "../../icons/sidebar";
 import { Mark } from "../../marks";
 import { AgeLabel } from "../age-label";
 import { pickProjectTint, ProjectTile } from "../project-tile";
-import { buildSubagentLook } from "../subagents/subagent-face";
 import { useHasSidePane, useSidePaneLayout } from "../subagents/use-side-pane";
 import "./thread-header.css";
 
@@ -39,33 +33,11 @@ import "./thread-header.css";
  */
 const SELECTED_TAB_PROPS = { className: "is-on" } as const;
 
-/** Marks a link as the current page only on its own path, not on a path below it. */
-const EXACT_PATH = { exact: true } as const;
-
 /**
- * Renders the header of one agent's page on the thread `sessionId`: the
- * session's own agent's page when `subagentId` is undefined, else that
- * subagent's. See `SessionAgentHeader` and `SubagentHeader`.
- */
-export function ThreadHeader({
-  sessionId,
-  subagentId,
-}: {
-  readonly sessionId: string;
-  /** The subagent whose page this is; undefined on the session's own agent's page. */
-  readonly subagentId?: string | undefined;
-}): JSX.Element {
-  return subagentId === undefined ? (
-    <SessionAgentHeader sessionId={sessionId} />
-  ) : (
-    <SubagentHeader sessionId={sessionId} subagentId={subagentId} />
-  );
-}
-
-/**
- * Renders the header of the session's own agent's page: pills that float
- * over the transcript, with no bar behind them, as the Bureau book's `.top`
- * draws them.
+ * Renders the header of the page of the thread `sessionId`'s own agent:
+ * pills that float over the transcript, with no bar behind them, as the
+ * Bureau book's `.top` draws them. A subagent's page draws its own header,
+ * `SubagentHeader`, which loads with that page.
  *
  * - The first pill holds the thread's project, one tab per thread of the
  *   thread's workspace, in the workspace's order, and a `+` that opens a new
@@ -82,7 +54,7 @@ export function ThreadHeader({
  * the cache before the thread screen renders, so nothing here waits in
  * practice.
  */
-function SessionAgentHeader({ sessionId }: { readonly sessionId: string }): JSX.Element {
+export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
@@ -117,7 +89,7 @@ function SessionAgentHeader({ sessionId }: { readonly sessionId: string }): JSX.
         )}
       </ThreadTabsPill>
       <span className="spacer" />
-      <PaneToggle sessionId={sessionId} />
+      <SidePaneToggle sessionId={sessionId} />
       <span className="pill">
         <button type="button" className="icon-btn" title="Open in editor" aria-disabled="true">
           <EditorIcon />
@@ -129,106 +101,15 @@ function SessionAgentHeader({ sessionId }: { readonly sessionId: string }): JSX.
 }
 
 /**
- * Renders the header of the page of the subagent `subagentId`: a crumb from
- * the thread down through the subagent's ancestors to the subagent, then the
- * side pane's toggle.
- *
- * - The thread and each ancestor are links to their pages.
- * - The subagent comes last, with its mark, its name and a "subagent" tag,
- *   tinted in its hue so the page cannot pass for a thread.
- *
- * When the header runs out of room, the thread and the ancestors shrink
- * first, down to about four letters each, then the subagent's name. The
- * thread's crumb is never wider than 260px and the subagent's than 340px.
- *
- * Fails with `notFound` when the session has no subagent `subagentId`.
- */
-function SubagentHeader({
-  sessionId,
-  subagentId,
-}: {
-  readonly sessionId: string;
-  readonly subagentId: string;
-}): JSX.Element {
-  const { controller } = useRouteContext({ from: "/_connected" });
-  const { client } = controller;
-  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
-  const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
-  const subagent = subagents.find((each) => each.id === subagentId);
-  // The subagent's page has already checked that the subagent exists, so
-  // this only guards the type. The router acts on a thrown `notFound`, which
-  // is a plain descriptor rather than an Error.
-  // eslint-disable-next-line @typescript-eslint/only-throw-error
-  if (subagent === undefined) throw notFound();
-  const pose = decideSubagentPose(
-    subagent.status,
-    isSubagentWaiting(subagent, session.openRequests),
-  );
-  const name = nameSubagent(subagent);
-
-  return (
-    <header className="top">
-      <nav className="pill subagent-crumbs" aria-label="Subagent of">
-        {/* Exact, so the router does not mark the thread's page as the
-            current one: the subagent's page sits under its path. */}
-        <Link
-          to="/threads/$sessionId"
-          params={{ sessionId }}
-          activeOptions={EXACT_PATH}
-          className="ptab"
-        >
-          <span className="ptab-title" title={session.title}>
-            {session.title}
-          </span>
-        </Link>
-        {listSubagentAncestors(subagent, subagents).map((ancestor) => (
-          <span key={ancestor.id} className="subagent-crumb">
-            <span className="subagent-crumb-sep" aria-hidden="true">
-              ›
-            </span>
-            <Link
-              to="/threads/$sessionId/subagents/$subagentId"
-              params={{ sessionId, subagentId: ancestor.id }}
-              className="ptab"
-            >
-              <span className="ptab-title" title={nameSubagent(ancestor)}>
-                {nameSubagent(ancestor)}
-              </span>
-            </Link>
-          </span>
-        ))}
-        <span className="subagent-crumb">
-          <span className="subagent-crumb-sep" aria-hidden="true">
-            ›
-          </span>
-          <span
-            className="ptab is-on subagent-crumb-here"
-            aria-current="page"
-            style={{ "--hue": `var(--hue-${buildSubagentLook(subagent).hue})` }}
-          >
-            {pose === "asleep" || pose === "away" ? null : <Mark state={pose} />}
-            <span className="ptab-title" title={name}>
-              {name}
-            </span>
-            <small className="subagent-tag">subagent</small>
-          </span>
-        </span>
-      </nav>
-      <span className="spacer" />
-      <PaneToggle sessionId={sessionId} />
-    </header>
-  );
-}
-
-/**
  * Renders the toggle for the side pane of the thread `sessionId`, pressed
- * while the pane is open. The icon is the sidebar's, mirrored, because the
+ * while the pane is open. The thread's header and a subagent's header both
+ * draw it. The icon is the sidebar's, mirrored, because the
  * pane opens on the right.
  *
  * Renders nothing outside the thread's screen, such as in the Office's
  * thread drawer, which has no side pane.
  */
-function PaneToggle({ sessionId }: { readonly sessionId: string }): JSX.Element | null {
+export function SidePaneToggle({ sessionId }: { readonly sessionId: string }): JSX.Element | null {
   const hasSidePane = useHasSidePane();
   const { layout, changeLayout } = useSidePaneLayout(sessionId);
   if (!hasSidePane) return null;
@@ -242,7 +123,7 @@ function PaneToggle({ sessionId }: { readonly sessionId: string }): JSX.Element 
         title={label}
         aria-pressed={layout.open}
         onClick={() => {
-          changeLayout(togglePane);
+          changeLayout(toggleSidePane);
         }}
       >
         <span className="pane-toggle-icon">

@@ -349,6 +349,58 @@ describe("ThreadNotifications", () => {
     ]);
   });
 
+  it("counts a thread whose body is not there yet, and shows its notification once a list gives the body", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([]),
+        notifications.setWaitingThreads([{ ...LOGIN, body: null }]),
+        notifications.setWaitingThreads([
+          { ...LOGIN, body: "Explore the auth module asks: Run the migration?" },
+        ]),
+        notifications.setWaitingThreads([
+          { ...LOGIN, body: "Explore the auth module asks: Run the migration?" },
+        ]),
+      ]),
+    );
+    expect(seen.badgeCounts).toEqual([0, 1, 1, 1]);
+    expect(describeNotifications(seen)).toEqual([
+      {
+        title: "Fix the login bug",
+        body: "Explore the auth module asks: Run the migration?",
+        state: "shown",
+      },
+    ]);
+  });
+
+  it("keeps a thread's old notification while the body of its new Request is not there yet", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([]),
+        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingThreads([
+          { ...LOGIN, body: null, openRequestIds: ["request-1", "request-3"] },
+        ]),
+      ]),
+    );
+    expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+      ["Run the migration?", "shown"],
+    ]);
+  });
+
+  it("shows no notification for a thread in the first list after signing in, even once its body comes", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([{ ...LOGIN, body: null }]),
+        notifications.setWaitingThreads([LOGIN]),
+      ]),
+    );
+    expect(seen.badgeCounts).toEqual([1, 1]);
+    expect(seen.notifications).toEqual([]);
+  });
+
   it("removes the notification of an answered newest Request, and shows none for the older Requests still open", async () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
