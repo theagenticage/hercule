@@ -5,7 +5,7 @@
  * compares the main pane with the app's thread screen (thread.tsx).
  *
  * First it stops every animation, so the waiting faces show the frame the
- * app draws. Then it makes exactly fourteen edits, each where the app draws
+ * app draws. Then it makes exactly fifteen edits, each where the app draws
  * something else than the book, for the reason given:
  *
  * 1. removes the provenance line, "Started 09:02 from ...": v1 does not
@@ -50,7 +50,11 @@
  *     system, The thread);
  * 14. sets the lip's branch in the UI face, where the book sets it in
  *     monospace: monospace is kept for code, commands and diffs (spec 17
- *     §Design system, item 2).
+ *     §Design system, item 2);
+ * 15. adds the side pane's toggle before Open in editor: the book has no
+ *     side pane, and the app's thread header draws its toggle there, with
+ *     the sidebar's icon mirrored because the pane opens on the right
+ *     (spec 17 §Thread, Subagents).
  *
  * Last, it scrolls the transcript back to where crew.js put it before the
  * edits changed its height: to its bottom, or on the page's
@@ -194,6 +198,23 @@ findElements(mini, ".btn", miniRows.length).forEach((button, index) => {
 
 // 14. The lip's branch in monospace.
 findElement(composer, ".lip .mono").classList.remove("mono");
+
+// 15. The side pane's toggle. The book has no `.pane-toggle-icon` rule, so
+// the mirror is an inline style. crew.js draws the icon in place of its
+// placeholder.
+const toggle = buildElement("button", "icon-btn", "");
+toggle.title = "Show the side pane";
+const toggleIcon = buildElement("span", "", "");
+toggleIcon.style.display = "inline-flex";
+toggleIcon.style.transform = "scaleX(-1)";
+const sidebarIcon = document.createElement("i");
+sidebarIcon.dataset.i = "sidebar";
+toggleIcon.append(sidebarIcon);
+toggle.append(toggleIcon);
+const togglePill = buildElement("span", "pill", "");
+togglePill.append(toggle);
+findElement(main, '.top .icon-btn[title="Open in editor"]').closest(".pill")!.before(togglePill);
+readCrew().drawPlaceholders(togglePill);
 
 transcript.scrollTop =
   document.documentElement.dataset.state === "scrolled"

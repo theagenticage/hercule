@@ -45,3 +45,8 @@
   -webkit-line-clamp: 3;
   overflow: hidden;
 }
+/* The base ring's 2px offset would touch the text, which fills the button
+   to its edges. 6px keeps the ring inside the card's padding. */
+.brief-card-text:focus-visible {
+  outline-offset: 6px;
+}

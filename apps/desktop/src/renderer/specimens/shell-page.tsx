@@ -72,6 +72,7 @@ import {
   sessionQuery,
   settingsQuery,
   startTasksQuery,
+  subagentsQuery,
   threadsQuery,
   transcriptQuery,
   userQuery,
@@ -239,6 +240,8 @@ const seedQueryCache = (
     queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, thread.session);
     queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, thread.transcript);
     queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
+    // The Bureau book draws a thread with no subagents.
+    queryClient.setQueryData(subagentsQuery(client, sessionId).queryKey, []);
   }
 };
 
