@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import type { Subagent } from "@hercule/contract";
 import { subagentsQuery, transcriptQuery } from "../../../../../../app/queries";
-import { AgentPage } from "../../../../../../screens/thread/agent-page";
+import { SubagentPage } from "../../../../../../screens/subagents/subagent-page";
 import "../../../../../../screens/thread/not-found.css";
 
 /**
@@ -37,18 +37,22 @@ export const Route = createFileRoute("/_connected/_shell/threads/$sessionId/suba
         transcriptQuery(controller.client, params.sessionId, params.subagentId),
       );
     },
-    component: SubagentPage,
+    component: SubagentPageRoute,
     notFoundComponent: SubagentNotFound,
   },
 );
 
-function SubagentPage(): JSX.Element {
+function SubagentPageRoute(): JSX.Element {
   const { sessionId, subagentId } = Route.useParams();
   // Keyed by the session id and the subagent id, for the reason the
   // thread's page gives: the page holds one agent's live tail and scroll
   // position, which must not carry over to another agent.
   return (
-    <AgentPage key={`${sessionId}/${subagentId}`} sessionId={sessionId} subagentId={subagentId} />
+    <SubagentPage
+      key={`${sessionId}/${subagentId}`}
+      sessionId={sessionId}
+      subagentId={subagentId}
+    />
   );
 }
 

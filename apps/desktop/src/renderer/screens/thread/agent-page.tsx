@@ -4,7 +4,7 @@
  * over its bottom. The agent is the session's own agent, or one of its
  * subagents. A subagent takes no messages, so its page has no composer.
  */
-import { useRef, useState, type JSX } from "react";
+import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { notFound, useRouteContext } from "@tanstack/react-router";
 import {
@@ -17,6 +17,7 @@ import {
   isSubagentWaiting,
   splitSubagentBrief,
 } from "@hercule/client-core";
+import type { SessionRequest, Subagent } from "@hercule/contract";
 import {
   providersQuery,
   runnersQuery,
@@ -27,14 +28,30 @@ import {
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
-import { AgentRequestDock } from "./agent-request-dock";
-import { BriefCard } from "../subagents/brief-card";
 import { SpawnLines } from "../subagents/spawn-lines";
-import { StatusCard } from "../subagents/status-card";
-import { TallyPill } from "../subagents/tally-pill";
 import { buildSubagentFaceSeed } from "../subagents/subagent-face";
 import { useAgentLive } from "./use-agent-live";
 import "./thread.css";
+
+/** What a subagent's page draws of its own, from the records the page reads. */
+export interface SubagentParts {
+  /** Drawn above the transcript's first block: the brief card. */
+  readonly lead: ReactNode;
+  /** Drawn in the composer's place: the status card and what sits on it. */
+  readonly bottom: ReactNode;
+}
+
+/**
+ * Returns what a subagent's page draws of its own, for `subagent`, given the
+ * session's subagents, its open Requests, and the brief the subagent's parent
+ * gave it (undefined while the transcript does not hold it yet).
+ */
+export type DrawSubagentParts = (records: {
+  readonly subagent: Subagent;
+  readonly subagents: readonly Subagent[];
+  readonly openRequests: readonly SessionRequest[];
+  readonly brief: string | undefined;
+}) => SubagentParts;
 
 /**
  * Renders the page of one agent of the thread `sessionId`: the session's own
@@ -42,9 +59,11 @@ import "./thread.css";
  *
  * - The session's own agent's page has the header, the transcript and the
  *   composer.
- * - A subagent's page has the header, the brief its parent gave it, its
- *   transcript, with faces seeded `<sessionId>:<subagentId>`, and its status
- *   card in the composer's place.
+ * - A subagent's page has the header, its transcript, with faces seeded
+ *   `<sessionId>:<subagentId>`, and the parts `drawSubagentParts` returns:
+ *   the brief above the transcript and the status card in the composer's
+ *   place. The subagent's page passes them in, so they load with that page
+ *   rather than with the thread's.
  *
  * Under each work stretch that started subagents, the transcript draws
  * their spawn lines, which link to their pages.
@@ -65,11 +84,19 @@ import "./thread.css";
 export function AgentPage({
   sessionId,
   subagentId,
-}: {
-  readonly sessionId: string;
-  /** The subagent whose page this is; undefined for the session's own agent. */
-  readonly subagentId: string | undefined;
-}): JSX.Element {
+  drawSubagentParts,
+}:
+  | {
+      readonly sessionId: string;
+      readonly subagentId: undefined;
+      readonly drawSubagentParts?: undefined;
+    }
+  | {
+      readonly sessionId: string;
+      /** The subagent whose page this is. */
+      readonly subagentId: string;
+      readonly drawSubagentParts: DrawSubagentParts;
+    }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client, live } = controller;
   const queryClient = useQueryClient();
@@ -94,10 +121,11 @@ export function AgentPage({
   const [composerStack, setComposerStack] = useState<HTMLDivElement | null>(null);
   const transcriptRef = useRef<TranscriptHandle>(null);
   // The composer shrinks while the reader is away from the bottom of the
-  // transcript, unless the focus is in the composer.
+  // transcript, unless the focus is in the composer. A subagent's status
+  // card never shrinks, so the transcript always clears it.
   const [atBottom, setAtBottom] = useState(true);
   const [composerFocused, setComposerFocused] = useState(false);
-  const shrunk = !atBottom && !composerFocused;
+  const shrunk = subagent === undefined && !atBottom && !composerFocused;
 
   const agent =
     subagent === undefined
@@ -113,6 +141,10 @@ export function AgentPage({
   const runner =
     session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
   const instance = instances.find((each) => each.id === session.instanceId);
+  const subagentParts =
+    subagent === undefined || drawSubagentParts === undefined
+      ? undefined
+      : drawSubagentParts({ subagent, subagents, openRequests: session.openRequests, brief });
 
   return (
     <>
@@ -122,11 +154,7 @@ export function AgentPage({
           subagentId === undefined ? sessionId : buildSubagentFaceSeed(sessionId, subagentId)
         }
         blocks={blocks}
-        lead={
-          subagent === undefined ? undefined : (
-            <BriefCard subagent={subagent} subagents={subagents} brief={brief} />
-          )
-        }
+        lead={subagentParts?.lead}
         pose={
           subagent === undefined
             ? decideThreadPose(session, runner)
@@ -146,7 +174,7 @@ export function AgentPage({
         )}
         ref={transcriptRef}
       />
-      {subagent === undefined ? (
+      {subagentParts === undefined ? (
         <ThreadComposer
           sessionId={sessionId}
           shrunk={shrunk}
@@ -162,15 +190,7 @@ export function AgentPage({
         // transcript's last line clears the card and what sits on it.
         <div className="composer-wrap">
           <div className="composer" ref={setComposerStack}>
-            <div className="fold tally-fold">
-              <TallyPill sessionId={sessionId} />
-            </div>
-            <AgentRequestDock sessionId={sessionId} pageSubagentId={subagent.id} />
-            <StatusCard
-              subagent={subagent}
-              subagents={subagents}
-              openRequests={session.openRequests}
-            />
+            {subagentParts.bottom}
           </div>
         </div>
       )}
