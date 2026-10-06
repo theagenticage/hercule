@@ -7,18 +7,17 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
-import { SidePaneSlotContext } from "../../app/side-pane-slot";
 import {
   MIN_SIDE_PANE_WIDTH,
   SIDE_PANE_SURFACES,
   closeSurface,
   fitSidePaneWidth,
   openSurface,
-  useSidePaneLayout,
-  useSidePaneWidth,
   type SidePaneSurface,
-} from "./use-side-pane";
+} from "@hercule/client-core";
+import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
+import { SidePaneSlotContext } from "../../app/side-pane-slot";
+import { useSidePaneLayout, useSidePaneWidth } from "./use-side-pane";
 
 /** How far one arrow key press moves the pane's edge, in pixels. */
 const KEYBOARD_STEP = 16;

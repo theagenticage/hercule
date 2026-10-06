@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { buildSpawnLines, findSpawnedSubagents, type ThreadTurn } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import { useDurationClock } from "../use-duration-clock";
-import { SUBAGENT_HUE_CLASSES, SubagentMark } from "./subagent-mark";
+import { SUBAGENT_HUE_CLASSES, SubagentMarkGlyph } from "./subagent-mark-glyph";
 
 /**
  * Renders the lines in a turn, one per subagent the turn started: `↳`, its
@@ -51,7 +51,7 @@ export function SpawnLines({
               ↳
             </span>
             <span className="flex w-3 shrink-0 justify-center">
-              <SubagentMark status={line.status} waiting={line.waiting} />
+              <SubagentMarkGlyph status={line.status} waiting={line.waiting} />
             </span>
             <span title={line.name} className="min-w-0 truncate font-emph text-ink">
               {line.name}
@@ -60,10 +60,12 @@ export function SpawnLines({
               <span className={SUBAGENT_HUE_CLASSES[line.state.hue]}>{line.state.word}</span>
               {" · "}
               <span className="font-mono text-fine tabular-nums">{line.state.duration}</span>
-              {line.below > 0 ? ` · ${String(line.below)} below` : null}
-              {line.waitsOnUserBelow ? (
-                <span className="text-attn"> · one waits on you</span>
-              ) : null}
+              {line.notes.map((note) => (
+                <span key={note.text} className={SUBAGENT_HUE_CLASSES[note.hue]}>
+                  {" · "}
+                  {note.text}
+                </span>
+              ))}
             </span>
           </Link>
         </li>

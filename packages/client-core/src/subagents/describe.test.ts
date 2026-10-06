@@ -1,12 +1,14 @@
 /**
  * Tests the words a screen shows for one subagent: `nameSubagent`,
- * `nameSubagentParent`, `isSubagentWaiting`, `describeSubagentState`,
+ * `nameSubagentParent`, `isSubagentWaiting`, `decideSubagentMark`,
+ * `describeSubagentState`,
  * `describeSubagentLine`, `formatTokenCount`, `formatSubagentTokens`,
  * `describeSubagentMeta` and `describeSubagentStop`.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionRequest } from "@hercule/contract";
 import {
+  decideSubagentMark,
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
@@ -57,6 +59,19 @@ describe("isSubagentWaiting", () => {
 
   it("is false for a subagent with no open Request of its own", () => {
     expect(isSubagentWaiting(buildSubagent({ id: "b" }), requests)).toBe(false);
+  });
+});
+
+describe("decideSubagentMark", () => {
+  it("marks a running subagent working, or waiting while it waits on the user", () => {
+    expect(decideSubagentMark("running", false)).toBe("working");
+    expect(decideSubagentMark("running", true)).toBe("waiting");
+  });
+
+  it("marks an ended subagent by how it ended, whether or not a Request is still open", () => {
+    expect(decideSubagentMark("completed", true)).toBe("done");
+    expect(decideSubagentMark("failed", true)).toBe("failed");
+    expect(decideSubagentMark("stopped", false)).toBe("stopped");
   });
 });
 

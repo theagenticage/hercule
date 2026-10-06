@@ -237,8 +237,14 @@ export {
   isSameDay,
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
-export { findSubagentBrief, type SubagentBrief } from "./subagents/brief";
 export {
+  describeBriefSource,
+  findSubagentBrief,
+  type BriefSource,
+  type SubagentBrief,
+} from "./subagents/brief";
+export {
+  decideSubagentMark,
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
@@ -249,6 +255,7 @@ export {
   nameSubagentParent,
   type SubagentHue,
   type SubagentLine,
+  type SubagentMark,
   type SubagentState,
   type SubagentStop,
 } from "./subagents/describe";
@@ -258,6 +265,22 @@ export {
   type RequestDockState,
 } from "./subagents/request-dock";
 export { buildSpawnLines, findSpawnedSubagents, type SpawnLine } from "./subagents/spawn-lines";
+export {
+  CLOSED_SIDE_PANE,
+  DEFAULT_SIDE_PANE_WIDTH,
+  MIN_MAIN_PANE_WIDTH,
+  MIN_SIDE_PANE_WIDTH,
+  SIDE_PANE_SURFACES,
+  closeSurface,
+  fitSidePaneWidth,
+  openSurface,
+  parseSidePaneLayout,
+  parseSidePaneWidth,
+  togglePane,
+  toggleSurface,
+  type SidePaneLayout,
+  type SidePaneSurface,
+} from "./subagents/side-pane";
 export { describeStatusCard, type StatusCardText } from "./subagents/status-card";
 export { describeSubagentTally, summarizeSubagents, type SubagentTally } from "./subagents/tally";
 export {

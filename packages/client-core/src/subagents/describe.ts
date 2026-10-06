@@ -3,7 +3,7 @@
  * one line under its name and the facts about it. They are read from the
  * Subagent record alone, so a screen needs no transcript to draw a subagent.
  */
-import type { SessionRequest, Subagent } from "@hercule/contract";
+import type { SessionRequest, Subagent, SubagentStatus } from "@hercule/contract";
 import { formatDuration } from "../threads/duration";
 import { countUsedTokens } from "../token-usage";
 import { listSubagentDescendants } from "./tree";
@@ -92,6 +92,31 @@ export const describeSubagentState = (
       return { word: "failed", hue: "fail", duration };
     case "stopped":
       return { word: "stopped", hue: "muted", duration };
+  }
+};
+
+/**
+ * The mark drawn beside a subagent: `working` while it runs, `waiting` while
+ * it runs and waits on the user, and `done`, `failed` or `stopped` once it
+ * has ended. Each app draws its own glyph or face for each mark.
+ */
+export type SubagentMark = "working" | "waiting" | "done" | "failed" | "stopped";
+
+/**
+ * Returns the mark of a subagent with `status`. `waiting` is whether it
+ * waits on the user, as `isSubagentWaiting` decides; it changes the mark only
+ * while the subagent runs.
+ */
+export const decideSubagentMark = (status: SubagentStatus, waiting: boolean): SubagentMark => {
+  switch (status) {
+    case "running":
+      return waiting ? "waiting" : "working";
+    case "completed":
+      return "done";
+    case "failed":
+      return "failed";
+    case "stopped":
+      return "stopped";
   }
 };
 

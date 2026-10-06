@@ -28,7 +28,7 @@ import { sessionQuery, subagentsQuery } from "../../app/queries";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
 import { useDurationClock } from "../use-duration-clock";
 import { useStopAgent } from "../use-stop-agent";
-import { SUBAGENT_HUE_CLASSES, SubagentMark } from "./subagent-mark";
+import { SUBAGENT_HUE_CLASSES, SubagentMarkGlyph } from "./subagent-mark-glyph";
 
 /** What every row of the tree reads besides its own subagent. */
 interface TreeContext {
@@ -160,7 +160,7 @@ function SubagentRow({
         )}
       >
         <span className="flex h-[1lh] w-3 shrink-0 items-center justify-center text-row">
-          <SubagentMark status={subagent.status} waiting={waiting} />
+          <SubagentMarkGlyph status={subagent.status} waiting={waiting} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-baseline gap-2 text-row">

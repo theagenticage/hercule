@@ -9,6 +9,7 @@ import {
   isSubagentWaiting,
   listSubagentAncestors,
   nameSubagent,
+  togglePane,
   type HerculeClient,
   type ThreadTab,
 } from "@hercule/client-core";
@@ -16,8 +17,8 @@ import type { Session, Subagent } from "@hercule/contract";
 import { DoneMark, WorkingMark, cn, useElementWidth } from "@hercule/ui";
 import { projectsQuery, sessionsQuery, workspacesQuery } from "../../app/queries";
 import { HeaderRow } from "../header-row";
-import { SubagentMark } from "../subagents/subagent-mark";
-import { togglePane, useSidePaneLayout } from "../subagents/use-side-pane";
+import { SubagentMarkGlyph } from "../subagents/subagent-mark-glyph";
+import { useSidePaneLayout } from "../subagents/use-side-pane";
 import { AssistantCrumb } from "./assistant-crumb";
 import { StepSessionCrumb } from "./step-session-crumb";
 
@@ -171,7 +172,7 @@ function SubagentChrome({
             </Fragment>
           ))}
           <span className="flex w-3 shrink-0 justify-center">
-            <SubagentMark
+            <SubagentMarkGlyph
               status={subagent.status}
               waiting={isSubagentWaiting(subagent, session.openRequests)}
             />

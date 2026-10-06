@@ -8,6 +8,7 @@ import {
   describeSubagentState,
   isSubagentWaiting,
   nameSubagent,
+  type SubagentLine,
   type SubagentState,
 } from "./describe";
 import { compareSubagentStarts, listSubagentDescendants } from "./tree";
@@ -20,13 +21,16 @@ export interface SpawnLine {
   readonly waiting: boolean;
   readonly name: string;
   readonly state: SubagentState;
-  /** How many subagents are below it, at any depth. */
-  readonly below: number;
   /**
-   * Whether any subagent below it waits on the user. The subagent's own
-   * waiting is left out, because its state already reads "waiting on you".
+   * The words after its state and duration, in order, each a separate note:
+   *
+   * - "N below", in `muted`, when it has subagents of its own, counted at
+   *   any depth;
+   * - "one waits on you", in `attn`, when a subagent below it waits on the
+   *   user. The subagent's own waiting is left out, because its state
+   *   already reads "waiting on you".
    */
-  readonly waitsOnUserBelow: boolean;
+  readonly notes: readonly SubagentLine[];
 }
 
 /**
@@ -76,13 +80,19 @@ export const buildSpawnLines = (
   spawned.map((subagent) => {
     const waiting = isSubagentWaiting(subagent, openRequests);
     const descendants = listSubagentDescendants(subagent, subagents);
+    const notes: SubagentLine[] = [];
+    if (descendants.length > 0) {
+      notes.push({ text: `${String(descendants.length)} below`, hue: "muted" });
+    }
+    if (descendants.some((each) => isSubagentWaiting(each, openRequests))) {
+      notes.push({ text: "one waits on you", hue: "attn" });
+    }
     return {
       subagentId: subagent.id,
       status: subagent.status,
       waiting,
       name: nameSubagent(subagent),
       state: describeSubagentState(subagent, waiting, now),
-      below: descendants.length,
-      waitsOnUserBelow: descendants.some((each) => isSubagentWaiting(each, openRequests)),
+      notes,
     };
   });

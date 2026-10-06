@@ -1,10 +1,11 @@
 /**
  * Tests `findSubagentBrief`, which finds the brief a subagent's page opens
- * with.
+ * with, and `describeBriefSource`, which says who handed it over.
  */
 import { describe, expect, it } from "vitest";
 import type { ThreadTurn } from "../threads/turns";
-import { findSubagentBrief } from "./brief";
+import { describeBriefSource, findSubagentBrief } from "./brief";
+import { buildSubagent } from "./subagents.testing";
 
 /** Builds a finished turn with `user` as its user message. */
 const buildTurn = (turnId: string, user: string): ThreadTurn => ({
@@ -27,5 +28,24 @@ describe("findSubagentBrief", () => {
   it("returns undefined while no turn is read, or the first holds no user message", () => {
     expect(findSubagentBrief([])).toBeUndefined();
     expect(findSubagentBrief([buildTurn("t-1", "")])).toBeUndefined();
+  });
+});
+
+describe("describeBriefSource", () => {
+  const planner = buildSubagent({ id: "p", description: "Plan the migration" });
+
+  it("names the parent subagent and the agent type", () => {
+    const reader = buildSubagent({ id: "r", parentSubagentId: "p", agentType: "Explore" });
+    expect(describeBriefSource(reader, [planner, reader])).toEqual({
+      parent: "Plan the migration",
+      agentType: "Explore",
+    });
+  });
+
+  it("names the main agent as the parent, and leaves out an agent type the record does not hold", () => {
+    expect(describeBriefSource(planner, [planner])).toEqual({
+      parent: "the main agent",
+      agentType: undefined,
+    });
   });
 });

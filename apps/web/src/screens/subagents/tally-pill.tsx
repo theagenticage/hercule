@@ -1,8 +1,8 @@
 import type { JSX } from "react";
-import { describeSubagentTally } from "@hercule/client-core";
+import { describeSubagentTally, toggleSurface } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import { DecisionMark, DoneMark, WorkingMark, cn } from "@hercule/ui";
-import { toggleSurface, useSidePaneLayout } from "./use-side-pane";
+import { useSidePaneLayout } from "./use-side-pane";
 
 /**
  * The pill above the composer, or above a subagent's status card, that reads

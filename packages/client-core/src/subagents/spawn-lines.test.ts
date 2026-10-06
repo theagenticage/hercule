@@ -70,8 +70,7 @@ describe("buildSpawnLines", () => {
         waiting: false,
         name: "Read the docs",
         state: { word: "done", hue: "muted", duration: "45s" },
-        below: 0,
-        waitsOnUserBelow: false,
+        notes: [],
       },
       {
         subagentId: "a",
@@ -79,8 +78,7 @@ describe("buildSpawnLines", () => {
         waiting: false,
         name: "Check the redirect",
         state: { word: "working", hue: "live", duration: "1m 30s" },
-        below: 3,
-        waitsOnUserBelow: false,
+        notes: [{ text: "3 below", hue: "muted" }],
       },
     ]);
   });
@@ -90,8 +88,11 @@ describe("buildSpawnLines", () => {
 
     expect(a).toMatchObject({
       waiting: false,
-      waitsOnUserBelow: true,
       state: { word: "working" },
+      notes: [
+        { text: "3 below", hue: "muted" },
+        { text: "one waits on you", hue: "attn" },
+      ],
     });
   });
 
@@ -100,8 +101,8 @@ describe("buildSpawnLines", () => {
 
     expect(a).toMatchObject({
       waiting: true,
-      waitsOnUserBelow: false,
       state: { word: "waiting on you" },
+      notes: [{ text: "3 below", hue: "muted" }],
     });
   });
 });
