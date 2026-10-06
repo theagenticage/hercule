@@ -67,18 +67,12 @@ const SIDE_PANE_SELECTOR = '[aria-label="Side pane"]';
 
 /**
  * The link to one subagent's page in the side pane, whose `href` ends in its
- * id. The link holds only the subagent's name; its row is the link's nearest
- * ancestor that is a direct child of a list item (see `INSTALL_DURATION_OBSERVER`).
+ * id. The link holds only the subagent's name.
  */
 const PANE_ROW_SELECTOR = 'a[href*="/subagents/"]';
 
-/**
- * The text of a row's duration, as `formatDuration` in `@hercule/client-core`
- * writes it: "31s", "12m 4s" or "1h 4m". A row's duration is the element in
- * the row with no child elements whose whole text matches it. A data hook on
- * the duration would be sturdier; the row has none yet.
- */
-const DURATION_PATTERN = String.raw`^(\d+h \d+m|\d+m \d+s|\d+s)$`;
+/** The attribute that marks a row's duration, whose value is the row's subagent id. */
+const DURATION_ATTRIBUTE = "data-subagent-duration";
 
 /** A thread's row in the sidebar. */
 const SIDEBAR_ROW_SELECTOR = "a.side-row";
@@ -484,16 +478,11 @@ const READ_PANE_OPEN = `document.querySelector(${JSON.stringify(SIDE_PANE_SELECT
 const INSTALL_DURATION_OBSERVER = `(() => {
   globalThis.durationObserver?.disconnect();
   const pane = document.querySelector(${JSON.stringify(SIDE_PANE_SELECTOR)});
-  const pattern = new RegExp(${JSON.stringify(DURATION_PATTERN)});
   const readLinks = () => [...pane.querySelectorAll(${JSON.stringify(PANE_ROW_SELECTOR)})];
   const readId = (link) => link.getAttribute("href").split("/subagents/")[1];
-  // The row holds the link and the duration side by side, and its list item
-  // also holds the rows of the subagent's own subagents, so the row is the
-  // item's child that holds the link, not the item.
   const readDuration = (link) =>
-    [...link.closest("li > *").querySelectorAll("*")]
-      .find((element) => element.childElementCount === 0 && pattern.test(element.textContent.trim()))
-      ?.textContent.trim() ?? null;
+    pane.querySelector("[${DURATION_ATTRIBUTE}=" + JSON.stringify(readId(link)) + "]")?.textContent ??
+    null;
   const last = new Map(readLinks().map((link) => [readId(link), readDuration(link)]));
   const changes = [];
   globalThis.durationChanges = changes;
