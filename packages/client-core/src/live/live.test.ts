@@ -417,11 +417,7 @@ describe("createLive", () => {
     const started = createSupervisor(fetch);
 
     const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
-    const namedIds: Array<ReadonlyArray<string>> = [];
-    started.subscribe("task", (keys, ids) => {
-      invalidations.push(keys);
-      namedIds.push(ids);
-    });
+    started.subscribe("task", (keys) => invalidations.push(keys));
 
     started.start();
     await settleTimers();
@@ -440,9 +436,37 @@ describe("createLive", () => {
       sortKeys(invalidations[1] ?? []),
       sortKeys(buildQueryKeys("task", ["task-1"])),
     );
-    // The handler also receives the ids the push names, and none when it is
-    // told that everything may have changed.
-    assert.deepStrictEqual(namedIds, [[], ["task-1"]]);
+  });
+
+  it("invalidates the current session of each conversation a session push names", async () => {
+    const { fetch } = stubTicketServer();
+    const started = createSupervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("session", (keys) => invalidations.push(keys));
+    started.start();
+    await settleTimers();
+
+    const socket = readLastSocket();
+    const call = socket.calls("subscribe")[0];
+    assert.isDefined(call);
+    socket.chunk(call?.id, [
+      {
+        _tag: "invalidate",
+        ids: ["s1", "thread-1"],
+        kind: "updated",
+        conversationIds: { s1: "c1", "thread-1": null },
+      },
+    ]);
+    await settleTimers();
+    assert.deepStrictEqual(invalidations[1], [
+      queryKeys.sessions(),
+      queryKeys.session("s1"),
+      queryKeys.session("thread-1"),
+      queryKeys.inputs("s1"),
+      queryKeys.inputs("thread-1"),
+      queryKeys.conversationSession("c1"),
+    ]);
   });
 
   it("invalidates everything for a subscriber that subscribed while the connection was down", async () => {
@@ -825,17 +849,19 @@ describe("buildQueryKeys", () => {
   });
 
   it("maps a session push to the session list, each session's page, and each session's queued-input list", () => {
-    assert.deepStrictEqual(buildQueryKeys("session", ["s1"]), [
+    assert.deepStrictEqual(buildQueryKeys("session", ["s1"], { s1: null }), [
       queryKeys.sessions(),
       queryKeys.session("s1"),
       queryKeys.inputs("s1"),
     ]);
 
-    // A push with no ids means any session may have changed.
+    // A push with no ids means any session may have changed, including each
+    // conversation's current session.
     assert.deepStrictEqual(buildQueryKeys("session", []), [
       queryKeys.sessions(),
       queryKeys.session(),
       queryKeys.inputs(),
+      queryKeys.conversationSession(),
     ]);
   });
 

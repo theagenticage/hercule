@@ -355,9 +355,9 @@ const isWorthRetrying = (failureCount: number, error: Error): boolean =>
  * because a list filtered here could be cut off at its page size and then
  * return an older session.
  *
- * A push on the `session` topic reads it again only when the push could have
- * changed it, as `buildConversationSessionKeys` decides (see
- * `useLiveConnection`). The web app keys the same read the same way.
+ * A push on the `session` topic reads it again only when the push names a
+ * session of this conversation, since only such a session can be or replace
+ * its current one. The web app keys the same read the same way.
  */
 export const currentConversationSessionQuery = (client: HerculeClient, conversationId: string) =>
   queryOptions({

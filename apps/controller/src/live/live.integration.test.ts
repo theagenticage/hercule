@@ -719,6 +719,53 @@ describe("what a conversation subscription receives", () => {
   });
 });
 
+describe("what a session subscription receives", () => {
+  it("names the conversation of each session it pushes: the assistant's for a conversation's session, null for a thread", async () => {
+    await withAgentFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const token = arranged.token;
+      const listed = await get(base, "/api/v1/assistants", token);
+      const [assistant] = ((await listed.json()) as { items: ReadonlyArray<Assistant> }).items;
+      const conversation = await readWebConversation(base, token, expectPresent(assistant).id);
+      await waitForLiveToSettle();
+      const ticket = await fetchTicket(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const sessions = yield* collectMessages(client, { topic: "session" });
+          yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, "session"));
+
+          // A message to the assistant starts a session in its conversation.
+          const sent = yield* Effect.promise(() =>
+            post(base, `/api/v1/conversations/${conversation.id}/messages`, { text: "hi" }, token),
+          );
+          expect(sent.status, yield* Effect.promise(() => sent.clone().text())).toBe(200);
+          const thread = yield* Effect.promise(() =>
+            spawnSessionOrFail(arranged, { prompt: "a thread" }),
+          );
+
+          const pushed = (): ReadonlyArray<readonly [string, string | null | undefined]> =>
+            sessions.received.flatMap((message) =>
+              message._tag === "invalidate"
+                ? message.ids.map((id) => [id, message.conversationIds?.[id]] as const)
+                : [],
+            );
+          const hasBoth = (): boolean =>
+            pushed().some(([id]) => id === thread.id) && pushed().some(([id]) => id !== thread.id);
+          expect(yield* Effect.promise(() => waitWithin(2000, hasBoth))).toBe(true);
+
+          for (const [id, conversationId] of pushed()) {
+            expect(conversationId, id).toBe(id === thread.id ? null : conversation.id);
+          }
+
+          yield* Fiber.interrupt(sessions.fiber);
+        }),
+      );
+    });
+  });
+});
+
 describe("what an event subscription receives", () => {
   it("starts at the end of the log and pushes what is appended after it", async () => {
     await withServer(async ({ base }) => {

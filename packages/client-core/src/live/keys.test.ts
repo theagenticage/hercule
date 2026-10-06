@@ -1,28 +1,37 @@
 import { assert, describe, it } from "vitest";
-import { buildSession } from "../threads/workspaces.testing";
-import { buildConversationSessionKeys, queryKeys } from "./keys";
+import { buildQueryKeys, queryKeys } from "./keys";
 
-/** A thread: a session in no conversation. */
-const THREAD = buildSession({ id: "thread-1", conversationId: null });
-/** The current sessions of two assistants' conversations. */
-const ADA_CURRENT = buildSession({ id: "ada-current", conversationId: "ada-conversation" });
-const MILO_CURRENT = buildSession({ id: "milo-current", conversationId: "milo-conversation" });
-const KNOWN = [THREAD, ADA_CURRENT, MILO_CURRENT];
+/**
+ * Returns only the keys of conversations' current sessions among the keys a
+ * `session` push invalidates.
+ */
+const listConversationSessionKeys = (
+  ids: ReadonlyArray<string>,
+  conversationIds?: Readonly<Record<string, string | null>>,
+) =>
+  buildQueryKeys("session", ids, conversationIds).filter(
+    (key) => key[0] === queryKeys.conversationSession()[0],
+  );
 
-describe("buildConversationSessionKeys", () => {
-  it("makes nothing stale for a push that names only threads", () => {
-    assert.deepStrictEqual(buildConversationSessionKeys([THREAD.id], KNOWN), []);
-  });
-
-  it("makes one conversation stale for a push that names its current session", () => {
-    assert.deepStrictEqual(buildConversationSessionKeys([ADA_CURRENT.id, THREAD.id], KNOWN), [
-      queryKeys.conversationSession("ada-conversation"),
-    ]);
-  });
-
-  it("lists each stale conversation once", () => {
+describe("the current sessions a session push makes stale", () => {
+  it("is none for a push that names only sessions in no conversation, such as threads and workflow runs' sessions", () => {
     assert.deepStrictEqual(
-      buildConversationSessionKeys([ADA_CURRENT.id, MILO_CURRENT.id, ADA_CURRENT.id], KNOWN),
+      listConversationSessionKeys(["thread-1", "run-session"], {
+        "thread-1": null,
+        "run-session": null,
+      }),
+      [],
+    );
+  });
+
+  it("is the conversation of each session the push names, once each", () => {
+    assert.deepStrictEqual(
+      listConversationSessionKeys(["ada-old", "thread-1", "milo-current", "ada-new"], {
+        "ada-old": "ada-conversation",
+        "thread-1": null,
+        "milo-current": "milo-conversation",
+        "ada-new": "ada-conversation",
+      }),
       [
         queryKeys.conversationSession("ada-conversation"),
         queryKeys.conversationSession("milo-conversation"),
@@ -30,21 +39,17 @@ describe("buildConversationSessionKeys", () => {
     );
   });
 
-  it("makes every conversation stale for a push that names a session the cache does not hold", () => {
-    // A new session may have started in any conversation, including one
-    // that had no session before, and the push does not say which.
-    assert.deepStrictEqual(buildConversationSessionKeys([THREAD.id, "new-session"], KNOWN), [
+  it("is every conversation's for a push that does not name a session's conversation", () => {
+    // A controller that predates `conversationIds` sends none, and then the
+    // session may be a new one in any conversation.
+    assert.deepStrictEqual(listConversationSessionKeys(["s1"]), [queryKeys.conversationSession()]);
+    assert.deepStrictEqual(listConversationSessionKeys(["s1", "s2"], { s1: null }), [
       queryKeys.conversationSession(),
-    ]);
-    assert.deepStrictEqual(buildConversationSessionKeys(["new-session"], []), [
-      ["conversation-session"],
     ]);
   });
 
-  it("makes every conversation stale for a push that names no ids", () => {
-    assert.deepStrictEqual(buildConversationSessionKeys([], KNOWN), [
-      queryKeys.conversationSession(),
-    ]);
+  it("is every conversation's for a push that names no ids", () => {
+    assert.deepStrictEqual(listConversationSessionKeys([]), [queryKeys.conversationSession()]);
   });
 
   it("keeps the keys out of the `sessions` prefix, so a session push reaches them only through this rule", () => {

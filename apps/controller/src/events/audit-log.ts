@@ -165,11 +165,14 @@ const RECORD_KINDS = {
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;
 
-/** Which record an entry is about, in the vocabulary the live overlay uses. */
-export interface AuditRecord {
-  readonly topic: MutableLiveTopic;
-  readonly id: string;
-}
+/**
+ * Which record an entry is about, in the vocabulary the live overlay uses. A
+ * session also names the conversation it answers, or `null` for none, which
+ * the live overlay pushes with it.
+ */
+export type AuditRecord =
+  | { readonly topic: Exclude<MutableLiveTopic, "session">; readonly id: string }
+  | { readonly topic: "session"; readonly id: string; readonly conversationId: string | null };
 
 /** What every audit entry carries, whichever kind it is. */
 interface AuditFields {
@@ -224,12 +227,7 @@ const make = Effect.gen(function* () {
         });
         // A row about a record is also announced as a change to that record.
         if (entry.record !== undefined) {
-          yield* announce({
-            _tag: "record",
-            topic: entry.record.topic,
-            id: entry.record.id,
-            kind: RECORD_KINDS[entry.kind],
-          });
+          yield* announce({ _tag: "record", ...entry.record, kind: RECORD_KINDS[entry.kind] });
         }
       }),
   };

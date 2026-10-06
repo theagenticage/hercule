@@ -47,11 +47,22 @@ export type { ApprovalRequest };
 
 /**
  * A Request one agent of a session is parked on: the request exactly as the
- * harness opened it, and the subagent that asked. `subagentId` is absent when
- * the session's own agent asked (spec 06 section 13.3).
+ * harness opened it, and the subagent that asked.
+ *
+ * - `subagentId` is absent when the session's own agent asked (spec 06
+ *   section 13.3).
+ * - `subagentName` is the asking subagent's name: its `description`, else its
+ *   `agentType`, read from its Subagent record every time the session is
+ *   read, so it is never older than the record. It is absent when the
+ *   session's own agent asked, and when the record holds neither field.
  */
 export const SessionRequest = OpenRequest.mapMembers(
-  Tuple.map(Schema.fieldsAssign({ subagentId: Schema.optionalKey(SubagentId) })),
+  Tuple.map(
+    Schema.fieldsAssign({
+      subagentId: Schema.optionalKey(SubagentId),
+      subagentName: Schema.optionalKey(Schema.String),
+    }),
+  ),
 );
 
 export type SessionRequest = Schema.Schema.Type<typeof SessionRequest>;

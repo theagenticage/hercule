@@ -43,21 +43,36 @@ describe("the requests of the renderer-to-main channels", () => {
         {
           destination: { kind: "thread", sessionId: "s-1" },
           requestId: "r-1",
+          openRequestIds: ["r-1"],
           title: "A thread",
-          question: "Run git push?",
+          body: "Run git push?",
         },
         {
           destination: { kind: "assistant", assistantId: "a-1" },
-          requestId: "r-2",
+          requestId: "r-3",
+          openRequestIds: ["r-2", "r-3"],
           title: "Ada",
-          question: "Book the train?",
+          body: "Book the train?\n+1 more waiting",
         },
       ],
       invalid: [
         {
           destination: { kind: "thread", sessionId: "s-1" },
+          openRequestIds: ["r-1"],
           title: "A thread",
-          question: "Run git push?",
+          body: "Run git push?",
+        },
+      ],
+    },
+    {
+      name: "waiting.set",
+      valid: [],
+      invalid: [
+        {
+          destination: { kind: "thread", sessionId: "s-1" },
+          requestId: "r-1",
+          title: "A thread",
+          body: "Run git push?",
         },
       ],
     },
@@ -68,8 +83,9 @@ describe("the requests of the renderer-to-main channels", () => {
         {
           destination: { kind: "office" },
           requestId: "r-1",
+          openRequestIds: ["r-1"],
           title: "The office",
-          question: "Run git push?",
+          body: "Run git push?",
         },
       ],
     },

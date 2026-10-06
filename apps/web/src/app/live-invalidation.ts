@@ -12,30 +12,10 @@
  */
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import {
-  buildConversationSessionKeys,
-  invalidateWithoutCancelling,
-  queryKeys,
-  type Live,
-} from "@hercule/client-core";
-import type { MutableLiveTopic, Session } from "@hercule/contract";
+import { invalidateWithoutCancelling, type Live } from "@hercule/client-core";
+import type { MutableLiveTopic } from "@hercule/contract";
 
-/**
- * Returns each conversation's current session the cache holds. They are the
- * only sessions this app tells apart for `buildConversationSessionKeys`: a
- * push that names any other session reads every current session again.
- */
-const listCurrentSessions = (queryClient: QueryClient): Session[] =>
-  queryClient
-    .getQueriesData<Session | null>({ queryKey: queryKeys.conversationSession() })
-    .flatMap(([, session]) => (session === undefined || session === null ? [] : [session]));
-
-/**
- * Subscribes to one topic while the calling component is mounted, and
- * invalidates the query keys each push lists. A `session` push also
- * invalidates the conversations' current sessions it makes stale, as
- * `buildConversationSessionKeys` decides.
- */
+/** Subscribes to one topic while the calling component is mounted, and invalidates the query keys each push lists. */
 export const useLiveInvalidation = (
   live: Live,
   queryClient: QueryClient,
@@ -43,12 +23,8 @@ export const useLiveInvalidation = (
 ): void => {
   useEffect(
     () =>
-      live.subscribe(topic, (keys, ids) => {
-        const stale =
-          topic === "session"
-            ? [...keys, ...buildConversationSessionKeys(ids, listCurrentSessions(queryClient))]
-            : keys;
-        for (const queryKey of stale) invalidateWithoutCancelling(queryClient, queryKey);
+      live.subscribe(topic, (keys) => {
+        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
       }),
     [live, queryClient, topic],
   );

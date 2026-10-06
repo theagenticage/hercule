@@ -2,7 +2,8 @@
  * Converts a stored session into the `Session` record the API returns.
  *
  * Every field on the record comes from the row, except `unenforced` and
- * `resumeHeld`. `resumeHeld` is the crash-loop guard's rule applied to the
+ * `resumeHeld`. Each open Request a subagent asked also gets that
+ * subagent's name, from the names the row was read with. `resumeHeld` is the crash-loop guard's rule applied to the
  * row, so every reader of the record agrees with the controller about it. The list
  * of spec fields the session's provider ignores is read from the provider
  * definition on every read. So when a new binary's adapter starts enforcing a
@@ -22,12 +23,25 @@
  */
 import * as Effect from "effect/Effect";
 import * as Struct from "effect/Struct";
-import type { Session } from "@hercule/contract";
+import type { Session, SessionRequest } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { listUnenforcedFields } from "../providers";
 import type { StoredSession } from "./repository";
 import { buildUsageFields } from "./usage";
 import { isResumeHeld } from "./resume-hold";
+
+/**
+ * Returns `request` with the name of the subagent that asked it, looked up
+ * in `subagentNames`. Returns it unchanged when the session's own agent
+ * asked, or when the subagent has no name yet.
+ */
+const addSubagentName = (
+  request: SessionRequest,
+  subagentNames: StoredSession["subagentNames"],
+): SessionRequest => {
+  const name = request.subagentId === undefined ? undefined : subagentNames.get(request.subagentId);
+  return name === undefined ? request : { ...request, subagentName: name };
+};
 
 export const sessionRecordComposer: Effect.Effect<
   Effect.Effect<(stored: StoredSession) => Session>,
@@ -45,7 +59,12 @@ export const sessionRecordComposer: Effect.Effect<
       "conversationDeleted",
       "usage",
       "usageProcess",
+      "openRequests",
+      "subagentNames",
     ]),
+    openRequests: stored.openRequests.map((request) =>
+      addSubagentName(request, stored.subagentNames),
+    ),
     ...buildUsageFields(stored.usage),
     resumeHeld: isResumeHeld(stored),
     unenforced: listUnenforcedFields(definitions, stored.providerId, stored.disallowedTools),

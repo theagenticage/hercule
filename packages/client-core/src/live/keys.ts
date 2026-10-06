@@ -10,11 +10,11 @@
  * would be a screen that silently stops updating.
  */
 import type {
+  Invalidate,
   MutableLiveTopic,
   NotificationFilter,
   RunFilter,
   Runner,
-  Session,
   TaskFilter,
 } from "@hercule/contract";
 import { listLoopbackEndpoints } from "../local-runner";
@@ -72,9 +72,9 @@ export const queryKeys = {
    * every conversation's.
    *
    * It is kept out of the `sessions` prefix on purpose. A `session` push
-   * reaches it only through `buildConversationSessionKeys`, which re-reads a
-   * conversation's current session only when the push could have changed it,
-   * rather than once per assistant on every push.
+   * reaches it only for the conversations the push names (see
+   * `buildConversationSessionKeys`), rather than once per assistant on every
+   * push.
    */
   conversationSession: (conversationId?: string): LiveQueryKey =>
     conversationId === undefined
@@ -170,11 +170,13 @@ export const queryKeys = {
  * Returns the query keys to invalidate for a push on a mutable topic. A push
  * with no ids means every record of the topic may have changed (a reconnect
  * assumes this), so it returns the list and record prefixes rather than one
- * key per record.
+ * key per record. `conversationIds` is the push's map from each session to its
+ * conversation, which only a `session` push carries.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
   ids: ReadonlyArray<string>,
+  conversationIds?: Invalidate["conversationIds"],
 ): ReadonlyArray<LiveQueryKey> => {
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
@@ -196,15 +198,21 @@ export const buildQueryKeys = (
   // The queued-input list is included because it changes whenever the session
   // does (an input is delivered or queued). The transcript is not listed: it
   // is never invalidated, only appended to from the `:stream` topic's deltas.
-  // Nor is a conversation's current session: it needs the cache to decide,
-  // see `buildConversationSessionKeys`.
+  // A conversation's current session is refetched only for the conversations
+  // the push names, see `buildConversationSessionKeys`.
   if (topic === "session") {
     return ids.length === 0
-      ? [queryKeys.sessions(), queryKeys.session(), queryKeys.inputs()]
+      ? [
+          queryKeys.sessions(),
+          queryKeys.session(),
+          queryKeys.inputs(),
+          queryKeys.conversationSession(),
+        ]
       : [
           queryKeys.sessions(),
           ...ids.map((id) => queryKeys.session(id)),
           ...ids.map((id) => queryKeys.inputs(id)),
+          ...buildConversationSessionKeys(ids, conversationIds),
         ];
   }
   // Any connection change refetches the list. A connection's own page is
@@ -275,39 +283,29 @@ export const buildQueryKeys = (
 };
 
 /**
- * Returns the `conversationSession` keys to invalidate for a push on the
- * `session` topic that names `ids`. `knownSessions` are the sessions the
- * app's cache holds, such as the thread list and each conversation's current
- * session.
+ * Returns the `conversationSession` keys a `session` push makes stale, from
+ * the conversation it names for each session in `ids`.
  *
- * A conversation's current session is its newest session, so a push can
- * change it in only two ways: the current session itself changed, or a new
- * session started in the conversation. For each id:
+ * A conversation's current session is its newest session, so a push changes
+ * it only when one of the conversation's sessions changed or a new one
+ * started there. Either way the push names that conversation, so:
  *
- * - a known session in a conversation makes that conversation's key stale;
- * - a known session in no conversation, such as a thread, makes nothing
- *   stale;
- * - an unknown session may be a new session in any conversation, because the
- *   push does not say which, so every conversation's key is stale and the
- *   prefix is returned.
- *
- * A push with no ids means every session may have changed, as after a
- * reconnect, so it returns the prefix too.
+ * - each conversation the push names is stale, once;
+ * - a session in no conversation, such as a thread or a workflow run's
+ *   session, makes nothing stale;
+ * - a session the push names no conversation for, as from a controller that
+ *   predates `conversationIds`, may be in any conversation, so every
+ *   conversation is stale and the prefix is returned.
  */
-export const buildConversationSessionKeys = (
+const buildConversationSessionKeys = (
   ids: ReadonlyArray<string>,
-  knownSessions: Iterable<Session>,
+  conversationIds: Invalidate["conversationIds"],
 ): ReadonlyArray<LiveQueryKey> => {
-  if (ids.length === 0) return [queryKeys.conversationSession()];
-  const known = new Map<string, Session>();
-  for (const session of knownSessions) known.set(session.id, session);
-  const staleConversationIds = new Set<string>();
+  const stale = new Set<string>();
   for (const id of ids) {
-    const session = known.get(id);
-    if (session === undefined) return [queryKeys.conversationSession()];
-    if (session.conversationId !== null) staleConversationIds.add(session.conversationId);
+    const conversationId = conversationIds?.[id];
+    if (conversationId === undefined) return [queryKeys.conversationSession()];
+    if (conversationId !== null) stale.add(conversationId);
   }
-  return [...staleConversationIds].map((conversationId) =>
-    queryKeys.conversationSession(conversationId),
-  );
+  return [...stale].map((conversationId) => queryKeys.conversationSession(conversationId));
 };

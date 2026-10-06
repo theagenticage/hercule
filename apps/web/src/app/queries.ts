@@ -580,9 +580,8 @@ export const conversationMessagesQuery = (client: HerculeClient, conversationId:
  * a list filtered in the browser could be cut off at its page size and then
  * return an older session.
  *
- * A `session` push refetches it when the push names its session, or a
- * session this app does not know, which may be a new one in the
- * conversation; `useLiveInvalidation` applies that rule.
+ * A `session` push refetches it only when the push names a session of this
+ * conversation, since only such a session can be or replace its current one.
  */
 export const currentConversationSessionQuery = (client: HerculeClient, conversationId: string) =>
   queryOptions({

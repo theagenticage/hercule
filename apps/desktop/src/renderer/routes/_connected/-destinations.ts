@@ -12,24 +12,28 @@ import { runnersQuery, threadsQuery } from "../../app/queries";
 
 /**
  * Returns what main is sent of an entry of Waiting on you: where its
- * notification opens, its Request, and the title and question the
- * notification shows. An assistant's notification is titled with its name.
+ * notification opens, its open Requests, the newest of which the
+ * notification shows, and the notification's title and text. An assistant's
+ * notification is titled with its name.
  */
 export const buildWaitingRequest = (waiting: Waiting): WaitingRequest => {
+  const fields = {
+    requestId: waiting.newestRequestId,
+    openRequestIds: waiting.openRequestIds,
+    body: waiting.notificationBody,
+  };
   switch (waiting.kind) {
     case "thread":
       return {
         destination: { kind: "thread", sessionId: waiting.sessionId },
-        requestId: waiting.requestId,
         title: waiting.title,
-        question: waiting.question,
+        ...fields,
       };
     case "assistant":
       return {
         destination: { kind: "assistant", assistantId: waiting.assistantId },
-        requestId: waiting.requestId,
         title: waiting.name,
-        question: waiting.question,
+        ...fields,
       };
   }
 };

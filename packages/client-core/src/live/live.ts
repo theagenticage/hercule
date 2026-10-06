@@ -84,17 +84,8 @@ export interface LiveOptions {
   readonly webSocket?: LiveWebSocketConstructor;
 }
 
-/**
- * Receives a mutable topic's push: the query keys to invalidate, and the ids
- * of the records the push names. `ids` is empty when every record of the
- * topic may have changed, as after a reconnect. A caller whose cache can tell
- * more than the keys do, such as which conversation a session answers, reads
- * the ids.
- */
-export type LiveInvalidateHandler = (
-  keys: ReadonlyArray<LiveQueryKey>,
-  ids: ReadonlyArray<string>,
-) => void;
+/** Receives a mutable topic's push as the query keys to invalidate. */
+export type LiveInvalidateHandler = (keys: ReadonlyArray<LiveQueryKey>) => void;
 
 /**
  * An append-only topic's push.
@@ -244,7 +235,7 @@ export const createLive = (options: LiveOptions): Live => {
   const sweep = (subscription: Subscription): void => {
     const topic = subscription.topic;
     if (!isAppendOnlyLiveTopic(topic)) {
-      isolate(() => (subscription.handler as LiveInvalidateHandler)(buildQueryKeys(topic, []), []));
+      isolate(() => (subscription.handler as LiveInvalidateHandler)(buildQueryKeys(topic, [])));
     } else if (subscription.cursor === undefined) {
       isolate(() =>
         (subscription.handler as LiveDeltaHandler)({
@@ -292,8 +283,11 @@ export const createLive = (options: LiveOptions): Live => {
         return;
       }
       (subscription.handler as LiveInvalidateHandler)(
-        buildQueryKeys(subscription.topic as MutableLiveTopic, message.ids),
-        message.ids,
+        buildQueryKeys(
+          subscription.topic as MutableLiveTopic,
+          message.ids,
+          message.conversationIds,
+        ),
       );
     });
   };

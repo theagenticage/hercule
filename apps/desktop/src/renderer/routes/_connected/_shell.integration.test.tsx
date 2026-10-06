@@ -9,7 +9,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling } from "@hercule/client-core";
-import type { OpenRequest, Session } from "@hercule/contract";
+import type { OpenRequest, Session, SessionRequest } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
 import { projectsQuery, threadsQuery } from "../../app/queries";
 import {
@@ -494,8 +494,9 @@ describe("Go > Office", () => {
 const RUNBOOK_WAITING = {
   destination: { kind: "thread", sessionId: FIXTURE_THREAD_IDS.runbook },
   requestId: "req-1",
+  openRequestIds: ["req-1"],
   title: "Write the retry runbook",
-  question: "Run git push?",
+  body: "Run git push?",
 };
 
 describe("the threads and assistants waiting on the user", () => {
@@ -514,8 +515,9 @@ describe("the threads and assistants waiting on the user", () => {
         {
           destination: { kind: "assistant", assistantId: ADA.id },
           requestId: "req-ada",
+          openRequestIds: ["req-ada"],
           title: "Ada",
-          question: "Run make deploy?",
+          body: "Run make deploy?",
         },
       ],
     ]);
@@ -530,8 +532,7 @@ describe("the threads and assistants waiting on the user", () => {
       detail: { command: "pnpm test" },
     };
     let threads = SIDEBAR_FIXTURE.threads;
-    const setFlakyRequest = (request: OpenRequest | null): void => {
-      const openRequests = request === null ? [] : [request];
+    const setFlakyRequests = (openRequests: readonly OpenRequest[]): void => {
       threads = threads.map((thread) =>
         thread.id === FIXTURE_THREAD_IDS.flaky ? { ...thread, openRequests } : thread,
       );
@@ -540,7 +541,7 @@ describe("the threads and assistants waiting on the user", () => {
       handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
     });
 
-    setFlakyRequest(TEST_REQUEST);
+    setFlakyRequests([TEST_REQUEST]);
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
     });
@@ -550,19 +551,71 @@ describe("the threads and assistants waiting on the user", () => {
         {
           destination: { kind: "thread", sessionId: FIXTURE_THREAD_IDS.flaky },
           requestId: "req-2",
+          openRequestIds: ["req-2"],
           title: "Fix flaky webhook tests",
-          question: "Run pnpm test?",
+          body: "Run pnpm test?",
         },
       ]);
     });
 
     // Answered elsewhere, such as in the web app.
-    setFlakyRequest(null);
+    setFlakyRequests([]);
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
     });
     await waitFor(() => {
       expect(fake.waitingLists.at(-1)).toEqual([RUNBOOK_WAITING]);
+    });
+  });
+
+  it("are sent to main with the newest of a thread's Requests for its notification, naming a subagent that asks", async () => {
+    const buildCommandRequest = (requestId: string, command: string): SessionRequest => ({
+      requestId,
+      itemId: `tool-${requestId}`,
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command },
+    });
+    let threads = SIDEBAR_FIXTURE.threads;
+    const setFlakyRequests = (openRequests: readonly SessionRequest[]): void => {
+      threads = threads.map((thread) =>
+        thread.id === FIXTURE_THREAD_IDS.flaky ? { ...thread, openRequests } : thread,
+      );
+      act(() => {
+        live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
+      });
+    };
+    const { fake, live } = await startShell({
+      handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
+    });
+    const FLAKY = { kind: "thread", sessionId: FIXTURE_THREAD_IDS.flaky };
+    const readFlaky = () =>
+      fake.waitingLists
+        .at(-1)
+        ?.find((each) => JSON.stringify(each.destination) === JSON.stringify(FLAKY));
+
+    setFlakyRequests([
+      buildCommandRequest("req-2", "pnpm test"),
+      {
+        ...buildCommandRequest("req-3", "git push"),
+        subagentId: "agent-1",
+        subagentName: "Review the diff",
+      },
+    ]);
+    await waitFor(() => {
+      expect(readFlaky()).toEqual({
+        destination: FLAKY,
+        requestId: "req-3",
+        openRequestIds: ["req-2", "req-3"],
+        title: "Fix flaky webhook tests",
+        body: "Review the diff asks: Run git push?\n+1 more waiting",
+      });
+    });
+
+    // The subagent's Request is answered; the older one stays open.
+    setFlakyRequests([buildCommandRequest("req-2", "pnpm test")]);
+    await waitFor(() => {
+      expect(readFlaky()).toMatchObject({ requestId: "req-2", openRequestIds: ["req-2"] });
     });
   });
 
@@ -707,15 +760,20 @@ describe("the assistants", () => {
       return { ...shell, countReadsOf };
     };
 
-    /** Pushes a `session` change and waits until every read it starts has settled. */
+    /**
+     * Pushes a `session` change naming `ids`, each with its conversation from
+     * `conversationIds` when given, and waits until every read it starts has
+     * settled.
+     */
     const pushAndSettle = async (
       { calls, live, context }: Awaited<ReturnType<typeof startWithAdaAndMilo>>,
       ids?: readonly string[],
+      conversationIds?: Readonly<Record<string, string | null>>,
     ) => {
       const threadReads =
         countReads(calls, "/api/v1/sessions") - calls.filter(readsConversation).length;
       act(() => {
-        live.pushInvalidation("session", ids);
+        live.pushInvalidation("session", ids, conversationIds);
       });
       // The thread list is read again on every push, so its read marks the
       // push as handled.
@@ -727,11 +785,27 @@ describe("the assistants", () => {
       });
     };
 
+    /** A session the app has never read, such as a new one. */
+    const NEW_SESSION_ID = "01a06d02-7400-7000-8000-000000000999";
+
     it("for no assistant, when the push names only threads", async () => {
       const shell = await startWithAdaAndMilo();
       const before = shell.countReadsOf();
 
-      await pushAndSettle(shell, [FIXTURE_THREAD_IDS.flaky, FIXTURE_THREAD_IDS.bunPin]);
+      await pushAndSettle(shell, [FIXTURE_THREAD_IDS.flaky, FIXTURE_THREAD_IDS.bunPin], {
+        [FIXTURE_THREAD_IDS.flaky]: null,
+        [FIXTURE_THREAD_IDS.bunPin]: null,
+      });
+
+      expect(shell.countReadsOf()).toEqual(before);
+    });
+
+    it("for no assistant, when the push names a session the app does not know in no conversation", async () => {
+      // Such as a workflow run's session, which the desktop app never reads.
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [NEW_SESSION_ID], { [NEW_SESSION_ID]: null });
 
       expect(shell.countReadsOf()).toEqual(before);
     });
@@ -740,18 +814,32 @@ describe("the assistants", () => {
       const shell = await startWithAdaAndMilo();
       const before = shell.countReadsOf();
 
-      await pushAndSettle(shell, [ADA_SESSION.id, FIXTURE_THREAD_IDS.flaky]);
+      await pushAndSettle(shell, [ADA_SESSION.id, FIXTURE_THREAD_IDS.flaky], {
+        [ADA_SESSION.id]: ADA.mainConversationId,
+        [FIXTURE_THREAD_IDS.flaky]: null,
+      });
 
       expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo });
     });
 
-    it("for every assistant, when the push names a session the app does not know", async () => {
-      // An unknown session may be a new one in an assistant's conversation,
-      // which then becomes that assistant's current session.
+    it("for that assistant only, when the push names a new session in its conversation", async () => {
+      // The new session becomes Ada's current session, though the app has
+      // never read it.
       const shell = await startWithAdaAndMilo();
       const before = shell.countReadsOf();
 
-      await pushAndSettle(shell, ["01a06d02-7400-7000-8000-000000000999"]);
+      await pushAndSettle(shell, [NEW_SESSION_ID], { [NEW_SESSION_ID]: ADA.mainConversationId });
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo });
+    });
+
+    it("for every assistant, when the push does not name the conversation of a session", async () => {
+      // A controller that predates `conversationIds` sends none, and the
+      // session may then be a new one in any assistant's conversation.
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [FIXTURE_THREAD_IDS.flaky]);
 
       expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo + 1 });
     });

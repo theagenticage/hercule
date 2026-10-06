@@ -6,8 +6,8 @@
  *
  * - `session`, for the thread list, the current session of each assistant's
  *   main conversation (and an open thread's own reads). An assistant's
- *   current session is read again only when the push could have changed it,
- *   as `buildConversationSessionKeys` decides, so a push about a thread reads
+ *   current session is read again only when the push names a session of its
+ *   conversation, so a push about a thread or a workflow run's session reads
  *   no assistant's session;
  * - `runner`, for the runners, whose connectivity draws a thread as away;
  * - `provider`, for the providers, whose catalogs name each thread's model;
@@ -16,9 +16,8 @@
  *   through, which may be made in the web app while this app runs;
  * - `assistant`, for the assistants the sidebar's Assistants section lists.
  *
- * Each push invalidates the query keys it lists, and a `session` push also
- * the current sessions it makes stale. The screens never deal with the
- * socket.
+ * Each push invalidates the query keys it lists. The screens never deal with
+ * the socket.
  *
  * Projects, workspaces and resources have no live topic yet (#279 adds
  * them). After a reconnect, pushes may have been lost while the connection
@@ -30,13 +29,8 @@
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import {
-  buildConversationSessionKeys,
-  invalidateWithoutCancelling,
-  queryKeys,
-  type Live,
-} from "@hercule/client-core";
-import type { MutableLiveTopic, Session } from "@hercule/contract";
+import { invalidateWithoutCancelling, queryKeys, type Live } from "@hercule/client-core";
+import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
 
 /** The topics the shell keeps subscribed. */
@@ -48,20 +42,6 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
   "connection",
   "assistant",
 ];
-
-/**
- * Returns every session the cache holds that a `session` push can name: the
- * threads, and each conversation's current session.
- */
-const listCachedSessions = (queryClient: QueryClient): Session[] => {
-  const threads = queryClient.getQueryData<readonly Session[]>(
-    queryKeys.sessions({ thread: true }),
-  );
-  const currentSessions = queryClient
-    .getQueriesData<Session | null>({ queryKey: queryKeys.conversationSession() })
-    .flatMap(([, session]) => (session === undefined || session === null ? [] : [session]));
-  return [...(threads ?? []), ...currentSessions];
-};
 
 /**
  * Subscribes to the shell's topics, then starts the live connection, and
@@ -89,12 +69,8 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
 
   useEffect(() => {
     const unsubscribes = SHELL_TOPICS.map((topic) =>
-      live.subscribe(topic, (keys, ids) => {
-        const stale =
-          topic === "session"
-            ? [...keys, ...buildConversationSessionKeys(ids, listCachedSessions(queryClient))]
-            : keys;
-        for (const queryKey of stale) invalidateWithoutCancelling(queryClient, queryKey);
+      live.subscribe(topic, (keys) => {
+        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
       }),
     );
 

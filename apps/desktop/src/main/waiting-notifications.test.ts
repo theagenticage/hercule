@@ -92,21 +92,34 @@ const describeNotifications = (seen: Seen) =>
 const LOGIN: WaitingRequest = {
   destination: { kind: "thread", sessionId: "session-1" },
   requestId: "request-1",
+  openRequestIds: ["request-1"],
   title: "Fix the login bug",
-  question: "Run the migration?",
+  body: "Run the migration?",
 };
 const CHECKOUT: WaitingRequest = {
   destination: { kind: "thread", sessionId: "session-2" },
   requestId: "request-2",
+  openRequestIds: ["request-2"],
   title: "Speed up checkout",
-  question: "Run pnpm test?",
+  body: "Run pnpm test?",
 };
 const ADA: WaitingRequest = {
   destination: { kind: "assistant", assistantId: "assistant-1" },
   requestId: "request-5",
+  openRequestIds: ["request-5"],
   title: "Ada",
-  question: "Book the train to Utrecht?",
+  body: "Book the train to Utrecht?",
 };
+
+/**
+ * Returns `waiting` once it waits on the Requests `openRequestIds`, oldest
+ * first, with a notification about the newest, whose text is `body`.
+ */
+const waitOn = (
+  waiting: WaitingRequest,
+  openRequestIds: readonly string[],
+  body: string,
+): WaitingRequest => ({ ...waiting, requestId: openRequestIds.at(-1)!, openRequestIds, body });
 
 describe("WaitingNotifications", () => {
   it("counts the first list after signing in on the badge, and shows no notification for it", async () => {
@@ -149,9 +162,7 @@ describe("WaitingNotifications", () => {
         notifications.setSignedIn(true),
         notifications.setWaitingRequests([]),
         notifications.setWaitingRequests([LOGIN]),
-        notifications.setWaitingRequests([
-          { ...LOGIN, requestId: "request-3", question: "Deploy it?" },
-        ]),
+        notifications.setWaitingRequests([waitOn(LOGIN, ["request-3"], "Deploy it?")]),
       ]),
     );
     expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
@@ -169,7 +180,7 @@ describe("WaitingNotifications", () => {
         Effect.sync(() => {
           seen.window.focused = true;
         }),
-        notifications.setWaitingRequests([{ ...LOGIN, requestId: "request-3" }]),
+        notifications.setWaitingRequests([waitOn(LOGIN, ["request-3"], "Deploy it?")]),
       ]),
     );
     expect(describeNotifications(seen).map(({ state }) => state)).toEqual(["closed"]);
@@ -296,7 +307,7 @@ describe("WaitingNotifications", () => {
         notifications.setWaitingRequests([]),
         notifications.setWaitingRequests([ADA]),
         notifications.setWaitingRequests([ADA, LOGIN]),
-        notifications.setWaitingRequests([LOGIN, { ...ADA, requestId: "request-6" }]),
+        notifications.setWaitingRequests([LOGIN, waitOn(ADA, ["request-6"], "Book a hotel?")]),
       ]),
     );
     expect(describeNotifications(seen).map(({ title, state }) => [title, state])).toEqual([
@@ -304,5 +315,100 @@ describe("WaitingNotifications", () => {
       ["Fix the login bug", "shown"],
       ["Ada", "shown"],
     ]);
+  });
+
+  describe("with several Requests open on one destination", () => {
+    const LOGIN_TWO = waitOn(LOGIN, ["request-1", "request-3"], "Deploy it?\n+1 more waiting");
+    const LOGIN_THREE = waitOn(LOGIN, ["request-3"], "Deploy it?");
+    const LOGIN_ONE = waitOn(LOGIN, ["request-1"], "Run the migration?");
+
+    it("replaces the notification with the newest Request's when another opens", async () => {
+      const seen = await runWithNotifications(false, (notifications) =>
+        Effect.all([
+          notifications.setSignedIn(true),
+          notifications.setWaitingRequests([]),
+          notifications.setWaitingRequests([LOGIN]),
+          notifications.setWaitingRequests([LOGIN_TWO]),
+        ]),
+      );
+      expect(seen.badgeCounts).toEqual([0, 1, 1]);
+      expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+        ["Run the migration?", "closed"],
+        ["Deploy it?\n+1 more waiting", "shown"],
+      ]);
+    });
+
+    it("keeps the newest Request's notification, and shows none again, when an older one is answered", async () => {
+      const seen = await runWithNotifications(false, (notifications) =>
+        Effect.all([
+          notifications.setSignedIn(true),
+          notifications.setWaitingRequests([]),
+          notifications.setWaitingRequests([LOGIN]),
+          notifications.setWaitingRequests([LOGIN_TWO]),
+          notifications.setWaitingRequests([LOGIN_THREE]),
+        ]),
+      );
+      expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+        ["Run the migration?", "closed"],
+        ["Deploy it?\n+1 more waiting", "shown"],
+      ]);
+    });
+
+    it("removes the notification, and shows none in its place, when its Request is answered and an older one stays open", async () => {
+      const seen = await runWithNotifications(false, (notifications) =>
+        Effect.all([
+          notifications.setSignedIn(true),
+          notifications.setWaitingRequests([]),
+          notifications.setWaitingRequests([LOGIN]),
+          notifications.setWaitingRequests([LOGIN_TWO]),
+          notifications.setWaitingRequests([LOGIN_ONE]),
+        ]),
+      );
+      expect(seen.badgeCounts).toEqual([0, 1, 1, 1]);
+      expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+        ["Run the migration?", "closed"],
+        ["Deploy it?\n+1 more waiting", "closed"],
+      ]);
+    });
+
+    it("removes the notification, and shows none, when another Request opens while the window is focused", async () => {
+      const seen = await runWithNotifications(false, (notifications, seen) =>
+        Effect.all([
+          notifications.setSignedIn(true),
+          notifications.setWaitingRequests([]),
+          notifications.setWaitingRequests([LOGIN]),
+          Effect.sync(() => {
+            seen.window.focused = true;
+          }),
+          notifications.setWaitingRequests([LOGIN_TWO]),
+        ]),
+      );
+      expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+        ["Run the migration?", "closed"],
+      ]);
+    });
+
+    it("follows the same rules for an assistant", async () => {
+      const seen = await runWithNotifications(false, (notifications) =>
+        Effect.all([
+          notifications.setSignedIn(true),
+          notifications.setWaitingRequests([]),
+          notifications.setWaitingRequests([ADA]),
+          notifications.setWaitingRequests([
+            waitOn(ADA, ["request-5", "request-6"], "Book a hotel?\n+1 more waiting"),
+          ]),
+          notifications.setWaitingRequests([waitOn(ADA, ["request-6"], "Book a hotel?")]),
+          notifications.setWaitingRequests([
+            waitOn(ADA, ["request-6", "request-7"], "Pay the bill?\n+1 more waiting"),
+          ]),
+          notifications.setWaitingRequests([waitOn(ADA, ["request-6"], "Book a hotel?")]),
+        ]),
+      );
+      expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+        ["Book the train to Utrecht?", "closed"],
+        ["Book a hotel?\n+1 more waiting", "closed"],
+        ["Pay the bill?\n+1 more waiting", "closed"],
+      ]);
+    });
   });
 });

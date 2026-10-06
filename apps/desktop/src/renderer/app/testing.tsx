@@ -1014,10 +1014,16 @@ export interface LiveStub {
   readonly isConnected: () => boolean;
   /**
    * Sends the app an invalidation on its subscription to `topic`, naming `ids`
-   * as updated. Throws when the app has no socket or no subscription to
-   * `topic`.
+   * as updated. `conversationIds` maps each session a `session` push names to
+   * its conversation, as the controller sends it; leave it out to play a
+   * controller that does not send it. Throws when the app has no socket or no
+   * subscription to `topic`.
    */
-  readonly pushInvalidation: (topic: MutableLiveTopic, ids?: readonly string[]) => void;
+  readonly pushInvalidation: (
+    topic: MutableLiveTopic,
+    ids?: readonly string[],
+    conversationIds?: Readonly<Record<string, string | null>>,
+  ) => void;
   /**
    * Sends the app stored rows on its subscription to `session:<sessionId>:stream`,
    * with the last row's position as the cursor, as the controller does.
@@ -1095,8 +1101,13 @@ const buildTestContext = async (
         ?.subscriptions()
         .map((each) => each.topic) ?? [],
     isConnected: () => sockets.at(-1)?.readyState === 1,
-    pushInvalidation: (topic, ids = []) => {
-      readSocket().push(topic, { _tag: "invalidate", ids, kind: "updated" });
+    pushInvalidation: (topic, ids = [], conversationIds) => {
+      readSocket().push(topic, {
+        _tag: "invalidate",
+        ids,
+        kind: "updated",
+        ...(conversationIds === undefined ? {} : { conversationIds }),
+      });
     },
     pushStreamRows: (sessionId, rows) => {
       const last = rows.at(-1);

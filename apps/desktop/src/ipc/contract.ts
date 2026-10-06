@@ -247,16 +247,22 @@ export const GoMenuItem = Schema.Struct({ destination: Destination, title: Schem
 export type GoMenuItem = typeof GoMenuItem.Type;
 
 /**
- * An open Request waiting on the user: where its notification goes when it
- * is clicked, the id of the Request, and the title and question the
- * notification shows. The renderer sends one Request for each thread or
- * assistant that waits, so a destination is in the list once.
+ * A thread or an assistant waiting on the user, as its notification needs
+ * it. The renderer sends one for each destination that waits, so a
+ * destination is in the list once.
+ *
+ * - `destination`: where the notification goes when it is clicked.
+ * - `requestId`: the newest open Request, the one the notification shows.
+ * - `openRequestIds`: every open Request of the destination, `requestId`
+ *   included, so main can tell a Request that opened from one that closed.
+ * - `title` and `body`: the notification's text, ready to show.
  */
 export const WaitingRequest = Schema.Struct({
   destination: Destination,
   requestId: Schema.String,
+  openRequestIds: Schema.Array(Schema.String),
   title: Schema.String,
-  question: Schema.String,
+  body: Schema.String,
 });
 export type WaitingRequest = typeof WaitingRequest.Type;
 

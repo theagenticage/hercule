@@ -73,6 +73,9 @@ describe("buildSidebarSections: Waiting on you", () => {
     requestId: `r-${sessionId}`,
     title: "A thread",
     question: "Run git push?",
+    newestRequestId: `r-${sessionId}`,
+    openRequestIds: [`r-${sessionId}`],
+    notificationBody: "Run git push?",
     activityAt: buildTimestamp(minutes),
   });
 
@@ -84,6 +87,9 @@ describe("buildSidebarSections: Waiting on you", () => {
     sessionId: `s-${assistantId}`,
     requestId: `r-${assistantId}`,
     question: "Run git push?",
+    newestRequestId: `r-${assistantId}`,
+    openRequestIds: [`r-${assistantId}`],
+    notificationBody: "Run git push?",
     activityAt: buildTimestamp(minutes),
   });
 

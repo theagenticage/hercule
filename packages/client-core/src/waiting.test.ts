@@ -57,6 +57,9 @@ describe("listWaiting", () => {
         requestId: "r-1",
         title: "Fix the login bug",
         question: "Run git push?",
+        newestRequestId: "r-1",
+        openRequestIds: ["r-1"],
+        notificationBody: "Run git push?",
         activityAt: LATE,
       },
       {
@@ -65,6 +68,9 @@ describe("listWaiting", () => {
         requestId: "r-3",
         title: "Write the release notes",
         question: "Run pnpm test?",
+        newestRequestId: "r-3",
+        openRequestIds: ["r-3"],
+        notificationBody: "Run pnpm test?",
         activityAt: EARLY,
       },
     ]);
@@ -94,6 +100,9 @@ describe("listWaiting", () => {
         sessionId: "s-ada",
         requestId: "r-ada",
         question: "Run git push?",
+        newestRequestId: "r-ada",
+        openRequestIds: ["r-ada"],
+        notificationBody: "Run git push?",
         activityAt: MIDDLE,
       },
     ]);
@@ -145,31 +154,88 @@ describe("listWaiting", () => {
     expect(waiting.map((entry) => entry.sessionId)).toEqual(["s-a", "s-b", "s-c"]);
   });
 
-  it("shows the oldest of a session's open Requests, whichever agent asked it", () => {
-    expect(
-      listWaiting(
-        [
+  it("shows the oldest of a session's open Requests in the row, whichever agent asked it", () => {
+    const [waiting] = listWaiting(
+      [
+        buildSession({
+          id: "s-1",
+          title: "Fix the login bug",
+          openRequests: [
+            { ...buildCommandRequest("r-1", "git push"), subagentId: "agent-1" },
+            buildCommandRequest("r-2", "pnpm test"),
+          ],
+        }),
+      ],
+      [],
+    );
+
+    expect(waiting).toMatchObject({ requestId: "r-1", question: "Run git push?" });
+  });
+
+  it("shows the newest of a session's open Requests in the notification, and counts the others", () => {
+    const [waiting] = listWaiting(
+      [
+        buildSession({
+          id: "s-1",
+          openRequests: [
+            buildCommandRequest("r-1", "git push"),
+            buildCommandRequest("r-2", "pnpm test"),
+            buildCommandRequest("r-3", "make deploy"),
+          ],
+        }),
+      ],
+      [],
+    );
+
+    expect(waiting).toMatchObject({
+      newestRequestId: "r-3",
+      openRequestIds: ["r-1", "r-2", "r-3"],
+      notificationBody: "Run make deploy?\n+2 more waiting",
+    });
+  });
+
+  it("starts the notification with the subagent's name when a subagent asked the newest Request", () => {
+    const [waiting] = listWaiting(
+      [],
+      [
+        buildAssistantRow(
+          "a-ada",
+          "Ada",
           buildSession({
-            id: "s-1",
-            title: "Fix the login bug",
+            id: "s-ada",
             openRequests: [
-              { ...buildCommandRequest("r-1", "git push"), subagentId: "agent-1" },
-              buildCommandRequest("r-2", "pnpm test"),
+              buildCommandRequest("r-1", "git push"),
+              {
+                ...buildCommandRequest("r-2", "pnpm test"),
+                subagentId: "agent-1",
+                subagentName: "Review the diff",
+              },
             ],
           }),
-        ],
-        [],
-      ),
-    ).toEqual([
-      {
-        kind: "thread",
-        sessionId: "s-1",
-        requestId: "r-1",
-        title: "Fix the login bug",
-        question: "Run git push?",
-        activityAt: EARLY,
-      },
-    ]);
+        ),
+      ],
+    );
+
+    expect(waiting).toMatchObject({
+      requestId: "r-1",
+      question: "Run git push?",
+      newestRequestId: "r-2",
+      notificationBody: "Review the diff asks: Run pnpm test?\n+1 more waiting",
+    });
+  });
+
+  it('starts the notification with "A subagent asks: " when the subagent has no name yet', () => {
+    const [waiting] = listWaiting(
+      [
+        buildSession({
+          id: "s-1",
+          openRequests: [{ ...buildCommandRequest("r-1", "pnpm test"), subagentId: "agent-1" }],
+        }),
+      ],
+      [],
+    );
+
+    expect(waiting?.notificationBody).toBe("A subagent asks: Run pnpm test?");
   });
 
   it("lists a thread parked on a question, with its first question as its line", () => {
@@ -210,6 +276,9 @@ describe("listWaiting", () => {
         requestId: "r-1",
         title: "Save drafts",
         question: "Which storage should drafts use?",
+        newestRequestId: "r-1",
+        openRequestIds: ["r-1"],
+        notificationBody: "Which storage should drafts use?",
         activityAt: EARLY,
       },
     ]);
