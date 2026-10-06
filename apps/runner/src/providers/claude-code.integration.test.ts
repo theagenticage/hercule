@@ -1,6 +1,7 @@
 /**
  * Checks that the real vendor SDK still returns the shapes that the stubbed
- * tests in `claude-code.test.ts` assume.
+ * tests in `claude-code.test.ts` assume. The last test replays a run recorded
+ * from the real CLI through the adapter, so it needs no CLI at all.
  *
  * The probe test and the User Material tests use a temporary config directory
  * and never touch the developer's own `~/.claude`. The User Material tests can
@@ -23,10 +24,15 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
-import { Duration, Effect, Stream } from "effect";
-import { query as sdkQuery, type Query } from "@anthropic-ai/claude-agent-sdk";
-import type { OutputSchema, ProviderEvent, SessionSpec } from "@hercule/protocol";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { Duration, Effect, Schema, Stream } from "effect";
+import {
+  query as sdkQuery,
+  type Options,
+  type Query,
+  type SDKMessage,
+} from "@anthropic-ai/claude-agent-sdk";
+import { ProviderEvent, type OutputSchema, type SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
   FIXTURE_PROMPT,
@@ -693,6 +699,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
           [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
           interrupt: () => started.interrupt().then(() => undefined),
           setModel: (model) => started.setModel(model),
+          stopTask: (taskId) => started.stopTask(taskId),
           close: () => void started.return(undefined).catch(() => undefined),
         };
       },
@@ -760,4 +767,720 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     },
     Duration.toMillis(PROBE_DEADLINE) * 2,
   );
+});
+
+/**
+ * Replays a recorded live run with two subagents through the adapter, and
+ * checks the events a user would see (spec 06 section 13, #436). The fixture
+ * was recorded from CLI 2.1.289 and scrubbed. Each line is one of these:
+ *
+ * - `{ frame }`: a message the SDK's query yielded;
+ * - `{ canUseTool }`: the SDK called the adapter's `canUseTool` at that point.
+ *
+ * In the run, the session's own agent starts a foreground subagent, "outer",
+ * which starts a background subagent, "inner". Both ask to use `Write` and wait
+ * at the same time. Then outer asks to use `Bash`.
+ */
+const OUTER = "ad748b185e19d61f8";
+const INNER = "adea95d9b3725e861";
+const OUTER_CALL = "toolu_01EsHF3WZdK6G3jSgav7n4UZ";
+const INNER_CALL = "toolu_01JEeMqQEM6B3HzmtSfRWfx5";
+const OUTER_WRITE = "toolu_01Y4bUpLFTVZ93qtPjkgEt2E";
+const INNER_WRITE = "toolu_011XTxjP7YJZR7Cn1kGy2aTQ";
+const OUTER_BASH = "toolu_01QouyZpMyyiKxyVS4rqX4uX";
+
+/**
+ * The ids of the messages the subagents sent. None may show up in an event of
+ * the session's own agent.
+ */
+const SUBAGENT_MESSAGES = [
+  "msg_011CfjqhJP1D4UWmZiWKW5qv",
+  "msg_011CfjqhYFgm38ZyBq2WUx3z",
+  "msg_011CfjqhYGRqicxjCpcRmx4E",
+  "msg_011CfjqhiMQ1nPVDXRWN857u",
+];
+
+/** The `system` subtypes that only report progress, and must produce no event. */
+const PROGRESS_SUBTYPES = ["task_progress", "task_updated", "background_tasks_changed"];
+
+const REPLAY_SESSION = "0199e0e7-0000-7000-8000-00000000ff0b";
+
+/** The arguments the SDK passed to `canUseTool`, as the fixture recorded them. */
+type CanUseToolCall = {
+  readonly toolName: string;
+  readonly input: Record<string, unknown>;
+  readonly toolUseID: string;
+  readonly agentID?: string;
+};
+
+/**
+ * What the host did at that point of a recorded run: stopped one subagent, or
+ * interrupted the whole session.
+ */
+type HostAction = { readonly stopTask: string } | { readonly interrupt: true };
+
+type FixtureLine =
+  | { readonly frame: SDKMessage }
+  | { readonly canUseTool: CanUseToolCall }
+  | { readonly host: HostAction };
+
+/** Reads a recorded run, one fixture line per JSON line of the file. */
+const readFixture = (name: string): ReadonlyArray<FixtureLine | { readonly scenario: string }> =>
+  readFileSync(new URL(name, import.meta.url), "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as FixtureLine | { readonly scenario: string });
+
+const FIXTURE = readFixture("./claude-code-subagents.fixture.jsonl") as ReadonlyArray<FixtureLine>;
+
+const FIXTURE_FRAMES: ReadonlyArray<SDKMessage> = FIXTURE.flatMap((line) =>
+  "frame" in line ? [line.frame] : [],
+);
+
+/** Returns the ids of the tool calls whose results a frame carries. */
+const readToolResultIds = (frame: SDKMessage): ReadonlyArray<string> =>
+  frame.type === "user" && Array.isArray(frame.message.content)
+    ? frame.message.content.flatMap((block) =>
+        block.type === "tool_result" ? [block.tool_use_id] : [],
+      )
+    : [];
+
+/**
+ * Returns the id of the tool call whose shell a frame reports started, or
+ * none. Claude runs a `Bash` call as a shell task, and starts it only once the
+ * call is allowed.
+ */
+const readShellToolCallIds = (frame: SDKMessage): ReadonlyArray<string> =>
+  frame.type === "system" &&
+  frame.subtype === "task_started" &&
+  frame.task_type === "local_bash" &&
+  frame.tool_use_id !== undefined
+    ? [frame.tool_use_id]
+    : [];
+
+/**
+ * Returns the id of the request the adapter opened for a tool call, or
+ * `undefined` when it opened none.
+ */
+const findRequestIdForToolCall = (
+  events: ReadonlyArray<ProviderEvent>,
+  toolUseId: string,
+): string | undefined =>
+  events.flatMap((event) =>
+    event._tag === "request.opened" && event.request.itemId === toolUseId
+      ? [event.request.requestId]
+      : [],
+  )[0];
+
+/** Returns the SDK message an event carries as its raw payload, or `undefined`. */
+const readRawFrame = (event: ProviderEvent): Readonly<Record<string, unknown>> | undefined => {
+  const payload: unknown = event.raw?.payload;
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    ? (payload as Readonly<Record<string, unknown>>)
+    : undefined;
+};
+
+/** Checks whether an SDK message only reports the progress of a subagent. */
+const isProgressReport = (frame: Readonly<Record<string, unknown>> | undefined): boolean =>
+  frame?.["type"] === "system" && PROGRESS_SUBTYPES.includes(String(frame["subtype"]));
+
+/**
+ * Returns the position of the event that carries a frame as its raw payload.
+ * The adapter puts the payload on the first event it emits for the frame
+ * itself, after any event that opens a turn.
+ */
+const findEventCarryingFrame = (events: ReadonlyArray<ProviderEvent>, frame: SDKMessage): number =>
+  events.findIndex((event) => readRawFrame(event)?.["uuid"] === frame.uuid);
+
+/** Checks whether an event belongs to the session's own agent rather than a subagent. */
+const isOwnAgentEvent = (event: ProviderEvent): boolean =>
+  !("subagentId" in event) || event.subagentId === undefined;
+
+/** What one replay of a recorded run produced. */
+interface Replay {
+  /** Every event the adapter emitted, in order, up to and including `session.exited`. */
+  readonly events: ReadonlyArray<ProviderEvent>;
+  /**
+   * The events the adapter emitted for the recorded run itself, before the
+   * replay stopped the session.
+   */
+  readonly eventsBeforeStop: ReadonlyArray<ProviderEvent>;
+  /** The decision each `canUseTool` call returned, by tool call id. */
+  readonly decisions: ReadonlyMap<string, unknown>;
+  /** The subagent id of each `stopTask` the adapter sent the harness, in order. */
+  readonly stopTasks: ReadonlyArray<string>;
+  /** How many times the adapter sent the harness `interrupt()`. */
+  readonly interrupts: number;
+}
+
+/**
+ * Replays a recorded run through the adapter, as one session, and returns
+ * every event it emitted. Fails when the adapter supplies no `canUseTool`,
+ * opens no request for a tool call the replay has to answer, or does not send
+ * the harness the `stopTask` a host stop line asks for.
+ *
+ * A tool call is allowed when the CLI went on to run it: just before the frame
+ * that carries its result, or the `task_started` of its shell. At a host line
+ * the replay calls the adapter's `interrupt`, as the controller would.
+ *
+ * The replay waits only for conditions, never for time. The fake query hands
+ * the adapter one frame, then waits until the adapter asks for the next one,
+ * which it does after it has handled the frame. A tool call is answered once
+ * its `request.opened` event has arrived, and the replay ends once
+ * `session.exited` has arrived.
+ */
+const replayFixture = async (
+  sessionId: string,
+  lines: ReadonlyArray<FixtureLine>,
+): Promise<Replay> => {
+  let options: Options | undefined;
+  let deliver: ((result: IteratorResult<SDKMessage>) => void) | undefined;
+  let onPull: (() => void) | undefined;
+  const stopTasks: Array<string> = [];
+  let interrupts = 0;
+  const adapter = makeClaudeCodeAdapter({
+    stream: (params) => {
+      options = params.options;
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: () =>
+            new Promise<IteratorResult<SDKMessage>>((resolve) => {
+              deliver = resolve;
+              onPull?.();
+              onPull = undefined;
+            }),
+        }),
+        interrupt: () => {
+          interrupts += 1;
+          return Promise.resolve();
+        },
+        setModel: () => Promise.resolve(),
+        stopTask: (taskId) => {
+          stopTasks.push(taskId);
+          return Promise.resolve();
+        },
+        close: () => deliver?.({ done: true, value: undefined }),
+      };
+    },
+    query: () => {
+      throw new Error("this test replays a session, not a probe");
+    },
+    run: () => Effect.succeed({ code: 0, stdout: "", stderr: "" }),
+  });
+
+  const seen: Array<ProviderEvent> = [];
+  Effect.runFork(
+    Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+  );
+
+  /** Waits until the adapter is waiting for its next frame. */
+  const waitForPull = (): Promise<void> =>
+    deliver !== undefined
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          onPull = resolve;
+        });
+
+  /** Hands the adapter one frame and waits until it has handled it. */
+  const deliverFrame = async (frame: SDKMessage): Promise<void> => {
+    await waitForPull();
+    const send = deliver!;
+    deliver = undefined;
+    send({ done: false, value: frame });
+    await waitForPull();
+  };
+
+  await Effect.runPromise(
+    adapter.startSession(
+      sessionId,
+      { ...SPEC, modelSelection: { model: "claude-sonnet-5-5", options: {} } },
+      {
+        cwd: "/workspace",
+        home: "/var/hercule/runner/providers/replay",
+        binary: "/usr/local/bin/claude",
+        env: { PATH: "/usr/bin" },
+        secrets: {},
+        herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
+      },
+    ),
+  );
+
+  const waiting: Array<{ readonly toolUseId: string; readonly decision: Promise<unknown> }> = [];
+  const decisions = new Map<string, unknown>();
+
+  /**
+   * Allows every tool call that is waiting, the newest first. In the live run
+   * the user answered inner's `Write` before outer's.
+   */
+  const allowWaitingToolCalls = async (): Promise<void> => {
+    for (const { toolUseId, decision } of waiting.toReversed()) {
+      const requestId = await vi.waitUntil(() => findRequestIdForToolCall(seen, toolUseId), {
+        timeout: 5_000,
+      });
+      await Effect.runPromise(adapter.respondToApprovalRequest(sessionId, requestId, "allow"));
+      decisions.set(toolUseId, await decision);
+    }
+    waiting.length = 0;
+  };
+
+  for (const [index, line] of lines.entries()) {
+    if ("frame" in line) {
+      // The CLI runs a tool, and so starts its shell or sends its result, only
+      // after the tool call is allowed.
+      const ran = [...readToolResultIds(line.frame), ...readShellToolCallIds(line.frame)];
+      if (waiting.some(({ toolUseId }) => ran.includes(toolUseId))) {
+        await allowWaitingToolCalls();
+      }
+      await deliverFrame(line.frame);
+      continue;
+    }
+    if ("host" in line) {
+      if ("stopTask" in line.host) {
+        const subagentId = line.host.stopTask;
+        await Effect.runPromise(adapter.interrupt(sessionId, subagentId));
+        expect(stopTasks, `the adapter sent no stopTask for ${subagentId}`).toContain(subagentId);
+      } else {
+        await Effect.runPromise(adapter.interrupt(sessionId));
+      }
+      continue;
+    }
+    const { toolName, input, toolUseID, agentID } = line.canUseTool;
+    const canUseTool = options?.canUseTool;
+    if (canUseTool === undefined) throw new Error("the adapter supplied no canUseTool");
+    waiting.push({
+      toolUseId: toolUseID,
+      decision: canUseTool(toolName, input, {
+        signal: new AbortController().signal,
+        toolUseID,
+        // The SDK's own control request id. The recording leaves it out, and
+        // the adapter never reads it.
+        requestId: `control-${index + 1}`,
+        ...(agentID === undefined ? {} : { agentID }),
+      }),
+    });
+  }
+
+  const eventsBeforeStop = [...seen];
+  await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+  await vi.waitUntil(() => seen.some((event) => event._tag === "session.exited"), {
+    timeout: 5_000,
+  });
+  return { events: seen, eventsBeforeStop, decisions, stopTasks, interrupts };
+};
+
+describe("a recorded Claude Code run with a nested subagent, replayed", () => {
+  let events: ReadonlyArray<ProviderEvent> = [];
+  let decisions: ReadonlyMap<string, unknown> = new Map();
+  beforeAll(async () => {
+    ({ events, decisions } = await replayFixture(REPLAY_SESSION, FIXTURE));
+  });
+
+  it("encodes every event with the protocol schema", () => {
+    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    for (const event of events) expect(() => encode(event), JSON.stringify(event)).not.toThrow();
+  });
+
+  it("drops no frame and exits once", () => {
+    expect(events.filter((event) => event._tag === "runtime.warning")).toEqual([]);
+    expect(events.filter((event) => event._tag === "session.exited")).toHaveLength(1);
+  });
+
+  it("gives the session's own agent one turn, from its first message to the result", () => {
+    const started = events.filter(
+      (event) => event._tag === "turn.started" && isOwnAgentEvent(event),
+    );
+    const completed = events.filter(
+      (event) => event._tag === "turn.completed" && isOwnAgentEvent(event),
+    );
+    expect(started).toHaveLength(1);
+    expect(completed).toEqual([
+      expect.objectContaining({
+        state: "completed",
+        turnId: (started[0] as Extract<ProviderEvent, { _tag: "turn.started" }>).turnId,
+      }),
+    ]);
+
+    // The turn opens with the first message of the session's own agent: no
+    // earlier stream event opens it.
+    const firstMessage = FIXTURE_FRAMES.find(
+      (frame) => frame.type === "assistant" && frame.parent_tool_use_id === null,
+    )!;
+    const carryingFirstMessage = findEventCarryingFrame(events, firstMessage);
+    expect(carryingFirstMessage).toBeGreaterThan(0);
+    expect(events[carryingFirstMessage - 1]).toBe(started[0]);
+
+    // The turn ends with the result, the last frame of the run.
+    const result = FIXTURE_FRAMES.find((frame) => frame.type === "result")!;
+    expect(FIXTURE_FRAMES.at(-1)).toBe(result);
+    const carryingResult = findEventCarryingFrame(events, result);
+    expect(carryingResult).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf(completed[0]!)).toBeGreaterThanOrEqual(carryingResult);
+  });
+
+  it("keeps subagent content out of the session's own agent's transcript", () => {
+    const reply = events
+      .flatMap((event) =>
+        event._tag === "content.delta" &&
+        isOwnAgentEvent(event) &&
+        event.streamKind === "assistant_text"
+          ? [event.delta]
+          : [],
+      )
+      .join("");
+    expect(reply).toBe("Both files (inner.txt and outer.txt) were created.");
+    // The transcript holds only the `Agent` call and the reply.
+    expect(
+      events.flatMap((event) =>
+        event._tag === "item.started" && isOwnAgentEvent(event) ? [event.itemId] : [],
+      ),
+    ).toEqual([OUTER_CALL, "msg_011CfjqhrigSwVhSJEp6AAz6#0"]);
+
+    const subagentContent = [
+      INNER_CALL,
+      OUTER_WRITE,
+      INNER_WRITE,
+      OUTER_BASH,
+      ...SUBAGENT_MESSAGES,
+    ];
+    for (const event of events) {
+      if (!isOwnAgentEvent(event) || event._tag === "subagent.started") continue;
+      const encoded = JSON.stringify(event);
+      for (const marker of subagentContent) {
+        expect(encoded, `an event of the session's own agent carries ${marker}`).not.toContain(
+          marker,
+        );
+      }
+    }
+  });
+
+  it("introduces each subagent before its own events, with its parent", () => {
+    // Outer is introduced by the session's own agent, inner by outer. Each is
+    // linked to the `Agent` call that started it, in its parent's transcript.
+    const introductions = events.filter((event) => event._tag === "subagent.started");
+    expect(introductions).toEqual([
+      expect.objectContaining({
+        subagentId: OUTER,
+        itemId: OUTER_CALL,
+        description: "Outer nested agent task",
+        agentType: "general-purpose",
+      }),
+      expect.objectContaining({
+        subagentId: INNER,
+        parentSubagentId: OUTER,
+        itemId: INNER_CALL,
+        description: "Create inner.txt",
+        agentType: "general-purpose",
+      }),
+    ]);
+    expect(introductions[0]).not.toHaveProperty("parentSubagentId");
+    const agentCalls = events.filter(
+      (event) =>
+        event._tag === "item.started" &&
+        (event.itemId === OUTER_CALL || event.itemId === INNER_CALL),
+    );
+    expect(agentCalls).toEqual([
+      expect.objectContaining({ itemId: OUTER_CALL, kind: "subagent" }),
+      expect.objectContaining({ itemId: INNER_CALL, kind: "subagent", subagentId: OUTER }),
+    ]);
+    expect(isOwnAgentEvent(agentCalls[0]!)).toBe(true);
+
+    for (const subagentId of [OUTER, INNER]) {
+      const introduced = events.findIndex(
+        (event) => event._tag === "subagent.started" && event.subagentId === subagentId,
+      );
+      const firstOwn = events.findIndex(
+        (event) =>
+          "subagentId" in event &&
+          event.subagentId === subagentId &&
+          event._tag !== "subagent.started",
+      );
+      expect(introduced, subagentId).toBeGreaterThanOrEqual(0);
+      expect(introduced, subagentId).toBeLessThan(firstOwn);
+    }
+  });
+
+  it("gives each subagent one turn with its model and no Token Usage", () => {
+    // Claude reports no Token Usage that is exact for a subagent, so a
+    // subagent's turn ends without one.
+    for (const subagentId of [OUTER, INNER]) {
+      const started = events.filter(
+        (event) => event._tag === "turn.started" && event.subagentId === subagentId,
+      );
+      const completed = events.filter(
+        (event) => event._tag === "turn.completed" && event.subagentId === subagentId,
+      );
+      expect(started, subagentId).toEqual([
+        expect.objectContaining({ model: "claude-sonnet-5-5" }),
+      ]);
+      expect(completed, subagentId).toEqual([
+        expect.objectContaining({
+          state: "completed",
+          turnId: (started[0] as Extract<ProviderEvent, { _tag: "turn.started" }>).turnId,
+        }),
+      ]);
+      for (const field of ["usage", "costUsd", "structuredResult"]) {
+        expect(completed[0], subagentId).not.toHaveProperty(field);
+      }
+    }
+    expect(
+      events.filter((event) => event._tag === "session.usage.updated" && !isOwnAgentEvent(event)),
+    ).toEqual([]);
+  });
+
+  it("opens both writes at once and resolves each before its agent's turn ends", () => {
+    for (const toolUseId of [INNER_WRITE, OUTER_WRITE, OUTER_BASH]) {
+      expect(decisions.get(toolUseId), toolUseId).toMatchObject({ behavior: "allow" });
+    }
+
+    // Both writes wait at once, each on its own subagent, and the answers
+    // come back in the other order.
+    const innerWrite = findRequestIdForToolCall(events, INNER_WRITE);
+    const outerWrite = findRequestIdForToolCall(events, OUTER_WRITE);
+    const outerBash = findRequestIdForToolCall(events, OUTER_BASH);
+    expect(new Set([innerWrite, outerWrite, outerBash]).size).toBe(3);
+    expect(
+      events
+        .filter((event) => event._tag === "request.opened" || event._tag === "request.resolved")
+        .map((event) =>
+          event._tag === "request.opened"
+            ? { opened: event.request.requestId, subagentId: event.subagentId }
+            : { resolved: event.requestId, subagentId: event.subagentId },
+        ),
+    ).toEqual([
+      { opened: outerWrite, subagentId: OUTER },
+      { opened: innerWrite, subagentId: INNER },
+      { resolved: innerWrite, subagentId: INNER },
+      { resolved: outerWrite, subagentId: OUTER },
+      { opened: outerBash, subagentId: OUTER },
+      { resolved: outerBash, subagentId: OUTER },
+    ]);
+    for (const [requestId, subagentId] of [
+      [innerWrite, INNER],
+      [outerWrite, OUTER],
+      [outerBash, OUTER],
+    ] as const) {
+      const resolved = events.findIndex(
+        (event) => event._tag === "request.resolved" && event.requestId === requestId,
+      );
+      const turnEnded = events.findIndex(
+        (event) => event._tag === "turn.completed" && event.subagentId === subagentId,
+      );
+      expect(resolved, String(requestId)).toBeGreaterThanOrEqual(0);
+      expect(resolved, String(requestId)).toBeLessThan(turnEnded);
+    }
+  });
+
+  it("puts each tool call in the transcript of the subagent that made it", () => {
+    for (const [toolUseId, subagentId] of [
+      [OUTER_WRITE, OUTER],
+      [INNER_WRITE, INNER],
+      [OUTER_BASH, OUTER],
+    ] as const) {
+      const items = events.filter(
+        (event) =>
+          (event._tag === "item.started" || event._tag === "item.completed") &&
+          event.itemId === toolUseId,
+      );
+      expect(
+        items.map((event) => event._tag),
+        toolUseId,
+      ).toEqual(["item.started", "item.completed"]);
+      for (const item of items) expect(item, toolUseId).toMatchObject({ subagentId });
+    }
+  });
+
+  it("produces nothing for progress reports", () => {
+    // The fixture holds progress reports, so the check below is not empty.
+    expect(FIXTURE_FRAMES.filter((frame) => isProgressReport(frame)).length).toBeGreaterThan(0);
+    // Any event the adapter made from a progress report, other than one that
+    // opens a turn, would carry the report as its raw payload.
+    expect(events.filter((event) => isProgressReport(readRawFrame(event)))).toEqual([]);
+  });
+});
+
+/**
+ * Replays recorded live runs in which the host stopped subagents, and checks
+ * that each stopped subagent reads `stopped` and that the stop sets no agent
+ * working again (spec 06 sections 13.4 and 13.6, #436). The fixture was
+ * recorded from CLI 2.1.289 and scrubbed. It holds several runs, each one
+ * after a `{ scenario }` line, and besides the lines of the fixture above it
+ * has `{ host }` lines: the host called `stopTask` for one subagent, or
+ * `interrupt()` for the whole session, at that point.
+ */
+const STOP_SCENARIOS: ReadonlyMap<string, ReadonlyArray<FixtureLine>> = (() => {
+  const scenarios = new Map<string, Array<FixtureLine>>();
+  let current: Array<FixtureLine> | undefined;
+  for (const line of readFixture("./claude-code-subagents-stop.fixture.jsonl")) {
+    if ("scenario" in line) {
+      current = [];
+      scenarios.set(line.scenario, current);
+    } else {
+      current!.push(line);
+    }
+  }
+  return scenarios;
+})();
+
+/** Returns the `turn.completed` events of one agent, or of the session's own agent. */
+const listTurnEnds = (
+  events: ReadonlyArray<ProviderEvent>,
+  subagentId: string | undefined,
+): ReadonlyArray<Extract<ProviderEvent, { _tag: "turn.completed" }>> =>
+  events.filter(
+    (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+      event._tag === "turn.completed" && event.subagentId === subagentId,
+  );
+
+/** Returns the `turn.started` events of one agent, or of the session's own agent. */
+const listTurnStarts = (
+  events: ReadonlyArray<ProviderEvent>,
+  subagentId: string | undefined,
+): ReadonlyArray<Extract<ProviderEvent, { _tag: "turn.started" }>> =>
+  events.filter(
+    (event): event is Extract<ProviderEvent, { _tag: "turn.started" }> =>
+      event._tag === "turn.started" && event.subagentId === subagentId,
+  );
+
+/** Returns the ids of the turns that started and have not completed. */
+const listOpenTurnIds = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> => {
+  const ended = new Set(
+    events.flatMap((event) => (event._tag === "turn.completed" ? [event.turnId] : [])),
+  );
+  return events.flatMap((event) =>
+    event._tag === "turn.started" && !ended.has(event.turnId) ? [event.turnId] : [],
+  );
+};
+
+/**
+ * Checks that a stopped subagent reads `stopped`: it has a turn that ended
+ * `interrupted`, its last turn ended `interrupted`, and none of its turns ended
+ * `completed` after the first one interrupted.
+ */
+const expectStopped = (events: ReadonlyArray<ProviderEvent>, subagentId: string): void => {
+  const ends = listTurnEnds(events, subagentId);
+  const stopped = ends.findIndex((end) => end.state === "interrupted");
+  expect(stopped, `${subagentId} has no interrupted turn`).toBeGreaterThanOrEqual(0);
+  expect(ends.at(-1)?.state, subagentId).toBe("interrupted");
+  expect(
+    ends.slice(stopped).map((end) => end.state),
+    `${subagentId} completed a turn after it was stopped`,
+  ).not.toContain("completed");
+};
+
+const STOPPED_OUTER = "a8c1fa90413e76396";
+const STOPPED_INNER = "a1dd814294a45cd7b";
+const STOPPED_OUTER_CALL = "toolu_01BhgdpXbb7UZmCms59EfpgR";
+const STOPPED_INNER_CALL = "toolu_01V9uiPLDJ9xJybTXJnWWHjy";
+/** The ids of the shell tasks the subagents' `Bash` calls started. */
+const SHELL_TASKS = ["blrg07p6w", "befpfikgv", "bw3n8gm12"];
+
+const STOP_TREE_SESSION = "0199e0e7-0000-7000-8000-00000000ff0c";
+const INTERRUPT_ALL_SESSION = "0199e0e7-0000-7000-8000-00000000ff0d";
+
+/**
+ * In the run, the session's own agent starts a foreground subagent, "outer",
+ * which starts a background subagent, "inner". Each runs a long `Bash`
+ * command. The host stops inner, then outer. After each stop the CLI still
+ * sends two late messages from the stopped subagent: the rejected tool result
+ * and "[Request interrupted by user for tool use]". Then the session's own
+ * agent replies and its turn ends.
+ */
+describe("a recorded Claude Code run whose subagents the host stopped, replayed", () => {
+  let replay: Replay;
+  beforeAll(async () => {
+    replay = await replayFixture(STOP_TREE_SESSION, STOP_SCENARIOS.get("stop-tree")!);
+  });
+
+  it("encodes every event with the protocol schema", () => {
+    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    for (const event of replay.events) {
+      expect(() => encode(event), JSON.stringify(event)).not.toThrow();
+    }
+  });
+
+  it("introduces the two subagents, and no shell task as a subagent", () => {
+    expect(replay.events.filter((event) => event._tag === "subagent.started")).toEqual([
+      expect.objectContaining({ subagentId: STOPPED_OUTER, itemId: STOPPED_OUTER_CALL }),
+      expect.objectContaining({
+        subagentId: STOPPED_INNER,
+        parentSubagentId: STOPPED_OUTER,
+        itemId: STOPPED_INNER_CALL,
+      }),
+    ]);
+    for (const event of replay.events) {
+      const encoded = JSON.stringify(event);
+      for (const task of SHELL_TASKS) {
+        if ("subagentId" in event) expect(event.subagentId, encoded).not.toBe(task);
+        if ("parentSubagentId" in event) expect(event.parentSubagentId, encoded).not.toBe(task);
+      }
+    }
+  });
+
+  it("sends stopTask once for each subagent, and none again for inner when outer stops", () => {
+    expect(replay.stopTasks).toEqual([STOPPED_INNER, STOPPED_OUTER]);
+    expect(replay.interrupts).toBe(0);
+  });
+
+  it("leaves each stopped subagent stopped, through its late messages", () => {
+    for (const subagentId of [STOPPED_OUTER, STOPPED_INNER]) {
+      expectStopped(replay.eventsBeforeStop, subagentId);
+    }
+  });
+
+  it("leaves no turn open when the run ends", () => {
+    expect(listOpenTurnIds(replay.eventsBeforeStop)).toEqual([]);
+  });
+
+  it("gives the session's own agent one turn, which completes", () => {
+    const started = listTurnStarts(replay.eventsBeforeStop, undefined);
+    expect(started).toHaveLength(1);
+    expect(listTurnEnds(replay.eventsBeforeStop, undefined)).toEqual([
+      expect.objectContaining({ turnId: started[0]!.turnId, state: "completed" }),
+    ]);
+  });
+});
+
+const BACKGROUND = "a05b29375c71392eb";
+
+/**
+ * In the run, the session's own agent starts a background subagent and its
+ * turn ends. While only the subagent works, on a long `Bash` command, the host
+ * interrupts the session. The CLI stops the subagent and still sends its two
+ * late messages.
+ */
+describe("a recorded Claude Code run interrupted while only a subagent works, replayed", () => {
+  let replay: Replay;
+  beforeAll(async () => {
+    replay = await replayFixture(INTERRUPT_ALL_SESSION, STOP_SCENARIOS.get("interrupt-all")!);
+  });
+
+  it("encodes every event with the protocol schema", () => {
+    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    for (const event of replay.events) {
+      expect(() => encode(event), JSON.stringify(event)).not.toThrow();
+    }
+  });
+
+  it("sends the harness the interrupt, because a subagent is working", () => {
+    expect(replay.interrupts).toBe(1);
+    expect(replay.stopTasks).toEqual([]);
+  });
+
+  it("leaves the subagent stopped, through its late messages", () => {
+    expect(
+      replay.events
+        .filter((event) => event._tag === "subagent.started")
+        .map((event) => event.subagentId),
+    ).toEqual([BACKGROUND]);
+    expectStopped(replay.eventsBeforeStop, BACKGROUND);
+  });
+
+  it("opens no turn of the session's own agent after its first one, and leaves nothing working", () => {
+    const started = listTurnStarts(replay.eventsBeforeStop, undefined);
+    expect(started).toHaveLength(1);
+    expect(listTurnEnds(replay.eventsBeforeStop, undefined)).toEqual([
+      expect.objectContaining({ turnId: started[0]!.turnId, state: "completed" }),
+    ]);
+    expect(listOpenTurnIds(replay.eventsBeforeStop)).toEqual([]);
+  });
 });

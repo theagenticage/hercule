@@ -65,6 +65,25 @@ export const SubagentId = Fact.check(
 
 export type SubagentId = Schema.Schema.Type<typeof SubagentId>;
 
+/**
+ * One subagent a resumed session already has a record of, as the controller
+ * sends it in `SessionSpec.continue.subagents`:
+ *
+ * - `itemId` is the item of the call that started the subagent, when the
+ *   record has one;
+ * - `parentSubagentId` is the subagent that started it, absent when the
+ *   session's own agent did. The adapter needs this tree to stop a continued
+ *   subagent together with the subagents below it, because a harness such as
+ *   Claude Code names no parent agent in its frames.
+ */
+export const ContinuedSubagent = Schema.Struct({
+  subagentId: SubagentId,
+  itemId: Schema.optionalKey(Fact),
+  parentSubagentId: Schema.optionalKey(SubagentId),
+});
+
+export type ContinuedSubagent = Schema.Schema.Type<typeof ContinuedSubagent>;
+
 /** The model and the per-model choices a turn runs with (spec 06 section 4). */
 export const ModelSelection = Schema.Struct({
   model: Fact,
@@ -151,9 +170,7 @@ export const SessionSpec = Schema.Struct({
     Schema.Struct({
       nativeSessionId: Fact,
       mode: Schema.Literals(["resume", "fork"]),
-      subagents: Schema.optionalKey(
-        Schema.Array(Schema.Struct({ subagentId: SubagentId, itemId: Schema.optionalKey(Fact) })),
-      ),
+      subagents: Schema.optionalKey(Schema.Array(ContinuedSubagent)),
     }),
   ),
   /**

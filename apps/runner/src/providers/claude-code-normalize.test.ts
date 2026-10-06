@@ -7,11 +7,25 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { ProviderEvent, type OutputSchema } from "@hercule/protocol";
-import { CLAUDE_SDK_MESSAGE, normalize, buildNormalizingState } from "./claude-code-normalize";
+import { ProviderEvent, type ContinuedSubagent, type OutputSchema } from "@hercule/protocol";
+import {
+  CLAUDE_SDK_MESSAGE,
+  normalize,
+  buildNormalizingState,
+  isAnyAgentWorking,
+} from "./claude-code-normalize";
+import { deferUntilTurnOpens, type RequestOpened } from "./claude-code-subagents";
+import {
+  BRIEF,
+  NATIVE,
+  SUBAGENT_MODEL,
+  buildAgentCall,
+  buildSubagentText,
+  buildTaskNotification,
+  buildTaskStarted,
+} from "./claude-code.testing";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
-const NATIVE = "a2c71f4c-13ba-41ba-b372-49675028b0b1";
 const MESSAGE = "msg_011CeoxAoRk4jaxYB956uTmL";
 const TOOL = "toolu_016JZjZUP3FNEkwxFk3eJZao";
 
@@ -19,7 +33,7 @@ const TOOL = "toolu_016JZjZUP3FNEkwxFk3eJZao";
  * Builds a state with readable ids, numbered in the order they are created: the
  * tenth is `id-10`.
  */
-const buildTestState = (outputSchema?: OutputSchema) => {
+const buildTestState = (outputSchema?: OutputSchema, seeded?: ReadonlyArray<ContinuedSubagent>) => {
   let minted = 0;
   return buildNormalizingState(
     SESSION,
@@ -28,6 +42,7 @@ const buildTestState = (outputSchema?: OutputSchema) => {
     // No schema means the session replies in free text, as most turns in this
     // file do. Tests that need structured output pass a schema.
     outputSchema,
+    seeded,
   );
 };
 
@@ -46,7 +61,22 @@ const OUTPUT_SCHEMA: OutputSchema = {
 type Event = Schema.Schema.Type<typeof ProviderEvent>;
 
 const formatEvent = (event: Event): string => {
+  const line = formatEventBody(event);
+  // A subagent's event ends with `@<its id>`, so a list shows which agent each
+  // event belongs to. `subagent.started` names its subagent in its body.
+  return event._tag !== "subagent.started" &&
+    "subagentId" in event &&
+    event.subagentId !== undefined
+    ? `${line} @${event.subagentId}`
+    : line;
+};
+
+const formatEventBody = (event: Event): string => {
   switch (event._tag) {
+    case "subagent.started":
+      return `subagent.started ${event.subagentId} parent=${event.parentSubagentId ?? "main"} item=${event.itemId ?? "-"}`;
+    case "turn.started":
+      return event.model === undefined ? "turn.started" : `turn.started ${event.model}`;
     case "item.started":
       return `item.started ${event.kind} ${event.itemId}`;
     case "item.completed":
@@ -62,10 +92,11 @@ const formatEvent = (event: Event): string => {
   }
 };
 
-const normalizeMessages = (messages: ReadonlyArray<unknown>): ReadonlyArray<string> => {
-  const running = buildTestState();
-  return messages.flatMap((message) => normalize(running, message as SDKMessage).map(formatEvent));
-};
+const normalizeMessages = (
+  messages: ReadonlyArray<unknown>,
+  running = buildTestState(),
+): ReadonlyArray<string> =>
+  messages.flatMap((message) => normalize(running, message as SDKMessage).map(formatEvent));
 
 const INIT = {
   type: "system",
@@ -324,6 +355,24 @@ describe("normalizing SDK messages one at a time", () => {
         'content.delta reasoning_text "The user wants an echo."',
         "item.completed reasoning id-3 completed",
       ],
+    },
+    {
+      // The harness can leave a thinking block's text out and send only its
+      // signature, which would make a blank transcript entry.
+      name: "emits no item for an empty block of a message that never streamed",
+      messages: [
+        {
+          ...ASSISTANT_THINKING,
+          message: {
+            ...ASSISTANT_THINKING.message,
+            content: [
+              { type: "thinking", thinking: "", signature: "EoMDCrI" },
+              { type: "text", text: "" },
+            ],
+          },
+        },
+      ],
+      events: [],
     },
     {
       // The CLI sends one complete assistant message per finished block, so a
@@ -712,6 +761,811 @@ describe("malformed messages", () => {
   }
 });
 
+/**
+ * The ids of the subagents in the tests below. The frames they send come from
+ * `claude-code.testing.ts`.
+ */
+const AGENT_CALL = "toolu_01626ABmfrmqSuY6p7z4RbdB";
+const SUBAGENT = "acc5f22912463b884";
+const NESTED_CALL = "toolu_01NestedAgentCallB00000";
+const NESTED = "a77e1f0c9b2d43e58";
+const SUBAGENT_TOOL = "toolu_01SubagentBashCall000000";
+
+/** The brief a subagent was given, which Claude Code also sends as a `user` frame. */
+const buildSubagentPrompt = (agentCallId: string) => ({
+  type: "user",
+  session_id: NATIVE,
+  parent_tool_use_id: agentCallId,
+  message: { role: "user", content: [{ type: "text", text: BRIEF }] },
+});
+
+const buildSubagentToolUse = (agentCallId: string, name = "Bash", input: unknown = {}) => ({
+  type: "assistant",
+  uuid: `uuid-${SUBAGENT_TOOL}`,
+  session_id: NATIVE,
+  parent_tool_use_id: agentCallId,
+  message: {
+    id: `msg-${SUBAGENT_TOOL}`,
+    role: "assistant",
+    model: SUBAGENT_MODEL,
+    content: [{ type: "tool_use", id: SUBAGENT_TOOL, name, input }],
+  },
+});
+
+const buildSubagentToolResult = (agentCallId: string) => ({
+  type: "user",
+  session_id: NATIVE,
+  parent_tool_use_id: agentCallId,
+  message: {
+    role: "user",
+    content: [{ tool_use_id: SUBAGENT_TOOL, type: "tool_result", content: "ok", is_error: false }],
+  },
+});
+
+/** A request the adapter built for a subagent's approval, as `deferUntilTurnOpens` receives it. */
+const buildRequestOpened = (requestId: string, subagentId: string): RequestOpened => ({
+  _tag: "request.opened",
+  eventId: `event-${requestId}`,
+  sessionId: SESSION,
+  at: "2026-09-07T10:51:47.000Z",
+  subagentId,
+  request: {
+    requestId,
+    itemId: SUBAGENT_TOOL,
+    kind: "tool_approval",
+    decisions: ["allow", "deny", "cancel"],
+    detail: { toolName: "Write" },
+  },
+});
+
+describe("a subagent's turns", () => {
+  it("opens the subagent's turn at its first assistant message, with its brief as the user message", () => {
+    expect(
+      normalizeMessages([
+        buildAgentCall(null, AGENT_CALL),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        // The brief again, as a frame: it shows once, from `task_started`.
+        buildSubagentPrompt(AGENT_CALL),
+        buildSubagentText(AGENT_CALL, "msg_sub_1", "found it"),
+      ]),
+    ).toEqual([
+      "turn.started",
+      `item.started subagent ${AGENT_CALL}`,
+      `subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`,
+      `turn.started ${SUBAGENT_MODEL} @${SUBAGENT}`,
+      `item.started user_message id-7 @${SUBAGENT}`,
+      `item.completed user_message id-7 completed @${SUBAGENT}`,
+      `item.started assistant_message id-10 @${SUBAGENT}`,
+      `content.delta assistant_text "found it" @${SUBAGENT}`,
+      `item.completed assistant_message id-10 completed @${SUBAGENT}`,
+    ]);
+  });
+
+  it("introduces the subagent with the description and agent type from task_started", () => {
+    const running = buildTestState();
+    const [introduced] = normalize(
+      running,
+      buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage,
+    );
+    expect(introduced).toMatchObject({
+      _tag: "subagent.started",
+      subagentId: SUBAGENT,
+      itemId: AGENT_CALL,
+      description: "Find the config",
+      agentType: "general-purpose",
+    });
+  });
+
+  it("carries the brief on the user message item, as the adapter's own user messages do", () => {
+    const running = buildTestState();
+    const events = [
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentText(AGENT_CALL, "msg_sub_1", "found it"),
+    ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
+    const brief = events.find(
+      (event) => event._tag === "item.started" && event.kind === "user_message",
+    );
+    expect(brief?._tag === "item.started" ? brief.detail : undefined).toEqual({ text: BRIEF });
+  });
+
+  it("never opens a turn of the session's own agent for a subagent's frames", () => {
+    const running = buildTestState();
+    const events = [
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentPrompt(AGENT_CALL),
+      buildSubagentToolUse(AGENT_CALL),
+      buildSubagentToolResult(AGENT_CALL),
+      buildSubagentText(AGENT_CALL, "msg_sub_1", "done"),
+    ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
+    expect(running.turnId).toBeUndefined();
+    for (const event of events) {
+      if (event._tag === "subagent.started") continue;
+      expect("subagentId" in event ? event.subagentId : undefined).toBe(SUBAGENT);
+    }
+  });
+
+  it("does nothing for a later task_started while the subagent's turn is pending or open", () => {
+    expect(
+      normalizeMessages([
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildSubagentText(AGENT_CALL, "msg_sub_1", "found it"),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+      ]),
+    ).toEqual([
+      `subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`,
+      `turn.started ${SUBAGENT_MODEL} @${SUBAGENT}`,
+      `item.started user_message id-4 @${SUBAGENT}`,
+      `item.completed user_message id-4 completed @${SUBAGENT}`,
+      `item.started assistant_message id-7 @${SUBAGENT}`,
+      `content.delta assistant_text "found it" @${SUBAGENT}`,
+      `item.completed assistant_message id-7 completed @${SUBAGENT}`,
+    ]);
+  });
+
+  it("keeps the lifecycle of tasks that are not subagents trimmed", () => {
+    expect(
+      normalizeMessages([
+        buildTaskStarted("bresy0kl9", "toolu_01ShellCall", "local_bash"),
+        { type: "system", subtype: "task_progress", task_id: SUBAGENT, description: "Reading" },
+        {
+          type: "system",
+          subtype: "task_updated",
+          task_id: SUBAGENT,
+          patch: { status: "running" },
+        },
+        buildTaskNotification("bresy0kl9", AGENT_CALL),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("names the subagent whose frame made the Agent call as the parent of a nested subagent", () => {
+    const lines = normalizeMessages([
+      buildAgentCall(null, AGENT_CALL),
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildAgentCall(AGENT_CALL, NESTED_CALL),
+      buildTaskStarted(NESTED, NESTED_CALL),
+    ]);
+    expect(lines).toContain(`item.started subagent ${NESTED_CALL} @${SUBAGENT}`);
+    expect(lines.at(-1)).toBe(`subagent.started ${NESTED} parent=${SUBAGENT} item=${NESTED_CALL}`);
+  });
+
+  for (const [status, state] of [
+    ["completed", "completed"],
+    ["failed", "failed"],
+    ["stopped", "interrupted"],
+  ] as const) {
+    it(`closes the subagent's turn as ${state} when its task_notification says ${status}`, () => {
+      const running = buildTestState();
+      const events = [
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildSubagentText(AGENT_CALL, "msg_sub_1", "found it"),
+        buildTaskNotification(SUBAGENT, AGENT_CALL, status),
+      ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
+      const done = events.at(-1);
+      expect(done === undefined ? undefined : formatEvent(done)).toBe(
+        `turn.completed ${state} @${SUBAGENT}`,
+      );
+      // Claude's per-task usage is not what the subagent spent (spec 06 section 13.5).
+      expect(done).not.toHaveProperty("usage");
+      expect(done).not.toHaveProperty("costUsd");
+      expect(done).not.toHaveProperty("structuredResult");
+      expect(isAnyAgentWorking(running)).toBe(false);
+    });
+  }
+
+  it("opens and closes the turn of a subagent that ended before sending a frame", () => {
+    expect(
+      normalizeMessages([
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildTaskNotification(SUBAGENT, AGENT_CALL),
+      ]),
+    ).toEqual([
+      `subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`,
+      `turn.started @${SUBAGENT}`,
+      `item.started user_message id-4 @${SUBAGENT}`,
+      `item.completed user_message id-4 completed @${SUBAGENT}`,
+      `turn.completed completed @${SUBAGENT}`,
+    ]);
+  });
+
+  it("ignores a task_notification for a subagent with no turn", () => {
+    expect(
+      normalizeMessages([
+        buildTaskNotification(SUBAGENT, AGENT_CALL),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildTaskNotification(SUBAGENT, AGENT_CALL),
+        buildTaskNotification(SUBAGENT, AGENT_CALL),
+      ]).filter((line) => line.startsWith("turn.completed")),
+    ).toEqual([`turn.completed completed @${SUBAGENT}`]);
+  });
+
+  it("opens a turn with no user message for a subagent that woke by itself", () => {
+    const lines = normalizeMessages([
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentText(AGENT_CALL, "msg_sub_1", "waiting for the build"),
+      buildTaskNotification(SUBAGENT, AGENT_CALL),
+      buildSubagentText(AGENT_CALL, "msg_sub_2", "the build passed"),
+    ]);
+    const woke = lines.slice(lines.indexOf(`turn.completed completed @${SUBAGENT}`) + 1);
+    expect(woke).toEqual([
+      `turn.started ${SUBAGENT_MODEL} @${SUBAGENT}`,
+      `item.started assistant_message id-14 @${SUBAGENT}`,
+      `content.delta assistant_text "the build passed" @${SUBAGENT}`,
+      `item.completed assistant_message id-14 completed @${SUBAGENT}`,
+    ]);
+  });
+
+  // After a stop, the stopped call's rejected tool_result arrives after the
+  // task_notification that closed the turn. A turn opened for it is closed at
+  // once, or nothing would ever close it and the subagent would look running.
+  // The subagent was stopped, so that turn ends as interrupted too.
+  it("closes the turn a trailing tool result opened for a stopped subagent as interrupted", () => {
+    const running = buildTestState();
+    const lines = [
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentToolUse(AGENT_CALL),
+      buildTaskNotification(SUBAGENT, AGENT_CALL, "stopped"),
+      buildSubagentToolResult(AGENT_CALL),
+    ].flatMap((message) => normalize(running, message as unknown as SDKMessage).map(formatEvent));
+    expect(lines.slice(-3)).toEqual([
+      `turn.started @${SUBAGENT}`,
+      `item.completed command_execution ${SUBAGENT_TOOL} completed @${SUBAGENT}`,
+      `turn.completed interrupted @${SUBAGENT}`,
+    ]);
+    expect(isAnyAgentWorking(running)).toBe(false);
+  });
+
+  it("closes any turn a stopped subagent opens later, in the same call, as interrupted", () => {
+    const running = buildTestState();
+    for (const message of [
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentText(AGENT_CALL, "msg_sub_1", "working"),
+      buildTaskNotification(SUBAGENT, AGENT_CALL, "stopped"),
+    ]) {
+      normalize(running, message as unknown as SDKMessage);
+    }
+    const late = buildSubagentText(AGENT_CALL, "msg_sub_2", "one more thing");
+    expect(normalize(running, late as unknown as SDKMessage).map(formatEvent)).toEqual([
+      `turn.started ${SUBAGENT_MODEL} @${SUBAGENT}`,
+      `item.started assistant_message id-14 @${SUBAGENT}`,
+      `content.delta assistant_text "one more thing" @${SUBAGENT}`,
+      `item.completed assistant_message id-14 completed @${SUBAGENT}`,
+      `turn.completed interrupted @${SUBAGENT}`,
+    ]);
+    expect(isAnyAgentWorking(running)).toBe(false);
+  });
+
+  // stopTask may land after the subagent finished on its own, and then it
+  // stopped nothing. The subagent must be stopped again if it works again.
+  for (const status of ["completed", "failed"] as const) {
+    it(`wants a sent stop again when the subagent's task_notification says ${status}`, () => {
+      const running = buildTestState();
+      normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+      running.subagents.byId.get(SUBAGENT)!.stop = "sent";
+      normalize(
+        running,
+        buildTaskNotification(SUBAGENT, AGENT_CALL, status) as unknown as SDKMessage,
+      );
+      expect(running.subagents.byId.get(SUBAGENT)!.stop).toBe("wanted");
+    });
+  }
+
+  // A stream event from a stopped subagent would open an item that no later
+  // frame completes, because the turn it lands in closes at once.
+  it("ignores stream events from a stopped subagent", () => {
+    const running = buildTestState();
+    for (const message of [
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentText(AGENT_CALL, "msg_sub_1", "working"),
+      buildTaskNotification(SUBAGENT, AGENT_CALL, "stopped"),
+    ]) {
+      normalize(running, message as unknown as SDKMessage);
+    }
+    for (const event of [
+      { type: "message_start", message: { id: "msg_sub_2", model: SUBAGENT_MODEL } },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    ]) {
+      const frame = {
+        type: "stream_event",
+        session_id: NATIVE,
+        parent_tool_use_id: AGENT_CALL,
+        event,
+      };
+      expect(normalize(running, frame as unknown as SDKMessage)).toEqual([]);
+    }
+    expect(isAnyAgentWorking(running)).toBe(false);
+  });
+
+  it("leaves a subagent's stream alone when the session's own agent's turn ends", () => {
+    const buildSubagentStreamEvent = (event: unknown) => ({
+      type: "stream_event",
+      session_id: NATIVE,
+      parent_tool_use_id: AGENT_CALL,
+      event,
+    });
+    const lines = normalizeMessages([
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentStreamEvent({
+        type: "message_start",
+        message: { id: "msg_sub_1", model: SUBAGENT_MODEL, role: "assistant" },
+      }),
+      buildSubagentStreamEvent({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      }),
+      RESULT,
+      buildSubagentStreamEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "still here" },
+      }),
+    ]);
+    expect(lines.at(-1)).toBe(`content.delta assistant_text "still here" @${SUBAGENT}`);
+  });
+});
+
+describe("frames from a subagent not linked yet", () => {
+  it("holds them back until task_started links their agent call, then emits them in order", () => {
+    expect(
+      normalizeMessages([
+        buildSubagentText(AGENT_CALL, "msg_sub_1", "first"),
+        buildSubagentText(AGENT_CALL, "msg_sub_2", "second"),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+      ]),
+    ).toEqual([
+      `subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`,
+      `turn.started ${SUBAGENT_MODEL} @${SUBAGENT}`,
+      `item.started user_message id-4 @${SUBAGENT}`,
+      `item.completed user_message id-4 completed @${SUBAGENT}`,
+      `item.started assistant_message id-7 @${SUBAGENT}`,
+      `content.delta assistant_text "first" @${SUBAGENT}`,
+      `item.completed assistant_message id-7 completed @${SUBAGENT}`,
+      `item.started assistant_message id-11 @${SUBAGENT}`,
+      `content.delta assistant_text "second" @${SUBAGENT}`,
+      `item.completed assistant_message id-11 completed @${SUBAGENT}`,
+    ]);
+  });
+
+  it("attaches each released frame's own payload to its events", () => {
+    const running = buildTestState();
+    const held = buildSubagentText(AGENT_CALL, "msg_sub_1", "first");
+    expect(normalize(running, held as unknown as SDKMessage)).toEqual([]);
+    const events = normalize(
+      running,
+      buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage,
+    );
+    const payloads = events.flatMap((event) =>
+      event.raw === undefined ? [] : [event.raw.payload],
+    );
+    expect(payloads).toEqual([buildTaskStarted(SUBAGENT, AGENT_CALL), held]);
+    const own = events.find(
+      (event) => event._tag === "item.started" && event.kind === "assistant_message",
+    );
+    expect(own?.raw?.payload).toEqual(held);
+  });
+
+  // A task_started links one agent call only. The frames of another subagent
+  // still wait for their own task_started, which can come later.
+  it("keeps another subagent's frames held past a task_started, and releases them at its own", () => {
+    const running = buildTestState();
+    const held = [
+      buildSubagentText(NESTED_CALL, "msg_nested_1", "first"),
+      buildSubagentText(NESTED_CALL, "msg_nested_2", "second"),
+    ];
+    for (const message of held) {
+      expect(normalize(running, message as unknown as SDKMessage)).toEqual([]);
+    }
+    expect(
+      normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage).map(
+        formatEvent,
+      ),
+    ).toEqual([`subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`]);
+    expect(running.heldFrames).toEqual(held);
+
+    const lines = normalize(
+      running,
+      buildTaskStarted(NESTED, NESTED_CALL) as unknown as SDKMessage,
+    ).map(formatEvent);
+    expect(lines.filter((line) => line.startsWith("content.delta"))).toEqual([
+      `content.delta assistant_text "first" @${NESTED}`,
+      `content.delta assistant_text "second" @${NESTED}`,
+    ]);
+    expect(lines.some((line) => line.startsWith("runtime.warning"))).toBe(false);
+    expect(running.heldFrames).toEqual([]);
+  });
+
+  it("releases only the frames a task_started links, and keeps the rest held in order", () => {
+    const running = buildTestState();
+    const own = [
+      buildSubagentText(AGENT_CALL, "msg_sub_1", "first"),
+      buildSubagentText(AGENT_CALL, "msg_sub_2", "second"),
+    ];
+    const other = [
+      buildSubagentText(NESTED_CALL, "msg_nested_1", "other first"),
+      buildSubagentText(NESTED_CALL, "msg_nested_2", "other second"),
+    ];
+    for (const message of [own[0], other[0], own[1], other[1]]) {
+      normalize(running, message as unknown as SDKMessage);
+    }
+    const lines = normalize(
+      running,
+      buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage,
+    ).map(formatEvent);
+    expect(lines.filter((line) => line.startsWith("content.delta"))).toEqual([
+      `content.delta assistant_text "first" @${SUBAGENT}`,
+      `content.delta assistant_text "second" @${SUBAGENT}`,
+    ]);
+    expect(running.heldFrames).toEqual(other);
+  });
+
+  it("holds at most 1000 frames, and drops them all, with the requests of unknown subagents, at the next", () => {
+    const running = buildTestState();
+    deferUntilTurnOpens(
+      running.subagents,
+      "a-never-started",
+      buildRequestOpened("r1", "a-never-started"),
+    );
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    deferUntilTurnOpens(running.subagents, SUBAGENT, buildRequestOpened("r2", SUBAGENT));
+    const lost = buildSubagentText("toolu_01NeverStarted", "msg_lost", "lost");
+    for (let held = 1; held <= 1000; held += 1) {
+      expect(normalize(running, lost as unknown as SDKMessage)).toEqual([]);
+    }
+    const events = normalize(running, lost as unknown as SDKMessage);
+    expect(
+      events.map((event) => (event._tag === "runtime.warning" ? event.message : event._tag)),
+    ).toEqual(["dropped 1001 messages from a subagent the harness never reported starting"]);
+    expect(running.heldFrames).toEqual([]);
+    // A known subagent's request still waits for its turn.
+    expect([...running.subagents.waitingRequests.keys()]).toEqual([SUBAGENT]);
+  });
+
+  // The frames that would have opened the subagent's turn are gone, so a
+  // request waiting for that turn could wait for ever.
+  it("drops the waiting requests of a subagent whose frames were dropped, until its turn opens", () => {
+    const running = buildTestState();
+    const lost = buildSubagentText(AGENT_CALL, "msg_lost", "lost");
+    for (let held = 1; held <= 1001; held += 1) normalize(running, lost as unknown as SDKMessage);
+    // The request comes after the drop, while the subagent is still unknown.
+    deferUntilTurnOpens(running.subagents, SUBAGENT, buildRequestOpened("r1", SUBAGENT));
+
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    expect(running.subagents.waitingRequests.has(SUBAGENT)).toBe(false);
+    expect(running.subagents.byId.get(SUBAGENT)?.openingFramesLost).toBe(true);
+
+    // The subagent's next frame opens its turn, and its requests work again.
+    normalize(running, buildSubagentText(AGENT_CALL, "msg_sub_1", "back") as unknown as SDKMessage);
+    expect(running.subagents.byId.get(SUBAGENT)?.openingFramesLost).toBe(false);
+    expect(
+      deferUntilTurnOpens(running.subagents, SUBAGENT, buildRequestOpened("r2", SUBAGENT)),
+    ).toHaveLength(1);
+  });
+
+  it("does not mark a subagent whose frames were never dropped", () => {
+    const running = buildTestState();
+    const lost = buildSubagentText("toolu_01NeverStarted", "msg_lost", "lost");
+    for (let held = 1; held <= 1001; held += 1) normalize(running, lost as unknown as SDKMessage);
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    expect(running.subagents.byId.get(SUBAGENT)?.openingFramesLost).toBe(false);
+  });
+});
+
+describe("introducing a subagent", () => {
+  it("leaves out a description and an agent type that are missing or empty", () => {
+    const running = buildTestState();
+    const started: Record<string, unknown> = {
+      ...buildTaskStarted(SUBAGENT, AGENT_CALL),
+      subagent_type: "",
+    };
+    delete started["description"];
+    const [introduced] = normalize(running, started as unknown as SDKMessage);
+    expect(introduced).toMatchObject({ _tag: "subagent.started", subagentId: SUBAGENT });
+    expect(introduced).not.toHaveProperty("description");
+    expect(introduced).not.toHaveProperty("agentType");
+  });
+
+  it("warns once, at the subagent's start, that its id was changed to fit the protocol", () => {
+    const running = buildTestState();
+    const started = normalize(
+      running,
+      buildTaskStarted("agent:1", AGENT_CALL) as unknown as SDKMessage,
+    );
+    expect(started.map(formatEvent)).toEqual([
+      `subagent.started agent_1 parent=main item=${AGENT_CALL}`,
+      "runtime.warning @agent_1",
+    ]);
+    const warned = started.at(-1);
+    expect(warned?._tag === "runtime.warning" ? warned.message : undefined).toBe(
+      'the harness named a subagent "agent:1", which the protocol does not accept, so it is reported as "agent_1"',
+    );
+    const later = [
+      buildTaskNotification("agent:1", AGENT_CALL),
+      buildTaskStarted("agent:1", AGENT_CALL),
+    ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
+    expect(later.some((event) => event._tag === "runtime.warning")).toBe(false);
+  });
+
+  it("replaces a colon in a SubagentId, which the protocol does not accept", () => {
+    const running = buildTestState();
+    const [introduced] = normalize(
+      running,
+      buildTaskStarted("agent:1", AGENT_CALL) as unknown as SDKMessage,
+    );
+    expect(introduced).toMatchObject({ _tag: "subagent.started", subagentId: "agent_1" });
+    const events = normalize(
+      running,
+      buildTaskNotification("agent:1", AGENT_CALL) as unknown as SDKMessage,
+    );
+    expect(events.map(formatEvent).at(-1)).toBe("turn.completed completed @agent_1");
+  });
+});
+
+describe("a malformed frame from a subagent", () => {
+  it("becomes an unknown item in the subagent's turn rather than throwing", () => {
+    const running = buildTestState();
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    const broken = {
+      type: "assistant",
+      session_id: NATIVE,
+      parent_tool_use_id: AGENT_CALL,
+      message: { id: "msg_broken" },
+    };
+    expect(
+      normalize(running, broken as unknown as SDKMessage)
+        .map(formatEvent)
+        .map((line) => line.replace(/ id-\d+/, "")),
+    ).toEqual([
+      `turn.started @${SUBAGENT}`,
+      `item.started user_message @${SUBAGENT}`,
+      `item.completed user_message completed @${SUBAGENT}`,
+      `item.started unknown @${SUBAGENT}`,
+      `item.completed unknown completed @${SUBAGENT}`,
+    ]);
+  });
+});
+
+describe("a resumed session's subagents", () => {
+  const SEEDED: ReadonlyArray<ContinuedSubagent> = [
+    { subagentId: SUBAGENT, itemId: AGENT_CALL, parentSubagentId: "a0parent00000000" },
+  ];
+
+  it("routes a known subagent's frames to it, introducing it first with its recorded parent", () => {
+    expect(
+      normalizeMessages(
+        [buildSubagentText(AGENT_CALL, "msg_sub_1", "back again")],
+        buildTestState(undefined, SEEDED),
+      ),
+    ).toEqual([
+      `subagent.started ${SUBAGENT} parent=a0parent00000000 item=${AGENT_CALL}`,
+      `turn.started ${SUBAGENT_MODEL} @${SUBAGENT}`,
+      `item.started assistant_message id-4 @${SUBAGENT}`,
+      `content.delta assistant_text "back again" @${SUBAGENT}`,
+      `item.completed assistant_message id-4 completed @${SUBAGENT}`,
+    ]);
+  });
+
+  it("attaches the frame's payload to the frame's own item, not to the introduction", () => {
+    const frame = buildSubagentText(AGENT_CALL, "msg_sub_1", "back again");
+    const events = normalize(buildTestState(undefined, SEEDED), frame as SDKMessage);
+    expect(events.filter((event) => event.raw !== undefined).map((event) => event._tag)).toEqual([
+      "item.started",
+    ]);
+  });
+
+  it("introduces a known subagent once, at the task_started that continues it", () => {
+    const lines = normalizeMessages(
+      [
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildSubagentText(AGENT_CALL, "msg_sub_1", "back again"),
+      ],
+      buildTestState(undefined, SEEDED),
+    );
+    expect(lines.filter((line) => line.startsWith("subagent.started"))).toEqual([
+      `subagent.started ${SUBAGENT} parent=a0parent00000000 item=${AGENT_CALL}`,
+    ]);
+  });
+});
+
+describe("a subagent's tool calls and denials", () => {
+  const buildSendMessage = (to: string) => ({
+    type: "assistant",
+    uuid: "uuid-send",
+    session_id: NATIVE,
+    parent_tool_use_id: null,
+    message: {
+      id: "msg_send",
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "toolu_01Send",
+          name: "SendMessage",
+          input: { to, message: "also check tests" },
+        },
+      ],
+    },
+  });
+
+  const readSendMessageDetail = (to: string): unknown => {
+    const running = buildTestState();
+    const events = [
+      buildAgentCall(null, AGENT_CALL, "finder"),
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSendMessage(to),
+    ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
+    const sent = events.find(
+      (event) => event._tag === "item.started" && event.itemId === "toolu_01Send",
+    );
+    return sent?._tag === "item.started" ? { kind: sent.kind, detail: sent.detail } : undefined;
+  };
+
+  it("makes SendMessage a subagent item that lists the subagent its `to` names", () => {
+    const input = { to: SUBAGENT, message: "also check tests" };
+    expect(readSendMessageDetail(SUBAGENT)).toEqual({
+      kind: "subagent",
+      detail: { name: "SendMessage", input, subagentIds: [SUBAGENT] },
+    });
+    expect(readSendMessageDetail("finder")).toEqual({
+      kind: "subagent",
+      detail: { name: "SendMessage", input: { ...input, to: "finder" }, subagentIds: [SUBAGENT] },
+    });
+    expect(readSendMessageDetail("stranger")).toEqual({
+      kind: "subagent",
+      detail: { name: "SendMessage", input: { ...input, to: "stranger" } },
+    });
+  });
+
+  const buildPermissionDenied = (agentId: string | undefined) => ({
+    type: "system",
+    subtype: "permission_denied",
+    tool_name: "Write",
+    tool_use_id: SUBAGENT_TOOL,
+    ...(agentId === undefined ? {} : { agent_id: agentId }),
+    decision_reason_type: "mode",
+    message: "Permission to use Write has been denied.",
+    uuid: "uuid-denied",
+    session_id: NATIVE,
+  });
+
+  it("attributes a permission denial to the subagent whose call was denied", () => {
+    expect(
+      normalizeMessages([
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildSubagentToolUse(AGENT_CALL, "Write"),
+        buildPermissionDenied(SUBAGENT),
+      ]).slice(-2),
+    ).toEqual([
+      `item.started unknown id-8 @${SUBAGENT}`,
+      `item.completed unknown id-8 completed @${SUBAGENT}`,
+    ]);
+  });
+
+  it("attributes a permission denial with no agent id to the session's own agent", () => {
+    expect(normalizeMessages([buildPermissionDenied(undefined)])).toEqual([
+      "turn.started",
+      "item.started unknown id-3",
+      "item.completed unknown id-3 completed",
+      "turn.completed completed",
+    ]);
+  });
+
+  // Attributed to the session's own agent, the denial would open a turn of
+  // that agent, which is not working.
+  it("holds a permission denial from an unknown agent until task_started names it", () => {
+    const running = buildTestState();
+    expect(normalize(running, buildPermissionDenied(SUBAGENT) as unknown as SDKMessage)).toEqual(
+      [],
+    );
+    const lines = normalize(
+      running,
+      buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage,
+    ).map(formatEvent);
+    expect(lines.filter((line) => line.startsWith("item.started"))).toEqual([
+      `item.started user_message id-4 @${SUBAGENT}`,
+      `item.started unknown id-7 @${SUBAGENT}`,
+    ]);
+    expect(lines.some((line) => !line.includes("@") && line.startsWith("turn."))).toBe(false);
+  });
+
+  it("keeps a permission denial from an unknown agent held past another subagent's task_started", () => {
+    const running = buildTestState();
+    const denied = buildPermissionDenied("a0unknown0000000");
+    normalize(running, denied as unknown as SDKMessage);
+    expect(
+      normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage).map(
+        formatEvent,
+      ),
+    ).toEqual([`subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`]);
+    expect(running.heldFrames).toEqual([denied]);
+  });
+});
+
+describe("a subagent's requests", () => {
+  it("defers a request until the subagent's turn opens, then emits it right after the opening", () => {
+    const running = buildTestState();
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    expect(
+      deferUntilTurnOpens(running.subagents, SUBAGENT, buildRequestOpened("r1", SUBAGENT)),
+    ).toEqual([]);
+    const lines = normalize(
+      running,
+      buildSubagentToolUse(AGENT_CALL, "Write") as unknown as SDKMessage,
+    ).map(formatEvent);
+    expect(lines).toEqual([
+      `turn.started ${SUBAGENT_MODEL} @${SUBAGENT}`,
+      `item.started user_message id-4 @${SUBAGENT}`,
+      `item.completed user_message id-4 completed @${SUBAGENT}`,
+      `request.opened @${SUBAGENT}`,
+      `item.started file_change ${SUBAGENT_TOOL} @${SUBAGENT}`,
+    ]);
+  });
+
+  it("returns a request at once while the subagent's turn is open", () => {
+    const running = buildTestState();
+    for (const message of [
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentToolUse(AGENT_CALL),
+    ]) {
+      normalize(running, message as unknown as SDKMessage);
+    }
+    const opened = buildRequestOpened("r1", SUBAGENT);
+    expect(deferUntilTurnOpens(running.subagents, SUBAGENT, opened)).toEqual([opened]);
+  });
+
+  // Claude Code asks as soon as it reads the tool call, which can be before
+  // the runner has normalized the task_started that names the subagent.
+  it("defers a request from a subagent the registry does not know yet", () => {
+    const running = buildTestState();
+    expect(
+      deferUntilTurnOpens(running.subagents, SUBAGENT, buildRequestOpened("r1", SUBAGENT)),
+    ).toEqual([]);
+    const lines = [
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentToolUse(AGENT_CALL),
+    ].flatMap((message) => normalize(running, message as unknown as SDKMessage).map(formatEvent));
+    expect(lines).toContain(`request.opened @${SUBAGENT}`);
+  });
+});
+
+describe("whether any agent is working", () => {
+  it("counts the session's own agent's turn and every subagent's open or pending turn", () => {
+    const running = buildTestState();
+    expect(isAnyAgentWorking(running)).toBe(false);
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    expect(isAnyAgentWorking(running)).toBe(true);
+    normalize(running, buildTaskNotification(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    expect(isAnyAgentWorking(running)).toBe(false);
+    normalize(running, ASSISTANT_TOOL_USE as unknown as SDKMessage);
+    expect(isAnyAgentWorking(running)).toBe(true);
+  });
+});
+
+describe("encoding a subagent's events with the protocol schema", () => {
+  it("encodes every event a subagent's life produces", () => {
+    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const running = buildTestState();
+    const messages = [
+      buildAgentCall(null, AGENT_CALL, "finder"),
+      buildTaskStarted(SUBAGENT, AGENT_CALL),
+      buildSubagentPrompt(AGENT_CALL),
+      buildSubagentToolUse(AGENT_CALL),
+      buildSubagentToolResult(AGENT_CALL),
+      buildAgentCall(AGENT_CALL, NESTED_CALL),
+      buildTaskStarted(NESTED, NESTED_CALL),
+      buildSubagentText(NESTED_CALL, "msg_nested_1", "nested"),
+      buildTaskNotification(NESTED, NESTED_CALL),
+      buildTaskNotification(SUBAGENT, AGENT_CALL, "stopped"),
+    ];
+    for (const message of messages) {
+      for (const event of normalize(running, message as unknown as SDKMessage)) {
+        expect(() => encode(event)).not.toThrow();
+      }
+    }
+  });
+});
+
 describe("two agents streaming at once", () => {
   const buildAgentStreamEvent = (parent: string | null, event: unknown) => ({
     type: "stream_event",
@@ -727,13 +1581,14 @@ describe("two agents streaming at once", () => {
 
   const text = { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
 
-  it("keeps the main loop's blocks apart from a subagent's", () => {
+  it("keeps the session's own agent's blocks apart from a subagent's", () => {
     expect(
       normalizeMessages([
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
         buildAgentStreamEvent(null, buildMessageStart("msg_main")),
         buildAgentStreamEvent(null, text),
-        buildAgentStreamEvent("toolu_sub", buildMessageStart("msg_sub")),
-        buildAgentStreamEvent("toolu_sub", text),
+        buildAgentStreamEvent(AGENT_CALL, buildMessageStart("msg_sub")),
+        buildAgentStreamEvent(AGENT_CALL, text),
         buildAgentStreamEvent(null, {
           type: "content_block_delta",
           index: 0,
@@ -742,9 +1597,14 @@ describe("two agents streaming at once", () => {
         buildAgentStreamEvent(null, { type: "content_block_stop", index: 0 }),
       ]),
     ).toEqual([
+      `subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`,
       "turn.started",
       "item.started assistant_message msg_main#0",
-      "item.started assistant_message msg_sub#0",
+      // A turn a stream opens carries the model `message_start` named.
+      `turn.started claude-haiku-4-5-20251001 @${SUBAGENT}`,
+      `item.started user_message id-7 @${SUBAGENT}`,
+      `item.completed user_message id-7 completed @${SUBAGENT}`,
+      `item.started assistant_message msg_sub#0 @${SUBAGENT}`,
       'content.delta assistant_text "from the main loop"',
       "item.completed assistant_message msg_main#0 completed",
     ]);

@@ -248,9 +248,10 @@ const make = Effect.gen(function* () {
 
   /**
    * Builds the `continue` part of a resume spec: the native session to
-   * resume, and the subagents the controller has records of, so the adapter
-   * puts a subagent the harness continues back on its record. `subagents` is
-   * left out when there are none.
+   * resume, and the subagents the controller has records of, each with the
+   * subagent that started it, so the adapter puts a subagent the harness
+   * continues back on its record and knows the tree a stop cascades down.
+   * `subagents` is left out when there are none.
    */
   const buildResumeContinuation = (
     sessionId: string,
