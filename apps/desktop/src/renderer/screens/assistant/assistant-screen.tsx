@@ -14,6 +14,7 @@ import {
   runnersQuery,
   runningTurnQuery,
 } from "../../app/queries";
+import { useKeepRequestDrafts } from "../../app/thread-drafts";
 import { buildLook, Face, type Look } from "../../faces";
 import { NotFound } from "../not-found";
 import { useSessionLive, type AttachOpenParagraph } from "../session/use-session-live";
@@ -75,6 +76,11 @@ function AssistantPage({ assistant }: { readonly assistant: Assistant }): JSX.El
   const shownSession = useDeferredValue(session);
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   useConversationLive(live, queryClient, client, assistant.mainConversationId);
+  // The dock keeps what the user typed into a Request in the session's
+  // Request drafts, which exist only while something keeps them. The page
+  // keeps them while it is open, as a thread's layout route does for a
+  // thread (see `useKeepRequestDrafts`).
+  useKeepRequestDrafts(session?.id ?? null);
   // The sidebar's row decides its pose with the same function, so the page
   // and the row always show the same pose.
   const pose = decideAssistantPose(

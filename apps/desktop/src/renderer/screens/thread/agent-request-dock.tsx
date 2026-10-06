@@ -77,7 +77,7 @@ export function AgentRequestDock({
  * the subagent, and only the arrows are drawn. `onShow` is called with the
  * Request an arrow shows.
  */
-function RequestPager({
+export function RequestPager({
   sessionId,
   dock,
   onShow,

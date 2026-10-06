@@ -2,7 +2,7 @@ import { useSyncExternalStore, type JSX, type Ref } from "react";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  findOldestOpenRequest,
+  buildRequestDock,
   isMutationRunning,
   queryKeys,
   readErrorMessage,
@@ -11,11 +11,12 @@ import {
 import type { Assistant, ConversationMessage, Session } from "@hercule/contract";
 import { buildAssistantDraftKey } from "../../app/pending-submissions";
 import { readMessagePage } from "../../app/queries";
-import { useKeepRequestDrafts } from "../../app/thread-drafts";
+import { useShownRequestId } from "../../app/thread-drafts";
 import type { Look } from "../../faces";
 import { ComposerFrame } from "../session/composer-frame";
 import { RequestDock } from "../session/dock";
 import { useSendOnMenuCommand } from "../session/send-key";
+import { RequestPager } from "../thread/agent-request-dock";
 import { storeNewestMessages } from "./use-conversation-live";
 
 /**
@@ -118,12 +119,7 @@ export function ConversationComposer({
       client.session.interrupt({ params: { id: sessionId }, payload: {} }),
   });
 
-  // The dock keeps what the user typed into a Request in the session's
-  // Request drafts, which exist only while something keeps them.
-  useKeepRequestDrafts(session?.id ?? null);
-
   const busy = session?.status === "busy";
-  const oldestRequest = session === null ? null : findOldestOpenRequest(session);
   const error =
     pending.failure ?? (interrupt.error === null ? null : readErrorMessage(interrupt.error));
   const canSend = pending.message.text.trim() !== "" && !sending;
@@ -156,20 +152,49 @@ export function ConversationComposer({
       stopping={interrupt.isPending}
       onStop={stop}
       error={error}
-      above={
-        session === null || oldestRequest === null ? null : (
-          <RequestDock
-            key={oldestRequest.requestId}
-            sessionId={session.id}
-            look={look}
-            request={oldestRequest}
-          />
-        )
-      }
+      above={session === null ? null : <ConversationRequestDock session={session} look={look} />}
       shrunk={shrunk}
       onFocusChange={onFocusChange}
       scrollTranscriptToBottom={scrollConversationToBottom}
       ref={ref}
     />
+  );
+}
+
+/**
+ * Renders the dock of the Request `session` shows, as a thread's page does:
+ * the oldest open Request, unless the user paged to another. Renders nothing
+ * while no Request is open.
+ *
+ * While several Requests are open, the pager line above the dock pages
+ * between them. Unlike a thread's, the line names no asker: a
+ * Conversation has one agent, and no page of a subagent to link to.
+ */
+function ConversationRequestDock({
+  session,
+  look,
+}: {
+  readonly session: Session;
+  readonly look: Look;
+}): JSX.Element | null {
+  const [shownRequestId, setShownRequestId] = useShownRequestId(session.id);
+  const dock = buildRequestDock(session.openRequests, [], undefined, shownRequestId);
+  if (dock === null) return null;
+  return (
+    <>
+      {dock.position === null ? null : (
+        <RequestPager
+          sessionId={session.id}
+          dock={{ ...dock, asker: null }}
+          onShow={setShownRequestId}
+        />
+      )}
+      <RequestDock
+        key={dock.request.requestId}
+        sessionId={session.id}
+        look={look}
+        request={dock.request}
+      />
+    </>
   );
 }

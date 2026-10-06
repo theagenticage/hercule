@@ -508,6 +508,40 @@ describe("an assistant's Conversation", () => {
       ]);
     });
   });
+
+  it("pages between the open Requests, with no line naming who asks", async () => {
+    const user = userEvent.setup();
+    const buildApproval = (requestId: string, command: string): OpenRequest => ({
+      requestId,
+      itemId: `tool-${requestId}`,
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command },
+    });
+    await openConversation({
+      readSession: () =>
+        buildAdaSession({
+          openRequests: [
+            buildApproval("req-1", "tail -n 200 /var/log/pg-backup.log"),
+            buildApproval("req-2", "df -h"),
+          ],
+        }),
+      messages: [QUESTION],
+      transcript: buildAdaTranscript(TURN_STARTED),
+    });
+    const findShownCommand = () =>
+      screen.getByRole("group", { name: "Run this command?" }).textContent;
+
+    // The oldest Request shows first.
+    expect(findShownCommand()).toContain("tail -n 200");
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    expect(screen.queryByText("The main agent asks")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Next Request" }));
+
+    expect(findShownCommand()).toContain("df -h");
+    expect(screen.getByText("2 of 2")).toBeTruthy();
+  });
 });
 
 describe("the Conversation's pages", () => {
