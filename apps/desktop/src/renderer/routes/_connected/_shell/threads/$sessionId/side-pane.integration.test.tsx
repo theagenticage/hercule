@@ -64,8 +64,49 @@ const WIDTH_KEY = "hercule.side-pane.width";
 /** The width of the split the two panes share, and so the right edge of the side pane. */
 const SPLIT_WIDTH = 1400;
 
+/** The callback of each element the fake IntersectionObserver watches. */
+const intersectionCallbacks = new Map<Element, IntersectionObserverCallback>();
+
+/**
+ * Stands in for IntersectionObserver, which jsdom lacks. It reports each
+ * element on screen as soon as it is watched, as a browser does for a row
+ * in view, until `reportOnScreen` says otherwise.
+ */
+class FakeIntersectionObserver {
+  private readonly callback: IntersectionObserverCallback;
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+  }
+  observe(element: Element): void {
+    intersectionCallbacks.set(element, this.callback);
+    // The row watches from an effect, which already runs inside `act`.
+    this.callback([buildEntry(element, true)], this as unknown as IntersectionObserver);
+  }
+  unobserve(element: Element): void {
+    intersectionCallbacks.delete(element);
+  }
+  disconnect(): void {
+    intersectionCallbacks.clear();
+  }
+}
+
+/** Builds the part of an IntersectionObserver entry the surface reads. */
+const buildEntry = (element: Element, onScreen: boolean): IntersectionObserverEntry =>
+  ({ target: element, isIntersecting: onScreen }) as IntersectionObserverEntry;
+
+/** Reports `element` inside or outside the visible part of its scroller, as a scroll would. */
+const reportOnScreen = (element: Element, onScreen: boolean): void => {
+  act(() => {
+    intersectionCallbacks.get(element)?.(
+      [buildEntry(element, onScreen)],
+      {} as IntersectionObserver,
+    );
+  });
+};
+
 beforeEach(() => {
   stubElementSize(800, 800);
+  vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
   // jsdom lays nothing out, so the split and the pane measure what a
   // 1400px wide main area with the default 420px pane would.
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
@@ -91,6 +132,8 @@ afterEach(() => {
   localStorage.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  intersectionCallbacks.clear();
   setVisibility("visible");
 });
 
@@ -306,5 +349,32 @@ describe("the thread's side pane", () => {
     setVisibility("visible");
     expect(await readDuration("Find the flaky webhook test")).toBe("working ·2m 0s");
     expect(await readDuration("List the webhook tests")).toBe("done ·30s");
+  });
+
+  it("stops counting a running subagent's duration while its row is scrolled out of view", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-10T09:05:00.000Z"), toFake: ["Date"] });
+    await openApp(`/threads/${SESSION_ID}`);
+    await screen.findByRole("textbox");
+    openPane();
+    const pane = await findPane();
+    const readDuration = (subagentId: string) =>
+      pane.querySelector(`[data-subagent-duration="${subagentId}"]`)?.textContent;
+    expect(readDuration(FIXTURE_SUBAGENT.id)).toBe("1m 20s");
+    expect(readDuration(NESTED_SUBAGENT.id)).toBe("1m 0s");
+
+    reportOnScreen(await findRow("Find the flaky webhook test"), false);
+    vi.setSystemTime(new Date("2026-09-10T09:05:10.000Z"));
+    // The row still on screen shows the clock fired; the one off screen kept its text.
+    await waitFor(
+      () => {
+        expect(readDuration(NESTED_SUBAGENT.id)).toBe("1m 10s");
+      },
+      { timeout: 2_000 },
+    );
+    expect(readDuration(FIXTURE_SUBAGENT.id)).toBe("1m 20s");
+
+    // Back in view, it catches up at once.
+    reportOnScreen(await findRow("Find the flaky webhook test"), true);
+    expect(readDuration(FIXTURE_SUBAGENT.id)).toBe("1m 30s");
   });
 });

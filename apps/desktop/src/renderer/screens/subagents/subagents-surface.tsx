@@ -6,7 +6,7 @@
  * where the web app shows a state mark, still in its pose (spec 17 §The
  * thread, Subagents).
  */
-import { useId, type JSX } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type JSX, type RefObject } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import {
@@ -48,7 +48,57 @@ interface TreeContext {
   readonly openRequests: readonly SessionRequest[];
   /** The subagent whose page is open in the main pane, whose row is marked current. */
   readonly subagentId: string | undefined;
+  readonly watchScreen: ScreenWatcher;
 }
+
+/**
+ * Starts reporting whether `element` is inside the visible part of the
+ * surface's scroller: `onChange(true)` when it comes into view, and
+ * `onChange(false)` when it leaves. Returns the function that stops the
+ * reports.
+ */
+type ScreenWatcher = (element: Element, onChange: (onScreen: boolean) => void) => () => void;
+
+/**
+ * Returns a `ScreenWatcher` for the elements inside the scroller `scrollerRef`
+ * points at. All elements share one IntersectionObserver, created on the
+ * first watch and disconnected when the surface unmounts.
+ */
+const useScreenWatcher = (scrollerRef: RefObject<HTMLElement | null>): ScreenWatcher => {
+  const watchedRef = useRef<{
+    readonly observer: IntersectionObserver;
+    readonly callbacks: Map<Element, (onScreen: boolean) => void>;
+  } | null>(null);
+  useEffect(
+    () => () => {
+      watchedRef.current?.observer.disconnect();
+      watchedRef.current = null;
+    },
+    [],
+  );
+  return useCallback(
+    (element, onChange) => {
+      if (watchedRef.current === null) {
+        const callbacks = new Map<Element, (onScreen: boolean) => void>();
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) callbacks.get(entry.target)?.(entry.isIntersecting);
+          },
+          { root: scrollerRef.current },
+        );
+        watchedRef.current = { observer, callbacks };
+      }
+      const { observer, callbacks } = watchedRef.current;
+      callbacks.set(element, onChange);
+      observer.observe(element);
+      return () => {
+        callbacks.delete(element);
+        observer.unobserve(element);
+      };
+    },
+    [scrollerRef],
+  );
+};
 
 /**
  * Renders the Subagents surface of the session `sessionId`. With no
@@ -71,6 +121,8 @@ export function SubagentsSurface({
   const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   const stopAgent = useStopAgent(client, sessionId);
   const headingId = useId();
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const watchScreen = useScreenWatcher(scrollerRef);
 
   if (subagents.length === 0) {
     return (
@@ -91,10 +143,11 @@ export function SubagentsSurface({
     subagents,
     openRequests: session.openRequests,
     subagentId,
+    watchScreen,
   };
   return (
     <div className="subagents">
-      <div className="subagents-scroll">
+      <div ref={scrollerRef} className="subagents-scroll">
         <h4 id={headingId} className="subagents-section">
           Started by the main agent · {tree.length}
         </h4>
@@ -143,8 +196,9 @@ export function SubagentsSurface({
  * keyboard focus is inside it, over its state.
  *
  * A running subagent's duration counts up on the app's one age clock, so it
- * draws at most once a second and not at all while the window is hidden. An
- * ended subagent's duration never changes, so its row registers no clock.
+ * draws at most once a second, and only while the row is inside the visible
+ * part of the surface and the window is shown. An ended subagent's duration
+ * never changes, so its row neither watches the screen nor registers a clock.
  */
 function SubagentRow({
   node,
@@ -158,9 +212,19 @@ function SubagentRow({
   const { subagent, children } = node;
   const { client, sessionId, subagents, openRequests } = context;
   const waiting = isSubagentWaiting(subagent, openRequests);
+  const running = subagent.status === "running";
+  const rowRef = useRef<HTMLDivElement>(null);
+  // Off until the observer first reports, which it does as soon as the row
+  // is watched. The first render reads the duration either way.
+  const [onScreen, setOnScreen] = useState(false);
+  const { watchScreen } = context;
+  useEffect(
+    () => (running ? watchScreen(rowRef.current!, setOnScreen) : undefined),
+    [running, watchScreen],
+  );
   const duration = useDurationText(
     subagent.startedAt,
-    subagent.status === "running",
+    running && onScreen,
     (now) => describeSubagentState(subagent, waiting, new Date(now)).duration,
   );
   // The word and its hue do not depend on the time, so any moment will do,
@@ -177,6 +241,7 @@ function SubagentRow({
   return (
     <li>
       <div
+        ref={rowRef}
         className={current ? "subagent-row is-on" : "subagent-row"}
         style={{ paddingLeft: 10 + depth * 20 }}
       >
@@ -197,7 +262,7 @@ function SubagentRow({
             </Link>
             <span className="subagent-row-end">
               <span data-hue={state.hue}>{state.word} ·</span>
-              <span>{duration}</span>
+              <span data-subagent-duration={subagent.id}>{duration}</span>
             </span>
           </span>
           {line === null ? null : (
