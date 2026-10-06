@@ -246,6 +246,11 @@ function waitForInterrupt(): Promise<void> {
   });
 }
 
+// The handlers go in before the Home is created. A Ctrl-C while the
+// controller starts would otherwise kill the script outright and leave the
+// Home behind; with them in, the script finishes starting, then stops the
+// controller and deletes the Home as usual.
+const interrupted = waitForInterrupt();
 const home = mkdtempSync(join(tmpdir(), "hercule-subagents-demo-"));
 try {
   const controller = await startSetUpController({ home });
@@ -275,7 +280,7 @@ try {
         "",
       ].join("\n"),
     );
-    await waitForInterrupt();
+    await interrupted;
     await fleet.disconnectRunners();
   } finally {
     await controller.stop();

@@ -174,13 +174,17 @@ describe("the scripted fleet", () => {
     const id = thread.id;
 
     // The session's own agent is done, while two subagents wait on the user.
+    // The two subagents race, so their Requests are compared sorted by
+    // subagent, not in the order they opened.
     await expect
       .poll(async () =>
-        (await readSession(id)).openRequests.map(({ kind, subagentId }) => ({ kind, subagentId })),
+        (await readSession(id)).openRequests
+          .map(({ kind, subagentId }) => ({ kind, subagentId }))
+          .toSorted((a, b) => (a.subagentId ?? "").localeCompare(b.subagentId ?? "")),
       )
       .toEqual([
-        { kind: "command_approval", subagentId: "nested" },
         { kind: "question", subagentId: "asker" },
+        { kind: "command_approval", subagentId: "nested" },
       ]);
     await waitForStatus(id, "idle");
     expect((await readSubagents(id)).find((one) => one.id === "nested")?.parentSubagentId).toBe(
@@ -206,7 +210,11 @@ describe("the scripted fleet", () => {
     // subagent's Request. Its sibling goes on.
     await client.session.interrupt({ params: { id }, payload: { subagentId: "asker" } });
     await expect
-      .poll(async () => (await readSubagents(id)).map(({ id, status }) => ({ id, status })))
+      .poll(async () =>
+        (await readSubagents(id))
+          .map(({ id, status }) => ({ id, status }))
+          .toSorted((a, b) => a.id.localeCompare(b.id)),
+      )
       .toEqual([
         { id: "asker", status: "stopped" },
         { id: "nested", status: "stopped" },
