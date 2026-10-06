@@ -139,9 +139,9 @@ export const makeCodexThreads = (options: {
   let preparation: Preparation | "ready" | undefined;
   let capacityDropped = 0;
   let pendingFrames = 0;
-  const resumedItemIds = new Map(
+  const resumedSubagents = new Map(
     options.spec.continue?.mode === "resume"
-      ? (options.spec.continue.subagents ?? []).map((known) => [known.subagentId, known.itemId])
+      ? (options.spec.continue.subagents ?? []).map((known) => [known.subagentId, known])
       : [],
   );
   let pendingBytes = 0;
@@ -155,7 +155,7 @@ export const makeCodexThreads = (options: {
         root ? options.spec.outputSchema : undefined,
         root ? undefined : { subagentId: threadId, rootThreadId: options.rootThreadId },
       ),
-      parentThreadId: undefined,
+      parentThreadId: resumedSubagents.get(threadId)?.parentSubagentId,
       get turnId() {
         return turns.get(thread)?.id;
       },
@@ -280,7 +280,7 @@ export const makeCodexThreads = (options: {
       dropped: 0,
       ready: false,
       introduced: false,
-      itemId: resumedItemIds.get(threadId),
+      itemId: resumedSubagents.get(threadId)?.itemId,
     };
     discoveries.set(threadId, discovery);
     pending.add(discovery);
@@ -460,16 +460,39 @@ export const makeCodexThreads = (options: {
     }
   };
 
+  const completeCodexDiscovery = (discovery: Discovery): void => {
+    const threadId = discovery.thread.state.threadId;
+    const parent = discovery.thread.parentThreadId;
+    if (parent !== undefined && parent !== options.rootThreadId) {
+      if (
+        parent === threadId ||
+        descendsFrom(threads.get(parent) ?? createCodexThread(parent), threadId)
+      ) {
+        discovery.thread.parentThreadId = undefined;
+        warn(
+          `Could not introduce the parent of subagent ${threadId}; reporting the subagent without a parent.`,
+        );
+      } else if (discoverCodexThread(parent) === undefined) {
+        const ancestor = discoveries.get(parent) ?? createDiscovery(parent);
+        warn(
+          `Could not read metadata for parent subagent ${parent}; retaining its known relationship.`,
+        );
+        completeCodexDiscovery(ancestor);
+      }
+    }
+    discovery.ready = true;
+    releaseDiscoveries();
+  };
+
   const applyMetadata = (discovery: Discovery, answer: unknown): void => {
     if (phase === "exited") return;
     const threadId = discovery.thread.state.threadId;
     const metadata = (answer as ThreadReadResponse | undefined)?.thread;
     if (metadata === undefined || metadata.id !== threadId) {
-      discovery.ready = true;
       warn(
         `Could not read metadata for subagent ${threadId}; the app-server returned no matching thread.`,
       );
-      releaseDiscoveries();
+      completeCodexDiscovery(discovery);
       return;
     }
     discovery.thread.state.model = metadata.model ?? undefined;
@@ -488,26 +511,7 @@ export const makeCodexThreads = (options: {
     if (discovery.fallbackDescription !== undefined)
       discovery.description ??= metadata.agentNickname ?? undefined;
     recordCodexParent(discovery.thread, metadata.parentThreadId ?? undefined);
-    const parent = discovery.thread.parentThreadId;
-    if (parent !== undefined && parent !== options.rootThreadId) {
-      if (
-        parent === threadId ||
-        descendsFrom(threads.get(parent) ?? createCodexThread(parent), threadId)
-      ) {
-        discovery.thread.parentThreadId = undefined;
-        warn(
-          `Could not introduce the parent of subagent ${threadId}; reporting the subagent without a parent.`,
-        );
-      } else if (discoverCodexThread(parent) === undefined) {
-        const ancestor = discoveries.get(parent) ?? createDiscovery(parent);
-        ancestor.ready = true;
-        warn(
-          `Could not read metadata for parent subagent ${parent}; retaining its known relationship.`,
-        );
-      }
-    }
-    discovery.ready = true;
-    releaseDiscoveries();
+    completeCodexDiscovery(discovery);
   };
 
   const discoverCodexThread = (threadId: string): Discovery | undefined => {
@@ -527,11 +531,10 @@ export const makeCodexThreads = (options: {
         {
           onFailure: () => {
             if (phase === "exited") return;
-            discovery.ready = true;
             warn(
               `Could not read metadata for subagent ${threadId}; reporting the subagent with the information already available.`,
             );
-            releaseDiscoveries();
+            completeCodexDiscovery(discovery);
           },
           onSuccess: (answer) => applyMetadata(discovery, answer),
         },

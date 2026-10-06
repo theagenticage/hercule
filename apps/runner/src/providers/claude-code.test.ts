@@ -28,7 +28,13 @@ import {
 import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
-import { NO_USER_MATERIAL_PATHS } from "./testing";
+import * as testing from "./testing";
+import {
+  buildAgentCall,
+  buildSubagentText,
+  buildTaskNotification,
+  buildTaskStarted,
+} from "./claude-code.testing";
 
 /** The hercule-as-a-tool files, which the runner prepares once at startup. */
 const HERCULE_TOOL = {
@@ -401,7 +407,7 @@ const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/s
  * empty: the runner links the material into the instance's home instead, and
  * the field being present is what marks the session.
  */
-const THREAD: ProviderRunnerContext = { ...WORKING, userMaterial: NO_USER_MATERIAL_PATHS };
+const THREAD: ProviderRunnerContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
 
 /** A fake harness for a session. The test sends it messages one at a time. */
 interface Driving {
@@ -415,8 +421,12 @@ interface Driving {
   readonly models: Array<string>;
   readonly closed: () => number;
   readonly interrupted: () => number;
+  /** The agent ids `stopTask` was called with, in order. */
+  readonly stoppedTasks: Array<string>;
   /** When true, `setModel` rejects the model. */
   refusesModel: boolean;
+  /** When true, `stopTask` rejects, as it does for a subagent the harness no longer runs. */
+  refusesStopTask: boolean;
   /** When true, `setModel` waits for `releaseModel`, so a stop can happen in the meantime. */
   holdsModel: boolean;
   readonly releaseModel: () => void;
@@ -435,6 +445,7 @@ const createDriving = (): Driving => {
   let closes = 0;
   let interrupts = 0;
   let releaseModel: (() => void) | undefined;
+  const stoppedTasks: Array<string> = [];
 
   const adapter = makeClaudeCodeAdapter({
     query: () => {
@@ -475,6 +486,11 @@ const createDriving = (): Driving => {
             releaseModel = resolve;
           });
         },
+        stopTask: (taskId) => {
+          stoppedTasks.push(taskId);
+          if (harness.refusesStopTask) return Promise.reject(new Error(`no task ${taskId}`));
+          return Promise.resolve();
+        },
         close: () => {
           closes += 1;
           ended = true;
@@ -496,6 +512,7 @@ const createDriving = (): Driving => {
     seen,
     models,
     refusesModel: false,
+    refusesStopTask: false,
     holdsModel: false,
     releaseModel: () => releaseModel?.(),
     say: (message) => {
@@ -513,6 +530,7 @@ const createDriving = (): Driving => {
     },
     closed: () => closes,
     interrupted: () => interrupts,
+    stoppedTasks,
   };
   return harness;
 };
@@ -557,13 +575,9 @@ const WAIT_DEADLINE_MS = 10_000;
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 5_000 });
 
-const waitUntil = async (what: string, ready: () => boolean): Promise<void> => {
-  const deadline = Date.now() + WAIT_DEADLINE_MS;
-  while (!ready() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-  expect(ready(), `the adapter never ${what}`).toBe(true);
-};
+/** Waits for `ready` with this file's longer wait limit. */
+const waitUntil = (what: string, ready: () => boolean): Promise<void> =>
+  testing.waitUntil(what, ready, WAIT_DEADLINE_MS);
 
 /** Waits until the session has ended, whatever ended it. */
 const awaitSessionEnd = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
@@ -823,17 +837,46 @@ describe("a Claude Code session", () => {
     expect(run.interrupted()).toBe(1);
   });
 
-  it("does nothing for an interrupt that names a subagent, because it reports no subagents yet", async () => {
+  it("leaves the session's own turn running on an interrupt that names a subagent", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
-    // The user asked to stop one subagent, not the session's own turn.
+    // The user asked to stop one subagent, not the session's own turn. The
+    // harness runs no such subagent, so there is nothing to stop, and the
+    // user is told so.
     await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-1"));
     expect(run.interrupted()).toBe(0);
+    expect(run.stoppedTasks).toEqual([]);
+    const warning = run.seen.find((event) => event._tag === "runtime.warning");
+    expect(warning?._tag === "runtime.warning" ? warning.message : undefined).toBe(
+      "subagent agent-1 is not known to this process, so nothing was stopped",
+    );
 
     await Effect.runPromise(run.adapter.interrupt(SESSION));
     expect(run.interrupted()).toBe(1);
+  });
+
+  it("interrupts while the session's own agent is idle and only a subagent works", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-b");
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+
+    // The harness's own interrupt stops every subagent (spec 06 section 13.4).
+    expect(run.interrupted()).toBe(1);
+    expect(run.stoppedTasks).toEqual([]);
+  });
+
+  it("asks the harness for every subagent's text, and keeps interrupt stopping background subagents", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    expect(run.options[0]?.forwardSubagentText).toBe(true);
+    // Unset, an interrupt also stops every background subagent, which Stop
+    // relies on (spec 06 section 13.4).
+    expect(run.options[0]?.perTaskStopAffordance).toBeUndefined();
   });
 
   it("resumes the given native session under its existing id", async () => {
@@ -895,28 +938,58 @@ describe("a Claude Code session", () => {
     expect(run.sent).toEqual([]);
   });
 
-  it("refuses delayed input after Stop while the model is changing, then accepts a new input", async () => {
+  it.each([false, true])(
+    "refuses delayed input after Stop while the model is changing, with a working subagent: %s",
+    async (subagentWorking) => {
+      const run = createDriving();
+      await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+      if (subagentWorking) await openSubagentTurn(run, "agent-b");
+      run.holdsModel = true;
+      const sending = Effect.runPromise(
+        Effect.flip(
+          run.adapter.sendInput(SESSION, {
+            text: "do not resurrect this input",
+            modelSelection: { model: "claude-opus-4-8", options: {} },
+          }),
+        ),
+      );
+      await waitUntil("asked the harness for the model", () => run.models.length === 1);
+      await Effect.runPromise(run.adapter.interrupt(SESSION));
+      run.releaseModel();
+      expect(await sending).toContain("stopped");
+      expect(run.sent).toEqual([]);
+      expect(run.interrupted()).toBe(subagentWorking ? 1 : 0);
+      expect(
+        run.seen.filter((event) => event._tag === "turn.started" && event.subagentId === undefined),
+      ).toEqual([]);
+      run.holdsModel = false;
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "new input" }));
+      await waitUntil("received the new input", () => run.sent.length === 1);
+      expect(run.sent[0]!.message.content).toEqual("new input");
+    },
+  );
+
+  it("keeps pending root input when Stop names a subagent", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-b");
     run.holdsModel = true;
     const sending = Effect.runPromise(
-      Effect.flip(
-        run.adapter.sendInput(SESSION, {
-          text: "do not resurrect this input",
-          modelSelection: { model: "claude-opus-4-8", options: {} },
-        }),
-      ),
+      run.adapter.sendInput(SESSION, {
+        text: "continue the root's work",
+        modelSelection: { model: "claude-opus-4-8", options: {} },
+      }),
     );
     await waitUntil("asked the harness for the model", () => run.models.length === 1);
-    await Effect.runPromise(run.adapter.interrupt(SESSION));
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-b"));
     run.releaseModel();
-    expect(await sending).toContain("stopped");
-    expect(run.sent).toEqual([]);
-    expect(run.seen.filter((event) => event._tag === "turn.started")).toEqual([]);
-    run.holdsModel = false;
-    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "new input" }));
-    await waitUntil("received the new input", () => run.sent.length === 1);
-    expect(run.sent[0]!.message.content).toEqual("new input");
+
+    expect(await sending).toMatchObject({ delivery: "opened" });
+    await waitUntil("received the root input", () => run.sent.length === 1);
+    expect(run.sent[0]!.message.content).toEqual("continue the root's work");
+    expect(run.interrupted()).toBe(0);
+    expect(run.stoppedTasks).toEqual(["agent-b"]);
   });
 
   it("exits as stopped when stopped, and removes the session", async () => {
@@ -1189,6 +1262,8 @@ const parkToolCall = (
   extra: {
     readonly suggestions?: ReadonlyArray<PermissionUpdate>;
     readonly toolUseID?: string;
+    /** The subagent that asks. Absent when the session's own agent asks. */
+    readonly agentID?: string;
   } = {},
 ): Park => {
   const callback = run.options[0]?.canUseTool;
@@ -1199,6 +1274,7 @@ const parkToolCall = (
     signal: aborting.signal,
     toolUseID: extra.toolUseID ?? TOOL_USE,
     requestId: "cr-1",
+    ...(extra.agentID === undefined ? {} : { agentID: extra.agentID }),
     ...(extra.suggestions === undefined ? {} : { suggestions: [...extra.suggestions] }),
   }).then((answer) => {
     settled = answer;
@@ -1212,6 +1288,22 @@ const respond = (run: Driving, requestId: string, decision: ApprovalDecision): P
 
 const listOpenedRequests = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<OpenRequest> =>
   seen.flatMap((event) => (event._tag === "request.opened" ? [event.request] : []));
+
+/**
+ * Returns who asked each request that opened, or each that resolved, as `tag`
+ * picks: the subagent id, or `undefined` for the session's own agent.
+ */
+const listRequestAskers = (
+  seen: ReadonlyArray<ProviderEvent>,
+  tag: "request.opened" | "request.resolved",
+): ReadonlyArray<{ readonly requestId: string; readonly subagentId: string | undefined }> =>
+  seen.flatMap((event) => {
+    if (event._tag !== tag) return [];
+    const requestId = event._tag === "request.opened" ? event.request.requestId : event.requestId;
+    return event._tag === "request.opened" || event._tag === "request.resolved"
+      ? [{ requestId, subagentId: event.subagentId }]
+      : [];
+  });
 
 /** Returns how each request was resolved: its decision or its answers. */
 const listResolutions = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<unknown> =>
@@ -1265,6 +1357,66 @@ const parkAndAwaitRequest = async (
   const park = parkToolCall(run, toolName, input, extra);
   await waitUntil("opened the request", () => listOpenedRequests(run.seen).length === before + 1);
   return { park, request: listOpenedRequests(run.seen)[before]! };
+};
+
+/**
+ * A test subagent's agent call, the `Agent` tool_use that started it, is its
+ * id with a prefix. The frames it sends come from `claude-code.testing.ts`.
+ */
+const buildAgentCallId = (subagentId: string): string => `toolu_agent_${subagentId}`;
+
+/** Builds the `Agent` call with which one subagent starts another. */
+const buildChildAgentCall = (parentId: string, subagentId: string) =>
+  buildAgentCall(buildAgentCallId(parentId), buildAgentCallId(subagentId));
+
+/** Builds the `task_started` that links a subagent to its agent call. */
+const buildSubagentStarted = (subagentId: string) =>
+  buildTaskStarted(subagentId, buildAgentCallId(subagentId));
+
+/** Builds a subagent's assistant message, which opens its turn when none is open. */
+const buildSubagentWords = (subagentId: string) =>
+  buildSubagentText(buildAgentCallId(subagentId), `msg-text-${subagentId}`, "looking");
+
+/** Builds the `task_notification` that reports a subagent finished. */
+const buildSubagentFinished = (subagentId: string) =>
+  buildTaskNotification(subagentId, buildAgentCallId(subagentId));
+
+/** Returns where the first event with this tag and this subagent is in `seen`, or -1. */
+const findSubagentEvent = (
+  seen: ReadonlyArray<ProviderEvent>,
+  tag: ProviderEvent["_tag"],
+  subagentId: string,
+): number =>
+  seen.findIndex(
+    (event) => event._tag === tag && "subagentId" in event && event.subagentId === subagentId,
+  );
+
+/**
+ * Sends the frames that start a subagent, started by `parentId` when given,
+ * and open its turn, then waits for that turn to open.
+ */
+const openSubagentTurn = async (run: Driving, subagentId: string, parentId?: string) => {
+  if (parentId !== undefined) run.say(buildChildAgentCall(parentId, subagentId));
+  run.say(buildSubagentStarted(subagentId));
+  run.say(buildSubagentWords(subagentId));
+  await waitUntil(
+    `opened the turn of ${subagentId}`,
+    () => findSubagentEvent(run.seen, "turn.started", subagentId) !== -1,
+  );
+};
+
+/**
+ * Sends one more frame of a subagent no task_started has linked than the
+ * adapter holds, so it drops them all, then waits for the warning that
+ * counts them.
+ */
+const dropHeldFrames = async (run: Driving, subagentId: string) => {
+  for (let frame = 0; frame <= 1000; frame += 1) run.say(buildSubagentWords(subagentId));
+  await waitUntil("dropped the held frames", () =>
+    run.seen.some(
+      (event) => event._tag === "runtime.warning" && event.message.startsWith("dropped 1001"),
+    ),
+  );
 };
 
 describe("a tool call that needs approval", () => {
@@ -1441,22 +1593,104 @@ describe("a tool call that needs approval", () => {
     expect(listResolutions(run.seen)).toEqual([]);
   });
 
-  it("holds one request at a time, and tells the harness to ask again later", async () => {
+  it("parks a second request beside the first, and resolves each only by its own answer", async () => {
     const run = await startApprovalSession();
-    const { park: first } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
+    const { park: first, request: firstRequest } = await parkAndAwaitRequest(run, "Bash", {
+      command: "ls -la",
+    });
 
-    const second = parkToolCall(
+    const { park: second, request: secondRequest } = await parkAndAwaitRequest(
       run,
       "Read",
       { file_path: "/work/one.ts" },
       { toolUseID: "toolu_two" },
     );
 
-    await waitUntil("answered the second ask", () => second.settled() !== undefined);
-    expect(second.settled()).toMatchObject({ behavior: "deny" });
-    // The card the user is looking at stays open.
+    // Both are shown at once, and neither is answered for the user.
+    expect(secondRequest.requestId).not.toBe(firstRequest.requestId);
     expect(first.settled()).toBeUndefined();
-    expect(listOpenedRequests(run.seen)).toHaveLength(1);
+    expect(second.settled()).toBeUndefined();
+
+    await respond(run, secondRequest.requestId, "deny");
+    await waitUntil("resolved the second park", () => second.settled() !== undefined);
+    expect(first.settled()).toBeUndefined();
+  });
+
+  it("parks the session's own agent and a subagent at once, answered in reverse order", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+    const { park: own, request: ownRequest } = await parkAndAwaitRequest(run, "Bash", {
+      command: "touch one.txt",
+    });
+    const { park: subagent, request: subagentRequest } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "touch two.txt" },
+      { toolUseID: "toolu_two", agentID: "agent-b" },
+    );
+
+    // Only the subagent's request carries a subagent id: the clients show
+    // each request on the agent that asked it.
+    expect(listRequestAskers(run.seen, "request.opened")).toEqual([
+      { requestId: ownRequest.requestId, subagentId: undefined },
+      { requestId: subagentRequest.requestId, subagentId: "agent-b" },
+    ]);
+    expect(
+      run.seen.some((event) => event._tag === "request.opened" && !("subagentId" in event)),
+    ).toBe(true);
+
+    await respond(run, subagentRequest.requestId, "allow");
+    await waitUntil("resolved the subagent's park", () => subagent.settled() !== undefined);
+    expect(subagent.settled()).toMatchObject({ behavior: "allow" });
+    expect(own.settled()).toBeUndefined();
+
+    await respond(run, ownRequest.requestId, "deny");
+    await waitUntil(
+      "resolved the park of the session's own agent",
+      () => own.settled() !== undefined,
+    );
+    expect(own.settled()).toMatchObject({ behavior: "deny" });
+
+    expect(listResolutions(run.seen)).toEqual([
+      { requestId: subagentRequest.requestId, decision: "allow" },
+      { requestId: ownRequest.requestId, decision: "deny" },
+    ]);
+    expect(listRequestAskers(run.seen, "request.resolved")).toEqual([
+      { requestId: subagentRequest.requestId, subagentId: "agent-b" },
+      { requestId: ownRequest.requestId, subagentId: undefined },
+    ]);
+  });
+
+  it("opens no turn of the session's own agent when a subagent asks", async () => {
+    const run = createDriving();
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, accessMode: "approval-required" }, WORKING),
+    );
+    await openSubagentTurn(run, "agent-b");
+
+    await parkAndAwaitRequest(run, "Bash", { command: "ls -la" }, { agentID: "agent-b" });
+
+    // A background subagent can ask while the session's own agent is idle,
+    // and the session must stay idle.
+    expect(
+      run.seen.filter((event) => event._tag === "turn.started" && event.subagentId === undefined),
+    ).toEqual([]);
+  });
+
+  it("ends a subagent's cancelled request with the same interrupting deny as the session's own", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+    const { park, request } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "rm -rf /" },
+      { agentID: "agent-b" },
+    );
+
+    await respond(run, request.requestId, "cancel");
+
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny", interrupt: true });
   });
 
   it("truncates a long command to the protocol's limit, ending it with an ellipsis", async () => {
@@ -1876,6 +2110,34 @@ describe("a park that is still open when the turn or the session ends", () => {
     expect(completed?._tag === "turn.completed" ? completed.state : undefined).toBe("interrupted");
   });
 
+  it("withdraws every open park on an interrupt, the subagents' too", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+    const { park: own, request: ownRequest } = await parkAndAwaitRequest(run, "Bash", {
+      command: "ls -la",
+    });
+    const { park: subagent, request: subagentRequest } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "ls -la" },
+      { toolUseID: "toolu_two", agentID: "agent-b" },
+    );
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+
+    await waitUntil(
+      "resolved both parks",
+      () => own.settled() !== undefined && subagent.settled() !== undefined,
+    );
+    expect(own.settled()).toMatchObject({ behavior: "deny" });
+    expect(subagent.settled()).toMatchObject({ behavior: "deny" });
+    expect(listResolutions(run.seen)).toEqual([
+      { requestId: ownRequest.requestId, decision: "cancel" },
+      { requestId: subagentRequest.requestId, decision: "cancel" },
+    ]);
+    expect(run.interrupted()).toBe(1);
+  });
+
   it("emits no request events on an interrupt when there is no park", async () => {
     const run = await startApprovalSession();
 
@@ -1978,6 +2240,391 @@ const runTurnToCompletion = async (
   expect(completed, "no turn was completed").toBeDefined();
   return completed!;
 };
+
+describe("a subagent's requests", () => {
+  it("reports a request a subagent asks before its turn opens only once the turn has opened", async () => {
+    const run = await startApprovalSession();
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    await openSubagentTurn(run, "agent-b");
+    await waitUntil("opened the request", () => listOpenedRequests(run.seen).length === 1);
+
+    // A request belongs to an open turn, so it never comes before the turn.
+    expect(findSubagentEvent(run.seen, "turn.started", "agent-b")).toBeLessThan(
+      findSubagentEvent(run.seen, "request.opened", "agent-b"),
+    );
+    expect(park.settled()).toBeUndefined();
+  });
+
+  it("denies a request withdrawn before its turn opened, and never reports it", async () => {
+    const run = await startApprovalSession();
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    park.abort();
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    await openSubagentTurn(run, "agent-b");
+    // The text item comes after the deferred events would have been released.
+    await waitUntil("reported the subagent's text", () =>
+      run.seen.some(
+        (event) =>
+          event._tag === "item.completed" &&
+          event.kind === "assistant_message" &&
+          event.subagentId === "agent-b",
+      ),
+    );
+
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    // The user never saw it open, so it is not reported closed either.
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("cancels a subagent's requests before reporting its turn completed, and keeps the others", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+    const { park: own } = await parkAndAwaitRequest(run, "Bash", { command: "ls" });
+    const { park, request } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "ls" },
+      { toolUseID: "toolu_two", agentID: "agent-b" },
+    );
+
+    run.say(buildSubagentFinished("agent-b"));
+    await waitUntil(
+      "completed the subagent's turn",
+      () => findSubagentEvent(run.seen, "turn.completed", "agent-b") !== -1,
+    );
+
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(listResolutions(run.seen)).toEqual([
+      { requestId: request.requestId, decision: "cancel" },
+    ]);
+    // In this order, or a card would stay on screen for a turn that is over.
+    expect(findSubagentEvent(run.seen, "request.resolved", "agent-b")).toBeLessThan(
+      findSubagentEvent(run.seen, "turn.completed", "agent-b"),
+    );
+    expect(own.settled()).toBeUndefined();
+  });
+
+  // The harness can send a subagent's frames before the task_started that
+  // links them. Another subagent's task_started in between must not drop
+  // them, or the subagent's turn never opens and its request waits for ever.
+  it("reports a request of a subagent whose frames waited past another subagent's task_started", async () => {
+    const run = await startApprovalSession();
+    run.say(buildSubagentWords("agent-b"));
+    await openSubagentTurn(run, "agent-a");
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    run.say(buildSubagentStarted("agent-b"));
+
+    await waitUntil("opened the request", () => listOpenedRequests(run.seen).length === 1);
+    expect(listRequestAskers(run.seen, "request.opened")).toEqual([
+      { requestId: listOpenedRequests(run.seen)[0]!.requestId, subagentId: "agent-b" },
+    ]);
+    expect(findSubagentEvent(run.seen, "turn.started", "agent-b")).toBeLessThan(
+      findSubagentEvent(run.seen, "request.opened", "agent-b"),
+    );
+    expect(run.seen.some((event) => event._tag === "runtime.warning")).toBe(false);
+    expect(park.settled()).toBeUndefined();
+  });
+
+  it("denies a request whose subagent was still unknown when the held frames were dropped, and never reports it", async () => {
+    const run = await startApprovalSession();
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-z" });
+
+    await dropHeldFrames(run, "agent-z");
+
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  // The frames that would have opened the subagent's turn were dropped, so
+  // its request would wait for ever for a turn to be shown in. Denied, the
+  // subagent goes on, and its next frame opens its turn.
+  it("denies at once a request from a subagent whose frames were dropped, with no Request", async () => {
+    const run = await startApprovalSession();
+    await dropHeldFrames(run, "agent-b");
+    run.say(buildSubagentStarted("agent-b"));
+    await waitUntil(
+      "introduced agent-b",
+      () => findSubagentEvent(run.seen, "subagent.started", "agent-b") !== -1,
+    );
+
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("withdraws a waiting request once a task_started links its subagent to dropped frames", async () => {
+    const run = await startApprovalSession();
+    await dropHeldFrames(run, "agent-b");
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    run.say(buildSubagentStarted("agent-b"));
+
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("reports a subagent's requests again once its turn opens after its frames were dropped", async () => {
+    const run = await startApprovalSession();
+    await dropHeldFrames(run, "agent-b");
+    run.say(buildSubagentStarted("agent-b"));
+    run.say(buildSubagentWords("agent-b"));
+    await waitUntil(
+      "opened agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.started", "agent-b") !== -1,
+    );
+
+    const { park, request } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "ls" },
+      { agentID: "agent-b" },
+    );
+
+    expect(listRequestAskers(run.seen, "request.opened")).toEqual([
+      { requestId: request.requestId, subagentId: "agent-b" },
+    ]);
+    expect(park.settled()).toBeUndefined();
+  });
+});
+
+describe("stopping a subagent", () => {
+  it("stops it and every working subagent below it, and leaves the rest running", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-a");
+    await openSubagentTurn(run, "agent-b", "agent-a");
+    await openSubagentTurn(run, "agent-c", "agent-b");
+    await openSubagentTurn(run, "agent-x");
+    // A child whose turn is about to open, from a task_started alone.
+    run.say(buildChildAgentCall("agent-a", "agent-d"));
+    run.say(buildSubagentStarted("agent-d"));
+    await waitUntil(
+      "introduced agent-d",
+      () => findSubagentEvent(run.seen, "subagent.started", "agent-d") !== -1,
+    );
+    const { park: below, request } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "ls" },
+      { toolUseID: "toolu_c", agentID: "agent-c" },
+    );
+    const { park: beside } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "ls" },
+      { toolUseID: "toolu_x", agentID: "agent-x" },
+    );
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+
+    expect([...run.stoppedTasks].sort()).toEqual(["agent-a", "agent-b", "agent-c", "agent-d"]);
+    expect(run.interrupted()).toBe(0);
+    await waitUntil("withdrew the park below", () => below.settled() !== undefined);
+    expect(listResolutions(run.seen)).toEqual([
+      { requestId: request.requestId, decision: "cancel" },
+    ]);
+    expect(beside.settled()).toBeUndefined();
+  });
+
+  it("stops an idle subagent below once it works again, and a subagent it starts later", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+    await openSubagentTurn(run, "agent-b", "agent-a");
+    run.say(buildSubagentFinished("agent-b"));
+    await waitUntil(
+      "completed agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.completed", "agent-b") !== -1,
+    );
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    expect(run.stoppedTasks).toEqual(["agent-a"]);
+
+    // agent-b wakes by itself and starts a child after the stop.
+    run.say(buildChildAgentCall("agent-b", "agent-e"));
+    run.say(buildSubagentStarted("agent-e"));
+    await waitUntil("stopped the late child", () => run.stoppedTasks.includes("agent-e"));
+    expect(run.stoppedTasks).toEqual(["agent-a", "agent-b", "agent-e"]);
+  });
+
+  it("stops a late child of a subagent the stop reached while it worked", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    // The harness had already sent the call before it read the stop.
+    run.say(buildChildAgentCall("agent-a", "agent-b"));
+    run.say(buildSubagentStarted("agent-b"));
+
+    await waitUntil("stopped the late child", () => run.stoppedTasks.includes("agent-b"));
+    expect(run.stoppedTasks).toEqual(["agent-a", "agent-b"]);
+  });
+
+  it("withdraws a late child's request that waits for its turn, and never reports it", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-a");
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    // The child asks before the pump has read the frames that start it.
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+    run.say(buildChildAgentCall("agent-a", "agent-b"));
+    run.say(buildSubagentStarted("agent-b"));
+    run.say(buildSubagentWords("agent-b"));
+
+    await waitUntil("stopped the late child", () => run.stoppedTasks.includes("agent-b"));
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    await waitUntil(
+      "opened agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.started", "agent-b") !== -1,
+    );
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("stops a subagent again when it finished before its stop landed and then works again", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    // The harness reports the task completed, not stopped: it finished on its
+    // own before stopTask reached it, so stopTask stopped nothing.
+    run.say(buildSubagentFinished("agent-a"));
+    run.say(buildSubagentWords("agent-a"));
+
+    await waitUntil("stopped agent-a again", () => run.stoppedTasks.length === 2);
+    expect(run.stoppedTasks).toEqual(["agent-a", "agent-a"]);
+  });
+
+  it("denies at once a request from a subagent the harness reported stopped", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+    run.say(buildTaskNotification("agent-b", buildAgentCallId("agent-b"), "stopped"));
+    await waitUntil(
+      "completed agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.completed", "agent-b") !== -1,
+    );
+
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("does nothing more for a stop the harness refuses after the session stopped", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+    run.refusesStopTask = true;
+
+    const stopping = Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+    await stopping;
+
+    expect(run.stoppedTasks).toEqual(["agent-a"]);
+    expect(run.seen.some((event) => event._tag === "runtime.warning")).toBe(false);
+  });
+
+  it("reports a stop the harness refused as a warning on the subagent, and still succeeds", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+    run.refusesStopTask = true;
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+
+    await waitUntil(
+      "warned about the stop",
+      () => findSubagentEvent(run.seen, "runtime.warning", "agent-a") !== -1,
+    );
+    const warning = run.seen[findSubagentEvent(run.seen, "runtime.warning", "agent-a")];
+    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain("no task agent-a");
+  });
+
+  it("sends stopTask again on a second interrupt after the harness refused the first", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+    run.refusesStopTask = true;
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    run.refusesStopTask = false;
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+
+    expect(run.stoppedTasks).toEqual(["agent-a", "agent-a"]);
+  });
+
+  // Only the user's own Stop sends a refused stop again. Resending it at each
+  // message would ask the harness, and fail, for as long as the subagent runs.
+  it("does not send again a stop the harness refused when the subagent woke", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+    await openSubagentTurn(run, "agent-b", "agent-a");
+    run.say(buildSubagentFinished("agent-b"));
+    await waitUntil(
+      "completed agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.completed", "agent-b") !== -1,
+    );
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    run.refusesStopTask = true;
+
+    run.say(buildSubagentWords("agent-b"));
+    await waitUntil(
+      "warned about agent-b's stop",
+      () => findSubagentEvent(run.seen, "runtime.warning", "agent-b") !== -1,
+    );
+    run.say(buildSubagentText(buildAgentCallId("agent-b"), "msg-more-agent-b", "still here"));
+    await waitUntil("reported agent-b's next words", () =>
+      run.seen.some((event) => event._tag === "content.delta" && event.delta === "still here"),
+    );
+
+    expect(run.stoppedTasks).toEqual(["agent-a", "agent-b"]);
+  });
+
+  it("stops a resumed subagent's resumed children, from the tree the controller sent", async () => {
+    const run = createDriving();
+    const carried = {
+      nativeSessionId: "0199e0e7-0000-7000-8000-0000000000ab",
+      mode: "resume",
+      subagents: [
+        { subagentId: "agent-a", itemId: buildAgentCallId("agent-a") },
+        {
+          subagentId: "agent-b",
+          itemId: buildAgentCallId("agent-b"),
+          parentSubagentId: "agent-a",
+        },
+      ],
+    } as const;
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, continue: carried }, WORKING),
+    );
+    // Only the child works in this process. Its frames carry its agent call,
+    // which the seeded tree links to it, so no task_started is needed.
+    run.say(buildSubagentWords("agent-b"));
+    await waitUntil(
+      "opened agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.started", "agent-b") !== -1,
+    );
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+
+    expect(run.stoppedTasks).toEqual(["agent-b"]);
+  });
+});
 
 describe("a session the controller started for an Agent", () => {
   it("appends the agent's instructions to the harness's preset, never replacing it", async () => {

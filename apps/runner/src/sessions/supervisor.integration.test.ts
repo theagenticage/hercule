@@ -1081,7 +1081,7 @@ const awaitForwarded = (
  * Returns the field that attributes an event to `subagentId`, or no field for
  * the session's own agent.
  */
-const attributeTo = (subagentId: string | undefined) =>
+const buildSubagentAttribution = (subagentId: string | undefined) =>
   subagentId === undefined ? {} : { subagentId };
 
 const emitTurnStarted = (fake: Fake, turnId: string, subagentId?: string): void =>
@@ -1091,7 +1091,7 @@ const emitTurnStarted = (fake: Fake, turnId: string, subagentId?: string): void 
     sessionId: SESSION,
     at,
     turnId,
-    ...attributeTo(subagentId),
+    ...buildSubagentAttribution(subagentId),
   });
 
 const emitTurnCompleted = (fake: Fake, turnId: string, subagentId?: string): void =>
@@ -1102,7 +1102,7 @@ const emitTurnCompleted = (fake: Fake, turnId: string, subagentId?: string): voi
     at,
     turnId,
     state: "completed",
-    ...attributeTo(subagentId),
+    ...buildSubagentAttribution(subagentId),
   });
 
 const emitDelta = (fake: Fake, id: string): void =>
@@ -1246,7 +1246,7 @@ const emitRequestOpened = (fake: Fake, requestId: string, subagentId?: string): 
     eventId: `e-${requestId}-opened`,
     sessionId: SESSION,
     at,
-    ...attributeTo(subagentId),
+    ...buildSubagentAttribution(subagentId),
     request: {
       requestId,
       itemId: "i-1",
@@ -1264,7 +1264,7 @@ const emitRequestResolved = (fake: Fake, requestId: string, subagentId?: string)
     at,
     requestId,
     decision: "allow",
-    ...attributeTo(subagentId),
+    ...buildSubagentAttribution(subagentId),
   });
 
 /**

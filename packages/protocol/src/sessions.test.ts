@@ -476,13 +476,16 @@ describe("what the controller sends for a session", () => {
     }
   });
 
-  it("carries the session's known subagents on a resume, each with its item when known", () => {
+  it("carries the session's known subagents on a resume, each with its item and parent when known", () => {
     const resumed = {
       ...spec,
       continue: {
         nativeSessionId: "native-1",
         mode: "resume",
-        subagents: [{ subagentId: "agent-a", itemId: "toolu_1" }, { subagentId: "agent-b" }],
+        subagents: [
+          { subagentId: "agent-a", itemId: "toolu_1" },
+          { subagentId: "agent-b", parentSubagentId: "agent-a" },
+        ],
       },
     } as const;
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(resumed))).toEqual(resumed);
@@ -503,7 +506,14 @@ describe("what the controller sends for a session", () => {
       continue: {
         nativeSessionId: "native-1",
         mode: "resume",
-        subagents: [{ subagentId: "agent-a", lastUsageReport }],
+        subagents: [
+          {
+            subagentId: "agent-a",
+            itemId: "toolu_1",
+            parentSubagentId: "agent-parent",
+            lastUsageReport,
+          },
+        ],
       },
     };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(resumed))).toEqual(resumed);

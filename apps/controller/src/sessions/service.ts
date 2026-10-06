@@ -27,11 +27,11 @@ import {
   type AccessMode,
   type AgentStepResultRequest,
   type ApprovalDecision,
+  type ContinuedSubagent,
   type Delivery,
   SubagentId,
   type ModelSelection,
   type ProviderEvent,
-  type ProviderReport,
   type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
@@ -1366,21 +1366,15 @@ const make = Effect.gen(function* () {
     /**
      * Returns the subagents a resumed session's harness is told about, so
      * the adapter puts a subagent it continues back on the record the
-     * controller already has. Each saved provider usage report goes back
-     * unchanged, so its adapter can restore native counters without reading
-     * the transcript. Checks no grant: the controller daemon calls
-     * it while it builds a resume spec.
+     * controller already has. Each entry names the subagent that started
+     * it, so the adapter knows the tree a stop cascades down. Each saved
+     * provider usage report goes back unchanged, so the adapter can restore
+     * native counters without reading the transcript. Checks no grant: the
+     * controller daemon calls it while it builds a resume spec.
      */
     listSubagentsToContinue: (
       sessionId: string,
-    ): Effect.Effect<
-      ReadonlyArray<{
-        readonly subagentId: SubagentId;
-        readonly itemId?: string;
-        readonly lastUsageReport?: ProviderReport;
-      }>,
-      SqlError
-    > =>
+    ): Effect.Effect<ReadonlyArray<ContinuedSubagent>, SqlError> =>
       Effect.map(subagents.listAll(sessionId), (records) =>
         records.map((record) => ({
           subagentId: record.id,
@@ -1388,6 +1382,9 @@ const make = Effect.gen(function* () {
           ...(record.lastUsageReport === undefined
             ? {}
             : { lastUsageReport: record.lastUsageReport }),
+          ...(record.parentSubagentId === undefined
+            ? {}
+            : { parentSubagentId: record.parentSubagentId }),
         })),
       ),
 
