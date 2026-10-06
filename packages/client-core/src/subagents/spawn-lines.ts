@@ -22,8 +22,11 @@ export interface SpawnLine {
   readonly state: SubagentState;
   /** How many subagents are below it, at any depth. */
   readonly below: number;
-  /** Whether it, or any subagent below it, waits on the user. */
-  readonly waitsOnUserAtOrBelow: boolean;
+  /**
+   * Whether any subagent below it waits on the user. The subagent's own
+   * waiting is left out, because its state already reads "waiting on you".
+   */
+  readonly waitsOnUserBelow: boolean;
 }
 
 /**
@@ -80,7 +83,6 @@ export const buildSpawnLines = (
       name: nameSubagent(subagent),
       state: describeSubagentState(subagent, waiting, now),
       below: descendants.length,
-      waitsOnUserAtOrBelow:
-        waiting || descendants.some((each) => isSubagentWaiting(each, openRequests)),
+      waitsOnUserBelow: descendants.some((each) => isSubagentWaiting(each, openRequests)),
     };
   });

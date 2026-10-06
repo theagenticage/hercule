@@ -286,7 +286,7 @@ describe("Thread: spawn lines", () => {
       "↳Check the 3-D Secure flowdone · 2m 20s",
       "↳Check the iDEAL redirectworking · 16m 57s · 2 below · one waits on you",
       "↳Check the Apple Pay pathstopped · 2m 54s",
-      "↳Run the webhook testswaiting on you · 16m 55s · one waits on you",
+      "↳Run the webhook testswaiting on you · 16m 55s",
     ]);
   });
 
