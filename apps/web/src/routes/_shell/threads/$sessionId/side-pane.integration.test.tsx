@@ -12,109 +12,45 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Project, Resource, Session, Subagent, Workspace } from "@hercule/contract";
 import { renderApp, stubApi, type Call, type Handler } from "../../../../app/testing";
+import { SESSION, SESSION_ID, buildController, buildSession, buildSubagent } from "./-fixtures";
 
-const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const AT = "2026-09-08T09:59:00.000Z";
 
-/** A thread whose harness has reported no token usage yet. */
-const UNREPORTED_SESSION: Session = {
-  id: SESSION_ID,
-  title: "Fix the login bug",
-  status: "idle",
-  resumable: false,
-  resumeHeld: false,
-  permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
-  agentId: null,
-  conversationId: null,
-  runId: null,
-  stepId: null,
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
-  runnerId: "01a06d02-3000-7000-8000-000000000001",
-  workspaceId: null,
-  projectId: null,
-  requestedAccessMode: "approval-required",
-  accessMode: "approval-required",
-  nativeSessionId: null,
-  modelSelection: { model: "claude-sonnet-5", options: {} },
-  parentSessionId: null,
-  openRequests: [],
-  createdAt: AT,
-  startedAt: "2026-09-08T09:59:01.000Z",
-  exitedAt: null,
-  lastActivityAt: "2026-09-08T10:01:03.000Z",
-  unenforced: [],
-};
-
-const SESSION: Session = {
-  ...UNREPORTED_SESSION,
-  usage: { inputTokens: 40_000, outputTokens: 2_300 },
-};
+/** A thread whose harness has reported token usage. */
+const REPORTED_SESSION = buildSession({ usage: { inputTokens: 40_000, outputTokens: 2_300 } });
 
 /** A running subagent the session's own agent started, with one running child. */
-const EXPLORER: Subagent = {
+const EXPLORER = buildSubagent({
   id: "toolu_explore_auth",
-  sessionId: SESSION_ID,
   description: "Explore the auth module",
   agentType: "Explore",
-  status: "running",
   toolCalls: 2,
   activity: "Reading src/auth/session.ts",
   startedAt: "2026-09-08T10:00:01.000Z",
-};
+});
 
-const READER: Subagent = {
+const READER = buildSubagent({
   id: "toolu_read_tests",
-  sessionId: SESSION_ID,
   parentSubagentId: EXPLORER.id,
   description: "Read the auth tests",
-  status: "running",
   toolCalls: 1,
   startedAt: "2026-09-08T10:00:05.000Z",
-};
+});
 
-const PLANNER: Subagent = {
+const PLANNER = buildSubagent({
   id: "toolu_plan_fix",
-  sessionId: SESSION_ID,
   description: "Plan the fix",
   status: "completed",
   toolCalls: 4,
   result: "Change the cookie's SameSite flag.",
   startedAt: "2026-09-08T09:59:30.000Z",
   endedAt: "2026-09-08T10:00:00.000Z",
-};
+});
 
 const SUBAGENTS: readonly Subagent[] = [PLANNER, EXPLORER, READER];
 
-/** Builds the stubbed controller routes for the app and for one thread. */
-const buildController = (
-  session: Session,
-  subagents: readonly Subagent[],
-  extra: Readonly<Record<string, Handler>> = {},
-): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/setup": { body: { complete: true } },
-  "GET /api/v1/settings": {
-    body: {
-      controller: {},
-      user: {
-        "onboarding.completedSteps": ["timezone", "assistant"],
-        timezone: "Europe/Amsterdam",
-      },
-    },
-  },
-  [`GET /api/v1/sessions/${session.id}`]: { body: session },
-  [`GET /api/v1/sessions/${session.id}/transcript`]: { body: { items: [] } },
-  [`GET /api/v1/sessions/${session.id}/subagents`]: { body: { items: subagents } },
-  [`GET /api/v1/sessions/${session.id}/inputs`]: { body: { items: [] } },
-  "GET /api/v1/providers": { body: [] },
-  "GET /api/v1/runners": { body: { items: [] } },
-  "GET /api/v1/profiles": { body: { items: [] } },
-  "GET /api/v1/assistants": { body: { items: [] } },
-  [`POST /api/v1/sessions/${session.id}/interrupt`]: { body: session },
-  ...extra,
-});
-
 const openThread = async ({
-  session = SESSION,
+  session = REPORTED_SESSION,
   subagents = SUBAGENTS,
   path = `/threads/${SESSION_ID}`,
   extra = {},
@@ -124,7 +60,12 @@ const openThread = async ({
   readonly path?: string;
   readonly extra?: Readonly<Record<string, Handler>>;
 } = {}) => {
-  const api = stubApi(buildController(session, subagents, extra));
+  const api = stubApi(
+    buildController(
+      { session, subagents },
+      { [`POST /api/v1/sessions/${SESSION_ID}/interrupt`]: { body: session }, ...extra },
+    ),
+  );
   const app = await renderApp({ path, api: api.fetch, token: "held" });
   return { ...app, api };
 };
@@ -251,7 +192,7 @@ describe("Side pane: the Subagents surface", () => {
 
   it("leaves the total out when the session has reported no usage", async () => {
     const user = userEvent.setup();
-    await openThread({ session: UNREPORTED_SESSION });
+    await openThread({ session: SESSION });
     const pane = await openPane(user);
 
     await within(pane).findByText("2 running · 1 settled");
@@ -383,7 +324,7 @@ const WORKSPACE: Workspace = {
 
 /** Opens a thread in `WORKSPACE`, whose header offers a new thread there. */
 const openThreadInWorkspace = () => {
-  const session = { ...SESSION, projectId: PROJECT.id, workspaceId: WORKSPACE.id };
+  const session = { ...REPORTED_SESSION, projectId: PROJECT.id, workspaceId: WORKSPACE.id };
   return openThread({
     session,
     extra: {

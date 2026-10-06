@@ -28,7 +28,6 @@ import type {
   Runner,
   Session,
   SessionRequest,
-  Subagent,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
@@ -51,43 +50,18 @@ import {
   type Handler,
   type LiveStub,
 } from "../../../../app/testing";
-
-const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
-const ZONE = "Europe/Amsterdam";
-
-const BASE_SESSION: Session = {
-  id: SESSION_ID,
-  title: "Fix the login bug",
-  status: "idle",
-  resumable: false,
-  resumeHeld: false,
-  permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
-  agentId: null,
-  conversationId: null,
-  runId: null,
-  stepId: null,
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
-  runnerId: "01a06d02-3000-7000-8000-000000000001",
-  workspaceId: null,
-  projectId: null,
-  requestedAccessMode: "approval-required",
-  accessMode: "approval-required",
-  nativeSessionId: null,
-  modelSelection: { model: "claude-sonnet-5", options: {} },
-  parentSessionId: null,
-  openRequests: [],
-  createdAt: "2026-09-08T09:59:00.000Z",
-  startedAt: "2026-09-08T09:59:01.000Z",
-  exitedAt: null,
-  lastActivityAt: "2026-09-08T10:01:03.000Z",
-  unenforced: [],
-};
-
-const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE_SESSION, ...overrides });
+import {
+  SESSION,
+  SESSION_ID,
+  ZONE,
+  buildController,
+  buildSession,
+  buildSubagent,
+} from "./-fixtures";
 
 /**
  * Fixtures for the composer tests:
- * - A provider instance, a runner and a profile with `BASE_SESSION`'s ids,
+ * - A provider instance, a runner and a profile with `SESSION`'s ids,
  *   which the started thread's read-only fields and model menu read.
  * - A second instance, runner and profile, which exist only to prove that
  *   they never show up in a started thread's read-only fields or its
@@ -123,7 +97,7 @@ const buildInstanceSnapshot = (
 });
 
 const INSTANCE_STARTED: ProviderInstance = {
-  id: BASE_SESSION.instanceId,
+  id: SESSION.instanceId,
   providerId: "claude-code",
   secretFields: [],
   name: "personal",
@@ -132,7 +106,7 @@ const INSTANCE_STARTED: ProviderInstance = {
   binaryName: "claude",
   declared: DECLARED,
   snapshots: [
-    buildInstanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] },
       { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
     ]),
@@ -163,7 +137,7 @@ const EFFORT: ModelOption = {
 const INSTANCE_OPTIONS: ProviderInstance = {
   ...INSTANCE_STARTED,
   snapshots: [
-    buildInstanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [EFFORT] },
       { slug: "claude-opus-5", name: "Claude Opus 5", options: [EFFORT] },
     ]),
@@ -175,14 +149,14 @@ const INSTANCE_OTHER: ProviderInstance = {
   id: "01a06d02-1000-7000-8000-000000000099",
   name: "work",
   snapshots: [
-    buildInstanceSnapshot(BASE_SESSION.runnerId, "work@example.com", "Claude Pro", [
+    buildInstanceSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
       { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
     ]),
   ],
 };
 
 const RUNNER_STARTED: Runner = {
-  id: BASE_SESSION.runnerId,
+  id: SESSION.runnerId,
   name: "moss",
   connectivity: "online",
   lifecycle: "active",
@@ -203,7 +177,7 @@ const RUNNER_OTHER: Runner = {
 };
 
 const PROFILE_STARTED: Profile = {
-  id: BASE_SESSION.permissionProfileId,
+  id: SESSION.permissionProfileId,
   name: "unrestricted",
   grants: [],
   shipped: true,
@@ -217,42 +191,33 @@ const PROFILE_OTHER: Profile = {
   name: "worker",
 };
 
-/** Builds the stubbed controller routes for the app and for the thread of `fixture`. */
-const buildController = (
+/**
+ * Builds the stubbed controller routes for the app and for the thread of
+ * `fixture`, with no subagents, the transcript `rows`, and the composer's
+ * instances, runners and profiles. `extra` is added over them.
+ */
+const buildThreadRoutes = (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
-): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/setup": { body: { complete: true } },
-  "GET /api/v1/settings": {
-    body: {
-      controller: {},
-      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE },
+): Readonly<Record<string, Handler>> =>
+  buildController(
+    { session: fixture, subagents: [] },
+    {
+      [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
+      "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
+      "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
+      "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
+      ...extra,
     },
-  },
-  [`GET /api/v1/sessions/${fixture.id}`]: { body: fixture },
-  [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
-  // The thread's subagents. A test about subagents overrides this with its
-  // own `extra`.
-  [`GET /api/v1/sessions/${fixture.id}/subagents`]: { body: { items: [] } },
-  // The composer's reads. A test that needs specific queued
-  // inputs overrides the `/inputs` route below with its own `extra`.
-  "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
-  "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
-  "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
-  [`GET /api/v1/sessions/${fixture.id}/inputs`]: { body: { items: [] } },
-  // The sidebar's Assistants group reads the assistants; a test of an
-  // assistant's session overrides this with its own `extra`.
-  "GET /api/v1/assistants": { body: { items: [] } },
-  ...extra,
-});
+  );
 
 const openApp = async (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
-  const api = stubApi(buildController(fixture, rows, extra));
+  const api = stubApi(buildThreadRoutes(fixture, rows, extra));
   const app = await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
   return { ...app, api };
 };
@@ -1726,14 +1691,12 @@ describe("Thread: live subscriptions", () => {
 
 const SUBAGENT_ID = "toolu_explore_auth";
 
-const SUBAGENT: Subagent = {
+const SUBAGENT = buildSubagent({
   id: SUBAGENT_ID,
-  sessionId: SESSION_ID,
   description: "Explore the auth module",
-  status: "running",
   toolCalls: 2,
   startedAt: "2026-09-08T10:00:01.000Z",
-};
+});
 
 /** The subagent's own transcript: one turn whose answer is a single message. */
 const buildSubagentTranscript = (): TranscriptRow[] =>
@@ -2993,7 +2956,7 @@ describe("Thread: the permission card", () => {
     let current = buildSession({ status: "busy", openRequests: [REQUEST] });
     let release: (() => void) | undefined;
     const api = stubApi({
-      ...buildController(current, buildParkedRows()),
+      ...buildThreadRoutes(current, buildParkedRows()),
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
       // The response is held until the test releases it, and it still has
       // the open request. The response is a snapshot from when the request
@@ -3061,7 +3024,7 @@ describe("Thread: the permission card", () => {
     const user = userEvent.setup();
     const current = buildSession({ status: "busy", openRequests: [REQUEST] });
     const api = stubApi({
-      ...buildController(current, buildParkedRows()),
+      ...buildThreadRoutes(current, buildParkedRows()),
       [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: { body: current },
     });
     await renderApp({ path: `/threads/${SESSION_ID}`, api: api.fetch, token: "held" });
@@ -3613,7 +3576,7 @@ describe("Draft: a draft joining a workspace", () => {
       workspaceId: workspace.id,
     });
     const api = stubApi({
-      ...buildController(
+      ...buildThreadRoutes(
         fixture,
         buildTwoCompletedTurns(),
         buildThreadWorldRoutes([workspace], [fixture]),
@@ -3651,8 +3614,8 @@ const ADA: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are a helpful assistant.",
-  instanceId: BASE_SESSION.instanceId,
-  permissionProfileId: BASE_SESSION.permissionProfileId,
+  instanceId: SESSION.instanceId,
+  permissionProfileId: SESSION.permissionProfileId,
   accessMode: "approval-required",
   model: null,
   disallowedTools: [],
@@ -3750,7 +3713,7 @@ describe("Thread: the session view of an assistant's session", () => {
     const user = userEvent.setup();
     const fixture = buildAssistantSession({ status: "busy", openRequests: [REQUEST] });
     const api = stubApi({
-      ...buildController(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
+      ...buildThreadRoutes(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
       [`POST /api/v1/sessions/${fixture.id}/respond-to-approval-request`]: { body: fixture },
     });
     await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });

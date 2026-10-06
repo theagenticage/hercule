@@ -10,19 +10,16 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import type {
-  Profile,
-  ProviderInstance,
-  Runner,
-  Session,
-  SessionRequest,
-  Subagent,
-  TranscriptRow,
-} from "@hercule/contract";
-import { readPageText, renderApp, stubApi, type Handler } from "../../../../app/testing";
+import type { Profile, ProviderInstance, Runner, Subagent, TranscriptRow } from "@hercule/contract";
+import { readPageText, renderApp, stubApi } from "../../../../app/testing";
+import {
+  SESSION_ID,
+  buildController,
+  buildRequest,
+  buildSession,
+  buildSubagent,
+} from "./-fixtures";
 
-const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
-const ZONE = "Europe/Amsterdam";
 /** The moment the tests run at: 16 minutes 57 seconds after the iDEAL check started. */
 const NOW = new Date("2026-09-08T10:17:00.000Z");
 
@@ -77,58 +74,32 @@ const PROFILE: Profile = {
   updatedAt: "2026-09-08T09:00:00.000Z",
 };
 
-/** Builds an open command approval of the subagent `subagentId`. */
-const buildRequest = (requestId: string, subagentId: string): SessionRequest => ({
-  requestId,
-  itemId: `item-${requestId}`,
-  kind: "command_approval",
-  decisions: ["allow", "deny"],
-  detail: { command: "curl -s https://docs.mollie.com" },
-  subagentId,
-});
-
 /**
  * The main agent is idle; its iDEAL check still runs in the background, and
  * two subagents wait on the user: one below the iDEAL check, and one the
  * turn started itself.
  */
-const SESSION: Session = {
-  id: SESSION_ID,
+const SESSION = buildSession({
   title: "Audit checkout before the EU launch",
-  status: "idle",
-  resumable: false,
-  resumeHeld: false,
-  permissionProfileId: PROFILE.id,
-  agentId: null,
-  conversationId: null,
-  runId: null,
-  stepId: null,
-  instanceId: INSTANCE.id,
-  runnerId: RUNNER.id,
-  workspaceId: null,
-  projectId: null,
-  requestedAccessMode: "approval-required",
-  accessMode: "approval-required",
-  nativeSessionId: null,
-  modelSelection: { model: "claude-sonnet-5", options: {} },
-  parentSessionId: null,
-  openRequests: [buildRequest("r-mollie", "mollie"), buildRequest("r-asker", "asker")],
-  createdAt: "2026-09-08T09:59:00.000Z",
-  startedAt: "2026-09-08T09:59:01.000Z",
-  exitedAt: null,
+  openRequests: [
+    buildRequest("r-mollie", "mollie", "curl -s https://docs.mollie.com"),
+    buildRequest("r-asker", "asker", "curl -s https://docs.mollie.com"),
+  ],
   lastActivityAt: "2026-09-08T10:05:00.000Z",
-  unenforced: [],
-};
-
-/** Builds a subagent of `SESSION` with `over` applied. */
-const buildSubagent = (over: Partial<Subagent> & Pick<Subagent, "id" | "status">): Subagent => ({
-  sessionId: SESSION_ID,
-  toolCalls: 0,
-  startedAt: "2026-09-08T10:00:00.000Z",
-  ...over,
 });
 
+/**
+ * The subagents of `SESSION`. They are listed out of start order, and the
+ * SEPA check started in the same second as the 3-D Secure check, though its
+ * item came later: the lines are ordered by start, then by id.
+ */
 const SUBAGENTS: readonly Subagent[] = [
+  buildSubagent({
+    id: "asker",
+    itemId: "i-asker",
+    description: "Run the webhook tests",
+    startedAt: "2026-09-08T10:00:05.000Z",
+  }),
   buildSubagent({
     id: "three-d-secure",
     itemId: "i-3ds",
@@ -142,14 +113,13 @@ const SUBAGENTS: readonly Subagent[] = [
     itemId: "i-sepa",
     description: "Check SEPA Direct Debit mandates",
     status: "failed",
-    startedAt: "2026-09-08T10:00:02.000Z",
-    endedAt: "2026-09-08T10:01:14.000Z",
+    startedAt: "2026-09-08T10:00:01.000Z",
+    endedAt: "2026-09-08T10:01:13.000Z",
   }),
   buildSubagent({
     id: "ideal",
     itemId: "i-ideal",
     description: "Check the iDEAL redirect",
-    status: "running",
     startedAt: "2026-09-08T10:00:03.000Z",
   }),
   buildSubagent({
@@ -157,7 +127,6 @@ const SUBAGENTS: readonly Subagent[] = [
     parentSubagentId: "ideal",
     itemId: "i-mollie",
     description: "Read Mollie's iDEAL docs",
-    status: "running",
     startedAt: "2026-09-08T10:03:00.000Z",
   }),
   buildSubagent({
@@ -176,13 +145,6 @@ const SUBAGENTS: readonly Subagent[] = [
     status: "stopped",
     startedAt: "2026-09-08T10:00:04.000Z",
     endedAt: "2026-09-08T10:02:58.000Z",
-  }),
-  buildSubagent({
-    id: "asker",
-    itemId: "i-asker",
-    description: "Run the webhook tests",
-    status: "running",
-    startedAt: "2026-09-08T10:00:05.000Z",
   }),
 ];
 
@@ -246,9 +208,8 @@ const buildTurn = (turnId: string, at: string, endAt: string, events: TurnEvent[
 /**
  * The thread's transcript:
  *
- * - The first turn starts five subagents, in an order that is not the order
- *   their records are listed in, and one subagent whose record has not been
- *   read yet.
+ * - The first turn starts five subagents, and one subagent whose record
+ *   has not been read yet.
  * - The second turn starts none.
  */
 const ROWS: TranscriptRow[] = [
@@ -277,24 +238,16 @@ const ROWS: TranscriptRow[] = [
   event: { ...event, eventId: `e${position}` },
 }));
 
-const ROUTES: Readonly<Record<string, Handler>> = {
-  "GET /api/v1/setup": { body: { complete: true } },
-  "GET /api/v1/settings": {
-    body: {
-      controller: {},
-      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE },
-    },
+const ROUTES = buildController(
+  { session: SESSION, subagents: SUBAGENTS },
+  {
+    "GET /api/v1/sessions": { body: { items: [SESSION] } },
+    [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: { body: { items: ROWS } },
+    "GET /api/v1/providers": { body: [INSTANCE] },
+    "GET /api/v1/runners": { body: { items: [RUNNER] } },
+    "GET /api/v1/profiles": { body: { items: [PROFILE] } },
   },
-  "GET /api/v1/sessions": { body: { items: [SESSION] } },
-  [`GET /api/v1/sessions/${SESSION_ID}`]: { body: SESSION },
-  [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: { body: { items: ROWS } },
-  [`GET /api/v1/sessions/${SESSION_ID}/subagents`]: { body: { items: SUBAGENTS } },
-  [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [] } },
-  "GET /api/v1/providers": { body: [INSTANCE] },
-  "GET /api/v1/runners": { body: { items: [RUNNER] } },
-  "GET /api/v1/profiles": { body: { items: [PROFILE] } },
-  "GET /api/v1/assistants": { body: { items: [] } },
-};
+);
 
 /** Runs pending microtasks inside `act`, so a render that waits on them has happened. */
 const settle = () =>
@@ -325,12 +278,12 @@ afterEach(() => {
 });
 
 describe("Thread: spawn lines", () => {
-  it("draws one line per subagent the turn started, in item order, and none for a record not read yet", async () => {
+  it("draws one line per subagent the turn started, ordered by start and then by id, and none for a record not read yet", async () => {
     await openThread();
 
     expect(getLines().map((line) => readPageText(line))).toEqual([
-      "↳Check the 3-D Secure flowdone · 2m 20s",
       "↳Check SEPA Direct Debit mandatesfailed · 1m 12s",
+      "↳Check the 3-D Secure flowdone · 2m 20s",
       "↳Check the iDEAL redirectworking · 16m 57s · 2 below · one waits on you",
       "↳Check the Apple Pay pathstopped · 2m 54s",
       "↳Run the webhook testswaiting on you · 16m 55s · one waits on you",
@@ -354,7 +307,7 @@ describe("Thread: spawn lines", () => {
     const marks = getLines().map((line) =>
       line.querySelector("[data-mark]")?.getAttribute("data-mark"),
     );
-    expect(marks).toEqual(["done", "failed", "working", "cancelled", "decision"]);
+    expect(marks).toEqual(["failed", "done", "working", "cancelled", "decision"]);
     expect(within(getLine("iDEAL")).getByText("working").className).toContain("text-live");
     expect(within(getLine("SEPA")).getByText("failed").className).toContain("text-fail");
     expect(within(getLine("webhook")).getByText("waiting on you").className).toContain("text-attn");
