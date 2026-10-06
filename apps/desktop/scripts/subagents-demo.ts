@@ -53,6 +53,8 @@ const PROMPT = "Get the release ready: flaky tests, dependency bumps and the dat
  *       done 20 s after the user allows it.
  *   - At ~4 s, "Plan the database migration" asks three questions. Once they
  *     are answered, it keeps working for an hour.
+ * - At once, the session's own agent reports the whole session's Token Usage,
+ *   which the side pane's footer totals.
  * - ~2 min: the session's own agent watches CI and then ends its turn, so the thread
  *   is idle while the subagents' Requests stay open.
  *
@@ -205,6 +207,9 @@ const SUBAGENTS_SCENARIO: ReadonlyArray<ScriptStep> = [
     kind: "message",
     text: "Three subagents are working on it. I'll watch CI while they do.",
   },
+  // The whole session's Token Usage, its subagents' included, which the side
+  // pane's footer totals.
+  { kind: "usage", usage: { inputTokens: 96_300, outputTokens: 12_100 } },
   { kind: "command", command: "gh pr checks --watch", forMs: 2 * MINUTE_MS },
   {
     kind: "message",
