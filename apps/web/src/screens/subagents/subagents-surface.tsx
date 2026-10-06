@@ -119,7 +119,9 @@ export function SubagentsSurface({
 /**
  * Renders one subagent's row, which opens its page, and under it, on a rail,
  * the rows of the subagents it started. A running row shows Stop while the
- * pointer is over it or focus is inside it, in place of its state.
+ * pointer is over it or keyboard focus is inside it, in place of its state.
+ * Focus left by a click does not count, so the row a click opened shows its
+ * state again once the pointer leaves.
  */
 function SubagentRow({
   node,
@@ -174,7 +176,7 @@ function SubagentRow({
             <span
               className={cn(
                 "ml-auto shrink-0 text-meta whitespace-nowrap",
-                stop !== null && "group-focus-within:opacity-0 group-hover:opacity-0",
+                stop !== null && "group-hover:opacity-0 group-has-focus-visible:opacity-0",
               )}
             >
               <span className={SUBAGENT_HUE_CLASSES[state.hue]}>{state.word}</span>
@@ -194,7 +196,7 @@ function SubagentRow({
         {stop === null ? null : (
           // The pill is taller than the first line, so it is centred on that
           // line and overhangs the row's padding rather than growing the row.
-          <span className="absolute top-0.5 right-2 z-10 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+          <span className="absolute top-0.5 right-2 z-10 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100">
             <StopButton
               label={stop.label}
               title={stop.title}
