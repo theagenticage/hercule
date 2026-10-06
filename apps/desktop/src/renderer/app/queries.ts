@@ -360,23 +360,45 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * Reads a thread's whole transcript, oldest first, page by page until the
- * last one, because the thread screen draws every row.
+ * Reads one agent's whole transcript, oldest first, page by page until the
+ * last one, because the thread screen draws every row. Without `subagentId`
+ * it reads the session's own agent; with it, that subagent's transcript.
  *
  * After this read, only the live connection changes the cached transcript:
- * `useThreadLive` merges each row `session:<id>:stream` delivers, and reads
- * the transcript again when the stream reports a reset. The `session` topic
- * never invalidates it, and it is never read again in the background: a read
- * that raced a merge could replace the cache with rows older than the ones
- * the merge had just added.
+ * the live hook merges each row the agent's `:stream` topic delivers, and
+ * reads the transcript again when the stream reports a reset. The `session`
+ * topic never invalidates it, and it is never read again in the background: a
+ * read that raced a merge could replace the cache with rows older than the
+ * ones the merge had just added.
  */
-export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
+export const transcriptQuery = (client: HerculeClient, sessionId: string, subagentId?: string) =>
   queryOptions({
-    queryKey: queryKeys.transcript(sessionId),
+    queryKey: queryKeys.transcript(sessionId, subagentId),
     queryFn: () =>
-      readEveryPage((page) => client.transcript.read({ params: { id: sessionId }, query: page })),
+      readEveryPage((page) =>
+        client.transcript.read({
+          params: { id: sessionId },
+          query: subagentId === undefined ? page : { ...page, subagentId },
+        }),
+      ),
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every subagent of one session, oldest first. Every page is read,
+ * because the Subagents surface draws the whole tree and a list cut short
+ * would hide subagents without telling the user. While a thread is open, the
+ * `subagent` live topic reads it again whenever one of its subagents changes.
+ */
+export const subagentsQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.subagents(sessionId),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.session.querySubagents({ params: { id: sessionId }, query: page }),
+      ),
+    retry: isWorthRetrying,
   });
 
 /**
