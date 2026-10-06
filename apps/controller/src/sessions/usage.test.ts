@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addUsageSnapshot, clearProcessShare } from "./usage";
+import { Schema } from "effect";
+import { addUsageSnapshot, addUsageReport, buildUsageFields, clearProcessShare } from "./usage";
 
 describe("addUsageSnapshot", () => {
   it("starts the total at the first snapshot", () => {
@@ -86,4 +87,52 @@ describe("clearProcessShare", () => {
       usageProcess: undefined,
     });
   });
+});
+
+describe("incomplete lifetime token accounting", () => {
+  it("preserves known totals and the missing interval over later exact reports and a resume", () => {
+    const earlier = addUsageSnapshot(
+      { usage: undefined, usageProcess: undefined },
+      { inputTokens: 100, outputTokens: 10 },
+    );
+    const partial = addUsageReport(clearProcessShare(earlier), {
+      status: "incomplete",
+      counts: { inputTokens: 0, outputTokens: 0 },
+    });
+    expect(partial.usage).toEqual({ inputTokens: 100, outputTokens: 10, incomplete: true });
+    const recovered = addUsageReport(partial, {
+      status: "complete",
+      counts: { inputTokens: 20, outputTokens: 2 },
+    });
+    expect(recovered.usage).toEqual({ inputTokens: 120, outputTokens: 12, incomplete: true });
+    const resumed = addUsageReport(clearProcessShare(recovered), {
+      status: "complete",
+      counts: { inputTokens: 5, outputTokens: 1 },
+    });
+    expect(buildUsageFields(resumed.usage)).toEqual({
+      usageReport: {
+        status: "incomplete",
+        counts: { inputTokens: 125, outputTokens: 13 },
+      },
+    });
+    expect(resumed.usageProcess).toEqual({ inputTokens: 5, outputTokens: 1 });
+  });
+
+  it("projects unchanged historical counts as exact and an absent count as absent", () => {
+    expect(buildUsageFields({ inputTokens: 12, outputTokens: 3 })).toEqual({
+      usage: { inputTokens: 12, outputTokens: 3 },
+      usageReport: { status: "complete", counts: { inputTokens: 12, outputTokens: 3 } },
+    });
+    expect(buildUsageFields(undefined)).toEqual({});
+  });
+});
+
+it("keeps incomplete counts unavailable to a legacy HTTP decoder", () => {
+  const legacyRecord = Schema.Struct({
+    usage: Schema.optionalKey(
+      Schema.Struct({ inputTokens: Schema.Number, outputTokens: Schema.Number }),
+    ),
+  });
+  const record = buildUsageFields({ inputTokens: 100, outputTokens: 10, incomplete: true });
+  expect(Schema.decodeUnknownSync(legacyRecord)(record)).toEqual({});
 });

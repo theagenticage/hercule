@@ -144,6 +144,8 @@ interface Held {
   readonly systemPromptFile: string | undefined;
   /** Whether `stopSession` is stopping this session. The stop then reports the exit. */
   stopping: boolean;
+  /** Counts Stops so an input waiting on an RPC reply cannot continue after its Stop. */
+  inputGeneration: number;
   /** The approval this session is parked on, if any. There is at most one at a time. */
   park: Park | undefined;
 }
@@ -757,13 +759,19 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * the input then fails too: prompting anyway would run the turn on the model
    * the user meant to replace.
    */
-  const selectModel = (held: Held, selection: ModelSelection): Effect.Effect<void, string> =>
+  const selectModel = (
+    held: Held,
+    selection: ModelSelection,
+    generation: number,
+  ): Effect.Effect<void, string> =>
     Effect.gen(function* () {
       yield* held.rpc.send({ type: "set_model", provider: ZAI, modelId: selection.model });
       // Record the model now, not after the level: pi has already switched
       // model, and if pi then rejected the level, turns would report the old
       // model.
       held.state.model = selection.model;
+      if (held.inputGeneration !== generation || held.stopping)
+        return yield* Effect.fail("the input was stopped before delivery");
       yield* held.rpc.send({
         type: "set_thinking_level",
         level: getSessionThinkingLevel(selection),
@@ -852,6 +860,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           state,
           systemPromptFile: instructions,
           stopping: false,
+          inputGeneration: 0,
           park: undefined,
         };
         sessions.set(sessionId, held);
@@ -873,7 +882,11 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
-        if (input.modelSelection !== undefined) yield* selectModel(held, input.modelSelection);
+        const generation = held.inputGeneration;
+        if (input.modelSelection !== undefined)
+          yield* selectModel(held, input.modelSelection, generation);
+        if (held.inputGeneration !== generation || held.stopping)
+          return yield* Effect.fail("the input was stopped before delivery");
         // A turn is in flight exactly while the state holds its id. An input
         // during a turn steers it, instead of opening a second turn and
         // leaving the first one with nothing to end it.
@@ -891,6 +904,11 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
               if (!steered) held.state.turnId = undefined;
             }),
         );
+        // A successful prompt reply acknowledges delivery even when Stop
+        // raced it. Abort again if that reply accepted work after the first
+        // abort; never let the delayed acceptance restart the stopped turn.
+        if (held.inputGeneration !== generation && held.state.turnId === turnId && !held.stopping)
+          yield* abortTurn(held, "interrupt");
         for (const event of buildUserMessage({
           sessionId,
           turnId,
@@ -912,6 +930,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         if (subagentId !== undefined) return Effect.void;
         const held = sessions.get(sessionId);
         if (held === undefined) return Effect.void;
+        held.inputGeneration += 1;
         // Cancel the open approval first. Nobody denied the call; its turn was
         // stopped. An approval hook still waiting for an answer would keep the
         // turn open through the abort meant to end it.

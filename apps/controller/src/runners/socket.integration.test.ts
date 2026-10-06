@@ -529,20 +529,18 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 2 is the last build without subagents. Such a runner would drop
-  // `subagentId` from an interrupt and stop the whole session, so it is
-  // refused rather than allowed in with a warning.
-  it("refuses a runner on protocol version 2, which knows no subagents, and says to upgrade it", async () => {
+  // Version 3 cannot distinguish incomplete usage from exact counts.
+  it("refuses a runner on protocol version 3 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dial(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 2 }));
+      wire.send(buildHello({ protocolVersion: 3 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(3);
+      expect(PROTOCOL_VERSION).toBe(4);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 3 and the runner does not; " +
-          "upgrade the runner to a build that uses version 3",
+        "this controller uses runner protocol version 4 and the runner does not; " +
+          "upgrade the runner to a build that uses version 4",
       );
       expect(wire.frames).toEqual([]);
     });

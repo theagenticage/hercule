@@ -10,6 +10,8 @@ export type { Model } from "./generated/v2/Model";
 export type { ModelListResponse } from "./generated/v2/ModelListResponse";
 export type { ThreadStartParams } from "./generated/v2/ThreadStartParams";
 export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse";
+export type { ThreadReadParams } from "./generated/v2/ThreadReadParams";
+export type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse";
 export type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams";
 export type { ThreadForkParams } from "./generated/v2/ThreadForkParams";
 export type { AskForApproval } from "./generated/v2/AskForApproval";

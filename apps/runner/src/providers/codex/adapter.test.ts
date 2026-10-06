@@ -8,7 +8,7 @@ import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber, Logger } from "effect";
+import { Duration, Effect, Fiber, Logger, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hercule/home/version";
 import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
@@ -16,7 +16,17 @@ import type { ProviderRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
+import {
+  METADATA_DEADLINE,
+  MAX_PENDING_FRAMES,
+  MAX_PENDING_BYTES,
+  MAX_PENDING_THREADS,
+} from "./threads";
 import { NO_USER_MATERIAL_PATHS } from "../testing";
+import {
+  computeSubagentAfter,
+  createBareSubagent,
+} from "../../../../controller/src/sessions/subagents";
 import {
   API_KEY,
   type Answers,
@@ -535,7 +545,7 @@ describe("what an input does to a Codex session", () => {
 });
 
 describe("an interrupt that names a subagent", () => {
-  it("does nothing, because the adapter reports no subagents yet", async () => {
+  it("ignores an unknown subagent without stopping the root", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
@@ -735,15 +745,16 @@ describe("each session's own app-server", () => {
     ]);
   });
 
-  it("ignores a notification about a thread no session on it holds", async () => {
-    const run = await startTestSession();
-    const reported = run.seen.length;
-
+  it("keeps the Session alive when an introduced child thread closes", async () => {
+    const run = await startTestSession({
+      "thread/read": () => ({ thread: { id: OTHER_THREAD, parentThreadId: THREAD } }),
+    });
     run.server.push({ method: "thread/closed", params: { threadId: OTHER_THREAD } });
-
-    await settle();
-    // This runner never opened that thread, so it has nothing to report about it.
-    expect(run.seen).toHaveLength(reported);
+    await waitUntil(
+      "introduced the child",
+      () => filterByTag(run.seen, "subagent.started").length === 1,
+    );
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
     expect(await Effect.runPromise(run.adapter.listSessions)).toHaveLength(1);
   });
 });
@@ -1527,5 +1538,1541 @@ describe("a Codex turn whose schema the API rejected", () => {
       outcome: "schema-failure",
       reason: expect.stringMatching(/^Invalid schema for response_format/) as string,
     });
+  });
+});
+
+const CHILD = "0199e0e7-0000-7000-8000-0000000000b1";
+const GRANDCHILD = "0199e0e7-0000-7000-8000-0000000000b2";
+const SIBLING = "0199e0e7-0000-7000-8000-0000000000b3";
+
+const readSubagentMetadata = (params: unknown) => {
+  const { threadId } = params as { threadId: string };
+  return {
+    thread: {
+      id: threadId,
+      parentThreadId: threadId === GRANDCHILD ? CHILD : THREAD,
+      model: "child-model",
+      agentRole: "reviewer",
+      agentNickname: "Inspector",
+    },
+  };
+};
+
+const pushNativeTurn = (
+  server: Spawn,
+  threadId: string,
+  turnId: string,
+  status = "inProgress",
+): void => {
+  server.push({
+    method: status === "inProgress" ? "turn/started" : "turn/completed",
+    params: { threadId, turn: { id: turnId, status, items: [], itemsView: "full" } },
+  });
+};
+
+/** Holds metadata replies and exposes the actual RPC ids written by the adapter. */
+const createDelayedMetadataSession = async (spec: SessionSpec = SPEC, answers: Answers = {}) => {
+  const run = buildScriptedSeam({ "thread/read": SILENT, ...answers });
+  const metadataIds = new Map<string, string | number>();
+  const submittedIds = new Map<string, string | number>();
+  const interruptedIds = new Map<string, string | number>();
+  const adapter = makeCodexAdapter({
+    ...run.seam,
+    appServer: (command, env) => {
+      const child = run.seam.appServer(command, env);
+      return {
+        ...child,
+        write: (text: string) => {
+          for (const line of text.split("\n")) {
+            if (line.trim() === "") continue;
+            const frame = JSON.parse(line) as {
+              id: string | number;
+              method: string;
+              params: { threadId: string };
+            };
+            if (frame.method === "thread/read") metadataIds.set(frame.params.threadId, frame.id);
+            if (frame.method === "turn/start") submittedIds.set(frame.method, frame.id);
+            if (frame.method === "turn/interrupt")
+              interruptedIds.set(frame.params.threadId, frame.id);
+          }
+          child.write(text);
+        },
+      };
+    },
+  });
+  const seen: ProviderEvent[] = [];
+  Effect.runFork(
+    Stream.runForEach(adapter.events, (event) =>
+      Effect.sync(() => {
+        seen.push(event);
+      }),
+    ),
+  );
+  await settle();
+  await Effect.runPromise(
+    adapter.startSession(SESSION, spec, buildContext(createCodexHome(), CWD)),
+  );
+  const server = run.spawns[0]!;
+  const releaseMetadata = (threadId: string, parentThreadId = THREAD): void => {
+    server.push({
+      id: metadataIds.get(threadId),
+      result: {
+        thread: {
+          id: threadId,
+          parentThreadId,
+          model: "child-model",
+          agentRole: "reviewer",
+          agentNickname: "Inspector",
+        },
+      },
+    });
+  };
+  return {
+    ...run,
+    adapter,
+    server,
+    seen,
+    metadataIds,
+    submittedIds,
+    interruptedIds,
+    releaseMetadata,
+  };
+};
+
+describe("stopping a Codex session's subagents", () => {
+  it("stops a child and grandchild while leaving the sibling and root running", async () => {
+    const run = await startBusySession({ "thread/read": readSubagentMetadata });
+    for (const [id, turn] of [
+      [CHILD, "child-turn"],
+      [GRANDCHILD, "grandchild-turn"],
+      [SIBLING, "sibling-turn"],
+    ])
+      pushNativeTurn(run.server, id!, turn!);
+    await waitUntil(
+      "reported all four turns",
+      () => filterByTag(run.seen, "turn.started").length === 4,
+    );
+    await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual(
+      expect.arrayContaining([
+        { threadId: CHILD, turnId: "child-turn" },
+        { threadId: GRANDCHILD, turnId: "grandchild-turn" },
+      ]),
+    );
+    expect(listSentParams(run.requests, "turn/interrupt")).toHaveLength(2);
+    expect(
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "keep inspecting" })),
+    ).toEqual({ turnId: TURN, delivery: "steered" });
+    pushNativeTurn(run.server, CHILD, "child-turn", "interrupted");
+    pushNativeTurn(run.server, CHILD, "continued-turn");
+    await waitUntil("reported continued child work", () =>
+      filterByTag(run.seen, "turn.started").some((event) => event.turnId === "continued-turn"),
+    );
+    expect(listSentParams(run.requests, "turn/interrupt")).toHaveLength(2);
+  });
+
+  it("stops background work while the root is idle, catches late child turns and allows the next message", async () => {
+    const run = await startBusySession({ "thread/read": readSubagentMetadata });
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    pushNativeTurn(run.server, THREAD, TURN, "completed");
+    await waitUntil(
+      "ended the root and started the child",
+      () =>
+        filterByTag(run.seen, "turn.completed").length === 1 &&
+        filterByTag(run.seen, "turn.started").length === 2,
+    );
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
+      { threadId: CHILD, turnId: "child-turn" },
+    ]);
+    pushNativeTurn(run.server, SIBLING, "late-turn");
+    await waitUntil(
+      "interrupted the late child",
+      () => listSentParams(run.requests, "turn/interrupt").length === 2,
+    );
+    pushNativeTurn(run.server, CHILD, "child-turn", "interrupted");
+    pushNativeTurn(run.server, SIBLING, "late-turn", "interrupted");
+    await settle();
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "start again" }));
+    for (const [threadId, turnId, id] of [
+      [THREAD, TURN, "root-approval"],
+      [CHILD, "new-child-turn", "child-approval"],
+    ]) {
+      pushNativeTurn(run.server, threadId!, turnId!);
+      run.server.push({
+        id,
+        method: "item/commandExecution/requestApproval",
+        params: { threadId, turnId, itemId: `${id}-item`, command: "ls" },
+      });
+    }
+    await waitUntil(
+      "opened new root and child approvals",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+    expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+    expect(run.answered).toEqual([]);
+    expect(listSentParams(run.requests, "turn/interrupt")).toHaveLength(2);
+  });
+
+  it("interrupts a turn whose metadata reply arrives after Stop", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, CHILD, "late-turn");
+    await waitUntil("requested child metadata", () => run.metadataIds.has(CHILD));
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "interrupted the delayed child",
+      () => listSentParams(run.requests, "turn/interrupt").length === 1,
+    );
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
+      { threadId: CHILD, turnId: "late-turn" },
+    ]);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("keeps newly arriving Requests cancelled until the next input is accepted", async () => {
+    const run = await startTestSession({ "thread/read": readSubagentMetadata });
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    run.server.push({
+      id: "late-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "late-turn", itemId: "late-item", command: "ls" },
+    });
+    await waitUntil("cancelled the late approval", () =>
+      run.answered.some((reply) => reply.id === "late-approval"),
+    );
+    expect(run.answered).toEqual([{ id: "late-approval", result: { decision: "cancel" } }]);
+    expect(filterByTag(run.seen, "request.resolved")[0]).toMatchObject({
+      subagentId: CHILD,
+      decision: "cancel",
+    });
+  });
+});
+
+describe("bounded Codex subagent discovery", () => {
+  it("keeps turn and usage frames by dropping queued transcript deltas first", async () => {
+    const run = await createDelayedMetadataSession();
+    for (let index = 0; index < MAX_PENDING_FRAMES; index += 1)
+      run.server.push({
+        method: "item/agentMessage/delta",
+        params: { threadId: SIBLING, turnId: "chatty-turn", itemId: "item", delta: "text" },
+      });
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    pushChildCounterReport(run.server, buildChildCounterReport(900, 100));
+    await waitUntil("requested both child metadata", () => run.metadataIds.size === 2);
+    run.releaseMetadata(SIBLING);
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "reported retained child usage",
+      () => filterByTag(run.seen, "session.usage.updated").length === 2,
+    );
+    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES - 2);
+    const reports = filterByTag(run.seen, "session.usage.updated");
+    expect(reports.at(-1)?.usage).toEqual({
+      inputTokens: 900,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(reports.at(-1)?.raw).toBeUndefined();
+    expect(reports.at(-1)?.providerRefs).toBeUndefined();
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 2 frames");
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("exits visibly if retaining lifecycle would exceed the queue bounds", async () => {
+    const run = await createDelayedMetadataSession();
+    for (let index = 0; index < MAX_PENDING_FRAMES / 2; index += 1) {
+      pushNativeTurn(run.server, CHILD, `turn-${index}`);
+      pushNativeTurn(run.server, CHILD, `turn-${index}`, "completed");
+    }
+    pushNativeTurn(run.server, SIBLING, "overflow-turn");
+    await waitUntil(
+      "reported lifecycle overflow exit",
+      () => filterByTag(run.seen, "session.exited").length === 1,
+    );
+    expect(filterByTag(run.seen, "session.exited")[0]?.reason).toBe("crash");
+    expect(
+      filterByTag(run.seen, "runtime.warning").some((event) =>
+        event.message.includes("losing its lifecycle"),
+      ),
+    ).toBe(true);
+    expect(filterByTag(run.seen, "session.usage.updated").at(-1)?.usageReport?.status).toBe(
+      "incomplete",
+    );
+    expect(run.server.kills()).toBe(1);
+    expect(run.seen.at(-1)?._tag).toBe("session.exited");
+  });
+
+  it("aggregates capacity warnings and reports the dropped count when capacity returns", async () => {
+    const run = await createDelayedMetadataSession();
+    for (let index = 0; index < MAX_PENDING_THREADS; index += 1)
+      pushNativeTurn(run.server, `pending-${index}`, `turn-${index}`);
+    await waitUntil("filled metadata capacity", () => run.metadataIds.size === MAX_PENDING_THREADS);
+    for (let index = 0; index < 101; index += 1)
+      run.server.push({
+        method: "item/agentMessage/delta",
+        params: { threadId: "overflow", turnId: "overflow-turn", itemId: "item", delta: "text" },
+      });
+    await waitUntil(
+      "reported metadata capacity overflow",
+      () => filterByTag(run.seen, "runtime.warning").length !== 0,
+    );
+    await settle();
+    expect(filterByTag(run.seen, "runtime.warning")).toHaveLength(1);
+    run.releaseMetadata("pending-0");
+    await waitUntil(
+      "reported aggregate drop count",
+      () => filterByTag(run.seen, "runtime.warning").length === 2,
+    );
+    expect(filterByTag(run.seen, "runtime.warning")[1]?.message).toContain(
+      "Dropped 101 Codex subagent frames",
+    );
+    expect(filterByTag(run.seen, "session.usage.updated")[0]?.usageReport?.status).toBe(
+      "incomplete",
+    );
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("retains an authoritative parent when the parent's metadata cannot be read", async () => {
+    const run = await createDelayedMetadataSession();
+    for (let index = 0; index < MAX_PENDING_THREADS - 1; index += 1)
+      pushNativeTurn(run.server, `pending-${index}`, `turn-${index}`);
+    pushNativeTurn(run.server, GRANDCHILD, "grandchild-turn");
+    await waitUntil("filled metadata capacity", () => run.metadataIds.size === MAX_PENDING_THREADS);
+    run.releaseMetadata(GRANDCHILD, CHILD);
+    await waitUntil(
+      "introduced known ancestry without a parent lookup",
+      () => filterByTag(run.seen, "subagent.started").length === 2,
+    );
+    expect(filterByTag(run.seen, "subagent.started").map((event) => event.subagentId)).toEqual([
+      CHILD,
+      GRANDCHILD,
+    ]);
+    expect(filterByTag(run.seen, "subagent.started")[1]?.parentSubagentId).toBe(CHILD);
+    expect(run.metadataIds.has(CHILD)).toBe(false);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("introduces an unknown parent before releasing its grandchild's queued events", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, GRANDCHILD, "grandchild-turn");
+    await waitUntil("requested grandchild metadata", () => run.metadataIds.has(GRANDCHILD));
+    run.releaseMetadata(GRANDCHILD, CHILD);
+    await waitUntil("requested parent metadata", () => run.metadataIds.has(CHILD));
+    expect(filterByTag(run.seen, "subagent.started")).toEqual([]);
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "reported grandchild turn",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+    expect(filterByTag(run.seen, "subagent.started").map((event) => event.subagentId)).toEqual([
+      CHILD,
+      GRANDCHILD,
+    ]);
+    expect(filterByTag(run.seen, "subagent.started")[1]?.parentSubagentId).toBe(CHILD);
+    expect(filterByTag(run.seen, "turn.started")[0]?.subagentId).toBe(GRANDCHILD);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("rejects overflowing Requests explicitly and reports the dropped count", async () => {
+    const run = await createDelayedMetadataSession();
+    for (let index = 0; index < MAX_PENDING_FRAMES; index += 1)
+      run.server.push({
+        method: "item/agentMessage/delta",
+        params: { threadId: CHILD, turnId: "child-turn", itemId: "item", delta: "text" },
+      });
+    run.server.push({
+      id: "overflow",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "child-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil("rejected the overflowing Request", () =>
+      run.answered.some((reply) => reply.id === "overflow"),
+    );
+    expect(run.answered[0]?.error?.code).toBe(-32603);
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "reported dropped frame count",
+      () => filterByTag(run.seen, "runtime.warning").length === 1,
+    );
+    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES);
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 1 frames");
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("bounds bytes as well as frame count while metadata is pending", async () => {
+    const run = await createDelayedMetadataSession();
+    run.server.push({
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: CHILD,
+        turnId: "child-turn",
+        itemId: "item",
+        delta: "x".repeat(MAX_PENDING_BYTES),
+      },
+    });
+    await waitUntil("requested child metadata", () => run.metadataIds.has(CHILD));
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "reported dropped oversized frame",
+      () => filterByTag(run.seen, "runtime.warning").length === 1,
+    );
+    expect(filterByTag(run.seen, "content.delta")).toEqual([]);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("drops pending metadata results after the hosting process exits", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    run.server.push({
+      id: "child-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "child-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil("requested child metadata", () => run.metadataIds.has(CHILD));
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+    run.releaseMetadata(CHILD);
+    await settle();
+    expect(filterByTag(run.seen, "session.exited")).toHaveLength(1);
+    expect(filterByTag(run.seen, "subagent.started")).toEqual([]);
+    expect(filterByTag(run.seen, "turn.started")).toEqual([]);
+    expect(filterByTag(run.seen, "request.opened")).toEqual([]);
+  });
+
+  it("keeps a resumed subagent's original spawn item link and learns its unknown parent", async () => {
+    const run = createDriving({ "thread/read": readSubagentMetadata });
+    await Effect.runPromise(
+      run.adapter.startSession(
+        SESSION,
+        {
+          ...SPEC,
+          continue: {
+            nativeSessionId: PRIOR,
+            mode: "resume",
+            subagents: [{ subagentId: GRANDCHILD, itemId: "original-spawn" }],
+          },
+        },
+        run.ctx,
+      ),
+    );
+    pushNativeTurn(run.spawns[0]!, GRANDCHILD, "resumed-child-turn");
+    await waitUntil(
+      "introduced resumed child",
+      () => filterByTag(run.seen, "subagent.started").length === 2,
+    );
+    expect(filterByTag(run.seen, "subagent.started")[1]).toMatchObject({
+      subagentId: GRANDCHILD,
+      parentSubagentId: CHILD,
+      itemId: "original-spawn",
+    });
+  });
+
+  it("uses thread/read nickname before the V2 path and accepts native thread/started discovery", async () => {
+    const run = await startTestSession({ "thread/read": readSubagentMetadata });
+    run.server.push({
+      method: "item/started",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        item: {
+          type: "subAgentActivity",
+          id: "spawn-item",
+          kind: "started",
+          agentThreadId: CHILD,
+          agentPath: "parent/path-name",
+        },
+      },
+    });
+    run.server.push({ method: "thread/started", params: { thread: { id: CHILD } } });
+    await waitUntil(
+      "introduced the V2 child",
+      () => filterByTag(run.seen, "subagent.started").length === 1,
+    );
+    expect(filterByTag(run.seen, "subagent.started")[0]).toMatchObject({
+      subagentId: CHILD,
+      itemId: "spawn-item",
+      description: "Inspector",
+    });
+    expect(listSentParams(run.requests, "thread/read")).toHaveLength(1);
+  });
+
+  it.each(["metadata-first", "spawn-first"])(
+    "stores the exact V1 brief with %s ordering",
+    async (order) => {
+      const run = await createDelayedMetadataSession();
+      const prompt = "Review database correctness.\nReport any defects.";
+      const spawn = {
+        type: "collabAgentToolCall",
+        id: "spawn-brief",
+        tool: "spawnAgent",
+        status: "completed",
+        senderThreadId: THREAD,
+        receiverThreadIds: [CHILD],
+        prompt,
+        model: null,
+        reasoningEffort: null,
+        agentsStates: {},
+      };
+      const completedSpawn = () =>
+        run.server.push({
+          method: "item/completed",
+          params: { threadId: THREAD, turnId: TURN, item: spawn },
+        });
+      if (order === "spawn-first") completedSpawn();
+      pushNativeTurn(run.server, CHILD, "child-turn");
+      await waitUntil(
+        "requested child metadata",
+        () => listSentParams(run.requests, "thread/read").length === 1,
+      );
+      run.server.push({
+        id: run.metadataIds.get(CHILD),
+        result: {
+          thread: {
+            id: CHILD,
+            parentThreadId: THREAD,
+            agentNickname: "Zeno",
+            source: {
+              subAgent: {
+                thread_spawn: {
+                  parent_thread_id: THREAD,
+                  depth: 1,
+                  agent_path: null,
+                  agent_nickname: "Zeno",
+                  agent_role: null,
+                },
+              },
+            },
+          },
+        },
+      });
+      await waitUntil(
+        "introduced V1 child",
+        () => filterByTag(run.seen, "subagent.started").length === 1,
+      );
+      if (order === "metadata-first") completedSpawn();
+      run.server.push({
+        method: "item/started",
+        params: {
+          threadId: CHILD,
+          turnId: "child-turn",
+          item: {
+            type: "userMessage",
+            id: "native-brief",
+            clientId: null,
+            content: [{ type: "text", text: prompt, text_elements: [] }],
+          },
+        },
+      });
+      await waitUntil("reported native V1 brief", () =>
+        filterByTag(run.seen, "item.started").some(
+          (event) => event.subagentId === CHILD && event.kind === "user_message",
+        ),
+      );
+      const record = run.seen.reduce(
+        (record, event) => computeSubagentAfter(record, event, { inFirstTurn: true }),
+        createBareSubagent(SESSION, CHILD, new Date().toISOString()),
+      );
+      expect(record.description).toBe("Review database correctness.");
+      expect(filterByTag(run.seen, "subagent.started")).toHaveLength(1);
+      await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+    },
+  );
+
+  it("keeps the V2 nickname when child metadata precedes the parent activity", async () => {
+    const run = await startTestSession({
+      "thread/read": () => ({
+        thread: {
+          id: CHILD,
+          parentThreadId: THREAD,
+          agentNickname: "Zeno",
+          source: {
+            subAgent: {
+              thread_spawn: {
+                parent_thread_id: THREAD,
+                depth: 1,
+                agent_path: "/root/database",
+                agent_nickname: "Zeno",
+                agent_role: null,
+              },
+            },
+          },
+        },
+      }),
+    });
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    await waitUntil(
+      "introduced child before V2 activity",
+      () => filterByTag(run.seen, "subagent.started").length === 1,
+    );
+    run.server.push({
+      method: "item/started",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        item: {
+          type: "subAgentActivity",
+          id: "spawn-activity",
+          kind: "started",
+          agentThreadId: CHILD,
+          agentPath: "/root/database",
+        },
+      },
+    });
+    await settle();
+    expect(filterByTag(run.seen, "subagent.started")).toHaveLength(1);
+    expect(filterByTag(run.seen, "subagent.started")[0]).toMatchObject({
+      subagentId: CHILD,
+      description: "Zeno",
+    });
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+});
+
+describe("Codex metadata lookup failures and Stop races", () => {
+  it("releases a resumed descendant through known ancestors when metadata capacity is full", async () => {
+    const descendant = "resumed-descendant";
+    const run = await createDelayedMetadataSession({
+      ...SPEC,
+      continue: {
+        nativeSessionId: PRIOR,
+        mode: "resume",
+        subagents: [
+          { subagentId: CHILD },
+          { subagentId: GRANDCHILD, parentSubagentId: CHILD },
+          { subagentId: descendant, parentSubagentId: GRANDCHILD },
+        ],
+      },
+    });
+    for (let index = 0; index < MAX_PENDING_THREADS - 1; index += 1)
+      pushNativeTurn(run.server, `pending-${index}`, `turn-${index}`);
+    pushNativeTurn(run.server, descendant, "descendant-turn");
+    await waitUntil("filled metadata capacity", () => run.metadataIds.size === MAX_PENDING_THREADS);
+    run.releaseMetadata(descendant, GRANDCHILD);
+    await waitUntil(
+      "released resumed descendant through its known ancestors",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+    expect(filterByTag(run.seen, "subagent.started").map((event) => event.subagentId)).toEqual([
+      CHILD,
+      GRANDCHILD,
+      descendant,
+    ]);
+    expect(run.metadataIds.size).toBe(MAX_PENDING_THREADS);
+    await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
+      { threadId: descendant, turnId: "descendant-turn" },
+    ]);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it.each([true, false])(
+    "retains resumed ancestry with parent turn %s and stops its subtree when metadata cannot be read",
+    async (hasParentTurn) => {
+      const run = createDriving({
+        "thread/read": () => buildRefusal("thread metadata unavailable"),
+      });
+      await Effect.runPromise(
+        run.adapter.startSession(
+          SESSION,
+          {
+            ...SPEC,
+            continue: {
+              nativeSessionId: PRIOR,
+              mode: "resume",
+              subagents: [
+                { subagentId: CHILD },
+                { subagentId: GRANDCHILD, parentSubagentId: CHILD },
+                { subagentId: SIBLING },
+              ],
+            },
+          },
+          run.ctx,
+        ),
+      );
+      if (hasParentTurn) pushNativeTurn(run.spawns[0]!, CHILD, "child-turn");
+      for (const [id, turn] of [
+        [GRANDCHILD, "grandchild-turn"],
+        [SIBLING, "sibling-turn"],
+      ] as const)
+        pushNativeTurn(run.spawns[0]!, id, turn);
+      run.spawns[0]!.push({
+        id: "resumed-descendant-approval",
+        method: "item/commandExecution/requestApproval",
+        params: {
+          threadId: GRANDCHILD,
+          turnId: "grandchild-turn",
+          itemId: "approval",
+          command: "ls",
+        },
+      });
+      await waitUntil(
+        "reported all resumed turns after metadata refusals",
+        () =>
+          filterByTag(run.seen, "turn.started").length === (hasParentTurn ? 3 : 2) &&
+          filterByTag(run.seen, "request.opened").length === 1,
+      );
+      await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+      expect(listSentParams(run.requests, "turn/interrupt")).toEqual(
+        expect.arrayContaining([
+          ...(hasParentTurn ? [{ threadId: CHILD, turnId: "child-turn" }] : []),
+          { threadId: GRANDCHILD, turnId: "grandchild-turn" },
+        ]),
+      );
+      expect(listSentParams(run.requests, "turn/interrupt")).toHaveLength(hasParentTurn ? 2 : 1);
+      expect(
+        filterByTag(run.seen, "subagent.started").find((event) => event.subagentId === GRANDCHILD),
+      ).toMatchObject({ parentSubagentId: CHILD });
+      expect(run.answered).toEqual([
+        { id: "resumed-descendant-approval", result: { decision: "cancel" } },
+      ]);
+      expect(filterByTag(run.seen, "request.resolved")).toMatchObject([
+        { subagentId: GRANDCHILD, decision: "cancel" },
+      ]);
+    },
+  );
+
+  it("introduces a child after a metadata refusal and keeps its approval answerable", async () => {
+    const run = await startTestSession({
+      "thread/read": () => buildRefusal("thread metadata unavailable"),
+    });
+    run.server.push({
+      id: "child-request",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "child-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil(
+      "opened child Request after lookup failure",
+      () => filterByTag(run.seen, "request.opened").length === 1,
+    );
+    const started = filterByTag(run.seen, "subagent.started")[0]!;
+    expect(started).toMatchObject({ subagentId: CHILD });
+    expect(started.parentSubagentId).toBeUndefined();
+    expect(filterByTag(run.seen, "runtime.warning")).toHaveLength(1);
+    const opened = filterByTag(run.seen, "request.opened")[0]!;
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, opened.request.requestId, "allow"),
+    );
+    expect(run.answered).toEqual([{ id: "child-request", result: { decision: "accept" } }]);
+  });
+
+  it("times out a silent metadata read and releases the held turn", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    await waitUntil(
+      "released the turn after metadata timeout",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+      7000,
+    );
+    expect(filterByTag(run.seen, "subagent.started")[0]?.subagentId).toBe(CHILD);
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain(
+      "Could not read metadata",
+    );
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  }, 8000);
+
+  it("bounds concurrent reads and admits new discoveries after earlier reads finish", async () => {
+    const run = await createDelayedMetadataSession();
+    for (let index = 0; index < MAX_PENDING_THREADS; index += 1)
+      pushNativeTurn(run.server, `child-${index}`, `turn-${index}`);
+    run.server.push({
+      id: "lookup-overflow",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "child-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil("rejected lookup overflow", () =>
+      run.answered.some((reply) => reply.id === "lookup-overflow"),
+    );
+    expect(run.metadataIds.size).toBe(MAX_PENDING_THREADS);
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("metadata lookup limit");
+    run.releaseMetadata("child-0");
+    await waitUntil(
+      "introduced first child",
+      () => filterByTag(run.seen, "subagent.started").length === 1,
+    );
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    await waitUntil("admitted another lookup", () => run.metadataIds.has(CHILD));
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "introduced another child",
+      () => filterByTag(run.seen, "subagent.started").length === 2,
+    );
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("stops an undiscovered grandchild even after its stopped parent completes", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    await waitUntil("requested child metadata", () => run.metadataIds.has(CHILD));
+    run.releaseMetadata(CHILD);
+    await waitUntil("started child", () => filterByTag(run.seen, "turn.started").length === 1);
+    pushNativeTurn(run.server, GRANDCHILD, "grandchild-turn");
+    await waitUntil("requested grandchild metadata", () => run.metadataIds.has(GRANDCHILD));
+    await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+    pushNativeTurn(run.server, CHILD, "child-turn", "interrupted");
+    await waitUntil("ended child", () => filterByTag(run.seen, "turn.completed").length === 1);
+    run.releaseMetadata(GRANDCHILD, CHILD);
+    await waitUntil(
+      "stopped delayed grandchild",
+      () => listSentParams(run.requests, "turn/interrupt").length === 2,
+    );
+    expect(listSentParams(run.requests, "turn/interrupt")[1]).toEqual({
+      threadId: GRANDCHILD,
+      turnId: "grandchild-turn",
+    });
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+});
+
+describe("subagent introductions under a full metadata queue", () => {
+  it("introduces every child listed by a parent item without exceeding the lookup cap", async () => {
+    const run = await createDelayedMetadataSession();
+    for (let index = 0; index < MAX_PENDING_THREADS; index += 1)
+      pushNativeTurn(run.server, `pending-${index}`, `turn-${index}`);
+    await waitUntil("filled metadata lookups", () => run.metadataIds.size === MAX_PENDING_THREADS);
+    run.server.push({
+      method: "item/started",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        item: {
+          type: "collabAgentToolCall",
+          id: "overflow-spawn",
+          tool: "spawnAgent",
+          status: "inProgress",
+          senderThreadId: THREAD,
+          receiverThreadIds: [CHILD],
+          prompt: "Review the changes",
+          model: null,
+          reasoningEffort: null,
+          agentsStates: {},
+        },
+      },
+    });
+    await waitUntil(
+      "introduced the listed child",
+      () => filterByTag(run.seen, "subagent.started").length === 1,
+    );
+    expect(filterByTag(run.seen, "subagent.started")[0]).toMatchObject({
+      subagentId: CHILD,
+      itemId: "overflow-spawn",
+      description: "Review the changes",
+    });
+    expect(filterByTag(run.seen, "item.started")[0]?.detail).toMatchObject({
+      subagentIds: [CHILD],
+    });
+    expect(run.metadataIds.size).toBe(MAX_PENDING_THREADS);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("continues replay after a malformed buffered item", async () => {
+    const run = await createDelayedMetadataSession();
+    run.server.push({ method: "item/started", params: { threadId: CHILD, turnId: "child-turn" } });
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    await waitUntil("requested metadata", () => run.metadataIds.has(CHILD));
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "replayed the valid turn",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+    expect(filterByTag(run.seen, "runtime.warning")).toHaveLength(1);
+    expect(filterByTag(run.seen, "turn.started")[0]?.subagentId).toBe(CHILD);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+});
+
+const buildChildCounterReport = (
+  inputTokens: number,
+  outputTokens: number,
+  lastInput = inputTokens,
+  lastOutput = outputTokens,
+) => {
+  const count = (input: number, output: number) => ({
+    inputTokens: input,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    outputTokens: output,
+    reasoningOutputTokens: 0,
+    totalTokens: input + output,
+  });
+  return {
+    source: "codex.app-server.notification",
+    payload: {
+      threadId: CHILD,
+      turnId: "child-turn",
+      tokenUsage: {
+        total: count(inputTokens, outputTokens),
+        last: count(lastInput, lastOutput),
+        modelContextWindow: 272000,
+      },
+    },
+  };
+};
+
+const buildResumedChildSpec = (
+  lastUsageReport?: ReturnType<typeof buildChildCounterReport>,
+): SessionSpec => ({
+  ...SPEC,
+  continue: {
+    nativeSessionId: THREAD,
+    mode: "resume",
+    subagents: [
+      {
+        subagentId: CHILD,
+        itemId: "original-spawn",
+        ...(lastUsageReport === undefined ? {} : { lastUsageReport }),
+      },
+    ],
+  },
+});
+
+const pushChildCounterReport = (
+  server: Spawn,
+  report: ReturnType<typeof buildChildCounterReport>,
+): void => {
+  server.push({ method: "thread/tokenUsage/updated", params: report.payload });
+};
+
+describe("restoring Codex subagent counters before continuation", () => {
+  it("preserves a usable baseline across a malformed current report and recovers growth", async () => {
+    const run = createDriving({ "thread/read": readSubagentMetadata });
+    await Effect.runPromise(
+      run.adapter.startSession(
+        SESSION,
+        buildResumedChildSpec(buildChildCounterReport(50000, 5000)),
+        run.ctx,
+      ),
+    );
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    pushNativeTurn(run.spawns[0]!, CHILD, "child-turn");
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(52000, 5200));
+    const invalid = buildChildCounterReport(53000, 5300);
+    pushChildCounterReport(run.spawns[0]!, {
+      ...invalid,
+      payload: {
+        ...invalid.payload,
+        tokenUsage: {
+          ...invalid.payload.tokenUsage,
+          total: { ...invalid.payload.tokenUsage.total, cachedInputTokens: -1 },
+        },
+      },
+    });
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(55000, 5500));
+    await waitUntil(
+      "reported recovered cumulative growth",
+      () =>
+        filterByTag(run.seen, "session.usage.updated").filter((event) => event.subagentId === CHILD)
+          .length === 2,
+    );
+    const reports = filterByTag(run.seen, "session.usage.updated").filter(
+      (event) => event.subagentId === CHILD,
+    );
+    expect(reports.map((event) => event.usage)).toEqual([
+      { inputTokens: 2000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 5000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+    expect(reports.every((event) => event.usageReport === undefined)).toBe(true);
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain(
+      "Keeping the last usable counters",
+    );
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("keeps rejected usage replay incomplete instead of treating it as an unused child", async () => {
+    const run = await createDelayedMetadataSession(buildResumedChildSpec(), {
+      "thread/resume": readSubagentMetadata,
+    });
+    const sending = Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    await waitUntil("awaited replay barrier", () => run.metadataIds.has(CHILD));
+    const invalid = buildChildCounterReport(300, 10);
+    pushChildCounterReport(run.server, {
+      ...invalid,
+      payload: {
+        ...invalid.payload,
+        tokenUsage: {
+          ...invalid.payload.tokenUsage,
+          total: { ...invalid.payload.tokenUsage.total, cachedInputTokens: -1 },
+        },
+      },
+    });
+    await waitUntil(
+      "reported rejected replay",
+      () => filterByTag(run.seen, "runtime.warning").length !== 0,
+    );
+    run.releaseMetadata(CHILD);
+    await sending;
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    pushChildCounterReport(run.server, buildChildCounterReport(300, 10, 0, 0));
+    await waitUntil("reported post-replay counters", () =>
+      filterByTag(run.seen, "session.usage.updated").some((event) => event.subagentId === CHILD),
+    );
+    await settle();
+    const childReports = filterByTag(run.seen, "session.usage.updated").filter(
+      (event) => event.subagentId === CHILD,
+    );
+    expect(
+      childReports.every(
+        (event) => event.usage === undefined && event.usageReport?.status === "incomplete",
+      ),
+    ).toBe(true);
+    expect(childReports.at(-1)?.usageReport?.counts).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(
+      filterByTag(run.seen, "runtime.warning").some((event) =>
+        event.message.includes("incomplete"),
+      ),
+    ).toBe(true);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("uses a saved report without loading child context and counts only post-resume usage", async () => {
+    const history = buildChildCounterReport(50000, 5000, 8000, 1000);
+    const run = createDriving({ "thread/read": readSubagentMetadata });
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, buildResumedChildSpec(history), run.ctx),
+    );
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    expect(listSentParams(run.requests, "thread/resume")).toHaveLength(1);
+    expect(listSentParams(run.requests, "thread/read")).toEqual([]);
+    pushNativeTurn(run.spawns[0]!, CHILD, "child-turn");
+    pushChildCounterReport(run.spawns[0]!, history);
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(62000, 6000, 12000, 1000));
+    await waitUntil(
+      "reported repeated and new child counters",
+      () => filterByTag(run.seen, "session.usage.updated").length === 4,
+    );
+    const childUsage = filterByTag(run.seen, "session.usage.updated").filter(
+      (event) => event.subagentId === CHILD,
+    );
+    expect(childUsage.map((event) => event.usage)).toEqual([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 12000, outputTokens: 1000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+    expect(filterByTag(run.seen, "session.usage.updated").at(-1)?.usage).toEqual(
+      childUsage[1]!.usage,
+    );
+  });
+
+  it("waits for the same-thread read barrier to consume usage replay before root input", async () => {
+    const run = await createDelayedMetadataSession(buildResumedChildSpec(), {
+      "thread/resume": readSubagentMetadata,
+    });
+    const sending = Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    await waitUntil("requested the child replay barrier", () => run.metadataIds.has(CHILD));
+    expect(listSentParams(run.requests, "turn/start")).toEqual([]);
+    expect(listSentParams(run.requests, "thread/resume")[1]).toEqual({
+      threadId: CHILD,
+      excludeTurns: false,
+    });
+    pushChildCounterReport(run.server, buildChildCounterReport(50000, 5000, 8000, 1000));
+    run.releaseMetadata(CHILD);
+    await sending;
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    pushChildCounterReport(run.server, buildChildCounterReport(50000, 5000, 8000, 1000));
+    await waitUntil(
+      "reported zero usage for cancellation",
+      () => filterByTag(run.seen, "session.usage.updated").length === 2,
+    );
+    expect(filterByTag(run.seen, "session.usage.updated")[0]?.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue again" }));
+    expect(listSentParams(run.requests, "thread/resume")).toHaveLength(2);
+    expect(listSentParams(run.requests, "thread/read")).toHaveLength(1);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("baselines an unused child at zero when the completed replay contains no usage report", async () => {
+    const run = createDriving({
+      "thread/resume": readSubagentMetadata,
+      "thread/read": readSubagentMetadata,
+    });
+    await Effect.runPromise(run.adapter.startSession(SESSION, buildResumedChildSpec(), run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    pushNativeTurn(run.spawns[0]!, CHILD, "child-turn");
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(200, 30));
+    await waitUntil(
+      "reported unused child's first call",
+      () => filterByTag(run.seen, "session.usage.updated").length === 2,
+    );
+    expect(filterByTag(run.seen, "session.usage.updated")[0]?.usage).toEqual({
+      inputTokens: 200,
+      outputTokens: 30,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(listSentParams(run.requests, "thread/read")).toEqual([
+      { threadId: CHILD, includeTurns: false },
+    ]);
+  });
+
+  it("continues with visibly incomplete usage when a missing child counter cannot be restored", async () => {
+    const run = createDriving({
+      "thread/read": readSubagentMetadata,
+      "thread/resume": (params) => {
+        const { threadId } = params as { threadId: string };
+        return threadId === CHILD
+          ? buildRefusal("could not resume child")
+          : { thread: { id: THREAD } };
+      },
+    });
+    await Effect.runPromise(run.adapter.startSession(SESSION, buildResumedChildSpec(), run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
+    await settle();
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("usage is incomplete");
+    expect(filterByTag(run.seen, "session.usage.updated")[0]).toMatchObject({
+      usageReport: { status: "incomplete" },
+    });
+    pushNativeTurn(run.spawns[0]!, CHILD, "child-turn");
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(50000, 5000));
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(52000, 5200));
+    await waitUntil(
+      "reported incomplete baseline and growth",
+      () =>
+        filterByTag(run.seen, "session.usage.updated").filter((event) => event.subagentId === CHILD)
+          .length === 3,
+    );
+    const reports = filterByTag(run.seen, "session.usage.updated")
+      .filter((event) => event.subagentId === CHILD)
+      .slice(1);
+    expect(reports.map((event) => event.usage)).toEqual([undefined, undefined]);
+    expect(reports.map((event) => event.usageReport?.counts)).toEqual([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 2000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+});
+
+describe("durable Codex Stop ownership", () => {
+  it("cancels a queued first approval without needing a turn-start notification", async () => {
+    const run = await createDelayedMetadataSession();
+    run.server.push({
+      id: "first-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "old-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil("requested approval owner's metadata", () => run.metadataIds.has(CHILD));
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "new work" }));
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "reported queued first approval",
+      () => filterByTag(run.seen, "request.opened").length === 1,
+    );
+    await settle();
+    expect(run.answered).toEqual([{ id: "first-approval", result: { decision: "cancel" } }]);
+    expect(listSentParams(run.requests, "turn/interrupt")).toContainEqual({
+      threadId: CHILD,
+      turnId: "old-turn",
+    });
+    expect(filterByTag(run.seen, "request.resolved")[0]?.requestId).toBe(
+      filterByTag(run.seen, "request.opened")[0]?.request.requestId,
+    );
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it.each([false, true])(
+    "applies a targeted Stop when an existing child's parent is learned after continuation: %s",
+    async (continued) => {
+      const run = await startTestSession({
+        "thread/read": (params) => {
+          const { threadId } = params as { threadId: string };
+          return { thread: { id: threadId, parentThreadId: threadId === CHILD ? THREAD : null } };
+        },
+      });
+      pushNativeTurn(run.server, CHILD, "parent-turn");
+      pushNativeTurn(run.server, SIBLING, "unlinked-turn");
+      run.server.push({
+        id: "late-link-approval",
+        method: "item/commandExecution/requestApproval",
+        params: { threadId: SIBLING, turnId: "unlinked-turn", itemId: "approval", command: "ls" },
+      });
+      await waitUntil(
+        "reported unlinked approval",
+        () => filterByTag(run.seen, "request.opened").length === 1,
+      );
+      await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+      expect(run.answered).toEqual([]);
+      if (continued) {
+        pushNativeTurn(run.server, CHILD, "parent-turn", "interrupted");
+        pushNativeTurn(run.server, CHILD, "continued-parent-turn");
+        await waitUntil(
+          "continued selected parent",
+          () => filterByTag(run.seen, "turn.started").length === 3,
+        );
+      }
+      run.server.push({
+        method: "item/started",
+        params: {
+          threadId: CHILD,
+          turnId: "parent-turn",
+          item: {
+            type: "subAgentActivity",
+            id: "late-spawn",
+            kind: "started",
+            agentThreadId: SIBLING,
+            agentPath: "parent/child",
+          },
+        },
+      });
+      await waitUntil(
+        "reported parent activity",
+        () => filterByTag(run.seen, "item.started").length === 1,
+      );
+      await settle();
+      expect(run.answered).toEqual([{ id: "late-link-approval", result: { decision: "cancel" } }]);
+      expect(listSentParams(run.requests, "turn/interrupt")).toContainEqual({
+        threadId: SIBLING,
+        turnId: "unlinked-turn",
+      });
+      await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+    },
+  );
+
+  it("allows a genuine selected continuation received before its metadata is ready", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, CHILD, "old-turn");
+    run.server.push({
+      id: "old-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "old-turn", itemId: "old", command: "ls" },
+    });
+    await waitUntil("requested selected metadata", () => run.metadataIds.has(CHILD));
+    await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+    pushNativeTurn(run.server, CHILD, "old-turn", "interrupted");
+    pushNativeTurn(run.server, CHILD, "new-turn");
+    run.server.push({
+      id: "new-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "new-turn", itemId: "new", command: "ls" },
+    });
+    await settle();
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "reported old and new approvals",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+    await settle();
+    expect(run.answered).toEqual([{ id: "old-approval", result: { decision: "cancel" } }]);
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
+      { threadId: CHILD, turnId: "old-turn" },
+    ]);
+    const current = filterByTag(run.seen, "request.opened")[1]!;
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, current.request.requestId, "allow"),
+    );
+    expect(run.answered.at(-1)).toEqual({ id: "new-approval", result: { decision: "accept" } });
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("bounds one shared preparation deadline and introduces even unstarted restores before reports", async () => {
+    const ids = [CHILD, GRANDCHILD, SIBLING, "0199e0e7-0000-7000-8000-0000000000b4"];
+    const run = createDriving({
+      "thread/resume": (params) =>
+        (params as { threadId: string }).threadId === THREAD ? { thread: { id: THREAD } } : SILENT,
+    });
+    const spec: SessionSpec = {
+      ...SPEC,
+      continue: {
+        nativeSessionId: THREAD,
+        mode: "resume",
+        subagents: ids.map((subagentId) => ({ subagentId })),
+      },
+    };
+    await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            run.adapter.sendInput(SESSION, { text: "continue" }),
+          );
+          yield* TestClock.adjust(Duration.zero);
+          expect(listSentParams(run.requests, "thread/resume")).toHaveLength(3);
+          expect(listSentParams(run.requests, "turn/start")).toEqual([]);
+          yield* TestClock.adjust(METADATA_DEADLINE);
+          yield* Fiber.join(sending);
+          yield* run.adapter.sendInput(SESSION, { text: "continue again" });
+          expect(listSentParams(run.requests, "thread/resume")).toHaveLength(3);
+        }),
+        TestClock.layer(),
+      ),
+    );
+    await settle();
+    for (const id of ids) {
+      const introduction = run.seen.findIndex(
+        (event) => event._tag === "subagent.started" && event.subagentId === id,
+      );
+      const report = run.seen.findIndex(
+        (event) => event._tag === "session.usage.updated" && event.subagentId === id,
+      );
+      expect(introduction).toBeGreaterThan(-1);
+      expect(report).toBeGreaterThan(introduction);
+    }
+    expect(filterByTag(run.seen, "runtime.warning")).toHaveLength(1);
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("4 Codex subagents");
+    expect(
+      filterByTag(run.seen, "session.usage.updated").every((event) => event.usage === undefined),
+    ).toBe(true);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("keeps queued old child work cancelled after a new root input is accepted", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, CHILD, "old-child-turn");
+    run.server.push({
+      id: "old-child-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "old-child-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil("requested old child metadata", () => run.metadataIds.has(CHILD));
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "new work" }));
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "released old child work",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+    await settle();
+    expect(listSentParams(run.requests, "turn/interrupt")).toContainEqual({
+      threadId: CHILD,
+      turnId: "old-child-turn",
+    });
+    expect(run.answered).toContainEqual({
+      id: "old-child-approval",
+      result: { decision: "cancel" },
+    });
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("keeps a selected agent's own queued old turn cancelled", async () => {
+    const run = await createDelayedMetadataSession();
+    pushNativeTurn(run.server, CHILD, "old-child-turn");
+    run.server.push({
+      id: "queued-own-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: CHILD, turnId: "old-child-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil("requested selected agent metadata", () => run.metadataIds.has(CHILD));
+    await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+    run.releaseMetadata(CHILD);
+    await waitUntil(
+      "released selected old turn",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+    await settle();
+    expect(listSentParams(run.requests, "turn/interrupt")).toContainEqual({
+      threadId: CHILD,
+      turnId: "old-child-turn",
+    });
+    expect(run.answered).toContainEqual({
+      id: "queued-own-approval",
+      result: { decision: "cancel" },
+    });
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+
+  it("keeps terminal closing irreversible while a submitted root input is accepted", async () => {
+    const run = await createDelayedMetadataSession(SPEC, {
+      "turn/start": SILENT,
+      "turn/interrupt": SILENT,
+      "thread/read": readSubagentMetadata,
+    });
+    pushNativeTurn(run.server, CHILD, "background-turn");
+    await waitUntil(
+      "introduced background child",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+    const sending = Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "before terminal Stop" }),
+    );
+    await waitUntil("submitted root input", () => run.submittedIds.has("turn/start"));
+    const stopping = Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+    await waitUntil("waited for child interrupt", () => run.interruptedIds.has(CHILD));
+    const backgroundInterrupt = run.interruptedIds.get(CHILD);
+    pushNativeTurn(run.server, THREAD, "late-root-turn");
+    run.server.push({
+      id: run.submittedIds.get("turn/start"),
+      result: {
+        turn: { id: "late-root-turn", status: "inProgress", items: [], itemsView: "full" },
+      },
+    });
+    await sending;
+    run.server.push({
+      id: "closing-approval",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: THREAD, turnId: "late-root-turn", itemId: "approval", command: "ls" },
+    });
+    await waitUntil("cancelled closing approval", () =>
+      run.answered.some((reply) => reply.id === "closing-approval"),
+    );
+    expect(listSentParams(run.requests, "turn/interrupt")).toContainEqual({
+      threadId: THREAD,
+      turnId: "late-root-turn",
+    });
+    expect(run.answered).toContainEqual({ id: "closing-approval", result: { decision: "cancel" } });
+    run.server.push({ id: backgroundInterrupt, result: {} });
+    await stopping;
+    await settle();
+    expect(filterByTag(run.seen, "session.exited")).toHaveLength(1);
+    expect(run.seen.at(-1)?._tag).toBe("session.exited");
+  });
+
+  it("does not let an already-submitted root input reopen stopped work", async () => {
+    const run = await createDelayedMetadataSession(SPEC, { "turn/start": SILENT });
+    const sending = Effect.runPromise(run.adapter.sendInput(SESSION, { text: "before Stop" }));
+    await waitUntil(
+      "submitted root input",
+      () => listSentParams(run.requests, "turn/start").length === 1,
+    );
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    pushNativeTurn(run.server, THREAD, "late-root-turn");
+    await settle();
+    expect(listSentParams(run.requests, "turn/interrupt")).toContainEqual({
+      threadId: THREAD,
+      turnId: "late-root-turn",
+    });
+    run.server.crash();
+    await sending.catch(() => undefined);
+  });
+
+  it("preempts restoration, refuses its waiting input and never retries preparation", async () => {
+    const run = await createDelayedMetadataSession(buildResumedChildSpec(), {
+      "thread/resume": readSubagentMetadata,
+    });
+    const sending = Effect.runPromise(run.adapter.sendInput(SESSION, { text: "before Stop" })).then(
+      () => "accepted",
+      (error: unknown) => String(error),
+    );
+    await waitUntil("awaited child replay barrier", () => run.metadataIds.has(CHILD));
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(await sending).toContain("stopped");
+    expect(listSentParams(run.requests, "turn/start")).toEqual([]);
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "new work" }));
+    expect(listSentParams(run.requests, "thread/resume")).toHaveLength(2);
+    expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+  });
+});
+
+describe("restoring only missing child reports", () => {
+  it("loads the invalid-report child while leaving a usable-report sibling unloaded", async () => {
+    const checkpoint = buildChildCounterReport(50000, 5000);
+    const run = createDriving({
+      "thread/resume": readSubagentMetadata,
+      "thread/read": readSubagentMetadata,
+    });
+    const spec: SessionSpec = {
+      ...SPEC,
+      continue: {
+        nativeSessionId: THREAD,
+        mode: "resume",
+        subagents: [
+          { subagentId: CHILD, lastUsageReport: checkpoint },
+          { subagentId: SIBLING, lastUsageReport: { ...checkpoint, source: "different-provider" } },
+        ],
+      },
+    };
+    await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    expect(
+      listSentParams(run.requests, "thread/resume").map(
+        (params) => (params as { threadId: string }).threadId,
+      ),
+    ).toEqual([THREAD, SIBLING]);
+    expect(listSentParams(run.requests, "thread/read")).toEqual([
+      { threadId: SIBLING, includeTurns: false },
+    ]);
+  });
+});
+
+describe("descendants first discovered after a subtree Stop", () => {
+  it.each([false, true])(
+    "stops a late descendant when its parent has completed: %s",
+    async (parentCompleted) => {
+      const run = await startTestSession({ "thread/read": readSubagentMetadata });
+      pushNativeTurn(run.server, CHILD, "parent-turn");
+      await waitUntil(
+        "started the parent",
+        () => filterByTag(run.seen, "turn.started").length === 1,
+      );
+      await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+      if (parentCompleted) {
+        pushNativeTurn(run.server, CHILD, "parent-turn", "interrupted");
+        await waitUntil(
+          "completed the stopped parent",
+          () => filterByTag(run.seen, "turn.completed").length === 1,
+        );
+      }
+      pushNativeTurn(run.server, GRANDCHILD, "late-descendant-turn");
+      run.server.push({
+        id: "late-descendant-approval",
+        method: "item/commandExecution/requestApproval",
+        params: {
+          threadId: GRANDCHILD,
+          turnId: "late-descendant-turn",
+          itemId: "approval",
+          command: "ls",
+        },
+      });
+      await waitUntil(
+        "opened the descendant approval",
+        () => filterByTag(run.seen, "request.opened").length === 1,
+      );
+      await settle();
+      expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
+        { threadId: CHILD, turnId: "parent-turn" },
+        { threadId: GRANDCHILD, turnId: "late-descendant-turn" },
+      ]);
+      expect(run.answered).toEqual([
+        { id: "late-descendant-approval", result: { decision: "cancel" } },
+      ]);
+      expect(filterByTag(run.seen, "request.resolved")[0]).toMatchObject({
+        subagentId: GRANDCHILD,
+        decision: "cancel",
+      });
+    },
+  );
+
+  it("allows new descendant work after the selected parent deliberately starts a new turn", async () => {
+    const run = await startTestSession({ "thread/read": readSubagentMetadata });
+    pushNativeTurn(run.server, CHILD, "parent-turn");
+    await waitUntil("started the parent", () => filterByTag(run.seen, "turn.started").length === 1);
+    await Effect.runPromise(run.adapter.interrupt(SESSION, CHILD));
+    pushNativeTurn(run.server, CHILD, "parent-turn", "interrupted");
+    pushNativeTurn(run.server, CHILD, "continued-parent-turn");
+    await waitUntil(
+      "continued the selected parent",
+      () => filterByTag(run.seen, "turn.started").length === 2,
+    );
+    pushNativeTurn(run.server, GRANDCHILD, "new-descendant-turn");
+    run.server.push({
+      id: "new-descendant-approval",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: GRANDCHILD,
+        turnId: "new-descendant-turn",
+        itemId: "approval",
+        command: "ls",
+      },
+    });
+    await waitUntil(
+      "opened new descendant approval",
+      () => filterByTag(run.seen, "request.opened").length === 1,
+    );
+    await settle();
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
+      { threadId: CHILD, turnId: "parent-turn" },
+    ]);
+    expect(run.answered).toEqual([]);
+    expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
 });

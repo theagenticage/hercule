@@ -1,6 +1,6 @@
 /**
  * Tests for the Codex normalizer, which takes one decoded app-server
- * notification and a per-session state, and returns normalized events.
+ * notification and a per-thread state, and returns normalized events.
  * Nothing here starts a process.
  *
  * The frames are trimmed from the generated types of codex 0.154.0 under
@@ -12,8 +12,15 @@
  * Event ids and the `at` timestamp are not checked here.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderEvent } from "@hercule/protocol";
-import { normalize, buildNormalizingState } from "./normalize";
+import { Schema } from "effect";
+import { ProviderEvent } from "@hercule/protocol";
+import {
+  normalize,
+  buildNormalizingState,
+  restoreUsageReport,
+  markUsageIncomplete,
+  requireUsageBaseline,
+} from "./normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const THREAD = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -674,5 +681,372 @@ describe("the detail a surface shows for an item without opening it", () => {
     ]);
 
     expect(filterByTag(opened, "item.started")[0]?.detail).toEqual({ command: "pnpm test" });
+  });
+});
+
+const CHILD = "0199e0e7-0000-7000-8000-0000000000fc";
+const OTHER_CHILD = "0199e0e7-0000-7000-8000-0000000000fb";
+
+/** Copies a notification onto another native thread without changing its turn or item ids. */
+const assignThread = (note: Note, threadId: string): Note => ({
+  ...note,
+  params: { ...(note.params as Record<string, unknown>), threadId },
+});
+
+describe("a subagent's native thread", () => {
+  it("attributes every event to its subagent and keeps the native thread id", () => {
+    const state = buildNormalizingState(SESSION, CHILD, undefined, {
+      subagentId: CHILD,
+      rootThreadId: THREAD,
+    });
+    const call = buildTokenBreakdown(100, 80, 20);
+    const events = normalizeNotes(
+      state,
+      [
+        TURN_STARTED,
+        ITEM_STARTED,
+        buildDeltaNote("item/agentMessage/delta", { delta: "Hello" }),
+        ITEM_COMPLETED,
+        buildUsageNote(call, call),
+        buildErrorNote("serverOverloaded", { willRetry: true }),
+        buildErrorNote("usageLimitExceeded"),
+        buildTurnCompleted("completed"),
+      ].map((note) => assignThread(note, CHILD)),
+    );
+
+    expect(events).toHaveLength(8);
+    for (const event of events) {
+      expect(event).toMatchObject({
+        sessionId: SESSION,
+        subagentId: CHILD,
+        providerRefs: { threadId: CHILD },
+      });
+      expect(Schema.is(ProviderEvent)(event), event._tag).toBe(true);
+    }
+  });
+
+  it("retains a child's native input and ignores the root's echo of already reported input", () => {
+    const input = buildItemCompleted({
+      type: "userMessage",
+      id: "brief",
+      clientId: null,
+      content: [
+        { type: "text", text: "Inspect the parser.", text_elements: [] },
+        { type: "localImage", path: "/tmp/context.png" },
+        { type: "text", text: "Report the result.", text_elements: [] },
+      ],
+    });
+    expect(normalize(buildTestState(), input)).toEqual([]);
+    const child = buildNormalizingState(SESSION, CHILD, undefined, {
+      subagentId: CHILD,
+      rootThreadId: THREAD,
+    });
+    const started = assignThread(
+      buildNote("item/started", input.params as Record<string, unknown>),
+      CHILD,
+    );
+    const events = normalizeNotes(child, [started, assignThread(input, CHILD)]);
+    expect(listEventTags(events)).toEqual(["item.started", "item.completed"]);
+    for (const event of events) {
+      expect(event).toMatchObject({
+        subagentId: CHILD,
+        itemId: "brief",
+        kind: "user_message",
+        detail: { text: "Inspect the parser.\nReport the result." },
+      });
+    }
+  });
+
+  it("keeps reasoning channels, models and structured answers independent when frames interleave", () => {
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["result"],
+      properties: { result: { type: "string" } },
+    } as const;
+    const root = buildNormalizingState(SESSION, THREAD, schema);
+    const child = buildNormalizingState(SESSION, CHILD, schema, {
+      subagentId: CHILD,
+      rootThreadId: THREAD,
+    });
+    root.model = "root-model";
+    child.model = "child-model";
+    expect(normalize(root, TURN_STARTED)[0]).toMatchObject({ model: "root-model" });
+    expect(normalize(child, assignThread(TURN_STARTED, CHILD))[0]).toMatchObject({
+      model: "child-model",
+      subagentId: CHILD,
+    });
+    normalize(root, buildRawDelta("root raw"));
+    expect(
+      listStreamedDeltas(normalize(child, assignThread(buildSummaryDelta("child summary"), CHILD))),
+    ).toEqual([["reasoning_text", "child summary"]]);
+    normalize(root, buildItemCompleted({ ...MESSAGE, text: '{"result":"root answer"}' }));
+    normalize(child, assignThread(buildItemCompleted({ ...MESSAGE, text: "child prose" }), CHILD));
+    expect(
+      normalize(child, assignThread(buildTurnCompleted("completed"), CHILD))[0],
+    ).not.toHaveProperty("structuredResult");
+    expect(normalize(root, buildSummaryDelta("duplicate root summary"))).toEqual([]);
+    expect(normalize(root, buildTurnCompleted("completed"))[0]).toMatchObject({
+      structuredResult: { outcome: "ok", value: { result: "root answer" } },
+    });
+  });
+
+  it("counts cached usage, repeated reports and resets independently for concurrent threads", () => {
+    const root = buildTestState();
+    const child = buildNormalizingState(SESSION, CHILD, undefined, {
+      subagentId: CHILD,
+      rootThreadId: THREAD,
+    });
+    normalize(root, TURN_STARTED);
+    normalize(child, assignThread(TURN_STARTED, CHILD));
+    const rootCall = buildTokenBreakdown(1_000, 900, 100);
+    const childCall = buildTokenBreakdown(400, 100, 50);
+    normalize(root, buildUsageNote(rootCall, rootCall));
+    normalize(child, assignThread(buildUsageNote(childCall, childCall), CHILD));
+    expect(
+      filterByTag(normalize(root, buildUsageNote(rootCall, rootCall)), "session.usage.updated")[0]
+        ?.usage,
+    ).toEqual({ inputTokens: 100, outputTokens: 100, cacheReadTokens: 900, cacheWriteTokens: 0 });
+    normalize(child, assignThread(buildUsageNote(buildTokenBreakdown(0, 0, 0), childCall), CHILD));
+    const nextCall = buildTokenBreakdown(200, 50, 20);
+    expect(
+      filterByTag(
+        normalize(child, assignThread(buildUsageNote(nextCall, nextCall), CHILD)),
+        "session.usage.updated",
+      )[0]?.usage,
+    ).toEqual({ inputTokens: 450, outputTokens: 70, cacheReadTokens: 150, cacheWriteTokens: 0 });
+    expect(root.counted).toMatchObject({
+      inputTokens: 1_000,
+      cachedInputTokens: 900,
+      outputTokens: 100,
+    });
+  });
+});
+
+describe("the subagents named by a native item", () => {
+  it("never links the session's root as a subagent, including when a child targets it", () => {
+    const child = buildNormalizingState(SESSION, CHILD, undefined, {
+      subagentId: CHILD,
+      rootThreadId: THREAD,
+    });
+    const events = normalizeNotes(child, [
+      assignThread(
+        buildItemCompleted({
+          type: "collabAgentToolCall",
+          id: ITEM,
+          tool: "sendMessage",
+          status: "completed",
+          senderThreadId: CHILD,
+          receiverThreadIds: [THREAD, OTHER_CHILD],
+          prompt: "The parser is valid.",
+          agentsStates: {},
+        }),
+        CHILD,
+      ),
+    ]);
+    expect(readItemDetail(events)).toEqual({
+      name: "sendMessage",
+      subagentIds: [OTHER_CHILD],
+      description: "The parser is valid.",
+    });
+    const activity = normalize(
+      child,
+      assignThread(
+        buildItemCompleted({
+          type: "subAgentActivity",
+          id: ITEM,
+          kind: "interacted",
+          agentThreadId: THREAD,
+          agentPath: "root",
+        }),
+        CHILD,
+      ),
+    );
+    expect(readItemDetail(activity)).toEqual({ name: "interacted" });
+  });
+
+  it.each([
+    "spawnAgent",
+    "sendInput",
+    "resumeAgent",
+    "wait",
+    "closeAgent",
+    "sendMessage",
+    "followupTask",
+    "interruptAgent",
+  ])("links every receiver of %s", (tool) => {
+    const events = normalizeFromStart([
+      buildItemCompleted({
+        type: "collabAgentToolCall",
+        id: ITEM,
+        tool,
+        status: "completed",
+        senderThreadId: THREAD,
+        receiverThreadIds: [CHILD, OTHER_CHILD],
+        prompt: "Check the parser.",
+        agentsStates: {},
+      }),
+    ]);
+    expect(readItemDetail(events)).toMatchObject({ name: tool, subagentIds: [CHILD, OTHER_CHILD] });
+  });
+
+  it.each(["started", "interacted", "completed", "interrupted"])(
+    "links the native agent of V2 %s activity",
+    (kind) => {
+      const events = normalizeFromStart([
+        buildItemCompleted({
+          type: "subAgentActivity",
+          id: ITEM,
+          kind,
+          agentThreadId: CHILD,
+          agentPath: "root/parser",
+        }),
+      ]);
+      expect(readItemDetail(events)).toMatchObject({ name: kind, subagentIds: [CHILD] });
+      expect(filterByTag(events, "item.completed")[0]?.status).toBe(
+        kind === "interrupted" ? "failed" : "completed",
+      );
+    },
+  );
+
+  it("keeps failed and interrupted V1 calls failed without changing a receiver's turn", () => {
+    for (const status of ["failed", "interrupted"]) {
+      const events = normalizeFromStart([
+        buildItemCompleted({
+          type: "collabAgentToolCall",
+          id: ITEM,
+          tool: "wait",
+          status,
+          senderThreadId: THREAD,
+          receiverThreadIds: [CHILD],
+          prompt: null,
+          agentsStates: {},
+        }),
+      ]);
+      expect(listEventTags(events)).toEqual(["item.completed"]);
+      expect(filterByTag(events, "item.completed")[0]).toMatchObject({
+        kind: "subagent",
+        status: "failed",
+        detail: { subagentIds: [CHILD] },
+      });
+    }
+  });
+});
+
+describe("restoring a saved Codex counter report", () => {
+  it("counts zero for a cancelled first call after resume and counts only new growth", () => {
+    const state = buildTestState();
+    const history = buildTokenBreakdown(50000, 10000, 5000);
+    expect(
+      restoreUsageReport(state, {
+        source: SOURCE,
+        payload: buildUsageNote(history, buildTokenBreakdown(8000, 1000, 1000)).params,
+      }),
+    ).toBe(true);
+    const events = normalizeNotes(state, [
+      TURN_STARTED,
+      buildUsageNote(history, buildTokenBreakdown(8000, 1000, 1000)),
+      buildUsageNote(
+        buildTokenBreakdown(62000, 13000, 6000),
+        buildTokenBreakdown(12000, 3000, 1000),
+      ),
+    ]);
+    expect(filterByTag(events, "session.usage.updated").map((event) => event.usage)).toEqual([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 9000, outputTokens: 1000, cacheReadTokens: 3000, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  it.each([
+    undefined,
+    null,
+    { source: "other-provider", payload: {} },
+    {
+      source: SOURCE,
+      payload: {
+        threadId: "different-thread",
+        tokenUsage: { total: buildTokenBreakdown(100, 0, 10) },
+      },
+    },
+    { source: SOURCE, payload: { threadId: THREAD, tokenUsage: { total: {} } } },
+    ...[-1, NaN, Infinity, 1.5, "100"].map((inputTokens) => ({
+      source: SOURCE,
+      payload: {
+        threadId: THREAD,
+        tokenUsage: { total: { ...buildTokenBreakdown(100, 0, 10), inputTokens } },
+      },
+    })),
+  ])("rejects an unusable saved report without partially seeding state: %j", (report) => {
+    const state = buildTestState();
+    expect(restoreUsageReport(state, report)).toBe(false);
+    expect(state.previousTotal).toBeUndefined();
+    expect(state.counted).toEqual({
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+});
+
+describe("incomplete Codex token accounting", () => {
+  it("baselines the first report after failed restoration and retains only later growth", () => {
+    const state = buildTestState();
+    requireUsageBaseline(state);
+    const history = buildTokenBreakdown(50000, 10000, 5000);
+    const events = normalizeNotes(state, [
+      TURN_STARTED,
+      buildUsageNote(history, buildTokenBreakdown(8000, 1000, 1000)),
+      buildUsageNote(
+        buildTokenBreakdown(62000, 13000, 6000),
+        buildTokenBreakdown(12000, 3000, 1000),
+      ),
+      buildUsageNote(
+        buildTokenBreakdown(62000, 13000, 6000),
+        buildTokenBreakdown(12000, 3000, 1000),
+      ),
+    ]);
+    const reports = filterByTag(events, "session.usage.updated");
+    expect(reports.map((event) => event.usageReport)).toEqual([
+      {
+        status: "incomplete",
+        counts: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+      {
+        status: "incomplete",
+        counts: {
+          inputTokens: 9000,
+          outputTokens: 1000,
+          cacheReadTokens: 3000,
+          cacheWriteTokens: 0,
+        },
+      },
+      {
+        status: "incomplete",
+        counts: {
+          inputTokens: 9000,
+          outputTokens: 1000,
+          cacheReadTokens: 3000,
+          cacheWriteTokens: 0,
+        },
+      },
+    ]);
+    for (const report of reports) expect(report).not.toHaveProperty("usage");
+    expect(state.usageBaselineRequired).toBe(false);
+  });
+
+  it("preserves an existing counter baseline when dropped frames make accounting incomplete", () => {
+    const state = buildTestState();
+    const history = buildTokenBreakdown(100, 0, 10);
+    restoreUsageReport(state, { source: SOURCE, payload: buildUsageNote(history, history).params });
+    markUsageIncomplete(state);
+    const events = normalizeNotes(state, [
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(150, 0, 20), buildTokenBreakdown(50, 0, 10)),
+    ]);
+    expect(filterByTag(events, "session.usage.updated")[0]?.usageReport).toEqual({
+      status: "incomplete",
+      counts: { inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
   });
 });

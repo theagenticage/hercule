@@ -7,6 +7,7 @@
  * copy would be out of date as soon as a runner is retired.
  */
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -17,7 +18,6 @@ import type {
   ModelSelection,
   ProviderEvent,
   SubagentId,
-  Usage,
 } from "@hercule/protocol";
 import {
   createNotFoundError,
@@ -44,7 +44,7 @@ import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import { attributeEvent, type StreamRow } from "./stream";
-import type { StoredUsage } from "./usage";
+import { StoredTokenUsage, type StoredUsage } from "./usage";
 
 /**
  * Builds a SQL expression, over a row of `sessions` under the given alias,
@@ -95,9 +95,9 @@ export interface StoredSession {
   /** The Requests the session's agents are parked on, oldest first. */
   readonly openRequests: ReadonlyArray<SessionRequest>;
   /** The session's Token Usage over its whole life; `undefined` until a harness reports some. */
-  readonly usage: Usage | undefined;
+  readonly usage: StoredTokenUsage | undefined;
   /** The current process's last usage snapshot; see `addUsageSnapshot`. Never shown by the API. */
-  readonly usageProcess: Usage | undefined;
+  readonly usageProcess: StoredTokenUsage | undefined;
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
@@ -268,8 +268,8 @@ const buildColumnList = (): string =>
  * for `NULL`, which means no harness has reported usage yet. Shared by the
  * session and subagent repositories, which store usage the same way.
  */
-export const parseUsage = (column: string | null): Usage | undefined =>
-  column === null ? undefined : (JSON.parse(column) as Usage);
+export const parseUsage = (column: string | null): StoredTokenUsage | undefined =>
+  column === null ? undefined : Schema.decodeUnknownSync(StoredTokenUsage)(JSON.parse(column));
 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),

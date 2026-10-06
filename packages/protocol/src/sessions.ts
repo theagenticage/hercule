@@ -52,6 +52,11 @@ const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
  */
 const PositiveMillis = Schema.Int.check(Schema.isGreaterThan(0));
 
+/** The provider's original report, retained without interpreting its payload. */
+export const ProviderReport = Schema.Struct({ source: Fact, payload: Schema.Json });
+
+export type ProviderReport = Schema.Schema.Type<typeof ProviderReport>;
+
 /**
  * The harness's own id for a subagent, unique within its session: the Claude
  * agent id, the Codex child thread id, or the child id from Hercule's pi
@@ -74,12 +79,16 @@ export type SubagentId = Schema.Schema.Type<typeof SubagentId>;
  * - `parentSubagentId` is the subagent that started it, absent when the
  *   session's own agent did. The adapter needs this tree to stop a continued
  *   subagent together with the subagents below it, because a harness such as
- *   Claude Code names no parent agent in its frames.
+ *   Claude Code names no parent agent in its frames;
+ * - `lastUsageReport` is the original provider report behind the latest
+ *   accepted usage snapshot. The adapter can restore its native counter
+ *   baseline without counting that history again.
  */
 export const ContinuedSubagent = Schema.Struct({
   subagentId: SubagentId,
   itemId: Schema.optionalKey(Fact),
   parentSubagentId: Schema.optionalKey(SubagentId),
+  lastUsageReport: Schema.optionalKey(ProviderReport),
 });
 
 export type ContinuedSubagent = Schema.Schema.Type<typeof ContinuedSubagent>;
@@ -163,8 +172,11 @@ export const SessionSpec = Schema.Struct({
    * `subagents` lists the subagents the controller already has records of,
    * sent on a resume only. The adapter seeds its own map from it, so a
    * subagent the harness continues in the new process lands on the record it
-   * already has (spec 06 section 13.2). A fork sends none: a forked session
-   * starts with no subagents.
+   * already has (spec 06 section 13.2). `lastUsageReport` is the original
+   * report behind its latest accepted usage snapshot. An adapter can restore
+   * its native counter baseline without counting that history again. The
+   * controller keeps the report unchanged. A fork sends none: a forked
+   * session starts with no subagents.
    */
   continue: Schema.optionalKey(
     Schema.Struct({
@@ -485,6 +497,18 @@ export const Usage = Schema.Struct({
 export type Usage = Schema.Schema.Type<typeof Usage>;
 
 /**
+ * Reports known token counts and whether every model call could be counted.
+ * An incomplete report is a subtotal. Recovering a native baseline permits
+ * counting later calls, but cannot reconstruct the missing interval.
+ */
+export const UsageReport = Schema.Struct({
+  status: Schema.Literals(["complete", "incomplete"]),
+  counts: Usage,
+});
+
+export type UsageReport = Schema.Schema.Type<typeof UsageReport>;
+
+/**
  * The fields every normalized event has. `turnId` and `itemId` are declared
  * per event instead, so an event about a turn or an item requires its id and
  * the other events have no field for one.
@@ -498,7 +522,7 @@ const base = {
   providerRefs: Schema.optionalKey(
     Schema.Record(Fact, Schema.String.check(Schema.isMaxLength(MAX_FACT_LENGTH))),
   ),
-  raw: Schema.optionalKey(Schema.Struct({ source: Fact, payload: Schema.Json })),
+  raw: Schema.optionalKey(ProviderReport),
 };
 
 const defineEvent = <const Tag extends string, Fields extends Schema.Struct.Fields>(
@@ -599,7 +623,18 @@ const ContentDelta = defineEvent("content.delta", {
  * Without `subagentId` the snapshot covers the session's own agent and every
  * subagent; with one, it covers that subagent alone (spec 06 section 6.6).
  */
-const SessionUsageUpdated = defineEvent("session.usage.updated", { ...attribution, usage: Usage });
+const SessionUsageUpdated = Schema.Union([
+  defineEvent("session.usage.updated", {
+    ...attribution,
+    usage: Usage,
+    usageReport: Schema.optionalKey(Schema.Never),
+  }),
+  defineEvent("session.usage.updated", {
+    ...attribution,
+    usage: Schema.optionalKey(Schema.Never),
+    usageReport: Schema.Struct({ status: Schema.Literal("incomplete"), counts: Usage }),
+  }),
+]);
 
 /** Either may fire inside a turn or between turns, so the turn id is optional. */
 const RuntimeWarning = defineEvent("runtime.warning", {

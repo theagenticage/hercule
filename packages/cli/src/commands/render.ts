@@ -20,6 +20,7 @@ import {
   formatDescribeLine,
   formatRequestQuestion,
   countUsedTokens,
+  describeTokenUsage,
   readJsonObject,
   readStringList,
   readTimestamps,
@@ -525,7 +526,12 @@ const summarizeSubagent = (subagent: Subagent, now: number): Record<string, unkn
   agentType: subagent.agentType,
   model: subagent.model,
   toolCalls: subagent.toolCalls,
-  tokens: subagent.usage === undefined ? undefined : countUsedTokens(subagent.usage),
+  tokens:
+    subagent.usageReport !== undefined
+      ? describeTokenUsage(subagent.usageReport)
+      : subagent.usage === undefined
+        ? undefined
+        : countUsedTokens(subagent.usage),
   // How long it ran, like a step's row in `run read`. A subagent lives within
   // one session's turn, so the time since it started would read "now" for
   // nearly every row.
@@ -573,11 +579,17 @@ const summarizeOpenRequest = (request: SessionRequest): Record<string, unknown> 
 const summarizeSession = ({
   openRequests,
   usage,
+  usageReport,
   ...fields
 }: Session): Record<string, unknown> => ({
   ...fields,
   openRequests: openRequests.length,
-  tokens: usage === undefined ? undefined : countUsedTokens(usage),
+  tokens:
+    usageReport !== undefined
+      ? describeTokenUsage(usageReport)
+      : usage === undefined
+        ? undefined
+        : countUsedTokens(usage),
 });
 
 /**

@@ -131,7 +131,7 @@ import {
   type SubagentEventFacts,
 } from "./subagents";
 import { hasOtherTurn, readAssistantTexts, readOpenTurnId } from "./transcript-log";
-import { addUsageSnapshot, clearProcessShare } from "./usage";
+import { addUsageReport, clearProcessShare } from "./usage";
 
 const QueryInput = Schema.Struct({
   ...SessionFilter.fields,
@@ -880,7 +880,15 @@ const make = Effect.gen(function* () {
         return false;
       }
       if (event._tag !== "session.usage.updated" || event.subagentId !== undefined) return false;
-      yield* sessions.setUsage(session.id, addUsageSnapshot(session, event.usage));
+      yield* sessions.setUsage(
+        session.id,
+        addUsageReport(
+          session,
+          event.usage === undefined
+            ? event.usageReport
+            : { status: "complete", counts: event.usage },
+        ),
+      );
       return true;
     });
 
@@ -1359,8 +1367,10 @@ const make = Effect.gen(function* () {
      * Returns the subagents a resumed session's harness is told about, so
      * the adapter puts a subagent it continues back on the record the
      * controller already has. Each entry names the subagent that started
-     * it, so the adapter knows the tree a stop cascades down. Checks no
-     * grant: the controller daemon calls it while it builds a resume spec.
+     * it, so the adapter knows the tree a stop cascades down. Each saved
+     * provider usage report goes back unchanged, so the adapter can restore
+     * native counters without reading the transcript. Checks no grant: the
+     * controller daemon calls it while it builds a resume spec.
      */
     listSubagentsToContinue: (
       sessionId: string,
@@ -1369,6 +1379,9 @@ const make = Effect.gen(function* () {
         records.map((record) => ({
           subagentId: record.id,
           ...(record.itemId === undefined ? {} : { itemId: record.itemId }),
+          ...(record.lastUsageReport === undefined
+            ? {}
+            : { lastUsageReport: record.lastUsageReport }),
           ...(record.parentSubagentId === undefined
             ? {}
             : { parentSubagentId: record.parentSubagentId }),

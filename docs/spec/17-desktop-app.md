@@ -1439,6 +1439,15 @@ The rows below were read on the prototype's page, not in the app, because the me
 - **Memory and idle were read with Profile open, not Appearance and Machines** as [What Settings costs](#what-settings-costs) asks, because those sections are not built yet. Their slices read them. With Profile open the app reads within the memory row, where the new-thread screen of the same launch setup reads 690 MB with its composer focused: Profile focuses no field, so the GPU process holds 105.5 MB against 586 MB.
 - **The one-minute load average was 8.4** at the Settings launch, from other programs on the machine.
 
+**Codex subagent usage reports,** measured 2026-10-06 with `pnpm build:desktop`'s size checks, for [#437](https://github.com/theagenticage/hercule/issues/437). The desktop imports the shared contract's new usage-report schemas. This change adds no desktop process, timer or polling. Desktop rendering and streamed-token handling are unchanged. Runtime memory, CPU and wakeups were not remeasured.
+
+| Measure | Earlier PR build, b9ca7602 | Final implementation, 3b9b6e58 | Budget |
+|---|---|---|---|
+| Renderer JavaScript for the first screen, gzipped | 299.2 kB | 299.3 kB | 250 kB, guide |
+| Main's startup file, minified | 156.9 kB | 157.2 kB | 160 kB, guide |
+
+The earlier sizes come from that commit's CI build; the final sizes come from the local build. This comparison measures the review corrections, not the full branch against its base. The renderer already exceeded its guide in the earlier build. The guide and exact pixel comparison gate remain unchanged; the final local comparison matched every cell and pixel in both themes and all seven regions.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

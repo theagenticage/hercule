@@ -56,6 +56,7 @@ import sessionExitReason from "./0045-session-exit-reason";
 import stepCheckoutBranch from "./0046-step-checkout-branch";
 import inputSentStatus from "./0047-input-sent-status";
 import subagents from "./0048-subagents";
+import subagentUsageReports from "./0049-subagent-usage-reports";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -106,6 +107,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [46, "step-checkout-branch", Effect.succeed(stepCheckoutBranch)],
   [47, "input-sent-status", Effect.succeed(inputSentStatus)],
   [48, "subagents", Effect.succeed(subagents)],
+  [49, "subagent-usage-reports", Effect.succeed(subagentUsageReports)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

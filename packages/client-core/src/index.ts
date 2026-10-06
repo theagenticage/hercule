@@ -238,7 +238,7 @@ export {
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
 export { resolveThreadRowsMode } from "./thread-rows";
-export { countUsedTokens } from "./token-usage";
+export { countUsedTokens, describeTokenUsage } from "./token-usage";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";
 export {

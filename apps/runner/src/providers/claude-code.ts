@@ -625,6 +625,8 @@ interface Live {
   stopping: ExitReason | undefined;
   /** The model the harness is using. It starts as the model in the session spec. */
   model: string;
+  /** Counts Stops so an input waiting for a model change cannot continue after its Stop. */
+  inputGeneration: number;
 }
 
 export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
@@ -1012,6 +1014,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               ),
               parks: new Map(),
               stopping: undefined,
+              inputGeneration: 0,
               model: spec.modelSelection.model,
             };
             live.set(sessionId, held);
@@ -1035,6 +1038,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       Effect.gen(function* () {
         const model = turn.modelSelection?.model;
         const before = yield* getHostedSession(sessionId);
+        const generation = before.inputGeneration;
         // Change the model only when a new turn is about to open: during a
         // turn, the harness keeps the model the turn started with. Only ask
         // when the model differs from the one last applied, so a session with
@@ -1052,6 +1056,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // the meantime a turn may have opened or ended, or the session may have
         // stopped.
         const held = yield* getHostedSession(sessionId);
+        if (held !== before || held.inputGeneration !== generation)
+          return yield* Effect.fail("the input was stopped before delivery");
         const { turnId, events } = openTurn(held.state);
         for (const event of events) emit(event);
         // Steering is implicit: if `openTurn` did not open a new turn, a turn
@@ -1075,6 +1081,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         const held = live.get(sessionId);
         if (held === undefined) return Effect.void;
         if (subagentId !== undefined) return stopSubagentTree(held, subagentId);
+        held.inputGeneration += 1;
         // Nothing is running, so do not send the harness a control request: it
         // would wait on the harness and hold up the connection's other frames.
         // A background subagent can run, or ask, while the session's own agent

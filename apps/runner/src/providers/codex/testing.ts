@@ -236,7 +236,9 @@ export const buildScriptedSeam = (
         requests.push({ method, params: frame["params"] });
         const reply = replies[method];
         if (reply === undefined || reply === SILENT) return;
-        const replied = reply(frame["params"]) as { readonly error?: unknown };
+        const returned = reply(frame["params"]);
+        if (returned === SILENT) return;
+        const replied = returned as { readonly error?: unknown };
         out.push(
           JSON.stringify(
             replied !== null && typeof replied === "object" && "error" in replied

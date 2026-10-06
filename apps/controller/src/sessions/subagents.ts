@@ -15,15 +15,22 @@
  * less than an earlier one. So the introduction, `subagent.started`, fills a
  * field only while it is empty and never overwrites one.
  */
-import type { ItemKind, ProviderEvent, SubagentId, Usage } from "@hercule/protocol";
+import type { ItemKind, ProviderEvent, ProviderReport, SubagentId } from "@hercule/protocol";
 import type { Subagent, SubagentStatus } from "@hercule/contract";
 import { attributeEvent } from "./stream";
-import { addUsageSnapshot, clearProcessShare } from "./usage";
+import {
+  addUsageReport,
+  buildUsageFields,
+  clearProcessShare,
+  type StoredTokenUsage,
+} from "./usage";
 
 /**
  * A subagent record as stored. Absent fields are `undefined` rather than
  * missing, and `usageProcess` is the current process's last usage snapshot,
- * which `addUsageSnapshot` needs and the API never shows.
+ * which `addUsageSnapshot` needs and the API never shows. `lastUsageReport`
+ * keeps the provider's original report behind that snapshot for a resume;
+ * it is private and survives a process ending or starting.
  */
 export interface StoredSubagent {
   readonly sessionId: string;
@@ -37,8 +44,9 @@ export interface StoredSubagent {
   readonly toolCalls: number;
   readonly activity: string | undefined;
   readonly result: string | undefined;
-  readonly usage: Usage | undefined;
-  readonly usageProcess: Usage | undefined;
+  readonly usage: StoredTokenUsage | undefined;
+  readonly usageProcess: StoredTokenUsage | undefined;
+  readonly lastUsageReport: ProviderReport | undefined;
   readonly startedAt: string;
   readonly endedAt: string | undefined;
 }
@@ -157,6 +165,7 @@ export const createBareSubagent = (
   result: undefined,
   usage: undefined,
   usageProcess: undefined,
+  lastUsageReport: undefined,
   startedAt: at,
   endedAt: undefined,
 });
@@ -380,7 +389,16 @@ const applyEventToSubagent = (
         result: decideResult(record.result, facts.lastAssistantText),
       };
     case "session.usage.updated":
-      return { ...record, ...addUsageSnapshot(record, event.usage) };
+      return {
+        ...record,
+        ...addUsageReport(
+          record,
+          event.usage === undefined
+            ? event.usageReport
+            : { status: "complete", counts: event.usage },
+        ),
+        lastUsageReport: event.raw,
+      };
     default:
       return record;
   }
@@ -402,7 +420,7 @@ export const toSubagentRecord = (stored: StoredSubagent): Subagent => ({
   toolCalls: stored.toolCalls,
   ...(stored.activity === undefined ? {} : { activity: stored.activity }),
   ...(stored.result === undefined ? {} : { result: stored.result }),
-  ...(stored.usage === undefined ? {} : { usage: stored.usage }),
+  ...buildUsageFields(stored.usage),
   startedAt: stored.startedAt,
   ...(stored.endedAt === undefined ? {} : { endedAt: stored.endedAt }),
 });

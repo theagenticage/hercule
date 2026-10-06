@@ -561,6 +561,10 @@ describe("session.querySubagents", () => {
           toolCalls: 1,
           result: "All tests pass.",
           usage: { inputTokens: 40, outputTokens: 4, costUsd: 0.5 },
+          usageReport: {
+            status: "complete",
+            counts: { inputTokens: 40, outputTokens: 4, costUsd: 0.5 },
+          },
           startedAt: at,
           endedAt: at,
         },
@@ -794,6 +798,10 @@ describe("Token Usage across a resume", () => {
     await withAgentFleet(async (arranged) => {
       const session = await startSession(arranged);
       const id = session.id;
+      const lastUsageReport = {
+        source: "test.provider",
+        payload: { nativeCounts: [1000, 900, 10], thread: "a1" },
+      };
       reportEvents(arranged, 2, [
         {
           ...buildBase(id),
@@ -805,6 +813,7 @@ describe("Token Usage across a resume", () => {
           ...buildBase(id, "a1"),
           _tag: "session.usage.updated",
           usage: { inputTokens: 100, outputTokens: 10 },
+          raw: lastUsageReport,
         },
         { ...buildBase(id), _tag: "subagent.started", subagentId: "a2", parentSubagentId: "a1" },
       ]);
@@ -829,6 +838,24 @@ describe("Token Usage across a resume", () => {
       await waitForSession(arranged, id, (one) => one.status === "exited");
       expect((await waitForSubagent(arranged, id, "a1", () => true)).status).toBe("stopped");
 
+      const lateEvent = {
+        ...buildBase(id, "a1"),
+        _tag: "session.usage.updated",
+        usage: { inputTokens: 999, outputTokens: 99 },
+        raw: { source: "test.provider", payload: { nativeCounts: [9999, 0, 99] } },
+      } as const;
+      reportEvent(arranged.wire, 7, lateEvent);
+      await waitUntil("stored late usage report", async () => {
+        const response = await readTranscript(arranged, id, "?subagentId=a1");
+        const page = (await response.json()) as {
+          readonly items: ReadonlyArray<{ readonly event: ProviderEvent }>;
+        };
+        return page.items.some((row) => row.event.eventId === lateEvent.eventId) ? true : undefined;
+      });
+      const exitedSubagent = await waitForSubagent(arranged, id, "a1", () => true);
+      expect(exitedSubagent.usage).toEqual({ inputTokens: 100, outputTokens: 10 });
+      expect(exitedSubagent).not.toHaveProperty("lastUsageReport");
+
       const input = await post(
         arranged.harness.base,
         `/api/v1/sessions/${id}/input`,
@@ -842,13 +869,13 @@ describe("Token Usage across a resume", () => {
         mode: "resume",
         // The nested subagent names its parent; the top-level one names none.
         subagents: [
-          { subagentId: "a1", itemId: "call-1" },
+          { subagentId: "a1", itemId: "call-1", lastUsageReport },
           { subagentId: "a2", parentSubagentId: "a1" },
         ],
       });
 
       // The new process counts from zero again.
-      reportEvents(arranged, 7, [
+      reportEvents(arranged, 8, [
         { ...buildBase(id), _tag: "session.started" },
         {
           ...buildBase(id),
@@ -870,6 +897,116 @@ describe("Token Usage across a resume", () => {
         (one) => one.usage?.inputTokens === 120,
       );
       expect(subagent.usage).toEqual({ inputTokens: 120, outputTokens: 12 });
+    });
+  });
+});
+
+describe("incomplete token accounting across controller persistence and public projections", () => {
+  it("preserves known counts over a resume while omitting exact-looking legacy usage", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { id } = await startSession(arranged);
+      const report = (subagentId: string | undefined, inputTokens: number): ProviderEvent => ({
+        ...buildBase(id, subagentId),
+        _tag: "session.usage.updated",
+        usageReport: {
+          status: "incomplete",
+          counts: { inputTokens, outputTokens: inputTokens / 10 },
+        },
+      });
+      reportEvents(arranged, 2, [
+        {
+          ...buildBase(id),
+          _tag: "session.usage.updated",
+          usage: { inputTokens: 100, outputTokens: 10 },
+        },
+        { ...buildBase(id), _tag: "subagent.started", subagentId: "a1" },
+        {
+          ...buildBase(id, "a1"),
+          _tag: "session.usage.updated",
+          usage: { inputTokens: 40, outputTokens: 4 },
+        },
+        report(undefined, 120),
+        report("a1", 50),
+      ]);
+      const partial = await waitForSession(
+        arranged,
+        id,
+        (one) => one.usageReport?.status === "incomplete",
+      );
+      expect(partial).not.toHaveProperty("usage");
+      expect(partial.usageReport).toEqual({
+        status: "incomplete",
+        counts: { inputTokens: 120, outputTokens: 12 },
+      });
+      const partialSubagent = await waitForSubagent(
+        arranged,
+        id,
+        "a1",
+        (one) => one.usageReport?.status === "incomplete",
+      );
+      expect(partialSubagent).not.toHaveProperty("usage");
+      expect(partialSubagent.usageReport?.counts.inputTokens).toBe(50);
+      const transcript = await readTranscript(arranged, id, "?subagentId=a1");
+      const rows = (await transcript.json()) as { items: Array<{ event: ProviderEvent }> };
+      const incomplete = rows.items.find(
+        ({ event }) => event._tag === "session.usage.updated" && event.usageReport !== undefined,
+      )?.event;
+      expect(incomplete).not.toHaveProperty("usage");
+      expect(incomplete).toHaveProperty("usageReport.status", "incomplete");
+
+      arranged.wire.send({
+        _tag: "sessionsReport",
+        sessions: [
+          {
+            sessionId: id,
+            nativeSessionId: "native-1",
+            instanceId: findInstanceId(arranged, "full-provider"),
+          },
+        ],
+      });
+      await waitForSession(arranged, id, (one) => one.nativeSessionId !== null);
+      reportEvent(arranged.wire, 7, {
+        ...buildBase(id),
+        _tag: "session.exited",
+        reason: "stopped",
+      });
+      await waitForSession(arranged, id, (one) => one.status === "exited");
+      const input = await post(
+        arranged.harness.base,
+        `/api/v1/sessions/${id}/input`,
+        { text: "continue" },
+        arranged.token,
+      );
+      expect(input.status, await input.clone().text()).toBe(200);
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2);
+      reportEvents(arranged, 8, [
+        { ...buildBase(id), _tag: "session.started" },
+        {
+          ...buildBase(id),
+          _tag: "session.usage.updated",
+          usage: { inputTokens: 5, outputTokens: 1 },
+        },
+        {
+          ...buildBase(id, "a1"),
+          _tag: "session.usage.updated",
+          usage: { inputTokens: 2, outputTokens: 1 },
+        },
+      ]);
+      const resumed = await waitForSession(
+        arranged,
+        id,
+        (one) => one.usageReport?.counts.inputTokens === 125,
+      );
+      expect(resumed).not.toHaveProperty("usage");
+      expect(resumed.usageReport?.status).toBe("incomplete");
+      const resumedSubagent = await waitForSubagent(
+        arranged,
+        id,
+        "a1",
+        (one) => one.usageReport?.counts.inputTokens === 52,
+      );
+      expect(resumedSubagent).not.toHaveProperty("usage");
+      expect(resumedSubagent.usageReport?.status).toBe("incomplete");
     });
   });
 });

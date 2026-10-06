@@ -113,6 +113,11 @@ const events: ReadonlyArray<Event> = [
     subagentId: "agent-b",
     usage: { inputTokens: 1, outputTokens: 2, cacheWriteTokens: 3 },
   },
+  {
+    _tag: "session.usage.updated",
+    ...baseFields,
+    usageReport: { status: "incomplete", counts: { inputTokens: 0, outputTokens: 0 } },
+  },
   { _tag: "runtime.warning", ...baseFields, message: "retrying after a 529" },
   { _tag: "runtime.error", ...baseFields, class: "ContextWindowExceeded", message: "too long" },
   {
@@ -168,7 +173,11 @@ const requests = [
 ] as const;
 
 const listTags = (union: typeof ProviderEvent) =>
-  union.members.map((member) => member.fields._tag.literal);
+  union.members.flatMap((member) =>
+    "fields" in member
+      ? [member.fields._tag.literal]
+      : member.members.map((branch) => branch.fields._tag.literal),
+  );
 
 describe("the normalized event taxonomy", () => {
   it.each(events)("round-trips $_tag unchanged", (event) => {
@@ -484,6 +493,32 @@ describe("what the controller sends for a session", () => {
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(forked))).toEqual(forked);
   });
 
+  it("returns a saved provider usage report unchanged on a resume", () => {
+    const lastUsageReport = {
+      source: "codex.app-server.notification",
+      payload: {
+        threadId: "agent-a",
+        tokenUsage: { total: { inputTokens: 10 }, last: { inputTokens: 10 } },
+      },
+    };
+    const resumed = {
+      ...spec,
+      continue: {
+        nativeSessionId: "native-1",
+        mode: "resume",
+        subagents: [
+          {
+            subagentId: "agent-a",
+            itemId: "toolu_1",
+            parentSubagentId: "agent-parent",
+            lastUsageReport,
+          },
+        ],
+      },
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(resumed))).toEqual(resumed);
+  });
+
   it("accepts a session without a workspace as an explicit null, never as an absent key", () => {
     expect(decode(SessionSpec, { ...spec, workspaceId: "w1" })._tag).toBe("Success");
     expect(decode(SessionSpec, omitKey(spec, "workspaceId"))._tag).toBe("Failure");
@@ -621,4 +656,30 @@ describe("the frames that answer a Request an agent is parked on", () => {
       frame,
     );
   });
+});
+
+describe("incomplete token accounting", () => {
+  it("rejects legacy counts alongside an incomplete report instead of stripping the warning", () => {
+    expect(
+      decode(ProviderEvent, {
+        _tag: "session.usage.updated",
+        ...baseFields,
+        usage: { inputTokens: 100, outputTokens: 10 },
+        usageReport: { status: "incomplete", counts: { inputTokens: 100, outputTokens: 10 } },
+      })._tag,
+    ).toBe("Failure");
+  });
+});
+
+it("makes an incomplete transcript event undecodable as a legacy exact event", () => {
+  const legacyUsageEvent = Schema.Struct({
+    _tag: Schema.Literal("session.usage.updated"),
+    usage: Schema.Struct({ inputTokens: Schema.Number, outputTokens: Schema.Number }),
+  });
+  const incomplete = {
+    _tag: "session.usage.updated",
+    ...baseFields,
+    usageReport: { status: "incomplete", counts: { inputTokens: 100, outputTokens: 10 } },
+  };
+  expect(() => Schema.decodeUnknownSync(legacyUsageEvent)(incomplete)).toThrow();
 });

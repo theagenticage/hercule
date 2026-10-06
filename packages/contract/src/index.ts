@@ -219,6 +219,7 @@ export {
   SubagentId,
   SubagentStatus,
   Usage,
+  UsageReport,
 } from "./groups/session";
 export {
   INPUT_SORT_FIELDS,

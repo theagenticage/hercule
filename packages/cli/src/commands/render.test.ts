@@ -1312,3 +1312,36 @@ describe("removeTerminalControls", () => {
     expect(removeTerminalControls(text)).toBe(text);
   });
 });
+
+describe("incomplete token usage in the CLI", () => {
+  it("labels session and subagent known subtotals instead of printing an exact-looking number", () => {
+    const usageReport = { status: "incomplete", counts: { inputTokens: 100, outputTokens: 20 } };
+    const session = renderHuman(
+      {
+        kind: "value",
+        value: { items: [{ id: SESSION, status: "busy", openRequests: [], usageReport }] },
+      },
+      lookUpCommand("session", "list"),
+    );
+    expect(session.join("\n")).toContain("120 (incomplete)");
+    const subagent = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [
+            {
+              id: "agent-a",
+              sessionId: SESSION,
+              status: "busy",
+              toolCalls: 0,
+              usageReport,
+              startedAt: new Date().toISOString(),
+            },
+          ],
+        },
+      },
+      lookUpCommand("session", "subagent", "list"),
+    );
+    expect(subagent.join("\n")).toContain("120 (incomplete)");
+  });
+});

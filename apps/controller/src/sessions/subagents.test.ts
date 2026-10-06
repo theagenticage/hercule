@@ -240,6 +240,36 @@ describe("computeSubagentAfter", () => {
     expect(computeSubagentAfter(bare, main)).toBe(bare);
   });
 
+  it("keeps the latest native usage report through a process exit and a restart", () => {
+    const report = { source: "test.provider", payload: { native: [100, 80, 3], label: "opaque" } };
+    const event = {
+      ...base,
+      _tag: "session.usage.updated",
+      subagentId: "a1",
+      usage: { inputTokens: 20, outputTokens: 3 },
+      raw: report,
+    } as const;
+    const counted = computeSubagentAfter(bare, event);
+    expect(counted).toMatchObject({ lastUsageReport: report, usage: event.usage });
+    const stopped = stopSubagent(counted, later, undefined);
+    expect(stopped.lastUsageReport).toEqual(report);
+    const restarted = computeSubagentAfter(stopped, { ...base, _tag: "session.started" });
+    expect(restarted.lastUsageReport).toEqual(report);
+    expect(restarted.usageProcess).toBeUndefined();
+    const resetReport = { source: report.source, payload: { native: [0, 0, 0] } };
+    expect(computeSubagentAfter(restarted, { ...event, raw: resetReport }).lastUsageReport).toEqual(
+      resetReport,
+    );
+    expect(
+      computeSubagentAfter(counted, {
+        ...base,
+        _tag: "session.usage.updated",
+        subagentId: "a1",
+        usage: event.usage,
+      }).lastUsageReport,
+    ).toBeUndefined();
+  });
+
   it("leaves a session's exit to the cleanup that stops running subagents", () => {
     const exited = { ...base, at: later, _tag: "session.exited", reason: "stopped" } as const;
     expect(computeSubagentAfter(bare, exited)).toBe(bare);
@@ -416,6 +446,7 @@ describe("toSubagentRecord", () => {
       ...bare,
       usage: { inputTokens: 1, outputTokens: 1 },
       usageProcess: { inputTokens: 1, outputTokens: 1 },
+      lastUsageReport: { source: "test.provider", payload: { secretNativeDetail: "not public" } },
     });
     expect(record).toEqual({
       id: "a1",
@@ -423,6 +454,7 @@ describe("toSubagentRecord", () => {
       status: "running",
       toolCalls: 0,
       usage: { inputTokens: 1, outputTokens: 1 },
+      usageReport: { status: "complete", counts: { inputTokens: 1, outputTokens: 1 } },
       startedAt: base.at,
     });
   });

@@ -938,6 +938,60 @@ describe("a Claude Code session", () => {
     expect(run.sent).toEqual([]);
   });
 
+  it.each([false, true])(
+    "refuses delayed input after Stop while the model is changing, with a working subagent: %s",
+    async (subagentWorking) => {
+      const run = createDriving();
+      await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+      if (subagentWorking) await openSubagentTurn(run, "agent-b");
+      run.holdsModel = true;
+      const sending = Effect.runPromise(
+        Effect.flip(
+          run.adapter.sendInput(SESSION, {
+            text: "do not resurrect this input",
+            modelSelection: { model: "claude-opus-4-8", options: {} },
+          }),
+        ),
+      );
+      await waitUntil("asked the harness for the model", () => run.models.length === 1);
+      await Effect.runPromise(run.adapter.interrupt(SESSION));
+      run.releaseModel();
+      expect(await sending).toContain("stopped");
+      expect(run.sent).toEqual([]);
+      expect(run.interrupted()).toBe(subagentWorking ? 1 : 0);
+      expect(
+        run.seen.filter((event) => event._tag === "turn.started" && event.subagentId === undefined),
+      ).toEqual([]);
+      run.holdsModel = false;
+      await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "new input" }));
+      await waitUntil("received the new input", () => run.sent.length === 1);
+      expect(run.sent[0]!.message.content).toEqual("new input");
+    },
+  );
+
+  it("keeps pending root input when Stop names a subagent", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-b");
+    run.holdsModel = true;
+    const sending = Effect.runPromise(
+      run.adapter.sendInput(SESSION, {
+        text: "continue the root's work",
+        modelSelection: { model: "claude-opus-4-8", options: {} },
+      }),
+    );
+    await waitUntil("asked the harness for the model", () => run.models.length === 1);
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-b"));
+    run.releaseModel();
+
+    expect(await sending).toMatchObject({ delivery: "opened" });
+    await waitUntil("received the root input", () => run.sent.length === 1);
+    expect(run.sent[0]!.message.content).toEqual("continue the root's work");
+    expect(run.interrupted()).toBe(0);
+    expect(run.stoppedTasks).toEqual(["agent-b"]);
+  });
+
   it("exits as stopped when stopped, and removes the session", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
