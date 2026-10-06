@@ -1351,6 +1351,20 @@ const openSubagentTurn = async (run: Driving, subagentId: string, parentId?: str
   );
 };
 
+/**
+ * Sends one more frame of a subagent no task_started has linked than the
+ * adapter holds, so it drops them all, then waits for the warning that
+ * counts them.
+ */
+const dropHeldFrames = async (run: Driving, subagentId: string) => {
+  for (let frame = 0; frame <= 1000; frame += 1) run.say(buildSubagentWords(subagentId));
+  await waitUntil("dropped the held frames", () =>
+    run.seen.some(
+      (event) => event._tag === "runtime.warning" && event.message.startsWith("dropped 1001"),
+    ),
+  );
+};
+
 describe("a tool call that needs approval", () => {
   it("parks the call and emits a request for the tool call's item", async () => {
     const run = await startApprovalSession();
@@ -2239,18 +2253,94 @@ describe("a subagent's requests", () => {
     expect(own.settled()).toBeUndefined();
   });
 
-  it("denies a request whose subagent's frames were dropped, and never reports it", async () => {
+  // The harness can send a subagent's frames before the task_started that
+  // links them. Another subagent's task_started in between must not drop
+  // them, or the subagent's turn never opens and its request waits for ever.
+  it("reports a request of a subagent whose frames waited past another subagent's task_started", async () => {
+    const run = await startApprovalSession();
+    run.say(buildSubagentWords("agent-b"));
+    await openSubagentTurn(run, "agent-a");
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    run.say(buildSubagentStarted("agent-b"));
+
+    await waitUntil("opened the request", () => listOpenedRequests(run.seen).length === 1);
+    expect(listRequestAskers(run.seen, "request.opened")).toEqual([
+      { requestId: listOpenedRequests(run.seen)[0]!.requestId, subagentId: "agent-b" },
+    ]);
+    expect(findSubagentEvent(run.seen, "turn.started", "agent-b")).toBeLessThan(
+      findSubagentEvent(run.seen, "request.opened", "agent-b"),
+    );
+    expect(run.seen.some((event) => event._tag === "runtime.warning")).toBe(false);
+    expect(park.settled()).toBeUndefined();
+  });
+
+  it("denies a request whose subagent was still unknown when the held frames were dropped, and never reports it", async () => {
     const run = await startApprovalSession();
     const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-z" });
-    // agent-z's frame waits for a task_started that never names it. The next
-    // task_started, for agent-b, drops it, so agent-z's turn may never open.
-    run.say(buildSubagentWords("agent-z"));
-    await openSubagentTurn(run, "agent-b");
+
+    await dropHeldFrames(run, "agent-z");
 
     await waitUntil("answered the harness", () => park.settled() !== undefined);
     expect(park.settled()).toMatchObject({ behavior: "deny" });
     expect(listOpenedRequests(run.seen)).toEqual([]);
     expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  // The frames that would have opened the subagent's turn were dropped, so
+  // its request would wait for ever for a turn to be shown in. Denied, the
+  // subagent goes on, and its next frame opens its turn.
+  it("denies at once a request from a subagent whose frames were dropped, with no Request", async () => {
+    const run = await startApprovalSession();
+    await dropHeldFrames(run, "agent-b");
+    run.say(buildSubagentStarted("agent-b"));
+    await waitUntil(
+      "introduced agent-b",
+      () => findSubagentEvent(run.seen, "subagent.started", "agent-b") !== -1,
+    );
+
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("withdraws a waiting request once a task_started links its subagent to dropped frames", async () => {
+    const run = await startApprovalSession();
+    await dropHeldFrames(run, "agent-b");
+    const park = parkToolCall(run, "Bash", { command: "ls" }, { agentID: "agent-b" });
+
+    run.say(buildSubagentStarted("agent-b"));
+
+    await waitUntil("answered the harness", () => park.settled() !== undefined);
+    expect(park.settled()).toMatchObject({ behavior: "deny" });
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+    expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("reports a subagent's requests again once its turn opens after its frames were dropped", async () => {
+    const run = await startApprovalSession();
+    await dropHeldFrames(run, "agent-b");
+    run.say(buildSubagentStarted("agent-b"));
+    run.say(buildSubagentWords("agent-b"));
+    await waitUntil(
+      "opened agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.started", "agent-b") !== -1,
+    );
+
+    const { park, request } = await parkAndAwaitRequest(
+      run,
+      "Bash",
+      { command: "ls" },
+      { agentID: "agent-b" },
+    );
+
+    expect(listRequestAskers(run.seen, "request.opened")).toEqual([
+      { requestId: request.requestId, subagentId: "agent-b" },
+    ]);
+    expect(park.settled()).toBeUndefined();
   });
 });
 
@@ -2408,6 +2498,47 @@ describe("stopping a subagent", () => {
     );
     const warning = run.seen[findSubagentEvent(run.seen, "runtime.warning", "agent-a")];
     expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain("no task agent-a");
+  });
+
+  it("sends stopTask again on a second interrupt after the harness refused the first", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+    run.refusesStopTask = true;
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    run.refusesStopTask = false;
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+
+    expect(run.stoppedTasks).toEqual(["agent-a", "agent-a"]);
+  });
+
+  // Only the user's own Stop sends a refused stop again. Resending it at each
+  // message would ask the harness, and fail, for as long as the subagent runs.
+  it("does not send again a stop the harness refused when the subagent woke", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    await openSubagentTurn(run, "agent-a");
+    await openSubagentTurn(run, "agent-b", "agent-a");
+    run.say(buildSubagentFinished("agent-b"));
+    await waitUntil(
+      "completed agent-b's turn",
+      () => findSubagentEvent(run.seen, "turn.completed", "agent-b") !== -1,
+    );
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "agent-a"));
+    run.refusesStopTask = true;
+
+    run.say(buildSubagentWords("agent-b"));
+    await waitUntil(
+      "warned about agent-b's stop",
+      () => findSubagentEvent(run.seen, "runtime.warning", "agent-b") !== -1,
+    );
+    run.say(buildSubagentText(buildAgentCallId("agent-b"), "msg-more-agent-b", "still here"));
+    await waitUntil("reported agent-b's next words", () =>
+      run.seen.some((event) => event._tag === "content.delta" && event.delta === "still here"),
+    );
+
+    expect(run.stoppedTasks).toEqual(["agent-a", "agent-b"]);
   });
 
   it("stops a resumed subagent's resumed children, from the tree the controller sent", async () => {

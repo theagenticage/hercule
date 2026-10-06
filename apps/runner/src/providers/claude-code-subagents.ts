@@ -40,7 +40,8 @@ type SubagentTurn =
  *   The adapter sends `stopTask` as soon as it works again;
  * - `sent`: the adapter sent `stopTask` for it. If the subagent then ends
  *   `completed` or `failed`, `stopTask` stopped nothing, and the stop is
- *   `wanted` again;
+ *   `wanted` again. If the harness refused `stopTask` or did not answer, the
+ *   stop is `none` again, so only the user's next Stop sends it again;
  * - `stopped`: the harness reported it stopped. A stopped Claude subagent
  *   cannot be continued, so it runs no more turns.
  */
@@ -61,6 +62,13 @@ export interface Subagent {
   introduced: boolean;
   turn: SubagentTurn;
   stop: SubagentStop;
+  /**
+   * Whether the normalizer dropped frames of the subagent before its turn
+   * opened. Those frames may have been the ones that open its turn, so a
+   * request it asks would wait for ever for a turn to be shown in. Cleared
+   * when its turn opens.
+   */
+  openingFramesLost: boolean;
 }
 
 /** A `request.opened` event, the only kind of event that waits for a subagent's turn. */
@@ -74,6 +82,8 @@ export type RequestOpened = Extract<ProviderEvent, { readonly _tag: "request.ope
  *   subagent can be continued or stopped at any time while the process lives.
  * - `waitingRequests` holds whole events, but only until the subagent's turn
  *   opens or its frames are dropped, whichever comes first.
+ * - `droppedAgentCalls` holds an agent call only until a `task_started`
+ *   links it.
  */
 export interface SubagentRegistry {
   /** Every known subagent, by SubagentId. */
@@ -96,6 +106,12 @@ export interface SubagentRegistry {
    * SubagentId. The id may name a subagent the registry does not know yet.
    */
   readonly waitingRequests: Map<SubagentId, Array<RequestOpened>>;
+  /**
+   * The agent calls whose frames the normalizer dropped before any
+   * `task_started` linked them. The subagent a later `task_started` links to
+   * one of them has lost its opening frames.
+   */
+  readonly droppedAgentCalls: Set<string>;
 }
 
 /**
@@ -128,6 +144,7 @@ export const buildSubagentRegistry = (
     agentCallOwners: new Map(),
     agentCallsByName: new Map(),
     waitingRequests: new Map(),
+    droppedAgentCalls: new Set(),
   };
   for (const known of seeded) {
     registry.byId.set(known.subagentId, {
@@ -137,6 +154,7 @@ export const buildSubagentRegistry = (
       introduced: false,
       turn: { phase: "idle" },
       stop: "none",
+      openingFramesLost: false,
     });
     if (known.itemId !== undefined) registry.byAgentCall.set(known.itemId, known.subagentId);
   }
@@ -167,28 +185,39 @@ export const recordAgentCall = (
  * A new subagent under a parent that was stopped is stopped too: its stop is
  * `wanted`. Claude Code does not stop a background child with its parent, and
  * a parent can start a child after the user stopped it (spec 06 section 13.4).
+ *
+ * When the normalizer dropped frames of the agent call, the subagent is
+ * marked as having lost its opening frames, and the requests waiting for its
+ * turn are dropped: that turn may never open.
  */
 export const registerSubagent = (
   registry: SubagentRegistry,
   subagentId: SubagentId,
   agentCallId: string | undefined,
 ): Subagent => {
-  if (agentCallId !== undefined) registry.byAgentCall.set(agentCallId, subagentId);
-  const known = registry.byId.get(subagentId);
-  if (known !== undefined) return known;
-  const parentSubagentId =
-    agentCallId === undefined ? undefined : registry.agentCallOwners.get(agentCallId);
-  const parentStop =
-    parentSubagentId === undefined ? "none" : registry.byId.get(parentSubagentId)?.stop;
-  const subagent: Subagent = {
-    subagentId,
-    agentCallId,
-    parentSubagentId,
-    introduced: false,
-    turn: { phase: "idle" },
-    stop: parentStop === undefined || parentStop === "none" ? "none" : "wanted",
-  };
-  registry.byId.set(subagentId, subagent);
+  let subagent = registry.byId.get(subagentId);
+  if (subagent === undefined) {
+    const parentSubagentId =
+      agentCallId === undefined ? undefined : registry.agentCallOwners.get(agentCallId);
+    const parentStop =
+      parentSubagentId === undefined ? "none" : registry.byId.get(parentSubagentId)?.stop;
+    subagent = {
+      subagentId,
+      agentCallId,
+      parentSubagentId,
+      introduced: false,
+      turn: { phase: "idle" },
+      stop: parentStop === undefined || parentStop === "none" ? "none" : "wanted",
+      openingFramesLost: false,
+    };
+    registry.byId.set(subagentId, subagent);
+  }
+  if (agentCallId === undefined) return subagent;
+  registry.byAgentCall.set(agentCallId, subagentId);
+  if (registry.droppedAgentCalls.delete(agentCallId)) {
+    subagent.openingFramesLost = true;
+    registry.waitingRequests.delete(subagentId);
+  }
   return subagent;
 };
 
@@ -272,6 +301,17 @@ export const takeStopsDue = (registry: SubagentRegistry): ReadonlyArray<Subagent
 };
 
 /**
+ * Marks a subagent whose `stopTask` the harness refused, or did not answer,
+ * as not being stopped. The user's next Stop then sends `stopTask` again, and
+ * nothing sends it by itself. A stop that is no longer `sent` is left as it
+ * is: the harness reported the subagent ended while the request was out.
+ */
+export const clearRefusedStop = (registry: SubagentRegistry, subagentId: SubagentId): void => {
+  const subagent = registry.byId.get(subagentId);
+  if (subagent?.stop === "sent") subagent.stop = "none";
+};
+
+/**
  * Returns `[opened]` when the turn of the subagent that asked is open, for the
  * caller to publish now. Otherwise stores the event and returns nothing: the
  * normalizer emits it right after the events that open the subagent's next
@@ -304,12 +344,16 @@ export const takeWaitingRequests = (
 };
 
 /**
- * Removes the `request.opened` events waiting for subagents the registry does
- * not know. The normalizer calls it when it drops frames no `task_started`
- * linked: those subagents may never be reported, so their turns may never
- * open.
+ * Records that the normalizer dropped frames of these agent calls, and
+ * removes the `request.opened` events waiting for subagents the registry does
+ * not know. Those subagents may never be reported, and the dropped frames may
+ * have been the ones that open their turns, so their turns may never open.
  */
-export const dropRequestsOfUnknownSubagents = (registry: SubagentRegistry): void => {
+export const recordDroppedFrames = (
+  registry: SubagentRegistry,
+  agentCallIds: ReadonlyArray<string>,
+): void => {
+  for (const agentCallId of agentCallIds) registry.droppedAgentCalls.add(agentCallId);
   for (const subagentId of registry.waitingRequests.keys()) {
     if (!registry.byId.has(subagentId)) registry.waitingRequests.delete(subagentId);
   }

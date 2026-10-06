@@ -31,11 +31,11 @@ import {
 import {
   buildSubagentRegistry,
   cleanSubagentId,
-  dropRequestsOfUnknownSubagents,
   findSendMessageRecipient,
   findSubagentByAgentCall,
   isSubagentWorking,
   recordAgentCall,
+  recordDroppedFrames,
   registerSubagent,
   takeWaitingRequests,
   type Subagent,
@@ -107,10 +107,10 @@ export interface Normalizing {
   /** The session's subagents and their turns. */
   readonly subagents: SubagentRegistry;
   /**
-   * Frames from a subagent the registry does not know yet: from an agent call
-   * no `task_started` has linked, or a denial naming an unknown agent id. They
-   * wait for the next `task_started` or `task_notification` of a subagent,
-   * and at most `MAX_HELD_FRAMES` of them are kept.
+   * Frames from a subagent the registry does not know yet, in the order they
+   * arrived: from an agent call no `task_started` has linked, or a denial
+   * naming an unknown agent id. Each waits for the `task_started` that links
+   * it, and at most `MAX_HELD_FRAMES` of them are kept.
    */
   readonly heldFrames: Array<SDKMessage>;
 }
@@ -118,7 +118,8 @@ export interface Normalizing {
 /**
  * The most frames `Normalizing.heldFrames` keeps. A harness that never
  * reports a subagent's start would otherwise make the runner hold that
- * subagent's frames for the life of the process.
+ * subagent's frames for the life of the process. The frame that would be one
+ * more drops them all, itself included.
  */
 const MAX_HELD_FRAMES = 1000;
 
@@ -169,9 +170,13 @@ interface TurnRef {
   readonly subagentId: string | undefined;
 }
 
-/** Returns the field that names the subagent an event belongs to, or nothing for the session's own agent. */
-const attributeTo = (subagentId: string | undefined): { readonly subagentId?: string } =>
-  subagentId === undefined ? {} : { subagentId };
+/**
+ * Builds the field that names the subagent an event belongs to. Returns an
+ * empty object for an event of the session's own agent.
+ */
+const buildSubagentAttribution = (
+  subagentId: string | undefined,
+): { readonly subagentId?: string } => (subagentId === undefined ? {} : { subagentId });
 
 /** Returns the key of an agent's entry in `Normalizing.streams`: `""` for the session's own agent. */
 const buildStreamKey = (agent: TurnOwner): string => agent?.subagentId ?? "";
@@ -350,6 +355,9 @@ const ensureAgentTurn = (
     out.push(buildItemCompleted(state, turn, itemId, "user_message", "completed", detail));
   }
   agent.turn = { phase: "open", turnId: turn.turnId };
+  // The turn is open, so the subagent's requests have a turn to be shown in
+  // again, even if frames that would have opened an earlier one were dropped.
+  agent.openingFramesLost = false;
   out.push(...takeWaitingRequests(state.subagents, subagentId));
   return turn;
 };
@@ -377,7 +385,7 @@ const closeTurn = (
     eventId: state.mint(),
     sessionId: state.sessionId,
     at: state.now(),
-    ...attributeTo(agent?.subagentId),
+    ...buildSubagentAttribution(agent?.subagentId),
     turnId,
     state: turnState,
     ...(extra.usage === undefined ? {} : { usage: extra.usage }),
@@ -400,7 +408,7 @@ const buildItemStarted = (
   eventId: state.mint(),
   sessionId: state.sessionId,
   at: state.now(),
-  ...attributeTo(turn.subagentId),
+  ...buildSubagentAttribution(turn.subagentId),
   turnId: turn.turnId,
   itemId,
   kind,
@@ -419,7 +427,7 @@ const buildItemCompleted = (
   eventId: state.mint(),
   sessionId: state.sessionId,
   at: state.now(),
-  ...attributeTo(turn.subagentId),
+  ...buildSubagentAttribution(turn.subagentId),
   turnId: turn.turnId,
   itemId,
   kind,
@@ -438,7 +446,7 @@ const buildContentDelta = (
   eventId: state.mint(),
   sessionId: state.sessionId,
   at: state.now(),
-  ...attributeTo(turn.subagentId),
+  ...buildSubagentAttribution(turn.subagentId),
   turnId: turn.turnId,
   itemId,
   streamKind,
@@ -987,14 +995,11 @@ const readAgentCallId = (sdk: SDKMessage): string | undefined => {
 
 /**
  * Checks whether a frame may link held frames to their subagent: a subagent's
- * `task_started` or `task_notification`. After one, the held frames are
- * emitted or dropped (spec 06 section 13.6).
+ * `task_started`, the only frame that registers a subagent. After one, the
+ * held frames it linked are emitted.
  */
-const isSubagentBoundary = (state: Normalizing, sdk: SDKMessage): boolean =>
-  sdk.type === "system" &&
-  ((sdk.subtype === "task_started" && sdk.task_type === "local_agent") ||
-    (sdk.subtype === "task_notification" &&
-      state.subagents.byId.has(cleanSubagentId(sdk.task_id) ?? "")));
+const isSubagentStart = (sdk: SDKMessage): boolean =>
+  sdk.type === "system" && sdk.subtype === "task_started" && sdk.task_type === "local_agent";
 
 /**
  * Checks whether an event comes from opening a turn rather than from the
@@ -1014,20 +1019,17 @@ const isTurnOpeningEvent = (event: ProviderEvent): boolean =>
  * copy.
  *
  * A subagent's frame whose subagent is not known yet returns nothing: it is
- * held, and returned after the next `task_started` or `task_notification`
- * of a subagent, or dropped then with a warning. That boundary may belong to
- * any subagent, so it also drops the held frames of another subagent that is
- * still unknown. At most `MAX_HELD_FRAMES` frames are held: the frame that
- * would be one more drops them all, itself included, the same way.
+ * held, and its events are returned after the `task_started` that links it.
+ * At most `MAX_HELD_FRAMES` frames are held: the frame that would be one more
+ * drops them all, itself included, and returns a warning that counts them.
  *
  * Never throws. A message with a known type but changed fields becomes an
  * `unknown` item, because the CLI ships weekly and a `TypeError` here would
  * take a live session down.
  */
 export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<ProviderEvent> => {
-  const boundary = isSubagentBoundary(state, sdk);
   const out = normalizeFrame(state, sdk);
-  if (boundary) out.push(...releaseHeldFrames(state));
+  if (isSubagentStart(sdk)) out.push(...releaseHeldFrames(state));
   return out;
 };
 
@@ -1128,48 +1130,44 @@ const closeUnsolicitedTurn = (
 /**
  * Holds a frame whose subagent is not known yet, and returns nothing. When
  * `MAX_HELD_FRAMES` frames are already held, drops them and this frame
- * instead, and returns the warning that counts them. Once those frames are
- * gone, a request from the same subagent may never see its turn open, so the
- * requests of unknown subagents are dropped too, and the adapter withdraws
- * them.
+ * instead, and returns a `runtime.warning` that counts them.
+ *
+ * The dropped frames may include the ones that would open a subagent's turn,
+ * so a request from that subagent may never see its turn open. The registry
+ * records their agent calls and drops the requests of unknown subagents, and
+ * the adapter withdraws those requests.
  */
 const holdFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
   state.heldFrames.push(sdk);
   if (state.heldFrames.length <= MAX_HELD_FRAMES) return [];
-  dropRequestsOfUnknownSubagents(state.subagents);
-  return [buildDroppedFramesWarning(state, state.heldFrames.splice(0).length)];
-};
-
-/** Returns the `runtime.warning` that counts the held frames the caller dropped. */
-const buildDroppedFramesWarning = (state: Normalizing, droppedFrames: number): ProviderEvent => {
-  return {
-    _tag: "runtime.warning",
-    eventId: state.mint(),
-    sessionId: state.sessionId,
-    at: state.now(),
-    ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
-    message: `dropped ${droppedFrames} ${droppedFrames === 1 ? "message" : "messages"} from a subagent the harness never reported starting`,
-  };
+  const dropped = state.heldFrames.splice(0);
+  recordDroppedFrames(
+    state.subagents,
+    dropped.flatMap((frame) => readAgentCallId(frame) ?? []),
+  );
+  return [
+    {
+      _tag: "runtime.warning",
+      eventId: state.mint(),
+      sessionId: state.sessionId,
+      at: state.now(),
+      ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
+      message: `dropped ${dropped.length} messages from a subagent the harness never reported starting`,
+    },
+  ];
 };
 
 /**
  * Normalizes the held frames whose subagent is now known, in the order they
- * arrived, and returns their events. The frames still unknown are dropped
- * with one `runtime.warning` that counts them: no later message would link
- * them, because the subagent's `task_started` has come and gone. The
- * requests of unknown subagents are dropped with them, as in `holdFrame`.
+ * arrived, and returns their events. The frames still unknown stay held, in
+ * order, for the `task_started` that links them.
  */
 const releaseHeldFrames = (state: Normalizing): Emit => {
   const held = state.heldFrames.splice(0);
   const out: Emit = [];
-  let dropped = 0;
   for (const frame of held) {
-    if (findTurnOwner(state, frame) === "unknown") dropped += 1;
+    if (findTurnOwner(state, frame) === "unknown") state.heldFrames.push(frame);
     else out.push(...normalizeFrame(state, frame));
-  }
-  if (dropped > 0) {
-    dropRequestsOfUnknownSubagents(state.subagents);
-    out.push(buildDroppedFramesWarning(state, dropped));
   }
   return out;
 };

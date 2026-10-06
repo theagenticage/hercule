@@ -3,6 +3,7 @@ import {
   buildSubagentRegistry,
   cleanSubagentId,
   collectDescendants,
+  clearRefusedStop,
   markStopsWanted,
   recordAgentCall,
   registerSubagent,
@@ -59,6 +60,18 @@ describe("stopping subagents", () => {
     registry.byId.get("a2")!.stop = "stopped";
     markStopsWanted(registry, ["a1", "a2"]);
     expect(registry.byId.get("a1")!.stop).toBe("sent");
+    expect(registry.byId.get("a2")!.stop).toBe("stopped");
+  });
+
+  // The harness may report the subagent ended while the refused stop was out.
+  it("clears only a stop that is still sent when the harness refused it", () => {
+    const registry = buildSubagentRegistry([{ subagentId: "a1" }, { subagentId: "a2" }]);
+    registry.byId.get("a1")!.stop = "sent";
+    registry.byId.get("a2")!.stop = "stopped";
+    clearRefusedStop(registry, "a1");
+    clearRefusedStop(registry, "a2");
+    clearRefusedStop(registry, "unknown");
+    expect(registry.byId.get("a1")!.stop).toBe("none");
     expect(registry.byId.get("a2")!.stop).toBe("stopped");
   });
 

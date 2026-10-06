@@ -1146,33 +1146,58 @@ describe("frames from a subagent not linked yet", () => {
     expect(own?.raw?.payload).toEqual(held);
   });
 
-  it("drops what is still unknown at the next task_started, with one warning that counts it", () => {
+  // A task_started links one agent call only. The frames of another subagent
+  // still wait for their own task_started, which can come later.
+  it("keeps another subagent's frames held past a task_started, and releases them at its own", () => {
     const running = buildTestState();
-    const events = [
-      buildSubagentText("toolu_01NeverStarted", "msg_lost_1", "lost"),
-      buildSubagentText("toolu_01NeverStarted", "msg_lost_2", "lost too"),
-      buildTaskStarted(SUBAGENT, AGENT_CALL),
-    ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
-    expect(events.map(formatEvent)).toEqual([
-      `subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`,
-      "runtime.warning",
+    const held = [
+      buildSubagentText(NESTED_CALL, "msg_nested_1", "first"),
+      buildSubagentText(NESTED_CALL, "msg_nested_2", "second"),
+    ];
+    for (const message of held) {
+      expect(normalize(running, message as unknown as SDKMessage)).toEqual([]);
+    }
+    expect(
+      normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage).map(
+        formatEvent,
+      ),
+    ).toEqual([`subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`]);
+    expect(running.heldFrames).toEqual(held);
+
+    const lines = normalize(
+      running,
+      buildTaskStarted(NESTED, NESTED_CALL) as unknown as SDKMessage,
+    ).map(formatEvent);
+    expect(lines.filter((line) => line.startsWith("content.delta"))).toEqual([
+      `content.delta assistant_text "first" @${NESTED}`,
+      `content.delta assistant_text "second" @${NESTED}`,
     ]);
-    const warned = events.at(-1);
-    expect(warned?._tag === "runtime.warning" ? warned.message : undefined).toBe(
-      "dropped 2 messages from a subagent the harness never reported starting",
-    );
+    expect(lines.some((line) => line.startsWith("runtime.warning"))).toBe(false);
+    expect(running.heldFrames).toEqual([]);
   });
 
-  it("counts a single dropped frame as one message", () => {
+  it("releases only the frames a task_started links, and keeps the rest held in order", () => {
     const running = buildTestState();
-    const events = [
-      buildSubagentText("toolu_01NeverStarted", "msg_lost_1", "lost"),
-      buildTaskStarted(SUBAGENT, AGENT_CALL),
-    ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
-    const warned = events.at(-1);
-    expect(warned?._tag === "runtime.warning" ? warned.message : undefined).toBe(
-      "dropped 1 message from a subagent the harness never reported starting",
-    );
+    const own = [
+      buildSubagentText(AGENT_CALL, "msg_sub_1", "first"),
+      buildSubagentText(AGENT_CALL, "msg_sub_2", "second"),
+    ];
+    const other = [
+      buildSubagentText(NESTED_CALL, "msg_nested_1", "other first"),
+      buildSubagentText(NESTED_CALL, "msg_nested_2", "other second"),
+    ];
+    for (const message of [own[0], other[0], own[1], other[1]]) {
+      normalize(running, message as unknown as SDKMessage);
+    }
+    const lines = normalize(
+      running,
+      buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage,
+    ).map(formatEvent);
+    expect(lines.filter((line) => line.startsWith("content.delta"))).toEqual([
+      `content.delta assistant_text "first" @${SUBAGENT}`,
+      `content.delta assistant_text "second" @${SUBAGENT}`,
+    ]);
+    expect(running.heldFrames).toEqual(other);
   });
 
   it("holds at most 1000 frames, and drops them all, with the requests of unknown subagents, at the next", () => {
@@ -1195,6 +1220,35 @@ describe("frames from a subagent not linked yet", () => {
     expect(running.heldFrames).toEqual([]);
     // A known subagent's request still waits for its turn.
     expect([...running.subagents.waitingRequests.keys()]).toEqual([SUBAGENT]);
+  });
+
+  // The frames that would have opened the subagent's turn are gone, so a
+  // request waiting for that turn could wait for ever.
+  it("drops the waiting requests of a subagent whose frames were dropped, until its turn opens", () => {
+    const running = buildTestState();
+    const lost = buildSubagentText(AGENT_CALL, "msg_lost", "lost");
+    for (let held = 1; held <= 1001; held += 1) normalize(running, lost as unknown as SDKMessage);
+    // The request comes after the drop, while the subagent is still unknown.
+    deferUntilTurnOpens(running.subagents, SUBAGENT, buildRequestOpened("r1", SUBAGENT));
+
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    expect(running.subagents.waitingRequests.has(SUBAGENT)).toBe(false);
+    expect(running.subagents.byId.get(SUBAGENT)?.openingFramesLost).toBe(true);
+
+    // The subagent's next frame opens its turn, and its requests work again.
+    normalize(running, buildSubagentText(AGENT_CALL, "msg_sub_1", "back") as unknown as SDKMessage);
+    expect(running.subagents.byId.get(SUBAGENT)?.openingFramesLost).toBe(false);
+    expect(
+      deferUntilTurnOpens(running.subagents, SUBAGENT, buildRequestOpened("r2", SUBAGENT)),
+    ).toHaveLength(1);
+  });
+
+  it("does not mark a subagent whose frames were never dropped", () => {
+    const running = buildTestState();
+    const lost = buildSubagentText("toolu_01NeverStarted", "msg_lost", "lost");
+    for (let held = 1; held <= 1001; held += 1) normalize(running, lost as unknown as SDKMessage);
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    expect(running.subagents.byId.get(SUBAGENT)?.openingFramesLost).toBe(false);
   });
 });
 
@@ -1415,13 +1469,16 @@ describe("a subagent's tool calls and denials", () => {
     expect(lines.some((line) => !line.includes("@") && line.startsWith("turn."))).toBe(false);
   });
 
-  it("drops a held permission denial whose agent no task_started names", () => {
+  it("keeps a permission denial from an unknown agent held past another subagent's task_started", () => {
+    const running = buildTestState();
+    const denied = buildPermissionDenied("a0unknown0000000");
+    normalize(running, denied as unknown as SDKMessage);
     expect(
-      normalizeMessages([
-        buildPermissionDenied("a0unknown0000000"),
-        buildTaskStarted(SUBAGENT, AGENT_CALL),
-      ]),
-    ).toEqual([`subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`, "runtime.warning"]);
+      normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage).map(
+        formatEvent,
+      ),
+    ).toEqual([`subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`]);
+    expect(running.heldFrames).toEqual([denied]);
   });
 });
 

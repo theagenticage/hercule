@@ -52,6 +52,7 @@ import {
 } from "./claude-code-normalize";
 import {
   cleanSubagentId,
+  clearRefusedStop,
   collectDescendants,
   deferUntilTurnOpens,
   markStopsWanted,
@@ -665,8 +666,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    * - the turn is interrupted or the session ends;
    * - the turn of the subagent that asked ends;
    * - the subagent that asked, or one above it, is stopped;
-   * - the frames of the subagent that asked are dropped, so its turn may
-   *   never open.
+   * - frames of the subagent that asked are dropped, so its turn may never
+   *   open.
    *
    * Each call gets its own park, under a request id the adapter creates, and
    * every answer comes back with that request id. Several parks can be open at
@@ -690,12 +691,15 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       // empty one is read as the session's own agent, because the protocol
       // does not accept an empty id.
       const subagentId = cleanSubagentId(options.agentID);
-      // A stopped Claude subagent runs no more turns, so its request would
-      // wait for ever for a turn to be shown in.
-      if (
-        subagentId !== undefined &&
-        held.state.subagents.byId.get(subagentId)?.stop === "stopped"
-      ) {
+      const subagent =
+        subagentId === undefined ? undefined : held.state.subagents.byId.get(subagentId);
+      // The request would wait for ever for a turn to be shown in, in two
+      // cases:
+      //
+      // - a stopped Claude subagent runs no more turns;
+      // - the frames that would open the subagent's turn were dropped. Denied,
+      //   the subagent goes on, and its next frame opens its turn.
+      if (subagent?.stop === "stopped" || subagent?.openingFramesLost === true) {
         return Promise.resolve(buildDenyResult());
       }
       // A park belongs to its asker's turn: the turn is waiting on it, and the
@@ -752,9 +756,14 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 
   /**
-   * Stops one subagent with `stopTask`. Never fails: when the harness refuses
-   * or does not answer, the subagent is reported with a `runtime.warning`,
-   * because the user asked to stop it and should know it may still run.
+   * Stops one subagent with `stopTask`. Never fails. When the harness refuses
+   * or does not answer:
+   *
+   * - the subagent is reported with a `runtime.warning`, because the user
+   *   asked to stop it and should know it may still run;
+   * - the subagent is no longer marked as being stopped, so the user's next
+   *   Stop sends `stopTask` again. Nothing sends it again by itself, so a
+   *   harness that keeps refusing is not asked at every message.
    */
   const stopSubagent = (held: Live, subagentId: SubagentId): Effect.Effect<void> =>
     Effect.map(sendControlRequest(held.stream.stopTask(subagentId)), (refused) => {
@@ -763,6 +772,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       const sessionStopped =
         held.stopping !== undefined || live.get(held.binding.sessionId) !== held;
       if (refused === undefined || sessionStopped) return;
+      clearRefusedStop(held.state.subagents, subagentId);
       emit({
         _tag: "runtime.warning",
         eventId: held.state.mint(),
@@ -847,10 +857,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 
   /**
-   * Withdraws each park of a subagent whose `request.opened` the normalizer
-   * dropped with that subagent's frames. Its turn may never open, so the
-   * request would never be shown. A park whose request was reported, or
-   * still waits for its turn, stays open.
+   * Withdraws each park whose `request.opened` the normalizer dropped because
+   * it dropped frames of the subagent that asked. The subagent's turn may
+   * never open, so the request would never be shown, and it ends with no
+   * `request.resolved`. A park whose request was reported, or still waits
+   * for its turn, stays open.
    */
   const withdrawRequestsOfDroppedSubagents = (held: Live): void => {
     const { waitingRequests } = held.state.subagents;
