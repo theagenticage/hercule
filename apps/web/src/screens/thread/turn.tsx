@@ -2,7 +2,8 @@
  * One turn of the transcript. It shows:
  *
  * - a centred time separator, when the screen passes one;
- * - the user's message as a right-aligned bubble;
+ * - the user's message as a right-aligned bubble, unless `hidesUserMessage`
+ *   leaves it out;
  * - one line per subagent the turn started;
  * - the assistant's prose at full width;
  * - the divider that shows how long the agent worked, or how the turn ended,
@@ -27,6 +28,7 @@ export function Turn({
   live,
   tailRef,
   stamp,
+  hidesUserMessage = false,
 }: {
   /** The session the turn belongs to, whether the turn is its own agent's or a subagent's. */
   readonly session: Session;
@@ -39,11 +41,17 @@ export function Turn({
   readonly tailRef?: RefObject<HTMLSpanElement | null> | undefined;
   /** The time separator to show above the turn; none when undefined. */
   readonly stamp: string | undefined;
+  /**
+   * Whether to leave out the user's message. A subagent's page sets it on
+   * the first turn, whose input is the brief the page's brief card already
+   * shows.
+   */
+  readonly hidesUserMessage?: boolean;
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-2">
       {stamp === undefined ? null : <TimeSeparator stamp={stamp} />}
-      {turn.user === "" ? null : (
+      {turn.user === "" || hidesUserMessage ? null : (
         <div className="flex justify-end">
           <OwnerBubble text={turn.user} />
         </div>
