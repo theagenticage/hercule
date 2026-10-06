@@ -25,6 +25,9 @@
  * - a decision on an open approval, or answers to an open question, with
  *   `request.resolved`.
  *
+ * Any agent can ask: the session's own agent, or a subagent at any depth. A
+ * Request a subagent opens carries its `subagentId`.
+ *
  * Nothing else happens until the caller calls a method. The simple methods
  * each report one change: a turn starts, a Request opens, the session exits.
  * `playScript` reports a whole turn's work instead: messages that stream word
@@ -147,6 +150,12 @@ const STREAM_BLOCKS: ReadonlyArray<string> = [
 /** The kinds of Request a harness can open. */
 export type RequestKind = OpenRequest["kind"];
 
+/** The questions one `question` Request asks, as the protocol carries them. */
+export type ScriptedQuestions = Extract<
+  OpenRequest,
+  { readonly kind: "question" }
+>["detail"]["questions"];
+
 /**
  * One piece of work in a scripted turn. `playScript` plays a list of steps in
  * order into the session's running turn. Each step reports the events the
@@ -162,6 +171,9 @@ export type RequestKind = OpenRequest["kind"];
  *   and `Edit`. The call runs for `forMs` (0 by default) and succeeds. With
  *   `ask`, it first opens a Request for approval and waits for the user to
  *   allow it; see `playScript`.
+ * - `question` asks the user `questions` the way Claude Code's
+ *   `AskUserQuestion` tool does: a `tool_call` item, and a `question` Request
+ *   about it. The agent waits for the answers, and the item then completes.
  * - `usage` reports a Token Usage snapshot of the agent playing the step: the
  *   whole session's when the session's own agent plays it, the subagent's own
  *   when a subagent does.
@@ -193,6 +205,7 @@ export type ScriptStep =
       readonly forMs?: number;
       readonly ask?: boolean;
     }
+  | { readonly kind: "question"; readonly questions: ScriptedQuestions }
   | { readonly kind: "usage"; readonly usage: Usage }
   | {
       readonly kind: "subagent";
@@ -201,6 +214,8 @@ export type ScriptStep =
       readonly description: string;
       /** The harness's name for the kind of agent, as Claude's `subagent_type`. */
       readonly agentType?: string;
+      /** The model the subagent's turn runs on, as the harness reports it on `turn.started`. */
+      readonly model?: string;
       /** The prompt the parent gives the subagent: its first turn's user message. */
       readonly brief: string;
       readonly steps: ReadonlyArray<ScriptStep>;
@@ -380,10 +395,10 @@ export async function enlistScriptedRunner(
   };
 
   /**
-   * Opens a turn of the agent and reports it. Fails if the agent already has
-   * a turn running.
+   * Opens a turn of the agent and reports it, with the model it runs on when
+   * one is given. Fails if the agent already has a turn running.
    */
-  const openTurn = (session: HostedSession, agent: Agent): void => {
+  const openTurn = (session: HostedSession, agent: Agent, model?: string): void => {
     if (agent.turnId !== undefined) {
       throw new Error(
         `${describeAgent(agent)} of session ${session.sessionId} is already running turn ${agent.turnId}`,
@@ -394,6 +409,7 @@ export async function enlistScriptedRunner(
       _tag: "turn.started",
       ...stampAgentEvent(session.sessionId, agent),
       turnId: agent.turnId,
+      ...(model === undefined ? {} : { model }),
     });
   };
 
@@ -586,12 +602,7 @@ export async function enlistScriptedRunner(
     });
     if (options.ask === true) {
       const request: OpenRequest = { ...call.approval, requestId: randomUUID(), itemId };
-      const answered = new Promise<RequestResolution>((resolve, reject) => {
-        session.requests.set(request.requestId, { agent, resumeScript: resolve });
-        signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
-      });
-      reportEvent(session, { _tag: "request.opened", ...stamp(), request });
-      const response = await answered;
+      const response = await parkOnRequest(session, agent, request, signal);
       if (
         !("decision" in response) ||
         (response.decision !== "allow" && response.decision !== "allow_always")
@@ -611,6 +622,74 @@ export async function enlistScriptedRunner(
       kind: call.kind,
       status: "completed",
       detail: { content: TOOL_OUTPUT },
+    });
+  };
+
+  /**
+   * Opens the Request for the agent and waits until it is resolved. Returns
+   * the decision or the answers it was resolved with. Fails when the agent's
+   * script is stopped first, as an interrupt does before it withdraws the
+   * Request.
+   */
+  const parkOnRequest = (
+    session: HostedSession,
+    agent: Agent,
+    request: OpenRequest,
+    signal: AbortSignal,
+  ): Promise<RequestResolution> => {
+    const answered = new Promise<RequestResolution>((resolve, reject) => {
+      session.requests.set(request.requestId, { agent, resumeScript: resolve });
+      signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
+    });
+    reportEvent(session, {
+      _tag: "request.opened",
+      ...stampAgentEvent(session.sessionId, agent),
+      request,
+    });
+    return answered;
+  };
+
+  /**
+   * Asks the user questions the way Claude Code's `AskUserQuestion` tool does:
+   * the tool call's item starts, its `question` Request opens, and once the
+   * user answers, the item completes with the answers as its output. Fails if
+   * the Request is resolved with a decision rather than answers: only an
+   * interrupt does that, and it stops the script first.
+   */
+  const askQuestions = async (
+    session: HostedSession,
+    agent: Agent,
+    turnId: string,
+    questions: ScriptedQuestions,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const itemId = `toolu_${randomBytes(12).toString("hex")}`;
+    const item = { turnId, itemId, kind: "tool_call" } as const;
+    const stamp = () => stampAgentEvent(session.sessionId, agent);
+    reportEvent(session, {
+      _tag: "item.started",
+      ...stamp(),
+      ...item,
+      detail: { name: "AskUserQuestion", input: { questions }, kind: "native" },
+    });
+    const response = await parkOnRequest(
+      session,
+      agent,
+      { requestId: randomUUID(), itemId, kind: "question", detail: { questions } },
+      signal,
+    );
+    if (!("answers" in response)) {
+      throw new Error(
+        `the question of session ${session.sessionId} was resolved with ${JSON.stringify(response)}; ` +
+          "a scripted question goes on only once the user answers it",
+      );
+    }
+    reportEvent(session, {
+      _tag: "item.completed",
+      ...stamp(),
+      ...item,
+      status: "completed",
+      detail: { content: JSON.stringify(response.answers) },
     });
   };
 
@@ -666,7 +745,7 @@ export async function enlistScriptedRunner(
       description: step.description,
       ...(step.agentType === undefined ? {} : { agentType: step.agentType }),
     });
-    openTurn(session, subagent);
+    openTurn(session, subagent, step.model);
     reportUserMessage(session, subagent, step.brief, false);
     const played = playSubagentTurn(session, subagent, step.steps, background);
 
@@ -731,6 +810,8 @@ export async function enlistScriptedRunner(
       case "command":
       case "file_change":
         return runToolCall(session, agent, turnId, buildToolCall(step), step, signal);
+      case "question":
+        return askQuestions(session, agent, turnId, step.questions, signal);
       case "usage":
         return reportEvent(session, {
           _tag: "session.usage.updated",

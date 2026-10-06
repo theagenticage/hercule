@@ -16,7 +16,8 @@
     "compare:bureau": "node scripts/compare-bureau.ts",
     "capture:sidebar-states": "node scripts/capture-sidebar-states.ts",
     "capture:room": "node scripts/capture-room.ts",
-    "capture:first-run": "node scripts/capture-first-run.ts"
+    "capture:first-run": "node scripts/capture-first-run.ts",
+    "demo:subagents": "node scripts/subagents-demo.ts"
   },
   "devDependencies": {
     "@babel/core": "8.0.1",
