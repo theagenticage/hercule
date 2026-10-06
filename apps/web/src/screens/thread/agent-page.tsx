@@ -149,11 +149,17 @@ export function AgentPage({
                 // live last turn gets the live tail element.
                 tailRef={isLive ? tailRef : undefined}
                 stamp={stamps[index]}
+                // The brief card above already shows the brief, the user
+                // message of a subagent's first turn.
+                hidesUserMessage={subagent !== undefined && index === 0}
               />
             );
           })}
         </div>
-        <div className="sticky bottom-0 flex flex-col gap-2">
+        {/* The foot has the page's background, so the transcript scrolling
+            beneath it never shows through beside the tally or between the
+            cards. */}
+        <div className="sticky bottom-0 flex flex-col gap-2 bg-bg">
           <TallyPill session={session} subagents={subagents} />
           {subagent === undefined ? <QueuedInputs client={client} sessionId={sessionId} /> : null}
           <div className="flex flex-col">
