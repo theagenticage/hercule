@@ -26,7 +26,8 @@ import {
 } from "../../app/queries";
 import { AccessModeSelector } from "./access-mode-selector";
 import { ComposerCard } from "./composer-card";
-import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
+import { StopButton } from "../stop-button";
+import { AttachButton, SendButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
 import { buildLoginSlot } from "./login-slot";

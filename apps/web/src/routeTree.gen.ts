@@ -38,11 +38,13 @@ import { Route as ShellSettingsSecretsRouteImport } from './routes/_shell/settin
 import { Route as ShellSettingsSystemRouteImport } from './routes/_shell/settings/system'
 import { Route as ShellSettingsThreadsRouteImport } from './routes/_shell/settings/threads'
 import { Route as ShellTasksIndexRouteImport } from './routes/_shell/tasks/index'
-import { Route as ShellThreadsSessionIdRouteImport } from './routes/_shell/threads/$sessionId'
+import { Route as ShellThreadsSessionIdRouteRouteImport } from './routes/_shell/threads/$sessionId/route'
 import { Route as ShellThreadsNewRouteImport } from './routes/_shell/threads/new'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell/workflows/index'
 import { Route as ShellWorkflowsWorkflowIdRouteImport } from './routes/_shell/workflows/$workflowId'
 import { Route as ShellWorkflowsNewRouteImport } from './routes/_shell/workflows/new'
+import { Route as ShellThreadsSessionIdIndexRouteImport } from './routes/_shell/threads/$sessionId/index'
+import { Route as ShellThreadsSessionIdSubagentsSubagentIdRouteImport } from './routes/_shell/threads/$sessionId/subagents/$subagentId'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -190,11 +192,12 @@ const ShellTasksIndexRoute = ShellTasksIndexRouteImport.update({
   path: '/tasks/',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellThreadsSessionIdRoute = ShellThreadsSessionIdRouteImport.update({
-  id: '/threads/$sessionId',
-  path: '/threads/$sessionId',
-  getParentRoute: () => ShellRoute,
-} as any)
+const ShellThreadsSessionIdRouteRoute =
+  ShellThreadsSessionIdRouteRouteImport.update({
+    id: '/threads/$sessionId',
+    path: '/threads/$sessionId',
+    getParentRoute: () => ShellRoute,
+  } as any)
 const ShellThreadsNewRoute = ShellThreadsNewRouteImport.update({
   id: '/threads/new',
   path: '/threads/new',
@@ -216,6 +219,18 @@ const ShellWorkflowsNewRoute = ShellWorkflowsNewRouteImport.update({
   path: '/workflows/new',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellThreadsSessionIdIndexRoute =
+  ShellThreadsSessionIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => ShellThreadsSessionIdRouteRoute,
+  } as any)
+const ShellThreadsSessionIdSubagentsSubagentIdRoute =
+  ShellThreadsSessionIdSubagentsSubagentIdRouteImport.update({
+    id: '/subagents/$subagentId',
+    path: '/subagents/$subagentId',
+    getParentRoute: () => ShellThreadsSessionIdRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -227,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ShellSettingsRouteWithChildren
   '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
+  '/threads/$sessionId': typeof ShellThreadsSessionIdRouteRouteWithChildren
   '/assistants/$assistantId': typeof ShellAssistantsAssistantIdRoute
   '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/runs/$runId': typeof ShellRunsRunIdRoute
@@ -239,7 +255,6 @@ export interface FileRoutesByFullPath {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
-  '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/threads/new': typeof ShellThreadsNewRoute
   '/workflows/$workflowId': typeof ShellWorkflowsWorkflowIdRoute
   '/workflows/new': typeof ShellWorkflowsNewRoute
@@ -251,6 +266,8 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof ShellSettingsIndexRoute
   '/tasks/': typeof ShellTasksIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
+  '/threads/$sessionId/': typeof ShellThreadsSessionIdIndexRoute
+  '/threads/$sessionId/subagents/$subagentId': typeof ShellThreadsSessionIdSubagentsSubagentIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -273,7 +290,6 @@ export interface FileRoutesByTo {
   '/settings/secrets': typeof ShellSettingsSecretsRoute
   '/settings/system': typeof ShellSettingsSystemRoute
   '/settings/threads': typeof ShellSettingsThreadsRoute
-  '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/threads/new': typeof ShellThreadsNewRoute
   '/workflows/$workflowId': typeof ShellWorkflowsWorkflowIdRoute
   '/workflows/new': typeof ShellWorkflowsNewRoute
@@ -285,6 +301,8 @@ export interface FileRoutesByTo {
   '/settings': typeof ShellSettingsIndexRoute
   '/tasks': typeof ShellTasksIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
+  '/threads/$sessionId': typeof ShellThreadsSessionIdIndexRoute
+  '/threads/$sessionId/subagents/$subagentId': typeof ShellThreadsSessionIdSubagentsSubagentIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -298,6 +316,7 @@ export interface FileRoutesById {
   '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/_shell/': typeof ShellIndexRoute
+  '/_shell/threads/$sessionId': typeof ShellThreadsSessionIdRouteRouteWithChildren
   '/_shell/assistants/$assistantId': typeof ShellAssistantsAssistantIdRoute
   '/_shell/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/_shell/runs/$runId': typeof ShellRunsRunIdRoute
@@ -310,7 +329,6 @@ export interface FileRoutesById {
   '/_shell/settings/secrets': typeof ShellSettingsSecretsRoute
   '/_shell/settings/system': typeof ShellSettingsSystemRoute
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
-  '/_shell/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/_shell/threads/new': typeof ShellThreadsNewRoute
   '/_shell/workflows/$workflowId': typeof ShellWorkflowsWorkflowIdRoute
   '/_shell/workflows/new': typeof ShellWorkflowsNewRoute
@@ -322,6 +340,8 @@ export interface FileRoutesById {
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/tasks/': typeof ShellTasksIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
+  '/_shell/threads/$sessionId/': typeof ShellThreadsSessionIdIndexRoute
+  '/_shell/threads/$sessionId/subagents/$subagentId': typeof ShellThreadsSessionIdSubagentsSubagentIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -335,6 +355,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/onboarding/assistant'
     | '/onboarding/timezone'
+    | '/threads/$sessionId'
     | '/assistants/$assistantId'
     | '/fleet/$runnerId'
     | '/runs/$runId'
@@ -347,7 +368,6 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
-    | '/threads/$sessionId'
     | '/threads/new'
     | '/workflows/$workflowId'
     | '/workflows/new'
@@ -359,6 +379,8 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/tasks/'
     | '/workflows/'
+    | '/threads/$sessionId/'
+    | '/threads/$sessionId/subagents/$subagentId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -381,7 +403,6 @@ export interface FileRouteTypes {
     | '/settings/secrets'
     | '/settings/system'
     | '/settings/threads'
-    | '/threads/$sessionId'
     | '/threads/new'
     | '/workflows/$workflowId'
     | '/workflows/new'
@@ -393,6 +414,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/tasks'
     | '/workflows'
+    | '/threads/$sessionId'
+    | '/threads/$sessionId/subagents/$subagentId'
   id:
     | '__root__'
     | '/_shell'
@@ -405,6 +428,7 @@ export interface FileRouteTypes {
     | '/onboarding/assistant'
     | '/onboarding/timezone'
     | '/_shell/'
+    | '/_shell/threads/$sessionId'
     | '/_shell/assistants/$assistantId'
     | '/_shell/fleet/$runnerId'
     | '/_shell/runs/$runId'
@@ -417,7 +441,6 @@ export interface FileRouteTypes {
     | '/_shell/settings/secrets'
     | '/_shell/settings/system'
     | '/_shell/settings/threads'
-    | '/_shell/threads/$sessionId'
     | '/_shell/threads/new'
     | '/_shell/workflows/$workflowId'
     | '/_shell/workflows/new'
@@ -429,6 +452,8 @@ export interface FileRouteTypes {
     | '/_shell/settings/'
     | '/_shell/tasks/'
     | '/_shell/workflows/'
+    | '/_shell/threads/$sessionId/'
+    | '/_shell/threads/$sessionId/subagents/$subagentId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -648,7 +673,7 @@ declare module '@tanstack/react-router' {
       id: '/_shell/threads/$sessionId'
       path: '/threads/$sessionId'
       fullPath: '/threads/$sessionId'
-      preLoaderRoute: typeof ShellThreadsSessionIdRouteImport
+      preLoaderRoute: typeof ShellThreadsSessionIdRouteRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/threads/new': {
@@ -678,6 +703,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/workflows/new'
       preLoaderRoute: typeof ShellWorkflowsNewRouteImport
       parentRoute: typeof ShellRoute
+    }
+    '/_shell/threads/$sessionId/': {
+      id: '/_shell/threads/$sessionId/'
+      path: '/'
+      fullPath: '/threads/$sessionId/'
+      preLoaderRoute: typeof ShellThreadsSessionIdIndexRouteImport
+      parentRoute: typeof ShellThreadsSessionIdRouteRoute
+    }
+    '/_shell/threads/$sessionId/subagents/$subagentId': {
+      id: '/_shell/threads/$sessionId/subagents/$subagentId'
+      path: '/subagents/$subagentId'
+      fullPath: '/threads/$sessionId/subagents/$subagentId'
+      preLoaderRoute: typeof ShellThreadsSessionIdSubagentsSubagentIdRouteImport
+      parentRoute: typeof ShellThreadsSessionIdRouteRoute
     }
   }
 }
@@ -712,16 +751,33 @@ const ShellSettingsRouteWithChildren = ShellSettingsRoute._addFileChildren(
   ShellSettingsRouteChildren,
 )
 
+interface ShellThreadsSessionIdRouteRouteChildren {
+  ShellThreadsSessionIdIndexRoute: typeof ShellThreadsSessionIdIndexRoute
+  ShellThreadsSessionIdSubagentsSubagentIdRoute: typeof ShellThreadsSessionIdSubagentsSubagentIdRoute
+}
+
+const ShellThreadsSessionIdRouteRouteChildren: ShellThreadsSessionIdRouteRouteChildren =
+  {
+    ShellThreadsSessionIdIndexRoute: ShellThreadsSessionIdIndexRoute,
+    ShellThreadsSessionIdSubagentsSubagentIdRoute:
+      ShellThreadsSessionIdSubagentsSubagentIdRoute,
+  }
+
+const ShellThreadsSessionIdRouteRouteWithChildren =
+  ShellThreadsSessionIdRouteRoute._addFileChildren(
+    ShellThreadsSessionIdRouteRouteChildren,
+  )
+
 interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellCheckInRoute: typeof ShellCheckInRoute
   ShellIntakeRoute: typeof ShellIntakeRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
+  ShellThreadsSessionIdRouteRoute: typeof ShellThreadsSessionIdRouteRouteWithChildren
   ShellAssistantsAssistantIdRoute: typeof ShellAssistantsAssistantIdRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
   ShellRunsRunIdRoute: typeof ShellRunsRunIdRoute
-  ShellThreadsSessionIdRoute: typeof ShellThreadsSessionIdRoute
   ShellThreadsNewRoute: typeof ShellThreadsNewRoute
   ShellWorkflowsWorkflowIdRoute: typeof ShellWorkflowsWorkflowIdRoute
   ShellWorkflowsNewRoute: typeof ShellWorkflowsNewRoute
@@ -740,10 +796,10 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIntakeRoute: ShellIntakeRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
+  ShellThreadsSessionIdRouteRoute: ShellThreadsSessionIdRouteRouteWithChildren,
   ShellAssistantsAssistantIdRoute: ShellAssistantsAssistantIdRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
   ShellRunsRunIdRoute: ShellRunsRunIdRoute,
-  ShellThreadsSessionIdRoute: ShellThreadsSessionIdRoute,
   ShellThreadsNewRoute: ShellThreadsNewRoute,
   ShellWorkflowsWorkflowIdRoute: ShellWorkflowsWorkflowIdRoute,
   ShellWorkflowsNewRoute: ShellWorkflowsNewRoute,

@@ -25,6 +25,7 @@ import {
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
+import { useStopAgent } from "../use-stop-agent";
 
 /** The localStorage key for the recently picked models. The API does not store them. */
 const RECENT_KEY = "hercule.recentModels";
@@ -135,12 +136,7 @@ export function useComposerModel(
     },
     onSettled: releaseSend,
   });
-  const interrupt = useMutation({
-    mutationFn: (id: string) => client.session.interrupt({ params: { id }, payload: {} }),
-    // The response is not written into the cache. It is the session as the
-    // controller read it before the interrupt, still busy, so writing it
-    // could bring back a Stop the live `session` push has already cleared.
-  });
+  const stopAgent = useStopAgent(client, session?.id ?? null);
   const readOnly = session === null ? null : findResumeBlockedReason(session);
   const busy = session?.status === "busy";
 
@@ -162,7 +158,7 @@ export function useComposerModel(
     readOnly,
     busy,
     sending: spawn.isPending || input.isPending,
-    error: spawn.error ?? input.error ?? interrupt.error,
+    error: spawn.error ?? input.error ?? stopAgent.error,
     setMessage,
     // Each pick is compared with the thread's own configuration, not with
     // earlier picks, so picking the configured value again clears the pick.
@@ -189,7 +185,7 @@ export function useComposerModel(
       }
     },
     stop: () => {
-      if (session !== null) interrupt.mutate(session.id);
+      stopAgent.stop();
     },
   };
 }

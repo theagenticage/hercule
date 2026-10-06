@@ -28,6 +28,7 @@ import type {
   Runner,
   Session,
   SessionRequest,
+  Subagent,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
@@ -35,6 +36,8 @@ import {
   APPROVAL_ANSWER_LABELS,
   buildSessionStreamTopic,
   buildSessionTapTopic,
+  buildSubagentStreamTopic,
+  buildSubagentTapTopic,
 } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -47,7 +50,7 @@ import {
   type FakeScrollGeometry,
   type Handler,
   type LiveStub,
-} from "../../../app/testing";
+} from "../../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const ZONE = "Europe/Amsterdam";
@@ -229,6 +232,9 @@ const buildController = (
   },
   [`GET /api/v1/sessions/${fixture.id}`]: { body: fixture },
   [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
+  // The thread's subagents. A test about subagents overrides this with its
+  // own `extra`.
+  [`GET /api/v1/sessions/${fixture.id}/subagents`]: { body: { items: [] } },
   // The composer's reads. A test that needs specific queued
   // inputs overrides the `/inputs` route below with its own `extra`.
   "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
@@ -1589,7 +1595,7 @@ describe("Thread: the transcript cache only grows forwards", () => {
 });
 
 describe("Thread: live subscriptions", () => {
-  it("subscribes to exactly the session's stream and tap topics while mounted, and ends them on unmount", async () => {
+  it("subscribes to exactly the session's stream and tap topics and the subagent topic while mounted, and ends them on unmount", async () => {
     const { live, router } = await openApp(
       buildSession({ status: "idle" }),
       buildTwoCompletedTurns(),
@@ -1597,13 +1603,14 @@ describe("Thread: live subscriptions", () => {
 
     // The shell has its own subscriptions whatever screen is open (for
     // example the sidebar's `session` invalidation topic). The assertion
-    // therefore checks only the topics that start with `session:`, not the
-    // whole set.
-    const listSessionTopics = () => live.topics().filter((topic) => topic.startsWith("session:"));
+    // therefore checks only the per-session topics, which start with
+    // `session:`, and the `subagent` topic, which only a thread opens.
+    const listThreadTopics = () =>
+      live.topics().filter((topic) => topic.startsWith("session:") || topic === "subagent");
 
     await waitFor(() => {
-      expect([...listSessionTopics()].sort()).toEqual(
-        [buildSessionStreamTopic(SESSION_ID), buildSessionTapTopic(SESSION_ID)].sort(),
+      expect([...listThreadTopics()].sort()).toEqual(
+        [buildSessionStreamTopic(SESSION_ID), buildSessionTapTopic(SESSION_ID), "subagent"].sort(),
       );
     });
 
@@ -1612,7 +1619,7 @@ describe("Thread: live subscriptions", () => {
     });
 
     await waitFor(() => {
-      expect(listSessionTopics()).toEqual([]);
+      expect(listThreadTopics()).toEqual([]);
     });
   });
 
@@ -1693,6 +1700,7 @@ describe("Thread: live subscriptions", () => {
       {
         [`GET /api/v1/sessions/${OTHER_ID}`]: { body: other },
         [`GET /api/v1/sessions/${OTHER_ID}/transcript`]: { body: { items: [] } },
+        [`GET /api/v1/sessions/${OTHER_ID}/subagents`]: { body: { items: [] } },
       },
     );
 
@@ -1713,6 +1721,155 @@ describe("Thread: live subscriptions", () => {
     // the beginning of its log. Any other value means the previous thread's
     // cursor leaked.
     expect(live.readCursor(buildSessionStreamTopic(OTHER_ID))).toBe("0");
+  });
+});
+
+const SUBAGENT_ID = "toolu_explore_auth";
+
+const SUBAGENT: Subagent = {
+  id: SUBAGENT_ID,
+  sessionId: SESSION_ID,
+  description: "Explore the auth module",
+  status: "running",
+  toolCalls: 2,
+  startedAt: "2026-09-08T10:00:01.000Z",
+};
+
+/** The subagent's own transcript: one turn whose answer is a single message. */
+const buildSubagentTranscript = (): TranscriptRow[] =>
+  buildTranscript(
+    buildTurnStart("s1", "2026-09-08T10:00:01.000Z"),
+    buildAssistantMessage(
+      "s1",
+      "2026-09-08T10:00:02.000Z",
+      "sa1",
+      "The auth module has two entry points.",
+    ),
+  );
+
+/**
+ * Builds the routes for a thread with `SUBAGENT`. The transcript route
+ * answers with the subagent's rows when the request names the subagent, and
+ * with the session's own rows otherwise, as the controller does.
+ */
+const buildSubagentRoutes = (
+  sessionRows: readonly TranscriptRow[],
+): Readonly<Record<string, Handler>> => ({
+  [`GET /api/v1/sessions/${SESSION_ID}/subagents`]: { body: { items: [SUBAGENT] } },
+  [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: (call: Call) => ({
+    body: {
+      items: call.search.includes(`subagentId=${SUBAGENT_ID}`)
+        ? buildSubagentTranscript()
+        : sessionRows,
+    },
+  }),
+});
+
+describe("Thread: a subagent's page", () => {
+  it("shows the subagent's transcript and subscribes to its topics in place of the session's", async () => {
+    const rows = buildTwoCompletedTurns();
+    const { live, router } = await openApp(
+      buildSession({ status: "busy" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+
+    await screen.findByText("The auth module has two entry points.");
+    expect(screen.queryByText("Added a test too.")).toBeNull();
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSubagentStreamTopic(SESSION_ID, SUBAGENT_ID));
+    });
+    expect(live.topics()).toContain(buildSubagentTapTopic(SESSION_ID, SUBAGENT_ID));
+    expect(live.topics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+    expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+    // The thread's layout stays mounted, so the `subagent` topic stays open.
+    expect(live.topics()).toContain("subagent");
+    // A subagent takes no messages from the user, so its page has no composer.
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("shows the rows the thread wrote while its subagent's page was open after going back", async () => {
+    // The thread's transcript stays cached while the subagent's page is open,
+    // but nothing appends to it: the session's stream is not subscribed. Going
+    // back subscribes again from the cached rows' cursor, and the controller
+    // replays every row written after it, so the thread catches up.
+    const rows = buildTwoCompletedTurns();
+    const { live, router } = await openApp(
+      buildSession({ status: "busy" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+
+    await act(async () => {
+      await router.navigate({ to: "/threads/$sessionId", params: { sessionId: SESSION_ID } });
+    });
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+    // The new subscription resumes after the last cached row, not at the head
+    // of the log, so the rows written meanwhile are replayed.
+    expect(live.readCursor(buildSessionStreamTopic(SESSION_ID))).toBe("15");
+
+    const written = [
+      ...buildTurnStart("t3", "2026-09-08T10:02:00.000Z"),
+      ...buildAssistantMessage("t3", "2026-09-08T10:02:01.000Z", "a3", "Merged the fix."),
+    ].map((event, index) =>
+      buildTranscriptRow(16 + index, { ...event, eventId: `e${16 + index}` }),
+    );
+    act(() => {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: written,
+        cursor: String(written.at(-1)!.position),
+      });
+    });
+
+    await screen.findByText("Merged the fix.");
+    expect(screen.getByText("Added a test too.")).toBeDefined();
+    // The subagent's rows are cached under their own key and never show here.
+    expect(screen.queryByText("The auth module has two entry points.")).toBeNull();
+  });
+
+  it("says the thread has no such subagent for an unknown subagent id", async () => {
+    const rows = buildTwoCompletedTurns();
+    const { router } = await openApp(
+      buildSession({ status: "idle" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: "toolu_unknown" },
+      });
+    });
+
+    await screen.findByText("This thread has no subagent with this id.");
+    expect(screen.getByRole("link", { name: "Go to the thread" })).toBeDefined();
   });
 });
 
@@ -3347,6 +3504,7 @@ const buildThreadWorldRoutes = (
   "GET /api/v1/sessions": { body: { items: sessions } },
   [`GET /api/v1/sessions/${SIBLING_ID}`]: { body: SIBLING },
   [`GET /api/v1/sessions/${SIBLING_ID}/transcript`]: { body: { items: [] } },
+  [`GET /api/v1/sessions/${SIBLING_ID}/subagents`]: { body: { items: [] } },
 });
 
 const findThreadChrome = async (): Promise<HTMLElement> => {
