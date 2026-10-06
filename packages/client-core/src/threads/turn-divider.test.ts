@@ -20,6 +20,7 @@ const STARTED_AT = "2026-09-08T10:00:00.000Z";
 
 const ITEM: ThreadItem = {
   itemId: "tool1",
+  kind: "command_execution",
   verb: "command",
   target: "ls -la",
   result: "completed",

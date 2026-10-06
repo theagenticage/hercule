@@ -237,6 +237,27 @@ export {
   isSameDay,
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
+export {
+  describeSubagentLine,
+  describeSubagentMeta,
+  describeSubagentState,
+  formatTokenCount,
+  isSubagentWaiting,
+  nameSubagent,
+  type SubagentHue,
+  type SubagentLine,
+  type SubagentState,
+} from "./subagents/describe";
+export { buildRequestDock, type RequestAsker, type RequestDock } from "./subagents/request-dock";
+export { buildSpawnLines, type SpawnLine } from "./subagents/spawn-lines";
+export { describeStatusCard, type StatusCard } from "./subagents/status-card";
+export { describeSubagentTally, summarizeSubagents, type SubagentTally } from "./subagents/tally";
+export {
+  buildSubagentTree,
+  listSubagentAncestors,
+  listSubagentDescendants,
+  type SubagentNode,
+} from "./subagents/tree";
 export { resolveThreadRowsMode } from "./thread-rows";
 export { countUsedTokens, describeTokenUsage } from "./token-usage";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";

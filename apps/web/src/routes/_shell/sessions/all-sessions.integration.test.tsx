@@ -127,6 +127,24 @@ const SETTLED = buildSession({
 
 const THREE_STATUSES: readonly Session[] = [BUSY, IDLE, SETTLED];
 
+/** A working thread whose subagent waits on the user's approval of a command. */
+const WAITING = buildSession({
+  id: "01a06d02-2000-7000-8000-000000000004",
+  title: "Migrate the billing tables",
+  status: "busy",
+  lastActivityAt: "2026-09-08T11:40:00.000Z",
+  openRequests: [
+    {
+      requestId: "request-1",
+      itemId: "item-1",
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command: "pnpm migrate" },
+      subagentId: "agent-1",
+    },
+  ],
+});
+
 /** Sessions that answer an assistant's conversation, one working and one waiting for input. */
 const ANSWERING: readonly Session[] = [
   buildSession({
@@ -268,14 +286,31 @@ describe("All sessions", () => {
     expect(onScreen[0]!.getAttribute("href")).toBe("/threads/new");
   });
 
-  it("renders only the non-empty lanes (Running, Idle and Settled), not the empty ones", async () => {
-    await openApp(THREE_STATUSES);
+  it("renders only the non-empty lanes (Waiting on you, Running, Idle and Settled), not the empty ones", async () => {
+    await openApp([...THREE_STATUSES, WAITING]);
 
     expect(await screen.findByText("Running")).toBeDefined();
+    expect(findLane("Waiting on you")).not.toBeNull();
     expect(screen.getByText("Idle")).toBeDefined();
     expect(screen.getByText("Settled")).toBeDefined();
-    expect(screen.queryByText("Waiting on you")).toBeNull();
     expect(screen.queryByText("Assistants")).toBeNull();
+  });
+
+  it("shows a working thread with an open Request in Waiting on you only, and counts it there", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      await openApp([...THREE_STATUSES, WAITING]);
+
+      expect(
+        screen.getByText("1 waiting on you · 1 running · 1 idle · 1 settled this week"),
+      ).toBeDefined();
+      expect(readPageText(findLane("Waiting on you"))).toContain(WAITING.title);
+      expect(readPageText(findLane("Running"))).not.toContain(WAITING.title);
+      expect(readPageText(findLane("Running"))).toContain(BUSY.title);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows one row per session, with its title and provider display name", async () => {
@@ -317,7 +352,7 @@ describe("All sessions", () => {
     expect(screen.queryByText("Running")).toBeNull();
     expect(screen.queryByText("Idle")).toBeNull();
     expect(screen.queryByText("Settled")).toBeNull();
-    expect(screen.queryByText("Waiting on you")).toBeNull();
+    expect(findLane("Waiting on you")).toBeNull();
     expect(screen.queryByText("Assistants")).toBeNull();
   });
 });
