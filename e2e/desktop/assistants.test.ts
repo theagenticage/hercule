@@ -23,16 +23,16 @@
  */
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
-import type { HerculeClient } from "../../packages/client-core/src/index";
-import type { Assistant, Session } from "../../packages/contract/src/index";
 import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
   clickWaitingNotification,
   hideWindow,
   openSignedIn,
+  readAssistant,
   readBadgeCount,
   readMenuItems,
+  readNewestSession,
   readWaitingNotifications,
 } from "./harness";
 
@@ -51,25 +51,6 @@ const findAssistantsSection = (page: Page) =>
 async function readAssistantRows(page: Page): Promise<Array<string | null>> {
   const links = await findAssistantsSection(page).getByRole("link").all();
   return Promise.all(links.map((link) => link.getAttribute("aria-label")));
-}
-
-/** Returns the assistant named `name`, read through the API. Fails when there is none. */
-async function readAssistant(client: HerculeClient, name: string): Promise<Assistant> {
-  const { items } = await client.assistant.query({ query: { limit: 50 } });
-  const assistant = items.find((each) => each.name === name);
-  if (assistant === undefined) throw new Error(`the controller has no assistant named ${name}`);
-  return assistant;
-}
-
-/** Returns the newest session of the conversation, or null when it has none yet. */
-async function readNewestSession(
-  client: HerculeClient,
-  conversationId: string,
-): Promise<Session | null> {
-  const { items } = await client.session.query({
-    query: { conversationId, sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
-  });
-  return items[0] ?? null;
 }
 
 /** Returns the floating header's pill, which holds the assistant's face, name and pose word. */

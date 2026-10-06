@@ -19,12 +19,14 @@ import { describe, expect, it } from "vitest";
 import { writeSettings } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
+  buildLiveCheck,
   createUserDataDirForTest,
   keepWindowOnTop,
   launchForTest,
   launchPlainAppForTest,
   openSignedIn,
   openThread,
+  recordFrames,
   signInAndReadToken,
 } from "./harness";
 
@@ -81,12 +83,8 @@ interface MessageSnapshot {
 const readShownText = ({ text, openParagraph }: MessageSnapshot): string =>
   `${text}${openParagraph ?? ""}`;
 
-/** The page's global object, with what the recorders below keep on it. */
-type RecordingGlobal = typeof globalThis & {
-  messageSnapshots?: MessageSnapshot[];
-  sentFrames?: string[];
-  receivedFrames?: string[];
-};
+/** The page's global object, with what `recordLastMessage` keeps on it. */
+type RecordingGlobal = typeof globalThis & { messageSnapshots?: MessageSnapshot[] };
 
 /**
  * Starts recording what the last agent message in the transcript shows, each
@@ -120,71 +118,6 @@ function recordLastMessage(): void {
     characterData: true,
   });
   takeSnapshot();
-}
-
-/**
- * Starts recording the frames the page sends and receives on its WebSockets,
- * as text: every frame sent, in `sentFrames`, and every frame received from
- * then on, in `receivedFrames`, both on the page's global object. It runs in
- * the page, like `recordLastMessage`.
- *
- * The live connection's socket already exists. It sends through the
- * prototype's `send`, so its frames are recorded too, and its first send adds
- * the listener that records what it receives. A reply never arrives before
- * its request is sent, so every reply to a recorded request is recorded.
- */
-function recordFrames(): void {
-  const sent: string[] = [];
-  const received: string[] = [];
-  (globalThis as RecordingGlobal).sentFrames = sent;
-  (globalThis as RecordingGlobal).receivedFrames = received;
-  const listened = new WeakSet<WebSocket>();
-  // The original `send` is kept apart from any socket, and called below with
-  // each socket as `this`.
-  const send = Reflect.get(WebSocket.prototype, "send");
-  WebSocket.prototype.send = function (this: WebSocket, data) {
-    if (!listened.has(this)) {
-      listened.add(this);
-      this.addEventListener("message", (event: MessageEvent<unknown>) => {
-        received.push(typeof event.data === "string" ? event.data : "");
-      });
-    }
-    sent.push(typeof data === "string" ? data : new TextDecoder().decode(data as ArrayBuffer));
-    send.call(this, data);
-  };
-}
-
-/**
- * Returns a page expression that checks, from the frames `recordFrames`
- * recorded, whether the open thread's two live subscriptions are in place. A
- * test waits for both before a message streams:
- *
- * - The page has sent the frame that subscribes to the thread's tap. The
- *   controller does not acknowledge a tap subscription, so the frame being
- *   sent is the closest a test can get to knowing it is live. A delta sent
- *   before the controller has the subscription reaches no one.
- * - The page has received the replay of the thread's stream: the first reply
- *   to the frame that subscribes to it, which the controller sends even when
- *   there is nothing to replay. A message that starts before the replay
- *   arrives is in the replay, so the page treats it as one that may have
- *   missed deltas: it skips the message's tail, and paints none of its text
- *   until the message's rows land.
- */
-function buildLiveCheck(sessionId: string): string {
-  const tap = JSON.stringify(`session:${sessionId}:tap`);
-  const stream = JSON.stringify(`session:${sessionId}:stream`);
-  return `(() => {
-    const parse = (frames) => (frames ?? []).flatMap((frame) => {
-      try { return [JSON.parse(frame)].flat(); } catch { return []; }
-    });
-    const requests = parse(globalThis.sentFrames).filter((message) => message?._tag === "Request");
-    const findSubscription = (topic) => requests.findLast((request) => request.payload?.topic === topic);
-    const streamRequest = findSubscription(${stream});
-    return findSubscription(${tap}) !== undefined && streamRequest !== undefined &&
-      parse(globalThis.receivedFrames).some(
-        (message) => message?._tag === "Chunk" && message.requestId === streamRequest.id,
-      );
-  })()`;
 }
 
 /** The first paragraph of `ANSWER`, as markdown and as the page renders it. */

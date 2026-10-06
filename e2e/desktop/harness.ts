@@ -30,6 +30,7 @@ import { createClient, type HerculeClient } from "../../packages/client-core/src
 import {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,
+  type Assistant,
   type Session,
 } from "../../packages/contract/src/index";
 import { connectFleet, type Fleet } from "../../apps/desktop/scripts/fleet";
@@ -699,4 +700,126 @@ export async function startServerForTest(
 export function answerWithEmptyPage(_request: IncomingMessage, response: ServerResponse): void {
   response.setHeader("content-type", "text/html; charset=utf-8");
   response.end("<!doctype html><title>another origin</title>");
+}
+
+/** The page's global object, with the frames `recordFrames` keeps on it. */
+type FrameRecordingGlobal = typeof globalThis & {
+  sentFrames?: string[];
+  receivedFrames?: string[];
+};
+
+/**
+ * Starts recording the frames the page sends and receives on its WebSockets,
+ * as text: every frame sent, in `sentFrames`, and every frame received from
+ * then on, in `receivedFrames`, both on the page's global object.
+ *
+ * It runs in the page, handed over as a function to `page.evaluate` or as
+ * source text, so it closes over nothing in this file.
+ *
+ * The live connection's socket already exists. It sends through the
+ * prototype's `send`, so its frames are recorded too, and its first send adds
+ * the listener that records what it receives. A reply never arrives before
+ * its request is sent, so every reply to a recorded request is recorded.
+ */
+export function recordFrames(): void {
+  const sent: string[] = [];
+  const received: string[] = [];
+  (globalThis as FrameRecordingGlobal).sentFrames = sent;
+  (globalThis as FrameRecordingGlobal).receivedFrames = received;
+  const listened = new WeakSet<WebSocket>();
+  // The original `send` is kept apart from any socket, and called below with
+  // each socket as `this`.
+  const send = Reflect.get(WebSocket.prototype, "send");
+  WebSocket.prototype.send = function (this: WebSocket, data) {
+    if (!listened.has(this)) {
+      listened.add(this);
+      this.addEventListener("message", (event: MessageEvent<unknown>) => {
+        received.push(typeof event.data === "string" ? event.data : "");
+      });
+    }
+    sent.push(typeof data === "string" ? data : new TextDecoder().decode(data as ArrayBuffer));
+    send.call(this, data);
+  };
+}
+
+/**
+ * Returns a page expression that checks, from the frames `recordFrames`
+ * recorded, whether the two live subscriptions of the session `sessionId` are in
+ * place: an open thread's, or an assistant's current session's. A test waits
+ * for both before a message streams:
+ *
+ * - The page has sent the frame that subscribes to the session's tap. The
+ *   controller does not acknowledge a tap subscription, so the frame being
+ *   sent is the closest a test can get to knowing it is live. A delta sent
+ *   before the controller has the subscription reaches no one.
+ * - The page has received the replay of the session's stream: the first reply
+ *   to the frame that subscribes to it, which the controller sends even when
+ *   there is nothing to replay. A message that starts before the replay
+ *   arrives is in the replay, so the page treats it as one that may have
+ *   missed deltas: it skips the message's tail, and paints none of its text
+ *   until the message's rows land.
+ */
+export function buildLiveCheck(sessionId: string): string {
+  const tap = JSON.stringify(`session:${sessionId}:tap`);
+  const stream = JSON.stringify(`session:${sessionId}:stream`);
+  return `(() => {
+    const parse = (frames) => (frames ?? []).flatMap((frame) => {
+      try { return [JSON.parse(frame)].flat(); } catch { return []; }
+    });
+    const requests = parse(globalThis.sentFrames).filter((message) => message?._tag === "Request");
+    const findSubscription = (topic) => requests.findLast((request) => request.payload?.topic === topic);
+    const streamRequest = findSubscription(${stream});
+    return findSubscription(${tap}) !== undefined && streamRequest !== undefined &&
+      parse(globalThis.receivedFrames).some(
+        (message) => message?._tag === "Chunk" && message.requestId === streamRequest.id,
+      );
+  })()`;
+}
+
+/** The tap subscriptions of one session the page has made, as `buildTapCheck` reads them. */
+export interface TapSubscriptions {
+  /** How many frames the page has sent that subscribe to the tap. */
+  readonly made: number;
+  /** How many of them the page has ended, with a frame that interrupts the subscription. */
+  readonly ended: number;
+}
+
+/**
+ * Returns a page expression that reads, from the frames `recordFrames`
+ * recorded, the subscriptions the page has made to the tap of the session
+ * `sessionId`: a `TapSubscriptions`. The tap is subscribed while `made` is
+ * more than `ended`.
+ */
+export function buildTapCheck(sessionId: string): string {
+  const tap = JSON.stringify(`session:${sessionId}:tap`);
+  return `(() => {
+    const sent = (globalThis.sentFrames ?? []).flatMap((frame) => {
+      try { return [JSON.parse(frame)].flat(); } catch { return []; }
+    });
+    const ids = new Set(
+      sent.filter((message) => message?._tag === "Request" && message.payload?.topic === ${tap})
+        .map((request) => request.id),
+    );
+    const ended = sent.filter((message) => message?._tag === "Interrupt" && ids.has(message.requestId));
+    return { made: ids.size, ended: ended.length };
+  })()`;
+}
+
+/** Returns the assistant named `name`, read through the API. Fails when there is none. */
+export async function readAssistant(client: HerculeClient, name: string): Promise<Assistant> {
+  const { items } = await client.assistant.query({ query: { limit: 50 } });
+  const assistant = items.find((each) => each.name === name);
+  if (assistant === undefined) throw new Error(`the controller has no assistant named ${name}`);
+  return assistant;
+}
+
+/** Returns the newest session of the conversation, or null when it has none yet. */
+export async function readNewestSession(
+  client: HerculeClient,
+  conversationId: string,
+): Promise<Session | null> {
+  const { items } = await client.session.query({
+    query: { conversationId, sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
+  });
+  return items[0] ?? null;
 }
