@@ -1743,14 +1743,19 @@ describe("agent steps over the runner socket", () => {
 
           arranged.wire.close();
           // Nothing has been heard about the session for longer than its
-          // absolute timeout, eight hours by default.
-          await Effect.runPromise(
-            Effect.orDie(arranged.harness.sql`
-              UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
-              WHERE id = unhex(replace(${sessionId}, '-', ''))
-            `),
-          );
-          const ended = await waitForRunEnded(arranged, runId, "failed");
+          // absolute timeout, eight hours by default. The time is set again
+          // on every poll, because a report the runner sent before the close
+          // can still be ingested after it and move the time back to now.
+          const ended = await waitUntil("failed the run", async () => {
+            await Effect.runPromise(
+              Effect.orDie(arranged.harness.sql`
+                UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
+                WHERE id = unhex(replace(${sessionId}, '-', ''))
+              `),
+            );
+            const run = await readRun(arranged.harness.base, arranged.token, runId);
+            return run.status === "failed" ? run : undefined;
+          });
           expect(ended).toMatchObject({ failureReason: "session-failed", failedStepId: IMPLEMENT });
           expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
             status: "failed",
