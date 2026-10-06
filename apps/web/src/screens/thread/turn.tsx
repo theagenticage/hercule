@@ -3,6 +3,7 @@
  *
  * - a centred time separator, when the screen passes one;
  * - the user's message as a right-aligned bubble;
+ * - one line per subagent the turn started;
  * - the assistant's prose at full width;
  * - the divider that shows how long the agent worked, or how the turn ended,
  *   when `showsTurnDivider` returns true.
@@ -12,17 +13,25 @@
  */
 import type { JSX, RefObject } from "react";
 import { showsTurnDivider, type ThreadTurn } from "@hercule/client-core";
+import type { Session, Subagent } from "@hercule/contract";
 import { OwnerBubble } from "../bubble";
+import { SpawnLines } from "../subagents/spawn-lines";
 import { TimeSeparator } from "../time-separator";
 import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
 
 export function Turn({
+  session,
+  subagents,
   turn,
   live,
   tailRef,
   stamp,
 }: {
+  /** The session the turn belongs to, whether the turn is its own agent's or a subagent's. */
+  readonly session: Session;
+  /** Every subagent of the session, oldest first. */
+  readonly subagents: readonly Subagent[];
   readonly turn: ThreadTurn;
   /** Whether the turn is running: the last turn of a busy session, with no `turn.completed` yet. */
   readonly live: boolean;
@@ -39,6 +48,7 @@ export function Turn({
           <OwnerBubble text={turn.user} />
         </div>
       )}
+      <SpawnLines session={session} subagents={subagents} turn={turn} />
       {turn.assistantText === "" && !live ? null : (
         // Until the first word streams into the tail, the prose is hidden, so
         // the flex gap above it does not count. The divider under the turn

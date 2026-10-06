@@ -169,23 +169,46 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * Reads a session's whole transcript, oldest first. Every page is fetched,
- * because the thread screen renders every turn.
+ * Reads one agent's whole transcript, oldest first: the session's own agent's
+ * without `subagentId`, else that subagent's. Every page is fetched, because
+ * an agent's page renders every turn.
  *
  * After the first fetch, only the live connection updates this cache entry:
- * `session:<id>:stream` appends new rows directly, and a `reset` refetches it.
- * TanStack Query's own staleness knows about neither, so the entry never goes
- * stale on its own and is never refetched in the background. A background
- * refetch that raced a live append could otherwise replace the entry with
- * older data than the append just wrote.
+ * the agent's `:stream` topic appends new rows directly, and a `reset`
+ * refetches it. TanStack Query's own staleness knows about neither, so the
+ * entry never goes stale on its own and is never refetched in the background.
+ * A background refetch that raced a live append could otherwise replace the
+ * entry with older data than the append just wrote. A page that opens again
+ * catches up without a refetch: its stream subscribes from the last row the
+ * entry holds, and the controller replays every row written since.
  */
-export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
+export const transcriptQuery = (client: HerculeClient, sessionId: string, subagentId?: string) =>
   queryOptions({
-    queryKey: queryKeys.transcript(sessionId),
+    queryKey: queryKeys.transcript(sessionId, subagentId),
     queryFn: () =>
-      readEveryPage((page) => client.transcript.read({ params: { id: sessionId }, query: page })),
+      readEveryPage((page) =>
+        client.transcript.read({
+          params: { id: sessionId },
+          query: subagentId === undefined ? page : { ...page, subagentId },
+        }),
+      ),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+  });
+
+/**
+ * Reads every subagent of one session, oldest first. Every page is fetched,
+ * because the side pane draws the whole tree and a page that stopped early
+ * would hide subagents without telling the user. The `subagent` live topic
+ * refetches it whenever one of the session's subagents changes.
+ */
+export const subagentsQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.subagents(sessionId),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.session.querySubagents({ params: { id: sessionId }, query: page }),
+      ),
   });
 
 /**

@@ -1,0 +1,33 @@
+import type { JSX } from "react";
+
+/**
+ * The button that stops an agent's work. The composer shows it while a turn
+ * runs; the subagent screens show it to stop subagents. `label` names what
+ * it stops, such as "Stop all" or "Stop with 2 below", and defaults to
+ * "Stop". `title` is the tooltip, which says what else stopping does.
+ *
+ * Its line height is set so the button is 28px tall, the height of the
+ * composer's send button: a taller Stop would grow the row, and move the text
+ * above it, whenever a turn starts.
+ */
+export function StopButton({
+  label = "Stop",
+  title = "Stops the running turn; queued messages wait",
+  onStop,
+}: {
+  readonly label?: string;
+  readonly title?: string;
+  readonly onStop: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onStop}
+      title={title}
+      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-meta leading-[18px] font-emph text-ink hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
+    >
+      <span aria-hidden="true" className="size-2 rounded-[1.5px] bg-current" />
+      {label}
+    </button>
+  );
+}

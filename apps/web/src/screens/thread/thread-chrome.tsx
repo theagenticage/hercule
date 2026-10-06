@@ -1,8 +1,76 @@
 import type { JSX, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import type { ThreadTab } from "@hercule/client-core";
+import { useQuery } from "@tanstack/react-query";
+import {
+  buildSiblingTabs,
+  describeStartingRun,
+  findAnsweredAssistantId,
+  isJoinable,
+  type HerculeClient,
+  type ThreadTab,
+} from "@hercule/client-core";
+import type { Session, Subagent } from "@hercule/contract";
 import { DoneMark, WorkingMark, cn } from "@hercule/ui";
+import { projectsQuery, sessionsQuery, workspacesQuery } from "../../app/queries";
 import { HeaderRow } from "../header-row";
+import { AssistantCrumb } from "./assistant-crumb";
+import { StepSessionCrumb } from "./step-session-crumb";
+
+/**
+ * Renders the header row of one agent's page: the session's own agent's page
+ * when `subagentId` is undefined, else that subagent's.
+ *
+ * It reads the thread's project and the other threads in its workspace,
+ * which the header shows beside the title. The crumb is the assistant for an
+ * assistant's session, the run for a step session, and the project
+ * otherwise.
+ */
+export function AgentChrome({
+  client,
+  session,
+}: {
+  readonly client: HerculeClient;
+  readonly session: Session;
+  /** Every subagent of the session, oldest first. */
+  readonly subagents: readonly Subagent[];
+  /** The subagent whose page this is; undefined on the thread's own page. */
+  readonly subagentId: string | undefined;
+}): JSX.Element {
+  const projects = useQuery(projectsQuery(client)).data?.items ?? [];
+  const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
+  const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
+  const workspace = workspaces.find((each) => each.id === session.workspaceId);
+  const project = projects.find((each) => each.id === session.projectId);
+  const assistantId = findAnsweredAssistantId(session);
+  // A step session's crumb names the run that started it.
+  const startingRun = describeStartingRun(session);
+
+  return (
+    <ThreadChrome
+      crumb={
+        assistantId !== null ? (
+          <AssistantCrumb client={client} assistantId={assistantId} />
+        ) : session.runId !== null && startingRun !== undefined ? (
+          <StepSessionCrumb runId={session.runId} label={startingRun} />
+        ) : (
+          project?.name
+        )
+      }
+      title={session.title}
+      tabs={buildSiblingTabs({ workspace, sessions, activeSessionId: session.id })}
+      actions={
+        <>
+          {workspace === undefined || !isJoinable(workspace) ? null : (
+            <NewThreadHere projectId={session.projectId} workspaceId={workspace.id} />
+          )}
+          <ChromeAction title="More (not built)" icon disabled>
+            …
+          </ChromeAction>
+        </>
+      }
+    />
+  );
+}
 
 /**
  * Renders the thread's header row: the project crumb, then the title, then
