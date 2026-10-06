@@ -398,7 +398,7 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
  * last one, because the thread screen draws every row.
  *
  * After this read, only the live connection changes the cached transcript:
- * `useThreadLive` merges each row `session:<id>:stream` delivers, and reads
+ * `useSessionLive` merges each row `session:<id>:stream` delivers, and reads
  * the transcript again when the stream reports a reset. The `session` topic
  * never invalidates it, and it is never read again in the background: a read
  * that raced a merge could replace the cache with rows older than the ones

@@ -14,9 +14,9 @@ import { PlusIcon } from "../../icons/plus";
 import { SendIcon } from "../../icons/send";
 import { ShieldIcon } from "../../icons/shield";
 import { WorkspaceIcon } from "../../icons/workspace";
+import { isSendKey } from "../session/send-key";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
-import { isSendKey } from "../thread/send-key";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 

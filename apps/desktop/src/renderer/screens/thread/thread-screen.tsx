@@ -10,13 +10,14 @@ import {
   buildThreadBlocks,
   decideThreadPose,
   describeAgent,
+  queryKeys,
 } from "@hercule/client-core";
 import { providersQuery, runnersQuery, sessionQuery, transcriptQuery } from "../../app/queries";
 import { NotFound } from "../not-found";
+import { useSessionLive } from "../session/use-session-live";
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
-import { useThreadLive } from "./use-thread-live";
 import "./thread.css";
 
 /**
@@ -37,7 +38,13 @@ export function ThreadScreen({ sessionId }: { readonly sessionId: string }): JSX
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
-  const attachOpenParagraph = useThreadLive(live, queryClient, sessionId, rows);
+  const attachOpenParagraph = useSessionLive(
+    live,
+    queryClient,
+    sessionId,
+    queryKeys.transcript(sessionId),
+    rows,
+  );
   // The transcript sizes its bottom padding from the composer's stack. The
   // stack is held as state, not a ref, because the composer mounts after the
   // transcript: its element exists only once the transcript's effects ran,

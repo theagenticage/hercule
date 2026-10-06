@@ -1,6 +1,7 @@
 /* The thread's transcript. The rules are the Bureau book's `.transcript`
-   through `.worked` (system.css) and the session page's own `.tx` and
-   `.waiting-note`. Each departure from the book says why. */
+   and `.worked` (system.css) and the session page's own `.tx` and
+   `.waiting-note`. The messages it draws are styled in
+   ../session/messages.css. Each departure from the book says why. */
 
 .transcript {
   flex: 1;
@@ -41,155 +42,6 @@
 }
 .tx-item[data-index="0"] {
   padding-top: 0;
-}
-
-.msg {
-  display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 12px;
-  align-items: start;
-}
-.msg-body {
-  font-size: var(--t-14);
-  line-height: 1.6;
-  min-width: 0;
-}
-.tx .msg-meta {
-  color: var(--faint);
-  font-size: var(--t-12);
-  margin-bottom: 3px;
-}
-/* The paragraph the agent is writing, as it streams in, before it is drawn
-   as markdown. Its line breaks are the agent's. */
-.streaming {
-  white-space: pre-wrap;
-}
-.msg--me {
-  display: flex;
-  justify-content: flex-end;
-}
-/* The cap sits on the wrapper: a percentage on the bubble itself would be a
-   share of its own shrink-wrapped width. */
-.msg--me > div {
-  max-width: 78%;
-}
-.bubble {
-  padding: 10px 14px;
-  border-radius: 18px 18px 6px 18px;
-  background: color-mix(in oklab, var(--ink) 6%, var(--surface));
-  font-size: var(--t-14);
-  line-height: 1.55;
-}
-.bubble-meta {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 4px;
-  color: var(--faint);
-  font-size: var(--t-11);
-}
-
-/* Markdown. The book draws paragraphs, inline code and code blocks; the
-   rules for the other elements markdown can hold keep them in the same
-   size and rhythm, rather than the browser's large defaults. Both kinds of
-   message hold markdown, so the rules cover both. */
-:is(.msg-body, .bubble) :is(p, ul, ol, blockquote, .table-scroll) {
-  margin: 0 0 10px;
-}
-/* The last block ends the message: its margin would add space under it. */
-:is(.msg-body, .bubble) > :last-child {
-  margin-bottom: 0;
-}
-:is(.msg-body, .bubble) :is(h1, h2, h3, h4, h5, h6) {
-  margin: 16px 0 6px;
-  font-size: var(--t-14);
-  font-weight: var(--w-bold);
-  line-height: 1.45;
-}
-:is(.msg-body, .bubble) > :is(h1, h2, h3, h4, h5, h6):first-child {
-  margin-top: 0;
-}
-:is(.msg-body, .bubble) :is(ul, ol) {
-  padding-left: 22px;
-}
-:is(.msg-body, .bubble) li > :is(ul, ol) {
-  margin-bottom: 0;
-}
-:is(.msg-body, .bubble) blockquote {
-  padding-left: 12px;
-  box-shadow: inset 2px 0 0 var(--line);
-  color: var(--muted);
-}
-:is(.msg-body, .bubble) hr {
-  height: 1px;
-  margin: 14px 0;
-  border: 0;
-  background: var(--line-soft);
-}
-.table-scroll {
-  overflow-x: auto;
-}
-:is(.msg-body, .bubble) table {
-  border-collapse: collapse;
-  font-size: var(--t-13);
-}
-:is(.msg-body, .bubble) :is(th, td) {
-  padding: 4px 12px 4px 0;
-  box-shadow: inset 0 -1px 0 var(--line-soft);
-  text-align: left;
-}
-/* A link in prose is underlined, because nothing else sets it apart from the
-   text around it. It opens in the default browser, so it shows the hand. */
-:is(.msg-body, .bubble) a {
-  text-decoration: underline;
-  text-decoration-color: var(--line);
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.msg-body code,
-.bubble code {
-  padding: 1px 5px;
-  border-radius: 5px;
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
-  font-size: 12.5px;
-}
-/* The book has no syntax colours: its `.k`, `.s` and `.f` spans are sample
-   highlighting, and the app loads no highlighter. */
-.codeblock {
-  margin: 10px 0;
-  padding: 12px 14px;
-  border-radius: var(--r-md);
-  background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--line-soft);
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
-  font-size: 12.5px;
-  line-height: 1.6;
-  white-space: pre;
-  overflow: auto;
-}
-/* Markdown puts a fence's text in a `code` element inside the block, which
-   takes the block's type and none of inline code's chip. */
-.codeblock code {
-  padding: 0;
-  border-radius: 0;
-  background: none;
-  font-size: inherit;
-}
-/* The text of the markdown when it could not be drawn as markdown. */
-.markdown-failed {
-  white-space: pre-wrap;
-}
-
-/* A reader may copy the transcript's words and code. The rest of the window,
-   the faces and times included, is chrome and stays unselectable. */
-.msg-body,
-.bubble,
-.worked-items {
-  user-select: text;
-}
-.msg-body .msg-meta {
-  user-select: none;
 }
 
 /* "Worked for 2m 14s ›": a quiet divider that folds a stretch of tool calls.
@@ -253,6 +105,11 @@ button.worked:hover b {
 }
 .worked-items code {
   overflow-wrap: anywhere;
+}
+/* A reader may copy the items' commands and paths, as they may a message's
+   words (messages.css). */
+.worked-items {
+  user-select: text;
 }
 
 .waiting-note {

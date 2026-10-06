@@ -1,6 +1,7 @@
 /**
- * The pending submissions: for each thread, and for each Draft Thread, what
- * the user has typed and picked in its composer and not sent yet.
+ * The pending submissions: for each thread, each Draft Thread and each
+ * assistant's Conversation, what the user has typed and picked in its
+ * composer and not sent yet.
  *
  * The store is held in memory for as long as the app runs, so a thread keeps
  * its unsent text and picks while the user looks at another thread, and
@@ -25,8 +26,10 @@ export interface PendingSubmission {
 }
 
 /**
- * The pending submission of every thread and every Draft Thread. A thread's
- * key is its session id, and a Draft Thread's is `buildDraftKey`'s.
+ * The pending submission of every thread, every Draft Thread and every
+ * assistant's Conversation. A thread's key is its session id, a Draft
+ * Thread's is `buildDraftKey`'s, and an assistant's is
+ * `buildAssistantDraftKey`'s.
  *
  * Every change tells every subscriber. A change that leaves no text, no
  * picks and no failure at `key` removes its entry.
@@ -73,6 +76,15 @@ const EMPTY: PendingSubmission = { message: { text: "" }, picks: {} };
  */
 export const buildDraftKey = (projectId: string | null, workspaceId: string | null): string =>
   `draft:${projectId ?? "-"}:${workspaceId ?? "-"}`;
+
+/**
+ * Returns the store key of the Message Draft in the Conversation of the
+ * assistant `assistantId`, such as `assistant:<assistant id>`. The draft is
+ * kept per assistant rather than per session, because the session behind a
+ * Conversation can change while the user writes. The prefix keeps the key
+ * apart from every session id and every `buildDraftKey` key.
+ */
+export const buildAssistantDraftKey = (assistantId: string): string => `assistant:${assistantId}`;
 
 /** Creates an empty store. */
 export const createPendingSubmissions = (): PendingSubmissions => {

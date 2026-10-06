@@ -1,5 +1,5 @@
 /**
- * Tests `useThreadLive` against a fake live connection: rows merged into the
+ * Tests `useSessionLive` against a fake live connection: rows merged into the
  * cached transcript, the paragraph being written painted once per frame, the
  * finished paragraphs drawn as markdown, the tap dropped while the window is
  * hidden, and the open items skipped wherever taps were lost. Animation
@@ -17,9 +17,10 @@ import {
   type TranscriptRow,
 } from "@hercule/contract";
 import { buildNextRows, setVisibility, THREAD_FIXTURES, type EventBody } from "../../app/testing";
-import { AgentMessage } from "./blocks";
-import { holdAnimationFrames, type HeldFrames } from "./testing";
-import { useThreadLive } from "./use-thread-live";
+import { buildLook } from "../../faces";
+import { holdAnimationFrames, type HeldFrames } from "../thread/testing";
+import { AgentMessage } from "./messages";
+import { useSessionLive } from "./use-session-live";
 
 /** A thread whose turn has finished, so no item is open when the hook mounts. */
 const THREAD = THREAD_FIXTURES.finished;
@@ -160,14 +161,20 @@ function Thread({
     staleTime: Infinity,
   });
   const rows = data ?? [];
-  const attachOpenParagraph = useThreadLive(live, queryClient, SESSION_ID, rows);
+  const attachOpenParagraph = useSessionLive(
+    live,
+    queryClient,
+    SESSION_ID,
+    queryKeys.transcript(SESSION_ID),
+    rows,
+  );
   const started = rows.some(
     ({ event }) => event._tag === "item.started" && event.itemId === NEW_ITEM_ID,
   );
   if (!started) return null;
   return (
     <AgentMessage
-      sessionId={SESSION_ID}
+      look={buildLook(SESSION_ID)}
       itemId={NEW_ITEM_ID}
       agent="Sonnet 5"
       text={readStoredText(rows)}
@@ -215,7 +222,7 @@ const mountHook = () => {
   };
 };
 
-describe("useThreadLive", () => {
+describe("useSessionLive", () => {
   it("subscribes to the stream after the last held row, and merges the rows it delivers", async () => {
     const { fake, queryClient } = mountHook();
     expect(fake.readSubscriptions()).toEqual([

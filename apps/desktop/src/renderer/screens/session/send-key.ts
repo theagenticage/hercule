@@ -3,8 +3,8 @@ import { useRouteContext } from "@tanstack/react-router";
 
 /**
  * Checks whether a keydown in a message field sends the message: ⏎ sends, and
- * ⇧⏎ starts a new line. The thread's composer and a Draft Thread's both use
- * it.
+ * ⇧⏎ starts a new line. `ComposerFrame`, a Draft Thread's composer and the
+ * dock use it.
  *
  * The ⏎ that ends an IME composition does not send, or it would cut a
  * Japanese or Chinese sentence off mid-word. Chromium marks that ⏎ with

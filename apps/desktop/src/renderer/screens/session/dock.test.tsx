@@ -22,8 +22,9 @@ import {
   type Call,
   type Handler,
 } from "../../app/testing";
+import { buildLook } from "../../faces";
+import { renderThreadPart } from "../thread/testing";
 import { RequestDock } from "./dock";
-import { renderThreadPart } from "./testing";
 
 /** A command approval that offers every decision. */
 const COMMAND: OpenRequest = {
@@ -53,7 +54,7 @@ const renderDock = (request: OpenRequest, respond: Handler = ACCEPTED) =>
     ({ sessionId }) => (
       <>
         <button type="button">Outside</button>
-        <RequestDock sessionId={sessionId} request={request} />
+        <RequestDock sessionId={sessionId} look={buildLook(sessionId)} request={request} />
       </>
     ),
     {

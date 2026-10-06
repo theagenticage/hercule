@@ -30,12 +30,12 @@ import { buildDraftKey } from "../../app/pending-submissions";
 import { threadsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
+import { useSendOnMenuCommand } from "../session/send-key";
 import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
-import { useSendOnMenuCommand } from "../thread/send-key";
 import { DraftComposer } from "./draft-composer";
 import { DraftHeader } from "./draft-header";
 import { StartCards } from "./start-cards";
-import "../thread/composer.css";
+import "../session/composer.css";
 import "./new-thread.css";
 
 // The login dialog is loaded the first time Log in opens it, so its code is

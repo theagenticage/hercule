@@ -13,7 +13,7 @@ import {
   typeQuestionAnswer,
 } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
-import { buildLook, Face } from "../../faces";
+import { Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { isSendKey } from "./send-key";
 import "./dock.css";
@@ -71,11 +71,12 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
 };
 
 /**
- * Renders one Request the thread's session is waiting on, the oldest
+ * Renders one Request the session `sessionId` is waiting on, the oldest
  * (`findOldestOpenRequest`), docked on top of the composer, as the Bureau
  * book's `.dock` draws it:
  *
- * - the question: the thread's face in the waiting pose, then the card's
+ * - the question: the face of whoever waits, drawn with `look` (the
+ *   thread's or the assistant's), in the waiting pose, then the card's
  *   title with what it asks about in `code`;
  * - for a `question` request, one question at a time: its header, its place
  *   among the questions when there are several, its options as choices, a
@@ -112,9 +113,11 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  */
 export function RequestDock({
   sessionId,
+  look,
   request,
 }: {
   readonly sessionId: string;
+  readonly look: Look;
   readonly request: OpenRequest;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
@@ -196,7 +199,7 @@ export function RequestDock({
     >
       <div className="fold">
         <div className="dock-q">
-          <Face look={buildLook(sessionId)} pose="waiting" size={30} />
+          <Face look={look} pose="waiting" size={30} />
           <span className="dock-text">
             <span id={titleId}>{card.title}</span>
             {card.subject.map((line, index) => (
@@ -315,7 +318,7 @@ export function RequestDock({
         )}
       </div>
       <div className="dock-mini">
-        <Face look={buildLook(sessionId)} pose="waiting" size={24} />
+        <Face look={look} pose="waiting" size={24} />
         <span className="dock-mini-q">{formatRequestQuestion(request)}</span>
         <span className="spacer" />
         {card.rows

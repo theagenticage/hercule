@@ -32,9 +32,11 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { resolveBrowserTimezone, type Pose, type ThreadBlock } from "@hercule/client-core";
 import { ageClock } from "../../app/age-clock";
-import { AgentMessage, LiveRow, TurnEnding, UserMessage, WaitingNote, WorkDivider } from "./blocks";
+import { buildLook } from "../../faces";
+import { AgentMessage, UserMessage } from "../session/messages";
+import type { AttachOpenParagraph } from "../session/use-session-live";
+import { LiveRow, TurnEnding, WaitingNote, WorkDivider } from "./blocks";
 import { useShowsClassicScrollbar } from "./classic-scrollbar";
-import type { AttachOpenParagraph } from "./use-thread-live";
 
 /**
  * The space above the first block, under the floating header: the book's
@@ -289,7 +291,7 @@ export function Transcript({
       case "agent":
         return (
           <AgentMessage
-            sessionId={sessionId}
+            look={buildLook(sessionId)}
             itemId={block.itemId}
             agent={describeAgent(block.model)}
             text={block.text}
