@@ -1,10 +1,12 @@
 /**
- * Tests `findSubagentBrief`, which finds the brief a subagent's page opens
- * with, and `describeBriefSource`, which says who handed it over.
+ * Tests `findSubagentBrief` and `splitSubagentBrief`, which find the brief a
+ * subagent's page opens with, and `describeBriefSource`, which says who
+ * handed it over.
  */
 import { describe, expect, it } from "vitest";
+import type { ThreadBlock } from "../threads/blocks";
 import type { ThreadTurn } from "../threads/turns";
-import { describeBriefSource, findSubagentBrief } from "./brief";
+import { describeBriefSource, findSubagentBrief, splitSubagentBrief } from "./brief";
 import { buildSubagent } from "./subagents.testing";
 
 /** Builds a finished turn with `user` as its user message. */
@@ -28,6 +30,35 @@ describe("findSubagentBrief", () => {
   it("returns undefined while no turn is read, or the first holds no user message", () => {
     expect(findSubagentBrief([])).toBeUndefined();
     expect(findSubagentBrief([buildTurn("t-1", "")])).toBeUndefined();
+  });
+});
+
+describe("splitSubagentBrief", () => {
+  const user = (text: string): ThreadBlock => ({
+    kind: "user",
+    key: `user:${text}`,
+    itemId: text,
+    text,
+    at: "2026-10-05T09:00:00.000Z",
+  });
+  const live: ThreadBlock = { kind: "live", key: "live", model: "claude-haiku-5" };
+
+  it("takes the first block's user message out as the brief", () => {
+    const later = user("And then?");
+    expect(splitSubagentBrief([user("Read the docs"), live, later])).toEqual({
+      brief: "Read the docs",
+      blocks: [live, later],
+    });
+  });
+
+  it("returns no brief and every block when the first block is not a user message with text", () => {
+    const empty = user("");
+    expect(splitSubagentBrief([])).toEqual({ brief: undefined, blocks: [] });
+    expect(splitSubagentBrief([live, user("Late")])).toEqual({
+      brief: undefined,
+      blocks: [live, user("Late")],
+    });
+    expect(splitSubagentBrief([empty, live])).toEqual({ brief: undefined, blocks: [empty, live] });
   });
 });
 

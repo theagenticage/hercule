@@ -8,6 +8,10 @@
  * sidebar may be asleep. Selecting another colleague with the drawer open
  * shows that colleague's thread. After the drawer closes, it keeps the last
  * thread drawn until it has slid away, then lets it go.
+ *
+ * The drawer has no side pane, so the thread shows no tally pill. Its spawn
+ * lines and the Request pager's "Open subagent" link leave the Office for
+ * the subagent's full page.
  */
 import { Suspense, useEffect, useState, useSyncExternalStore, type JSX } from "react";
 import { AgentPage } from "../../screens/thread/agent-page";

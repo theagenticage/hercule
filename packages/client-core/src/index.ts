@@ -240,7 +240,9 @@ export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from ".
 export {
   describeBriefSource,
   findSubagentBrief,
+  splitSubagentBrief,
   type BriefSource,
+  type SplitSubagentBrief,
   type SubagentBrief,
 } from "./subagents/brief";
 export {

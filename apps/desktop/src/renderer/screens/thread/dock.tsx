@@ -13,10 +13,11 @@ import {
   typeQuestionAnswer,
   type QuestionDraft,
 } from "@hercule/client-core";
-import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
+import type { ApprovalDecision, QuestionAnswers, SessionRequest } from "@hercule/contract";
 import { useRequestDraft } from "../../app/thread-drafts";
 import { buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons/check";
+import { buildSubagentFaceSeed } from "../subagents/subagent-face";
 import { isSendKey } from "./send-key";
 import "./dock.css";
 
@@ -73,12 +74,14 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
 };
 
 /**
- * Renders one Request the thread's session is waiting on, the oldest
- * (`findOldestOpenRequest`), docked on top of the composer, as the Bureau
- * book's `.dock` draws it:
+ * Renders one Request the thread's session is waiting on, docked on top of
+ * the composer, as the Bureau book's `.dock` draws it. On an agent's page,
+ * `AgentRequestDock` decides which Request and pages between them; the
+ * Office's dossier shows the oldest.
  *
- * - the question: the thread's face in the waiting pose, then the card's
- *   title with what it asks about in `code`;
+ * - the question: the face of the agent that asked, in the waiting pose,
+ *   then the card's title with what it asks about in `code`. A subagent's
+ *   Request shows the subagent's face, else the thread's;
  * - for a `question` request, one question at a time: its header, its place
  *   among the questions when there are several, its options as choices, a
  *   field for the user's own answer, and Next, or Send answers on the last
@@ -121,12 +124,17 @@ export function RequestDock({
   request,
 }: {
   readonly sessionId: string;
-  readonly request: OpenRequest;
+  readonly request: SessionRequest;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const titleId = useId();
   const card = buildApprovalCard(request);
+  const faceLook = buildLook(
+    request.subagentId === undefined
+      ? sessionId
+      : buildSubagentFaceSeed(sessionId, request.subagentId),
+  );
   const [requestDraft, changeRequestDraft] = useRequestDraft(request.requestId);
   // A failed send unlocks the Request, so the user can answer again. The
   // mutation's own callbacks run even after the dock has unmounted, so the
@@ -216,7 +224,7 @@ export function RequestDock({
     >
       <div className="fold">
         <div className="dock-q">
-          <Face look={buildLook(sessionId)} pose="waiting" size={30} />
+          <Face look={faceLook} pose="waiting" size={30} />
           <span className="dock-text">
             <span id={titleId}>{card.title}</span>
             {card.subject.map((line, index) => (
@@ -335,7 +343,7 @@ export function RequestDock({
         )}
       </div>
       <div className="dock-mini">
-        <Face look={buildLook(sessionId)} pose="waiting" size={24} />
+        <Face look={faceLook} pose="waiting" size={24} />
         <span className="dock-mini-q">{formatRequestQuestion(request)}</span>
         <span className="spacer" />
         {card.rows

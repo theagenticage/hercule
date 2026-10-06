@@ -60,8 +60,10 @@ export interface RenderedThreadPart {
  * answer to `session.respondToApprovalRequest`.
  *
  * The router has the app's `_connected` route id, so the part finds the
- * bridge and the controller in its route context, and the app's paths `/` and
- * `/threads/$sessionId`, so the part's links resolve. It starts at the
+ * bridge and the controller in its route context, the app's paths `/` and
+ * `/threads/$sessionId`, so the part's links resolve, and the app's id for
+ * the thread's route under `_shell`, so a part that matches that route finds
+ * it. It starts at the
  * thread, whose loader makes the reads the shell's and the thread's loaders
  * make. So, as in the app, nothing waits once this returns.
  */
@@ -97,8 +99,13 @@ export const renderThreadPart = async (
     id: "_connected",
     beforeLoad: () => ({ bridge, controller }),
   });
-  const threadRoute = createRoute({
+  const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,
+    id: "_shell",
+    component: Outlet,
+  });
+  const threadRoute = createRoute({
+    getParentRoute: () => shellRoute,
     path: "threads/$sessionId",
     loader: () =>
       Promise.all([
@@ -111,7 +118,7 @@ export const renderThreadPart = async (
     routeTree: rootRoute.addChildren([
       connectedRoute.addChildren([
         createRoute({ getParentRoute: () => connectedRoute, path: "/" }),
-        threadRoute,
+        shellRoute.addChildren([threadRoute]),
       ]),
     ]),
     history: createMemoryHistory({ initialEntries: [`/threads/${sessionId}`] }),

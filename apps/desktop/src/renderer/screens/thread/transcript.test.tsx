@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { buildSessionAgentState, buildThreadBlocks, type Pose } from "@hercule/client-core";
 import {
   buildNextRows,
@@ -111,5 +111,53 @@ describe("Transcript", () => {
 
     rerender(renderTranscript("waiting"));
     expect(container.querySelector(".cr--animated")).toBeNull();
+  });
+
+  it("draws the lead first, as the column's first item, so it scrolls with the blocks", () => {
+    const blocks = buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session));
+    const { container } = render(
+      <Transcript
+        faceSeed={THREAD.session.id}
+        blocks={blocks}
+        lead={<p className="test-lead">The brief</p>}
+        pose="working"
+        describeAgent={() => "Claude Code · Claude Sonnet 5"}
+        attachOpenParagraph={() => undefined}
+        composerStack={null}
+        onBottomChange={() => {}}
+      />,
+    );
+    const items = [...container.querySelectorAll(".column.tx > .tx-item")];
+    expect(items[0]!.getAttribute("data-index")).toBe("0");
+    expect(items[0]!.textContent).toBe("The brief");
+    // The first block follows the lead in the same scrolling column.
+    expect(items[1]!.getAttribute("data-index")).toBe("1");
+    expect(items[1]!.querySelector(".test-lead")).toBeNull();
+    expect(items).toHaveLength(blocks.length + 1);
+  });
+
+  it("draws what renderSpawnLines returns under a stretch of work, given its items", () => {
+    const seen: string[][] = [];
+    render(
+      <Transcript
+        faceSeed={THREAD.session.id}
+        blocks={buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session))}
+        pose="working"
+        describeAgent={() => "Claude Code · Claude Sonnet 5"}
+        attachOpenParagraph={() => undefined}
+        composerStack={null}
+        onBottomChange={() => {}}
+        renderSpawnLines={(items, onScreen) => {
+          seen.push(items.map((item) => item.itemId));
+          return <p>Spawn lines {onScreen ? "on screen" : "off screen"}</p>;
+        }}
+      />,
+    );
+    // The live stretch gets its own lines, drawn after its divider.
+    const divider = screen.getByRole("button", { name: /^Working for/ });
+    const lines = within(divider.closest(".tx-item")!).getByText(/^Spawn lines/);
+    expect(lines.textContent).toBe("Spawn lines on screen");
+    expect(divider.compareDocumentPosition(lines) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(seen).toContainEqual(["turn-1-fix-test"]);
   });
 });

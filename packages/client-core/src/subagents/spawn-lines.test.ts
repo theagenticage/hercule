@@ -56,6 +56,13 @@ describe("findSpawnedSubagents", () => {
     ]);
   });
 
+  it("takes any run of items, such as one work stretch of a turn", () => {
+    const stretch = { items: [buildItem("spawn-a", "subagent")] };
+    expect(findSpawnedSubagents(stretch, undefined, SUBAGENTS).map((each) => each.id)).toEqual([
+      "a",
+    ]);
+  });
+
   it("leaves out a subagent another agent started, even when its item id matches", () => {
     expect(findSpawnedSubagents(TURN, "a", SUBAGENTS).map((each) => each.id)).toEqual(["a2"]);
   });

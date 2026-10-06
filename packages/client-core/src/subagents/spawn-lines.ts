@@ -3,7 +3,7 @@
  * the transcript where its agent started it.
  */
 import type { SessionRequest, Subagent, SubagentId, SubagentStatus } from "@hercule/contract";
-import type { ThreadTurn } from "../threads/turns";
+import type { ThreadItem } from "../threads/turns";
 import {
   describeSubagentState,
   isSubagentWaiting,
@@ -34,12 +34,14 @@ export interface SpawnLine {
 }
 
 /**
- * Returns the subagents `turn` started, ordered as the side pane orders
- * siblings, so the two never disagree. `agentSubagentId` is the agent whose
- * turn it is: a subagent's id, or undefined for the session's own agent.
+ * Returns the subagents a run of items started, ordered as the side pane
+ * orders siblings, so the two never disagree. `run` is anything that holds
+ * items: a whole turn, or one work stretch of it. `agentSubagentId` is the
+ * agent whose items they are: a subagent's id, or undefined for the
+ * session's own agent.
  *
- * A subagent belongs to the turn when its `itemId` is one of the turn's
- * `subagent` items and the turn's agent started it. Both are checked,
+ * A subagent belongs to the run when its `itemId` is one of the run's
+ * `subagent` items and the run's agent started it. Both are checked,
  * because an item id is unique only within one agent's transcript.
  *
  * A `subagent` item whose record has not been read yet has no subagent
@@ -47,12 +49,12 @@ export interface SpawnLine {
  * does.
  */
 export const findSpawnedSubagents = (
-  turn: ThreadTurn,
+  run: { readonly items: readonly ThreadItem[] },
   agentSubagentId: SubagentId | undefined,
   subagents: readonly Subagent[],
 ): readonly Subagent[] => {
   const itemIds = new Set(
-    turn.items.filter((item) => item.kind === "subagent").map((item) => item.itemId),
+    run.items.filter((item) => item.kind === "subagent").map((item) => item.itemId),
   );
   return subagents
     .filter(

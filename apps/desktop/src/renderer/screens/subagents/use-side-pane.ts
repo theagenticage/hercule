@@ -15,6 +15,7 @@
  * The layout's changes and the width's limits live in `@hercule/client-core`.
  */
 import { useSyncExternalStore } from "react";
+import { useMatch } from "@tanstack/react-router";
 import {
   CLOSED_SIDE_PANE,
   DEFAULT_SIDE_PANE_WIDTH,
@@ -53,6 +54,18 @@ const readWidth = (): number => {
     return DEFAULT_SIDE_PANE_WIDTH;
   }
 };
+
+/**
+ * Returns whether the caller is drawn on a thread's screen, the one place
+ * with a side pane. It returns false in the Office's thread drawer, which
+ * draws the thread page outside that route, so the drawer shows nothing that
+ * would open a pane it does not have.
+ */
+export function useHasSidePane(): boolean {
+  return (
+    useMatch({ from: "/_connected/_shell/threads/$sessionId", shouldThrow: false }) !== undefined
+  );
+}
 
 /**
  * Returns the layout of the side pane of the thread `sessionId`, and a
