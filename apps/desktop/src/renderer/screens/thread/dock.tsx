@@ -134,13 +134,13 @@ export function RequestDock({
   const card = buildApprovalCard(request);
   const faceLook = buildLook(buildAgentFaceSeed(sessionId, request.subagentId));
   const [requestDraft, changeRequestDraft] = useRequestDraft(sessionId, request.requestId);
-  const markAnswered = (answered: boolean): void => {
-    changeRequestDraft((current) => ({ ...current, answered }));
-  };
   // A failed send unlocks the Request, so the user can answer again. The
   // mutation's own callbacks run even after the dock has unmounted, and the
   // draft is changed through the thread's drafts, so the unlock lands
   // whether or not the dock is still shown.
+  const markAnswered = (answered: boolean): void => {
+    changeRequestDraft((current) => ({ ...current, answered }));
+  };
   // Neither response is written into the cache. It is the session as the
   // controller held it when the answer arrived, still waiting on the
   // request, so writing it could bring back a dock the live `session` push
