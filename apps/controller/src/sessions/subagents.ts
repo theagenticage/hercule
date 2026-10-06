@@ -107,7 +107,9 @@ const readDetail = (detail: unknown): Readonly<Record<string, unknown>> =>
 /**
  * Returns the part of an item's `detail` worth naming in `activity`: the
  * command, the path, the search, the tool's name or its description. Each
- * adapter shapes `detail` its own way, so each field is optional.
+ * adapter shapes `detail` its own way, so each field is optional. The Claude
+ * adapter keeps the tool's arguments under `detail.input`, so a field there
+ * comes before the same field at the top level.
  *
  * A `subagent` item is named only by the task it hands over, its
  * `description`. Its `name` is the delegating tool, such as Claude's `Agent`
@@ -115,10 +117,20 @@ const readDetail = (detail: unknown): Readonly<Record<string, unknown>> =>
  */
 const findDetailTarget = (kind: ItemKind, detail: unknown): string | undefined => {
   const fields = readDetail(detail);
+  const input = readDetail(fields.input);
   const candidates =
     kind === "subagent"
-      ? [fields.description]
-      : [fields.command, fields.path, fields.description, fields.name];
+      ? [input.description, fields.description]
+      : [
+          input.command,
+          fields.command,
+          input.file_path,
+          fields.path,
+          input.query,
+          input.description,
+          fields.description,
+          fields.name,
+        ];
   return candidates.find((value): value is string => typeof value === "string");
 };
 
