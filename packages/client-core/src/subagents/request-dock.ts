@@ -3,7 +3,8 @@
  * pages to the others, and which agent asked it.
  */
 import type { SessionRequest, Subagent, SubagentId } from "@hercule/contract";
-import { nameSubagent, nameSubagentParent } from "./describe";
+import { nameSubagentParent } from "./describe";
+import { nameSubagent } from "./name";
 
 /**
  * The agent that asked the shown Request: the session's own agent, or a
@@ -109,3 +110,31 @@ export const buildRequestDock = (
     showsAskerLine: requests.length > 1 || asker?.kind === "subagent",
   };
 };
+
+/**
+ * Who asks the shown Request, in the words the line above the dock shows:
+ * "<name> asks · subagent of <parent>", or "The main agent asks". The parts
+ * are kept apart so each app can draw the subagent's name in its own style.
+ */
+export interface RequestAskerWords {
+  /** The asking subagent's name; null when the main agent asks. */
+  readonly name: string | null;
+  /** The words after the name, "asks", or "The main agent asks" when there is no name. */
+  readonly asks: string;
+  /**
+   * Who started the asking subagent, such as "subagent of the main agent".
+   * Null when the main agent asks, or when the asker's record has not been
+   * read yet, so its parent is not known.
+   */
+  readonly parent: string | null;
+}
+
+/** Returns the words that name `asker` on the line above the dock. */
+export const describeRequestAsker = (asker: RequestAsker): RequestAskerWords =>
+  asker.kind === "main agent"
+    ? { name: null, asks: "The main agent asks", parent: null }
+    : {
+        name: asker.name,
+        asks: "asks",
+        parent: asker.parentName === null ? null : `subagent of ${asker.parentName}`,
+      };

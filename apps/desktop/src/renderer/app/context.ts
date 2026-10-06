@@ -25,9 +25,9 @@ export interface SavedController {
   /**
    * The live connection to the controller. It is created here and does not
    * connect until the shell starts it (see `useLiveConnection`). Most screens
-   * never touch it: pushes invalidate query keys. The thread screen and an
-   * assistant's Conversation are the exceptions: each subscribes to its
-   * session's stream and tap through `useSessionLive`.
+   * never touch it: pushes invalidate query keys. An agent's page on a thread
+   * and an assistant's Conversation are the exceptions: each subscribes to its
+   * agent's stream and tap through `useSessionLive`.
    */
   readonly live: Live;
   /** What each thread's, Draft Thread's and assistant's composer holds and has not sent yet. */

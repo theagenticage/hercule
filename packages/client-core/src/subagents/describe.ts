@@ -1,11 +1,15 @@
 /**
- * The words every screen shows for one subagent: its name, its state, the
- * one line under its name and the facts about it. They are read from the
- * Subagent record alone, so a screen needs no transcript to draw a subagent.
+ * The words every screen shows for one subagent: the name of the agent that
+ * started it, its state, the one line under its name and the facts about it.
+ * They are read from the Subagent record alone, so a screen needs no
+ * transcript to draw a subagent. The subagent's own name is `nameSubagent`,
+ * in `./name`.
  */
-import type { SessionRequest, Subagent } from "@hercule/contract";
+import type { SessionRequest, Subagent, SubagentStatus } from "@hercule/contract";
 import { formatDuration } from "../threads/duration";
+import type { Pose } from "../threads/pose";
 import { countUsedTokens } from "../token-usage";
+import { nameSubagent } from "./name";
 import { listSubagentDescendants } from "./tree";
 
 /**
@@ -27,15 +31,6 @@ export interface SubagentLine {
   readonly text: string;
   readonly hue: SubagentHue;
 }
-
-/**
- * Returns the name a screen shows for a subagent: its `description`, which
- * is the task name its parent gave it or the first line of its brief. Until
- * the controller has read either, it falls back to the subagent's agent
- * type, such as "Explore", and then to "Subagent".
- */
-export const nameSubagent = (subagent: Subagent): string =>
-  subagent.description ?? subagent.agentType ?? "Subagent";
 
 /**
  * Returns the name a screen shows for the agent that started `subagent`:
@@ -93,6 +88,41 @@ export const describeSubagentState = (
     case "stopped":
       return { word: "stopped", hue: "muted", duration };
   }
+};
+
+/**
+ * The mark drawn beside a subagent: `working` while it runs, `waiting` while
+ * it runs and waits on the user, and `done`, `failed` or `stopped` once it
+ * has ended. Each app draws its own glyph or face for each mark.
+ */
+export type SubagentMark = "working" | "waiting" | "done" | "failed" | "stopped";
+
+/**
+ * Returns the mark of a subagent with `status`. `waiting` is whether it
+ * waits on the user, as `isSubagentWaiting` decides; it changes the mark only
+ * while the subagent runs.
+ */
+export const decideSubagentMark = (status: SubagentStatus, waiting: boolean): SubagentMark => {
+  switch (status) {
+    case "running":
+      return waiting ? "waiting" : "working";
+    case "completed":
+      return "done";
+    case "failed":
+      return "failed";
+    case "stopped":
+      return "stopped";
+  }
+};
+
+/**
+ * Returns the pose of a subagent's face, from the same rules as
+ * `decideSubagentMark`. A face has no stopped pose, so a stopped subagent
+ * is `idle`: it does nothing, and it is neither done nor failed.
+ */
+export const decideSubagentPose = (status: SubagentStatus, waiting: boolean): Pose => {
+  const mark = decideSubagentMark(status, waiting);
+  return mark === "stopped" ? "idle" : mark;
 };
 
 /** Returns what the user is asked to do about a Request, such as "allow a command". */

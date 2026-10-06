@@ -15,7 +15,6 @@ import {
   buildSubmission,
   buildThreadWorkspaceLabel,
   computeEffectiveConfig,
-  findOldestOpenRequest,
   findResumeBlockedReason,
   formatAccessMode,
   isMutationRunning,
@@ -37,14 +36,15 @@ import {
   workspacesQuery,
 } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
-import { buildLook } from "../../faces";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
 import { WorkspaceIcon } from "../../icons/workspace";
-import { RequestDock } from "../session/dock";
 import { ComposerFrame } from "../session/composer-frame";
 import { useSendOnMenuCommand } from "../session/send-key";
+import { TallyPill } from "../subagents/tally-pill";
+import { useStopAgent } from "../use-stop-agent";
+import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
 import { QueuedInputs } from "./queued-inputs";
 
@@ -60,8 +60,10 @@ interface SentSubmission {
  * Renders the thread's composer in a `ComposerFrame`, floating over the
  * bottom of the transcript. From top to bottom:
  *
+ * - the tally pill, while the thread has subagents, see `TallyPill`;
  * - the queued inputs, see `QueuedInputs`;
- * - the dock, while the session waits on a Request, see `RequestDock`;
+ * - the dock, while the session waits on a Request, with the pager line
+ *   above it when there is one, see `AgentRequestDock`;
  * - the card: the message field, then a row with Attach, the access mode,
  *   the model options when the model has any, the model, Dictate, and Send,
  *   or Stop while a turn runs;
@@ -69,7 +71,8 @@ interface SentSubmission {
  *
  * ⏎ in the field sends the message and ⇧⏎ starts a new line. The controller
  * opens a turn with a message sent to an idle thread, and queues one sent
- * while a turn runs. Stop interrupts the running turn. A thread that has
+ * while a turn runs. Stop stops everything the session runs: its own
+ * agent's turn and every running subagent (`useStopAgent`). A thread that has
  * exited and cannot be resumed takes no message: its field is read-only
  * and its menus do not open.
  *
@@ -136,7 +139,6 @@ export function ThreadComposer({
   const fields = buildComposerFields(catalogs, config, "active");
   const readOnly = findResumeBlockedReason(session);
   const busy = session.status === "busy";
-  const oldestRequest = findOldestOpenRequest(session);
   const workspaceLabel = buildThreadWorkspaceLabel(session, workspaces);
   const placeholder = buildComposerPlaceholder({
     readOnly,
@@ -171,14 +173,9 @@ export function ThreadComposer({
       pendingSubmissions.recordFailure(sessionId, readErrorMessage(error));
     },
   });
-  const interrupt = useMutation({
-    mutationFn: () => client.session.interrupt({ params: { id: sessionId }, payload: {} }),
-    // The response is not written into the cache. It is the session as the
-    // controller read it before the interrupt, still busy, so writing it
-    // could bring back a Stop the live `session` push has already cleared.
-  });
+  const stopAgent = useStopAgent(client, sessionId);
   const error =
-    pending.failure ?? (interrupt.error === null ? null : readErrorMessage(interrupt.error));
+    pending.failure ?? (stopAgent.error === null ? null : readErrorMessage(stopAgent.error));
   const canSend = readOnly === null && pending.message.text.trim() !== "" && !sending;
 
   // Each pick is compared with the thread's own configuration, not with the
@@ -191,7 +188,7 @@ export function ThreadComposer({
     if (!canSend || isMutationRunning(queryClient, sendKey)) return;
     const submission = buildSubmission(thread, pending.picks, pending.message);
     pendingSubmissions.clearFailure(sessionId);
-    if (interrupt.isError) interrupt.reset();
+    if (stopAgent.error !== null) stopAgent.reset();
     input.mutate({
       payload: submission.payload,
       picks: pending.picks,
@@ -201,9 +198,12 @@ export function ThreadComposer({
   };
   useSendOnMenuCommand(submit);
   const stop = (): void => {
-    if (interrupt.isPending) return;
+    // `useStopAgent` already ignores a second stop, but Stop is only
+    // `aria-disabled` while one is in flight, so it can still be clicked:
+    // such a click must not clear the send failure either.
+    if (stopAgent.isPending) return;
     pendingSubmissions.clearFailure(sessionId);
-    interrupt.mutate();
+    stopAgent.stop();
   };
 
   return (
@@ -217,7 +217,7 @@ export function ThreadComposer({
       canSend={canSend}
       onSend={submit}
       busy={busy}
-      stopping={interrupt.isPending}
+      stopping={stopAgent.isPending}
       onStop={stop}
       error={error}
       start={
@@ -251,17 +251,13 @@ export function ThreadComposer({
       }
       above={
         <>
+          <div className="fold tally-fold">
+            <TallyPill sessionId={sessionId} />
+          </div>
           <div className="fold">
             <QueuedInputs sessionId={sessionId} />
           </div>
-          {oldestRequest === null ? null : (
-            <RequestDock
-              key={oldestRequest.requestId}
-              sessionId={sessionId}
-              look={buildLook(sessionId)}
-              request={oldestRequest}
-            />
-          )}
+          <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} />
         </>
       }
       below={

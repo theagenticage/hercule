@@ -1,0 +1,56 @@
+/* The status card, copied from the subagents prototype's `.proto-status`
+   and `.proto-stop` (commit 6253a529). Each departure from the prototype
+   says why. The card is a `.composer-card`, so it floats over the
+   transcript's bottom in the composer's glass. */
+.status-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+}
+.status-card-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-12);
+  color: var(--faint);
+  line-height: 1.4;
+}
+.status-card-text > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.status-card-text b {
+  font-size: var(--t-13);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.status-card-text b[data-hue="attn"] {
+  color: var(--you-ink);
+}
+.status-card-text b[data-hue="fail"] {
+  color: var(--fail-ink);
+}
+/* Not in the prototype, whose Stop never fails. The reason wraps, because
+   it is the one line the user must read whole. */
+.status-card-text > .status-card-error {
+  color: var(--fail-ink);
+  white-space: normal;
+}
+.status-card-stop {
+  gap: 5px;
+  color: var(--fail-ink);
+}
+.status-card-stop:hover {
+  background: var(--fail-tint);
+}
+/* The transcript fades out above the composer's lip (composer.css). The
+   status card has no lip, so the transcript is hidden only below the card,
+   over the wrap's 18px bottom padding, and fades in over the card's lower
+   edge as it does over the composer's. Five classes deep, so it wins over
+   the composer's four-class rule whatever order the style sheets load in. */
+.transcript:has(~ .composer-wrap > .composer > .composer-card.status-card) {
+  --lip-clearance: 18px;
+}

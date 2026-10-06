@@ -56,6 +56,13 @@ describe("findSpawnedSubagents", () => {
     ]);
   });
 
+  it("takes any run of items, such as one work stretch of a turn", () => {
+    const stretch = { items: [buildItem("spawn-a", "subagent")] };
+    expect(findSpawnedSubagents(stretch, undefined, SUBAGENTS).map((each) => each.id)).toEqual([
+      "a",
+    ]);
+  });
+
   it("leaves out a subagent another agent started, even when its item id matches", () => {
     expect(findSpawnedSubagents(TURN, "a", SUBAGENTS).map((each) => each.id)).toEqual(["a2"]);
   });
@@ -70,8 +77,7 @@ describe("buildSpawnLines", () => {
         waiting: false,
         name: "Read the docs",
         state: { word: "done", hue: "muted", duration: "45s" },
-        below: 0,
-        waitsOnUserBelow: false,
+        notes: [],
       },
       {
         subagentId: "a",
@@ -79,8 +85,7 @@ describe("buildSpawnLines", () => {
         waiting: false,
         name: "Check the redirect",
         state: { word: "working", hue: "live", duration: "1m 30s" },
-        below: 3,
-        waitsOnUserBelow: false,
+        notes: [{ text: "3 below", hue: "muted" }],
       },
     ]);
   });
@@ -90,9 +95,26 @@ describe("buildSpawnLines", () => {
 
     expect(a).toMatchObject({
       waiting: false,
-      waitsOnUserBelow: true,
       state: { word: "working" },
+      notes: [
+        { text: "3 below", hue: "muted" },
+        { text: "one waits on you", hue: "attn" },
+      ],
     });
+  });
+
+  it("counts the subagents below it that wait on the user when there are several", () => {
+    const [a] = buildSpawnLines(
+      [A],
+      SUBAGENTS,
+      [buildRequest("r-1", "a1x"), buildRequest("r-2", "a2")],
+      NOW,
+    );
+
+    expect(a?.notes).toEqual([
+      { text: "3 below", hue: "muted" },
+      { text: "2 wait on you", hue: "attn" },
+    ]);
   });
 
   it("marks a subagent that asks itself as waiting on you, without saying one below waits", () => {
@@ -100,8 +122,8 @@ describe("buildSpawnLines", () => {
 
     expect(a).toMatchObject({
       waiting: true,
-      waitsOnUserBelow: false,
       state: { word: "waiting on you" },
+      notes: [{ text: "3 below", hue: "muted" }],
     });
   });
 });

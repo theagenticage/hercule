@@ -1,0 +1,21 @@
+/* The thread's split: the main pane, which holds the open agent's page, and
+   the side pane beside it while the side pane is open (side-pane.css). The
+   rules are the subagents prototype's `.proto-split` and `.proto-split-main`
+   (commit 6253a529).
+
+   The page's header and composer float over its transcript, placed against
+   the nearest positioned box. The main pane is that box, so both shrink
+   with it when the side pane opens. The split is drawn whether the side
+   pane is open or not, so opening the pane never mounts the page again. */
+.thread-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.thread-split-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}

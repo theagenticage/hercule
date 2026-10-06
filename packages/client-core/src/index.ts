@@ -254,24 +254,36 @@ export {
   isSameDay,
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
-export { findSubagentBrief, type SubagentBrief } from "./subagents/brief";
 export {
+  describeBriefSource,
+  findSubagentBrief,
+  splitSubagentBrief,
+  type BriefSource,
+  type SubagentBriefSplit,
+  type SubagentBrief,
+} from "./subagents/brief";
+export {
+  decideSubagentMark,
+  decideSubagentPose,
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
   describeSubagentStop,
   formatTokenCount,
   isSubagentWaiting,
-  nameSubagent,
   nameSubagentParent,
   type SubagentHue,
   type SubagentLine,
+  type SubagentMark,
   type SubagentState,
   type SubagentStop,
 } from "./subagents/describe";
+export { nameSubagent } from "./subagents/name";
 export {
   buildRequestDock,
+  describeRequestAsker,
   type RequestAsker,
+  type RequestAskerWords,
   type RequestDockState,
 } from "./subagents/request-dock";
 export { buildSpawnLines, findSpawnedSubagents, type SpawnLine } from "./subagents/spawn-lines";
@@ -370,6 +382,12 @@ export { decideRelatedReads } from "./threads/related-reads";
 export { findOldestOpenRequest } from "./threads/oldest-request";
 export { formatRequestQuestion } from "./threads/request-question";
 export {
+  changeRequestDraft,
+  dropClosedRequestDrafts,
+  EMPTY_REQUEST_DRAFT,
+  type RequestDraft,
+} from "./threads/request-drafts";
+export {
   buildQuestionAnswers,
   buildQuestionDraft,
   isQuestionAnswered,
@@ -400,6 +418,22 @@ export {
   listWorkspaceThreads,
   type ThreadTab,
 } from "./threads/siblings";
+export {
+  CLOSED_SIDE_PANE,
+  DEFAULT_SIDE_PANE_WIDTH,
+  MIN_MAIN_PANE_WIDTH,
+  MIN_SIDE_PANE_WIDTH,
+  SIDE_PANE_SURFACES,
+  closeSidePaneSurface,
+  fitSidePaneWidth,
+  openSidePaneSurface,
+  parseSidePaneLayout,
+  parseSidePaneWidth,
+  toggleSidePane,
+  toggleSidePaneSurface,
+  type SidePaneLayout,
+  type SidePaneSurface,
+} from "./threads/side-pane";
 export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
 export { pickProjectHue, type ProjectTone } from "./threads/tone";
 export { buildBranchField, type BranchField } from "./threads/branch-menu";

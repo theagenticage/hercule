@@ -25,7 +25,7 @@ import {
   type WorkBlock,
 } from "@hercule/client-core";
 import { useAgeLabel, useDurationText } from "../../app/age-clock";
-import { buildLook } from "../../faces";
+import type { Look } from "../../faces";
 import { Mark } from "../../marks";
 import { AgentFace, formatBlockTime } from "../session/messages";
 
@@ -36,17 +36,18 @@ import { AgentFace, formatBlockTime } from "../session/messages";
  * face, and the row goes.
  */
 export const LiveRow = memo(function LiveRow({
-  sessionId,
+  look,
   agent,
   pose,
 }: {
-  readonly sessionId: string;
+  /** The agent's look, from `buildLook`: the session's own agent's, or a subagent's. */
+  readonly look: Look;
   readonly agent: string;
   readonly pose: Pose;
 }): JSX.Element {
   return (
     <div className="msg">
-      <AgentFace look={buildLook(sessionId)} pose={pose} />
+      <AgentFace look={look} pose={pose} />
       <div className="msg-body">
         <div className="msg-meta">{agent}</div>
       </div>

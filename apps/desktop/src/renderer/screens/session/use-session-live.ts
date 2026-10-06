@@ -1,17 +1,23 @@
 /**
- * Keeps a session on screen current through the live connection: its
- * transcript rows, and the paragraph the agent is writing. The thread screen
- * keeps a thread's session current this way, and an assistant's Conversation
- * the running turn of its current session.
+ * Keeps one agent of a session on screen current through the live
+ * connection: its transcript rows, and the paragraph the agent is writing.
+ * The agent is the session's own agent, or one of its subagents. A thread's
+ * agent page keeps one agent current this way, and an assistant's
+ * Conversation the running turn of its current session. A page follows
+ * exactly one agent, so a subagent's page holds the subagent's topics in
+ * place of the thread's, never beside them.
  *
- * Two topics carry a session's live changes:
+ * Two topics carry an agent's live changes:
  *
- * - `session:<id>:stream` delivers stored rows, which are merged into the
- *   cached rows. It stays subscribed while the window is hidden, so the
- *   rows are whole when the window is shown again.
- * - `session:<id>:tap` delivers token deltas, which go into the session's
- *   tail buffer (`createTailBuffer`). It is subscribed only while the window
- *   is visible, because nobody reads a hidden window (spec 17, rule 3).
+ * - its stream (`session:<id>:stream`, or
+ *   `session:<id>:subagent:<subagentId>:stream`) delivers stored rows, which
+ *   are merged into the cached rows. It stays subscribed while the window is
+ *   hidden, so the rows are whole when the window is shown again.
+ * - its tap (`session:<id>:tap`, or `session:<id>:subagent:<subagentId>:tap`)
+ *   delivers token deltas, which go into the agent's tail buffer
+ *   (`createTailBuffer`). It is subscribed only while the window is visible,
+ *   because nobody reads a hidden window (spec 17, rule 3), whichever agent's
+ *   tap it is.
  *
  * The paragraph the agent is writing is painted outside React, into one text
  * node, at most once per animation frame however many deltas arrived. A React
@@ -37,11 +43,7 @@ import {
   splitStreamingText,
   type Live,
 } from "@hercule/client-core";
-import {
-  buildSessionStreamTopic,
-  buildSessionTapTopic,
-  type TranscriptRow,
-} from "@hercule/contract";
+import { buildAgentStreamTopic, buildAgentTapTopic, type TranscriptRow } from "@hercule/contract";
 
 /**
  * A message the agent is still writing, as it attaches the element that its
@@ -91,9 +93,9 @@ const subscribeToVisibility = (onChange: () => void): (() => void) => {
 const isWindowVisible = (): boolean => document.visibilityState === "visible";
 
 /**
- * Subscribes the session `sessionId` to its live topics, and returns the
- * function that attaches the element an open message's paragraph being written is
- * painted into. The open message draws its finished paragraphs as markdown,
+ * Subscribes to the live topics of one agent of the session `sessionId`, and
+ * returns the function that attaches the element an open message's paragraph
+ * being written is painted into. The open message draws its finished paragraphs as markdown,
  * then that element, empty, such as
  * `<p ref={(element) => attachOpenParagraph(element, message)} />`: the hook
  * puts one text node inside it and writes there the rest of the message's
@@ -101,16 +103,18 @@ const isWindowVisible = (): boolean => document.visibilityState === "visible";
  *
  * - `live` is the controller's live connection, or `null` to draw the
  *   session without live changes, as the thread specimen does.
- * - `queryKey` is the key the session's rows are cached under: the thread
- *   passes `queryKeys.transcript(sessionId)`, the Conversation the key of its
- *   running turn's rows. Stream rows are merged into the rows held there, and
+ * - `subagentId` names the subagent to follow, or is undefined for the
+ *   session's own agent.
+ * - `queryKey` is the key the agent's rows are cached under: an agent page
+ *   passes `queryKeys.transcript(sessionId, subagentId)`, the Conversation
+ *   the key of its running turn's rows. Stream rows are merged into the rows held there, and
  *   a stream `reset` reads them again through that key.
  * - `rows` are the rows cached under `queryKey`, so that the tail is painted
  *   in the same commit as the rows that hold its text.
  *
  * The hook keeps one tail buffer, and reads `queryKey` once, for the life of
  * the component, so the caller mounts the component again for another
- * session: the thread route keys the screen by session id. Reading the key
+ * agent: the thread's routes key the page by session id and subagent id. Reading the key
  * once also means a caller may build it inline on every render without the
  * subscriptions starting again.
  *
@@ -146,6 +150,7 @@ export const useSessionLive = (
   live: Live | null,
   queryClient: QueryClient,
   sessionId: string,
+  subagentId: string | undefined,
   queryKey: QueryKey,
   rows: readonly TranscriptRow[],
 ): AttachOpenParagraph => {
@@ -219,7 +224,7 @@ export const useSessionLive = (
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(rowsKey) ?? [];
     const unsubscribe = live.subscribe(
-      buildSessionStreamTopic(sessionId),
+      buildAgentStreamTopic(sessionId, subagentId),
       (delta) => {
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
@@ -242,12 +247,12 @@ export const useSessionLive = (
       buildStreamCursor(readHeldRows()),
     );
     return unsubscribe;
-  }, [live, queryClient, sessionId, rowsKey, buffer, skipOpenItems]);
+  }, [live, queryClient, sessionId, subagentId, rowsKey, buffer, skipOpenItems]);
 
   useEffect(() => {
     if (live === null || !visible) return;
     skipOpenItems();
-    const unsubscribe = live.subscribe(buildSessionTapTopic(sessionId), (delta) => {
+    const unsubscribe = live.subscribe(buildAgentTapTopic(sessionId, subagentId), (delta) => {
       const delivery = decideTapDelivery(delta);
       if (delivery.kind === "gone") {
         unsubscribe();
@@ -259,7 +264,7 @@ export const useSessionLive = (
       }
     });
     return unsubscribe;
-  }, [live, sessionId, visible, buffer, schedulePaint, skipOpenItems]);
+  }, [live, sessionId, subagentId, visible, buffer, schedulePaint, skipOpenItems]);
 
   useEffect(
     () => () => {

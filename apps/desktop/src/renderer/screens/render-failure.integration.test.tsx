@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route as ThreadRoute } from "../routes/_connected/_shell/threads/$sessionId";
+import { Route as ThreadRoute } from "../routes/_connected/_shell/threads/$sessionId/index";
 import {
   buildErrorBody,
   buildSidebarHandlers,

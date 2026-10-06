@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildHueStyle } from "./face";
 import { buildLook, HUES, hashSeed, SHAPES, WARDROBE, type Look } from "./look";
 
 // Computed with the Bureau book's own `hash` and `lookFor` in crew.js.
@@ -85,5 +86,11 @@ describe("buildLook", () => {
     }
     // At most 256 looks exist, so most of the 1000 seeds repeat a look.
     expect(firstByLook.size).toBeLessThanOrEqual(256);
+  });
+});
+
+describe("buildHueStyle", () => {
+  it("sets --hue to the hue's token", () => {
+    expect(buildHueStyle("teal")).toEqual({ "--hue": "var(--hue-teal)" });
   });
 });

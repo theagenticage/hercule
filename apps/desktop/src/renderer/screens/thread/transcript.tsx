@@ -1,7 +1,7 @@
 /**
- * The thread's transcript: the blocks `buildThreadBlocks` returns, in the
- * region "Transcript", virtualized, opening at the bottom and following new
- * content while the reader is there.
+ * One agent's transcript, the session's own agent's or a subagent's: the
+ * blocks `buildThreadBlocks` returns, in the region "Transcript", virtualized,
+ * opening at the bottom and following new content while the reader is there.
  *
  * Only the blocks in and near the visible part are mounted. Each mounted block
  * is measured (`measureElement`), and an empty spacer stands in for the
@@ -26,10 +26,16 @@ import {
   useRef,
   useState,
   type JSX,
+  type ReactNode,
   type Ref,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { resolveBrowserTimezone, type Pose, type ThreadBlock } from "@hercule/client-core";
+import {
+  resolveBrowserTimezone,
+  type Pose,
+  type ThreadBlock,
+  type ThreadItem,
+} from "@hercule/client-core";
 import { buildLook } from "../../faces";
 import { AgentMessage, UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
@@ -71,6 +77,12 @@ const OVERSCAN = 6;
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
 
+/** Roughly how tall `lead` is before it is measured, in CSS pixels. */
+const LEAD_HEIGHT_ESTIMATE = 110;
+
+/** Roughly how tall one spawn line is before it is measured: the line's 30px and the 2px between lines. */
+const SPAWN_LINE_HEIGHT_ESTIMATE = 32;
+
 /** Roughly how many characters fit on one line of an agent message, and of a user's bubble. */
 const AGENT_CHARS_PER_LINE = 100;
 const USER_CHARS_PER_LINE = 80;
@@ -83,8 +95,8 @@ const USER_LINE_HEIGHT = 21.7;
 /**
  * Estimates a block's height before it is measured, from the book's
  * measurements: the lines of text, a meta line 20.4px with its margin, a
- * divider or a note 17.4px, and a bubble's padding and time 40px. Only blocks
- * that were never mounted use the estimate.
+ * divider or a note 17.4px, a bubble's padding and time 40px, and the spawn
+ * lines under a divider. Only blocks that were never mounted use the estimate.
  */
 const estimateBlockHeight = (block: ThreadBlock): number => {
   switch (block.kind) {
@@ -98,7 +110,14 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
       );
     case "live":
       return 42.8;
-    case "work":
+    case "work": {
+      // The divider, then a spawn line per subagent the stretch started. The
+      // lines sit in the divider's item, so the block gap above them is a
+      // margin. A subagent whose record is not read yet draws no line, so
+      // such a stretch is estimated a little tall.
+      const spawned = block.items.filter((item) => item.kind === "subagent").length;
+      return spawned === 0 ? 17.4 : 17.4 + BLOCK_GAP + SPAWN_LINE_HEIGHT_ESTIMATE * spawned;
+    }
     case "ending":
     case "waiting":
       return 17.4;
@@ -120,10 +139,12 @@ export interface TranscriptHandle {
 }
 
 /**
- * Renders the transcript of the thread `sessionId`.
+ * Renders one agent's transcript.
  *
- * - `blocks` are the thread's blocks in reading order.
- * - `pose` is the thread's pose, drawn on the block that holds the working face.
+ * - `faceSeed` seeds the agent's face: the session id for the session's own
+ *   agent, `<sessionId>:<subagentId>` for a subagent.
+ * - `blocks` are the agent's blocks in reading order.
+ * - `pose` is the agent's pose, drawn on the block that holds the working face.
  * - `describeAgent` returns the start of an agent message's meta line, such
  *   as "Claude Code · Opus 5.5", for the model slug the message ran on.
  * - `attachOpenParagraph` attaches the element an open message's paragraph
@@ -133,27 +154,37 @@ export interface TranscriptHandle {
  *   `null` until the composer is mounted, and while the composer is shrunk:
  *   the space then stays as the expanded composer needs it, so shrinking
  *   changes nothing the reader can scroll to.
- * - `onBottomChange` is told when the reader reaches the bottom, or leaves
+ * - `onBottomChange` is called when the reader reaches the bottom, or leaves
  *   it. The transcript opens at the bottom.
+ * - `lead`, when set, is drawn above the first block, and scrolls with the
+ *   blocks.
+ * - `renderSpawnLines`, when set, returns what is drawn under a work
+ *   stretch's divider for the stretch's `items`: the spawn lines of the
+ *   subagents it started. `onScreen` is true while the stretch is in the
+ *   visible part of the transcript.
  * - `ref` receives a `TranscriptHandle`.
  */
 export function Transcript({
-  sessionId,
+  faceSeed,
   blocks,
   pose,
   describeAgent,
   attachOpenParagraph,
   composerStack,
   onBottomChange,
+  lead,
+  renderSpawnLines,
   ref,
 }: {
-  readonly sessionId: string;
+  readonly faceSeed: string;
   readonly blocks: readonly ThreadBlock[];
   readonly pose: Pose;
   readonly describeAgent: (model: string) => string;
   readonly attachOpenParagraph: AttachOpenParagraph;
   readonly composerStack: HTMLElement | null;
   readonly onBottomChange: (atBottom: boolean) => void;
+  readonly lead?: ReactNode;
+  readonly renderSpawnLines?: (items: readonly ThreadItem[], onScreen: boolean) => ReactNode;
   readonly ref?: Ref<TranscriptHandle>;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
@@ -180,26 +211,35 @@ export function Transcript({
   // see into the virtualizer (see below). These callbacks are memoized by
   // hand: the virtualizer measures the blocks again whenever `getItemKey`
   // changes.
-  // The virtualizer asks only for indexes below `count`, which is `blocks.length`.
-  const getItemKey = useCallback((index: number) => blocks[index]!.key, [blocks]);
+  // `lead`, when set, is the virtualizer's item 0, and the blocks follow it.
+  // The virtualizer asks only for indexes below `count`, which is
+  // `blocks.length` plus the lead.
+  const leadCount = lead === undefined ? 0 : 1;
+  const getItemKey = useCallback(
+    (index: number) => (index < leadCount ? "lead" : blocks[index - leadCount]!.key),
+    [blocks, leadCount],
+  );
   const estimateSize = useCallback(
-    (index: number) => (index === 0 ? 0 : BLOCK_GAP) + estimateBlockHeight(blocks[index]!),
-    [blocks],
+    (index: number) =>
+      index < leadCount
+        ? LEAD_HEIGHT_ESTIMATE
+        : (index === 0 ? 0 : BLOCK_GAP) + estimateBlockHeight(blocks[index - leadCount]!),
+    [blocks, leadCount],
   );
   // The estimated scroll position of the bottom, so the first render mounts
   // the last blocks rather than the first. Read once, when the virtualizer is
   // created.
-  const estimateBottomOffset = (): number =>
-    Math.max(
-      0,
-      blocks.reduce((sum, _block, index) => sum + estimateSize(index), HEADER_CLEARANCE) +
-        DEFAULT_END_PADDING -
-        window.innerHeight,
-    );
+  const estimateBottomOffset = (): number => {
+    let height = HEADER_CLEARANCE + DEFAULT_END_PADDING;
+    for (let index = 0; index < blocks.length + leadCount; index += 1) {
+      height += estimateSize(index);
+    }
+    return Math.max(0, height - window.innerHeight);
+  };
 
   // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above and the memoized blocks keep the renders cheap instead.
   const virtualizer = useVirtualizer({
-    count: blocks.length,
+    count: blocks.length + leadCount,
     getScrollElement: () => scrollRef.current,
     estimateSize,
     getItemKey,
@@ -273,7 +313,7 @@ export function Transcript({
       case "agent":
         return (
           <AgentMessage
-            look={buildLook(sessionId)}
+            look={buildLook(faceSeed)}
             itemId={block.itemId}
             agent={describeAgent(block.model)}
             text={block.text}
@@ -286,15 +326,20 @@ export function Transcript({
           />
         );
       case "live":
-        return <LiveRow sessionId={sessionId} agent={describeAgent(block.model)} pose={pose} />;
+        return (
+          <LiveRow look={buildLook(faceSeed)} agent={describeAgent(block.model)} pose={pose} />
+        );
       case "work":
         return (
-          <WorkDivider
-            block={block}
-            onScreen={onScreen}
-            expanded={expanded.has(block.key)}
-            onToggle={toggleExpanded}
-          />
+          <>
+            <WorkDivider
+              block={block}
+              onScreen={onScreen}
+              expanded={expanded.has(block.key)}
+              onToggle={toggleExpanded}
+            />
+            {renderSpawnLines?.(block.items, onScreen)}
+          </>
         );
       case "ending":
         return <TurnEnding block={block} />;
@@ -331,10 +376,12 @@ export function Transcript({
         )}
         {virtualItems.map(({ index, key }) => (
           <div key={key} ref={virtualizer.measureElement} data-index={index} className="tx-item">
-            {renderBlock(
-              blocks[index]!,
-              visible !== null && index >= visible.startIndex && index <= visible.endIndex,
-            )}
+            {index < leadCount
+              ? lead
+              : renderBlock(
+                  blocks[index - leadCount]!,
+                  visible !== null && index >= visible.startIndex && index <= visible.endIndex,
+                )}
           </div>
         ))}
         {last === undefined || last.end >= end ? null : <div style={{ height: end - last.end }} />}

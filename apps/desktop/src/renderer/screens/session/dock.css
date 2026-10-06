@@ -124,7 +124,11 @@
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
+/* "Question 1 of 3" never wraps beside a long header on the narrow Office
+   card. */
 .dock-question-place {
+  flex: none;
+  white-space: nowrap;
   color: var(--faint);
   font-size: var(--t-11);
   font-variant-numeric: tabular-nums;

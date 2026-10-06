@@ -81,6 +81,7 @@ import {
   sessionQuery,
   settingsQuery,
   startTasksQuery,
+  subagentsQuery,
   threadsQuery,
   transcriptQuery,
   userQuery,
@@ -94,7 +95,7 @@ import {
 import { createQueryClient } from "../app/query-client";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
-import { ThreadScreen } from "../screens/thread/thread-screen";
+import { AgentPage } from "../screens/thread/agent-page";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 
@@ -283,6 +284,8 @@ const seedQueryCache = (
     queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, thread.session);
     queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, thread.transcript);
     queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
+    // The Bureau book draws a thread with no subagents.
+    queryClient.setQueryData(subagentsQuery(client, sessionId).queryKey, []);
   }
 };
 
@@ -361,7 +364,7 @@ const buildRouter = (
           path: "threads/$sessionId",
           component: () =>
             openThreadId === undefined ? null : (
-              <ThreadScreen key={openThreadId} sessionId={openThreadId} />
+              <AgentPage key={openThreadId} sessionId={openThreadId} subagentId={undefined} />
             ),
         }),
         createRoute({

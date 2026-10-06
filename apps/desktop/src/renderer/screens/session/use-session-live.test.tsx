@@ -2,8 +2,9 @@
  * Tests `useSessionLive` against a fake live connection: rows merged into the
  * cached transcript, the paragraph being written painted once per frame, the
  * finished paragraphs drawn as markdown, the tap dropped while the window is
- * hidden, and the open items skipped wherever taps were lost. Animation
- * frames are faked, so a test runs each frame when it chooses.
+ * hidden, the open items skipped wherever taps were lost, and a subagent's
+ * page following the subagent's topics alone. Animation frames are faked,
+ * so a test runs each frame when it chooses.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
@@ -13,6 +14,8 @@ import { queryKeys, type Live } from "@hercule/client-core";
 import {
   buildSessionStreamTopic,
   buildSessionTapTopic,
+  buildSubagentStreamTopic,
+  buildSubagentTapTopic,
   type TapItem,
   type TranscriptRow,
 } from "@hercule/contract";
@@ -27,6 +30,8 @@ const THREAD = THREAD_FIXTURES.finished;
 const SESSION_ID = THREAD.session.id;
 const STREAM_TOPIC = buildSessionStreamTopic(SESSION_ID);
 const TAP_TOPIC = buildSessionTapTopic(SESSION_ID);
+/** The subagent whose page a test mounts. */
+const SUBAGENT_ID = "agent-1";
 /** The item the agent starts writing after the hook mounts. */
 const NEW_ITEM_ID = "turn-2-answer";
 
@@ -129,9 +134,11 @@ const buildTextRow = (delta: string): EventBody => ({
   delta,
 });
 
-/** Returns the transcript `queryClient` holds for the thread. */
-const readHeldRows = (queryClient: QueryClient) =>
-  queryClient.getQueryData<readonly TranscriptRow[]>(queryKeys.transcript(SESSION_ID)) ?? [];
+/** Returns the transcript `queryClient` holds for the thread, or for its subagent `subagentId`. */
+const readHeldRows = (queryClient: QueryClient, subagentId?: string) =>
+  queryClient.getQueryData<readonly TranscriptRow[]>(
+    queryKeys.transcript(SESSION_ID, subagentId),
+  ) ?? [];
 
 /** Returns the new item's stored text: the text of its rows in `rows`, joined. */
 const readStoredText = (rows: readonly TranscriptRow[]): string =>
@@ -142,21 +149,24 @@ const readStoredText = (rows: readonly TranscriptRow[]): string =>
     .join("");
 
 /**
- * Renders the thread the way the thread screen does, reduced to the new
- * item's message: the hook reads the transcript from the cache, and the
- * message is drawn open, as the agent writes it, once its first row is held.
+ * Renders an agent's page the way `AgentPage` does, reduced to the new
+ * item's message: the hook reads the agent's transcript from the cache, and
+ * the message is drawn open, as the agent writes it, once its first row is
+ * held.
  */
-function Thread({
+function Page({
   live,
   queryClient,
+  subagentId,
   readTranscript,
 }: {
   readonly live: Live;
   readonly queryClient: QueryClient;
+  readonly subagentId: string | undefined;
   readonly readTranscript: () => Promise<readonly TranscriptRow[]>;
 }): JSX.Element | null {
   const { data } = useQuery({
-    queryKey: queryKeys.transcript(SESSION_ID),
+    queryKey: queryKeys.transcript(SESSION_ID, subagentId),
     queryFn: readTranscript,
     staleTime: Infinity,
   });
@@ -165,7 +175,8 @@ function Thread({
     live,
     queryClient,
     SESSION_ID,
-    queryKeys.transcript(SESSION_ID),
+    subagentId,
+    queryKeys.transcript(SESSION_ID, subagentId),
     rows,
   );
   const started = rows.some(
@@ -189,21 +200,27 @@ function Thread({
 }
 
 /**
- * Mounts the hook the way the thread screen does, reading the transcript from
- * the cache, which holds the fixture's rows. Returns the fake live
- * connection, the cache, the function that reads the transcript again, and
- * functions that read the new item's message as drawn.
+ * Mounts the hook the way `AgentPage` does, for the session's own agent or
+ * for the subagent `subagentId`, reading the agent's transcript from the
+ * cache, which holds the fixture's rows. Returns the fake live connection,
+ * the cache, the function that reads the transcript again, and functions
+ * that read the new item's message as drawn.
  */
-const mountHook = () => {
+const mountHook = (subagentId?: string) => {
   const fake = createFakeLive();
   const queryClient = new QueryClient();
-  queryClient.setQueryData(queryKeys.transcript(SESSION_ID), THREAD.transcript);
+  queryClient.setQueryData(queryKeys.transcript(SESSION_ID, subagentId), THREAD.transcript);
   // Reading the transcript again returns what the cache holds, as a
   // controller that has lost no rows would.
-  const readTranscript = vi.fn(() => Promise.resolve(readHeldRows(queryClient)));
+  const readTranscript = vi.fn(() => Promise.resolve(readHeldRows(queryClient, subagentId)));
   const { container } = render(
     <QueryClientProvider client={queryClient}>
-      <Thread live={fake.live} queryClient={queryClient} readTranscript={readTranscript} />
+      <Page
+        live={fake.live}
+        queryClient={queryClient}
+        subagentId={subagentId}
+        readTranscript={readTranscript}
+      />
     </QueryClientProvider>,
   );
   // The tap's first subscription paints once; start each test with no frame due.
@@ -455,6 +472,42 @@ describe("useSessionLive", () => {
     await settle();
     frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix ");
+  });
+
+  it("follows a subagent through its own topics alone, and merges its rows into its own transcript", async () => {
+    const stream = buildSubagentStreamTopic(SESSION_ID, SUBAGENT_ID);
+    const tap = buildSubagentTapTopic(SESSION_ID, SUBAGENT_ID);
+    const { fake, queryClient, findOpenParagraph } = mountHook(SUBAGENT_ID);
+    expect(fake.readSubscriptions()).toEqual([
+      { topic: stream, cursor: String(THREAD.transcript.at(-1)!.position) },
+      { topic: tap, cursor: undefined },
+    ]);
+
+    const rows = buildNextRows(THREAD, NEW_ITEM_STARTED);
+    fake.deliver(stream, { items: rows });
+    await settle();
+    expect(readHeldRows(queryClient, SUBAGENT_ID)).toEqual([...THREAD.transcript, ...rows]);
+    expect(readHeldRows(queryClient)).toEqual([]);
+
+    fake.deliver(tap, {
+      items: [
+        { turnId: "turn-2", itemId: NEW_ITEM_ID, streamKind: "assistant_text", delta: "On it" },
+      ],
+    });
+    frames.run();
+    expect(findOpenParagraph()?.textContent).toBe("On it");
+  });
+
+  it("drops a subagent's tap while the window is hidden, and keeps its stream", () => {
+    const stream = buildSubagentStreamTopic(SESSION_ID, SUBAGENT_ID);
+    const tap = buildSubagentTapTopic(SESSION_ID, SUBAGENT_ID);
+    const { fake } = mountHook(SUBAGENT_ID);
+
+    setVisibility("hidden");
+    expect(fake.readSubscriptions().map(({ topic }) => topic)).toEqual([stream]);
+
+    setVisibility("visible");
+    expect(fake.readSubscriptions().map(({ topic }) => topic)).toEqual([stream, tap]);
   });
 
   it("ends a subscription whose session is gone", () => {

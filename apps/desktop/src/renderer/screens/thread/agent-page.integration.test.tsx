@@ -1,7 +1,7 @@
 /**
- * Tests the thread screen as the app opens it: the transcript drawn from the
- * stubbed controller's records, the live changes pushed over the stubbed live
- * connection, and the work dividers that expand.
+ * Tests the session's own agent's page as the app opens it: the transcript
+ * drawn from the stubbed controller's records, the live changes pushed over
+ * the stubbed live connection, and the work dividers that expand.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -15,6 +15,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_INSTANCE,
+  FIXTURE_SUBAGENT,
   renderApp,
   RUNNING_ITEM_ID,
   SIDEBAR_FIXTURE,
@@ -385,5 +386,45 @@ describe("the thread screen", () => {
       field.blur();
     });
     expect(composer.className).toBe("composer");
+  });
+});
+
+describe("a subagent's question on the main agent's page", () => {
+  it("docks while the main agent is idle, and opens the subagent's page in one click", async () => {
+    const user = userEvent.setup();
+    const finished = THREAD_FIXTURES.finished;
+    const subagent = { ...FIXTURE_SUBAGENT, sessionId: finished.session.id };
+    const { router } = await openThread({
+      ...finished,
+      session: {
+        ...finished.session,
+        openRequests: [
+          {
+            requestId: "req-sub",
+            itemId: "agent-1-tool-1",
+            kind: "command_approval",
+            decisions: ["allow", "deny"],
+            detail: { command: "bun test test/webhooks" },
+            subagentId: subagent.id,
+          },
+        ],
+      },
+      subagents: [subagent],
+      subagentTranscripts: THREAD_FIXTURES.delegating.subagentTranscripts,
+    });
+
+    const pager = document.querySelector(".request-pager")!;
+    expect(pager.textContent).toContain("Find the flaky webhook test asks");
+    expect(screen.getByRole("group", { name: "Run this command?" }).textContent).toContain(
+      "bun test test/webhooks",
+    );
+
+    await user.click(within(pager as HTMLElement).getByRole("link", { name: "Open subagent" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        `/threads/${finished.session.id}/subagents/${subagent.id}`,
+      );
+    });
   });
 });

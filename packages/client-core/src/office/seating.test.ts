@@ -121,6 +121,24 @@ describe("decideOfficeSeating", () => {
     expect(queue).toEqual(["s-long", "s-recent"]);
   });
 
+  it("queues a thread whose only open Request a subagent asked, in its place, with the waiting pose", () => {
+    const { queue, rooms } = seat([
+      buildSession({ id: "s-recent", openRequests: [REQUEST], lastActivityAt: buildTimestamp(5) }),
+      buildSession({
+        id: "s-subagent",
+        status: "busy",
+        openRequests: [{ ...REQUEST, requestId: "req-2", subagentId: "agent-1" }],
+        lastActivityAt: buildTimestamp(3),
+      }),
+      buildSession({ id: "s-long", openRequests: [REQUEST], lastActivityAt: buildTimestamp(1) }),
+    ]);
+
+    expect(queue).toEqual(["s-long", "s-subagent", "s-recent"]);
+    expect(
+      rooms.flatMap((room) => room.desks).find((desk) => desk.session.id === "s-subagent")?.pose,
+    ).toBe("waiting");
+  });
+
   it("sends the idle threads to the Lounge, and they keep their desks", () => {
     const sessions = [
       buildSession({ id: "s-idle", status: "idle" }),

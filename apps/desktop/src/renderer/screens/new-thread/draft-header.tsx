@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import type { Project, Runner, Session } from "@hercule/contract";
 import { ComposeIcon } from "../../icons/compose";
-import { MorePill, ThreadTabsPill } from "../thread/thread-header";
+import { MorePill, ThreadTabsPill } from "../thread/header-pills";
 import "../thread/thread-header.css";
 
 /**

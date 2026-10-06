@@ -476,21 +476,45 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * Reads a thread's whole transcript, oldest first, page by page until the
- * last one, because the thread screen draws every row.
+ * Reads one agent's whole transcript, oldest first, page by page until the
+ * last one, because the thread screen draws every row. Without `subagentId`
+ * it reads the session's own agent; with it, that subagent's transcript.
  *
  * After this read, only the live connection changes the cached transcript:
- * `useSessionLive` merges each row `session:<id>:stream` delivers, and reads
- * the transcript again when the stream reports a reset. The `session` topic
- * never invalidates it, and it is never read again in the background: a read
- * that raced a merge could replace the cache with rows older than the ones
- * the merge had just added.
+ * `useSessionLive` merges each row the agent's `:stream` topic delivers, and
+ * reads the transcript again when the stream reports a reset. The `session`
+ * topic never invalidates it, and it is never read again in the background: a
+ * read that raced a merge could replace the cache with rows older than the
+ * ones the merge had just added.
  */
-export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
+export const transcriptQuery = (client: HerculeClient, sessionId: string, subagentId?: string) =>
   queryOptions({
-    queryKey: queryKeys.transcript(sessionId),
+    queryKey: queryKeys.transcript(sessionId, subagentId),
     queryFn: () =>
-      readEveryPage((page) => client.transcript.read({ params: { id: sessionId }, query: page })),
+      readEveryPage((page) =>
+        client.transcript.read({
+          params: { id: sessionId },
+          query: subagentId === undefined ? page : { ...page, subagentId },
+        }),
+      ),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every subagent of one session, oldest first. Every page is read,
+ * because the Subagents surface draws the whole tree and a list cut short
+ * would hide subagents without telling the user. While a thread is open, the
+ * `subagent` live topic reads it again whenever one of its subagents changes
+ * (see `useSubagentsLive`).
+ */
+export const subagentsQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.subagents(sessionId),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.session.querySubagents({ params: { id: sessionId }, query: page }),
+      ),
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
@@ -593,13 +617,15 @@ export const ensureFirstRunData = async (
 };
 
 /**
- * Reads everything the thread screen shows of the thread `sessionId` into
- * `queryClient`: its session, its whole transcript and its queued inputs.
+ * Reads everything the thread's own agent's page shows of the thread
+ * `sessionId` into `queryClient`: its session, its subagents, its whole
+ * transcript and its queued inputs.
  * Resolves once every read is cached, and fails with the first read that
  * fails, such as a `not_found` `ApiError` when no such session exists.
  *
- * The thread's loader calls it, and so does a test that renders one part of
- * the thread screen alone.
+ * The thread's loader calls it, and so do the Office, whose drawer shows the
+ * thread's page outside the thread's route, and a test that renders one
+ * part of the page alone.
  */
 export const ensureThreadData = async (
   queryClient: QueryClient,
@@ -608,6 +634,7 @@ export const ensureThreadData = async (
 ): Promise<void> => {
   await Promise.all([
     queryClient.ensureQueryData(sessionQuery(client, sessionId)),
+    queryClient.ensureQueryData(subagentsQuery(client, sessionId)),
     queryClient.ensureQueryData(transcriptQuery(client, sessionId)),
     queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
   ]);

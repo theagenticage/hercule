@@ -7,14 +7,29 @@ import { isSendKey } from "./send-key";
 import "./composer.css";
 
 /**
- * Checks that focus on `element` keeps the composer expanded: it is inside
- * `composer`, and not on `dock-mini`, whose answers act without expanding
- * the composer.
+ * The class of the Request pager line, which a thread's agent page draws
+ * above the dock (`AgentRequestDock`). The frame reads it too: a click or
+ * focus on the line keeps the composer at its size, as `dock-mini`'s answers
+ * do.
  */
-const keepsComposerExpanded = (composer: Element, element: EventTarget | null): boolean =>
-  element instanceof Element &&
-  composer.contains(element) &&
-  element.closest(".dock-mini") === null;
+export const REQUEST_PAGER_CLASS = "request-pager";
+
+/**
+ * Checks that `element` is on one of the two lines the shrunk composer keeps
+ * of a Request: `dock-mini` or the Request pager line.
+ */
+const isOnRequestLines = (element: Element): boolean =>
+  element.closest(`.dock-mini, .${REQUEST_PAGER_CLASS}`) !== null;
+
+/**
+ * Checks that a click on `target` leaves the shrunk composer shrunk: it is
+ * on one of `dock-mini`'s answers, or anywhere on the Request pager line. A
+ * click on the rest of `dock-mini`, such as its question, expands the
+ * composer like a click anywhere else.
+ */
+const keepsComposerShrunk = (target: EventTarget): boolean =>
+  target instanceof Element &&
+  target.closest(`.dock-mini button, .${REQUEST_PAGER_CLASS}`) !== null;
 
 /**
  * Renders a composer's card, the Bureau book's `.composer-card`: the message
@@ -145,7 +160,7 @@ export function ComposerCard({
  * the Bureau book's `.composer-wrap` draws it. The thread's composer and an
  * assistant's Conversation draw it. From top to bottom:
  *
- * - `above`, such as the queued inputs and the Requests dock;
+ * - `above`, such as the tally pill, the queued inputs and the Request dock;
  * - the card, see `ComposerCard`, which takes the frame's props of the same
  *   names, and draws Stop in place of Send while `busy`;
  * - `below`, such as the thread's lip.
@@ -153,10 +168,11 @@ export function ComposerCard({
  * The frame's own props:
  *
  * - `shrunk` draws the composer as the book's `.is-scrolled`: narrower, one
- *   line high, with only the field and the Request's one-line `dock-mini`
- *   left. The screen decides it.
- * - `onFocusChange` is told whether the focus is in the composer, which
- *   keeps the composer expanded. Focus on `dock-mini` does not count.
+ *   line high, with only the field, the Request's pager line and its
+ *   one-line `dock-mini` left. The screen decides it.
+ * - `onFocusChange` is called with whether the focus is in the composer,
+ *   which keeps the composer expanded. Focus on `dock-mini` or the pager line
+ *   keeps the size the composer has.
  * - `scrollTranscriptToBottom` is called when a click on the shrunk composer
  *   expands it.
  * - `ref` receives the stack of `above`, the card and `below`, whose height
@@ -211,12 +227,19 @@ export function ComposerFrame({
 }): JSX.Element {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   // Whether the pointer went down on the shrunk composer, anywhere but on
-  // `dock-mini`'s answers. By the time the click arrives, the focus it moved
-  // has already expanded the composer.
+  // `dock-mini`'s answers or the pager line. By the time the click arrives,
+  // the focus it moved has already expanded the composer.
   const expandOnClickRef = useRef(false);
 
+  // Focus inside the composer keeps it expanded. Focus on the Request lines
+  // keeps the size the composer has instead, so a user who answers or pages a
+  // Request from the shrunk composer keeps reading the transcript.
   const reportFocus = (event: FocusEvent<HTMLDivElement>, element: EventTarget | null): void => {
-    onFocusChange(keepsComposerExpanded(event.currentTarget, element));
+    onFocusChange(
+      element instanceof Element &&
+        event.currentTarget.contains(element) &&
+        !(shrunk && isOnRequestLines(element)),
+    );
   };
 
   return (
@@ -235,9 +258,7 @@ export function ComposerFrame({
           reportFocus(event, event.relatedTarget);
         }}
         onPointerDown={(event) => {
-          expandOnClickRef.current =
-            shrunk &&
-            !(event.target instanceof Element && event.target.closest(".dock-mini button"));
+          expandOnClickRef.current = shrunk && !keepsComposerShrunk(event.target);
         }}
         onClick={() => {
           if (!expandOnClickRef.current) return;

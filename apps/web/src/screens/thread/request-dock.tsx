@@ -1,6 +1,11 @@
 import { useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { buildRequestDock, type HerculeClient, type RequestAsker } from "@hercule/client-core";
+import {
+  buildRequestDock,
+  describeRequestAsker,
+  type HerculeClient,
+  type RequestAsker,
+} from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import { PermissionCard } from "./permission-card";
 
@@ -78,8 +83,9 @@ export function RequestDock({
 }
 
 /**
- * Renders who asks the shown Request: "<subagent> asks · subagent of
- * <parent>" with a link to the subagent's page, or "The main agent asks".
+ * Renders who asks the shown Request, as `describeRequestAsker` words it:
+ * "<subagent> asks · subagent of <parent>" with a link to the subagent's
+ * page, or "The main agent asks".
  */
 function Asker({
   sessionId,
@@ -88,15 +94,15 @@ function Asker({
   readonly sessionId: string;
   readonly asker: RequestAsker;
 }): JSX.Element {
+  const words = describeRequestAsker(asker);
   if (asker.kind === "main agent") {
-    return <span className="min-w-0 truncate">The main agent asks</span>;
+    return <span className="min-w-0 truncate">{words.asks}</span>;
   }
   return (
     <>
       <span className="min-w-0 truncate">
-        <span className="font-emph text-ink">{asker.name}</span> asks
-        {/* The parent is unknown while the asker's record has not been read. */}
-        {asker.parentName === null ? null : ` · subagent of ${asker.parentName}`}
+        <span className="font-emph text-ink">{words.name}</span> {words.asks}
+        {words.parent === null ? null : ` · ${words.parent}`}
       </span>
       <Link
         to="/threads/$sessionId/subagents/$subagentId"

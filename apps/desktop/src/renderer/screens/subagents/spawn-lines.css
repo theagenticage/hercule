@@ -1,0 +1,54 @@
+/* The spawn lines under a work stretch, as the subagents prototype's
+   `.proto-c-links` draws them. The lines sit in the same transcript item as
+   the stretch's divider, so the 22px gap the prototype's own block had
+   above them is a margin here. */
+
+.spawn-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 22px 0 0 46px;
+  padding: 0;
+  list-style: none;
+}
+.spawn-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-size: var(--t-13);
+  text-decoration: none;
+}
+.spawn-line:hover {
+  background: var(--hover);
+}
+.spawn-line-arrow {
+  color: var(--faint);
+}
+.spawn-line-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: var(--w-medium);
+}
+.spawn-line-state {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* Coloured as the subagents surface colours a state: a subagent that waits
+   on the user in the user's ink, a failed one in the failure's. */
+.spawn-line-state [data-hue="attn"] {
+  color: var(--you-ink);
+}
+.spawn-line-state [data-hue="fail"] {
+  color: var(--fail-ink);
+}

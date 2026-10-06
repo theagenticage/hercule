@@ -11,6 +11,7 @@ import {
 import type { Assistant, ConversationMessage, Session } from "@hercule/contract";
 import { buildAssistantDraftKey } from "../../app/pending-submissions";
 import { readMessagePage } from "../../app/queries";
+import { useKeepRequestDrafts } from "../../app/thread-drafts";
 import type { Look } from "../../faces";
 import { ComposerFrame } from "../session/composer-frame";
 import { RequestDock } from "../session/dock";
@@ -116,6 +117,10 @@ export function ConversationComposer({
     mutationFn: (sessionId: string) =>
       client.session.interrupt({ params: { id: sessionId }, payload: {} }),
   });
+
+  // The dock keeps what the user typed into a Request in the session's
+  // Request drafts, which exist only while something keeps them.
+  useKeepRequestDrafts(session?.id ?? null);
 
   const busy = session?.status === "busy";
   const oldestRequest = session === null ? null : findOldestOpenRequest(session);

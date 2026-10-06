@@ -8,7 +8,9 @@
  * - selecting a colleague reads its thread, so the drawer opens on it at once;
  * - Enter and Open thread open the drawer, and the param follows;
  * - the param opens the drawer, and Escape steps back from the drawer to the
- *   card, then from the card to nothing.
+ *   card, then from the card to nothing;
+ * - the drawer shows neither the side pane toggle nor the tally pill,
+ *   because the drawer has no side pane.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
@@ -16,7 +18,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Session } from "@hercule/contract";
+import type { Session, SessionRequest } from "@hercule/contract";
 import { queryKeys } from "@hercule/client-core";
 import {
   buildSidebarHandlers,
@@ -24,6 +26,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -55,22 +58,28 @@ const flakyAsking: Session = {
 /**
  * Starts the app signed in at `path`, with the sidebar fixture's threads and
  * `flakyAsking` in place of the working flaky thread, so two colleagues wait.
- * The waiting runbook's thread answers its reads, for the drawer.
+ * `drawerThread`, the waiting runbook's unless given, answers its reads, for
+ * the drawer. `handlers` add or replace answers.
  */
-const openOffice = async (path = "/office") => {
-  stubApi({
+const openOffice = async (
+  path = "/office",
+  drawerThread = THREAD_FIXTURES.waiting,
+  handlers: Parameters<typeof stubApi>[0] = {},
+) => {
+  const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
       threads: SIDEBAR_FIXTURE.threads.map((thread) =>
         thread.id === flakyAsking.id ? flakyAsking : thread,
       ),
     }),
-    ...buildThreadHandlers(THREAD_FIXTURES.waiting),
+    ...buildThreadHandlers(drawerThread),
+    ...handlers,
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
   const app = await renderApp(fake, { path });
   await screen.findByRole("group", { name: "Who is doing what" });
-  return { user: userEvent.setup(), ...app };
+  return { user: userEvent.setup(), calls, ...app };
 };
 
 /** Returns the dossier card of the colleague named `name`. */
@@ -166,5 +175,71 @@ describe("the thread drawer", () => {
 
     expect(readOffice().selectedId).toBeNull();
     expect(findCard(runbook.title).dataset.open).toBe("false");
+  });
+
+  it("draws neither the side pane toggle nor the tally pill, because the drawer has no side pane", async () => {
+    const delegating = THREAD_FIXTURES.delegating;
+    const { calls } = await openOffice(`/office?session=${delegating.session.id}`, delegating);
+
+    const drawer = findDrawer();
+    expect(
+      await within(drawer).findByRole("navigation", { name: "Threads in this workspace" }),
+    ).toBeTruthy();
+    // The drawer has read the thread's subagent, so only the missing side
+    // pane keeps the tally pill out.
+    expect(delegating.subagents).toHaveLength(1);
+    expect(
+      calls.some((call) => call.path === `/api/v1/sessions/${delegating.session.id}/subagents`),
+    ).toBe(true);
+    expect(within(drawer).queryByRole("button", { name: /side pane/ })).toBeNull();
+    expect(within(drawer).queryByRole("button", { name: /^Subagents/ })).toBeNull();
+  });
+
+  it("keeps each Request's typed answer and sent answer while the user pages between them", async () => {
+    const question: SessionRequest = {
+      requestId: "req-question",
+      itemId: "tool-question",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Which storage should drafts use?",
+            header: "Storage",
+            options: [],
+            multiSelect: false,
+          },
+        ],
+      },
+    };
+    const waiting = THREAD_FIXTURES.waiting;
+    const thread = {
+      ...waiting,
+      session: { ...waiting.session, openRequests: [...waiting.session.openRequests, question] },
+    };
+    const held = holdAnswer();
+    const respond = `POST /api/v1/sessions/${runbook.id}/respond-to-approval-request`;
+    const { user, calls } = await openOffice(`/office?session=${runbook.id}`, thread, {
+      [respond]: held.handler,
+    });
+    const drawer = findDrawer();
+
+    await user.click(await within(drawer).findByRole("button", { name: /^Allow\b/ }));
+    await user.click(within(drawer).getByRole("button", { name: "Next Request" }));
+    await user.type(within(drawer).getByRole("textbox", { name: "Your own answer" }), "SQLite");
+    await user.click(within(drawer).getByRole("button", { name: "Previous Request" }));
+
+    expect(
+      within(drawer)
+        .getByRole("button", { name: /^Deny\b/ })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    await user.click(within(drawer).getByRole("button", { name: /^Deny\b/ }));
+    await user.click(within(drawer).getByRole("button", { name: "Next Request" }));
+
+    expect(
+      within(drawer).getByRole<HTMLInputElement>("textbox", { name: "Your own answer" }).value,
+    ).toBe("SQLite");
+    expect(calls.filter((call) => `${call.method} ${call.path}` === respond)).toHaveLength(1);
+    held.answer({ body: thread.session });
   });
 });

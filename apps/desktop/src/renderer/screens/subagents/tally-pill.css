@@ -1,0 +1,34 @@
+/* The tally pill, as the subagents prototype's `.proto-tally.is-composer`
+   draws it: a glass pill at the column's right, like a chip on the
+   composer's lip. Its button copies the measurements of the header's
+   `.ptab` rather than using that class, because the header owns it and
+   changes it for its own layout. */
+
+.tally-pill {
+  align-self: flex-end;
+  margin-bottom: 8px;
+}
+.tally-pill-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.tally-pill-button:hover {
+  background: var(--hover);
+}
+.tally-pill-button.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.tally-pill-button small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}

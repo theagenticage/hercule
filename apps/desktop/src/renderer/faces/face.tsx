@@ -1,4 +1,4 @@
-import { Fragment, type JSX } from "react";
+import { Fragment, type CSSProperties, type JSX } from "react";
 import { drawAccessory } from "./accessories";
 import {
   drawBrows,
@@ -8,10 +8,17 @@ import {
   drawPoseExtras,
   drawTypewriter,
 } from "./face-parts";
-import type { Look } from "./look";
+import type { Hue, Look } from "./look";
 import type { Pose } from "@hercule/client-core";
 import { buildBodyPath, SHAPE_METRICS } from "./shapes";
 import "./face.css";
+
+/**
+ * Returns the inline style that paints an element in `hue`. tokens.css derives
+ * `--who` and its shades from the `--hue` it sets, so a face, a crumb or a
+ * card drawn inside the element takes the colleague's colour.
+ */
+export const buildHueStyle = (hue: Hue): CSSProperties => ({ "--hue": `var(--hue-${hue})` });
 
 /**
  * Renders a colleague's face: `look` drawn in `pose`, `size` CSS pixels
@@ -44,7 +51,7 @@ export function Face({
   // Left unrounded, as crew.js leaves it.
   const highlightY = topY + 6.4;
   const tapping = animated && pose === "working";
-  const hue = { "--hue": `var(--hue-${look.hue})` };
+  const hue = buildHueStyle(look.hue);
   const drawing = (
     <>
       {/* The body twice: its shade as the base it sits on, then the body itself, 2 units higher. */}

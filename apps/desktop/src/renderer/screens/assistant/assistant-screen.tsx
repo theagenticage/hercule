@@ -154,6 +154,7 @@ function SessionConversation({
     live,
     queryClient,
     session.id,
+    undefined,
     queryKeys.runningTurn(session.id),
     rows,
   );

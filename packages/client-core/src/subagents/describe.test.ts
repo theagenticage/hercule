@@ -1,12 +1,14 @@
 /**
- * Tests the words a screen shows for one subagent: `nameSubagent`,
- * `nameSubagentParent`, `isSubagentWaiting`, `describeSubagentState`,
- * `describeSubagentLine`, `formatTokenCount`, `formatSubagentTokens`,
- * `describeSubagentMeta` and `describeSubagentStop`.
+ * Tests the words a screen shows for one subagent: `nameSubagentParent`,
+ * `isSubagentWaiting`, `decideSubagentMark`, `decideSubagentPose`,
+ * `describeSubagentState`, `describeSubagentLine`, `formatTokenCount`,
+ * `formatSubagentTokens`, `describeSubagentMeta` and `describeSubagentStop`.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionRequest } from "@hercule/contract";
 import {
+  decideSubagentMark,
+  decideSubagentPose,
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
@@ -14,25 +16,11 @@ import {
   formatSubagentTokens,
   formatTokenCount,
   isSubagentWaiting,
-  nameSubagent,
   nameSubagentParent,
 } from "./describe";
 import { buildRequest, buildSubagent } from "./subagents.testing";
 
 const NOW = new Date("2026-10-05T09:16:02.000Z");
-
-describe("nameSubagent", () => {
-  it("names a subagent by its description", () => {
-    expect(
-      nameSubagent(buildSubagent({ id: "a", description: "Read the docs", agentType: "Explore" })),
-    ).toBe("Read the docs");
-  });
-
-  it("falls back to its agent type, then to Subagent, while it has no description", () => {
-    expect(nameSubagent(buildSubagent({ id: "a", agentType: "Explore" }))).toBe("Explore");
-    expect(nameSubagent(buildSubagent({ id: "a" }))).toBe("Subagent");
-  });
-});
 
 describe("nameSubagentParent", () => {
   const planner = buildSubagent({ id: "p", description: "Plan the migration" });
@@ -57,6 +45,29 @@ describe("isSubagentWaiting", () => {
 
   it("is false for a subagent with no open Request of its own", () => {
     expect(isSubagentWaiting(buildSubagent({ id: "b" }), requests)).toBe(false);
+  });
+});
+
+describe("decideSubagentMark", () => {
+  it("marks a running subagent working, or waiting while it waits on the user", () => {
+    expect(decideSubagentMark("running", false)).toBe("working");
+    expect(decideSubagentMark("running", true)).toBe("waiting");
+  });
+
+  it("marks an ended subagent by how it ended, whether or not a Request is still open", () => {
+    expect(decideSubagentMark("completed", true)).toBe("done");
+    expect(decideSubagentMark("failed", true)).toBe("failed");
+    expect(decideSubagentMark("stopped", false)).toBe("stopped");
+  });
+});
+
+describe("decideSubagentPose", () => {
+  it("poses a subagent as its mark, and a stopped one idle", () => {
+    expect(decideSubagentPose("running", false)).toBe("working");
+    expect(decideSubagentPose("running", true)).toBe("waiting");
+    expect(decideSubagentPose("completed", false)).toBe("done");
+    expect(decideSubagentPose("failed", false)).toBe("failed");
+    expect(decideSubagentPose("stopped", true)).toBe("idle");
   });
 });
 
