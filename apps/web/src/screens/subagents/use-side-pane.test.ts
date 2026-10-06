@@ -137,4 +137,22 @@ describe("useSidePaneWidth", () => {
     expect(result.current[0]).toBe(480);
     expect(localStorage.getItem("hercule.side-pane.width")).toBe("480");
   });
+
+  // Runs last of the width tests: once a write is refused, the stored width
+  // stays in memory for the rest of the file.
+  it("keeps a refused width in memory, over the older width storage still holds", () => {
+    const full = createMemoryStorage({ "hercule.side-pane.width": "480" });
+    full.setItem = () => {
+      throw new Error("The quota has been exceeded.");
+    };
+    vi.stubGlobal("localStorage", full);
+    const { result } = renderHook(() => useSidePaneWidth());
+    expect(result.current[0]).toBe(480);
+
+    act(() => {
+      result.current[1](520);
+    });
+
+    expect(result.current[0]).toBe(520);
+  });
 });

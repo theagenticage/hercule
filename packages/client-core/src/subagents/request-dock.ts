@@ -3,22 +3,28 @@
  * pages to the others, and which agent asked it.
  */
 import type { SessionRequest, Subagent, SubagentId } from "@hercule/contract";
-import { nameSubagent } from "./describe";
+import { nameSubagent, nameSubagentParent } from "./describe";
 
-/** The subagent that asked the shown Request, and the agent that started it. */
-export interface RequestAsker {
-  readonly subagentId: SubagentId;
-  readonly name: string;
-  /**
-   * The name of the agent that started the asker: a subagent's name, or "the
-   * main agent". Null when the asker's record has not been read yet, so its
-   * parent is not known.
-   */
-  readonly parentName: string | null;
-}
+/**
+ * The agent that asked the shown Request: the session's own agent, or a
+ * subagent, named with the agent that started it.
+ */
+export type RequestAsker =
+  | { readonly kind: "main agent" }
+  | {
+      readonly kind: "subagent";
+      readonly subagentId: SubagentId;
+      readonly name: string;
+      /**
+       * The name of the agent that started the asker: a subagent's name, or
+       * "the main agent". Null when the asker's record has not been read
+       * yet, so its parent is not known.
+       */
+      readonly parentName: string | null;
+    };
 
 /** What the Request dock shows. */
-export interface RequestDock {
+export interface RequestDockState {
   readonly request: SessionRequest;
   /** Where the shown Request is among the open ones, counted from 1. Null when only one is open. */
   readonly position: { readonly at: number; readonly of: number } | null;
@@ -26,55 +32,75 @@ export interface RequestDock {
   readonly previousRequestId: string | undefined;
   /** The Request the pager's forward arrow shows; undefined on the last one. */
   readonly nextRequestId: string | undefined;
-  /** The subagent that asked; null when the session's own agent asked. */
+  /**
+   * The agent the line above the card names. Null on a subagent's page,
+   * which already names the subagent.
+   */
   readonly asker: RequestAsker | null;
   /**
-   * Whether the thread page draws the line above the card that pages and
-   * names the asker. It does when several Requests are open, or when a
-   * subagent asked. A lone Request of the main agent has no line, because
-   * the card is then plainly the thread's own.
+   * Whether the line above the card, which pages and names the asker, is
+   * drawn. On the thread's page it is drawn when several Requests are open,
+   * or when a subagent asked: a lone Request of the main agent has no line,
+   * because the card is then plainly the thread's own. On a subagent's page
+   * it is drawn only when several Requests are open, for the arrows.
    */
   readonly showsAskerLine: boolean;
 }
 
 /** Returns the asker of a subagent's Request, read from `subagents`. */
-const buildAsker = (subagentId: SubagentId, subagents: readonly Subagent[]): RequestAsker => {
+const buildSubagentAsker = (
+  subagentId: SubagentId,
+  subagents: readonly Subagent[],
+): RequestAsker => {
   const subagent = subagents.find((each) => each.id === subagentId);
-  if (subagent === undefined) return { subagentId, name: "A subagent", parentName: null };
-  const parent = subagents.find((each) => each.id === subagent.parentSubagentId);
+  if (subagent === undefined) {
+    return { kind: "subagent", subagentId, name: "A subagent", parentName: null };
+  }
   return {
+    kind: "subagent",
     subagentId,
     name: nameSubagent(subagent),
-    parentName: parent === undefined ? "the main agent" : nameSubagent(parent),
+    parentName: nameSubagentParent(subagent, subagents),
   };
 };
 
 /**
- * Builds what the Request dock shows from `requests`, the open Requests it
- * pages through, oldest first. It shows the Request `shownRequestId` names;
- * when that one is no longer open, or none is named, it shows the oldest.
- * Returns null when no Request is open.
+ * Builds what the Request dock shows, or returns null when it has nothing
+ * to show.
  *
- * On a subagent's page, `requests` are that subagent's own, and the page
- * draws the pager without the asker's name, because the page already names
- * it.
+ * - `openRequests` are the session's open Requests, oldest first.
+ * - `pageSubagentId` is the subagent whose page the dock is on; the dock
+ *   then pages through that subagent's own Requests only. Undefined on the
+ *   thread's page, where it pages through all of them.
+ * - `shownRequestId` is the Request the user paged to. When it is no longer
+ *   open, or none is named, the dock shows the oldest.
  */
 export const buildRequestDock = (
-  requests: readonly SessionRequest[],
+  openRequests: readonly SessionRequest[],
   subagents: readonly Subagent[],
+  pageSubagentId: SubagentId | undefined,
   shownRequestId: string | undefined,
-): RequestDock | null => {
+): RequestDockState | null => {
+  const requests =
+    pageSubagentId === undefined
+      ? openRequests
+      : openRequests.filter((request) => request.subagentId === pageSubagentId);
   const found = requests.findIndex((request) => request.requestId === shownRequestId);
   const index = found === -1 ? 0 : found;
   const request = requests[index];
   if (request === undefined) return null;
-  const asker = request.subagentId === undefined ? null : buildAsker(request.subagentId, subagents);
+  const asker: RequestAsker | null =
+    pageSubagentId !== undefined
+      ? null
+      : request.subagentId === undefined
+        ? { kind: "main agent" }
+        : buildSubagentAsker(request.subagentId, subagents);
   return {
     request,
     position: requests.length > 1 ? { at: index + 1, of: requests.length } : null,
     previousRequestId: index > 0 ? requests[index - 1]?.requestId : undefined,
     nextRequestId: requests[index + 1]?.requestId,
     asker,
-    showsAskerLine: requests.length > 1 || asker !== null,
+    showsAskerLine: requests.length > 1 || asker?.kind === "subagent",
   };
 };

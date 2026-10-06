@@ -22,6 +22,7 @@ import {
   buildTurns,
   chooseStamps,
   findAnsweredAssistantId,
+  findSubagentBrief,
   type HerculeClient,
   type Live,
 } from "@hercule/client-core";
@@ -29,6 +30,7 @@ import { inputsQuery, sessionQuery, subagentsQuery, transcriptQuery } from "../.
 import { Composer } from "../composer/composer";
 import { ContentColumn } from "../content-column";
 import { BriefCard } from "../subagents/brief-card";
+import { SpawnLines } from "../subagents/spawn-lines";
 import { StatusCard } from "../subagents/status-card";
 import { TallyPill } from "../subagents/tally-pill";
 import { useStickToBottom } from "../use-stick-to-bottom";
@@ -73,6 +75,9 @@ export function AgentPage({
       ? buildSessionAgentState(session)
       : buildSubagentAgentState(subagent, session);
   const turns = buildTurns(rows, agent);
+  // A subagent's page shows its brief in the brief card, so the turn whose
+  // user message holds the brief leaves that message out.
+  const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useAgentLive(live, queryClient, sessionId, subagentId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
@@ -109,12 +114,7 @@ export function AgentPage({
 
   return (
     <div className="flex flex-1 flex-col">
-      <AgentChrome
-        client={client}
-        session={session}
-        subagents={subagents}
-        subagentId={subagentId}
-      />
+      <AgentChrome client={client} session={session} subagents={subagents} subagent={subagent} />
       <ContentColumn className="gap-6">
         {/* The turns take the height the composer leaves, so the composer
             stays at the foot of a short thread. Their bottom padding and the
@@ -122,7 +122,7 @@ export function AgentPage({
             conversation. */}
         <div className="flex flex-1 flex-col gap-6 pb-4">
           {subagent === undefined ? null : (
-            <BriefCard subagents={subagents} subagent={subagent} turns={turns} />
+            <BriefCard subagents={subagents} subagent={subagent} brief={brief} />
           )}
           {turns.map((turn, index) => {
             // Only the last turn can still be running.
@@ -141,17 +141,21 @@ export function AgentPage({
             return (
               <Turn
                 key={turn.turnId}
-                session={session}
-                subagents={subagents}
                 turn={turn}
+                spawnLines={
+                  <SpawnLines
+                    session={session}
+                    subagents={subagents}
+                    agentSubagentId={subagentId}
+                    turn={turn}
+                  />
+                }
                 live={isLive}
                 // The tap buffer holds one item's text at a time, so only the
                 // live last turn gets the live tail element.
                 tailRef={isLive ? tailRef : undefined}
                 stamp={stamps[index]}
-                // The brief card above already shows the brief, the user
-                // message of a subagent's first turn.
-                hidesUserMessage={subagent !== undefined && index === 0}
+                hidesUserMessage={turn.turnId === brief?.turnId}
               />
             );
           })}
@@ -167,7 +171,7 @@ export function AgentPage({
               client={client}
               session={session}
               subagents={subagents}
-              subagentId={subagentId}
+              subagent={subagent}
             />
             {subagent !== undefined ? (
               <StatusCard

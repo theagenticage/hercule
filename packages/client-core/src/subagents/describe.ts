@@ -6,6 +6,7 @@
 import type { SessionRequest, Subagent } from "@hercule/contract";
 import { formatDuration } from "../threads/duration";
 import { countUsedTokens } from "../token-usage";
+import { listSubagentDescendants } from "./tree";
 
 /**
  * The colour a subagent's words are drawn in: `live` while it works, `attn`
@@ -37,16 +38,24 @@ export const nameSubagent = (subagent: Subagent): string =>
   subagent.description ?? subagent.agentType ?? "Subagent";
 
 /**
- * Checks whether a subagent waits on the user: it is running, and one of
- * `openRequests` is its own. A Request of a subagent that has ended is not
- * counted, because the subagent can no longer act on the answer.
+ * Returns the name a screen shows for the agent that started `subagent`:
+ * its parent subagent's name, or "the main agent" when the session's own
+ * agent started it. `subagents` are the session's subagents.
+ */
+export const nameSubagentParent = (subagent: Subagent, subagents: readonly Subagent[]): string => {
+  const parent = subagents.find((each) => each.id === subagent.parentSubagentId);
+  return parent === undefined ? "the main agent" : nameSubagent(parent);
+};
+
+/**
+ * Checks whether a subagent waits on the user: one of `openRequests`, the
+ * session's open Requests, is its own. It is the same rule the thread's
+ * waiting mark follows, whoever asked, so every screen agrees on who waits.
  */
 export const isSubagentWaiting = (
   subagent: Subagent,
   openRequests: readonly SessionRequest[],
-): boolean =>
-  subagent.status === "running" &&
-  openRequests.some((request) => request.subagentId === subagent.id);
+): boolean => openRequests.some((request) => request.subagentId === subagent.id);
 
 /**
  * Returns how long a subagent has run, in milliseconds: from its start until
@@ -105,8 +114,9 @@ const describeRequestAsk = (request: SessionRequest): string => {
 /**
  * Returns the one line a screen shows under a subagent's name:
  *
- * - while it runs and `openRequest`, one of its own Requests, is open, what
- *   it waits on the user for, such as "Waiting on you to allow a command";
+ * - while one of `openRequests`, the session's open Requests, is its own,
+ *   what it waits on the user for, such as "Waiting on you to allow a
+ *   command";
  * - while it runs otherwise, what it is doing now, its `activity`;
  * - once it has ended, the first line of its last message, its `result`.
  *
@@ -114,12 +124,13 @@ const describeRequestAsk = (request: SessionRequest): string => {
  */
 export const describeSubagentLine = (
   subagent: Subagent,
-  openRequest: SessionRequest | undefined,
+  openRequests: readonly SessionRequest[],
 ): SubagentLine | null => {
+  const openRequest = openRequests.find((request) => request.subagentId === subagent.id);
+  if (openRequest !== undefined) {
+    return { text: `Waiting on you to ${describeRequestAsk(openRequest)}`, hue: "attn" };
+  }
   if (subagent.status === "running") {
-    if (openRequest !== undefined) {
-      return { text: `Waiting on you to ${describeRequestAsk(openRequest)}`, hue: "attn" };
-    }
     return subagent.activity === undefined ? null : { text: subagent.activity, hue: "live" };
   }
   if (subagent.result === undefined) return null;
@@ -161,4 +172,32 @@ export const describeSubagentMeta = (subagent: Subagent): string => {
   ]
     .filter((part) => part !== undefined)
     .join(" · ");
+};
+
+/** The Stop button of a running subagent: its label, and its tooltip when it has one. */
+export interface SubagentStop {
+  readonly label: string;
+  readonly title: string | undefined;
+}
+
+/**
+ * Returns the Stop button of `subagent`, or null once it has ended and there
+ * is nothing to stop. Stopping a subagent stops every subagent below it too,
+ * so the label says how many: "Stop", or "Stop with 2 below", with a tooltip
+ * that says so. `subagents` are the session's subagents.
+ */
+export const describeSubagentStop = (
+  subagent: Subagent,
+  subagents: readonly Subagent[],
+): SubagentStop | null => {
+  if (subagent.status !== "running") return null;
+  const below = listSubagentDescendants(subagent, subagents).length;
+  if (below === 0) return { label: "Stop", title: undefined };
+  return {
+    label: `Stop with ${String(below)} below`,
+    title:
+      below === 1
+        ? "Also stops the subagent below it"
+        : `Also stops the ${String(below)} subagents below it`,
+  };
 };

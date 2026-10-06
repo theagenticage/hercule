@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import { buildButtonClassName } from "@hercule/ui";
 import { answeredAssistantQuery } from "../../app/queries";
-import { StopButton } from "../stop-button";
+import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
 import { useStopAgent } from "../use-stop-agent";
 
 /**
@@ -48,7 +48,7 @@ export function ConversationSessionNotice({
         <div className="flex h-7 shrink-0 items-center gap-1.5">
           {busy ? (
             <StopButton
-              title="Stops the running turn; queued messages wait"
+              title={SESSION_STOP_TITLE}
               onStop={() => {
                 stopAgent.stop();
               }}

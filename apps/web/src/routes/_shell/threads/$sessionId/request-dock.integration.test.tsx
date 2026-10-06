@@ -10,49 +10,16 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildApprovalCard } from "@hercule/client-core";
-import type { Session, SessionRequest, Subagent, TranscriptRow } from "@hercule/contract";
+import type { SessionRequest, Subagent, TranscriptRow } from "@hercule/contract";
 import { readPageText, renderApp, stubApi, type Call, type Handler } from "../../../../app/testing";
-
-const SESSION_ID = "01a06d02-b100-7000-8000-000000000002";
-
-const BASE_SESSION: Session = {
-  id: SESSION_ID,
-  title: "Get the release ready",
-  status: "idle",
-  resumable: false,
-  resumeHeld: false,
-  permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
-  agentId: null,
-  conversationId: null,
-  runId: null,
-  stepId: null,
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
-  runnerId: "01a06d02-3000-7000-8000-000000000001",
-  workspaceId: null,
-  projectId: null,
-  requestedAccessMode: "approval-required",
-  accessMode: "approval-required",
-  nativeSessionId: null,
-  modelSelection: { model: "claude-sonnet-5", options: {} },
-  parentSessionId: null,
-  openRequests: [],
-  createdAt: "2026-10-06T09:59:00.000Z",
-  startedAt: "2026-10-06T09:59:01.000Z",
-  exitedAt: null,
-  lastActivityAt: "2026-10-06T10:01:03.000Z",
-  unenforced: [],
-};
-
-const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE_SESSION, ...overrides });
-
-/** Builds a subagent of the session that started at 10:00 and still runs, with `over` applied. */
-const buildSubagent = (over: Partial<Subagent> & { readonly id: string }): Subagent => ({
-  sessionId: SESSION_ID,
-  status: "running",
-  toolCalls: 0,
-  startedAt: "2026-10-06T10:00:00.000Z",
-  ...over,
-});
+import {
+  SESSION_ID,
+  buildController,
+  buildRequest,
+  buildSession,
+  buildSubagent,
+  type ControllerState,
+} from "./-fixtures";
 
 const PLAN = buildSubagent({
   id: "plan-migration",
@@ -72,23 +39,10 @@ const SCHEMA = buildSubagent({
 });
 
 /** The main agent asks to run a command. */
-const MAIN_REQUEST: SessionRequest = {
-  requestId: "req-main",
-  itemId: "tool-main",
-  kind: "command_approval",
-  decisions: ["allow", "deny"],
-  detail: { command: "stripe listen" },
-};
+const MAIN_REQUEST = buildRequest("req-main", undefined, "stripe listen");
 
 /** The nested subagent asks to run a command. */
-const DRY_RUN_REQUEST: SessionRequest = {
-  requestId: "req-dry-run",
-  itemId: "tool-dry-run",
-  kind: "command_approval",
-  decisions: ["allow", "deny"],
-  detail: { command: "./scripts/deploy.sh --dry-run" },
-  subagentId: DRY_RUN.id,
-};
+const DRY_RUN_REQUEST = buildRequest("req-dry-run", DRY_RUN.id, "./scripts/deploy.sh --dry-run");
 
 /** The planning subagent asks a question, which offers no decision. */
 const PLAN_QUESTION: SessionRequest = {
@@ -124,7 +78,7 @@ const buildBriefTurn = (text: string): TranscriptRow[] =>
       detail: { text },
     },
   ].map((event, position) => {
-    const at = "2026-10-06T10:00:00.000Z";
+    const at = "2026-09-08T10:00:00.000Z";
     return {
       position,
       at,
@@ -132,47 +86,20 @@ const buildBriefTurn = (text: string): TranscriptRow[] =>
     } as TranscriptRow;
   });
 
-/**
- * The controller as the tests see it. `state` holds the session and its
- * subagents, which a test changes before it pushes a live nudge; every read
- * answers from it.
- */
-interface ControllerState {
-  session: Session;
-  subagents: readonly Subagent[];
-}
-
-const buildController = (
-  state: ControllerState,
-  extra: Readonly<Record<string, Handler>> = {},
-): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/setup": { body: { complete: true } },
-  "GET /api/v1/settings": {
-    body: {
-      controller: {},
-      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: "UTC" },
-    },
-  },
-  [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
-  [`GET /api/v1/sessions/${SESSION_ID}/subagents`]: () => ({ body: { items: state.subagents } }),
-  // A subagent's transcript is its brief; the session's own is empty.
-  [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: (call: Call) => ({
-    body: { items: call.search.includes("subagentId=") ? buildBriefTurn(BRIEF) : [] },
-  }),
-  [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [] } },
-  "GET /api/v1/providers": { body: [] },
-  "GET /api/v1/runners": { body: { items: [] } },
-  "GET /api/v1/profiles": { body: { items: [] } },
-  "GET /api/v1/assistants": { body: { items: [] } },
-  ...extra,
-});
-
 const openApp = async (
   state: ControllerState,
   path = `/threads/${SESSION_ID}`,
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
-  const api = stubApi(buildController(state, extra));
+  const api = stubApi(
+    buildController(state, {
+      // A subagent's transcript is its brief; the session's own is empty.
+      [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: (call: Call) => ({
+        body: { items: call.search.includes("subagentId=") ? buildBriefTurn(BRIEF) : [] },
+      }),
+      ...extra,
+    }),
+  );
   const app = await renderApp({ path, api: api.fetch, token: "held" });
   return { ...app, api };
 };
@@ -298,6 +225,58 @@ describe("Request dock: paging through the thread's open Requests", () => {
   });
 });
 
+describe("Request dock: an answer on its way", () => {
+  it("keeps an answered Request locked when the user pages away and back before the controller closes it", async () => {
+    const user = userEvent.setup();
+    const state: ControllerState = {
+      session: buildSession({ status: "busy", openRequests: [DRY_RUN_REQUEST, MAIN_REQUEST] }),
+      subagents: [PLAN, DRY_RUN],
+    };
+    const { api } = await openApp(state, undefined, {
+      [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: () => ({
+        body: state.session,
+      }),
+    });
+
+    await user.click(await findAnswer(DRY_RUN_REQUEST, "allow"));
+    await waitFor(() => {
+      expect(api.calls.some((call) => call.path.endsWith("/respond-to-approval-request"))).toBe(
+        true,
+      );
+    });
+    await user.click(screen.getByRole("button", { name: "Next Request" }));
+    await screen.findByText("stripe listen");
+    expect((await findAnswer(MAIN_REQUEST, "allow")).hasAttribute("disabled")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Previous Request" }));
+
+    await screen.findByText("./scripts/deploy.sh --dry-run");
+    expect((await findAnswer(DRY_RUN_REQUEST, "allow")).hasAttribute("disabled")).toBe(true);
+  });
+});
+
+describe("Request dock: a subagent the cached list does not hold yet", () => {
+  it("opens the page of a subagent whose Request docked before its record was read", async () => {
+    const user = userEvent.setup();
+    const state: ControllerState = {
+      session: buildSession({ status: "idle", openRequests: [DRY_RUN_REQUEST] }),
+      subagents: [PLAN],
+    };
+    const { router } = await openApp(state);
+    await screen.findByText("./scripts/deploy.sh --dry-run");
+    // The subagent has started since the list was read, and no live nudge
+    // has refetched the list yet.
+    state.subagents = [PLAN, DRY_RUN];
+
+    await user.click(screen.getByRole("link", { name: "Open subagent" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${SESSION_ID}/subagents/${DRY_RUN.id}`);
+    });
+    await screen.findByText("Waiting on you");
+    expect(screen.queryByText("This thread has no subagent with this id.")).toBeNull();
+  });
+});
+
 describe("Request dock: stopping the subagent that asks", () => {
   it("reaches the asking subagent's Stop in two clicks with the main agent idle, and stopping closes its question", async () => {
     const user = userEvent.setup();
@@ -329,7 +308,7 @@ describe("Request dock: stopping the subagent that asks", () => {
     state.subagents = [PLAN, DRY_RUN, SCHEMA].map((each) => ({
       ...each,
       status: "stopped",
-      endedAt: "2026-10-06T10:02:54.000Z",
+      endedAt: "2026-09-08T10:02:54.000Z",
     }));
     act(() => {
       live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
@@ -395,7 +374,7 @@ describe("Status card", () => {
     ["failed", "Failed after 2m 20s", "text-fail"],
     ["stopped", "Stopped after 2m 20s", "text-muted"],
   ] as const)("shows a %s subagent as %s, with no Stop", async (status, headline, hue) => {
-    const ended = { ...DRY_RUN, status, endedAt: "2026-10-06T10:02:20.000Z" };
+    const ended = { ...DRY_RUN, status, endedAt: "2026-09-08T10:02:20.000Z" };
     const card = await openStatusCard(ended, [PLAN, ended]);
     expect(within(card).getByText(headline).className).toContain(hue);
     expect(within(card).queryByRole("button", { name: /^Stop/ })).toBeNull();

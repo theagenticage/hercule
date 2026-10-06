@@ -12,29 +12,24 @@
  * Both messages are rendered as markdown. Spec 14 §The thread surface owns
  * the turn's layout.
  */
-import type { JSX, RefObject } from "react";
+import type { JSX, ReactNode, RefObject } from "react";
 import { showsTurnDivider, type ThreadTurn } from "@hercule/client-core";
-import type { Session, Subagent } from "@hercule/contract";
 import { OwnerBubble } from "../bubble";
-import { SpawnLines } from "../subagents/spawn-lines";
 import { TimeSeparator } from "../time-separator";
 import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
 
 export function Turn({
-  session,
-  subagents,
   turn,
+  spawnLines,
   live,
   tailRef,
   stamp,
   hidesUserMessage = false,
 }: {
-  /** The session the turn belongs to, whether the turn is its own agent's or a subagent's. */
-  readonly session: Session;
-  /** Every subagent of the session, oldest first. */
-  readonly subagents: readonly Subagent[];
   readonly turn: ThreadTurn;
+  /** The lines of the subagents the turn started, drawn under the user's message. */
+  readonly spawnLines: ReactNode;
   /** Whether the turn is running: the last turn of a busy session, with no `turn.completed` yet. */
   readonly live: boolean;
   /** The element the live tail streams text into; set only on the live turn. */
@@ -56,7 +51,7 @@ export function Turn({
           <OwnerBubble text={turn.user} />
         </div>
       )}
-      <SpawnLines session={session} subagents={subagents} turn={turn} />
+      {spawnLines}
       {turn.assistantText === "" && !live ? null : (
         // Until the first word streams into the tail, the prose is hidden, so
         // the flex gap above it does not count. The divider under the turn

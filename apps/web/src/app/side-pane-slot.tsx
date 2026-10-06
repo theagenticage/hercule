@@ -14,11 +14,22 @@
 import { createContext, useContext, type JSX, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-/**
- * The slot's element, or null until the shell has mounted it. The shell
- * provides it.
- */
-export const SidePaneSlotContext = createContext<HTMLElement | null>(null);
+/** The shell's side-pane slot and the room around it. The shell provides it. */
+export interface SidePaneSlotState {
+  /** The slot's element, or null until the shell has mounted it. */
+  readonly element: HTMLElement | null;
+  /**
+   * The width the main pane and the slot share, in pixels, so a pane drawn
+   * in the slot can leave the main pane room. Undefined until it is
+   * measured, and in a browser that lays nothing out, such as jsdom.
+   */
+  readonly availableWidth: number | undefined;
+}
+
+export const SidePaneSlotContext = createContext<SidePaneSlotState>({
+  element: null,
+  availableWidth: undefined,
+});
 
 /**
  * Renders `children` into the shell's side-pane slot. Renders nothing until
@@ -26,6 +37,6 @@ export const SidePaneSlotContext = createContext<HTMLElement | null>(null);
  * nothing outside a shell.
  */
 export function SidePaneSlot({ children }: { readonly children: ReactNode }): JSX.Element | null {
-  const slot = useContext(SidePaneSlotContext);
-  return slot === null ? null : createPortal(children, slot);
+  const { element } = useContext(SidePaneSlotContext);
+  return element === null ? null : createPortal(children, element);
 }

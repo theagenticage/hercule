@@ -36,7 +36,7 @@ export function StatusCard({
   readonly subagent: Subagent;
 }): JSX.Element {
   const now = useDurationClock(subagent.status === "running" ? [subagent.startedAt] : []);
-  const card = describeStatusCard(subagent, subagents, session, now);
+  const card = describeStatusCard(subagent, subagents, session.openRequests, now);
   const stopAgent = useStopAgent(client, session.id);
   return (
     <div className="relative z-[1] flex items-center gap-3 rounded-[14px] border border-line bg-raised py-2 pr-2.5 pl-3.5 shadow-lift">
@@ -58,13 +58,14 @@ export function StatusCard({
         {card.stop === null ? null : (
           <StopButton
             label={card.stop.label}
-            {...(card.stop.title === undefined ? {} : { title: card.stop.title })}
+            title={card.stop.title}
+            disabled={stopAgent.isPending}
             onStop={() => {
               stopAgent.stop(subagent.id);
             }}
           />
         )}
-        {card.parentSubagentId === undefined ? (
+        {subagent.parentSubagentId === undefined ? (
           <Link
             to="/threads/$sessionId"
             params={{ sessionId: session.id }}
@@ -75,7 +76,7 @@ export function StatusCard({
         ) : (
           <Link
             to="/threads/$sessionId/subagents/$subagentId"
-            params={{ sessionId: session.id, subagentId: card.parentSubagentId }}
+            params={{ sessionId: session.id, subagentId: subagent.parentSubagentId }}
             className={buildButtonClassName("primary", undefined)}
           >
             Open parent

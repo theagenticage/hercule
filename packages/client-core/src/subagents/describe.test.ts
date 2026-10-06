@@ -1,7 +1,8 @@
 /**
  * Tests the words a screen shows for one subagent: `nameSubagent`,
- * `isSubagentWaiting`, `describeSubagentState`, `describeSubagentLine`,
- * `formatTokenCount` and `describeSubagentMeta`.
+ * `nameSubagentParent`, `isSubagentWaiting`, `describeSubagentState`,
+ * `describeSubagentLine`, `formatTokenCount`, `formatSubagentTokens`,
+ * `describeSubagentMeta` and `describeSubagentStop`.
  */
 import { describe, expect, it } from "vitest";
 import type { SessionRequest } from "@hercule/contract";
@@ -9,9 +10,12 @@ import {
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
+  describeSubagentStop,
+  formatSubagentTokens,
   formatTokenCount,
   isSubagentWaiting,
   nameSubagent,
+  nameSubagentParent,
 } from "./describe";
 import { buildRequest, buildSubagent } from "./subagents.testing";
 
@@ -30,16 +34,29 @@ describe("nameSubagent", () => {
   });
 });
 
+describe("nameSubagentParent", () => {
+  const planner = buildSubagent({ id: "p", description: "Plan the migration" });
+  const reader = buildSubagent({ id: "r", parentSubagentId: "p" });
+
+  it("names the parent subagent", () => {
+    expect(nameSubagentParent(reader, [planner, reader])).toBe("Plan the migration");
+  });
+
+  it("names the main agent when the session's own agent started it", () => {
+    expect(nameSubagentParent(planner, [planner, reader])).toBe("the main agent");
+  });
+});
+
 describe("isSubagentWaiting", () => {
   const requests = [buildRequest("r-1", "a"), buildRequest("r-2")];
 
-  it("is true for a running subagent with an open Request of its own", () => {
+  it("is true for a subagent with an open Request of its own, whatever its status", () => {
     expect(isSubagentWaiting(buildSubagent({ id: "a" }), requests)).toBe(true);
+    expect(isSubagentWaiting(buildSubagent({ id: "a", status: "stopped" }), requests)).toBe(true);
   });
 
-  it("is false for another subagent, and for one that has ended", () => {
+  it("is false for a subagent with no open Request of its own", () => {
     expect(isSubagentWaiting(buildSubagent({ id: "b" }), requests)).toBe(false);
-    expect(isSubagentWaiting(buildSubagent({ id: "a", status: "stopped" }), requests)).toBe(false);
   });
 });
 
@@ -95,12 +112,15 @@ describe("describeSubagentLine", () => {
     ],
   ])("reads %s while that kind of Request of its own is open", (text, request) => {
     const subagent = buildSubagent({ id: "a", activity: "Reading checkout.ts" });
-    expect(describeSubagentLine(subagent, request)).toEqual({ text, hue: "attn" });
+    expect(describeSubagentLine(subagent, [buildRequest("r-0"), request])).toEqual({
+      text,
+      hue: "attn",
+    });
   });
 
   it("shows what a running subagent does now", () => {
     const subagent = buildSubagent({ id: "a", activity: "Reading checkout.ts" });
-    expect(describeSubagentLine(subagent, undefined)).toEqual({
+    expect(describeSubagentLine(subagent, [])).toEqual({
       text: "Reading checkout.ts",
       hue: "live",
     });
@@ -108,18 +128,16 @@ describe("describeSubagentLine", () => {
 
   it("shows the result of an ended subagent, in the fail hue when it failed", () => {
     const done = buildSubagent({ id: "a", status: "completed", result: "Found it" });
-    expect(describeSubagentLine(done, undefined)).toEqual({ text: "Found it", hue: "muted" });
-    expect(describeSubagentLine({ ...done, status: "failed" }, undefined)).toEqual({
+    expect(describeSubagentLine(done, [])).toEqual({ text: "Found it", hue: "muted" });
+    expect(describeSubagentLine({ ...done, status: "failed" }, [])).toEqual({
       text: "Found it",
       hue: "fail",
     });
   });
 
   it("returns null while the record holds no line yet", () => {
-    expect(describeSubagentLine(buildSubagent({ id: "a" }), undefined)).toBeNull();
-    expect(
-      describeSubagentLine(buildSubagent({ id: "a", status: "stopped" }), undefined),
-    ).toBeNull();
+    expect(describeSubagentLine(buildSubagent({ id: "a" }), [])).toBeNull();
+    expect(describeSubagentLine(buildSubagent({ id: "a", status: "stopped" }), [])).toBeNull();
   });
 });
 
@@ -137,6 +155,17 @@ describe("formatTokenCount", () => {
   });
 });
 
+describe("formatSubagentTokens", () => {
+  it("formats the count of the subagent's own Token Usage", () => {
+    const usage = { inputTokens: 40_000, outputTokens: 1_000, cacheReadTokens: 700 };
+    expect(formatSubagentTokens(buildSubagent({ id: "a", usage }))).toBe("41.7k");
+  });
+
+  it("returns undefined when the harness reported no count, rather than 0", () => {
+    expect(formatSubagentTokens(buildSubagent({ id: "a" }))).toBeUndefined();
+  });
+});
+
 describe("describeSubagentMeta", () => {
   it("joins the agent type, the model, the tokens and the tool calls", () => {
     const subagent = buildSubagent({
@@ -151,5 +180,33 @@ describe("describeSubagentMeta", () => {
 
   it("leaves out what the record does not hold, tokens included, and counts one tool", () => {
     expect(describeSubagentMeta(buildSubagent({ id: "a", toolCalls: 1 }))).toBe("1 tool");
+  });
+});
+
+describe("describeSubagentStop", () => {
+  const planner = buildSubagent({ id: "p" });
+  const reader = buildSubagent({ id: "r", parentSubagentId: "p" });
+  const runner = buildSubagent({ id: "d", parentSubagentId: "r" });
+
+  it("reads Stop, with no tooltip, when nothing is below the subagent", () => {
+    expect(describeSubagentStop(runner, [planner, reader, runner])).toEqual({
+      label: "Stop",
+      title: undefined,
+    });
+  });
+
+  it("counts every subagent below it, at any depth", () => {
+    expect(describeSubagentStop(reader, [planner, reader, runner])).toEqual({
+      label: "Stop with 1 below",
+      title: "Also stops the subagent below it",
+    });
+    expect(describeSubagentStop(planner, [planner, reader, runner])).toEqual({
+      label: "Stop with 2 below",
+      title: "Also stops the 2 subagents below it",
+    });
+  });
+
+  it("returns null once the subagent has ended", () => {
+    expect(describeSubagentStop({ ...planner, status: "completed" }, [planner])).toBeNull();
   });
 });

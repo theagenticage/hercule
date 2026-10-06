@@ -23,39 +23,64 @@ export interface SpawnLine {
   /** How many subagents are below it, at any depth. */
   readonly below: number;
   /** Whether it, or any subagent below it, waits on the user. */
-  readonly waitsOnYou: boolean;
+  readonly waitsOnUserAtOrBelow: boolean;
 }
 
 /**
- * Builds the spawn lines of `turn`: one for each `subagent` item of the turn
- * whose subagent is in `subagents`, ordered as the side pane orders siblings,
- * so the two never disagree.
+ * Returns the subagents `turn` started, ordered as the side pane orders
+ * siblings, so the two never disagree. `agentSubagentId` is the agent whose
+ * turn it is: a subagent's id, or undefined for the session's own agent.
+ *
+ * A subagent belongs to the turn when its `itemId` is one of the turn's
+ * `subagent` items and the turn's agent started it. Both are checked,
+ * because an item id is unique only within one agent's transcript.
+ *
+ * A `subagent` item whose record has not been read yet has no subagent
+ * here, because there is nothing to name it by; it appears when the record
+ * does.
+ */
+export const findSpawnedSubagents = (
+  turn: ThreadTurn,
+  agentSubagentId: SubagentId | undefined,
+  subagents: readonly Subagent[],
+): readonly Subagent[] => {
+  const itemIds = new Set(
+    turn.items.filter((item) => item.kind === "subagent").map((item) => item.itemId),
+  );
+  return subagents
+    .filter(
+      (subagent) =>
+        subagent.parentSubagentId === agentSubagentId &&
+        subagent.itemId !== undefined &&
+        itemIds.has(subagent.itemId),
+    )
+    .sort(compareSubagentStarts);
+};
+
+/**
+ * Builds one spawn line per subagent of `spawned`, which
+ * `findSpawnedSubagents` returns, in the same order. `subagents` are the
+ * session's subagents, which count the ones below each line's subagent;
  * `openRequests` are the session's open Requests, and `now` is the moment a
  * running subagent's duration is measured to.
- *
- * A `subagent` item whose record has not been read yet has no line, because
- * there is nothing to name it by; the line appears when the record does.
  */
 export const buildSpawnLines = (
-  turn: ThreadTurn,
+  spawned: readonly Subagent[],
   subagents: readonly Subagent[],
   openRequests: readonly SessionRequest[],
   now: Date,
 ): readonly SpawnLine[] =>
-  turn.items
-    .filter((item) => item.kind === "subagent")
-    .flatMap((item) => subagents.filter((each) => each.itemId === item.itemId))
-    .sort(compareSubagentStarts)
-    .map((subagent) => {
-      const waiting = isSubagentWaiting(subagent, openRequests);
-      const descendants = listSubagentDescendants(subagent, subagents);
-      return {
-        subagentId: subagent.id,
-        status: subagent.status,
-        waiting,
-        name: nameSubagent(subagent),
-        state: describeSubagentState(subagent, waiting, now),
-        below: descendants.length,
-        waitsOnYou: waiting || descendants.some((each) => isSubagentWaiting(each, openRequests)),
-      };
-    });
+  spawned.map((subagent) => {
+    const waiting = isSubagentWaiting(subagent, openRequests);
+    const descendants = listSubagentDescendants(subagent, subagents);
+    return {
+      subagentId: subagent.id,
+      status: subagent.status,
+      waiting,
+      name: nameSubagent(subagent),
+      state: describeSubagentState(subagent, waiting, now),
+      below: descendants.length,
+      waitsOnUserAtOrBelow:
+        waiting || descendants.some((each) => isSubagentWaiting(each, openRequests)),
+    };
+  });

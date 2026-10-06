@@ -1,9 +1,9 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { useMatches } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Live } from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
-import { cn } from "@hercule/ui";
+import { cn, useElementWidth } from "@hercule/ui";
 import { SidePaneSlotContext } from "../app/side-pane-slot";
 import { Sidebar } from "./sidebar";
 import { TopBar, ownsItsTopBar } from "./top-bar";
@@ -39,25 +39,34 @@ export function Shell({
   // again when it appears; a ref would still be null on their first render
   // and would not tell them when it is set.
   const [sidePaneSlot, setSidePaneSlot] = useState<HTMLElement | null>(null);
+  // The main column and the slot share the width beside the sidebar. A pane
+  // in the slot reads it to leave the main column room.
+  const { observeElement: observePanes, width: panesWidth } = useElementWidth();
+  const slotState = useMemo(
+    () => ({ element: sidePaneSlot, availableWidth: panesWidth }),
+    [sidePaneSlot, panesWidth],
+  );
 
   return (
-    <SidePaneSlotContext value={sidePaneSlot}>
+    <SidePaneSlotContext value={slotState}>
       <div className="flex h-dvh">
         <Sidebar settings={settings} client={client} queryClient={queryClient} live={live} />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <TopBar settings={settings} />
-          <main
-            className={cn(
-              "flex min-h-0 flex-1 flex-col overflow-y-auto",
-              !bare && "px-8 pt-4 pb-28",
-            )}
-          >
-            {children}
-          </main>
+        <div ref={observePanes} className="flex min-h-0 min-w-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <TopBar settings={settings} />
+            <main
+              className={cn(
+                "flex min-h-0 flex-1 flex-col overflow-y-auto",
+                !bare && "px-8 pt-4 pb-28",
+              )}
+            >
+              {children}
+            </main>
+          </div>
+          {/* Empty unless a screen fills it with `SidePaneSlot`. It takes the
+              width of what is drawn in it and the window's full height. */}
+          <div ref={setSidePaneSlot} className="flex min-h-0 shrink-0" />
         </div>
-        {/* Empty unless a screen fills it with `SidePaneSlot`. It takes the
-            width of what is drawn in it and the window's full height. */}
-        <div ref={setSidePaneSlot} className="flex min-h-0 shrink-0" />
       </div>
     </SidePaneSlotContext>
   );

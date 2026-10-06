@@ -26,6 +26,13 @@ describe("describeSubagentTally", () => {
     expect(describeSubagentTally(RUNNING, [buildRequest("r-1", "b")]).mark).toBe("waiting");
   });
 
+  it("shows the waiting mark while an ended subagent's Request is still open", () => {
+    expect(describeSubagentTally(SETTLED, [buildRequest("r-1", "c")])).toEqual({
+      mark: "waiting",
+      count: "4",
+    });
+  });
+
   it("shows only how many there are, with the done mark, once none runs", () => {
     expect(describeSubagentTally(SETTLED, [])).toEqual({ mark: "done", count: "4" });
   });

@@ -44,23 +44,34 @@ export function PermissionCard({
   client,
   sessionId,
   request,
+  answered,
+  onAnsweredChange,
 }: {
   readonly client: HerculeClient;
   readonly sessionId: string;
   readonly request: OpenRequest;
+  /** Whether the user has sent an answer to this Request, from this card or an earlier one. */
+  readonly answered: boolean;
+  /**
+   * Called with true when an answer is sent, and with false when sending it
+   * fails, so the user can answer again.
+   */
+  readonly onAnsweredChange: (answered: boolean) => void;
 }): JSX.Element {
   const card = buildApprovalCard(request);
   // Neither response is written into the cache. It is a snapshot of the
   // session from when the controller received the answer, still parked on
   // the request, so writing it would bring back a card the live `session`
   // topic has already cleared. That topic is the source of truth; until it
-  // clears the request, the card stays locked through `isSuccess`.
+  // clears the request, the card stays locked through `answered`.
   const decide = useMutation({
     mutationFn: (decision: ApprovalDecision) =>
       client.session.respondToApprovalRequest({
         params: { id: sessionId },
         payload: { requestId: request.requestId, decision },
       }),
+    onMutate: () => onAnsweredChange(true),
+    onError: () => onAnsweredChange(false),
   });
   const answer = useMutation({
     mutationFn: (answers: QuestionAnswers) =>
@@ -68,11 +79,13 @@ export function PermissionCard({
         params: { id: sessionId },
         payload: { requestId: request.requestId, answers },
       }),
+    onMutate: () => onAnsweredChange(true),
+    onError: () => onAnsweredChange(false),
   });
   // One answer per request. The card stays until the runner reports the
   // request resolved, and a second click in that time could send an answer
   // that contradicts the one already recorded.
-  const locked = [decide, answer].some((sent) => sent.isPending || sent.isSuccess);
+  const locked = answered || decide.isPending || answer.isPending;
   const error = decide.error ?? answer.error;
 
   return (

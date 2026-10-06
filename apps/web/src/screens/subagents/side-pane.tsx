@@ -1,15 +1,14 @@
 import {
+  useContext,
   useId,
-  useLayoutEffect,
   useState,
   type JSX,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from "react";
-import type { HerculeClient } from "@hercule/client-core";
-import type { Session, Subagent } from "@hercule/contract";
 import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
-import { SubagentsSurface } from "./subagents-surface";
+import { SidePaneSlotContext } from "../../app/side-pane-slot";
 import {
   MIN_SIDE_PANE_WIDTH,
   SIDE_PANE_SURFACES,
@@ -26,7 +25,8 @@ const KEYBOARD_STEP = 16;
 
 /** Returns the name a surface's tab shows, such as "Subagents". */
 const nameSurface = (surface: SidePaneSurface): string =>
-  SIDE_PANE_SURFACES.find((each) => each.kind === surface)?.name ?? surface;
+  // Every surface is listed in `SIDE_PANE_SURFACES`, so the find never misses.
+  SIDE_PANE_SURFACES.find((each) => each.kind === surface)!.name;
 
 /**
  * The thread's side pane, to the right of the main pane: a container of
@@ -36,33 +36,26 @@ const nameSurface = (surface: SidePaneSurface): string =>
  * moves between the thread's page and its subagents' pages.
  *
  * Renders nothing while the pane is closed. The user resizes it by dragging
- * its left edge, or with the arrow keys once that edge has focus.
+ * its left edge, or with the arrow keys once that edge has focus. The pane
+ * is never dragged so wide that the main pane is left narrower than
+ * `MIN_MAIN_PANE_WIDTH`.
  */
 export function SidePane({
-  client,
-  session,
-  subagents,
-  subagentId,
+  children,
 }: {
-  readonly client: HerculeClient;
-  readonly session: Session;
-  /** Every subagent of the session, oldest first. */
-  readonly subagents: readonly Subagent[];
-  /** The subagent whose page is open in the main pane; undefined on the thread's own page. */
-  readonly subagentId: string | undefined;
+  /** The shown surface. */
+  readonly children: ReactNode;
 }): JSX.Element | null {
   const { layout, changeLayout } = useSidePaneLayout();
   const [storedWidth, storeWidth] = useSidePaneWidth();
   // The width while the user drags, stored only when the drag ends, so a
   // drag does not write to storage on every pointer move.
   const [dragWidth, setDragWidth] = useState<number | undefined>(undefined);
-  const [pane, setPane] = useState<HTMLElement | null>(null);
-  const available = useAvailableWidth(pane);
+  const available = useContext(SidePaneSlotContext).availableWidth;
   const panelId = useId();
   if (!layout.open || layout.shown === undefined) return null;
 
   const width = fitSidePaneWidth(dragWidth ?? storedWidth, available);
-  const widest = fitSidePaneWidth(Number.POSITIVE_INFINITY, available);
   const shown = layout.shown;
 
   const startDrag = (event: PointerEvent<HTMLDivElement>): void => {
@@ -98,7 +91,6 @@ export function SidePane({
 
   return (
     <aside
-      ref={setPane}
       aria-label="Side pane"
       style={{ width }}
       className="relative flex shrink-0 flex-col border-l border-line-soft bg-surface"
@@ -109,7 +101,12 @@ export function SidePane({
         aria-label="Resize the side pane"
         aria-valuenow={width}
         aria-valuemin={MIN_SIDE_PANE_WIDTH}
-        aria-valuemax={widest}
+        // How wide the pane may grow is known only once the shell is measured.
+        aria-valuemax={
+          available === undefined
+            ? undefined
+            : fitSidePaneWidth(Number.POSITIVE_INFINITY, available)
+        }
         tabIndex={0}
         onPointerDown={startDrag}
         onKeyDown={resizeWithKeys}
@@ -156,47 +153,10 @@ export function SidePane({
         aria-label={nameSurface(shown)}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <SubagentsSurface
-          client={client}
-          session={session}
-          subagents={subagents}
-          subagentId={subagentId}
-        />
+        {children}
       </div>
     </aside>
   );
-}
-
-/**
- * Returns the width the main pane and the side pane share, measured from the
- * shell's layout around `pane`, and measures it again whenever the window or
- * the main pane changes size. Returns undefined until `pane` is on the page
- * and laid out.
- *
- * The pane sits in the shell's side-pane slot, and the main pane is the
- * slot's previous sibling, so the shared width runs from the main pane's left
- * edge to the slot's right edge.
- */
-function useAvailableWidth(pane: HTMLElement | null): number | undefined {
-  const [available, setAvailable] = useState<number | undefined>(undefined);
-  useLayoutEffect(() => {
-    const slot = pane?.parentElement;
-    const main = slot?.previousElementSibling;
-    if (slot == null || main == null) return;
-    const measure = (): void => {
-      const shared = slot.getBoundingClientRect().right - main.getBoundingClientRect().left;
-      // A browser that lays nothing out, such as jsdom, measures 0.
-      if (shared > 0) setAvailable(shared);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(main);
-    observer.observe(slot);
-    return () => {
-      observer.disconnect();
-    };
-  }, [pane]);
-  return available;
 }
 
 /** Renders one surface's tab: its name, which shows the surface, and its close button. */

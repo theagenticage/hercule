@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { resolveDisplayTimezone } from "@hercule/client-core";
+import type { Subagent } from "@hercule/contract";
 import { EmptyState } from "@hercule/ui";
 import { settingsQuery, subagentsQuery, transcriptQuery } from "../../../../../app/queries";
 import { AgentPage } from "../../../../../screens/thread/agent-page";
@@ -14,18 +15,26 @@ import { AgentPage } from "../../../../../screens/thread/agent-page";
  *
  * The loader checks that the session has the subagent, so a link to one it
  * does not have shows that instead of an empty page, then fetches the
- * subagent's transcript before the route renders.
+ * subagent's transcript before the route renders. A subagent missing from
+ * the cached list may have started since the list was read, such as one
+ * whose Request docked before its record was refetched, so the loader reads
+ * the list again before it gives up.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId/subagents/$subagentId")({
   staticData: { title: "Subagent", ownsTopBar: true },
   loader: async ({ context, params }) => {
-    const subagents = await context.queryClient.ensureQueryData(
-      subagentsQuery(context.client, params.sessionId),
-    );
-    // The router acts on a thrown `notFound`, which is a plain descriptor
-    // rather than an Error.
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
-    if (!subagents.some((subagent) => subagent.id === params.subagentId)) throw notFound();
+    const query = subagentsQuery(context.client, params.sessionId);
+    const hasSubagent = (subagents: readonly Subagent[]): boolean =>
+      subagents.some((subagent) => subagent.id === params.subagentId);
+    if (
+      !hasSubagent(await context.queryClient.ensureQueryData(query)) &&
+      !hasSubagent(await context.queryClient.fetchQuery({ ...query, staleTime: 0 }))
+    ) {
+      // The router acts on a thrown `notFound`, which is a plain descriptor
+      // rather than an Error.
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw notFound();
+    }
     await context.queryClient.ensureQueryData(
       transcriptQuery(context.client, params.sessionId, params.subagentId),
     );

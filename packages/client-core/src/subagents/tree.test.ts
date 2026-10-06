@@ -1,6 +1,6 @@
 /**
- * Tests `buildSubagentTree`, `listSubagentAncestors` and
- * `listSubagentDescendants`, which arrange a session's subagents by who
+ * Tests `compareSubagentStarts`, `buildSubagentTree`,
+ * `listSubagentAncestors` and `listSubagentDescendants`, which arrange a session's subagents by who
  * started whom.
  */
 import { describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import type { Subagent } from "@hercule/contract";
 import { buildSubagent } from "./subagents.testing";
 import {
   buildSubagentTree,
+  compareSubagentStarts,
   listSubagentAncestors,
   listSubagentDescendants,
   type SubagentNode,
@@ -44,6 +45,18 @@ const readIds = (nodes: readonly SubagentNode[]): unknown[] =>
   nodes.map((node) =>
     node.children.length === 0 ? node.subagent.id : [node.subagent.id, readIds(node.children)],
   );
+
+describe("compareSubagentStarts", () => {
+  it("orders subagents by start, and a tie in start time by id", () => {
+    const at = "2026-10-05T09:00:00.000Z";
+    const sorted = [
+      buildSubagent({ id: "c", startedAt: at }),
+      B,
+      buildSubagent({ id: "b0", startedAt: at }),
+    ].sort(compareSubagentStarts);
+    expect(sorted.map((each) => each.id)).toEqual(["b0", "c", "b"]);
+  });
+});
 
 describe("buildSubagentTree", () => {
   it("nests each subagent under the one that started it, siblings oldest first", () => {

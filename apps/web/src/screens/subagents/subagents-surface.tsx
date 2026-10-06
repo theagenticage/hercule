@@ -5,58 +5,62 @@
  * §Subagents on the thread surface owns it.
  */
 import { useId, type JSX } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouteContext } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildSubagentTree,
   countUsedTokens,
-  describeStatusCard,
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
+  describeSubagentStop,
   formatTokenCount,
   isSubagentWaiting,
   nameSubagent,
+  readErrorMessage,
   summarizeSubagents,
   type HerculeClient,
   type SubagentNode,
 } from "@hercule/client-core";
-import type { Session, Subagent } from "@hercule/contract";
+import type { SessionRequest, Subagent } from "@hercule/contract";
 import { LaneLabel, cn } from "@hercule/ui";
-import { StopButton } from "../stop-button";
+import { sessionQuery, subagentsQuery } from "../../app/queries";
+import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
 import { useDurationClock } from "../use-duration-clock";
 import { useStopAgent } from "../use-stop-agent";
 import { SUBAGENT_HUE_CLASSES, SubagentMark } from "./subagent-mark";
 
 /** What every row of the tree reads besides its own subagent. */
 interface TreeContext {
-  readonly session: Session;
+  readonly client: HerculeClient;
+  readonly sessionId: string;
+  /** Every subagent of the session, oldest first. */
   readonly subagents: readonly Subagent[];
+  readonly openRequests: readonly SessionRequest[];
   /** The subagent whose page is open in the main pane, whose row is marked current. */
   readonly subagentId: string | undefined;
   readonly now: Date;
-  readonly stop: (subagentId: string) => void;
 }
 
 /**
- * Renders the Subagents surface. With no subagents yet, it says so and what
- * will appear. The durations of running subagents count up while it shows.
+ * Renders the Subagents surface of the session `sessionId`. With no
+ * subagents yet, it says so and what will appear. The durations of running
+ * subagents count up while it shows.
  */
 export function SubagentsSurface({
-  client,
-  session,
-  subagents,
+  sessionId,
   subagentId,
 }: {
-  readonly client: HerculeClient;
-  readonly session: Session;
-  /** Every subagent of the session, oldest first. */
-  readonly subagents: readonly Subagent[];
+  readonly sessionId: string;
   /** The subagent whose page is open in the main pane; undefined on the thread's own page. */
   readonly subagentId: string | undefined;
 }): JSX.Element {
+  const { client } = useRouteContext({ from: "/_shell" });
+  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
+  const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   const running = subagents.filter((subagent) => subagent.status === "running");
   const now = useDurationClock(running.map((subagent) => subagent.startedAt));
-  const stopAgent = useStopAgent(client, session.id);
+  const stopAgent = useStopAgent(client, sessionId);
   const headingId = useId();
 
   if (subagents.length === 0) {
@@ -72,13 +76,12 @@ export function SubagentsSurface({
 
   const tree = buildSubagentTree(subagents);
   const context: TreeContext = {
-    session,
+    client,
+    sessionId,
     subagents,
+    openRequests: session.openRequests,
     subagentId,
     now,
-    stop: (id) => {
-      stopAgent.stop(id);
-    },
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -92,12 +95,18 @@ export function SubagentsSurface({
           ))}
         </ul>
       </div>
+      {stopAgent.error === null ? null : (
+        <p role="alert" className="border-t border-line-soft px-4 pt-2 text-meta text-fail">
+          {readErrorMessage(stopAgent.error)}
+        </p>
+      )}
       <div className="flex h-12 shrink-0 items-center gap-3 border-t border-line-soft px-4 text-meta text-muted">
         <span>{summarizeSubagents(subagents)}</span>
         {running.length === 0 ? null : (
           <StopButton
             label="Stop all"
-            title="Stops the main agent's turn and every running subagent"
+            title={SESSION_STOP_TITLE}
+            disabled={stopAgent.isPending}
             onStop={() => {
               stopAgent.stop();
             }}
@@ -131,16 +140,14 @@ function SubagentRow({
   readonly context: TreeContext;
 }): JSX.Element {
   const { subagent, children } = node;
-  const { session, subagents, now } = context;
-  const waiting = isSubagentWaiting(subagent, session.openRequests);
+  const { client, sessionId, subagents, openRequests, now } = context;
+  const waiting = isSubagentWaiting(subagent, openRequests);
   const state = describeSubagentState(subagent, waiting, now);
-  const line = describeSubagentLine(
-    subagent,
-    session.openRequests.find((request) => request.subagentId === subagent.id),
-  );
-  // The status card's Stop and this one stop the same subagents, so they
-  // share one label: "Stop", or "Stop with 2 below".
-  const stop = describeStatusCard(subagent, subagents, session, now).stop;
+  const line = describeSubagentLine(subagent, openRequests);
+  // Each row stops on its own, so a stop on its way from one row neither
+  // blocks another row's Stop nor shows its failure there.
+  const stopAgent = useStopAgent(client, sessionId);
+  const stop = describeSubagentStop(subagent, subagents);
   const current = subagent.id === context.subagentId;
   const name = nameSubagent(subagent);
 
@@ -162,7 +169,7 @@ function SubagentRow({
                 separate button above it. */}
             <Link
               to="/threads/$sessionId/subagents/$subagentId"
-              params={{ sessionId: session.id, subagentId: subagent.id }}
+              params={{ sessionId, subagentId: subagent.id }}
               aria-current={current ? "page" : undefined}
               title={name}
               className={cn(
@@ -192,16 +199,30 @@ function SubagentRow({
           <span className="truncate font-mono text-fine text-faint tabular-nums">
             {describeSubagentMeta(subagent)}
           </span>
+          {stopAgent.error === null ? null : (
+            <span role="alert" className="text-meta text-fail">
+              {readErrorMessage(stopAgent.error)}
+            </span>
+          )}
         </span>
         {stop === null ? null : (
           // The pill is taller than the first line, so it is centred on that
           // line and overhangs the row's padding rather than growing the row.
-          <span className="absolute top-0.5 right-2 z-10 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100">
+          // While it is hidden it takes no clicks, so a click there opens
+          // the subagent's page rather than stopping it unseen.
+          <span
+            className={cn(
+              "pointer-events-none absolute top-0.5 right-2 z-10 opacity-0",
+              "group-hover:pointer-events-auto group-hover:opacity-100",
+              "group-has-focus-visible:pointer-events-auto group-has-focus-visible:opacity-100",
+            )}
+          >
             <StopButton
               label={stop.label}
               title={stop.title}
+              disabled={stopAgent.isPending}
               onStop={() => {
-                context.stop(subagent.id);
+                stopAgent.stop(subagent.id);
               }}
             />
           </span>

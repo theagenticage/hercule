@@ -152,7 +152,7 @@ interface StoredValue<T> {
  * Creates a `StoredValue` kept in `storage` under `key`. The stored text is
  * the single source of truth: `read` parses it again only when it changed, so
  * React sees the same value until a write. When the browser denies storage,
- * the value lives in memory until the page reloads.
+ * or refuses a write, the value lives in memory until the page reloads.
  */
 const createStoredValue = <T>(
   storage: () => Storage,
@@ -162,8 +162,12 @@ const createStoredValue = <T>(
 ): StoredValue<T> => {
   const listeners = new Set<() => void>();
   let memory: string | null = null;
+  // Once a write is refused, such as when storage is full, the value in
+  // memory is the newer one, so reads keep coming from memory.
+  let inMemory = false;
   let last: { readonly raw: string | null; readonly value: T } | undefined;
   const readRaw = (): string | null => {
+    if (inMemory) return memory;
     try {
       return storage().getItem(key);
     } catch {
@@ -183,6 +187,7 @@ const createStoredValue = <T>(
       } catch {
         // The value stays in memory instead; losing it on a reload is harmless.
         memory = raw;
+        inMemory = true;
       }
       for (const listener of listeners) listener();
     },

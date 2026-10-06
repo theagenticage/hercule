@@ -1,6 +1,5 @@
 import type { JSX } from "react";
 import { Outlet, createFileRoute, useMatch } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { findAnsweredAssistantId } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../../app/live-invalidation";
 import {
@@ -17,6 +16,7 @@ import {
 } from "../../../../app/queries";
 import { SidePaneSlot } from "../../../../app/side-pane-slot";
 import { SidePane } from "../../../../screens/subagents/side-pane";
+import { SubagentsSurface } from "../../../../screens/subagents/subagents-surface";
 
 /**
  * The thread: the layout around the page of each of its agents, the
@@ -73,13 +73,11 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
  * - `subagent` refetches the session's subagents when one starts or changes.
  */
 function ThreadLayout(): JSX.Element {
-  const { client, queryClient, live } = Route.useRouteContext();
+  const { queryClient, live } = Route.useRouteContext();
   const { sessionId } = Route.useParams();
   useLiveInvalidation(live, queryClient, "session");
   useLiveInvalidation(live, queryClient, "subagent");
 
-  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
-  const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   // The subagent whose page is open, so the side pane can mark its row.
   const subagentId = useMatch({
     from: "/_shell/threads/$sessionId/subagents/$subagentId",
@@ -89,7 +87,9 @@ function ThreadLayout(): JSX.Element {
   return (
     <>
       <SidePaneSlot>
-        <SidePane client={client} session={session} subagents={subagents} subagentId={subagentId} />
+        <SidePane>
+          <SubagentsSurface sessionId={sessionId} subagentId={subagentId} />
+        </SidePane>
       </SidePaneSlot>
       <Outlet />
     </>

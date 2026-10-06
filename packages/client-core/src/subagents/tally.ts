@@ -29,13 +29,14 @@ export const describeSubagentTally = (
   openRequests: readonly SessionRequest[],
 ): SubagentTally => {
   const running = countRunning(subagents);
-  if (running === 0) return { mark: "done", count: String(subagents.length) };
-  return {
-    mark: subagents.some((subagent) => isSubagentWaiting(subagent, openRequests))
-      ? "waiting"
-      : "working",
-    count: `${String(running)} of ${String(subagents.length)} running`,
-  };
+  const count =
+    running === 0
+      ? String(subagents.length)
+      : `${String(running)} of ${String(subagents.length)} running`;
+  if (subagents.some((subagent) => isSubagentWaiting(subagent, openRequests))) {
+    return { mark: "waiting", count };
+  }
+  return { mark: running === 0 ? "done" : "working", count };
 };
 
 /**

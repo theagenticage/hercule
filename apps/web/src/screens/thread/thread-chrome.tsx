@@ -30,7 +30,7 @@ const COMPACT_ROW_WIDTH = 640;
 
 /**
  * Renders the header row of one agent's page: the session's own agent's page
- * when `subagentId` is undefined, else that subagent's.
+ * when `subagent` is undefined, else that subagent's.
  *
  * - On the session's own agent's page, it reads the thread's project and the
  *   other threads in its workspace, which the header shows beside the title.
@@ -46,16 +46,15 @@ export function AgentChrome({
   client,
   session,
   subagents,
-  subagentId,
+  subagent,
 }: {
   readonly client: HerculeClient;
   readonly session: Session;
   /** Every subagent of the session, oldest first. */
   readonly subagents: readonly Subagent[];
   /** The subagent whose page this is; undefined on the thread's own page. */
-  readonly subagentId: string | undefined;
+  readonly subagent: Subagent | undefined;
 }): JSX.Element {
-  const subagent = subagents.find((each) => each.id === subagentId);
   return subagent === undefined ? (
     <SessionAgentChrome client={client} session={session} />
   ) : (
@@ -204,8 +203,9 @@ const CRUMB_LINK =
  * to their mark, and only then the active one. The workspace name is not
  * repeated here, because the lip already shows it.
  *
- * The thread screen draws this row instead of the shell's top bar, because
- * the shell's title would repeat the same information one row higher. Spec 14
+ * The thread's page and the draft thread screen draw this row instead of the
+ * shell's top bar, because the shell's title would repeat the same
+ * information one row higher. Spec 14
  * §The thread surface owns the row.
  */
 export function ThreadChrome({
@@ -341,7 +341,7 @@ function PaneToggle(): JSX.Element {
 }
 
 /** A button in the header row. This component sets the look; the screen supplies the behaviour. */
-export function ChromeAction(props: {
+function ChromeAction(props: {
   readonly title: string;
   readonly disabled?: boolean;
   /** Whether the content is a glyph rather than a word: narrower padding, wider letter spacing. */
@@ -373,7 +373,7 @@ export function ChromeAction(props: {
  * In a narrow header it shows only "+", and keeps its words in its tooltip
  * and its accessible name.
  */
-export function NewThreadHere({
+function NewThreadHere({
   projectId,
   workspaceId,
   compact = false,

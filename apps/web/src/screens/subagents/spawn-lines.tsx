@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { buildSpawnLines, type ThreadTurn } from "@hercule/client-core";
+import { buildSpawnLines, findSpawnedSubagents, type ThreadTurn } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import { useDurationClock } from "../use-duration-clock";
 import { SUBAGENT_HUE_CLASSES, SubagentMark } from "./subagent-mark";
@@ -18,23 +18,23 @@ import { SUBAGENT_HUE_CLASSES, SubagentMark } from "./subagent-mark";
 export function SpawnLines({
   session,
   subagents,
+  agentSubagentId,
   turn,
 }: {
   readonly session: Session;
   /** Every subagent of the session, oldest first. */
   readonly subagents: readonly Subagent[];
+  /** The agent whose turn it is: a subagent's id, or undefined for the session's own agent. */
+  readonly agentSubagentId: string | undefined;
   readonly turn: ThreadTurn;
 }): JSX.Element | null {
+  const spawned = findSpawnedSubagents(turn, agentSubagentId, subagents);
   const now = useDurationClock(
-    subagents
-      .filter(
-        (subagent) =>
-          subagent.status === "running" &&
-          turn.items.some((item) => item.itemId === subagent.itemId),
-      )
+    spawned
+      .filter((subagent) => subagent.status === "running")
       .map((subagent) => subagent.startedAt),
   );
-  const lines = buildSpawnLines(turn, subagents, session.openRequests, now);
+  const lines = buildSpawnLines(spawned, subagents, session.openRequests, now);
   if (lines.length === 0) return null;
 
   return (
@@ -60,7 +60,9 @@ export function SpawnLines({
               {" · "}
               <span className="font-mono text-fine tabular-nums">{line.state.duration}</span>
               {line.below > 0 ? ` · ${String(line.below)} below` : null}
-              {line.waitsOnYou ? <span className="text-attn"> · one waits on you</span> : null}
+              {line.waitsOnUserAtOrBelow ? (
+                <span className="text-attn"> · one waits on you</span>
+              ) : null}
             </span>
           </Link>
         </li>

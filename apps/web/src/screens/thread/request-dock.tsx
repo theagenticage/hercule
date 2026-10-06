@@ -1,10 +1,6 @@
 import { useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import {
-  buildRequestDock,
-  type HerculeClient,
-  type RequestDock as Dock,
-} from "@hercule/client-core";
+import { buildRequestDock, type HerculeClient, type RequestAsker } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import { PermissionCard } from "./permission-card";
 
@@ -29,26 +25,27 @@ export function RequestDock({
   client,
   session,
   subagents,
-  subagentId,
+  subagent,
 }: {
   readonly client: HerculeClient;
   readonly session: Session;
   /** Every subagent of the session, oldest first, which name the agent that asks. */
   readonly subagents: readonly Subagent[];
   /** The subagent whose page this is; undefined on the thread's own page. */
-  readonly subagentId: string | undefined;
+  readonly subagent: Subagent | undefined;
 }): JSX.Element | null {
   const [shownRequestId, setShownRequestId] = useState<string | undefined>(undefined);
-  const requests =
-    subagentId === undefined
-      ? session.openRequests
-      : session.openRequests.filter((each) => each.subagentId === subagentId);
-  const dock = buildRequestDock(requests, subagents, shownRequestId);
+  // The Requests the user has sent an answer to. The card of a Request
+  // unmounts when the user pages away, so the dock remembers the answer:
+  // paging back must not offer a second answer while the controller has not
+  // yet closed the Request.
+  const [answeredRequestIds, setAnsweredRequestIds] = useState<ReadonlySet<string>>(new Set());
+  const dock = buildRequestDock(session.openRequests, subagents, subagent?.id, shownRequestId);
   if (dock === null) return null;
-  const showsLine = subagentId === undefined ? dock.showsAskerLine : dock.position !== null;
+  const { requestId } = dock.request;
   return (
     <>
-      {showsLine ? (
+      {dock.showsAskerLine ? (
         <div className="mx-3.5 flex items-center gap-1.5 px-3 pb-1.5 text-fine text-muted">
           {dock.position === null ? null : (
             <span className="flex shrink-0 items-center gap-0.5">
@@ -71,16 +68,25 @@ export function RequestDock({
               </PagerButton>
             </span>
           )}
-          {subagentId === undefined ? <Asker sessionId={session.id} dock={dock} /> : null}
+          {dock.asker === null ? null : <Asker sessionId={session.id} asker={dock.asker} />}
         </div>
       ) : null}
       <PermissionCard
-        // A new request gets a new card, so the answered state of the previous
-        // request is not carried over.
-        key={dock.request.requestId}
+        // A new request gets a new card, so the draft and the error of the
+        // previous request are not carried over.
+        key={requestId}
         client={client}
         sessionId={session.id}
         request={dock.request}
+        answered={answeredRequestIds.has(requestId)}
+        onAnsweredChange={(answered) => {
+          setAnsweredRequestIds((ids) => {
+            const next = new Set(ids);
+            if (answered) next.add(requestId);
+            else next.delete(requestId);
+            return next;
+          });
+        }}
       />
     </>
   );
@@ -92,22 +98,24 @@ export function RequestDock({
  */
 function Asker({
   sessionId,
-  dock,
+  asker,
 }: {
   readonly sessionId: string;
-  readonly dock: Dock;
+  readonly asker: RequestAsker;
 }): JSX.Element {
-  if (dock.asker === null) return <span className="min-w-0 truncate">The main agent asks</span>;
+  if (asker.kind === "main agent") {
+    return <span className="min-w-0 truncate">The main agent asks</span>;
+  }
   return (
     <>
       <span className="min-w-0 truncate">
-        <span className="font-emph text-ink">{dock.asker.name}</span> asks
+        <span className="font-emph text-ink">{asker.name}</span> asks
         {/* The parent is unknown while the asker's record has not been read. */}
-        {dock.asker.parentName === null ? null : ` · subagent of ${dock.asker.parentName}`}
+        {asker.parentName === null ? null : ` · subagent of ${asker.parentName}`}
       </span>
       <Link
         to="/threads/$sessionId/subagents/$subagentId"
-        params={{ sessionId, subagentId: dock.asker.subagentId }}
+        params={{ sessionId, subagentId: asker.subagentId }}
         className="ml-auto shrink-0 rounded-control px-1.5 py-0.5 font-emph text-ink hover:bg-line-soft focus-visible:outline-2 focus-visible:outline-live"
       >
         Open subagent
