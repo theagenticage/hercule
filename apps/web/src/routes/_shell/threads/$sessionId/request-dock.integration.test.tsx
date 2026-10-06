@@ -366,7 +366,7 @@ describe("Status card", () => {
       "Subagent of Plan the database migration · takes no messages",
     );
     const stop = within(card).getByRole("button", { name: "Stop" });
-    expect(stop.getAttribute("title")).not.toMatch(/subagent/);
+    expect(stop.getAttribute("title")).toBeNull();
     expect(within(card).getByRole("link", { name: "Open parent" }).getAttribute("href")).toBe(
       `/threads/${SESSION_ID}/subagents/${PLAN.id}`,
     );
