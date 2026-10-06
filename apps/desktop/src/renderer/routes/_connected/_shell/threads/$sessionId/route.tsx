@@ -1,6 +1,6 @@
-import type { JSX } from "react";
+import { Suspense, lazy, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Outlet, createFileRoute, notFound, redirect } from "@tanstack/react-router";
+import { Outlet, createFileRoute, notFound, redirect, useMatch } from "@tanstack/react-router";
 import { isNotFound } from "@hercule/client-core";
 import {
   clearLastThread,
@@ -11,7 +11,20 @@ import {
 import { useLiveInvalidation } from "../../../../../app/live";
 import { ensureThreadData, sessionQuery } from "../../../../../app/queries";
 import { ThreadDraftsProvider } from "../../../../../app/thread-drafts";
+import { useSidePaneLayout } from "../../../../../screens/subagents/use-side-pane";
 import { ThreadNotFound } from "../../../../../screens/thread/not-found";
+import "../../../../../screens/subagents/side-pane-split.css";
+
+/**
+ * The side pane, loaded the first time a thread's pane opens, so its code
+ * and its surfaces' code stay out of the first screen's chunk (spec 17
+ * §What subagents cost).
+ */
+const SidePane = lazy(() =>
+  import("../../../../../screens/subagents/side-pane").then((module) => ({
+    default: module.SidePane,
+  })),
+);
 
 /**
  * The thread: the layout around the page of each of its agents, the
@@ -65,28 +78,45 @@ export const Route = createFileRoute("/_connected/_shell/threads/$sessionId")({
 
 /**
  * Keeps the thread's subagents current while any of its pages is open, and
- * renders the open agent's page with the thread's Request drafts, so what
- * the user typed on a Request and has not sent survives a move between the
- * thread's pages.
+ * renders the open agent's page in the main pane, with the thread's side
+ * pane beside it while that is open. The page has the thread's Request
+ * drafts, so what the user typed on a Request and has not sent survives a
+ * move between the thread's pages.
  *
  * The `subagent` topic is subscribed only here, while a thread is open,
  * because only a thread's pages show subagents (spec 17 §What subagents
  * cost). The shell already holds the `session` topic.
+ *
+ * The side pane stays as it was while the main pane moves between the
+ * thread's pages, because it is drawn here and not by a page.
  */
 function ThreadLayout(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
   const { sessionId } = Route.useParams();
   const { openRequests } = useSuspenseQuery(sessionQuery(controller.client, sessionId)).data;
   useLiveInvalidation(controller.live, queryClient, "subagent");
+  const { layout } = useSidePaneLayout(sessionId);
+  // The subagent whose page is open, so the side pane can mark its row.
+  const subagentId = useMatch({
+    from: "/_connected/_shell/threads/$sessionId/subagents/$subagentId",
+    shouldThrow: false,
+  })?.params.subagentId;
 
-  // The side pane's mount point: the Subagents surface is drawn beside the
-  // open page from here, loaded lazily, so its code stays out of the first
-  // screen's chunk. Nothing is drawn here yet.
   return (
     // Keyed by the session, so one thread's drafts never show on another:
     // the router keeps this layout when only the session id changes.
     <ThreadDraftsProvider key={sessionId} openRequests={openRequests}>
-      <Outlet />
+      <div className="thread-split">
+        <div className="thread-split-main">
+          <Outlet />
+        </div>
+        {layout.open ? (
+          // Nothing is drawn while the pane's code loads, which happens once.
+          <Suspense fallback={null}>
+            <SidePane sessionId={sessionId} subagentId={subagentId} />
+          </Suspense>
+        ) : null}
+      </div>
     </ThreadDraftsProvider>
   );
 }

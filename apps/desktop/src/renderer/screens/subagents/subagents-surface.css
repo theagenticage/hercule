@@ -1,0 +1,211 @@
+/* The Subagents surface. The measurements are the subagents prototype's
+   variant D (`.proto-surface` and what follows it in prototype.css, commit
+   6253a529). Each departure from the prototype says why. */
+.subagents {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.subagents-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 16px;
+}
+.subagents-section {
+  margin: 8px 0 4px 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.subagents-tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The rail that ties nested rows to the face of the subagent that started
+   them. `--rail-x` is set on the list, under that subagent's face. */
+.subagents-tree--nested {
+  position: relative;
+}
+.subagents-tree--nested::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  bottom: 22px;
+  left: var(--rail-x);
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--line);
+}
+/* The row's left padding grows with its depth and is set on the element. */
+.subagent-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  cursor: default;
+  transition: background var(--dur-1);
+}
+.subagent-row:hover {
+  background: var(--hover);
+}
+.subagent-row.is-on {
+  background: var(--selected);
+}
+.subagent-row > .cr {
+  flex: none;
+  margin-top: 1px;
+}
+.subagent-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+.subagent-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.subagent-row-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  outline: none;
+}
+/* Not in the prototype, whose row is a button: the name is the row's link,
+   and its box covers the whole row, so a click anywhere on the row opens the
+   subagent's page. Keyboard focus rings the row. */
+.subagent-row-name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-md);
+}
+.subagent-row-name:focus-visible::after {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.subagent-row-end {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* Not in the prototype, which shows the state only as the mark at the end
+   of the row and the word "stopped". The face shows the state here, and the
+   word beside the duration is the web app's, coloured as Bureau colours
+   the marks: a subagent that waits on the user in the user's ink, a failed
+   one in the failure's. */
+.subagent-row-end [data-hue="live"] {
+  color: var(--muted);
+}
+.subagent-row-end [data-hue="attn"] {
+  color: var(--you-ink);
+}
+.subagent-row-end [data-hue="fail"] {
+  color: var(--fail-ink);
+}
+.subagent-row-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.subagent-row-line[data-hue="attn"] {
+  color: var(--you-ink);
+}
+.subagent-row-line[data-hue="fail"] {
+  color: var(--fail-ink);
+}
+/* Not in the prototype, whose type is a chip on the name's line: the agent
+   type leads this line, as client-core writes it, so the words match the
+   web app's. */
+.subagent-row-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: var(--t-11);
+}
+.subagents-stop {
+  gap: 5px;
+  color: var(--fail-ink);
+}
+.subagents-stop:hover {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+/* A row's Stop sits over the row's state, and is shown while the pointer is
+   over the row or keyboard focus is inside it. Hidden, it takes no clicks,
+   so a click there opens the subagent's page rather than stopping it unseen.
+   It sits above the link that covers the row. */
+.subagent-row-stop {
+  position: absolute;
+  z-index: 1;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--raised);
+  box-shadow: var(--shadow-1);
+}
+.subagent-row:hover .subagent-row-stop,
+.subagent-row:has(:focus-visible) .subagent-row-stop {
+  opacity: 1;
+  pointer-events: auto;
+}
+.subagents-error {
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+.subagents-error--foot {
+  margin: 0;
+  padding: 8px 18px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.subagents-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 18px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* Not in the prototype, which always has subagents to show. The words are
+   the web app's. */
+.subagents-empty {
+  padding: 8px 20px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.subagents-empty p {
+  margin: 0 0 4px;
+}
+.subagents-empty-title {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
