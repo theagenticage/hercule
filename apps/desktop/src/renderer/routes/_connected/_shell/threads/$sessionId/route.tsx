@@ -1,5 +1,4 @@
 import { Suspense, lazy, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, notFound, redirect, useMatch } from "@tanstack/react-router";
 import { isNotFound } from "@hercule/client-core";
 import {
@@ -9,8 +8,8 @@ import {
   rememberLastThread,
 } from "../../../../../app/last-thread";
 import { useSubagentsLive } from "../../../../../app/live";
-import { ensureThreadData, sessionQuery } from "../../../../../app/queries";
-import { useThreadRequestDrafts } from "../../../../../app/thread-drafts";
+import { ensureThreadData } from "../../../../../app/queries";
+import { useKeepRequestDrafts } from "../../../../../app/thread-drafts";
 import { useSidePaneLayout } from "../../../../../screens/subagents/use-side-pane";
 import { ThreadNotFound } from "../../../../../screens/thread/not-found";
 import "../../../../../screens/subagents/side-pane-split.css";
@@ -95,9 +94,8 @@ export const Route = createFileRoute("/_connected/_shell/threads/$sessionId")({
 function ThreadLayout(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
   const { sessionId } = Route.useParams();
-  const { openRequests } = useSuspenseQuery(sessionQuery(controller.client, sessionId)).data;
   useSubagentsLive(controller.live, queryClient, sessionId);
-  useThreadRequestDrafts(sessionId, openRequests);
+  useKeepRequestDrafts(sessionId);
   const { layout } = useSidePaneLayout(sessionId);
   // The subagent whose page is open, so the side pane can mark its row.
   const subagentId = useMatch({

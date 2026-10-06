@@ -1,5 +1,5 @@
 import { Fragment, useId, type JSX, type KeyboardEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildApprovalCard,
@@ -14,7 +14,6 @@ import {
   type QuestionDraft,
 } from "@hercule/client-core";
 import type { ApprovalDecision, QuestionAnswers, SessionRequest } from "@hercule/contract";
-import { sessionQuery } from "../../app/queries";
 import { useRequestDraft } from "../../app/thread-drafts";
 import { buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons/check";
@@ -118,7 +117,9 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  *
  * What the user has typed, the shown question and whether an answer was
  * sent are kept in the thread's Request draft (`useRequestDraft`), so they
- * survive a move to a subagent's page and back.
+ * survive paging to another Request, and a move to a subagent's page and
+ * back. Something that shows the thread must keep its drafts
+ * (`useKeepRequestDrafts`).
  */
 export function RequestDock({
   sessionId,
@@ -129,26 +130,17 @@ export function RequestDock({
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const queryClient = useQueryClient();
   const titleId = useId();
   const card = buildApprovalCard(request);
   const faceLook = buildLook(buildAgentFaceSeed(sessionId, request.subagentId));
-  const [requestDraft, changeRequestDraft] = useRequestDraft(request.requestId);
+  const [requestDraft, changeRequestDraft] = useRequestDraft(sessionId, request.requestId);
   const markAnswered = (answered: boolean): void => {
     changeRequestDraft((current) => ({ ...current, answered }));
   };
   // A failed send unlocks the Request, so the user can answer again. The
-  // mutation's own callbacks run even after the dock has unmounted, so the
-  // draft is right when the user comes back. A Request that closed while
-  // the answer was on its way is left alone: unlocking it would bring back
-  // a draft for a Request nobody can answer any more. The session is read
-  // from the cache, because the dock's own props may be stale by then.
-  const unlockAfterFailure = (): void => {
-    const session = queryClient.getQueryData(sessionQuery(client, sessionId).queryKey);
-    if (session?.openRequests.some((each) => each.requestId === request.requestId) === true) {
-      markAnswered(false);
-    }
-  };
+  // mutation's own callbacks run even after the dock has unmounted, and the
+  // draft is changed through the thread's drafts, so the unlock lands
+  // whether or not the dock is still shown.
   // Neither response is written into the cache. It is the session as the
   // controller held it when the answer arrived, still waiting on the
   // request, so writing it could bring back a dock the live `session` push
@@ -161,7 +153,7 @@ export function RequestDock({
         payload: { requestId: request.requestId, decision },
       }),
     onMutate: () => markAnswered(true),
-    onError: unlockAfterFailure,
+    onError: () => markAnswered(false),
   });
   const answer = useMutation({
     mutationFn: (answers: QuestionAnswers) =>
@@ -170,7 +162,7 @@ export function RequestDock({
         payload: { requestId: request.requestId, answers },
       }),
     onMutate: () => markAnswered(true),
-    onError: unlockAfterFailure,
+    onError: () => markAnswered(false),
   });
   // One answer per request. The dock stays until the runner reports the
   // request resolved, and a second answer in that time could contradict the

@@ -300,24 +300,20 @@ describe("the dock", () => {
     }
   });
 
-  it("keeps a Request locked when its send fails after the Request closed", async () => {
+  it("lets the user answer again after a failed send, with no session in the cache", async () => {
+    // The Office's dossier card draws the dock from the thread list, before
+    // the session's own read lands, and that read can fail.
     const user = userEvent.setup();
     const held = holdAnswer();
     const { queryClient } = await renderDock(COMMAND, held.handler);
+    queryClient.removeQueries({ queryKey: queryKeys.session(FIXTURE_THREAD_IDS.runbook) });
 
     await user.click(within(readDock()).getByRole("button", { name: "Allow" }));
-    // The live session push closes the Request while the answer is on its way.
-    act(() => {
-      queryClient.setQueryData(queryKeys.session(FIXTURE_THREAD_IDS.runbook), {
-        ...THREAD_FIXTURES.waiting.session,
-        openRequests: [],
-      });
-    });
-    held.answer({ status: 409, body: buildErrorBody("invalid_state", "Already closed.") });
+    held.answer({ status: 409, body: buildErrorBody("invalid_state", "Try again.") });
 
     await screen.findByRole("alert");
     for (const answer of within(readDock()).getAllByRole("button")) {
-      expect(answer.getAttribute("aria-disabled")).toBe("true");
+      expect(answer.getAttribute("aria-disabled")).toBeNull();
     }
   });
 

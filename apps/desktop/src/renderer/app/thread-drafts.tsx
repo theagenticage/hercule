@@ -7,38 +7,51 @@
  * answers changes only that Request's draft, so only its dock renders again,
  * not the pager or the docks of other Requests.
  *
- * The thread's layout route keeps the drafts (`useThreadRequestDrafts`),
- * because it stays mounted while the user moves between the thread's page
- * and its subagents' pages. The dock unmounts on each move, so drafts kept
- * in its own state would be lost. Where no layout keeps the thread's drafts,
- * such as in the Office's thread drawer, each reader keeps its own state.
+ * A thread's drafts exist while something that shows the thread keeps them
+ * (`useKeepRequestDrafts`). The dock itself cannot keep them, because it
+ * unmounts whenever the user pages to another Request or moves to another of
+ * the thread's pages. The keepers are:
+ *
+ * - the thread's layout route, which stays mounted while the user moves
+ *   between the thread's page and its subagents' pages;
+ * - in the Office, the dossier card and the thread drawer, which show the
+ *   same thread, so an answer started on the card is still there in the
+ *   drawer.
+ *
+ * Several keepers may keep one thread at once. Its drafts are dropped when
+ * the last of them lets go, so leaving the thread forgets what was typed.
+ * Drafts of Requests that closed meanwhile stay until then: no dock shows a
+ * closed Request, and a requestId is never opened again.
+ *
+ * A reader of a thread that nobody keeps reads the empty draft, and its
+ * changes are dropped. This is what an answer that fails after the user left
+ * the thread must do: it must not bring the thread's drafts back.
  *
  * The composer's Message Draft and picks are not here: the controller's
  * `pendingSubmissions` keeps them per thread for the whole app run.
  *
- * The drafts live in memory only. Leaving the thread drops them.
+ * The drafts live in memory only.
  */
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { useMatch } from "@tanstack/react-router";
-import {
-  EMPTY_REQUEST_DRAFT,
-  changeRequestDraft,
-  dropClosedRequestDrafts,
-  type RequestDraft,
-} from "@hercule/client-core";
-import type { SessionRequest } from "@hercule/contract";
+import { useEffect, useSyncExternalStore } from "react";
+import { EMPTY_REQUEST_DRAFT, changeRequestDraft, type RequestDraft } from "@hercule/client-core";
 
 interface ThreadDrafts {
-  /** The drafts of the thread's open Requests, by requestId. */
+  /** The drafts of the thread's Requests, by requestId. */
   readonly requests: ReadonlyMap<string, RequestDraft>;
   /** The Request the user paged the dock to; undefined until the user pages. */
   readonly shownRequestId: string | undefined;
 }
 
+interface KeptThread {
+  /** How many mounted keepers keep the thread's drafts. */
+  readonly keepers: number;
+  readonly drafts: ThreadDrafts;
+}
+
 const EMPTY_THREAD_DRAFTS: ThreadDrafts = { requests: new Map(), shownRequestId: undefined };
 
-/** The drafts of each thread a mounted layout keeps, by session id. */
-const threadDrafts = new Map<string, ThreadDrafts>();
+/** The threads whose drafts are kept, by session id. */
+const keptThreads = new Map<string, KeptThread>();
 const listeners = new Set<() => void>();
 
 const subscribe = (listener: () => void): (() => void) => {
@@ -54,87 +67,69 @@ const notifyListeners = (): void => {
 
 /**
  * Replaces the drafts of the thread `sessionId` with `change` applied to
- * them, and tells every reader. Does nothing once no layout keeps the
- * thread's drafts: an answer that fails after the user left the thread must
- * not bring its drafts back.
+ * them, and tells every reader. Does nothing while nobody keeps the thread.
  */
 const changeThreadDrafts = (
   sessionId: string,
   change: (drafts: ThreadDrafts) => ThreadDrafts,
 ): void => {
-  const current = threadDrafts.get(sessionId);
-  if (current === undefined) return;
-  const next = change(current);
-  if (next === current) return;
-  threadDrafts.set(sessionId, next);
+  const kept = keptThreads.get(sessionId);
+  if (kept === undefined) return;
+  const drafts = change(kept.drafts);
+  if (drafts === kept.drafts) return;
+  keptThreads.set(sessionId, { ...kept, drafts });
   notifyListeners();
 };
 
-/**
- * Returns the session id of the thread whose route the caller is drawn in,
- * or undefined outside it. The Office's thread drawer draws the thread's
- * page without the thread's route.
- */
-const useThreadSessionId = (): string | undefined =>
-  useMatch({
-    from: "/_connected/_shell/threads/$sessionId",
-    shouldThrow: false,
-    select: (match) => match.params.sessionId,
-  });
+/** Returns the drafts of the thread `sessionId`, or the empty drafts while nobody keeps it. */
+const readThreadDrafts = (sessionId: string): ThreadDrafts =>
+  keptThreads.get(sessionId)?.drafts ?? EMPTY_THREAD_DRAFTS;
 
 /**
- * Keeps the drafts of the thread `sessionId` while the caller is mounted.
- * The thread's layout route calls it.
- *
- * - The draft of a Request is dropped once the Request is no longer among
- *   the session's `openRequests`.
- * - Every draft of the thread is dropped when the caller unmounts or moves
- *   to another session, so leaving the thread forgets what was typed.
+ * Keeps the drafts of the thread `sessionId` while the caller is mounted, or
+ * keeps nothing when `sessionId` is null. The drafts are dropped once the
+ * last keeper of the thread unmounts or moves to another session.
  */
-export function useThreadRequestDrafts(
-  sessionId: string,
-  openRequests: readonly SessionRequest[],
-): void {
-  // This effect is declared first so that, on mount, the thread's drafts
-  // exist before the next effect prunes them.
+export function useKeepRequestDrafts(sessionId: string | null): void {
   useEffect(() => {
-    threadDrafts.set(sessionId, EMPTY_THREAD_DRAFTS);
-    notifyListeners();
+    if (sessionId === null) return;
+    const kept = keptThreads.get(sessionId);
+    keptThreads.set(sessionId, {
+      keepers: (kept?.keepers ?? 0) + 1,
+      drafts: kept?.drafts ?? EMPTY_THREAD_DRAFTS,
+    });
     return () => {
-      threadDrafts.delete(sessionId);
+      const current = keptThreads.get(sessionId);
+      if (current === undefined) return;
+      if (current.keepers > 1) {
+        keptThreads.set(sessionId, { ...current, keepers: current.keepers - 1 });
+        return;
+      }
+      keptThreads.delete(sessionId);
       notifyListeners();
     };
   }, [sessionId]);
-  // A closed Request's dock is no longer drawn, so pruning after the render
-  // shows nothing stale.
-  useEffect(() => {
-    changeThreadDrafts(sessionId, (drafts) => dropClosedRequestDrafts(drafts, openRequests));
-  }, [sessionId, openRequests]);
 }
 
 /**
- * Returns the draft of the open Request `requestId` and a function that
- * changes it. A Request the user has not touched has the empty draft.
- * Renders the caller again only when this Request's draft changes.
+ * Returns the draft of the Request `requestId` of the thread `sessionId`,
+ * and a function that changes it. A Request the user has not touched has the
+ * empty draft. Renders the caller again only when this Request's draft
+ * changes.
  *
- * Where no layout keeps the thread's drafts, the draft is the caller's own
- * state. The Office's thread drawer draws the thread's page without the
- * thread's layout, and never moves to another of the thread's pages, so its
- * dock has nothing to keep across a move.
+ * The function goes through the store rather than the caller's state, so it
+ * still works after the caller unmounts, for as long as the thread is kept.
  */
 export function useRequestDraft(
+  sessionId: string,
   requestId: string,
 ): readonly [RequestDraft, (change: (draft: RequestDraft) => RequestDraft) => void] {
-  const sessionId = useThreadSessionId();
-  const [ownDraft, setOwnDraft] = useState(EMPTY_REQUEST_DRAFT);
-  // Null while no layout keeps the thread's drafts.
-  const threadDraft = useSyncExternalStore(subscribe, () => {
-    const drafts = sessionId === undefined ? undefined : threadDrafts.get(sessionId);
-    return drafts === undefined ? null : (drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT);
-  });
-  if (sessionId === undefined || threadDraft === null) return [ownDraft, setOwnDraft];
+  const draft = useSyncExternalStore(
+    subscribe,
+    () => readThreadDrafts(sessionId).requests.get(requestId) ?? EMPTY_REQUEST_DRAFT,
+  );
   return [
-    threadDraft,
+    draft,
     (change) => {
       changeThreadDrafts(sessionId, (drafts) => changeRequestDraft(drafts, requestId, change));
     },
@@ -142,32 +137,22 @@ export function useRequestDraft(
 }
 
 /**
- * Returns the id of the Request the user paged the dock to, undefined until
- * the user pages, and a function that changes it. The dock passes it to
- * `buildRequestDock`, which falls back to the oldest Request when the id is
- * no longer open.
- *
- * Where no layout keeps the thread's drafts, the id is the caller's own
- * state, as the draft is in `useRequestDraft`.
+ * Returns the id of the Request the user paged the dock of the thread
+ * `sessionId` to, undefined until the user pages, and a function that
+ * changes it. The dock passes it to `buildRequestDock`, which falls back to
+ * the oldest Request when the id is no longer open.
  */
-export function useShownRequestId(): readonly [
-  string | undefined,
-  (requestId: string | undefined) => void,
-] {
-  const sessionId = useThreadSessionId();
-  const [ownShownRequestId, setOwnShownRequestId] = useState<string | undefined>(undefined);
-  // Null while no layout keeps the thread's drafts.
-  const threadShownRequestId = useSyncExternalStore(subscribe, () => {
-    const drafts = sessionId === undefined ? undefined : threadDrafts.get(sessionId);
-    return drafts === undefined ? null : drafts.shownRequestId;
-  });
-  if (sessionId === undefined || threadShownRequestId === null) {
-    return [ownShownRequestId, setOwnShownRequestId];
-  }
+export function useShownRequestId(
+  sessionId: string,
+): readonly [string | undefined, (requestId: string | undefined) => void] {
+  const shownRequestId = useSyncExternalStore(
+    subscribe,
+    () => readThreadDrafts(sessionId).shownRequestId,
+  );
   return [
-    threadShownRequestId,
-    (shownRequestId) => {
-      changeThreadDrafts(sessionId, (drafts) => ({ ...drafts, shownRequestId }));
+    shownRequestId,
+    (requestId) => {
+      changeThreadDrafts(sessionId, (drafts) => ({ ...drafts, shownRequestId: requestId }));
     },
   ];
 }

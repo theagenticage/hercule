@@ -51,7 +51,7 @@ export function AgentRequestDock({
   const { client } = controller;
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
-  const [shownRequestId, setShownRequestId] = useShownRequestId();
+  const [shownRequestId, setShownRequestId] = useShownRequestId(sessionId);
   const dock = buildRequestDock(session.openRequests, subagents, pageSubagentId, shownRequestId);
   if (dock === null) return null;
   return (

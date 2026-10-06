@@ -21,6 +21,7 @@ import {
 import { buildRouterContext } from "../../app/context";
 import type { PendingSubmissions } from "../../app/pending-submissions";
 import { ensureShellData, ensureThreadData } from "../../app/queries";
+import { useKeepRequestDrafts } from "../../app/thread-drafts";
 import {
   buildSidebarHandlers,
   buildThreadHandlers,
@@ -65,7 +66,8 @@ export interface RenderedThreadPart {
  * the thread's route under `_shell`, so a part that matches that route finds
  * it. It starts at the thread, whose loader makes the reads the shell's and
  * the thread's loaders make. So, as in the app, nothing waits once this
- * returns.
+ * returns. The thread's route keeps the thread's Request drafts, as the
+ * thread's layout route does in the app.
  */
 export const renderThreadPart = async (
   Part: ThreadPart,
@@ -112,7 +114,10 @@ export const renderThreadPart = async (
         ensureShellData(queryClient, client),
         ensureThreadData(queryClient, client, sessionId),
       ]),
-    component: () => <Part sessionId={sessionId} />,
+    component: function ThreadRoute() {
+      useKeepRequestDrafts(sessionId);
+      return <Part sessionId={sessionId} />;
+    },
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([

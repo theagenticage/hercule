@@ -12,11 +12,14 @@
  * The drawer has no side pane, so the thread shows no tally pill. Its spawn
  * lines and the Request pager's "Open subagent" link leave the Office for
  * the subagent's full page. While it shows a thread, it holds the `subagent`
- * topic, as the thread's own screen does, so the spawn lines stay current.
+ * topic, as the thread's own screen does, so the spawn lines stay current,
+ * and keeps the thread's Request drafts, so paging between Requests keeps
+ * what was typed and what was sent.
  */
 import { Suspense, useEffect, useState, useSyncExternalStore, type JSX } from "react";
 import { useRouteContext } from "@tanstack/react-router";
 import { useSubagentsLive } from "../../app/live";
+import { useKeepRequestDrafts } from "../../app/thread-drafts";
 import { AgentPage } from "../../screens/thread/agent-page";
 import { readOffice, subscribeOffice, type OfficeState } from "../office-store";
 
@@ -37,6 +40,7 @@ export function ThreadDrawer(): JSX.Element {
   if (open && threadId !== shownId) setShownId(threadId);
   const { controller, queryClient } = useRouteContext({ from: "/_connected" });
   useSubagentsLive(controller.live, queryClient, shownId);
+  useKeepRequestDrafts(shownId);
   // A timer rather than `transitionend`: with Reduce motion on, the slide
   // takes no time and no transition event fires.
   useEffect(() => {
