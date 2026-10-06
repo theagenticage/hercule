@@ -272,10 +272,13 @@ function FloatingHeader({
             onClick={onDrawer}
             title="Heartbeat, reminders and memory"
           >
-            <HeartIcon size={14} />
-            10:00
-            <span className="pill-dot" />
-            <MemoryIcon size={14} />7
+            {/* The pill opens the drawer, but its numbers have nothing behind them yet. */}
+            <span className="is-faded">
+              <HeartIcon size={14} />
+              10:00
+              <span className="pill-dot" />
+              <MemoryIcon size={14} />7
+            </span>
           </button>
         </span>
       ) : null}
@@ -528,11 +531,11 @@ function Composer({
               </span>
             ) : (
               <>
-                <span>
+                <span className="is-faded">
                   <MemoryIcon size={13} />
                   {who === HERCULE ? "Remembers nothing yet" : "Remembers 7 topics"}
                 </span>
-                <span>
+                <span className="is-faded">
                   <HeartIcon size={13} />
                   Next heartbeat 10:00
                 </span>

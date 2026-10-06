@@ -48,7 +48,9 @@ export function Rail({
   const hue = { "--hue": `var(--hue-${who.look.hue})` } as CSSProperties;
   return (
     <aside className={className} style={hue} aria-label={`What ${who.name} keeps`}>
-      <section>
+      {/* Nothing reads these sections yet: heartbeats do not fire before #94,
+          and Reminders and Memory have no operations. So all three are inert. */}
+      <section className="is-inert" aria-disabled="true">
         <h2 className="section-h">
           <HeartIcon size={14} />
           Heartbeat<span className="section-aside">Every hour</span>
@@ -72,7 +74,6 @@ export function Rail({
         <BeatLine beats={beats} />
       </section>
 
-      {/* Reminders and Memory have no operation behind them yet, so they are drawn inert. */}
       <section className="is-inert" aria-disabled="true">
         <h2 className="section-h">
           <AlarmIcon size={14} />

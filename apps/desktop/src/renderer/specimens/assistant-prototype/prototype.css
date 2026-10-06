@@ -606,3 +606,12 @@ body:has(.proto-switcher) .app {
   opacity: 0.5;
   pointer-events: none;
 }
+
+/* Text with nothing behind it yet, drawn at half opacity inside something
+   that still works, such as the drawer's pill. */
+.is-faded {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  opacity: 0.5;
+}
