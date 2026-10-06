@@ -895,6 +895,30 @@ describe("a Claude Code session", () => {
     expect(run.sent).toEqual([]);
   });
 
+  it("refuses delayed input after Stop while the model is changing, then accepts a new input", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    run.holdsModel = true;
+    const sending = Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "do not resurrect this input",
+          modelSelection: { model: "claude-opus-4-8", options: {} },
+        }),
+      ),
+    );
+    await waitUntil("asked the harness for the model", () => run.models.length === 1);
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    run.releaseModel();
+    expect(await sending).toContain("stopped");
+    expect(run.sent).toEqual([]);
+    expect(run.seen.filter((event) => event._tag === "turn.started")).toEqual([]);
+    run.holdsModel = false;
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "new input" }));
+    await waitUntil("received the new input", () => run.sent.length === 1);
+    expect(run.sent[0]!.message.content).toEqual("new input");
+  });
+
   it("exits as stopped when stopped, and removes the session", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));

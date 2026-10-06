@@ -655,7 +655,9 @@ export const connect = (
           case "sessionInput":
             return queueSessionWork(message.sessionId, supervisor.input(message));
           case "sessionInterrupt":
-            return queueSessionWork(message.sessionId, supervisor.interrupt(message));
+            // Stop must reach input preparation while that input is still
+            // waiting on the harness. The supervisor waits only for binding.
+            return yield* Effect.asVoid(Effect.forkIn(supervisor.interrupt(message), connection));
           case "sessionRespondToApprovalRequest":
             return queueSessionWork(
               message.sessionId,

@@ -1,11 +1,12 @@
 /** Runs a local Responses API fixture while Codex owns threads, tools and approvals. */
-export const startMockModel = (version: "v1" | "v2") => {
+export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
   const calls = new Map<string, number>();
   const children = new Set<string>();
   const waitingChildren = new Set<string>();
   let followupSteps: Array<Record<string, unknown>> = [];
   let heldChildId: string | undefined;
   let rootThreadId: string | undefined;
+  let branchThreadId: string | undefined;
   let sequence = 0;
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -16,6 +17,7 @@ export const startMockModel = (version: "v1" | "v2") => {
       rootThreadId ??= threadId;
       const child = threadId !== rootThreadId;
       if (child) children.add(threadId);
+      if (child && stopScenario) branchThreadId ??= threadId;
       const call = (calls.get(threadId) ?? 0) + 1;
       calls.set(threadId, call);
       const responseId = `response-${++sequence}`;
@@ -47,7 +49,37 @@ export const startMockModel = (version: "v1" | "v2") => {
             ),
           });
         }
-      } else if (child && call === 1) {
+      } else if (stopScenario && threadId === branchThreadId && version === "v1" && call === 1) {
+        items.push({
+          type: "tool_search_call",
+          call_id: "discover-descendant",
+          execution: "client",
+          arguments: { query: "spawn_agent", limit: 1 },
+        });
+      } else if (
+        stopScenario &&
+        threadId === branchThreadId &&
+        call === (version === "v1" ? 2 : 1)
+      ) {
+        items.push({
+          type: "function_call",
+          namespace: version === "v1" ? "multi_agent_v1" : "collaboration",
+          name: "spawn_agent",
+          call_id: "spawn-descendant",
+          arguments: JSON.stringify(
+            version === "v1"
+              ? { message: "Descendant: ask approval, then finish.", fork_context: true }
+              : {
+                  task_name: "descendant",
+                  message: "Descendant: ask approval, then finish.",
+                  fork_turns: "all",
+                },
+          ),
+        });
+      } else if (
+        child &&
+        call === (stopScenario && threadId === branchThreadId ? (version === "v1" ? 3 : 2) : 1)
+      ) {
         items.push({
           type: "function_call",
           name: "exec_command",
@@ -85,7 +117,10 @@ export const startMockModel = (version: "v1" | "v2") => {
           },
         },
       ];
-      if (threadId === heldChildId) {
+      if (
+        threadId === heldChildId ||
+        (stopScenario && !child && call > (version === "v1" ? 3 : 2))
+      ) {
         waitingChildren.add(threadId);
         return new Response(
           new ReadableStream<Uint8Array>({
@@ -160,6 +195,7 @@ export const startMockModel = (version: "v1" | "v2") => {
       "[features]",
       "multi_agent = true",
       `multi_agent_v2 = ${version === "v2"}`,
+      ...(stopScenario ? ["[agents]", "max_depth = 2"] : []),
       "[model_providers.fixture]",
       'name = "Isolated fixture"',
       `base_url = "${server.url.toString()}v1"`,

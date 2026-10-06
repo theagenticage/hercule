@@ -846,6 +846,13 @@ describe("session frames on one connection", () => {
     readonly turns: Array<string>;
     /** The gate each session's `startSession` waits at, if it has one. */
     readonly startGates: Map<string, Gate>;
+    /** The gate each session's input waits at before reporting delivery. */
+    readonly inputGates: Map<string, Gate>;
+    readonly interrupts: Array<string>;
+    /** The native turn stopped when each interrupt actually executes. */
+    readonly cancelledTurns: Array<string>;
+    /** Holds an interrupt before the adapter applies its cancellation. */
+    interruptGate: Gate | undefined;
     /** A gate the first `listSessions` call waits at. That call is the start's own check, before the session has an entry. */
     listGate: Gate | undefined;
     /**
@@ -866,6 +873,10 @@ describe("session frames on one connection", () => {
       turns: [],
       stops: [],
       startGates: new Map(),
+      inputGates: new Map(),
+      interrupts: [],
+      cancelledTurns: [],
+      interruptGate: undefined,
       listGate: undefined,
       stopGate: undefined,
       emit: (event) => PubSub.publishUnsafe(events, event),
@@ -892,13 +903,24 @@ describe("session frames on one connection", () => {
             }),
           ),
         sendInput: (sessionId, input) =>
-          Effect.sync(() => {
-            const turnId = crypto.randomUUID();
-            fake.inputs.push([sessionId, input.text]);
-            fake.turns.push(turnId);
-            return { turnId, delivery: "opened" as const };
-          }),
-        interrupt: () => Effect.void,
+          Effect.andThen(
+            fake.inputGates.get(sessionId)?.pass ?? Effect.void,
+            Effect.sync(() => {
+              const turnId = crypto.randomUUID();
+              fake.inputs.push([sessionId, input.text]);
+              fake.turns.push(turnId);
+              return { turnId, delivery: "opened" as const };
+            }),
+          ),
+        interrupt: (sessionId) =>
+          Effect.andThen(
+            fake.interruptGate?.pass ?? Effect.void,
+            Effect.sync(() => {
+              fake.interrupts.push(sessionId);
+              const index = fake.inputs.findLastIndex(([id]) => id === sessionId);
+              if (index >= 0) fake.cancelledTurns.push(fake.turns[index]!);
+            }),
+          ),
         respondToApprovalRequest: () => Effect.void,
         respondToQuestion: () => Effect.void,
         stopSession: (sessionId, reason) =>
@@ -1070,6 +1092,114 @@ describe("session frames on one connection", () => {
     stub.hangUp();
     await pending;
   });
+
+  it("delivers Stop after binding while the first input still waits on the harness", async () => {
+    const fake = createFake();
+    const starting = createGate();
+    const input = createGate();
+    fake.startGates.set(SESSION_A, starting);
+    fake.inputGates.set(SESSION_A, input);
+    const { stub, pending } = await connectWithSessions(fake);
+    try {
+      stub.say(buildStart(SESSION_A));
+      await waitUntil(starting.reached);
+      starting.open();
+      await waitUntil(input.reached);
+      stub.say({ _tag: "sessionInterrupt", sessionId: SESSION_A });
+      await waitUntil(() => fake.interrupts.length === 1);
+      expect(listInputResults(stub)).toEqual([]);
+      expect(fake.interrupts).toEqual([SESSION_A]);
+      input.open();
+      await waitUntil(() => listInputResults(stub).length === 1);
+    } finally {
+      starting.open();
+      input.open();
+      stub.hangUp();
+      await pending;
+    }
+  });
+
+  it("waits for an earlier Stop to reach the adapter before delivering post-Stop input", async () => {
+    const fake = createFake();
+    const input = createGate();
+    const interrupt = createGate();
+    fake.inputGates.set(SESSION_A, input);
+    fake.interruptGate = interrupt;
+    const { stub, pending } = await connectWithSessions(fake);
+    try {
+      stub.say(buildStart(SESSION_A));
+      await waitUntil(input.reached);
+      stub.say({ _tag: "sessionInterrupt", sessionId: SESSION_A });
+      stub.say({
+        _tag: "sessionInput",
+        requestId: "0199e0e7-0000-7000-8000-0000000000c2",
+        sessionId: SESSION_A,
+        input: { text: "new work after Stop" },
+      });
+      await waitUntil(interrupt.reached);
+      input.open();
+      await waitUntil(() => listInputResults(stub).length >= 1);
+      await pingAndWaitForPong(stub);
+      interrupt.open();
+      await waitUntil(() => listInputResults(stub).length === 2);
+      expect(fake.inputs).toEqual([
+        [SESSION_A, `start ${SESSION_A}`],
+        [SESSION_A, "new work after Stop"],
+      ]);
+      expect(fake.cancelledTurns).toEqual([fake.turns[0]]);
+    } finally {
+      input.open();
+      interrupt.open();
+      stub.hangUp();
+      await pending;
+    }
+  });
+
+  it.each(["context", "harness"])(
+    "keeps Stop through %s startup, cancels earlier step input and accepts a later input",
+    async (phase) => {
+      const fake = createFake();
+      const starting = createGate();
+      if (phase === "harness") fake.startGates.set(SESSION_A, starting);
+      const { stub, pending } = await connectWithSessions(fake);
+      if (phase === "context") fake.listGate = starting;
+      const oldInput: SessionInput = {
+        _tag: "sessionInput",
+        requestId: "0199e0e7-0000-7000-8000-0000000000c1",
+        sessionId: SESSION_A,
+        input: { text: "old queued work", step: STEP },
+      };
+      const newInput: SessionInput = {
+        ...oldInput,
+        requestId: "0199e0e7-0000-7000-8000-0000000000c2",
+        input: { text: "new explicit work" },
+      };
+      try {
+        stub.say(buildStart(SESSION_A));
+        await waitUntil(starting.reached);
+        stub.say(oldInput);
+        stub.say({ _tag: "sessionInterrupt", sessionId: SESSION_A });
+        stub.say(newInput);
+        await pingAndWaitForPong(stub);
+        expect(fake.interrupts).toEqual([]);
+        starting.open();
+        await waitUntil(() => listInputResults(stub).length === 3);
+        expect(listInputResults(stub).map((result) => result.ok)).toEqual([false, false, true]);
+        expect(fake.inputs).toEqual([[SESSION_A, "new explicit work"]]);
+        expect(fake.interrupts).toEqual([SESSION_A]);
+        stub.say(STEP_RESULT_REQUEST);
+        await waitUntil(() => listStepResults(stub).length === 1);
+        expect(listStepResults(stub)[0]!.outcome).toMatchObject({
+          status: "failed",
+          code: "interrupted",
+        });
+      } finally {
+        starting.open();
+        stub.hangUp();
+        await pending;
+      }
+    },
+  );
 
   it("starts two sessions at the same time", async () => {
     const fake = createFake();

@@ -1,6 +1,6 @@
 /**
  * Converts the app-server's notifications into normalized provider events.
- * It takes one decoded frame and a small mutable per-thread state, and
+ * It takes one decoded frame and mutable state for one Codex thread, and
  * returns events. It uses no process, no socket, and no clock other than the
  * wall clock. Spec 06 section 6 owns the event taxonomy.
  *
@@ -19,7 +19,8 @@
  * one it does not know (spec 06 section 10.2). An item type with no mapping is
  * reported as `unknown`, with the frame in `raw`, so nothing is lost.
  */
-import type * as Schema from "effect/Schema";
+import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import type {
   ItemKind,
   ItemStatus,
@@ -87,6 +88,10 @@ export interface Normalizing {
   previousTotal: TokenCounts | undefined;
   /** The tokens counted since this process started, in Codex's own counts. */
   counted: TokenCounts;
+  /** Whether some calls in this process could not be counted. */
+  usageIncomplete: boolean;
+  /** Whether the next usable report must establish a baseline without counting history. */
+  usageBaselineRequired: boolean;
 }
 
 /** Builds independent state for one native thread; only the root keeps an output schema. */
@@ -107,9 +112,11 @@ export const buildNormalizingState = (
   turnStarted: false,
   previousTotal: undefined,
   counted: NO_TOKENS,
+  usageIncomplete: false,
+  usageBaselineRequired: false,
 });
 
-const buildThreadEnvelope = (
+const buildCodexThreadEnvelope = (
   state: Normalizing,
 ): Envelope & { readonly subagentId?: SubagentId } => ({
   ...buildEnvelope(state.sessionId, { threadId: state.threadId }),
@@ -121,11 +128,10 @@ const buildNotificationRaw = (payload: unknown): ReturnType<typeof buildRaw> =>
   buildRaw(CODEX_NOTIFICATION, payload);
 
 /**
- * Maps each Codex item type to a normalized item kind; unmapped types are
- * `unknown`. `userMessage` maps to `null` (no event) rather than
- * `user_message`: it is Codex echoing back what Hercule sent, and the adapter
- * has already reported that input, along with whether it steered the turn.
- * Two items for one message would look like the user sent it twice.
+ * Maps Codex items to normalized kinds, retaining unmapped types as unknown.
+ * The root's userMessage echoes input the adapter already reported, so the
+ * table suppresses that duplicate. classifyItem reports subagent userMessage
+ * items instead: they contain the task input its parent gave the subagent.
  */
 const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
   userMessage: null,
@@ -265,7 +271,7 @@ const buildContentDelta = (
 ): ReadonlyArray<ProviderEvent> => [
   {
     _tag: "content.delta",
-    ...buildThreadEnvelope(state),
+    ...buildCodexThreadEnvelope(state),
     turnId: ensureId(params.turnId),
     itemId: ensureId(params.itemId),
     streamKind,
@@ -313,42 +319,56 @@ const NO_TOKENS: TokenCounts = {
   outputTokens: 0,
 };
 
+const NativeTokenCount = Schema.Number.check(
+  Schema.makeFilter((count: number) => Number.isSafeInteger(count) && count >= 0),
+);
+
+const NativeTokenCounts = Schema.Struct({
+  inputTokens: NativeTokenCount,
+  cachedInputTokens: NativeTokenCount,
+  cacheWriteInputTokens: NativeTokenCount,
+  outputTokens: NativeTokenCount,
+}).check(Schema.makeFilter((counts) => counts.cachedInputTokens <= counts.inputTokens));
+
+const SavedUsageReport = Schema.Struct({
+  source: Schema.Literal(CODEX_NOTIFICATION),
+  payload: Schema.Struct({
+    threadId: Schema.String,
+    tokenUsage: Schema.Struct({ total: NativeTokenCounts }),
+  }),
+});
+
 /**
- * Restores the thread's previous native total without counting its history.
- * Returns false when the saved report belongs to another provider or thread,
- * or its counters cannot be read. The controller stores the report unchanged;
- * only this adapter knows how to interpret Codex's counters.
+ * Restores the native total without counting historical work. Returns false
+ * for another provider, another Codex thread, or invalid counters. The
+ * controller keeps the report unchanged; only this adapter interprets it.
  */
 export const restoreUsageReport = (state: Normalizing, report: unknown): boolean => {
-  if (
-    typeof report !== "object" ||
-    report === null ||
-    !("source" in report) ||
-    report.source !== CODEX_NOTIFICATION ||
-    !("payload" in report)
-  )
-    return false;
-  const payload = report.payload;
-  if (
-    typeof payload !== "object" ||
-    payload === null ||
-    !("threadId" in payload) ||
-    payload.threadId !== state.threadId ||
-    !("tokenUsage" in payload)
-  )
-    return false;
-  const usage = payload.tokenUsage;
-  if (typeof usage !== "object" || usage === null || !("total" in usage)) return false;
-  const total = usage.total;
-  if (typeof total !== "object" || total === null) return false;
-  const counters = { ...NO_TOKENS };
-  for (const key of TOKEN_COUNT_KEYS) {
-    const value: unknown = (total as Record<string, unknown>)[key];
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return false;
-    counters[key] = value;
-  }
-  if (counters.cachedInputTokens > counters.inputTokens) return false;
-  state.previousTotal = counters;
+  const decoded = Schema.decodeUnknownOption(SavedUsageReport)(report);
+  if (Option.isNone(decoded) || decoded.value.payload.threadId !== state.threadId) return false;
+  state.previousTotal = decoded.value.payload.tokenUsage.total;
+  return true;
+};
+
+/** Marks the known subtotal incomplete without discarding a usable native baseline. */
+export const markUsageIncomplete = (state: Normalizing): void => {
+  state.usageIncomplete = true;
+};
+
+/** Requires the next usable report to establish a baseline without counting old work. */
+export const requireUsageBaseline = (state: Normalizing): void => {
+  markUsageIncomplete(state);
+  state.previousTotal = undefined;
+  state.usageBaselineRequired = true;
+};
+
+/**
+ * Initializes a zero baseline after native replay finishes without a report.
+ * Returns false if a rejected report requires a later usable baseline.
+ */
+export const initializeUsageBaseline = (state: Normalizing): boolean => {
+  if (state.usageBaselineRequired) return false;
+  state.previousTotal ??= NO_TOKENS;
   return true;
 };
 
@@ -401,16 +421,24 @@ const buildUsage = (counts: TokenCounts): Usage => ({
  *
  * - With no earlier report, counting starts from `total - last`, the thread's
  *   usage before the model call reported. That is zero on a fresh thread and
- *   the parent's total on a forked one.
+ *   the inherited total on a public fork. Native spawned subagents start at zero.
  * - Codex repeats an unchanged total after a cancelled call, a stream error
  *   or a compaction. A repeated total adds nothing.
  * - A total that went down adds nothing, and counting continues from it.
  */
 const countUsageSinceStart = (state: Normalizing, usage: ThreadTokenUsage): Usage | undefined => {
-  const previous = state.previousTotal ?? subtractTokenCounts(usage.total, usage.last);
-  state.previousTotal = usage.total;
+  const total = Schema.decodeUnknownSync(NativeTokenCounts)(usage.total);
+  if (state.usageBaselineRequired) {
+    state.previousTotal = total;
+    state.usageBaselineRequired = false;
+    return state.turnStarted ? buildUsage(state.counted) : undefined;
+  }
+  const previous =
+    state.previousTotal ??
+    subtractTokenCounts(total, Schema.decodeUnknownSync(NativeTokenCounts)(usage.last));
+  state.previousTotal = total;
   if (!state.turnStarted) return undefined;
-  state.counted = addTotalGrowth(state.counted, previous, usage.total);
+  state.counted = addTotalGrowth(state.counted, previous, total);
   return buildUsage(state.counted);
 };
 
@@ -434,7 +462,7 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
     return [
       {
         _tag: "runtime.warning",
-        ...buildThreadEnvelope(state),
+        ...buildCodexThreadEnvelope(state),
         ...buildNotificationRaw(params),
         ...turn,
         message: truncateMessage(`${failure}: ${params.error.message} (Codex is retrying)`),
@@ -444,7 +472,7 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
   return [
     {
       _tag: "runtime.error",
-      ...buildThreadEnvelope(state),
+      ...buildCodexThreadEnvelope(state),
       ...buildNotificationRaw(params),
       ...turn,
       class: failure,
@@ -569,7 +597,7 @@ export const normalize = (
       return [
         {
           _tag: "turn.started",
-          ...buildThreadEnvelope(state),
+          ...buildCodexThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turn.id),
           ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
@@ -588,7 +616,7 @@ export const normalize = (
       return [
         {
           _tag: "turn.completed",
-          ...buildThreadEnvelope(state),
+          ...buildCodexThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turn.id),
           state: ended,
@@ -603,7 +631,7 @@ export const normalize = (
       return [
         {
           _tag: "item.started",
-          ...buildThreadEnvelope(state),
+          ...buildCodexThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turnId),
           itemId: ensureId(params.item.id),
@@ -622,7 +650,7 @@ export const normalize = (
       return [
         {
           _tag: "item.completed",
-          ...buildThreadEnvelope(state),
+          ...buildCodexThreadEnvelope(state),
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turnId),
           itemId: ensureId(params.item.id),
@@ -639,9 +667,11 @@ export const normalize = (
       return [
         {
           _tag: "session.usage.updated",
-          ...buildThreadEnvelope(state),
+          ...buildCodexThreadEnvelope(state),
           ...buildNotificationRaw(params),
-          usage,
+          ...(state.usageIncomplete
+            ? { usageReport: { status: "incomplete" as const, counts: usage } }
+            : { usage }),
         },
       ];
     }

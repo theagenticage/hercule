@@ -14,7 +14,13 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import { ProviderEvent } from "@hercule/protocol";
-import { normalize, buildNormalizingState, restoreUsageReport } from "./normalize";
+import {
+  normalize,
+  buildNormalizingState,
+  restoreUsageReport,
+  markUsageIncomplete,
+  requireUsageBaseline,
+} from "./normalize";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const THREAD = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -979,6 +985,68 @@ describe("restoring a saved Codex counter report", () => {
       cachedInputTokens: 0,
       cacheWriteInputTokens: 0,
       outputTokens: 0,
+    });
+  });
+});
+
+describe("incomplete Codex token accounting", () => {
+  it("baselines the first report after failed restoration and retains only later growth", () => {
+    const state = buildTestState();
+    requireUsageBaseline(state);
+    const history = buildTokenBreakdown(50000, 10000, 5000);
+    const events = normalizeNotes(state, [
+      TURN_STARTED,
+      buildUsageNote(history, buildTokenBreakdown(8000, 1000, 1000)),
+      buildUsageNote(
+        buildTokenBreakdown(62000, 13000, 6000),
+        buildTokenBreakdown(12000, 3000, 1000),
+      ),
+      buildUsageNote(
+        buildTokenBreakdown(62000, 13000, 6000),
+        buildTokenBreakdown(12000, 3000, 1000),
+      ),
+    ]);
+    const reports = filterByTag(events, "session.usage.updated");
+    expect(reports.map((event) => event.usageReport)).toEqual([
+      {
+        status: "incomplete",
+        counts: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+      {
+        status: "incomplete",
+        counts: {
+          inputTokens: 9000,
+          outputTokens: 1000,
+          cacheReadTokens: 3000,
+          cacheWriteTokens: 0,
+        },
+      },
+      {
+        status: "incomplete",
+        counts: {
+          inputTokens: 9000,
+          outputTokens: 1000,
+          cacheReadTokens: 3000,
+          cacheWriteTokens: 0,
+        },
+      },
+    ]);
+    for (const report of reports) expect(report).not.toHaveProperty("usage");
+    expect(state.usageBaselineRequired).toBe(false);
+  });
+
+  it("preserves an existing counter baseline when dropped frames make accounting incomplete", () => {
+    const state = buildTestState();
+    const history = buildTokenBreakdown(100, 0, 10);
+    restoreUsageReport(state, { source: SOURCE, payload: buildUsageNote(history, history).params });
+    markUsageIncomplete(state);
+    const events = normalizeNotes(state, [
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(150, 0, 20), buildTokenBreakdown(50, 0, 10)),
+    ]);
+    expect(filterByTag(events, "session.usage.updated")[0]?.usageReport).toEqual({
+      status: "incomplete",
+      counts: { inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
     });
   });
 });

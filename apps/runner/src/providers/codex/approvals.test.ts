@@ -729,6 +729,10 @@ describe("a second request Codex sends before the first is resolved", () => {
     );
     expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "acceptForSession" });
     expect(listResolutions(run)).toEqual(["deny", "allow_always"]);
+    expect(filterByTag(run.seen, "request.resolved").map((event) => event.requestId)).toEqual([
+      second!.request.requestId,
+      first!.request.requestId,
+    ]);
   });
 
   it("cancels every open Request when the session is interrupted", async () => {
@@ -743,6 +747,131 @@ describe("a second request Codex sends before the first is resolved", () => {
     expect((await awaitAnswer(run, SECOND_ID)).result).toEqual({ decision: "cancel" });
     expect(filterByTag(run.seen, "request.resolved")).toHaveLength(2);
     expect(listResolutions(run)).toEqual(["cancel", "cancel"]);
+  });
+
+  it("cancels the asker's other Request while leaving its sibling's approval open", async () => {
+    const childId = "0199e0e7-0000-7000-8000-0000000000b1";
+    const run = await startBusySession({
+      "thread/read": () => ({ thread: { id: childId, parentThreadId: THREAD } }),
+    });
+    run.server.push({
+      method: "turn/started",
+      params: {
+        threadId: childId,
+        turn: { id: "child-turn", status: "inProgress", items: [], itemsView: "full" },
+      },
+    });
+    run.server.push({ id: ID, method: COMMAND, params: COMMAND_PARAMS });
+    run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
+    run.server.push({
+      id: "sibling-approval",
+      method: COMMAND,
+      params: {
+        ...COMMAND_PARAMS,
+        threadId: childId,
+        turnId: "child-turn",
+        itemId: "sibling-item",
+      },
+    });
+    await waitUntil(
+      "opened both asker Requests and sibling approval",
+      () => filterByTag(run.seen, "request.opened").length === 3,
+    );
+    const opened = filterByTag(run.seen, "request.opened");
+    const own = opened.filter((event) => event.subagentId === undefined);
+    const sibling = opened.find((event) => event.subagentId === childId)!;
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, own[0]!.request.requestId, "cancel"),
+    );
+    expect(run.answered).toEqual([
+      { id: ID, result: { decision: "cancel" } },
+      { id: SECOND_ID, result: { decision: "cancel" } },
+    ]);
+    expect(filterByTag(run.seen, "request.resolved").map((event) => event.requestId)).toEqual(
+      own.map((event) => event.request.requestId),
+    );
+    expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, sibling.request.requestId, "allow"),
+    );
+    expect((await awaitAnswer(run, "sibling-approval")).result).toEqual({ decision: "accept" });
+  });
+
+  it("keeps late Requests of the cancelled turn cancelled while later turns and other agents can work", async () => {
+    const child = "0199e0e7-0000-7000-8000-0000000000b1";
+    const descendant = "0199e0e7-0000-7000-8000-0000000000b2";
+    const sibling = "0199e0e7-0000-7000-8000-0000000000b3";
+    const run = await startBusySession({
+      "thread/read": (params) => {
+        const { threadId } = params as { threadId: string };
+        return {
+          thread: { id: threadId, parentThreadId: threadId === descendant ? child : THREAD },
+        };
+      },
+    });
+    const pushTurn = (threadId: string, turnId: string, status = "inProgress") =>
+      run.server.push({
+        method: status === "inProgress" ? "turn/started" : "turn/completed",
+        params: { threadId, turn: { id: turnId, status, items: [], itemsView: "full" } },
+      });
+    const pushApproval = (threadId: string, turnId: string, id: string) =>
+      run.server.push({
+        id,
+        method: COMMAND,
+        params: { ...COMMAND_PARAMS, threadId, turnId, itemId: id },
+      });
+    for (const id of [child, descendant, sibling]) {
+      pushTurn(id, id);
+      pushApproval(id, id, id);
+    }
+    await waitUntil(
+      "opened asker, descendant and sibling approvals",
+      () => filterByTag(run.seen, "request.opened").length === 3,
+    );
+    const opened = filterByTag(run.seen, "request.opened");
+    const asker = opened.find((event) => event.subagentId === child)!;
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, asker.request.requestId, "cancel"),
+    );
+    pushApproval(child, child, "late-approval");
+    await waitUntil(
+      "opened the late approval",
+      () => filterByTag(run.seen, "request.opened").length === 4,
+    );
+    const late = filterByTag(run.seen, "request.opened")[3]!;
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, late.request.requestId, "allow"),
+    );
+    expect(run.answered).toEqual([
+      { id: child, result: { decision: "cancel" } },
+      { id: "late-approval", result: { decision: "cancel" } },
+    ]);
+    expect(filterByTag(run.seen, "request.resolved").map((event) => event.requestId)).toEqual([
+      asker.request.requestId,
+      late.request.requestId,
+    ]);
+    pushTurn(child, child, "interrupted");
+    pushTurn(child, "new-turn");
+    pushApproval(child, "new-turn", "new-approval");
+    await waitUntil(
+      "opened the subsequent turn's approval",
+      () => filterByTag(run.seen, "request.opened").length === 5,
+    );
+    const current = filterByTag(run.seen, "request.opened")[4]!;
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, current.request.requestId, "allow"),
+    );
+    for (const event of opened.filter((event) => event.subagentId !== child))
+      await Effect.runPromise(
+        run.adapter.respondToApprovalRequest(SESSION, event.request.requestId, "allow"),
+      );
+    expect(run.answered.slice(2)).toEqual([
+      { id: "new-approval", result: { decision: "accept" } },
+      ...opened
+        .filter((event) => event.subagentId !== child)
+        .map((event) => ({ id: event.subagentId, result: { decision: "accept" } })),
+    ]);
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
   });
 });
 

@@ -47,7 +47,7 @@ import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import { startMockModel } from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
-import { NO_USER_MATERIAL_PATHS } from "../testing";
+import { createLines, NO_USER_MATERIAL_PATHS } from "../testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
 const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
@@ -477,6 +477,283 @@ describe.skipIf(binary === undefined)(
   },
 );
 
+/** Checks native whole-session, subtree and selective Stops with real nested subagents and Requests. */
+describe.skipIf(binary === undefined)("Stop against real Codex subagents", () => {
+  it.each([
+    ["v1", "whole"],
+    ["v2", "whole"],
+    ["v1", "subtree"],
+    ["v2", "subtree"],
+    ["v1", "selective"],
+    ["v2", "selective"],
+    ["v1", "discovering-subtree"],
+    ["v2", "discovering-subtree"],
+  ] as const)(
+    "%s stops %s work while preserving unrelated work",
+    async (version, target) => {
+      const model = startMockModel(version, true);
+      const home = createScratchDir("native-stop");
+      mkdirSync(join(home, "codex"));
+      // V2 exposes delegation tools to subagents only for a V2 model preset.
+      // A small local catalog makes that capability explicit for the fixture.
+      const catalog = join(home, "codex", "model-catalog.json");
+      if (version === "v2")
+        writeFileSync(
+          catalog,
+          JSON.stringify({
+            models: [
+              {
+                slug: "gpt-5.4",
+                display_name: "Local fixture",
+                description: "Local model fixture",
+                supported_reasoning_levels: [],
+                shell_type: "unified_exec",
+                visibility: "list",
+                supported_in_api: true,
+                priority: 0,
+                support_verbosity: false,
+                truncation_policy: { mode: "tokens", limit: 10000 },
+                experimental_supported_tools: [],
+                base_instructions: "Complete the isolated fixture task.",
+                multi_agent_version: "v2",
+              },
+            ],
+          }),
+        );
+      writeFileSync(
+        join(home, "codex", "config.toml"),
+        `${version === "v2" ? `model_catalog_json = ${JSON.stringify(catalog)}\n` : ""}${model.config}`,
+      );
+      const delayed = createLines();
+      let heldMetadata: { line: string; id: string; parentId: string } | undefined;
+      let descendantRequestArrived = false;
+      const adapter = makeCodexAdapter({
+        appServer:
+          target !== "discovering-subtree"
+            ? spawnAppServer
+            : (command, env) => {
+                const child = spawnAppServer(command, env);
+                const reads = new Set<string | number>();
+                let rootId: string | undefined;
+                void (async () => {
+                  try {
+                    for await (const line of child.stdout) {
+                      const frame = JSON.parse(line) as {
+                        id?: string | number;
+                        method?: string;
+                        params?: { threadId?: string };
+                        result?: { thread?: { id: string; parentThreadId?: string | null } };
+                      };
+                      const thread = frame.result?.thread;
+                      rootId ??= thread?.id;
+                      if (
+                        frame.id !== undefined &&
+                        reads.has(frame.id) &&
+                        thread?.parentThreadId != null &&
+                        thread.parentThreadId !== rootId
+                      ) {
+                        heldMetadata = { line, id: thread.id, parentId: thread.parentThreadId };
+                        continue;
+                      }
+                      if (
+                        frame.method === "item/commandExecution/requestApproval" &&
+                        frame.params?.threadId === heldMetadata?.id
+                      )
+                        descendantRequestArrived = true;
+                      delayed.push(line);
+                    }
+                  } finally {
+                    delayed.end();
+                  }
+                })();
+                return {
+                  ...child,
+                  stdout: delayed.iterable,
+                  write: (line) => {
+                    const frame = JSON.parse(line) as { id?: string | number; method?: string };
+                    if (frame.method === "thread/read" && frame.id !== undefined)
+                      reads.add(frame.id);
+                    child.write(line);
+                  },
+                };
+              },
+        run: runProcess,
+      });
+      const seen: Array<ProviderEvent> = [];
+      const subscriber = Effect.runFork(
+        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+      );
+      const sessionId = "0199e0e7-0000-7000-8000-00000000ff10";
+      const waitUntil = async (predicate: () => boolean) => {
+        const deadline = Date.now() + 20_000;
+        while (!predicate()) {
+          if (Date.now() >= deadline)
+            throw new Error(
+              `Codex Stop fixture deadline: ${seen.map((event) => event._tag).join(", ")}`,
+            );
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      };
+      try {
+        await Effect.runPromise(
+          adapter.startSession(
+            sessionId,
+            { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+            {
+              ...buildContext(home),
+              env: {
+                PATH: process.env["PATH"] ?? "",
+                HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
+              },
+            },
+          ),
+        );
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish history." }));
+        await waitUntil(() =>
+          seen.some((event) => event._tag === "turn.completed" && event.subagentId === undefined),
+        );
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn the tree." }));
+        await waitUntil(
+          () =>
+            (target === "discovering-subtree"
+              ? heldMetadata !== undefined &&
+                descendantRequestArrived &&
+                seen.filter((event) => event._tag === "request.opened").length === 2
+              : seen.filter((event) => event._tag === "request.opened").length === 3) &&
+            model.waitingChildren.size === 1,
+        );
+        const introduced = seen.filter((event) => event._tag === "subagent.started");
+        const descendant =
+          target === "discovering-subtree"
+            ? { subagentId: heldMetadata!.id, parentSubagentId: heldMetadata!.parentId }
+            : introduced.find((event) => event.parentSubagentId !== undefined)!;
+        expect(descendant).toBeDefined();
+        const branch = introduced.find(
+          (event) => event.subagentId === descendant.parentSubagentId,
+        )!;
+        const sibling = introduced.find(
+          (event) => event.parentSubagentId === undefined && event.subagentId !== branch.subagentId,
+        )!;
+        const subtree = target === "subtree" || target === "discovering-subtree";
+        const stoppedIds =
+          target === "whole"
+            ? introduced.map((event) => event.subagentId)
+            : subtree
+              ? [branch.subagentId, descendant.subagentId]
+              : [descendant.subagentId];
+        await Effect.runPromise(
+          adapter.interrupt(
+            sessionId,
+            target === "whole" ? undefined : subtree ? branch.subagentId : descendant.subagentId,
+          ),
+        );
+        if (target === "discovering-subtree") {
+          await waitUntil(() =>
+            seen.some(
+              (event) =>
+                event._tag === "turn.completed" &&
+                event.subagentId === branch.subagentId &&
+                event.state === "interrupted",
+            ),
+          );
+          expect(
+            seen.filter(
+              (event) =>
+                event._tag === "subagent.started" && event.subagentId === descendant.subagentId,
+            ),
+          ).toEqual([]);
+          delayed.push(heldMetadata!.line);
+        }
+        await waitUntil(() =>
+          stoppedIds.every((id) =>
+            seen.some(
+              (event) =>
+                event._tag === "turn.completed" &&
+                event.subagentId === id &&
+                event.state === "interrupted",
+            ),
+          ),
+        );
+        for (const request of seen
+          .filter((event) => event._tag === "request.opened")
+          .filter((event) => stoppedIds.includes(event.subagentId!))) {
+          expect(
+            seen.some(
+              (event) =>
+                event._tag === "request.resolved" &&
+                event.requestId === request.request.requestId &&
+                "decision" in event &&
+                event.decision === "cancel",
+            ),
+          ).toBe(true);
+        }
+        if (target === "discovering-subtree") {
+          const request = seen
+            .filter((event) => event._tag === "request.opened")
+            .find((event) => event.subagentId === descendant.subagentId)!;
+          expect(request).toBeDefined();
+          const completions = seen.filter(
+            (event) =>
+              event._tag === "turn.completed" && event.subagentId === descendant.subagentId,
+          ).length;
+          await Effect.runPromise(
+            adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
+          );
+          expect(
+            seen.filter(
+              (event) =>
+                event._tag === "turn.completed" && event.subagentId === descendant.subagentId,
+            ),
+          ).toHaveLength(completions);
+        }
+        if (target === "whole") {
+          await waitUntil(() =>
+            seen.some(
+              (event) =>
+                event._tag === "turn.completed" &&
+                event.subagentId === undefined &&
+                event.state === "interrupted",
+            ),
+          );
+        } else {
+          expect(
+            seen.filter(
+              (event) => event._tag === "turn.completed" && event.subagentId === sibling.subagentId,
+            ),
+          ).toEqual([]);
+          expect(
+            seen.filter(
+              (event) => event._tag === "turn.completed" && event.subagentId === undefined,
+            ),
+          ).toHaveLength(1);
+          const request = seen.find(
+            (event) => event._tag === "request.opened" && event.subagentId === sibling.subagentId,
+          )!;
+          if (request._tag !== "request.opened")
+            throw new Error("the sibling did not ask for approval");
+          await Effect.runPromise(
+            adapter.respondToApprovalRequest(sessionId, request.request.requestId, "allow"),
+          );
+          await waitUntil(() =>
+            seen.some(
+              (event) =>
+                event._tag === "turn.completed" &&
+                event.subagentId === sibling.subagentId &&
+                event.state === "completed",
+            ),
+          );
+        }
+        expect(await Effect.runPromise(adapter.listSessions)).toHaveLength(1);
+      } finally {
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        await Effect.runPromise(Fiber.interrupt(subscriber));
+        await model.stop();
+      }
+    },
+    45_000,
+  );
+});
+
 /** Proves accounting across a real process restart, including cancellation before a model completes. */
 describe.skipIf(binary === undefined)("a real Codex child's usage after process restart", () => {
   it.each([
@@ -546,7 +823,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
               )
               .at(-1);
             expect(
-              report?._tag === "session.usage.updated" ? report.usage.inputTokens : undefined,
+              report?._tag === "session.usage.updated" ? report.usage?.inputTokens : undefined,
             ).toBe(600);
             expect(report?.raw).toBeDefined();
             return {

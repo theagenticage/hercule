@@ -31,6 +31,7 @@ import {
   SubagentId,
   type ModelSelection,
   type ProviderEvent,
+  type ProviderReport,
   type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
@@ -130,7 +131,7 @@ import {
   type SubagentEventFacts,
 } from "./subagents";
 import { hasOtherTurn, readAssistantTexts, readOpenTurnId } from "./transcript-log";
-import { addUsageSnapshot, clearProcessShare } from "./usage";
+import { addUsageReport, clearProcessShare } from "./usage";
 
 const QueryInput = Schema.Struct({
   ...SessionFilter.fields,
@@ -879,7 +880,15 @@ const make = Effect.gen(function* () {
         return false;
       }
       if (event._tag !== "session.usage.updated" || event.subagentId !== undefined) return false;
-      yield* sessions.setUsage(session.id, addUsageSnapshot(session, event.usage));
+      yield* sessions.setUsage(
+        session.id,
+        addUsageReport(
+          session,
+          event.usage === undefined
+            ? event.usageReport
+            : { status: "complete", counts: event.usage },
+        ),
+      );
       return true;
     });
 
@@ -1368,7 +1377,7 @@ const make = Effect.gen(function* () {
       ReadonlyArray<{
         readonly subagentId: SubagentId;
         readonly itemId?: string;
-        readonly lastUsageReport?: NonNullable<ProviderEvent["raw"]>;
+        readonly lastUsageReport?: ProviderReport;
       }>,
       SqlError
     > =>

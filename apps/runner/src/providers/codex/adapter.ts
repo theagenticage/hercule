@@ -10,7 +10,6 @@ import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as PubSub from "effect/PubSub";
 import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
@@ -41,11 +40,11 @@ import { ASKED } from "./approvals";
 import { normalize, readChangedPaths } from "./normalize";
 import {
   makeCodexThreads,
-  readThreadId,
+  readCodexThreadId,
   type CodexThreads,
   type Park,
-  type ThreadFrame,
-  type ThreadState,
+  type CodexThreadFrame,
+  type CodexThreadState,
 } from "./threads";
 import {
   makeCodexInstall,
@@ -75,9 +74,7 @@ import type {
   ThreadResumeParams,
   ThreadStartParams,
   ThreadStartResponse,
-  TurnCompletedNotification,
   TurnInterruptParams,
-  TurnStartedNotification,
   TurnStartParams,
   TurnStartResponse,
   TurnSteerParams,
@@ -486,10 +483,15 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     });
 
   /** Delivers a known thread's frame without letting malformed vendor data stop the reader. */
-  const dispatchThreadFrame = (held: Held, thread: ThreadState, frame: ThreadFrame): void => {
+  const dispatchCodexThreadFrame = (
+    held: Held,
+    thread: CodexThreadState,
+    frame: CodexThreadFrame,
+    cancelled: boolean,
+  ): void => {
     try {
       if ("id" in frame) {
-        openRequest(held, thread, frame);
+        openRequest(held, thread, frame, cancelled);
         return;
       }
       if (frame.method === "thread/closed") {
@@ -498,33 +500,28 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       }
       for (const event of normalize(thread.state, frame)) {
         if (event._tag !== "session.usage.updated") emit(event);
-        else {
-          thread.usage = event.usage;
-          const { subagentId, ...aggregate } = event;
-          if (subagentId !== undefined) emit(event);
-          emit({ ...aggregate, eventId: crypto.randomUUID(), usage: held.threads.sumUsage() });
-        }
+        else held.threads.recordUsage(thread, event);
       }
       if (frame.method === "item/started" || frame.method === "item/completed") {
         const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
         if (item.type === "fileChange") {
+          // Completed patches would otherwise keep their cached approval paths
+          // for the rest of a long turn.
           if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
           else thread.fileChanges.set(item.id, readChangedPaths(item));
         }
       }
-      if (frame.method === "turn/started") {
-        thread.turnId ??= (frame.params as TurnStartedNotification).turn.id;
-      } else if (frame.method === "turn/completed") {
-        const turn = (frame.params as TurnCompletedNotification).turn;
-        if (turn.status !== "inProgress" && turn.id === thread.turnId) {
-          thread.turnId = undefined;
-          // The turn event closes its Requests at the controller. Codex still
-          // needs a reply to each native RPC, but no duplicate resolution event.
-          cancelRequests(held, thread, false);
-          thread.fileChanges.clear();
-        }
-      }
     } catch {
+      if (frame.method === "thread/tokenUsage/updated") {
+        const missingBaseline = held.threads.rejectUsageReport(thread);
+        warn(
+          held.host,
+          missingBaseline
+            ? "The app-server sent an unreadable usage report. Usage is incomplete; the next usable report will establish a baseline."
+            : "The app-server sent an unreadable usage report. Keeping the last usable counters until a valid report arrives.",
+        );
+        return;
+      }
       if ("id" in frame)
         refuseRequest(held.host, frame, {
           code: INVALID_REQUEST,
@@ -541,15 +538,15 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   /** Resolves one Request under its asking thread and native RPC id. */
   const resolvePark = (
     held: Held,
-    thread: ThreadState,
+    thread: CodexThreadState,
     park: Park,
     reply: RpcReply,
     resolution: RequestResolution,
-    report = true,
+    reportResolution = true,
   ): void => {
     thread.parks.delete(park.request.requestId);
     held.host.rpc.answer(park.id, reply);
-    if (report)
+    if (reportResolution)
       emit({
         _tag: "request.resolved",
         eventId: crypto.randomUUID(),
@@ -562,7 +559,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /** Cancels only the Requests of the thread whose work ended. */
-  const cancelRequests = (held: Held, thread: ThreadState, report = true): void => {
+  const cancelRequests = (held: Held, thread: CodexThreadState, reportResolution = true): void => {
     for (const park of [...thread.parks.values()])
       resolvePark(
         held,
@@ -570,7 +567,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         park,
         park.asked.replies("cancel", park.params),
         { decision: "cancel" },
-        report,
+        reportResolution,
       );
   };
 
@@ -612,7 +609,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       return;
     }
     const held = findHostSession(host);
-    const threadId = readThreadId(frame);
+    const threadId = readCodexThreadId(frame);
     if (threadId === undefined || held === undefined) {
       refuseRequest(host, frame, {
         code: INVALID_REQUEST,
@@ -624,7 +621,12 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /** Publishes every Request immediately, with the identity of its asker. */
-  const openRequest = (held: Held, thread: ThreadState, frame: ServerRequestFrame): void => {
+  const openRequest = (
+    held: Held,
+    thread: CodexThreadState,
+    frame: ServerRequestFrame,
+    cancelled: boolean,
+  ): void => {
     const asked = ASKED[frame.method]!;
     const request = asked.opens(frame.params, {
       requestId: crypto.randomUUID(),
@@ -641,33 +643,40 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       request,
       ...(thread.state.subagentId === undefined ? {} : { subagentId: thread.state.subagentId }),
     });
-    if (held.threads.isStopped(thread)) cancelRequests(held, thread);
+    if (cancelled)
+      resolvePark(held, thread, park, park.asked.replies("cancel", park.params), {
+        decision: "cancel",
+      });
   };
 
   /** Interrupts only this thread's native turn, within the control deadline. */
-  const interruptTurn = (held: Held, thread: ThreadState): Effect.Effect<void> =>
-    thread.turnId === undefined
+  const interruptTurn = (
+    held: Held,
+    thread: CodexThreadState,
+    turnId = thread.turnId,
+  ): Effect.Effect<void> =>
+    turnId === undefined
       ? Effect.void
       : Effect.ignore(
           Effect.timeout(
             held.host.rpc.request("turn/interrupt", {
               threadId: thread.state.threadId,
-              turnId: thread.turnId,
+              turnId,
             } satisfies TurnInterruptParams),
             CONTROL_DEADLINE,
           ),
         );
 
   /** Cancels a thread's Requests before stopping the turn that asked them. */
-  const stopThread = (held: Held, thread: ThreadState): Effect.Effect<void> =>
+  const stopCodexThread = (held: Held, thread: CodexThreadState): Effect.Effect<void> =>
     Effect.suspend(() => {
       cancelRequests(held, thread);
       return interruptTurn(held, thread);
     });
 
   /** Stops selected threads together, so a silent child cannot delay its siblings. */
-  const stopThreads = (held: Held, subagentId?: SubagentId): Effect.Effect<void> =>
-    Effect.forEach(held.threads.selectForStop(subagentId), (thread) => stopThread(held, thread), {
+  const stopCodexThreads = (held: Held, subagentId?: SubagentId): Effect.Effect<void> =>
+    Effect.forEach(held.threads.cancelWork(subagentId), (thread) => stopCodexThread(held, thread), {
       concurrency: "unbounded",
       discard: true,
     });
@@ -876,8 +885,17 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             spec,
             rpc: host.rpc,
             emit,
-            dispatch: (thread, frame) => dispatchThreadFrame(held, thread, frame),
-            interrupt: (thread) => stopThread(held, thread),
+            dispatch: (thread, frame, cancelled) =>
+              dispatchCodexThreadFrame(held, thread, frame, cancelled),
+            interrupt: (thread, turnId) => interruptTurn(held, thread, turnId),
+            cancelRequests: (thread) => cancelRequests(held, thread),
+            completeTurn: (thread) => {
+              // The turn event closes the controller's Requests. Native RPCs
+              // still need replies, without duplicate resolution events.
+              cancelRequests(held, thread, false);
+              thread.fileChanges.clear();
+            },
+            failSession: () => exitSession(held, "crash"),
           }),
         };
         sessions.set(sessionId, held);
@@ -897,28 +915,33 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
-        yield* held.threads.restoreUsage;
-        const running = held.threads.root.turnId;
-        held.threads.beginInput();
+        const ticket = held.threads.beginInput();
         const sent = yield* Effect.onExit(
           Effect.gen(function* () {
+            yield* held.threads.prepareUsage;
+            const running = held.threads.root.turnId;
+            yield* held.threads.submitInput(ticket, running);
             const steered =
               running === undefined ? undefined : yield* steerTurn(held, input.text, running);
-            return steered ?? (yield* startTurn(held, input));
+            if (steered !== undefined) return steered;
+            yield* held.threads.submitInput(ticket);
+            return yield* startTurn(held, input);
           }),
-          (exit) => Effect.sync(() => held.threads.finishInput(Exit.isSuccess(exit))),
+          () => Effect.sync(() => held.threads.finishInput(ticket)),
         );
         // The turn counts as running from the reply, not from the
         // `turn/started` notification after it: an input arriving in between
         // would otherwise start a second turn.
-        held.threads.root.turnId = sent.turnId;
-        for (const event of buildUserMessage({
-          sessionId,
-          turnId: sent.turnId,
-          text: input.text,
-          steered: sent.delivery === "steered",
-          providerRefs: { threadId: held.binding.nativeSessionId },
-        })) {
+        held.threads.acceptInput(ticket, sent.turnId);
+        for (const event of sessions.get(sessionId) !== held
+          ? []
+          : buildUserMessage({
+              sessionId,
+              turnId: sent.turnId,
+              text: input.text,
+              steered: sent.delivery === "steered",
+              providerRefs: { threadId: held.binding.nativeSessionId },
+            })) {
           emit(event);
         }
         return sent;
@@ -927,7 +950,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
-        return held === undefined ? Effect.void : stopThreads(held, subagentId);
+        return held === undefined ? Effect.void : stopCodexThreads(held, subagentId);
       }),
 
     respondToApprovalRequest: (
@@ -947,6 +970,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           return Effect.void;
         }
         const { held, thread, park } = found;
+        if (decision === "cancel") held.threads.cancelAskingTurn(thread);
         resolvePark(held, thread, park, park.asked.replies(decision, park.params), { decision });
         // Cancel ends the asking agent alone. The explicit Stop operation is
         // the operation that also stops descendants.
@@ -976,11 +1000,12 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // died, has already exited: a second exit would record the same end
         // twice.
         if (held === undefined) return Effect.void;
+        held.threads.beginClosing();
         // The turn is interrupted before the session exits. Otherwise the
         // app-server would keep working in the workspace until it is killed,
         // and nobody would receive its notifications.
         return Effect.andThen(
-          stopThreads(held),
+          stopCodexThreads(held),
           Effect.sync(() => exitSession(held, reason)),
         );
       }),

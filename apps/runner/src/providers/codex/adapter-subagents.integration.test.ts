@@ -231,6 +231,10 @@ describe("independent Codex subagent conversations", () => {
       CHILD_B,
       CHILD_A,
     ]);
+    expect(filterByTag(run.seen, "request.resolved").map((event) => event.requestId)).toEqual([
+      second!.request.requestId,
+      first!.request.requestId,
+    ]);
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
     validateEvents(run.seen);
   });

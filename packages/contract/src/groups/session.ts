@@ -18,6 +18,7 @@ import {
   QuestionAnswers,
   SubagentId,
   Usage,
+  UsageReport,
 } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -41,7 +42,7 @@ import { atMost, bounded } from "../strings";
  * The request, subagent and usage vocabulary comes from the runner protocol;
  * the API returns it unchanged.
  */
-export { ApprovalDecision, OpenRequest, QuestionAnswers, SubagentId, Usage };
+export { ApprovalDecision, OpenRequest, QuestionAnswers, SubagentId, Usage, UsageReport };
 export type { ApprovalRequest };
 
 /**
@@ -154,9 +155,11 @@ export const Session = Schema.Struct({
   /**
    * The session's Token Usage: every token its own agent and all its
    * subagents have used over the session's whole life, summed across its
-   * processes. Absent until the harness first reports usage.
+   * processes. Absent until the harness reports exact usage. Incomplete counts appear only in `usageReport`.
    */
   usage: Schema.optionalKey(Usage),
+  /** The known counts and their completeness; absent until usage is reported. */
+  usageReport: Schema.optionalKey(UsageReport),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
   /** The time of the last exit. Kept while the session is resumed, and overwritten when it exits again. */
@@ -220,6 +223,8 @@ export const Subagent = Schema.Struct({
    * no exact count for it, which a screen shows as not reported, never as 0.
    */
   usage: Schema.optionalKey(Usage),
+  /** The known counts and their completeness; absent until usage is reported. */
+  usageReport: Schema.optionalKey(UsageReport),
   /**
    * The `at` of its `subagent.started`, or of its first event when that came
    * first. Like every event's `at`, it was read off the runner's clock.

@@ -454,6 +454,7 @@ describe("toSubagentRecord", () => {
       status: "running",
       toolCalls: 0,
       usage: { inputTokens: 1, outputTokens: 1 },
+      usageReport: { status: "complete", counts: { inputTokens: 1, outputTokens: 1 } },
       startedAt: base.at,
     });
   });

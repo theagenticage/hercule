@@ -79,11 +79,21 @@ const isStepTurn = (step: RunningStep, turnId: string): boolean =>
 const readFinalText = (step: RunningStep, turnId: string): string =>
   [...step.texts.values()].filter((item) => item.turnId === turnId).at(-1)?.text ?? "";
 
+/** Records Stops received while inputs for one harness are waiting for delivery. */
+interface InputCancellation {
+  generation: number;
+  /** Completes after the latest earlier Stop reaches the adapter. Later inputs wait for it. */
+  controlsReady: Deferred.Deferred<void> | undefined;
+}
+
 /**
  * A session this runner holds. The binding is not stored here, because the
  * adapters are the source of truth for what they host (spec 03 section 2.2).
  */
 interface Live {
+  readonly inputCancellation: InputCancellation;
+  /** Completes when the adapter has bound the harness, before the first input is delivered. */
+  readonly harnessReady: Deferred.Deferred<void>;
   readonly adapter: ProviderAdapter;
   readonly scratch: string | undefined;
   /** The workspace this session works in. It is read again and reported when the session exits. */
@@ -186,6 +196,9 @@ interface Live {
  */
 interface ArrivedStart {
   readonly sessionId: string;
+  readonly inputCancellation: InputCancellation;
+  /** Lets controls received during context resolution wait for the harness binding. */
+  readonly harnessReady: Deferred.Deferred<void>;
   /** The reason of the first stop that arrived for this session since the start arrived. */
   pendingStop: ExitReason | undefined;
 }
@@ -730,6 +743,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      * or refused, with the reason. Never fails. Both a `sessionInput` and the
      * input a `sessionStart` carries are delivered through here. The caller
      * cancels the idle wait first.
+     * Inputs received after a Stop wait for that control to reach the adapter.
+     * Earlier inputs keep their original barrier, so Stop can cancel their
+     * preparation without waiting behind them.
      *
      * An input that carries a step key also begins that agent step. How the
      * turn the input went to ends becomes the step's result, which is saved
@@ -747,6 +763,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     const sendInputAndAnswer = (
       held: Live,
       frame: SessionInput | SessionStart,
+      generation: number,
+      cancellation: InputCancellation = held.inputCancellation,
+      controlsReady?: Deferred.Deferred<void>,
     ): Effect.Effect<void> => {
       const stepKey = frame.input.step;
       const step: RunningStep | undefined =
@@ -784,7 +803,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             return isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void;
           }),
         );
-      const deliverInput = held.adapter.sendInput(frame.sessionId, frame.input).pipe(
+      const deliverInput = Effect.suspend(() =>
+        cancellation.generation !== generation
+          ? Effect.fail("the input was stopped before delivery")
+          : held.adapter.sendInput(frame.sessionId, frame.input),
+      ).pipe(
         Effect.tap((sent) =>
           Effect.sync(() => {
             // Unless the turn has already ended and finished the step.
@@ -797,8 +820,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         Effect.catch(refuseHeldInput),
         Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
       );
-      return Effect.flatMap(beginStep, (recorded) =>
-        recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
+      return Effect.andThen(
+        controlsReady === undefined ? Effect.void : Deferred.await(controlsReady),
+        Effect.flatMap(beginStep, (recorded) =>
+          recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
+        ),
       );
     };
 
@@ -960,6 +986,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
         const held: Live = {
+          inputCancellation: arrived.inputCancellation,
+          harnessReady: arrived.harnessReady,
           adapter,
           scratch: resolved.scratch,
           workspaceId: frame.spec.workspaceId,
@@ -1039,6 +1067,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               yield* tearDownSession(held);
             }),
         );
+        yield* Deferred.succeed(held.harnessReady, undefined);
         return held;
       });
 
@@ -1057,6 +1086,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     const handOverStartInput = (
       held: Live,
       frame: SessionStart,
+      generation: number,
     ): Effect.Effect<void, UndeliveredStart> =>
       // The idle wait cannot be running yet, because the session has had no
       // turn. It is cancelled anyway, before the checks, so the checks stay
@@ -1087,7 +1117,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               }),
             );
           }
-          return sendInputAndAnswer(held, frame);
+          return sendInputAndAnswer(held, frame, generation);
         }),
       );
 
@@ -1137,12 +1167,17 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       //   before the input. Its start and the input itself do not wait on
       //   the harness.
       start: (frame: SessionStart): Effect.Effect<void> => {
-        const arrived: ArrivedStart = { sessionId: frame.sessionId, pendingStop: undefined };
+        const arrived: ArrivedStart = {
+          sessionId: frame.sessionId,
+          pendingStop: undefined,
+          harnessReady: Deferred.makeUnsafe<void>(),
+          inputCancellation: { generation: 0, controlsReady: undefined },
+        };
         arrivedStarts.add(arrived);
         return Effect.uninterruptibleMask((restore) =>
           restore(prepareStart(frame, arrived)).pipe(
             Effect.flatMap((prepared) => launchHarness(frame, prepared, arrived)),
-            Effect.flatMap((held) => handOverStartInput(held, frame)),
+            Effect.flatMap((held) => handOverStartInput(held, frame, 0)),
             Effect.catch((undelivered) => answerUndeliveredStart(frame, undelivered)),
             Effect.catchCause((cause) =>
               // An interrupted preparation started nothing, and the
@@ -1155,7 +1190,14 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   ),
             ),
           ),
-        ).pipe(Effect.ensuring(Effect.sync(() => arrivedStarts.delete(arrived))));
+        ).pipe(
+          Effect.ensuring(
+            Effect.andThen(
+              Deferred.succeed(arrived.harnessReady, undefined),
+              Effect.sync(() => arrivedStarts.delete(arrived)),
+            ),
+          ),
+        );
       },
 
       /**
@@ -1164,11 +1206,16 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
        * (spec 06 section 5). The controller waits for the answer under the
        * Queued Input row's id, `requestId`.
        */
-      input: (frame: SessionInput): Effect.Effect<void> =>
+      input: (frame: SessionInput): Effect.Effect<void> => {
+        const cancellation =
+          [...arrivedStarts].filter((start) => start.sessionId === frame.sessionId).at(-1)
+            ?.inputCancellation ?? live.get(frame.sessionId)?.inputCancellation;
+        const generation = cancellation?.generation ?? 0;
+        const controlsReady = cancellation?.controlsReady;
         // Read the table when the effect runs, not when it is built: the
         // connection builds it as the frame arrives, and runs it only after
         // the session's earlier frames, such as its start, are done.
-        Effect.suspend(() => {
+        return Effect.suspend(() => {
           const held = live.get(frame.sessionId);
           if (held === undefined) {
             return refuseInput(frame, `session ${frame.sessionId} is not running on this runner`);
@@ -1188,22 +1235,51 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // each adapter puts on its requests to the harness bound that wait;
           // the comment on `start` lists them.
           return Effect.uninterruptible(
-            Effect.andThen(cancelIdleUnload(held), sendInputAndAnswer(held, frame)),
+            Effect.andThen(
+              cancelIdleUnload(held),
+              sendInputAndAnswer(held, frame, generation, cancellation, controlsReady),
+            ),
           );
-        }),
+        });
+      },
 
       /**
-       * Passes the interrupt to the adapter, with the subagent it names, if
-       * any. The adapter stops the subagents below that one itself, because
+       * Records Stop when the frame arrives, then passes the interrupt to the
+       * adapter once its harness is bound and earlier controls have completed.
+       * Later inputs wait for this control; earlier inputs do not. The adapter
+       * stops the subagents below the named subagent itself, because
        * only the adapter knows them. Idempotent: a session this runner does not
        * hold has no turn to end.
        */
-      interrupt: (frame: SessionInterrupt): Effect.Effect<void> =>
-        Effect.suspend(
-          () =>
-            live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId, frame.subagentId) ??
-            Effect.void,
-        ),
+      interrupt: (frame: SessionInterrupt): Effect.Effect<void> => {
+        const targets = new Set<InputCancellation>();
+        const held = live.get(frame.sessionId);
+        if (held !== undefined) targets.add(held.inputCancellation);
+        for (const start of arrivedStarts) {
+          if (start.sessionId === frame.sessionId) targets.add(start.inputCancellation);
+        }
+        const controlsReady = Deferred.makeUnsafe<void>();
+        const previousControls = new Set<Deferred.Deferred<void>>();
+        for (const target of targets) {
+          if (target.controlsReady !== undefined) previousControls.add(target.controlsReady);
+          target.controlsReady = controlsReady;
+        }
+        if (frame.subagentId === undefined) {
+          for (const target of targets) target.generation += 1;
+        }
+        const target =
+          live.get(frame.sessionId) ??
+          [...arrivedStarts].find((start) => start.sessionId === frame.sessionId);
+        if (target === undefined)
+          return Deferred.succeed(controlsReady, undefined).pipe(Effect.asVoid);
+        return Effect.gen(function* () {
+          yield* Deferred.await(target.harnessReady);
+          for (const previous of previousControls) yield* Deferred.await(previous);
+          const held = live.get(frame.sessionId);
+          if (held?.harnessReady === target.harnessReady)
+            yield* held.adapter.interrupt(frame.sessionId, frame.subagentId);
+        }).pipe(Effect.ensuring(Deferred.succeed(controlsReady, undefined)));
+      },
 
       /**
        * Passes the user's decision on an open approval to the adapter.

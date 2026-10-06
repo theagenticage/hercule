@@ -86,6 +86,9 @@ export interface Rpc {
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(30);
 
+/** The JSON-RPC code for a request the server could not complete. */
+export const INTERNAL_ERROR = -32603;
+
 const GONE = "the app-server exited or closed its output";
 
 const MALFORMED = "the app-server returned an error with no message";

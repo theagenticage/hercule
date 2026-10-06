@@ -1,6 +1,6 @@
 # Codex subagent usage across forks and resumes
 
-[Report Codex subagents, #437](https://github.com/theagenticage/hercule/issues/437) owns this probe. It resolves spec 06 §13.5's expected inherited total and checks the cancellation case identified during review of #442.
+[Report Codex subagents, #437](https://github.com/theagenticage/hercule/issues/437) owns this probe. It resolves spec 06 §13.5's expected inherited total and checks whether cancellation after a process restart can count historical tokens again.
 
 ## Method
 
@@ -45,7 +45,7 @@ The probe lets a child use 300 input tokens and 10 output tokens, stops the app-
 
 The final report is historical usage, although its `turnId` names the new turn. Without an earlier baseline, `total - last` makes the baseline zero and counts those historical tokens again. Checking the usage notification's turn ID cannot distinguish this case.
 
-The approved implementation carries the last attributed native report privately with the known Subagent on resume. The controller stores the provider's report without interpreting Codex counters. The adapter restores its previous native total from that report and starts its new process's count at zero. The cancelled call then adds zero; the next successful call adds only its new usage. The Session snapshot remains the root plus every subagent.
+The adapter receives the last attributed native report with the known Subagent on resume. The controller stores the provider's report without interpreting Codex counters. The checkpoint is internal to Subagent persistence and resume metadata; the original event's raw report remains visible through the transcript. The adapter restores its previous native total from that report and starts its new process's count at zero. The cancelled call then adds zero; the next successful call adds only its new usage. The Session snapshot remains the root plus every subagent.
 
 ## Restoring older records that have no saved report
 
@@ -60,14 +60,20 @@ Two cheaper alternatives do not work:
 
 This fallback loads the historical child. One small V2 child with one turn took 5 ms to attach, increased loaded threads from one to two, and increased app-server RSS from 75,472 KiB to 79,760 KiB. This is an illustrative single-child measurement, not a large-history benchmark. Saving native reports avoids this extra attachment on ordinary later resumes.
 
+## Incomplete accounting and Stop
+
+Missing saved reports are initialized once per app-server process, with at most two parallel attachments and one five-second deadline for the complete initialization. A timeout or rejected attachment warns once and releases input instead of retrying the same initialization forever. Stop can cancel that preparation before native input acceptance. The affected subagent and Session then expose `usageReport: { status: "incomplete", counts }`; counts contain the known subtotal. The compatibility `usage` field is absent, so callers cannot retain an old exact-looking total. The missing interval cannot be reconstructed by a later baseline, so incompleteness survives subsequent inputs and process resumes. Protocol 4 carries this distinction.
+
 ## Acceptance evidence
 
 The real-process integration checks both Codex tool generations. A root spawns two inherited children. Each child asks a real command approval. Both requests remain open while the root finishes. The test answers the second request first, observes that child's completion while the first request remains unresolved, then answers the first. It checks descriptions, parentage, models, command attribution and exact usage.
 
 Each child uses 600 input tokens and 20 output tokens across its command call and final answer. The Session snapshot is 2,500 input/80 output for V1, or 2,400 input/70 output for V2. The difference is V1's tool-discovery model call. The same cases pass on pinned 0.154.0 and installed 0.160.1.
 
+The native Stop cases run both APIs against a real three-subagent tree with parked approvals and a busy root. Whole-session Stop ends the root and every subagent. Subtree Stop also ends the selected subagent's descendant; selective Stop leaves the parent and sibling running. The sibling's independent approval still completes its work. Two additional cases delay only a real descendant metadata reply, stop its parent, then release the reply: the late turn is interrupted and its Request cancelled. These cases use native Codex events, with no fabricated replay. V1 sets `agents.max_depth = 2` in the disposable home. V2 uses a small local model catalog that declares its native tool generation, because [the pinned tool planner](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core/src/tools/spec_plan.rs#L616-L626) gives a subagent delegation tools only when its model declares V2.
+
 The restart cases run both V1 and V2 with a saved native report and with that report absent on an older record. After restarting the app-server, they cancel a known child's first response, require its new-process usage to remain zero, then complete another child call and require exactly 300 input/10 output tokens. These cases also check that introductions reuse known subagent IDs, once per process.
 
-Removing only the saved-report baseline assignment, while still reporting that the report was valid, makes both native saved-report restart tests fail numerically: the cancelled call incorrectly counts 300 input/10 output tokens. Restoring that assignment makes both tests pass. The complete local-model integration file passes eight tests on both 0.154.0 and 0.160.1; the two subscription-only tests remain skipped in those local runs.
+Removing only the saved-report baseline assignment, while still reporting that the report was valid, makes both native saved-report restart tests fail numerically: the cancelled call incorrectly counts 300 input/10 output tokens. Restoring that assignment makes both tests pass. The complete local-model integration file passes sixteen tests on both 0.154.0 and 0.160.1; the two subscription-only tests remain skipped in those local runs.
 
 A separate authorized login-backed run against pinned 0.154.0 passed the existing output-schema success and impossible-schema failure tests. That run copied only the nominated login file into a temporary instance home and removed that home afterwards. The concurrent-subagent scenario uses the deterministic local model, so the exact timing and totals do not depend on a remote model choosing to delegate.

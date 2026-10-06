@@ -113,6 +113,11 @@ const events: ReadonlyArray<Event> = [
     subagentId: "agent-b",
     usage: { inputTokens: 1, outputTokens: 2, cacheWriteTokens: 3 },
   },
+  {
+    _tag: "session.usage.updated",
+    ...baseFields,
+    usageReport: { status: "incomplete", counts: { inputTokens: 0, outputTokens: 0 } },
+  },
   { _tag: "runtime.warning", ...baseFields, message: "retrying after a 529" },
   { _tag: "runtime.error", ...baseFields, class: "ContextWindowExceeded", message: "too long" },
   {
@@ -168,7 +173,11 @@ const requests = [
 ] as const;
 
 const listTags = (union: typeof ProviderEvent) =>
-  union.members.map((member) => member.fields._tag.literal);
+  union.members.flatMap((member) =>
+    "fields" in member
+      ? [member.fields._tag.literal]
+      : member.members.map((branch) => branch.fields._tag.literal),
+  );
 
 describe("the normalized event taxonomy", () => {
   it.each(events)("round-trips $_tag unchanged", (event) => {
@@ -637,4 +646,30 @@ describe("the frames that answer a Request an agent is parked on", () => {
       frame,
     );
   });
+});
+
+describe("incomplete token accounting", () => {
+  it("rejects legacy counts alongside an incomplete report instead of stripping the warning", () => {
+    expect(
+      decode(ProviderEvent, {
+        _tag: "session.usage.updated",
+        ...baseFields,
+        usage: { inputTokens: 100, outputTokens: 10 },
+        usageReport: { status: "incomplete", counts: { inputTokens: 100, outputTokens: 10 } },
+      })._tag,
+    ).toBe("Failure");
+  });
+});
+
+it("makes an incomplete transcript event undecodable as a legacy exact event", () => {
+  const legacyUsageEvent = Schema.Struct({
+    _tag: Schema.Literal("session.usage.updated"),
+    usage: Schema.Struct({ inputTokens: Schema.Number, outputTokens: Schema.Number }),
+  });
+  const incomplete = {
+    _tag: "session.usage.updated",
+    ...baseFields,
+    usageReport: { status: "incomplete", counts: { inputTokens: 100, outputTokens: 10 } },
+  };
+  expect(() => Schema.decodeUnknownSync(legacyUsageEvent)(incomplete)).toThrow();
 });

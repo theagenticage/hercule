@@ -262,6 +262,61 @@ describe("launching pi for a Thread that sees the user's own material", () => {
 });
 
 describe("sending an input to a pi session", () => {
+  it.each(["set_model", "prompt"])(
+    "keeps Stop effective while %s is waiting and acknowledges only accepted input",
+    async (command) => {
+      const run = await startTestSession({ answers: { [command]: () => undefined } });
+      const input = run.adapter.sendInput(SESSION, {
+        text: "do not resurrect this input",
+        ...(command === "set_model"
+          ? { modelSelection: { model: "glm-5.3-flash", options: {} } }
+          : {}),
+      });
+      const sending =
+        command === "prompt" ? Effect.runPromise(input) : Effect.runPromise(Effect.flip(input));
+      await waitUntil(
+        "received the delayed command",
+        () => listSentCommands(run.sent, command).length === 1,
+      );
+      await Effect.runPromise(run.adapter.interrupt(SESSION));
+      const pending = listSentCommands(run.sent, command)[0]!;
+      run.child.push({ type: "response", command, id: pending["id"], success: true });
+      if (command === "prompt") expect(await sending).toMatchObject({ delivery: "opened" });
+      else expect(await sending).toContain("stopped");
+      expect(listSentCommands(run.sent, "prompt")).toHaveLength(command === "prompt" ? 1 : 0);
+      expect(
+        filterByTag(run.seen, "item.started").filter((event) => event.kind === "user_message"),
+      ).toHaveLength(command === "prompt" ? 1 : 0);
+      expect(listSentCommands(run.sent, "set_thinking_level")).toEqual([]);
+      expect(listSentCommands(run.sent, "abort")).toHaveLength(command === "prompt" ? 2 : 0);
+      if (command === "prompt") {
+        pushAgentEnd(run.child, { stopReason: "aborted" });
+        await waitUntil(
+          "ended the accepted stopped turn",
+          () => filterByTag(run.seen, "turn.completed").length === 1,
+        );
+        expect(filterByTag(run.seen, "turn.completed")[0]!.state).toBe("interrupted");
+      }
+      const next = Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "new explicit input" }),
+      );
+      if (command === "prompt") {
+        await waitUntil(
+          "received the later input",
+          () => listSentCommands(run.sent, "prompt").length === 2,
+        );
+        const pendingNext = listSentCommands(run.sent, "prompt")[1]!;
+        run.child.push({
+          type: "response",
+          command: "prompt",
+          id: pendingNext["id"],
+          success: true,
+        });
+      }
+      expect(await next).toMatchObject({ delivery: "opened" });
+    },
+  );
+
   it("sends a prompt when no turn is running, and reports that it opened a turn", async () => {
     const run = await startTestSession();
 

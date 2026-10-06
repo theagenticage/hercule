@@ -26,6 +26,7 @@ import type { Session } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { listUnenforcedFields } from "../providers";
 import type { StoredSession } from "./repository";
+import { buildUsageFields } from "./usage";
 import { isResumeHeld } from "./resume-hold";
 
 export const sessionRecordComposer: Effect.Effect<
@@ -45,7 +46,7 @@ export const sessionRecordComposer: Effect.Effect<
       "usage",
       "usageProcess",
     ]),
-    ...(stored.usage === undefined ? {} : { usage: stored.usage }),
+    ...buildUsageFields(stored.usage),
     resumeHeld: isResumeHeld(stored),
     unenforced: listUnenforcedFields(definitions, stored.providerId, stored.disallowedTools),
   }));
