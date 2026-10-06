@@ -25,7 +25,7 @@ export const answerAsAda = (sent: string): Answer => {
     const title = readReminderTitle(sent);
     return {
       text: `Done. Reminder set for tomorrow, Wednesday 30 September, 09:00: ${title.charAt(0).toLowerCase()}${title.slice(1)}.`,
-      extra: { kind: "reminder", title, when: "Wed 30 Sep · 09:00 · to Web chat" },
+      extra: { kind: "reminder", title, when: "Wed 30 Sep · 09:00" },
     };
   }
   if (lower.includes("marta")) {

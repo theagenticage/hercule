@@ -261,17 +261,6 @@ function FloatingHeader({
         <Face look={who.look} pose={pose} size={24} animated={pose === "working"} />
         <b>{who.name}</b>
         <span className="presence">{describePose(pose)}</span>
-        <span className="pill-sep" />
-        <span className="chan is-on">
-          <ChatIcon size={13} />
-          Web chat
-        </span>
-        {who === ADA ? (
-          <span className="chan">
-            <SlackMark size={12} />
-            Slack DM
-          </span>
-        ) : null}
       </span>
       <span className="spacer" />
       {hasRail ? (

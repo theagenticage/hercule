@@ -128,7 +128,7 @@ const MORNING: ReadonlyArray<Entry> = [
     extra: {
       kind: "reminder",
       title: "Renew the SSL cert for ops",
-      when: "Fri 2 Oct · 09:00 · to Web chat",
+      when: "Fri 2 Oct · 09:00",
     },
   },
   { kind: "me", key: "m-backup", text: "What's the status of the backup job?", time: "09:38" },

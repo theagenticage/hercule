@@ -121,7 +121,7 @@ export function useConversation(setup: ConversationSetup) {
         setOpen(null);
         const extra = open.extra;
         if (extra?.kind !== "reminder") return;
-        // "Wed 30 Sep · 09:00 · to Web chat" shows in the rail as "Wed 09:00", first
+        // "Wed 30 Sep · 09:00" shows in the rail as "Wed 09:00", first
         // because every reminder Ada sets here is for tomorrow.
         const [day, time] = extra.when.split(" · ");
         setReminders((before) => [
