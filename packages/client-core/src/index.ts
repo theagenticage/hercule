@@ -358,6 +358,7 @@ export {
   isQuestionAnswered,
   pickQuestionOption,
   typeQuestionAnswer,
+  type QuestionDraft,
 } from "./threads/question-draft";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";

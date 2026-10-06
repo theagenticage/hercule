@@ -25,6 +25,7 @@ import {
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
+import { useComposerDraft } from "../../app/thread-drafts";
 import { useStopAgent } from "../use-stop-agent";
 
 /** The localStorage key for the recently picked models. The API does not store them. */
@@ -79,6 +80,9 @@ export interface ComposerModel {
  * every render and the user's picks are applied on top. So a catalog that
  * arrives late, such as after a login while the draft is open, fills in
  * whatever the user has not picked.
+ *
+ * The unsent message and picks are the thread's drafts, so they survive a
+ * visit to one of the thread's subagents.
  */
 export function useComposerModel(
   thread: Thread,
@@ -88,8 +92,7 @@ export function useComposerModel(
 ): ComposerModel {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [message, setMessage] = useState("");
-  const [picks, setPicks] = useState<ThreadPicks>({});
+  const [{ message, picks }, changeDraft] = useComposerDraft();
   const [recent, setRecent] = useState(readRecent);
 
   const session = thread.kind === "active" ? thread.session : null;
@@ -129,8 +132,10 @@ export function useComposerModel(
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sent.id) });
       // Text typed while the message was in flight is a new message, so the
       // box is cleared only while it still holds what was sent.
-      setMessage((current) => (current === sent.payload.text ? "" : current));
-      setPicks({});
+      changeDraft((draft) => ({
+        message: draft.message === sent.payload.text ? "" : draft.message,
+        picks: {},
+      }));
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sent.id) });
       onSend?.();
     },
@@ -159,11 +164,16 @@ export function useComposerModel(
     busy,
     sending: spawn.isPending || input.isPending,
     error: spawn.error ?? input.error ?? stopAgent.error,
-    setMessage,
+    setMessage: (text) => {
+      changeDraft((draft) => ({ ...draft, message: text }));
+    },
     // Each pick is compared with the thread's own configuration, not with
     // earlier picks, so picking the configured value again clears the pick.
     pick: (...steps) => {
-      setPicks((held) => applyPicks(catalogs, base, held, steps));
+      changeDraft((draft) => ({
+        ...draft,
+        picks: applyPicks(catalogs, base, draft.picks, steps),
+      }));
     },
     submit: () => {
       // A second Enter or click before the first send settles is ignored, so

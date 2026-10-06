@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import { Outlet, createFileRoute, useMatch } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { findAnsweredAssistantId } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../../app/live-invalidation";
 import {
@@ -15,6 +16,7 @@ import {
   workspacesQuery,
 } from "../../../../app/queries";
 import { SidePaneSlot } from "../../../../app/side-pane-slot";
+import { ThreadDraftsProvider } from "../../../../app/thread-drafts";
 import { SidePane } from "../../../../screens/subagents/side-pane";
 import { SubagentsSurface } from "../../../../screens/subagents/subagents-surface";
 
@@ -66,15 +68,18 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
 
 /**
  * Keeps the thread's records current while any of its pages is open, fills
- * the shell's side-pane slot, and renders the open agent's page.
+ * the shell's side-pane slot, and renders the open agent's page with the
+ * thread's drafts, so what the user typed and has not sent survives a move
+ * between the thread's pages.
  *
  * - `session` refetches the session when it changes elsewhere, such as a
  *   queued input being delivered, a turn finishing or a Request opening.
  * - `subagent` refetches the session's subagents when one starts or changes.
  */
 function ThreadLayout(): JSX.Element {
-  const { queryClient, live } = Route.useRouteContext();
+  const { client, queryClient, live } = Route.useRouteContext();
   const { sessionId } = Route.useParams();
+  const { openRequests } = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   useLiveInvalidation(live, queryClient, "session");
   useLiveInvalidation(live, queryClient, "subagent");
 
@@ -91,7 +96,11 @@ function ThreadLayout(): JSX.Element {
           <SubagentsSurface sessionId={sessionId} subagentId={subagentId} />
         </SidePane>
       </SidePaneSlot>
-      <Outlet />
+      {/* Keyed by the session, so one thread's drafts never show on another:
+          the router keeps this layout when only the session id changes. */}
+      <ThreadDraftsProvider key={sessionId} openRequests={openRequests}>
+        <Outlet />
+      </ThreadDraftsProvider>
     </>
   );
 }

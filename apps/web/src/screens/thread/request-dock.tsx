@@ -35,14 +35,8 @@ export function RequestDock({
   readonly subagent: Subagent | undefined;
 }): JSX.Element | null {
   const [shownRequestId, setShownRequestId] = useState<string | undefined>(undefined);
-  // The Requests the user has sent an answer to. The card of a Request
-  // unmounts when the user pages away, so the dock remembers the answer:
-  // paging back must not offer a second answer while the controller has not
-  // yet closed the Request.
-  const [answeredRequestIds, setAnsweredRequestIds] = useState<ReadonlySet<string>>(new Set());
   const dock = buildRequestDock(session.openRequests, subagents, subagent?.id, shownRequestId);
   if (dock === null) return null;
-  const { requestId } = dock.request;
   return (
     <>
       {dock.showsAskerLine ? (
@@ -72,21 +66,12 @@ export function RequestDock({
         </div>
       ) : null}
       <PermissionCard
-        // A new request gets a new card, so the draft and the error of the
-        // previous request are not carried over.
-        key={requestId}
+        // A new request gets a new card, so the error of a failed send is
+        // not carried over to another request.
+        key={dock.request.requestId}
         client={client}
         sessionId={session.id}
         request={dock.request}
-        answered={answeredRequestIds.has(requestId)}
-        onAnsweredChange={(answered) => {
-          setAnsweredRequestIds((ids) => {
-            const next = new Set(ids);
-            if (answered) next.add(requestId);
-            else next.delete(requestId);
-            return next;
-          });
-        }}
       />
     </>
   );

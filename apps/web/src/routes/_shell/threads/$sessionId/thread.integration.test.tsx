@@ -1834,6 +1834,33 @@ describe("Thread: a subagent's page", () => {
     await screen.findByText("This thread has no subagent with this id.");
     expect(screen.getByRole("link", { name: "Go to the thread" })).toBeDefined();
   });
+
+  it("keeps the composer's unsent message after a visit to a subagent's page", async () => {
+    const user = userEvent.setup();
+    const rows = buildTwoCompletedTurns();
+    const { router } = await openApp(
+      buildSession({ status: "idle" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await user.type(await screen.findByPlaceholderText("Reply…"), "Also check the logout path");
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+    await screen.findByText("The auth module has two entry points.");
+    await act(async () => {
+      await router.navigate({ to: "/threads/$sessionId", params: { sessionId: SESSION_ID } });
+    });
+
+    expect(await screen.findByPlaceholderText("Reply…")).toHaveProperty(
+      "value",
+      "Also check the logout path",
+    );
+  });
 });
 
 /**

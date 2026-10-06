@@ -1,4 +1,4 @@
-import { type JSX, useId, useState } from "react";
+import { type JSX, useId } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   type ApprovalQuestion,
@@ -8,11 +8,13 @@ import {
   type HerculeClient,
   isQuestionAnswered,
   pickQuestionOption,
+  type QuestionDraft,
   readErrorMessage,
   typeQuestionAnswer,
 } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
 import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@hercule/ui";
+import { useRequestDraft, type RequestDraft } from "../../app/thread-drafts";
 
 /**
  * Renders the permission card: one Request the session's agents are parked
@@ -39,39 +41,43 @@ import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@her
  * `buildApprovalCard`, so an answer is described the same way everywhere and
  * no screen can reword or drop it. Only the controls' own labels, such as
  * Next, are written here.
+ *
+ * What the user has typed, which question is shown, and whether an answer was
+ * sent are the thread's drafts, not the card's own state. The card unmounts
+ * when the user pages to another Request or opens another of the thread's
+ * pages, and coming back must find the half-written answer, and must not
+ * offer a second answer while the controller has not yet closed the Request.
  */
 export function PermissionCard({
   client,
   sessionId,
   request,
-  answered,
-  onAnsweredChange,
 }: {
   readonly client: HerculeClient;
   readonly sessionId: string;
   readonly request: OpenRequest;
-  /** Whether the user has sent an answer to this Request, from this card or an earlier one. */
-  readonly answered: boolean;
-  /**
-   * Called with true when an answer is sent, and with false when sending it
-   * fails, so the user can answer again.
-   */
-  readonly onAnsweredChange: (answered: boolean) => void;
 }): JSX.Element {
   const card = buildApprovalCard(request);
+  const [draft, changeDraft] = useRequestDraft(request.requestId);
+  // A failed send unlocks the Request, so the user can answer again. The
+  // mutation's own callbacks run even after the card has unmounted, so the
+  // draft is right when the user comes back.
+  const markAnswered = (answered: boolean): void => {
+    changeDraft((current) => ({ ...current, answered }));
+  };
   // Neither response is written into the cache. It is a snapshot of the
   // session from when the controller received the answer, still parked on
   // the request, so writing it would bring back a card the live `session`
   // topic has already cleared. That topic is the source of truth; until it
-  // clears the request, the card stays locked through `answered`.
+  // clears the request, the card stays locked through the draft's `answered`.
   const decide = useMutation({
     mutationFn: (decision: ApprovalDecision) =>
       client.session.respondToApprovalRequest({
         params: { id: sessionId },
         payload: { requestId: request.requestId, decision },
       }),
-    onMutate: () => onAnsweredChange(true),
-    onError: () => onAnsweredChange(false),
+    onMutate: () => markAnswered(true),
+    onError: () => markAnswered(false),
   });
   const answer = useMutation({
     mutationFn: (answers: QuestionAnswers) =>
@@ -79,13 +85,13 @@ export function PermissionCard({
         params: { id: sessionId },
         payload: { requestId: request.requestId, answers },
       }),
-    onMutate: () => onAnsweredChange(true),
-    onError: () => onAnsweredChange(false),
+    onMutate: () => markAnswered(true),
+    onError: () => markAnswered(false),
   });
   // One answer per request. The card stays until the runner reports the
   // request resolved, and a second click in that time could send an answer
   // that contradicts the one already recorded.
-  const locked = answered || decide.isPending || answer.isPending;
+  const locked = draft.answered || decide.isPending || answer.isPending;
   const error = decide.error ?? answer.error;
 
   return (
@@ -113,6 +119,8 @@ export function PermissionCard({
         {card.questions.length === 0 ? null : (
           <QuestionForm
             questions={card.questions}
+            draft={draft}
+            onDraftChange={changeDraft}
             locked={locked}
             onSend={(answers) => answer.mutate(answers)}
           />
@@ -153,16 +161,24 @@ export function PermissionCard({
  */
 function QuestionForm({
   questions,
+  draft: requestDraft,
+  onDraftChange,
   locked,
   onSend,
 }: {
   readonly questions: readonly ApprovalQuestion[];
+  /** The Request's draft, which holds the answers typed so far and the shown question. */
+  readonly draft: RequestDraft;
+  readonly onDraftChange: (change: (draft: RequestDraft) => RequestDraft) => void;
   /** Whether an answer was sent, so nothing in the form takes input. */
   readonly locked: boolean;
   readonly onSend: (answers: QuestionAnswers) => void;
 }): JSX.Element {
-  const [draft, setDraft] = useState(() => buildQuestionDraft(questions));
-  const [shownQuestionIndex, setShownQuestionIndex] = useState(0);
+  const draft = requestDraft.question ?? buildQuestionDraft(questions);
+  const { shownQuestionIndex } = requestDraft;
+  const setDraft = (question: QuestionDraft): void => {
+    onDraftChange((current) => ({ ...current, question }));
+  };
   // Radios of one question share a name, so the browser moves between them
   // with the arrow keys. The id keeps two cards from sharing a group.
   const groupName = useId();
@@ -178,7 +194,7 @@ function QuestionForm({
         event.preventDefault();
         if (locked || !questionAnswered) return;
         if (!isLast) {
-          setShownQuestionIndex(shownQuestionIndex + 1);
+          onDraftChange((current) => ({ ...current, shownQuestionIndex: shownQuestionIndex + 1 }));
           return;
         }
         const answers = buildQuestionAnswers(draft, questions);

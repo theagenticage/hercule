@@ -252,6 +252,79 @@ describe("Request dock: an answer on its way", () => {
     await screen.findByText("./scripts/deploy.sh --dry-run");
     expect((await findAnswer(DRY_RUN_REQUEST, "allow")).hasAttribute("disabled")).toBe(true);
   });
+
+  it("keeps a child's answered Request locked on the child's page before the controller closes it", async () => {
+    const user = userEvent.setup();
+    const state: ControllerState = {
+      session: buildSession({ status: "busy", openRequests: [DRY_RUN_REQUEST] }),
+      subagents: [PLAN, DRY_RUN],
+    };
+    const { api, router } = await openApp(state, undefined, {
+      [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: () => ({
+        body: state.session,
+      }),
+    });
+
+    await user.click(await findAnswer(DRY_RUN_REQUEST, "allow"));
+    await waitFor(() => {
+      expect(api.calls.some((call) => call.path.endsWith("/respond-to-approval-request"))).toBe(
+        true,
+      );
+    });
+    await user.click(screen.getByRole("link", { name: "Open subagent" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${SESSION_ID}/subagents/${DRY_RUN.id}`);
+    });
+    await screen.findByText("Waiting on you");
+    expect((await findAnswer(DRY_RUN_REQUEST, "allow")).hasAttribute("disabled")).toBe(true);
+  });
+});
+
+describe("Request dock: a half-answered question", () => {
+  it("keeps the typed answer and the shown question when the user pages away and back", async () => {
+    const user = userEvent.setup();
+    const twoQuestions: SessionRequest = {
+      ...PLAN_QUESTION,
+      detail: {
+        questions: [
+          ...PLAN_QUESTION.detail.questions,
+          {
+            question: "Which day should it roll out?",
+            header: "Day",
+            options: [{ label: "Monday", description: "start of the week" }],
+            multiSelect: false,
+          },
+        ],
+      },
+    };
+    const state: ControllerState = {
+      session: buildSession({ status: "busy", openRequests: [twoQuestions, MAIN_REQUEST] }),
+      subagents: [PLAN],
+    };
+    const { api } = await openApp(state, undefined, {
+      [`POST /api/v1/sessions/${SESSION_ID}/respond-to-question`]: () => ({ body: state.session }),
+    });
+
+    await user.type(await screen.findByLabelText("Your own answer"), "An hour at night");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Which day should it roll out?");
+    await user.type(screen.getByLabelText("Your own answer"), "Sun");
+    await user.click(screen.getByRole("button", { name: "Next Request" }));
+    await screen.findByText("stripe listen");
+    await user.click(screen.getByRole("button", { name: "Previous Request" }));
+
+    await screen.findByText("Which day should it roll out?");
+    expect(screen.getByText("Question 2 of 2")).toBeDefined();
+    expect(screen.getByLabelText("Your own answer")).toHaveProperty("value", "Sun");
+    // The first question's answer was kept too.
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    await waitFor(() => {
+      expect(
+        api.calls.find((call) => call.path.endsWith("/respond-to-question"))?.body,
+      ).toMatchObject({ answers: { Downtime: "An hour at night", Day: "Sun" } });
+    });
+  });
 });
 
 describe("Request dock: a subagent the cached list does not hold yet", () => {
