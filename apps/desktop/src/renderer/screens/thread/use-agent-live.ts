@@ -1,15 +1,22 @@
 /**
- * Keeps an open thread current through the live connection: its transcript,
- * and the paragraph the agent is writing.
+ * Keeps one agent's open page current through the live connection: the
+ * agent's transcript, and the paragraph the agent is writing. The agent is
+ * the session's own agent, or one of its subagents. A page follows exactly
+ * one agent, so a subagent's page holds the subagent's topics in place of
+ * the thread's, never beside them.
  *
- * Two topics carry a thread's live changes:
+ * Two topics carry an agent's live changes:
  *
- * - `session:<id>:stream` delivers stored rows, which are merged into the
- *   cached transcript. It stays subscribed while the window is hidden, so the
- *   transcript is whole when the window is shown again.
- * - `session:<id>:tap` delivers token deltas, which go into the thread's tail
- *   buffer (`createTailBuffer`). It is subscribed only while the window is
- *   visible, because nobody reads a hidden window (spec 17, rule 3).
+ * - its stream (`session:<id>:stream`, or
+ *   `session:<id>:subagent:<subagentId>:stream`) delivers stored rows, which
+ *   are merged into the agent's cached transcript. It stays subscribed while
+ *   the window is hidden, so the transcript is whole when the window is
+ *   shown again.
+ * - its tap (`session:<id>:tap`, or `session:<id>:subagent:<subagentId>:tap`)
+ *   delivers token deltas, which go into the page's tail buffer
+ *   (`createTailBuffer`). It is subscribed only while the window is visible,
+ *   because nobody reads a hidden window (spec 17, rule 3), whichever agent's
+ *   tap it is.
  *
  * The paragraph the agent is writing is painted outside React, into one text
  * node, at most once per animation frame however many deltas arrived. A React
@@ -36,11 +43,7 @@ import {
   splitStreamingText,
   type Live,
 } from "@hercule/client-core";
-import {
-  buildSessionStreamTopic,
-  buildSessionTapTopic,
-  type TranscriptRow,
-} from "@hercule/contract";
+import { buildAgentStreamTopic, buildAgentTapTopic, type TranscriptRow } from "@hercule/contract";
 
 /**
  * A message the agent is still writing, as it attaches the element that its
@@ -90,7 +93,7 @@ const subscribeToVisibility = (onChange: () => void): (() => void) => {
 const isWindowVisible = (): boolean => document.visibilityState === "visible";
 
 /**
- * Subscribes an open thread to its live topics, and returns the function
+ * Subscribes an agent's open page to the agent's live topics, and returns the function
  * that attaches the element an open message's paragraph being written is
  * painted into. The open message draws its finished paragraphs as markdown,
  * then that element, empty, such as
@@ -98,15 +101,17 @@ const isWindowVisible = (): boolean => document.visibilityState === "visible";
  * puts one text node inside it and writes there the rest of the message's
  * text, stored and streamed.
  *
- * - `live` is the controller's live connection, or `null` to draw the thread
+ * - `live` is the controller's live connection, or `null` to draw the page
  *   without live changes, as the thread specimen does.
- * - `rows` is the thread's transcript as cached under
- *   `queryKeys.transcript(sessionId)`, so that the tail is painted in the
- *   same commit as the rows that hold its text.
+ * - `subagentId` names the subagent whose page this is, or is undefined for
+ *   the session's own agent.
+ * - `rows` is the agent's transcript as cached under
+ *   `queryKeys.transcript(sessionId, subagentId)`, so that the tail is
+ *   painted in the same commit as the rows that hold its text.
  *
  * The hook keeps one tail buffer for the life of the component, so the caller
- * mounts the component again for another thread; the thread route keys the
- * screen by session id.
+ * mounts the component again for another agent; the thread's routes key the
+ * page by session id and subagent id.
  *
  * What the hook does with each delivery, as `decideStreamDelivery` and
  * `decideTapDelivery` decide it:
@@ -136,10 +141,11 @@ const isWindowVisible = (): boolean => document.visibilityState === "visible";
  * text with a gap until its next stored row. Token positions (#290) will
  * remove the need to guess.
  */
-export const useThreadLive = (
+export const useAgentLive = (
   live: Live | null,
   queryClient: QueryClient,
   sessionId: string,
+  subagentId: string | undefined,
   rows: readonly TranscriptRow[],
 ): AttachOpenParagraph => {
   const [buffer] = useState(createTailBuffer);
@@ -192,10 +198,12 @@ export const useThreadLive = (
    */
   const skipOpenItems = useCallback((): void => {
     buffer.skipOpenItems(
-      queryClient.getQueryData<readonly TranscriptRow[]>(queryKeys.transcript(sessionId)) ?? [],
+      queryClient.getQueryData<readonly TranscriptRow[]>(
+        queryKeys.transcript(sessionId, subagentId),
+      ) ?? [],
     );
     schedulePaint();
-  }, [buffer, queryClient, sessionId, schedulePaint]);
+  }, [buffer, queryClient, sessionId, subagentId, schedulePaint]);
 
   // Runs in the commit that shows new rows, before the browser paints, so the
   // text a row took from the tail and the row itself show in the same frame.
@@ -210,11 +218,11 @@ export const useThreadLive = (
 
   useEffect(() => {
     if (live === null) return;
-    const queryKey = queryKeys.transcript(sessionId);
+    const queryKey = queryKeys.transcript(sessionId, subagentId);
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(queryKey) ?? [];
     const unsubscribe = live.subscribe(
-      buildSessionStreamTopic(sessionId),
+      buildAgentStreamTopic(sessionId, subagentId),
       (delta) => {
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
@@ -237,12 +245,12 @@ export const useThreadLive = (
       buildStreamCursor(readHeldRows()),
     );
     return unsubscribe;
-  }, [live, queryClient, sessionId, buffer, skipOpenItems]);
+  }, [live, queryClient, sessionId, subagentId, buffer, skipOpenItems]);
 
   useEffect(() => {
     if (live === null || !visible) return;
     skipOpenItems();
-    const unsubscribe = live.subscribe(buildSessionTapTopic(sessionId), (delta) => {
+    const unsubscribe = live.subscribe(buildAgentTapTopic(sessionId, subagentId), (delta) => {
       const delivery = decideTapDelivery(delta);
       if (delivery.kind === "gone") {
         unsubscribe();
@@ -254,7 +262,7 @@ export const useThreadLive = (
       }
     });
     return unsubscribe;
-  }, [live, sessionId, visible, buffer, schedulePaint, skipOpenItems]);
+  }, [live, sessionId, subagentId, visible, buffer, schedulePaint, skipOpenItems]);
 
   useEffect(
     () => () => {

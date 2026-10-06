@@ -30,7 +30,7 @@ import { useAgeLabel, useDurationText } from "../../app/age-clock";
 import { buildLook, Face } from "../../faces";
 import { Mark } from "../../marks";
 import { Markdown } from "./markdown";
-import type { AttachOpenParagraph } from "./use-thread-live";
+import type { AttachOpenParagraph } from "./use-agent-live";
 
 /** The size of a face in the transcript, in CSS pixels: the book's `data-size="34"`. */
 const FACE_SIZE = 34;
@@ -44,19 +44,19 @@ const formatBlockTime = (at: string, timezone: string, today: number): string | 
   formatMessageTime(new Date(at), timezone, new Date(today));
 
 /**
- * Renders the thread's face beside an agent message: seeded by the session id,
- * in `pose`, moving only while working. The face is decorative, because the
+ * Renders the agent's face beside an agent message: seeded by `faceSeed`, in
+ * `pose`, moving only while working. The face is decorative, because the
  * meta line beside it names the agent.
  */
 function AgentFace({
-  sessionId,
+  faceSeed,
   pose,
 }: {
-  readonly sessionId: string;
+  readonly faceSeed: string;
   readonly pose: Pose;
 }): JSX.Element {
   return (
-    <Face look={buildLook(sessionId)} pose={pose} size={FACE_SIZE} animated={pose === "working"} />
+    <Face look={buildLook(faceSeed)} pose={pose} size={FACE_SIZE} animated={pose === "working"} />
   );
 }
 
@@ -95,7 +95,7 @@ export const UserMessage = memo(function UserMessage({
  *   `open`, the agent is still writing it: see `OpenMessageText`.
  */
 export const AgentMessage = memo(function AgentMessage({
-  sessionId,
+  faceSeed,
   itemId,
   agent,
   text,
@@ -106,7 +106,8 @@ export const AgentMessage = memo(function AgentMessage({
   open,
   attachOpenParagraph,
 }: {
-  readonly sessionId: string;
+  /** The seed of the agent's face: the session id, or `<sessionId>:<subagentId>` for a subagent. */
+  readonly faceSeed: string;
   readonly itemId: string;
   readonly agent: string;
   readonly text: string;
@@ -120,7 +121,7 @@ export const AgentMessage = memo(function AgentMessage({
   const meta = describeMessageMeta(agent, formatBlockTime(startedAt, timezone, today));
   return (
     <div className="msg">
-      <AgentFace sessionId={sessionId} pose={pose} />
+      <AgentFace faceSeed={faceSeed} pose={pose} />
       <div className="msg-body">
         <div className="msg-meta">{meta}</div>
         {open ? (
@@ -185,17 +186,18 @@ function OpenMessageText({
  * face, and the row goes.
  */
 export const LiveRow = memo(function LiveRow({
-  sessionId,
+  faceSeed,
   agent,
   pose,
 }: {
-  readonly sessionId: string;
+  /** The seed of the agent's face: the session id, or `<sessionId>:<subagentId>` for a subagent. */
+  readonly faceSeed: string;
   readonly agent: string;
   readonly pose: Pose;
 }): JSX.Element {
   return (
     <div className="msg">
-      <AgentFace sessionId={sessionId} pose={pose} />
+      <AgentFace faceSeed={faceSeed} pose={pose} />
       <div className="msg-body">
         <div className="msg-meta">{agent}</div>
       </div>

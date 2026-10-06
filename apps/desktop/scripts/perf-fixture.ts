@@ -14,6 +14,8 @@
  *
  * On request, `growTranscript` also plays turns into one idle thread until its
  * transcript is long, and `streamTurn` streams a long answer into it.
+ * `playTurn` plays any script into a thread, and `call` reaches the
+ * controller's API, for scenarios that make their own threads' state.
  *
  * An idle thread's row shows its age, and the perf script counts how often
  * the app's age clock fires while nothing happens. For that count to mean
@@ -46,7 +48,7 @@ import {
   startSetUpController,
 } from "../../../scripts/controller-process.ts";
 import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
-import { connectFleet } from "./fleet.ts";
+import { connectFleet, type Fleet } from "./fleet.ts";
 import { pollUntil } from "./poll.ts";
 
 /** The projects the threads are spread over, in the order they are created. */
@@ -190,6 +192,20 @@ export interface ThreadFixture {
    * completed.
    */
   readonly streamTurn: (sessionId: string, forMs: number) => Promise<void>;
+  /**
+   * Sends the idle thread `sessionId` the message `text`, which opens a turn,
+   * and starts playing `script` into that turn on the thread's runner.
+   * Returns `played`, which settles as the runner's `playScript` does: once
+   * every step has been played, the steps of subagents in the background
+   * included.
+   */
+  readonly playTurn: (
+    sessionId: string,
+    text: string,
+    script: ReadonlyArray<ScriptStep>,
+  ) => Promise<{ readonly played: Promise<void> }>;
+  /** Calls one operation of the public API as the signed-in user (see `Fleet`). */
+  readonly call: Fleet["call"];
 }
 
 /**
@@ -390,12 +406,21 @@ export async function runWithThreadFixture<T>(
         return { id: thread.id, title: thread.title, rowCount: rows };
       };
 
+      const playTurn = async (
+        sessionId: string,
+        text: string,
+        script: ReadonlyArray<ScriptStep>,
+      ): Promise<{ readonly played: Promise<void> }> => {
+        await call("POST", `/sessions/${sessionId}/input`, { text });
+        return { played: runnerBySessionId.get(sessionId)!.playScript(sessionId, script) };
+      };
+
       const streamTurn = async (sessionId: string, forMs: number): Promise<void> => {
-        await call("POST", `/sessions/${sessionId}/input`, { text: STREAM_QUESTION });
-        await runnerBySessionId.get(sessionId)!.playScript(sessionId, [
+        const { played } = await playTurn(sessionId, STREAM_QUESTION, [
           { kind: "stream", forMs },
           { kind: "end", state: "completed" },
         ]);
+        await played;
         await waitForIdle(sessionId);
       };
 
@@ -407,6 +432,8 @@ export async function runWithThreadFixture<T>(
         readControllerPid,
         growTranscript,
         streamTurn,
+        playTurn,
+        call,
       });
     } finally {
       await Promise.all(runners.map((runner) => runner.goOffline()));

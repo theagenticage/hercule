@@ -13,7 +13,7 @@
     "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
     "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hercule/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hercule/src/main.ts --compile --outfile hercule",
-    "build:desktop": "pnpm --filter @hercule/desktop build && bun run scripts/check-bundle-budget.ts apps/desktop/out/renderer --route apps/desktop/src/renderer/routes/__root.tsx --route apps/desktop/src/renderer/routes/_connected.tsx --route apps/desktop/src/renderer/routes/_connected/_shell.tsx --route apps/desktop/src/renderer/routes/_connected/_shell/index.tsx --route 'apps/desktop/src/renderer/routes/_connected/_shell/threads/$sessionId.tsx' --guide && bun run scripts/check-bundle-budget.ts --main-startup apps/desktop/out/main/index.js --guide && pnpm --filter @hercule/desktop package",
+    "build:desktop": "pnpm --filter @hercule/desktop build && bun run scripts/check-bundle-budget.ts apps/desktop/out/renderer --route apps/desktop/src/renderer/routes/__root.tsx --route apps/desktop/src/renderer/routes/_connected.tsx --route apps/desktop/src/renderer/routes/_connected/_shell.tsx --route apps/desktop/src/renderer/routes/_connected/_shell/index.tsx --route 'apps/desktop/src/renderer/routes/_connected/_shell/threads/$sessionId/route.tsx' --route 'apps/desktop/src/renderer/routes/_connected/_shell/threads/$sessionId/index.tsx' --guide && bun run scripts/check-bundle-budget.ts --main-startup apps/desktop/out/main/index.js --guide && pnpm --filter @hercule/desktop package",
     "test:desktop": "vitest run --project desktop",
     "compare:bureau": "pnpm --filter @hercule/desktop compare:bureau"
   },

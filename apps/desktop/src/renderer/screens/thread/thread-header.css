@@ -143,3 +143,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Not in the book. When the header runs out of room, the other threads'
+   tabs give way first, and only then the open thread's tab. A tab that is
+   not open stops at 72px: its padding, its mark, the gap and about four
+   letters with an ellipsis. On a subagent's page, the earlier crumbs give
+   way the same way (subagent-header.css). */
+.top nav.pill .ptab:not(.is-on) {
+  flex-shrink: 1000;
+  min-width: 72px;
+}
+
+/* The side pane's toggle. The pane opens on the right, so the sidebar's
+   icon is mirrored, as the subagents prototype (commit 6253a529) draws it. */
+.pane-toggle-icon {
+  display: inline-flex;
+  transform: scaleX(-1);
+}

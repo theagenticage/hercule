@@ -6,7 +6,7 @@ import { buildButtonClassName, cn } from "@hercule/ui";
 import { StopButton } from "../stop-button";
 import { useDurationClock } from "../use-duration-clock";
 import { useStopAgent } from "../use-stop-agent";
-import { SUBAGENT_HUE_CLASSES } from "./subagent-mark";
+import { SUBAGENT_HUE_CLASSES } from "./subagent-mark-glyph";
 
 /**
  * Renders the card that takes the composer's place on a subagent's page,

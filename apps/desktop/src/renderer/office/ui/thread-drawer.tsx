@@ -8,9 +8,19 @@
  * sidebar may be asleep. Selecting another colleague with the drawer open
  * shows that colleague's thread. After the drawer closes, it keeps the last
  * thread drawn until it has slid away, then lets it go.
+ *
+ * The drawer has no side pane, so the thread shows no tally pill. Its spawn
+ * lines and the Request pager's "Open subagent" link leave the Office for
+ * the subagent's full page. While it shows a thread, it holds the `subagent`
+ * topic, as the thread's own screen does, so the spawn lines stay current,
+ * and keeps the thread's Request drafts, so paging between Requests keeps
+ * what was typed and what was sent.
  */
 import { Suspense, useEffect, useState, useSyncExternalStore, type JSX } from "react";
-import { ThreadScreen } from "../../screens/thread/thread-screen";
+import { useRouteContext } from "@tanstack/react-router";
+import { useSubagentsLive } from "../../app/live";
+import { useKeepRequestDrafts } from "../../app/thread-drafts";
+import { AgentPage } from "../../screens/thread/agent-page";
 import { readOffice, subscribeOffice, type OfficeState } from "../office-store";
 
 /** Milliseconds the drawer keeps its thread after closing: longer than its slide, `--dur-3`. */
@@ -28,6 +38,9 @@ export function ThreadDrawer(): JSX.Element {
   const open = threadId !== null;
   const [shownId, setShownId] = useState(threadId);
   if (open && threadId !== shownId) setShownId(threadId);
+  const { controller, queryClient } = useRouteContext({ from: "/_connected" });
+  useSubagentsLive(controller.live, queryClient, shownId);
+  useKeepRequestDrafts(shownId);
   // A timer rather than `transitionend`: with Reduce motion on, the slide
   // takes no time and no transition event fires.
   useEffect(() => {
@@ -40,7 +53,7 @@ export function ThreadDrawer(): JSX.Element {
       {shownId === null ? null : (
         <div className="office-drawer-thread">
           <Suspense fallback={null}>
-            <ThreadScreen key={shownId} sessionId={shownId} />
+            <AgentPage key={shownId} sessionId={shownId} subagentId={undefined} />
           </Suspense>
         </div>
       )}

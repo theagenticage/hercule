@@ -13,6 +13,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { Live } from "@hercule/client-core";
 import {
+  buildErrorBody,
   createApiStub,
   stubWebSocketInto,
   type Answer,
@@ -22,8 +23,9 @@ import {
 } from "@hercule/client-core/testing";
 import { buildSession, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
+  buildAgentStreamTopic,
+  buildAgentTapTopic,
   buildSessionStreamTopic,
-  buildSessionTapTopic,
   GITHUB_CONNECTION_TYPE,
   type Assistant,
   type Connection,
@@ -36,6 +38,7 @@ import {
   type Resource,
   type Runner,
   type Session,
+  type Subagent,
   type TapItem,
   type TranscriptRow,
   type Workspace,
@@ -619,13 +622,20 @@ export const FIXTURE_GITHUB_CONNECTION: Connection = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-/** A thread as the stubbed controller holds it: its session, its transcript and its inputs. */
+/**
+ * A thread as the stubbed controller holds it: its session, its transcript,
+ * its inputs, and its subagents with their transcripts.
+ */
 export interface ThreadRecords {
   readonly session: Session;
-  /** The transcript's rows, in position order. */
+  /** The session's own agent's transcript rows, in position order. */
   readonly transcript: readonly TranscriptRow[];
   /** Every input the session was given, oldest first, whatever its status. */
   readonly inputs: readonly Input[];
+  /** The session's subagents, oldest first; none when absent. */
+  readonly subagents?: readonly Subagent[];
+  /** Each subagent's transcript rows, in position order, by subagent id. */
+  readonly subagentTranscripts?: Readonly<Record<string, readonly TranscriptRow[]>>;
 }
 
 /** A provider event, as a transcript row holds it. */
@@ -777,6 +787,43 @@ const RUNNING_TRANSCRIPT = buildTranscript(FIXTURE_THREAD_IDS.flaky, "2026-09-10
       itemId: RUNNING_ITEM_ID,
       streamKind: "assistant_text",
       delta: "The three failures share one cause: ",
+    },
+  ],
+]);
+
+/** The subagent the `delegating` fixture thread's agent started, still running. */
+export const FIXTURE_SUBAGENT: Subagent = {
+  id: "agent-1",
+  sessionId: FIXTURE_THREAD_IDS.flaky,
+  itemId: "turn-1-delegate",
+  description: "Find the flaky webhook test",
+  agentType: "Explore",
+  status: "running",
+  toolCalls: 1,
+  startedAt: "2026-09-10T09:03:40.000Z",
+};
+
+/** The item `FIXTURE_SUBAGENT` is writing, for a test that taps text into it. */
+export const SUBAGENT_RUNNING_ITEM_ID = "agent-1-turn-1-answer";
+
+/** The rows of `FIXTURE_SUBAGENT`'s transcript: its brief, one command, and the answer it is writing. */
+const SUBAGENT_TRANSCRIPT = buildTranscript(FIXTURE_THREAD_IDS.flaky, "2026-09-10T09:03:40.000Z", [
+  [0, { _tag: "turn.started", turnId: "agent-1-turn-1", model: "claude-haiku-5" }],
+  ...writeUserMessage(0, "agent-1-turn-1", "Find which webhook test fails, and why."),
+  ...runItem([1, 4], {
+    turnId: "agent-1-turn-1",
+    itemId: "agent-1-turn-1-grep",
+    kind: "command_execution",
+    detail: { command: "rg -l setTimeout test/webhooks" },
+    text: { streamKind: "command_output", delta: "test/webhooks/retry.test.ts\n" },
+  }),
+  [
+    5,
+    {
+      _tag: "item.started",
+      turnId: "agent-1-turn-1",
+      itemId: SUBAGENT_RUNNING_ITEM_ID,
+      kind: "assistant_message",
     },
   ],
 ]);
@@ -939,6 +986,17 @@ export const THREAD_FIXTURES = {
       ),
     ],
   },
+  /**
+   * The running thread with one subagent, `FIXTURE_SUBAGENT`, which is
+   * writing its answer.
+   */
+  delegating: {
+    session: FIXTURE_THREADS.flaky,
+    transcript: RUNNING_TRANSCRIPT,
+    inputs: [],
+    subagents: [FIXTURE_SUBAGENT],
+    subagentTranscripts: { [FIXTURE_SUBAGENT.id]: SUBAGENT_TRANSCRIPT },
+  },
   /** "Sketch the pricing page", idle: a turn that failed after its first command. */
   failed: {
     session: FIXTURE_THREADS.pricingPage,
@@ -968,14 +1026,23 @@ export const THREAD_FIXTURES = {
 
 /**
  * Returns the handlers that answer a thread's reads from `thread`: its
- * session, its transcript as one page, and its inputs, newest first, as the
- * app asks for them.
+ * session, its subagents, each agent's transcript as one page, and its
+ * inputs, newest first, as the app asks for them. A transcript read for a
+ * subagent the thread has no transcript for answers `not_found`.
  */
 export const buildThreadHandlers = (thread: ThreadRecords): Readonly<Record<string, Handler>> => {
   const path = `/api/v1/sessions/${thread.session.id}`;
   return {
     [`GET ${path}`]: { body: thread.session },
-    [`GET ${path}/transcript`]: { body: { items: thread.transcript } },
+    [`GET ${path}/subagents`]: { body: { items: thread.subagents ?? [] } },
+    [`GET ${path}/transcript`]: (call) => {
+      const subagentId = new URLSearchParams(call.search).get("subagentId");
+      if (subagentId === null) return { body: { items: thread.transcript } };
+      const rows = thread.subagentTranscripts?.[subagentId];
+      return rows === undefined
+        ? { status: 404, body: buildErrorBody("not_found", `no subagent ${subagentId}`) }
+        : { body: { items: rows } };
+    },
     [`GET ${path}/inputs`]: { body: { items: [...thread.inputs].reverse() } },
   };
 };
@@ -1026,24 +1093,30 @@ export interface LiveStub {
   ) => void;
   /**
    * Sends the app stored rows on its subscription to `session:<sessionId>:stream`,
-   * with the last row's position as the cursor, as the controller does.
-   * Throws when the app has no socket or no such subscription.
+   * or to the subagent `subagentId`'s stream when it is given, with the last
+   * row's position as the cursor, as the controller does. Throws when the app
+   * has no socket or no such subscription.
    */
-  readonly pushStreamRows: (sessionId: string, rows: readonly TranscriptRow[]) => void;
+  readonly pushStreamRows: (
+    sessionId: string,
+    rows: readonly TranscriptRow[],
+    subagentId?: string,
+  ) => void;
   /**
    * Sends the app an empty replay on its subscription to
    * `session:<sessionId>:stream`, with the subscription's cursor. The
    * controller answers every stream subscription with the rows written after
    * its cursor first, even when there are none, so the rows pushed after the
-   * replay are live rows. Throws when the app has no socket or no such
-   * subscription.
-   */
-  readonly pushEmptyReplay: (sessionId: string) => void;
-  /**
-   * Sends the app token deltas on its subscription to `session:<sessionId>:tap`.
+   * replay are live rows. `subagentId` sends it on that subagent's stream.
    * Throws when the app has no socket or no such subscription.
    */
-  readonly pushTaps: (sessionId: string, taps: readonly TapItem[]) => void;
+  readonly pushEmptyReplay: (sessionId: string, subagentId?: string) => void;
+  /**
+   * Sends the app token deltas on its subscription to `session:<sessionId>:tap`,
+   * or to the subagent `subagentId`'s tap when it is given. Throws when the
+   * app has no socket or no such subscription.
+   */
+  readonly pushTaps: (sessionId: string, taps: readonly TapItem[], subagentId?: string) => void;
   /**
    * Rejects the cursor of the app's subscription to `session:<sessionId>:stream`,
    * as the controller does when the transcript's log was replaced. The live
@@ -1109,22 +1182,22 @@ const buildTestContext = async (
         ...(conversationIds === undefined ? {} : { conversationIds }),
       });
     },
-    pushStreamRows: (sessionId, rows) => {
+    pushStreamRows: (sessionId, rows, subagentId) => {
       const last = rows.at(-1);
-      readSocket().push(buildSessionStreamTopic(sessionId), {
+      readSocket().push(buildAgentStreamTopic(sessionId, subagentId), {
         _tag: "delta",
         ...(last === undefined ? {} : { cursor: String(last.position) }),
         items: rows,
       });
     },
-    pushEmptyReplay: (sessionId) => {
+    pushEmptyReplay: (sessionId, subagentId) => {
       const socket = readSocket();
-      const topic = buildSessionStreamTopic(sessionId);
+      const topic = buildAgentStreamTopic(sessionId, subagentId);
       const { cursor } = socket.findSubscription(topic);
       socket.push(topic, { _tag: "delta", cursor, items: [] });
     },
-    pushTaps: (sessionId, taps) => {
-      readSocket().push(buildSessionTapTopic(sessionId), { _tag: "delta", items: taps });
+    pushTaps: (sessionId, taps, subagentId) => {
+      readSocket().push(buildAgentTapTopic(sessionId, subagentId), { _tag: "delta", items: taps });
     },
     resetStream: (sessionId) => {
       const socket = readSocket();

@@ -1,0 +1,76 @@
+/* The pager line above the Request dock, as the subagents prototype's
+   `.proto-pager` draws it: a tab in the dock's marigold tint, sitting on the
+   dock's top left edge. */
+
+.request-pager {
+  position: relative;
+  z-index: 2;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 28px);
+  height: 30px;
+  margin: 0 0 -1px 14px;
+  padding: 0 12px 0 6px;
+  border: 1px solid color-mix(in oklab, var(--you) 45%, transparent);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--you-tint);
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.request-pager:not(:has(.request-pager-nav)) {
+  padding-left: 12px;
+}
+.request-pager + .dock {
+  border-top-left-radius: 6px;
+}
+.request-pager-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+  border-right: 1px solid color-mix(in oklab, var(--you) 45%, transparent);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+/* Not in the prototype, which has no subagent's page. There the arrows are
+   alone on the line, so they need no rule after them. */
+.request-pager-nav:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+.request-pager-nav b {
+  padding: 0 2px;
+  font-weight: var(--w-bold);
+}
+.request-pager-nav .icon-btn[aria-disabled="true"] {
+  opacity: 0.35;
+}
+.request-pager-flip {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+.request-pager-who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.request-pager-name {
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+}
+.request-pager-parent {
+  color: var(--faint);
+}
+.request-pager-open {
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.request-pager-open:hover {
+  text-decoration: underline;
+}

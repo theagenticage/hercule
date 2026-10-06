@@ -11,7 +11,7 @@ import {
   createLaunchHistory,
   readLastThread,
   rememberLastThread,
-} from "../../../../app/last-thread";
+} from "../../../../../app/last-thread";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -22,7 +22,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   THREAD_FIXTURES,
-} from "../../../../app/testing";
+} from "../../../../../app/testing";
 
 /** A thread id no controller holds. */
 const GONE_ID = "01a06d02-7400-7000-8000-0000000000ff";
@@ -44,9 +44,10 @@ describe("the thread route", () => {
   const thread = THREAD_FIXTURES.finished;
   const sessionId = thread.session.id;
 
-  it("reads the session, the transcript and the queued inputs before the screen renders", async () => {
-    const { app } = openApp(`/threads/${sessionId}`);
+  it("reads the session, its subagents, the transcript and the queued inputs before the screen renders", async () => {
+    const { app, calls } = openApp(`/threads/${sessionId}`);
     const { router, context } = await app;
+    expect(calls.map((call) => call.path)).toContain(`/api/v1/sessions/${sessionId}/subagents`);
     expect(router.state.location.pathname).toBe(`/threads/${sessionId}`);
     const cache = context.queryClient;
     expect(cache.getQueryData(queryKeys.session(sessionId))).toEqual(thread.session);

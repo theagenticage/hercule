@@ -1,8 +1,8 @@
 import type { JSX } from "react";
-import { describeSubagentTally } from "@hercule/client-core";
+import { describeSubagentTally, toggleSidePaneSurface } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import { DecisionMark, DoneMark, WorkingMark, cn } from "@hercule/ui";
-import { toggleSurface, useSidePaneLayout } from "./use-side-pane";
+import { useSidePaneLayout } from "./use-side-pane";
 
 /**
  * The pill above the composer, or above a subagent's status card, that reads
@@ -30,7 +30,7 @@ export function TallyPill({
         aria-pressed={shown}
         title={shown ? "Hide the side pane" : "Show the subagents in the side pane"}
         onClick={() => {
-          changeLayout((current) => toggleSurface(current, "subagents"));
+          changeLayout((current) => toggleSidePaneSurface(current, "subagents"));
         }}
         className={cn(
           "inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-line bg-raised py-[3px] pr-[11px] pl-2 text-meta whitespace-nowrap hover:bg-line-soft hover:text-ink",

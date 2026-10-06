@@ -179,6 +179,30 @@ export const buildSubagentTapTopic = (
   subagentId: SubagentId,
 ): SessionLiveTopic => `session:${sessionId}:subagent:${subagentId}:tap`;
 
+/**
+ * Builds the topic name of one agent's durable transcript: the session's own
+ * agent when `subagentId` is undefined, else that subagent.
+ */
+export const buildAgentStreamTopic = (
+  sessionId: string,
+  subagentId: SubagentId | undefined,
+): SessionLiveTopic =>
+  subagentId === undefined
+    ? buildSessionStreamTopic(sessionId)
+    : buildSubagentStreamTopic(sessionId, subagentId);
+
+/**
+ * Builds the topic name of one agent's ephemeral token deltas: the session's
+ * own agent when `subagentId` is undefined, else that subagent.
+ */
+export const buildAgentTapTopic = (
+  sessionId: string,
+  subagentId: SubagentId | undefined,
+): SessionLiveTopic =>
+  subagentId === undefined
+    ? buildSessionTapTopic(sessionId)
+    : buildSubagentTapTopic(sessionId, subagentId);
+
 /** How a record changed, spelled as in the audit kinds. */
 export const InvalidateKind = Schema.Literals(["created", "updated", "deleted"]);
 

@@ -10,11 +10,12 @@ import {
   pickQuestionOption,
   type QuestionDraft,
   readErrorMessage,
+  type RequestDraft,
   typeQuestionAnswer,
 } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
 import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@hercule/ui";
-import { useRequestDraft, type RequestDraft } from "../../app/thread-drafts";
+import { useRequestDraft } from "../../app/thread-drafts";
 
 /**
  * Renders the permission card: one Request the session's agents are parked

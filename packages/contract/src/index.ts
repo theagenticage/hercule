@@ -478,6 +478,8 @@ export {
   LiveTopic,
   MUTABLE_LIVE_TOPICS,
   parseSessionTopic,
+  buildAgentStreamTopic,
+  buildAgentTapTopic,
   buildSessionStreamTopic,
   buildSessionTapTopic,
   buildSubagentStreamTopic,

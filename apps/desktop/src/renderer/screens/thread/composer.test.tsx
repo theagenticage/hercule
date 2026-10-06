@@ -16,11 +16,12 @@ import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Session } from "@hercule/contract";
+import type { Session, SessionRequest } from "@hercule/contract";
 import {
   buildErrorBody,
   CONTROLLER_URL,
   FIXTURE_INSTANCE,
+  FIXTURE_SUBAGENT,
   holdAnswer,
   SIDEBAR_FIXTURE,
   THREAD_FIXTURES,
@@ -329,7 +330,7 @@ describe("the composer", () => {
     expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }]);
   });
 
-  it("draws Stop in Send's place while a turn runs, which interrupts the turn once, and ⏎ still sends", async () => {
+  it("draws Stop in Send's place while a turn runs, which stops everything once, and ⏎ still sends", async () => {
     const user = userEvent.setup();
     const held = holdAnswer();
     const { calls } = await renderComposer(BUSY, {
@@ -348,6 +349,10 @@ describe("the composer", () => {
       expect(stop.getAttribute("aria-disabled")).toBeNull();
     });
     expect(countInterrupts(calls, BUSY)).toBe(1);
+    // Without a subagent named, the interrupt stops the turn and every subagent.
+    expect(
+      calls.find((call) => `${call.method} ${call.path}` === buildInterruptOperation(BUSY))?.body,
+    ).toEqual({});
 
     await user.type(readField(), "Also check the retry test.{Enter}");
     await waitFor(() => {
@@ -541,18 +546,21 @@ describe("the composer", () => {
     ).toEqual(["No workspace", ""]);
   });
 
-  it("stacks the queued inputs, then the Request, above the card, without taking the focus", async () => {
+  it("stacks the tally, the queued inputs, then the Request, above the card, without taking the focus", async () => {
     const approval = SIDEBAR_FIXTURE.threads[0]!.openRequests[0]!;
     await renderComposer(changeSession(THREAD_FIXTURES.queued, { openRequests: [approval] }));
 
     const stack = document.querySelector(".composer")!;
     expect([...stack.children].map((child) => child.className)).toEqual([
+      "fold tally-fold",
       "fold",
       "dock",
       "composer-card",
       "fold",
     ]);
-    expect([...stack.firstElementChild!.children].map((child) => child.className)).toEqual([
+    // The thread has no subagent, so its tally draws nothing.
+    expect(stack.children[0]!.children).toHaveLength(0);
+    expect([...stack.children[1]!.children].map((child) => child.className)).toEqual([
       "queued",
       "queued",
     ]);
@@ -585,6 +593,26 @@ describe("the shrunk composer", () => {
 
   /** The operation `dock-mini` answers the Request with. */
   const RESPOND = `POST /api/v1/sessions/${WAITING.session.id}/respond-to-approval-request`;
+
+  /** A command approval the waiting thread's subagent asks. */
+  const SUBAGENT_REQUEST: SessionRequest = {
+    requestId: "req-2",
+    itemId: "tool-2",
+    kind: "command_approval",
+    decisions: ["allow", "deny"],
+    detail: { command: "rm -rf tmp" },
+    subagentId: FIXTURE_SUBAGENT.id,
+  };
+
+  /** The waiting thread with a second Request, which its subagent asks. */
+  const TWO_REQUESTS: ThreadRecords = {
+    ...WAITING,
+    session: {
+      ...WAITING.session,
+      openRequests: [...WAITING.session.openRequests, SUBAGENT_REQUEST],
+    },
+    subagents: [{ ...FIXTURE_SUBAGENT, sessionId: WAITING.session.id }],
+  };
 
   it("keeps only the field and the Request's one line, with its answers", async () => {
     await renderComposer(WAITING, {
@@ -625,6 +653,40 @@ describe("the shrunk composer", () => {
     expect(document.activeElement).toBe(readField());
     expect(reports.scrolls).toBe(1);
     expect(reports.focus.at(-1)).toBe(true);
+  });
+
+  it("keeps the pager line, which pages without expanding, and dock-mini answers the Request it shows", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const { calls, reports } = await renderComposer(TWO_REQUESTS, {
+      shrunk: true,
+      handlers: { [RESPOND]: { body: WAITING.session } },
+    });
+    const pager = document.querySelector<HTMLElement>(".request-pager")!;
+    const mini = document.querySelector<HTMLElement>(".dock-mini")!;
+    expect(pager.textContent).toBe("1 of 2The main agent asks");
+    expect(mini.textContent).toBe("Run git push?AllowDeny");
+
+    await user.click(within(pager).getByRole("button", { name: "Next Request" }));
+
+    expect(pager.textContent).toBe(
+      "2 of 2Find the flaky webhook test asks · subagent of the main agentOpen subagent ›",
+    );
+    // The dock is keyed by its Request, so the shown one has a dock-mini of its own.
+    const shownMini = document.querySelector<HTMLElement>(".dock-mini")!;
+    expect(shownMini.textContent).toBe("Run rm -rf tmp?AllowDeny");
+    // Paging kept the composer shrunk: no focus it counts, and no scroll.
+    expect(reports).toEqual({ focus: [false], scrolls: 0 });
+    await user.click(pager.querySelector(".request-pager-who")!);
+    expect(reports.scrolls).toBe(0);
+
+    await user.click(within(shownMini).getByRole("button", { name: "Allow" }));
+    await waitFor(() => {
+      expect(
+        calls.filter((call) => `${call.method} ${call.path}` === RESPOND).map((call) => call.body),
+      ).toEqual([{ requestId: "req-2", decision: "allow" }]);
+    });
+    expect(reports.scrolls).toBe(0);
   });
 
   it("reports focus in the composer, and none when the focus leaves it", async () => {

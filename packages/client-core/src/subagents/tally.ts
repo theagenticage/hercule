@@ -3,7 +3,7 @@
  * the composer and the footer of the Subagents surface.
  */
 import type { SessionRequest, Subagent } from "@hercule/contract";
-import { isSubagentWaiting } from "./describe";
+import { isSubagentWaiting, type SubagentMark } from "./describe";
 
 /** The tally pill's mark and count, such as a working mark and "2 of 6 running". */
 export interface SubagentTally {
@@ -11,7 +11,7 @@ export interface SubagentTally {
    * `waiting` while a subagent waits on the user, as `isSubagentWaiting`
    * decides, `working` while any subagent runs, and `done` once none runs.
    */
-  readonly mark: "working" | "waiting" | "done";
+  readonly mark: Extract<SubagentMark, "working" | "waiting" | "done">;
   readonly count: string;
 }
 

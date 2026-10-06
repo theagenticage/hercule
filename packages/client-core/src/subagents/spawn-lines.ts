@@ -3,13 +3,14 @@
  * the transcript where its agent started it.
  */
 import type { SessionRequest, Subagent, SubagentId, SubagentStatus } from "@hercule/contract";
-import type { ThreadTurn } from "../threads/turns";
+import type { ThreadItem } from "../threads/turns";
 import {
   describeSubagentState,
   isSubagentWaiting,
-  nameSubagent,
+  type SubagentLine,
   type SubagentState,
 } from "./describe";
+import { nameSubagent } from "./name";
 import { compareSubagentStarts, listSubagentDescendants } from "./tree";
 
 /** One subagent a turn started, as its spawn line shows it. */
@@ -20,22 +21,27 @@ export interface SpawnLine {
   readonly waiting: boolean;
   readonly name: string;
   readonly state: SubagentState;
-  /** How many subagents are below it, at any depth. */
-  readonly below: number;
   /**
-   * Whether any subagent below it waits on the user. The subagent's own
-   * waiting is left out, because its state already reads "waiting on you".
+   * The words after its state and duration, in order, each a separate note:
+   *
+   * - "N below", in `muted`, when it has subagents of its own, counted at
+   *   any depth;
+   * - "one waits on you", or "N wait on you" when several do, in `attn`,
+   *   when subagents below it wait on the user. The subagent's own waiting
+   *   is left out, because its state already reads "waiting on you".
    */
-  readonly waitsOnUserBelow: boolean;
+  readonly notes: readonly SubagentLine[];
 }
 
 /**
- * Returns the subagents `turn` started, ordered as the side pane orders
- * siblings, so the two never disagree. `agentSubagentId` is the agent whose
- * turn it is: a subagent's id, or undefined for the session's own agent.
+ * Returns the subagents a run of items started, ordered as the side pane
+ * orders siblings, so the two never disagree. `run` is anything that holds
+ * items: a whole turn, or one work stretch of it. `agentSubagentId` is the
+ * agent whose items they are: a subagent's id, or undefined for the
+ * session's own agent.
  *
- * A subagent belongs to the turn when its `itemId` is one of the turn's
- * `subagent` items and the turn's agent started it. Both are checked,
+ * A subagent belongs to the run when its `itemId` is one of the run's
+ * `subagent` items and the run's agent started it. Both are checked,
  * because an item id is unique only within one agent's transcript.
  *
  * A `subagent` item whose record has not been read yet has no subagent
@@ -43,12 +49,12 @@ export interface SpawnLine {
  * does.
  */
 export const findSpawnedSubagents = (
-  turn: ThreadTurn,
+  run: { readonly items: readonly ThreadItem[] },
   agentSubagentId: SubagentId | undefined,
   subagents: readonly Subagent[],
 ): readonly Subagent[] => {
   const itemIds = new Set(
-    turn.items.filter((item) => item.kind === "subagent").map((item) => item.itemId),
+    run.items.filter((item) => item.kind === "subagent").map((item) => item.itemId),
   );
   return subagents
     .filter(
@@ -76,13 +82,22 @@ export const buildSpawnLines = (
   spawned.map((subagent) => {
     const waiting = isSubagentWaiting(subagent, openRequests);
     const descendants = listSubagentDescendants(subagent, subagents);
+    const notes: SubagentLine[] = [];
+    if (descendants.length > 0) {
+      notes.push({ text: `${String(descendants.length)} below`, hue: "muted" });
+    }
+    const waitingBelow = descendants.filter((each) => isSubagentWaiting(each, openRequests)).length;
+    if (waitingBelow === 1) {
+      notes.push({ text: "one waits on you", hue: "attn" });
+    } else if (waitingBelow > 1) {
+      notes.push({ text: `${String(waitingBelow)} wait on you`, hue: "attn" });
+    }
     return {
       subagentId: subagent.id,
       status: subagent.status,
       waiting,
       name: nameSubagent(subagent),
       state: describeSubagentState(subagent, waiting, now),
-      below: descendants.length,
-      waitsOnUserBelow: descendants.some((each) => isSubagentWaiting(each, openRequests)),
+      notes,
     };
   });

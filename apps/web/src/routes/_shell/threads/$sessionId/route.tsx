@@ -93,7 +93,7 @@ function ThreadLayout(): JSX.Element {
     <>
       <SidePaneSlot>
         <SidePane>
-          <SubagentsSurface sessionId={sessionId} subagentId={subagentId} />
+          <SubagentsSurface sessionId={sessionId} openSubagentId={subagentId} />
         </SidePane>
       </SidePaneSlot>
       {/* Keyed by the session, so one thread's drafts never show on another:

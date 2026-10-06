@@ -198,6 +198,12 @@ button.pick:not([aria-disabled="true"]):hover,
 .composer.is-scrolled .fold {
   display: none;
 }
+/* The tally pill's fold lays the pill out as a column, so the pill can sit
+   at the column's right with `align-self`. */
+.tally-fold {
+  display: flex;
+  flex-direction: column;
+}
 
 /* Not in the book, which shows no unsent pick. The note that a model pick
    applies on send fills the spacer, on one line. */

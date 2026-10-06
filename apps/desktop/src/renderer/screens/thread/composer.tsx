@@ -15,7 +15,6 @@ import {
   buildSubmission,
   buildThreadWorkspaceLabel,
   computeEffectiveConfig,
-  findOldestOpenRequest,
   findResumeBlockedReason,
   formatAccessMode,
   isMutationRunning,
@@ -45,8 +44,10 @@ import { SendIcon } from "../../icons/send";
 import { ShieldIcon } from "../../icons/shield";
 import { StopIcon } from "../../icons/stop";
 import { WorkspaceIcon } from "../../icons/workspace";
+import { TallyPill } from "../subagents/tally-pill";
+import { useStopAgent } from "../use-stop-agent";
+import { AgentRequestDock, REQUEST_PAGER_CLASS } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
-import { RequestDock } from "./dock";
 import { QueuedInputs } from "./queued-inputs";
 import { isSendKey, useSendOnMenuCommand } from "./send-key";
 import "./composer.css";
@@ -60,21 +61,30 @@ interface SentSubmission {
 }
 
 /**
- * Checks that focus on `element` keeps the composer expanded: it is inside
- * `composer`, and not on `dock-mini`, whose answers act without expanding
- * the composer.
+ * Checks that `element` is on one of the two lines the shrunk composer keeps
+ * of a Request: `dock-mini` or the Request pager line.
  */
-const keepsComposerExpanded = (composer: Element, element: EventTarget | null): boolean =>
-  element instanceof Element &&
-  composer.contains(element) &&
-  element.closest(".dock-mini") === null;
+const isOnRequestLines = (element: Element): boolean =>
+  element.closest(`.dock-mini, .${REQUEST_PAGER_CLASS}`) !== null;
+
+/**
+ * Checks that a click on `target` leaves the shrunk composer shrunk: it is
+ * on one of `dock-mini`'s answers, or anywhere on the Request pager line. A
+ * click on the rest of `dock-mini`, such as its question, expands the
+ * composer like a click anywhere else.
+ */
+const keepsComposerShrunk = (target: EventTarget): boolean =>
+  target instanceof Element &&
+  target.closest(`.dock-mini button, .${REQUEST_PAGER_CLASS}`) !== null;
 
 /**
  * Renders the thread's composer, floating over the bottom of the transcript,
  * as the Bureau book's `.composer-wrap` draws it. From top to bottom:
  *
+ * - the tally pill, while the thread has subagents, see `TallyPill`;
  * - the queued inputs, see `QueuedInputs`;
- * - the dock, while the session waits on a Request, see `RequestDock`;
+ * - the dock, while the session waits on a Request, with the pager line
+ *   above it when there is one, see `AgentRequestDock`;
  * - the card: the message field, then a row with Attach, the access mode,
  *   the model options when the model has any, the model, Dictate, and Send,
  *   or Stop while a turn runs;
@@ -82,7 +92,8 @@ const keepsComposerExpanded = (composer: Element, element: EventTarget | null): 
  *
  * ⏎ in the field sends the message and ⇧⏎ starts a new line. The controller
  * opens a turn with a message sent to an idle thread, and queues one sent
- * while a turn runs. Stop interrupts the running turn. A thread that has
+ * while a turn runs. Stop stops everything the session runs: its own
+ * agent's turn and every running subagent (`useStopAgent`). A thread that has
  * exited and cannot be resumed takes no message: its field is read-only
  * and its menus do not open.
  *
@@ -100,10 +111,11 @@ const keepsComposerExpanded = (composer: Element, element: EventTarget | null): 
  * `aria-disabled`.
  *
  * - `shrunk` draws the composer as the book's `.is-scrolled`: narrower, one
- *   line high, with only the field and the Request's one-line `dock-mini`
- *   left. The thread screen decides it.
- * - `onFocusChange` is told whether the focus is in the composer, which
- *   keeps the composer expanded. Focus on `dock-mini` does not count.
+ *   line high, with only the field, the Request's pager line and its
+ *   one-line `dock-mini` left. The thread screen decides it.
+ * - `onFocusChange` is called with whether the focus is in the composer,
+ *   which keeps the composer expanded. Focus on `dock-mini` or the pager line
+ *   keeps the size the composer has.
  * - `scrollTranscriptToBottom` is called when a message is sent, and when a
  *   click on the shrunk composer expands it.
  * - `ref` receives the stack of the rows above, the card and the lip, whose
@@ -143,8 +155,8 @@ export function ThreadComposer({
   const sendKey = ["thread-input", sessionId];
   const sending = useIsMutating({ mutationKey: sendKey }) > 0;
   // Whether the pointer went down on the shrunk composer, anywhere but on
-  // `dock-mini`'s answers. By the time the click arrives, the focus it moved
-  // has already expanded the composer.
+  // `dock-mini`'s answers or the pager line. By the time the click arrives,
+  // the focus it moved has already expanded the composer.
   const expandOnClickRef = useRef(false);
 
   // No runner is local to the desktop app. A started thread names its own
@@ -164,7 +176,6 @@ export function ThreadComposer({
   const fields = buildComposerFields(catalogs, config, "active");
   const readOnly = findResumeBlockedReason(session);
   const busy = session.status === "busy";
-  const oldestRequest = findOldestOpenRequest(session);
   const workspaceLabel = buildThreadWorkspaceLabel(session, workspaces);
   const placeholder = buildComposerPlaceholder({
     readOnly,
@@ -199,14 +210,9 @@ export function ThreadComposer({
       pendingSubmissions.recordFailure(sessionId, readErrorMessage(error));
     },
   });
-  const interrupt = useMutation({
-    mutationFn: () => client.session.interrupt({ params: { id: sessionId }, payload: {} }),
-    // The response is not written into the cache. It is the session as the
-    // controller read it before the interrupt, still busy, so writing it
-    // could bring back a Stop the live `session` push has already cleared.
-  });
+  const stopAgent = useStopAgent(client, sessionId);
   const error =
-    pending.failure ?? (interrupt.error === null ? null : readErrorMessage(interrupt.error));
+    pending.failure ?? (stopAgent.error === null ? null : readErrorMessage(stopAgent.error));
   const canSend = readOnly === null && pending.message.text.trim() !== "" && !sending;
 
   // Each pick is compared with the thread's own configuration, not with the
@@ -219,7 +225,7 @@ export function ThreadComposer({
     if (!canSend || isMutationRunning(queryClient, sendKey)) return;
     const submission = buildSubmission(thread, pending.picks, pending.message);
     pendingSubmissions.clearFailure(sessionId);
-    if (interrupt.isError) interrupt.reset();
+    if (stopAgent.error !== null) stopAgent.reset();
     input.mutate({
       payload: submission.payload,
       picks: pending.picks,
@@ -229,13 +235,23 @@ export function ThreadComposer({
   };
   useSendOnMenuCommand(submit);
   const stop = (): void => {
-    if (interrupt.isPending) return;
+    // `useStopAgent` already ignores a second stop, but Stop is only
+    // `aria-disabled` while one is in flight, so it can still be clicked:
+    // such a click must not clear the send failure either.
+    if (stopAgent.isPending) return;
     pendingSubmissions.clearFailure(sessionId);
-    interrupt.mutate();
+    stopAgent.stop();
   };
 
+  // Focus inside the composer keeps it expanded. Focus on the Request lines
+  // keeps the size the composer has instead, so a user who answers or pages a
+  // Request from the shrunk composer keeps reading the transcript.
   const reportFocus = (event: FocusEvent<HTMLDivElement>, element: EventTarget | null): void => {
-    onFocusChange(keepsComposerExpanded(event.currentTarget, element));
+    onFocusChange(
+      element instanceof Element &&
+        event.currentTarget.contains(element) &&
+        !(shrunk && isOnRequestLines(element)),
+    );
   };
 
   return (
@@ -254,9 +270,7 @@ export function ThreadComposer({
           reportFocus(event, event.relatedTarget);
         }}
         onPointerDown={(event) => {
-          expandOnClickRef.current =
-            shrunk &&
-            !(event.target instanceof Element && event.target.closest(".dock-mini button"));
+          expandOnClickRef.current = shrunk && !keepsComposerShrunk(event.target);
         }}
         onClick={() => {
           if (!expandOnClickRef.current) return;
@@ -265,16 +279,13 @@ export function ThreadComposer({
           scrollTranscriptToBottom();
         }}
       >
+        <div className="fold tally-fold">
+          <TallyPill sessionId={sessionId} />
+        </div>
         <div className="fold">
           <QueuedInputs sessionId={sessionId} />
         </div>
-        {oldestRequest === null ? null : (
-          <RequestDock
-            key={oldestRequest.requestId}
-            sessionId={sessionId}
-            request={oldestRequest}
-          />
-        )}
+        <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} />
         <div className="composer-card">
           <textarea
             ref={fieldRef}
@@ -331,7 +342,7 @@ export function ThreadComposer({
                   type="button"
                   className="stop"
                   title="Stop"
-                  aria-disabled={interrupt.isPending || undefined}
+                  aria-disabled={stopAgent.isPending || undefined}
                   onClick={stop}
                 >
                   <StopIcon size={14} />

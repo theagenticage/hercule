@@ -7,6 +7,8 @@
  *   opens while the window is hidden shows a notification;
  * - a Request answered elsewhere, here through the API, removes its
  *   notification and lowers the badge;
+ * - a thread's notification is about its newest Request, names the subagent
+ *   that asked it, and says how many more wait;
  * - clicking a notification shows the window and opens its thread;
  * - signing out hides the badge, removes the notifications and empties Go.
  *
@@ -65,6 +67,51 @@ describe("the dock badge and the threads' notifications", () => {
     await expect
       .poll(() => readWaitingNotifications(app))
       .toEqual([{ title: "Thread 1", body: "Run pnpm test?", state: "closed" }]);
+  });
+
+  it("replaces a thread's notification with the newest Request, named after the subagent that asked it, and shows nothing again once it is answered", async () => {
+    const { app, client, runner, thread } = await arrangeHiddenApp();
+    runner.openRequest(thread.id, "command_approval");
+    await expect.poll(() => readWaitingNotifications(app)).toHaveLength(1);
+
+    const played = runner.playScript(thread.id, [
+      {
+        kind: "subagent",
+        subagentId: "linter",
+        description: "Check the lint rules",
+        brief: "Check them.",
+        background: true,
+        steps: [{ kind: "command", command: "pnpm lint", ask: true }],
+      },
+    ]);
+
+    await expect
+      .poll(() => readWaitingNotifications(app))
+      .toEqual([
+        { title: "Thread 1", body: "Run pnpm test?", state: "closed" },
+        {
+          title: "Thread 1",
+          body: "Check the lint rules asks: Run pnpm lint?\n+1 more waiting",
+          state: "shown",
+        },
+      ]);
+    expect(await readBadgeCount(app)).toBe(1);
+
+    const subagentRequest = (
+      await client.session.read({ params: { id: thread.id } })
+    ).openRequests.find((request) => request.subagentId === "linter")!;
+    await client.session.respondToApprovalRequest({
+      params: { id: thread.id },
+      payload: { requestId: subagentRequest.requestId, decision: "allow" },
+    });
+    await played;
+
+    // The older Request still waits, so the badge stays, but the user has
+    // already been told about it.
+    await expect
+      .poll(async () => (await readWaitingNotifications(app)).map(({ state }) => state))
+      .toEqual(["closed", "closed"]);
+    expect(await readBadgeCount(app)).toBe(1);
   });
 
   it("shows the window and opens the thread when its notification is clicked", async () => {

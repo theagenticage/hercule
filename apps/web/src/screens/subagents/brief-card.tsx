@@ -1,5 +1,5 @@
 import { useState, type JSX } from "react";
-import { nameSubagentParent, type SubagentBrief } from "@hercule/client-core";
+import { describeBriefSource, type SubagentBrief } from "@hercule/client-core";
 import type { Subagent } from "@hercule/contract";
 import { cn } from "@hercule/ui";
 
@@ -24,15 +24,15 @@ export function BriefCard({
   readonly brief: SubagentBrief | undefined;
 }): JSX.Element {
   const [isWhole, setIsWhole] = useState(false);
+  const source = describeBriefSource(subagent, subagents);
   return (
     <div className="flex flex-col gap-1 rounded-[10px] border border-line-soft bg-surface px-3.5 py-2.5">
       <span className="text-meta text-muted">
-        Brief from{" "}
-        <span className="font-emph text-ink">{nameSubagentParent(subagent, subagents)}</span>
-        {subagent.agentType === undefined ? null : (
+        Brief from <span className="font-emph text-ink">{source.parent}</span>
+        {source.agentType === undefined ? null : (
           <>
             {" · "}
-            <span className="font-mono text-fine">{subagent.agentType}</span> agent
+            <span className="font-mono text-fine">{source.agentType}</span> agent
           </>
         )}
       </span>

@@ -11,27 +11,19 @@
  * The drafts live in memory only. Leaving the thread drops them.
  */
 import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
-import type { QuestionDraft, ThreadPicks } from "@hercule/client-core";
+import {
+  EMPTY_REQUEST_DRAFT,
+  changeRequestDraft,
+  dropClosedRequestDrafts,
+  type RequestDraft,
+  type ThreadPicks,
+} from "@hercule/client-core";
 import type { SessionRequest } from "@hercule/contract";
 
 /** The composer's unsent input: the Message Draft and the picks not yet sent. */
 export interface ComposerDraft {
   readonly message: string;
   readonly picks: ThreadPicks;
-}
-
-/** What the user has done so far on one open Request. */
-export interface RequestDraft {
-  /**
-   * Whether an answer was sent. It stays true until the controller closes the
-   * Request, so the Request is not answered twice, and turns false again when
-   * sending fails.
-   */
-  readonly answered: boolean;
-  /** The answers to a `question` Request typed so far; null until the user gives one. */
-  readonly question: QuestionDraft | null;
-  /** The question of a `question` Request that is shown, from 0. */
-  readonly shownQuestionIndex: number;
 }
 
 interface ThreadDrafts {
@@ -46,12 +38,6 @@ interface ThreadDraftsStore {
 }
 
 const EMPTY_COMPOSER_DRAFT: ComposerDraft = { message: "", picks: {} };
-
-const EMPTY_REQUEST_DRAFT: RequestDraft = {
-  answered: false,
-  question: null,
-  shownQuestionIndex: 0,
-};
 
 const ThreadDraftsContext = createContext<ThreadDraftsStore | null>(null);
 
@@ -87,23 +73,6 @@ export function ThreadDraftsProvider({
       {children}
     </ThreadDraftsContext.Provider>
   );
-}
-
-/**
- * Returns `drafts` without the drafts of Requests that are not among
- * `openRequests`, or `drafts` itself when there is none to drop.
- */
-function dropClosedRequestDrafts(
-  drafts: ThreadDrafts,
-  openRequests: readonly SessionRequest[],
-): ThreadDrafts {
-  const closed = [...drafts.requests.keys()].filter(
-    (id) => !openRequests.some((request) => request.requestId === id),
-  );
-  if (closed.length === 0) return drafts;
-  const requests = new Map(drafts.requests);
-  for (const id of closed) requests.delete(id);
-  return { ...drafts, requests };
 }
 
 /**
@@ -146,11 +115,7 @@ export function useRequestDraft(
   return [
     store.drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT,
     (change) => {
-      store.update((drafts) => {
-        const requests = new Map(drafts.requests);
-        requests.set(requestId, change(drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT));
-        return { ...drafts, requests };
-      });
+      store.update((drafts) => changeRequestDraft(drafts, requestId, change));
     },
   ];
 }

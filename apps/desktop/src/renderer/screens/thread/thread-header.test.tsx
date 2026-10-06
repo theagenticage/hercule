@@ -1,17 +1,33 @@
 /**
  * Tests the thread header against the stubbed controller: the tabs of the
  * thread's workspace, how each tab ends, the link to a new thread in the
- * workspace, and the two buttons that are drawn but do nothing yet.
+ * workspace, the two buttons that are drawn but do nothing yet, and the side
+ * pane's toggle, on the thread's page and on a subagent's page.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FIXTURE_THREAD_IDS, SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
+import {
+  buildSidebarHandlers,
+  buildThreadHandlers,
+  CONTROLLER_URL,
+  createFakeBridge,
+  FIXTURE_INSTANCE,
+  FIXTURE_SUBAGENT,
+  FIXTURE_THREAD_IDS,
+  renderApp,
+  SIDEBAR_FIXTURE,
+  stubApi,
+  stubElementSize,
+  THREAD_FIXTURES,
+} from "../../app/testing";
+import { forgetSidePaneLayouts } from "../subagents/use-side-pane";
 import { renderThreadPart } from "./testing";
 import { ThreadHeader } from "./thread-header";
 
 afterEach(() => {
   vi.useRealTimers();
+  forgetSidePaneLayouts();
 });
 
 /** Returns the header's first pill: the project and the workspace's tabs. */
@@ -125,5 +141,39 @@ describe("the thread header", () => {
     }
     expect(calls).toHaveLength(sent);
     expect(readLinkNames()).toEqual(["Bump the Bun pin, idle", "New thread in this workspace"]);
+  });
+});
+
+describe("the side pane's toggle", () => {
+  // The Office's thread drawer draws no toggle; office-screen.integration.test.tsx checks that.
+
+  /** Starts the app signed in at `path`, with the delegating thread's reads. */
+  const openApp = (path: string) => {
+    stubElementSize(800, 800);
+    stubApi({
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildThreadHandlers(THREAD_FIXTURES.delegating),
+    });
+    return renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
+      path,
+    });
+  };
+
+  it("shows and hides the thread's side pane, pressed while the pane is open", async () => {
+    await openApp(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
+    const toggle = await screen.findByRole("button", { name: "Show the side pane" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+    await userEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-label")).toBe("Hide the side pane");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.classList.contains("is-on")).toBe(true);
+    expect(await screen.findByRole("complementary", { name: "Side pane" })).toBeTruthy();
+  });
+
+  it("is drawn on a subagent's page too", async () => {
+    await openApp(`/threads/${FIXTURE_THREAD_IDS.flaky}/subagents/${FIXTURE_SUBAGENT.id}`);
+    expect(await screen.findByRole("button", { name: "Show the side pane" })).toBeTruthy();
   });
 });

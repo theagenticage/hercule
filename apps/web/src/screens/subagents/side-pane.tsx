@@ -7,18 +7,17 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
-import { SidePaneSlotContext } from "../../app/side-pane-slot";
 import {
   MIN_SIDE_PANE_WIDTH,
   SIDE_PANE_SURFACES,
-  closeSurface,
+  closeSidePaneSurface,
   fitSidePaneWidth,
-  openSurface,
-  useSidePaneLayout,
-  useSidePaneWidth,
+  openSidePaneSurface,
   type SidePaneSurface,
-} from "./use-side-pane";
+} from "@hercule/client-core";
+import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
+import { SidePaneSlotContext } from "../../app/side-pane-slot";
+import { useSidePaneLayout, useSidePaneWidth } from "./use-side-pane";
 
 /** How far one arrow key press moves the pane's edge, in pixels. */
 const KEYBOARD_STEP = 16;
@@ -124,17 +123,17 @@ export function SidePane({
                 selected={surface === shown}
                 panelId={panelId}
                 onSelect={() => {
-                  changeLayout((current) => openSurface(current, surface));
+                  changeLayout((current) => openSidePaneSurface(current, surface));
                 }}
                 onClose={() => {
-                  changeLayout((current) => closeSurface(current, surface));
+                  changeLayout((current) => closeSidePaneSurface(current, surface));
                 }}
               />
             ))}
           </div>
           <SurfacePicker
             onPick={(surface) => {
-              changeLayout((current) => openSurface(current, surface));
+              changeLayout((current) => openSidePaneSurface(current, surface));
             }}
           />
           <span className="ml-auto flex">

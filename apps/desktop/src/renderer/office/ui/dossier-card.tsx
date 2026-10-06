@@ -10,7 +10,11 @@
  * - Open thread.
  *
  * The card hides while the thread drawer is open, because the drawer shows
- * the same thread in full. After the selection is cleared the card keeps the
+ * the same thread in full. The card keeps the colleague's Request drafts, as
+ * the drawer does, so an answer begun on the card is still there in the
+ * drawer, and the other way round. As the card keeps the last colleague
+ * drawn after the selection is cleared, it keeps that colleague's drafts
+ * until another colleague is selected or the Office closes. After the selection is cleared the card keeps the
  * last colleague drawn while it fades out.
  */
 import { useState, useSyncExternalStore, type JSX, type ReactNode } from "react";
@@ -19,6 +23,7 @@ import { Mark } from "../../marks";
 import { ProjectTile } from "../../screens/project-tile";
 import { RequestDock } from "../../screens/thread/dock";
 import { useAgeLabel } from "../../app/age-clock";
+import { useKeepRequestDrafts } from "../../app/thread-drafts";
 import type { BuiltOffice } from "../engine/contracts";
 import {
   applyColleagueState,
@@ -90,6 +95,7 @@ export function DossierCard({
   const [shown, setShown] = useState(selected);
   if (selected !== null && selected !== shown) setShown(selected);
   const open = selected !== null && !state.drawer;
+  useKeepRequestDrafts(shown?.id ?? null);
 
   if (shown === null) return <section className="office-card glass" data-open={false} inert />;
 

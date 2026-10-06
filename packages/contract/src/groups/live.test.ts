@@ -8,6 +8,8 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  buildAgentStreamTopic,
+  buildAgentTapTopic,
   buildSessionStreamTopic,
   buildSessionTapTopic,
   buildSubagentStreamTopic,
@@ -22,6 +24,13 @@ const isAccepted = (topic: string): boolean =>
   Schema.decodeUnknownExit(LiveTopic)(topic)._tag === "Success";
 
 describe("a session topic", () => {
+  it("is the session's own topic without a subagent id, else the subagent's", () => {
+    expect(buildAgentStreamTopic("s1", undefined)).toBe(buildSessionStreamTopic("s1"));
+    expect(buildAgentTapTopic("s1", undefined)).toBe(buildSessionTapTopic("s1"));
+    expect(buildAgentStreamTopic("s1", "agent-a")).toBe(buildSubagentStreamTopic("s1", "agent-a"));
+    expect(buildAgentTapTopic("s1", "agent-a")).toBe(buildSubagentTapTopic("s1", "agent-a"));
+  });
+
   it("parses back to the ids and kind it was built from", () => {
     expect(parseSessionTopic(buildSessionStreamTopic("s1"))).toEqual({
       sessionId: "s1",

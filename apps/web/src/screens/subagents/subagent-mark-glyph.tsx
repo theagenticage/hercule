@@ -1,25 +1,27 @@
 import type { JSX } from "react";
-import type { SubagentHue } from "@hercule/client-core";
+import { decideSubagentMark, type SubagentHue } from "@hercule/client-core";
 import type { SubagentStatus } from "@hercule/contract";
 import { CancelledMark, DecisionMark, DoneMark, FailedMark, WorkingMark } from "@hercule/ui";
 
 /**
- * Renders a subagent's state mark: the working mark while it runs, the
- * decision mark while it runs and waits on the user, and the done, failed or
- * cancelled mark once it has ended. `waiting` is what `isSubagentWaiting`
- * returns for the subagent.
+ * Renders a subagent's state mark, as `decideSubagentMark` decides it: the
+ * working mark while it runs, the decision mark while it runs and waits on
+ * the user, and the done, failed or cancelled mark once it has ended.
+ * `waiting` is what `isSubagentWaiting` returns for the subagent.
  */
-export function SubagentMark({
+export function SubagentMarkGlyph({
   status,
   waiting,
 }: {
   readonly status: SubagentStatus;
   readonly waiting: boolean;
 }): JSX.Element {
-  switch (status) {
-    case "running":
-      return waiting ? <DecisionMark /> : <WorkingMark />;
-    case "completed":
+  switch (decideSubagentMark(status, waiting)) {
+    case "working":
+      return <WorkingMark />;
+    case "waiting":
+      return <DecisionMark />;
+    case "done":
       return <DoneMark />;
     case "failed":
       return <FailedMark />;
