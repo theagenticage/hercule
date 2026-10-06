@@ -26,6 +26,7 @@ export {
   findNewestConversationSession,
   type AssistantPresence,
 } from "./assistants/presence";
+export { buildAssistantRows, decideAssistantPose, type AssistantRow } from "./assistants/rows";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
   buildConfigDraft,
@@ -80,6 +81,7 @@ export {
 export { toIdTail } from "./id-tail";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
+export { listWaiting, type Waiting, type WaitingAssistant, type WaitingThread } from "./waiting";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";
@@ -429,7 +431,6 @@ export {
   showsTurnDivider,
 } from "./threads/turn-divider";
 export { buildTurns, mayBeRunningTurn, type ThreadItem, type ThreadTurn } from "./threads/turns";
-export { listWaitingThreads, type WaitingThread } from "./threads/waiting-threads";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

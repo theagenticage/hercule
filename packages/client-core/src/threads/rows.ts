@@ -25,13 +25,17 @@ export interface ThreadRow {
 }
 
 /**
- * Compares two rows so that sorting puts the most recently active first, and
- * two rows active at the same moment in session id order. Ties are common:
- * ending many sessions at once stamps one time on all of them. Every list of
- * thread rows sorts with this, so two lists that show the same threads show
- * them in the same order.
+ * Compares two entries, each a session's last activity and its session id,
+ * so that sorting puts the most recently active first, and two entries
+ * active at the same moment in session id order. Ties are common: ending many
+ * sessions at once stamps one time on all of them. Every list of thread rows,
+ * and Waiting on you, sorts with this, so two lists that show the same
+ * sessions show them in the same order.
  */
-export const compareNewestFirst = (a: ThreadRow, b: ThreadRow): number =>
+export const compareNewestFirst = (
+  a: { readonly activityAt: string; readonly id: string },
+  b: { readonly activityAt: string; readonly id: string },
+): number =>
   Date.parse(b.activityAt) - Date.parse(a.activityAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** Returns the state marker for a session's row. */

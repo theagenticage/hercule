@@ -139,8 +139,11 @@ const buildAgentTapTopic = (sessionId: string, subagentId: SubagentId | undefine
     ? buildSessionTapTopic(sessionId)
     : buildSubagentTapTopic(sessionId, subagentId);
 
+/** A change to one record of a mutable topic. */
+type RecordChange = Extract<Change, { readonly _tag: "record" }>;
+
 /** Checks whether a record change is collected for the slow window rather than the short one. */
-const isSlowPaced = (change: Extract<Change, { readonly _tag: "record" }>): boolean =>
+const isSlowPaced = (change: RecordChange): boolean =>
   change.topic === "subagent" || change.usageOnly === true;
 
 const make = Effect.gen(function* () {
@@ -182,11 +185,19 @@ const make = Effect.gen(function* () {
    * them when it closes, one message per topic and kind. Returns the function
    * that adds a change. The first change after a send opens the next window,
    * so an id is sent at most once per window however often it changes.
+   *
+   * A `session` message also maps each id to its session's conversation. The
+   * map is kept by id from the moment a change is collected, so batching can
+   * never pair an id with another session's conversation.
    */
   const startCoalescing = (windowMs: number) =>
     Effect.gen(function* () {
-      /** The ids of the records changed since the last send, by topic and by kind. */
-      const pending = new Map<MutableLiveTopic, Map<InvalidateKind, Set<string>>>();
+      /**
+       * The records changed since the last send, by topic and by kind: each
+       * id, with its session's conversation. Only the `session` topic has
+       * one, so on every other topic the value is `null` and never sent.
+       */
+      const pending = new Map<MutableLiveTopic, Map<InvalidateKind, Map<string, string | null>>>();
       /** Receives a signal when changes are pending. Holds at most one signal. */
       const wake = yield* Queue.dropping<void>(1);
 
@@ -196,8 +207,17 @@ const make = Effect.gen(function* () {
         for (const [topic, kinds] of collected) {
           const subscribers = watchers.get(topic);
           if (subscribers === undefined) continue;
-          for (const [kind, ids] of kinds) {
-            const message: LiveMessage = { _tag: "invalidate", ids: [...ids], kind };
+          for (const [kind, changed] of kinds) {
+            const ids = [...changed.keys()];
+            const message: LiveMessage =
+              topic === "session"
+                ? {
+                    _tag: "invalidate",
+                    ids,
+                    kind,
+                    conversationIds: Object.fromEntries(changed),
+                  }
+                : { _tag: "invalidate", ids, kind };
             yield* Effect.forEach(subscribers, (watcher) => offerTo(watcher, message), {
               discard: true,
             });
@@ -222,13 +242,14 @@ const make = Effect.gen(function* () {
         ),
       );
 
-      return (topic: MutableLiveTopic, kind: InvalidateKind, id: string): Effect.Effect<void> =>
+      return (change: RecordChange): Effect.Effect<void> =>
         Effect.suspend(() => {
-          const kinds = pending.get(topic) ?? new Map<InvalidateKind, Set<string>>();
-          pending.set(topic, kinds);
-          const ids = kinds.get(kind) ?? new Set<string>();
-          kinds.set(kind, ids);
-          ids.add(id);
+          const kinds =
+            pending.get(change.topic) ?? new Map<InvalidateKind, Map<string, string | null>>();
+          pending.set(change.topic, kinds);
+          const changed = kinds.get(change.kind) ?? new Map<string, string | null>();
+          kinds.set(change.kind, changed);
+          changed.set(change.id, change.topic === "session" ? change.conversationId : null);
           return Effect.asVoid(Queue.offer(wake, undefined));
         });
     });
@@ -505,7 +526,7 @@ const make = Effect.gen(function* () {
             continue;
           }
           const collect = isSlowPaced(change) ? collectSlowChange : collectChange;
-          yield* collect(change.topic, change.kind, change.id);
+          yield* collect(change);
         }
         for (const topic of grown) {
           yield* Effect.forEach(

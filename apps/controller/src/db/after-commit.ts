@@ -38,14 +38,27 @@ import type { SubagentId } from "@hercule/protocol";
  * - A `record` change with `usageOnly` changed nothing about the record but
  *   its Token Usage. It comes with almost every event a working agent
  *   reports, so it is sent at a slower pace than other changes.
+ * - A `record` change on the `session` topic names the conversation the
+ *   session answers, or `null` for a session in none, so the push can tell a
+ *   client which conversations it touches. A session's conversation is set
+ *   when the session is created and never changes, so two changes to one
+ *   session can never disagree about it.
  * - A `transcript` change names the agent whose transcript grew: the
  *   session's own when `subagentId` is absent, otherwise that subagent's.
  */
 export type Change =
   | {
       readonly _tag: "record";
-      readonly topic: MutableLiveTopic;
+      readonly topic: Exclude<MutableLiveTopic, "session">;
       readonly id: string;
+      readonly kind: InvalidateKind;
+      readonly usageOnly?: true;
+    }
+  | {
+      readonly _tag: "record";
+      readonly topic: "session";
+      readonly id: string;
+      readonly conversationId: string | null;
       readonly kind: InvalidateKind;
       readonly usageOnly?: true;
     }

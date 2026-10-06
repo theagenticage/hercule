@@ -13,8 +13,6 @@ import {
   countThreadsByPose,
   decideThreadPose,
   decideThreadRowEnd,
-  findOldestOpenRequest,
-  formatRequestQuestion,
   type DraftPlace,
   type ExpandedSections,
   type Pose,
@@ -23,6 +21,7 @@ import {
   type SidebarSections,
   type ThreadCounts,
   type ThreadRowEnd,
+  type Waiting,
   type WaitingSection,
 } from "@hercule/client-core";
 import type {
@@ -33,7 +32,8 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
-import type { GoMenuThread } from "../../ipc/contract";
+import type { GoMenuItem } from "../../ipc/contract";
+import { buildDestinationKey } from "../../ipc/destination";
 import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
 
 /**
@@ -58,10 +58,17 @@ export type SectionKey = "waiting" | `project:${string}`;
 export type SidebarItemContent =
   | { readonly kind: "waiting-header"; readonly key: string; readonly count: number }
   | {
-      readonly kind: "waiting-row";
+      readonly kind: "waiting-thread-row";
       readonly key: string;
       readonly sessionId: string;
       readonly title: string;
+      readonly question: string;
+    }
+  | {
+      readonly kind: "waiting-assistant-row";
+      readonly key: string;
+      readonly assistantId: string;
+      readonly name: string;
       readonly question: string;
     }
   | {
@@ -127,7 +134,8 @@ export type SidebarItemKind = SidebarItem["kind"];
  * the same numbers):
  *
  * - a section header (`h3.side-h`) is 24;
- * - a Waiting on you row (`.side-row--wait`) is 38;
+ * - a Waiting on you row (`.side-row--wait`) is 38, a thread's and an
+ *   assistant's alike;
  * - a thread row (`.side-row`) is 35, and so is the draft's row, which is
  *   drawn as one;
  * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
@@ -136,7 +144,8 @@ export type SidebarItemKind = SidebarItem["kind"];
  */
 export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-header": 24,
-  "waiting-row": 38,
+  "waiting-thread-row": 38,
+  "waiting-assistant-row": 38,
   "project-header": 24,
   "workspace-label": 22,
   "thread-row": 35,
@@ -206,6 +215,28 @@ const formatMoreLabel = (section: "waiting" | "project", hidden: number): string
     ? `${String(hidden)} more waiting on you`
     : `${String(hidden)} more ${hidden === 1 ? "thread" : "threads"}`;
 
+/** Returns the content of a Waiting on you row: a thread's or an assistant's. */
+const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
+  switch (waiting.kind) {
+    case "thread":
+      return {
+        kind: "waiting-thread-row",
+        key: `waiting:${buildDestinationKey({ kind: "thread", sessionId: waiting.sessionId })}`,
+        sessionId: waiting.sessionId,
+        title: waiting.title,
+        question: waiting.question,
+      };
+    case "assistant":
+      return {
+        kind: "waiting-assistant-row",
+        key: `waiting:${buildDestinationKey({ kind: "assistant", assistantId: waiting.assistantId })}`,
+        assistantId: waiting.assistantId,
+        name: waiting.name,
+        question: waiting.question,
+      };
+  }
+};
+
 /** What the items need to know about the threads, beyond the sections. */
 interface SidebarItemSources {
   readonly sections: SidebarSections;
@@ -252,32 +283,18 @@ const placeInSection = (
   }));
 
 /**
- * Returns what Waiting on you draws: its header, its rows, and its "more" row
- * when it hides some.
+ * Returns what Waiting on you draws: its header, its rows, threads and
+ * assistants in the section's order, and its "more" row when it hides some.
  */
-const buildWaitingContents = (
-  waiting: WaitingSection,
-  sessions: ReadonlyMap<string, Session>,
-): SidebarItemContent[] => {
+const buildWaitingContents = (waiting: WaitingSection): SidebarItemContent[] => {
   const contents: SidebarItemContent[] = [
     {
       kind: "waiting-header",
       key: buildHeaderKey("waiting"),
       count: waiting.rows.length + waiting.hiddenCount,
     },
+    ...waiting.rows.map(buildWaitingRow),
   ];
-  for (const row of waiting.rows) {
-    const session = sessions.get(row.id);
-    const request = session === undefined ? null : findOldestOpenRequest(session);
-    if (request === null) continue;
-    contents.push({
-      kind: "waiting-row",
-      key: `waiting:${row.id}`,
-      sessionId: row.id,
-      title: row.title,
-      question: formatRequestQuestion(request),
-    });
-  }
   if (waiting.hiddenCount > 0) {
     contents.push({
       kind: "more",
@@ -357,18 +374,20 @@ const buildProjectContents = (
 };
 
 /**
- * Returns the sidebar's items, top to bottom: Waiting on you when a thread is
- * waiting, then each project's section in the order of `sections.projects`.
+ * Returns the sidebar's items, top to bottom: Waiting on you when a thread or
+ * an assistant is waiting, then each project's section in the order of
+ * `sections.projects`.
  *
- * A row whose session is missing from `sessions` or `poses` is left out. All
- * three are built from one read of the thread list, so this does not happen.
+ * A thread row whose session is missing from `sessions` or `poses` is left
+ * out. All three are built from one read of the thread list, so this does
+ * not happen.
  */
 const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
-  const { sections, sessions } = sources;
+  const { sections } = sources;
   return [
     ...(sections.waiting === null
       ? []
-      : placeInSection("waiting", buildWaitingContents(sections.waiting, sessions))),
+      : placeInSection("waiting", buildWaitingContents(sections.waiting))),
     ...sections.projects.flatMap((project) =>
       placeInSection(
         buildProjectSectionKey(project.projectId),
@@ -381,6 +400,8 @@ const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] 
 /** What the sidebar is built from: the lists it reads, the open draft, and the user's choices. */
 export interface SidebarSources {
   readonly threads: readonly Session[];
+  /** The threads and the assistants waiting on the user, as `listWaiting` returns them. */
+  readonly waiting: readonly Waiting[];
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
@@ -414,6 +435,7 @@ export interface Sidebar {
  */
 export const buildSidebar = ({
   threads,
+  waiting,
   projects,
   workspaces,
   resources,
@@ -445,6 +467,7 @@ export const buildSidebar = ({
   });
   const sections = buildSidebarSections({
     groups,
+    waiting,
     poses,
     expanded: buildExpandedSections(expanded, groups),
     selectedId,
@@ -460,26 +483,49 @@ export const buildSidebar = ({
   return { items, counts: countThreadsByPose(poses.values()) };
 };
 
-/** How many threads the Go menu lists: one per shortcut, ⌘1 to ⌘9. */
-const GO_MENU_THREAD_LIMIT = 9;
+/** How many items the Go menu lists: one per shortcut, ⌘1 to ⌘9. */
+const GO_MENU_LIMIT = 9;
 
 /**
- * Returns the first nine threads the sidebar shows, top to bottom, for the Go
- * menu. A waiting thread shows twice, under Waiting on you and in its project,
- * and is listed once, where it shows first.
+ * Returns the Go menu item of a sidebar item that opens a thread or an
+ * assistant, or `null` for any other item.
  */
-export const listGoMenuThreads = (items: readonly SidebarItem[]): GoMenuThread[] => {
-  const threads = new Map<string, GoMenuThread>();
-  for (const item of items) {
-    if (threads.size === GO_MENU_THREAD_LIMIT) break;
-    if (
-      (item.kind === "waiting-row" || item.kind === "thread-row") &&
-      !threads.has(item.sessionId)
-    ) {
-      threads.set(item.sessionId, { sessionId: item.sessionId, title: item.title });
-    }
+const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
+  switch (item.kind) {
+    case "waiting-thread-row":
+    case "thread-row":
+      return { destination: { kind: "thread", sessionId: item.sessionId }, title: item.title };
+    case "waiting-assistant-row":
+      return {
+        destination: { kind: "assistant", assistantId: item.assistantId },
+        title: item.name,
+      };
+    case "waiting-header":
+    case "project-header":
+    case "workspace-label":
+    case "draft-row":
+    case "more":
+      return null;
   }
-  return [...threads.values()];
+};
+
+/**
+ * Returns the first nine threads and assistants the sidebar's list shows,
+ * top to bottom, for the Go menu. A waiting thread shows twice, under Waiting
+ * on you and in its project, and is listed once, where it shows first. An
+ * assistant is listed only while Waiting on you shows it: the Assistants
+ * section is not part of the list.
+ */
+export const listGoMenuItems = (items: readonly SidebarItem[]): GoMenuItem[] => {
+  const listed = new Map<string, GoMenuItem>();
+  for (const item of items) {
+    if (listed.size === GO_MENU_LIMIT) break;
+    const goMenuItem = buildGoMenuItem(item);
+    if (goMenuItem === null) continue;
+    const key = buildDestinationKey(goMenuItem.destination);
+    if (!listed.has(key)) listed.set(key, goMenuItem);
+  }
+  return [...listed.values()];
 };
 
 /**
@@ -511,7 +557,9 @@ export const pickFocusFallback = (
       const shown = after.find(
         (item) =>
           item.section === gone.section &&
-          (item.kind === "waiting-row" || item.kind === "thread-row") &&
+          (item.kind === "waiting-thread-row" ||
+            item.kind === "waiting-assistant-row" ||
+            item.kind === "thread-row") &&
           !shownBefore.has(item.key),
       );
       if (shown !== undefined) return shown.key;

@@ -154,6 +154,7 @@ describe("buildRoomContents", () => {
     heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
     rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
     reply: "turn-end",
+    mainConversationId: "01a06d02-c000-7000-8000-000000000001",
     createdAt: "2026-09-05T09:00:00.000Z",
     updatedAt: "2026-09-05T09:00:00.000Z",
   };
@@ -195,7 +196,7 @@ describe("buildRoomContents", () => {
 
     expect(room.lightsOn).toBe(true);
     expect(room.yourDesk).toBe(true);
-    expect(room.assistant).toEqual({ name: "Hercule" });
+    expect(room.assistant).toEqual({ id: HERCULE.id, name: "Hercule" });
   });
 
   it("draws everything once every step is done", () => {
@@ -211,7 +212,7 @@ describe("buildRoomContents", () => {
         },
       },
       yourDesk: true,
-      assistant: { name: "Hercule" },
+      assistant: { id: HERCULE.id, name: "Hercule" },
       triage: { note: TRIAGE_READING_GITHUB },
       gitHubAccount: "rogier",
     });
@@ -269,7 +270,7 @@ describe("buildRoomContents", () => {
     const newer = { ...HERCULE, name: "Ada", createdAt: "2026-09-06T09:00:00.000Z" };
     const room = buildRoomContents({ ...EVERYTHING, ...ROOM, assistants: [newer, HERCULE] });
 
-    expect(room.assistant).toEqual({ name: "Hercule" });
+    expect(room.assistant).toEqual({ id: HERCULE.id, name: "Hercule" });
   });
 
   it("draws the first thread only when a provider is logged in, in the oldest project", () => {

@@ -1,7 +1,7 @@
 /**
  * The items of the sidebar's thread list: section headers, workspace labels,
- * thread rows, the draft's row and "more" rows, drawn as the Bureau book's
- * crew.js draws them.
+ * thread rows, the waiting assistants' rows, the draft's row and "more" rows,
+ * drawn as the Bureau book's crew.js draws them.
  *
  * Each item draws itself at its kind's fixed height, with the space above it
  * as its top margin. The list stacks the items one under another, so an item
@@ -102,7 +102,7 @@ function ThreadLink({
  * state. It opens the thread in the Office's drawer while `officeOpen` is
  * true, because a waiting thread always has a colleague there.
  */
-export const WaitingRow = memo(function WaitingRow({
+export const WaitingThreadRow = memo(function WaitingThreadRow({
   itemKey,
   leading,
   sessionId,
@@ -123,7 +123,7 @@ export const WaitingRow = memo(function WaitingRow({
       officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={itemKey}
-      style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-row"] }}
+      style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-thread-row"] }}
       aria-label={`${title}, ${describePose("waiting")}`}
       aria-describedby={questionId}
     >
@@ -135,6 +135,47 @@ export const WaitingRow = memo(function WaitingRow({
         </span>
       </span>
     </ThreadLink>
+  );
+});
+
+/**
+ * Renders an assistant in Waiting on you, drawn as a waiting thread's row:
+ * its waiting face, its name and the question it asks. The link is named
+ * "<name>, waiting on you" and described by the question. It opens the
+ * assistant's Conversation, where the Request is answered, also while the
+ * Office is open, because an assistant has no colleague there.
+ */
+export const WaitingAssistantRow = memo(function WaitingAssistantRow({
+  itemKey,
+  leading,
+  assistantId,
+  name,
+  question,
+}: Placement & {
+  readonly assistantId: string;
+  readonly name: string;
+  readonly question: string;
+}): JSX.Element {
+  const questionId = useId();
+  return (
+    <Link
+      to="/assistants/$assistantId"
+      params={{ assistantId }}
+      activeProps={SELECTED_LINK_PROPS}
+      className="side-row side-row--wait side-item"
+      data-key={itemKey}
+      style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-assistant-row"] }}
+      aria-label={`${name}, ${describePose("waiting")}`}
+      aria-describedby={questionId}
+    >
+      <Face look={buildLook(assistantId)} pose="waiting" size={24} />
+      <span className="side-text">
+        <span className="side-name">{name}</span>
+        <span className="side-ask" id={questionId}>
+          {question}
+        </span>
+      </span>
+    </Link>
   );
 });
 

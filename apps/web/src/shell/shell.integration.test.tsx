@@ -786,6 +786,7 @@ const BASE_ASSISTANT: Assistant = {
   heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
   rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
   reply: "turn-end",
+  mainConversationId: "01a06d02-c000-7000-8000-000000000001",
   createdAt: "2026-09-04T08:00:00.000Z",
   updatedAt: "2026-09-04T08:00:00.000Z",
 };
@@ -796,6 +797,7 @@ const BOB: Assistant = {
   ...BASE_ASSISTANT,
   id: "01a06d02-a000-7000-8000-000000000002",
   name: "Bob",
+  mainConversationId: "01a06d02-c000-7000-8000-000000000002",
   createdAt: "2026-09-04T09:00:00.000Z",
   updatedAt: "2026-09-04T09:00:00.000Z",
 };

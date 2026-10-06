@@ -1,26 +1,30 @@
 /**
  * Tests the shell route's data and wiring: the loader's reads, the live
  * connection that keeps them current, File > New Thread, Go > Office, and
- * what the shell sends main for the dock badge, the threads' notifications
- * and the Go menu.
+ * what the shell sends main for the dock badge, the notifications and the Go
+ * menu, and opens when main asks for a thread or an assistant.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling } from "@hercule/client-core";
-import type { OpenRequest, Session } from "@hercule/contract";
+import type { OpenRequest, Session, SessionRequest } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
 import { projectsQuery, threadsQuery } from "../../app/queries";
 import {
   buildErrorBody,
+  buildFixtureAssistant,
+  buildFixtureAssistantSession,
   buildSidebarHandlers,
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
+  startApp,
   stubApi,
   THREAD_FIXTURES,
   type Call,
@@ -47,10 +51,60 @@ afterEach(() => {
 const countReads = (calls: readonly Call[], path: string): number =>
   calls.filter((call) => call.method === "GET" && call.path === path).length;
 
+/** Ada, an assistant whose current session waits on the user's approval of `make deploy`. */
+const ADA = buildFixtureAssistant({
+  id: "01a06d02-7700-7000-8000-000000000001",
+  name: "Ada",
+  mainConversationId: "01a06d02-7800-7000-8000-000000000001",
+});
+const ADA_SESSION = buildFixtureAssistantSession(ADA, {
+  id: "01a06d02-7400-7000-8000-000000000101",
+  status: "busy",
+  lastActivityAt: "2026-09-10T09:01:00.000Z",
+  openRequests: [
+    {
+      requestId: "req-ada",
+      itemId: "tool-ada",
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command: "make deploy" },
+    },
+  ],
+});
+
+/** Checks whether `call` reads the current session of one conversation, as an assistant's pose needs. */
+const readsConversation = (call: Call): boolean =>
+  call.path === "/api/v1/sessions" && new URLSearchParams(call.search).has("conversationId");
+
+/** Counts the reads of one conversation's current session among `calls`. */
+const countConversationReads = (calls: readonly Call[], conversationId: string): number =>
+  calls.filter(
+    (call) =>
+      readsConversation(call) &&
+      new URLSearchParams(call.search).get("conversationId") === conversationId,
+  ).length;
+
+/** Milo, an assistant whose current session is idle. */
+const MILO = buildFixtureAssistant({
+  id: "01a06d02-7700-7000-8000-000000000003",
+  name: "Milo",
+  mainConversationId: "01a06d02-7800-7000-8000-000000000003",
+});
+const MILO_SESSION = buildFixtureAssistantSession(MILO, {
+  id: "01a06d02-7400-7000-8000-000000000103",
+  status: "idle",
+});
+
+/** The sidebar fixture's handlers, with Ada and her waiting session added. */
+const WITH_ADA = buildSidebarHandlers({
+  ...SIDEBAR_FIXTURE,
+  assistants: [{ assistant: ADA, session: ADA_SESSION }],
+});
+
 /**
  * Starts the app signed in, at `path`, with the sidebar fixture and
  * `handlers` on top, and waits until the live connection holds the shell's
- * five subscriptions and every read has settled, including the reads the
+ * six subscriptions and every read has settled, including the reads the
  * first connection makes.
  */
 const startShell = async ({
@@ -64,10 +118,11 @@ const startShell = async ({
   return { calls, fake, ...app };
 };
 
-/** Waits until the live connection holds the shell's five subscriptions and no read is running. */
+/** Waits until the live connection holds the shell's six subscriptions and no read is running. */
 const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promise<void> => {
   await waitFor(() => {
     expect([...live.readTopics()].sort()).toEqual([
+      "assistant",
       "connection",
       "provider",
       "runner",
@@ -89,6 +144,7 @@ describe("the shell's loader", () => {
       "/api/v1/runners",
       "/api/v1/providers",
       "/api/v1/user",
+      "/api/v1/assistants",
     ]) {
       expect(countReads(calls, path), path).toBeGreaterThan(0);
     }
@@ -121,6 +177,27 @@ describe("the shell's loader", () => {
       { thread: "true", limit: "500" },
       { thread: "true", limit: "500", cursor: "page-2" },
     ]);
+  });
+
+  it("waits for each assistant's current session before the shell renders", async () => {
+    const held = holdAnswer();
+    const calls = stubApi({
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+      ...WITH_ADA,
+      "GET /api/v1/sessions": (call) =>
+        readsConversation(call) ? held.handler() : { body: { items: SIDEBAR_FIXTURE.threads } },
+    });
+    await startApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }));
+    await waitFor(() => {
+      expect(calls.some(readsConversation)).toBe(true);
+    });
+    // Rendered now, the shell would show Ada idle until her session arrived.
+    expect(screen.queryByRole("navigation", { name: "Assistants" })).toBeNull();
+
+    held.answer({ body: { items: [ADA_SESSION] } });
+
+    const section = await screen.findByRole("navigation", { name: "Assistants" });
+    expect(within(section).getByRole("link", { name: "Ada, waiting on you" })).toBeTruthy();
   });
 
   it("shows the sign-in screen, with the caches emptied, when the controller rejects the saved token", async () => {
@@ -392,7 +469,7 @@ describe("Go > Office", () => {
       handlers: buildThreadHandlers(THREAD_FIXTURES.finished),
     });
 
-    fake.openThread(FIXTURE_THREAD_IDS.bunPin);
+    fake.openDestination({ kind: "thread", sessionId: FIXTURE_THREAD_IDS.bunPin });
 
     await waitFor(() => {
       expect(router.state.location.search).toEqual({ session: FIXTURE_THREAD_IDS.bunPin });
@@ -405,7 +482,7 @@ describe("Go > Office", () => {
 
     // "Rotate the backups key" has exited and cannot be resumed, so it is
     // away and has no colleague.
-    fake.openThread(FIXTURE_THREAD_IDS.backupsKey);
+    fake.openDestination({ kind: "thread", sessionId: FIXTURE_THREAD_IDS.backupsKey });
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
@@ -413,19 +490,37 @@ describe("Go > Office", () => {
   });
 });
 
-describe("the threads waiting on the user", () => {
-  /** The fixture's one waiting thread, as the shell sends it to main. */
-  const RUNBOOK_WAITING = {
-    sessionId: FIXTURE_THREAD_IDS.runbook,
-    requestId: "req-1",
-    title: "Write the retry runbook",
-    question: "Run git push?",
-  };
+/** The fixture's one waiting thread, as the shell sends it to main. */
+const RUNBOOK_WAITING = {
+  destination: { kind: "thread", sessionId: FIXTURE_THREAD_IDS.runbook },
+  requestId: "req-1",
+  openRequestIds: ["req-1"],
+  title: "Write the retry runbook",
+  body: "Run git push?",
+};
 
+describe("the threads and assistants waiting on the user", () => {
   it("are sent to main when the shell opens", async () => {
     const { fake } = await startShell();
 
-    expect(fake.waitingThreadLists).toEqual([[RUNBOOK_WAITING]]);
+    expect(fake.waitingLists).toEqual([[RUNBOOK_WAITING]]);
+  });
+
+  it("are sent to main with a waiting assistant under its name, newest first among the threads", async () => {
+    const { fake } = await startShell({ handlers: WITH_ADA });
+
+    expect(fake.waitingLists).toEqual([
+      [
+        RUNBOOK_WAITING,
+        {
+          destination: { kind: "assistant", assistantId: ADA.id },
+          requestId: "req-ada",
+          openRequestIds: ["req-ada"],
+          title: "Ada",
+          body: "Run make deploy?",
+        },
+      ],
+    ]);
   });
 
   it("are sent to main again when a thread starts waiting, and when its Request is answered elsewhere", async () => {
@@ -437,8 +532,7 @@ describe("the threads waiting on the user", () => {
       detail: { command: "pnpm test" },
     };
     let threads = SIDEBAR_FIXTURE.threads;
-    const setFlakyRequest = (request: OpenRequest | null): void => {
-      const openRequests = request === null ? [] : [request];
+    const setFlakyRequests = (openRequests: readonly OpenRequest[]): void => {
       threads = threads.map((thread) =>
         thread.id === FIXTURE_THREAD_IDS.flaky ? { ...thread, openRequests } : thread,
       );
@@ -447,29 +541,81 @@ describe("the threads waiting on the user", () => {
       handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
     });
 
-    setFlakyRequest(TEST_REQUEST);
+    setFlakyRequests([TEST_REQUEST]);
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
     });
     await waitFor(() => {
-      expect(fake.waitingThreadLists.at(-1)).toEqual([
+      expect(fake.waitingLists.at(-1)).toEqual([
         RUNBOOK_WAITING,
         {
-          sessionId: FIXTURE_THREAD_IDS.flaky,
+          destination: { kind: "thread", sessionId: FIXTURE_THREAD_IDS.flaky },
           requestId: "req-2",
+          openRequestIds: ["req-2"],
           title: "Fix flaky webhook tests",
-          question: "Run pnpm test?",
+          body: "Run pnpm test?",
         },
       ]);
     });
 
     // Answered elsewhere, such as in the web app.
-    setFlakyRequest(null);
+    setFlakyRequests([]);
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
     });
     await waitFor(() => {
-      expect(fake.waitingThreadLists.at(-1)).toEqual([RUNBOOK_WAITING]);
+      expect(fake.waitingLists.at(-1)).toEqual([RUNBOOK_WAITING]);
+    });
+  });
+
+  it("are sent to main with the newest of a thread's Requests for its notification, naming a subagent that asks", async () => {
+    const buildCommandRequest = (requestId: string, command: string): SessionRequest => ({
+      requestId,
+      itemId: `tool-${requestId}`,
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command },
+    });
+    let threads = SIDEBAR_FIXTURE.threads;
+    const setFlakyRequests = (openRequests: readonly SessionRequest[]): void => {
+      threads = threads.map((thread) =>
+        thread.id === FIXTURE_THREAD_IDS.flaky ? { ...thread, openRequests } : thread,
+      );
+      act(() => {
+        live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
+      });
+    };
+    const { fake, live } = await startShell({
+      handlers: { "GET /api/v1/sessions": () => ({ body: { items: threads } }) },
+    });
+    const FLAKY = { kind: "thread", sessionId: FIXTURE_THREAD_IDS.flaky };
+    const readFlaky = () =>
+      fake.waitingLists
+        .at(-1)
+        ?.find((each) => JSON.stringify(each.destination) === JSON.stringify(FLAKY));
+
+    setFlakyRequests([
+      buildCommandRequest("req-2", "pnpm test"),
+      {
+        ...buildCommandRequest("req-3", "git push"),
+        subagentId: "agent-1",
+        subagentName: "Review the diff",
+      },
+    ]);
+    await waitFor(() => {
+      expect(readFlaky()).toEqual({
+        destination: FLAKY,
+        requestId: "req-3",
+        openRequestIds: ["req-2", "req-3"],
+        title: "Fix flaky webhook tests",
+        body: "Review the diff asks: Run git push?\n+1 more waiting",
+      });
+    });
+
+    // The subagent's Request is answered; the older one stays open.
+    setFlakyRequests([buildCommandRequest("req-2", "pnpm test")]);
+    await waitFor(() => {
+      expect(readFlaky()).toMatchObject({ requestId: "req-2", openRequestIds: ["req-2"] });
     });
   });
 
@@ -492,8 +638,14 @@ describe("the threads waiting on the user", () => {
     await waitFor(() => {
       expect(fake.goMenus).toHaveLength(2);
     });
-    expect(fake.waitingThreadLists).toEqual([[RUNBOOK_WAITING]]);
+    expect(fake.waitingLists).toEqual([[RUNBOOK_WAITING]]);
   });
+});
+
+/** Returns the Go menu item that opens the thread `sessionId`, titled `title`. */
+const buildThreadItem = (sessionId: string, title: string) => ({
+  destination: { kind: "thread", sessionId },
+  title,
 });
 
 describe("the Go menu", () => {
@@ -502,12 +654,22 @@ describe("the Go menu", () => {
 
     expect(fake.goMenus).toEqual([
       [
-        { sessionId: FIXTURE_THREAD_IDS.runbook, title: "Write the retry runbook" },
-        { sessionId: FIXTURE_THREAD_IDS.flaky, title: "Fix flaky webhook tests" },
-        { sessionId: FIXTURE_THREAD_IDS.bunPin, title: "Bump the Bun pin" },
-        { sessionId: FIXTURE_THREAD_IDS.backupsKey, title: "Rotate the backups key" },
-        { sessionId: FIXTURE_THREAD_IDS.pricingPage, title: "Sketch the pricing page" },
+        buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Write the retry runbook"),
+        buildThreadItem(FIXTURE_THREAD_IDS.flaky, "Fix flaky webhook tests"),
+        buildThreadItem(FIXTURE_THREAD_IDS.bunPin, "Bump the Bun pin"),
+        buildThreadItem(FIXTURE_THREAD_IDS.backupsKey, "Rotate the backups key"),
+        buildThreadItem(FIXTURE_THREAD_IDS.pricingPage, "Sketch the pricing page"),
       ],
+    ]);
+  });
+
+  it("sends main a waiting assistant where Waiting on you shows it, under its name", async () => {
+    const { fake } = await startShell({ handlers: WITH_ADA });
+
+    expect(fake.goMenus.at(-1)?.slice(0, 3)).toEqual([
+      buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Write the retry runbook"),
+      { destination: { kind: "assistant", assistantId: ADA.id }, title: "Ada" },
+      buildThreadItem(FIXTURE_THREAD_IDS.flaky, "Fix flaky webhook tests"),
     ]);
   });
 
@@ -529,7 +691,7 @@ describe("the Go menu", () => {
     await waitFor(() => {
       expect(fake.goMenus).toHaveLength(2);
     });
-    expect(fake.goMenus[1]?.map((thread) => thread.title)).toEqual([
+    expect(fake.goMenus[1]?.map((item) => item.title)).toEqual([
       "Write the retry runbook",
       "Fix flaky webhook tests",
       "Bump the Bun pin to 1.3",
@@ -543,11 +705,213 @@ describe("the Go menu", () => {
     fake.sendMenuCommand("newThread");
     await screen.findByRole("dialog", { name: "New thread in" });
 
-    fake.openThread(FIXTURE_THREAD_IDS.bunPin);
+    fake.openDestination({ kind: "thread", sessionId: FIXTURE_THREAD_IDS.bunPin });
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.bunPin}`);
     });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens the assistant main asks for on its screen, also while the Office is open", async () => {
+    const { fake, router } = await startShell({ path: "/office", handlers: WITH_ADA });
+    fake.sendMenuCommand("newThread");
+    await screen.findByRole("dialog", { name: "New thread in" });
+
+    fake.openDestination({ kind: "assistant", assistantId: ADA.id });
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/assistants/${ADA.id}`);
+    });
+    expect(screen.queryByRole("dialog", { name: "New thread in" })).toBeNull();
+  });
+});
+
+describe("the assistants", () => {
+  it("are read again when the live connection reports a change to one", async () => {
+    const { calls, live } = await startShell({ handlers: WITH_ADA });
+    const reads = countReads(calls, "/api/v1/assistants");
+
+    act(() => {
+      live.pushInvalidation("assistant", [ADA.id]);
+    });
+
+    await waitFor(() => {
+      expect(countReads(calls, "/api/v1/assistants")).toBe(reads + 1);
+    });
+  });
+
+  describe("on a session push, read an assistant's current session again", () => {
+    /** Starts the shell with Ada and Milo, and returns how often each one's current session was read. */
+    const startWithAdaAndMilo = async () => {
+      const shell = await startShell({
+        handlers: buildSidebarHandlers({
+          ...SIDEBAR_FIXTURE,
+          assistants: [
+            { assistant: ADA, session: ADA_SESSION },
+            { assistant: MILO, session: MILO_SESSION },
+          ],
+        }),
+      });
+      const countReadsOf = () => ({
+        ada: countConversationReads(shell.calls, ADA.mainConversationId),
+        milo: countConversationReads(shell.calls, MILO.mainConversationId),
+      });
+      return { ...shell, countReadsOf };
+    };
+
+    /**
+     * Pushes a `session` change naming `ids`, each with its conversation from
+     * `conversationIds` when given, and waits until every read it starts has
+     * settled.
+     */
+    const pushAndSettle = async (
+      { calls, live, context }: Awaited<ReturnType<typeof startWithAdaAndMilo>>,
+      ids?: readonly string[],
+      conversationIds?: Readonly<Record<string, string | null>>,
+    ) => {
+      const threadReads =
+        countReads(calls, "/api/v1/sessions") - calls.filter(readsConversation).length;
+      act(() => {
+        live.pushInvalidation("session", ids, conversationIds);
+      });
+      // The thread list is read again on every push, so its read marks the
+      // push as handled.
+      await waitFor(() => {
+        expect(countReads(calls, "/api/v1/sessions") - calls.filter(readsConversation).length).toBe(
+          threadReads + 1,
+        );
+        expect(context.queryClient.isFetching()).toBe(0);
+      });
+    };
+
+    /** A session the app has never read, such as a new one. */
+    const NEW_SESSION_ID = "01a06d02-7400-7000-8000-000000000999";
+
+    it("for no assistant, when the push names only threads", async () => {
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [FIXTURE_THREAD_IDS.flaky, FIXTURE_THREAD_IDS.bunPin], {
+        [FIXTURE_THREAD_IDS.flaky]: null,
+        [FIXTURE_THREAD_IDS.bunPin]: null,
+      });
+
+      expect(shell.countReadsOf()).toEqual(before);
+    });
+
+    it("for no assistant, when the push names a session the app does not know in no conversation", async () => {
+      // Such as a workflow run's session, which the desktop app never reads.
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [NEW_SESSION_ID], { [NEW_SESSION_ID]: null });
+
+      expect(shell.countReadsOf()).toEqual(before);
+    });
+
+    it("for that assistant only, when the push names its current session", async () => {
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [ADA_SESSION.id, FIXTURE_THREAD_IDS.flaky], {
+        [ADA_SESSION.id]: ADA.mainConversationId,
+        [FIXTURE_THREAD_IDS.flaky]: null,
+      });
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo });
+    });
+
+    it("for that assistant only, when the push names a new session in its conversation", async () => {
+      // The new session becomes Ada's current session, though the app has
+      // never read it.
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [NEW_SESSION_ID], { [NEW_SESSION_ID]: ADA.mainConversationId });
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo });
+    });
+
+    it("for every assistant, when the push does not name the conversation of a session", async () => {
+      // A controller that predates `conversationIds` sends none, and the
+      // session may then be a new one in any assistant's conversation.
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell, [FIXTURE_THREAD_IDS.flaky]);
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo + 1 });
+    });
+
+    it("for every assistant, when the push names no session", async () => {
+      const shell = await startWithAdaAndMilo();
+      const before = shell.countReadsOf();
+
+      await pushAndSettle(shell);
+
+      expect(shell.countReadsOf()).toEqual({ ada: before.ada + 1, milo: before.milo + 1 });
+    });
+  });
+
+  it("show the screen's failure, not an idle assistant, when a new assistant's session cannot be read", async () => {
+    const ben = buildFixtureAssistant({
+      id: "01a06d02-7700-7000-8000-000000000002",
+      name: "Ben",
+      mainConversationId: "01a06d02-7800-7000-8000-000000000002",
+    });
+    let assistants = [ADA];
+    const { live } = await startShell({
+      handlers: {
+        ...WITH_ADA,
+        "GET /api/v1/assistants": () => ({ body: { items: assistants } }),
+        "GET /api/v1/sessions": (call) => {
+          const conversationId = new URLSearchParams(call.search).get("conversationId");
+          if (conversationId === null) return { body: { items: SIDEBAR_FIXTURE.threads } };
+          if (conversationId === ben.mainConversationId) {
+            return { status: 500, body: buildErrorBody("internal", "The database is locked.") };
+          }
+          return { body: { items: [ADA_SESSION] } };
+        },
+      },
+    });
+
+    assistants = [ADA, ben];
+    act(() => {
+      live.pushInvalidation("assistant", [ben.id]);
+    });
+
+    expect(await screen.findByRole("heading", { name: "This screen did not load" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Ben, idle" })).toBeNull();
+  });
+
+  it("keep an assistant's pose when its session cannot be read again", async () => {
+    let failing = false;
+    const { calls, context, live } = await startShell({
+      handlers: {
+        ...WITH_ADA,
+        "GET /api/v1/sessions": (call) => {
+          if (!readsConversation(call)) return { body: { items: SIDEBAR_FIXTURE.threads } };
+          return failing
+            ? { status: 500, body: buildErrorBody("internal", "The database is locked.") }
+            : { body: { items: [ADA_SESSION] } };
+        },
+      },
+    });
+    const section = screen.getByRole("navigation", { name: "Assistants" });
+    expect(within(section).getByRole("link", { name: "Ada, waiting on you" })).toBeTruthy();
+    const reads = calls.filter(readsConversation).length;
+
+    failing = true;
+    act(() => {
+      live.pushInvalidation("session", [ADA_SESSION.id]);
+    });
+
+    await waitFor(() => {
+      expect(calls.filter(readsConversation).length).toBeGreaterThan(reads);
+      expect(context.queryClient.isFetching()).toBe(0);
+    });
+    expect(within(section).getByRole("link", { name: "Ada, waiting on you" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "This screen did not load" })).toBeNull();
   });
 });

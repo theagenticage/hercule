@@ -184,11 +184,21 @@ export const InvalidateKind = Schema.Literals(["created", "updated", "deleted"])
 
 export type InvalidateKind = Schema.Schema.Type<typeof InvalidateKind>;
 
-/** A mutable topic's push: which records changed, and how. */
+/**
+ * A mutable topic's push: which records changed, and how.
+ *
+ * A `session` push also carries `conversationIds`: for each session in
+ * `ids`, the id of the conversation it answers, or `null` for a session in
+ * no conversation, such as a thread or a workflow run's session. A client
+ * that shows an assistant's current session then re-reads it only when a
+ * session of that assistant's conversation changed, without knowing every
+ * session in advance. A push on any other topic leaves it out.
+ */
 export const Invalidate = Schema.Struct({
   _tag: Schema.Literal("invalidate"),
   ids: Schema.Array(Schema.String),
   kind: InvalidateKind,
+  conversationIds: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
 });
 
 export type Invalidate = Schema.Schema.Type<typeof Invalidate>;

@@ -74,7 +74,8 @@ const PROFILE_UNRESTRICTED = buildProfile("01a06d02-3000-7000-8000-000000000002"
 const PROFILES: readonly Profile[] = [PROFILE_ASSISTANT, PROFILE_UNRESTRICTED];
 
 const buildAssistant = (
-  fields: Pick<Assistant, "id" | "name" | "systemPrompt"> & Partial<Assistant>,
+  fields: Pick<Assistant, "id" | "name" | "systemPrompt" | "mainConversationId"> &
+    Partial<Assistant>,
 ): Assistant => ({
   instanceId: INSTANCE_PERSONAL.id,
   permissionProfileId: PROFILE_ASSISTANT.id,
@@ -93,12 +94,14 @@ const buildAssistant = (
 
 const ADA = buildAssistant({
   id: "01a06d02-a000-7000-8000-000000000001",
+  mainConversationId: "01a06d02-c000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are Ada. Answer briefly.",
 });
 
 const BOB = buildAssistant({
   id: "01a06d02-a000-7000-8000-000000000002",
+  mainConversationId: "01a06d02-c000-7000-8000-000000000002",
   name: "Bob",
   systemPrompt: "You are Bob. Answer at length.",
   instanceId: INSTANCE_WORK.id,
@@ -110,6 +113,7 @@ const BOB = buildAssistant({
 /** What the controller returns for `assistant.create { name: "Hercule" }`. */
 const CREATED = buildAssistant({
   id: "01a06d02-a000-7000-8000-000000000003",
+  mainConversationId: "01a06d02-c000-7000-8000-000000000003",
   name: "Hercule",
   systemPrompt: "You are a personal assistant running inside the user's own controller.",
 });

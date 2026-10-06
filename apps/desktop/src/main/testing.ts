@@ -28,7 +28,7 @@ export interface FakeMainWindow {
   /**
    * Each call made to the window, in order: the method's name, followed by
    * its arguments, such as `reload` or
-   * `showAndSend thread.open {"sessionId":"session-1"}`.
+   * `showAndSend destination.open {"kind":"thread","sessionId":"session-1"}`.
    */
   readonly calls: Array<string>;
   /** What `isFocused` returns; a test may change it. */

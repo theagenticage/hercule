@@ -415,6 +415,7 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
 /** Returns every list the sidebar reads, holding `threads` and every scene's projects, workspaces and runners. */
 const buildSceneRecords = (threads: ReadonlyArray<Session>): SidebarRecords => ({
   threads,
+  assistants: [],
   projects: PROJECTS,
   workspaces: WORKSPACES,
   resources: [WEBSHOP_REPO, ONBOARDING_REPO],

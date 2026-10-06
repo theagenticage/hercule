@@ -124,6 +124,17 @@ runner ──ws──▶ controller  session.reported
 - `session` nudges also when a session's `openRequests` or `usage` changes. A `usage` change is coalesced to at most one nudge per session per second, like the `subagent` topic, because a harness can report it after every model call.
 - Every subagent topic needs `session.read`, like the session's own topics.
 
+*(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* **A `session` nudge also names each session's conversation.** Its `invalidate` carries `conversationIds`, a map from each id in `ids` to the id of the Conversation that session belongs to, or `null` for a session in no conversation, such as a thread or a workflow run's session:
+
+```
+  session:  invalidate { ids: ["s1", "s2"], kind: "updated", conversationIds: { "s1": "c1", "s2": null } }
+```
+
+- A client that shows a Conversation's current session reads it again only when the nudge names a session of that Conversation. Without the map it could not tell a new session in that Conversation from any other session it does not know, and would read every current session again on every nudge.
+- The map is keyed by session id, so it stays exact when coalescing merges several changes into one nudge.
+- A session's conversation is set when the session is created and never changes, so the controller fills the map from the session it is already changing, with no extra read per token.
+- No other topic carries the map. A client treats an id with no entry, as from a controller that predates the map, as possibly in any Conversation.
+
 **Who listens, on a thread page, with subagents.** The thread page adds `subagent`, and refetches the subagent list only for the open thread, ignoring nudges about other sessions. A subagent's page subscribes to its subagent's `:stream` and `:tap` in place of the thread's, so a page always follows exactly one agent.
 
 **The ticket** is the value of `auth.wsTicket` ([./13-security.md](./13-security.md) section 4): a 5-minute single-use random string fetched over authenticated HTTP, because a browser cannot set headers on the WebSocket handshake and the 30-day bearer token must never ride in a URL.

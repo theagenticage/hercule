@@ -4,20 +4,17 @@
  * capture when it is ready.
  */
 import { waitForPresentedFrame } from "../app/presented-frame";
-import { THEMES } from "./sheet-themes";
+import { ALL_THEMES } from "./sheet-themes";
 
 /**
  * Sets the theme named by the page's `?theme=` on `<html>`, Whitehaven when
- * the URL names none. Fails on any other name, because a sheet drawn in a
- * theme the comparison does not expect would only show up as a flood of
- * differing pixels.
+ * the URL names none. Fails on a name that is not one of the five themes,
+ * because the page would otherwise be drawn in no theme at all.
  */
 export function applySheetTheme(): void {
   const theme = new URLSearchParams(location.search).get("theme") ?? "whitehaven";
-  if (!THEMES.includes(theme)) {
-    throw new Error(
-      `Unknown theme "${theme}" in the URL. Use ?theme=whitehaven or ?theme=orient-express.`,
-    );
+  if (!ALL_THEMES.includes(theme)) {
+    throw new Error(`Unknown theme "${theme}" in the URL. Use one of: ${ALL_THEMES.join(", ")}.`);
   }
   document.documentElement.dataset.theme = theme;
 }

@@ -44,7 +44,7 @@ import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { secureSession, secureWebContents } from "./security";
 import { StoredTokenLayer } from "./stored-token";
-import { makeThreadNotificationsLayer } from "./thread-notifications";
+import { makeWaitingNotificationsLayer } from "./waiting-notifications";
 import { MainWindowLayer } from "./window";
 
 /**
@@ -76,7 +76,7 @@ const openFolder = (folder: string): Effect.Effect<void> =>
 
 /** Starts the app; see this module's comment. Call it once the single-instance lock is held. */
 const startApp = (): void => {
-  const threadNotifications = makeThreadNotificationsLayer({
+  const waitingNotifications = makeWaitingNotificationsLayer({
     Notification,
     setBadgeCount: (count) => app.setBadgeCount(count),
     // Electron has no call that only asks. The first call that needs
@@ -89,7 +89,7 @@ const startApp = (): void => {
   });
   const windowMenuAndNotifications = Layer.mergeAll(
     makeMainMenuLayer(Menu, !app.isPackaged),
-    threadNotifications,
+    waitingNotifications,
   ).pipe(Layer.provideMerge(MainWindowLayer));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(

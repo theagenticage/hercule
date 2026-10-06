@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DraftPlace } from "@hercule/client-core";
+import { listWaiting, type AssistantRow, type DraftPlace } from "@hercule/client-core";
 import {
   buildProject,
   buildSession,
@@ -13,9 +13,10 @@ import {
   WEBSHOP_PROJECT,
 } from "@hercule/client-core/threads/testing";
 import type { OpenRequest, Project, Runner, Session, Workspace } from "@hercule/contract";
+import type { GoMenuItem } from "../../ipc/contract";
 import {
   buildSidebar,
-  listGoMenuThreads,
+  listGoMenuItems,
   pickFocusFallback,
   type SectionKey,
   type Sidebar,
@@ -42,11 +43,24 @@ const waiting = (id: string, minutes: number, over: Partial<Session> = {}): Sess
   thread(id, minutes, { status: "busy", openRequests: [APPROVAL], ...over });
 
 /**
- * Returns the sidebar for `threads`, in the fixture's projects, workspaces and
- * resources. With a `draft`, its row's second line is "draft meta".
+ * Returns the row of an assistant whose session waits on a command approval,
+ * named and identified `id`, its session last active at 09:`minutes`.
+ */
+const waitingAssistant = (id: string, minutes: number): AssistantRow => ({
+  id,
+  name: id,
+  pose: "waiting",
+  session: waiting(`${id}-session`, minutes),
+});
+
+/**
+ * Returns the sidebar for `threads` and `assistantRows`, in the fixture's
+ * projects, workspaces and resources. With a `draft`, its row's second line
+ * is "draft meta".
  */
 const buildFixtureSidebar = ({
   threads,
+  assistantRows = [],
   runners = [MOSS],
   projects = [WEBSHOP_PROJECT, OPS_PROJECT],
   workspaces = [PRIMARY, THREAD_3F1],
@@ -55,6 +69,7 @@ const buildFixtureSidebar = ({
   draft = null,
 }: {
   readonly threads: readonly Session[];
+  readonly assistantRows?: readonly AssistantRow[];
   readonly runners?: readonly Runner[];
   readonly projects?: readonly Project[];
   readonly workspaces?: readonly Workspace[];
@@ -64,6 +79,7 @@ const buildFixtureSidebar = ({
 }): Sidebar =>
   buildSidebar({
     threads,
+    waiting: listWaiting(threads, assistantRows),
     projects,
     workspaces,
     resources: [WEBSHOP, INFRA, RUNBOOKS],
@@ -108,7 +124,7 @@ describe("buildSidebar", () => {
 
     expect(items.map(({ kind, key, section, leading }) => [kind, key, section, leading])).toEqual([
       ["waiting-header", "header:waiting", "waiting", 8],
-      ["waiting-row", "waiting:s-runbook", "waiting", 1],
+      ["waiting-thread-row", "waiting:thread:s-runbook", "waiting", 1],
       ["project-header", "header:project:p-webshop", "project:p-webshop", 8],
       ["workspace-label", "workspace:project:p-webshop:ws-thread-3f1", "project:p-webshop", 1],
       ["thread-row", "thread:s-runbook", "project:p-webshop", 1],
@@ -126,7 +142,7 @@ describe("buildSidebar", () => {
     const items = buildItems({ threads: WORLD_THREADS });
 
     expect(findItem(items, "header:waiting")).toMatchObject({ count: 1 });
-    expect(findItem(items, "waiting:s-runbook")).toMatchObject({
+    expect(findItem(items, "waiting:thread:s-runbook")).toMatchObject({
       sessionId: "s-runbook",
       title: "s-runbook",
       question: "Run git push?",
@@ -304,13 +320,57 @@ describe("buildSidebar", () => {
 
     expect(listKeys(items)).toEqual([
       "header:waiting",
-      "waiting:s-5",
-      "waiting:s-4",
-      "waiting:s-3",
+      "waiting:thread:s-5",
+      "waiting:thread:s-4",
+      "waiting:thread:s-3",
       "more:waiting",
     ]);
     expect(findItem(items, "header:waiting")).toMatchObject({ count: 5 });
     expect(findItem(items, "more:waiting")).toMatchObject({ label: "2 more waiting on you" });
+  });
+
+  it("draws a waiting assistant in Waiting on you by its name and question, newest first among the threads", () => {
+    const items = buildItems({
+      threads: [waiting("s-old", 1), waiting("s-new", 5)],
+      assistantRows: [waitingAssistant("ada", 3)],
+    }).filter((item) => item.section === "waiting");
+
+    expect(listKeys(items)).toEqual([
+      "header:waiting",
+      "waiting:thread:s-new",
+      "waiting:assistant:ada",
+      "waiting:thread:s-old",
+    ]);
+    expect(findItem(items, "waiting:assistant:ada")).toMatchObject({
+      kind: "waiting-assistant-row",
+      assistantId: "ada",
+      name: "ada",
+      question: "Run git push?",
+      leading: 1,
+    });
+  });
+
+  it("caps Waiting on you at 3 rows, threads and assistants together", () => {
+    const items = buildItems({
+      threads: [waiting("s-1", 1), waiting("s-2", 2)],
+      assistantRows: [waitingAssistant("ada", 3), waitingAssistant("milo", 4)],
+    }).filter((item) => item.section === "waiting");
+
+    expect(listKeys(items)).toEqual([
+      "header:waiting",
+      "waiting:assistant:milo",
+      "waiting:assistant:ada",
+      "waiting:thread:s-2",
+      "more:waiting",
+    ]);
+    expect(findItem(items, "header:waiting")).toMatchObject({ count: 4 });
+    expect(findItem(items, "more:waiting")).toMatchObject({ label: "1 more waiting on you" });
+  });
+
+  it("draws Waiting on you for a waiting assistant when no thread waits", () => {
+    const items = buildItems({ threads: [], assistantRows: [waitingAssistant("ada", 3)] });
+
+    expect(listKeys(items)).toEqual(["header:waiting", "waiting:assistant:ada"]);
   });
 
   it("shows every waiting thread once Waiting on you is expanded", () => {
@@ -319,7 +379,7 @@ describe("buildSidebar", () => {
       (item) => item.section === "waiting",
     );
 
-    expect(items.filter((item) => item.kind === "waiting-row")).toHaveLength(5);
+    expect(items.filter((item) => item.kind === "waiting-thread-row")).toHaveLength(5);
     expect(listKeys(items)).not.toContain("more:waiting");
   });
 
@@ -362,22 +422,53 @@ describe("buildSidebar", () => {
   });
 });
 
-describe("listGoMenuThreads", () => {
+/** Returns the session ids of the thread items among `items`, in order. */
+const listThreadSessionIds = (items: readonly GoMenuItem[]): readonly string[] =>
+  items.flatMap(({ destination }) =>
+    destination.kind === "thread" ? [destination.sessionId] : [],
+  );
+
+describe("listGoMenuItems", () => {
   it("lists the threads top to bottom, a waiting thread once, where it shows first", () => {
-    expect(listGoMenuThreads(buildItems({ threads: WORLD_THREADS }))).toEqual([
-      { sessionId: "s-runbook", title: "s-runbook" },
-      { sessionId: "s-flaky", title: "s-flaky" },
-      { sessionId: "s-bun", title: "s-bun" },
-      { sessionId: "s-keys", title: "s-keys" },
-      { sessionId: "s-price", title: "s-price" },
+    const thread = (sessionId: string): GoMenuItem => ({
+      destination: { kind: "thread", sessionId },
+      title: sessionId,
+    });
+    expect(listGoMenuItems(buildItems({ threads: WORLD_THREADS }))).toEqual([
+      thread("s-runbook"),
+      thread("s-flaky"),
+      thread("s-bun"),
+      thread("s-keys"),
+      thread("s-price"),
     ]);
+  });
+
+  it("lists a waiting assistant where Waiting on you shows it, titled with its name", () => {
+    const items = buildItems({
+      threads: [waiting("s-new", 5)],
+      assistantRows: [waitingAssistant("ada", 3)],
+    });
+    expect(listGoMenuItems(items)).toEqual([
+      { destination: { kind: "thread", sessionId: "s-new" }, title: "s-new" },
+      { destination: { kind: "assistant", assistantId: "ada" }, title: "ada" },
+    ]);
+  });
+
+  it("lists no assistant the more row of Waiting on you hides", () => {
+    const items = buildItems({
+      threads: [1, 2, 3].map((minutes) => waiting(`s-${String(minutes)}`, minutes + 10)),
+      assistantRows: [waitingAssistant("ada", 1)],
+    });
+    expect(listGoMenuItems(items).some(({ destination }) => destination.kind === "assistant")).toBe(
+      false,
+    );
   });
 
   it("lists no thread a more row hides", () => {
     const threads = [1, 2, 3, 4, 5, 6, 7].map((minutes) =>
       thread(`s-${String(minutes)}`, minutes, { projectId: OPS_PROJECT.id }),
     );
-    expect(listGoMenuThreads(buildItems({ threads })).map((each) => each.sessionId)).toEqual([
+    expect(listThreadSessionIds(listGoMenuItems(buildItems({ threads })))).toEqual([
       "s-7",
       "s-6",
       "s-5",
@@ -391,7 +482,7 @@ describe("listGoMenuThreads", () => {
       thread(`s-${String(12 - index)}`, 12 - index, { projectId: OPS_PROJECT.id }),
     );
     const items = buildItems({ threads, expanded: new Set(["project:p-ops"]) });
-    expect(listGoMenuThreads(items).map((each) => each.sessionId)).toEqual(
+    expect(listThreadSessionIds(listGoMenuItems(items))).toEqual(
       ["12", "11", "10", "9", "8", "7", "6", "5", "4"].map((number) => `s-${number}`),
     );
   });
@@ -402,7 +493,7 @@ describe("listGoMenuThreads", () => {
       draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
     });
     expect(items.some((item) => item.kind === "draft-row")).toBe(true);
-    expect(listGoMenuThreads(items)).toEqual([]);
+    expect(listGoMenuItems(items)).toEqual([]);
   });
 });
 
@@ -413,7 +504,7 @@ describe("pickFocusFallback", () => {
     const before = buildItems({ threads: FIVE_WAITING });
     const after = buildItems({ threads: FIVE_WAITING, expanded: new Set(["waiting"]) });
 
-    expect(pickFocusFallback("more:waiting", before, after)).toBe("waiting:s-2");
+    expect(pickFocusFallback("more:waiting", before, after)).toBe("waiting:thread:s-2");
   });
 
   it("picks the section's more row when a row leaves a capped section", () => {
@@ -423,7 +514,7 @@ describe("pickFocusFallback", () => {
     );
     const after = buildItems({ threads: answered });
 
-    expect(pickFocusFallback("waiting:s-5", before, after)).toBe("more:waiting");
+    expect(pickFocusFallback("waiting:thread:s-5", before, after)).toBe("more:waiting");
   });
 
   it("picks the section's header when a row leaves a section with no more row", () => {
@@ -431,7 +522,7 @@ describe("pickFocusFallback", () => {
     const before = buildItems({ threads });
     const after = buildItems({ threads: [threads[0]!, { ...threads[1]!, openRequests: [] }] });
 
-    expect(pickFocusFallback("waiting:s-b", before, after)).toBe("header:waiting");
+    expect(pickFocusFallback("waiting:thread:s-b", before, after)).toBe("header:waiting");
   });
 
   it("picks the item that now sits in the gone item's place when its section is gone", () => {

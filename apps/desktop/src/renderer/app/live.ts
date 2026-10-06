@@ -2,14 +2,19 @@
  * Runs the live connection while the shell is mounted, and keeps the
  * sidebar's reads current through it.
  *
- * The shell subscribes to five topics:
+ * The shell subscribes to six topics:
  *
- * - `session`, for the thread list (and an open thread's own reads);
+ * - `session`, for the thread list, the current session of each assistant's
+ *   main conversation (and an open thread's own reads). An assistant's
+ *   current session is read again only when the push names a session of its
+ *   conversation, so a push about a thread or a workflow run's session reads
+ *   no assistant's session;
  * - `runner`, for the runners, whose connectivity draws a thread as away;
  * - `provider`, for the providers, whose catalogs name each thread's model;
  * - `task`, for the open tasks a Draft Thread offers to start from;
  * - `connection`, for the GitHub Connection the New project form clones
- *   through, which may be made in the web app while this app runs.
+ *   through, which may be made in the web app while this app runs;
+ * - `assistant`, for the assistants the sidebar's Assistants section lists.
  *
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
@@ -35,6 +40,7 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
   "provider",
   "task",
   "connection",
+  "assistant",
 ];
 
 /**

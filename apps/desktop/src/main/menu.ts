@@ -3,8 +3,8 @@
  * the MainMenu service, through which main changes it while the app runs.
  *
  * Main carries out none of the app's own items itself. It shows the window
- * and sends the page a menu command, or asks it to open a thread, and the
- * page acts on it.
+ * and sends the page a menu command, or asks it to open a destination, and
+ * the page acts on it.
  *
  * There is no View menu in the packaged app, so it has no page zoom and no
  * reload. In development a View menu adds Reload and Toggle Developer Tools.
@@ -17,7 +17,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
-import type { GoMenuThread, MenuCommand } from "../ipc/contract";
+import type { Destination, GoMenuItem, MenuCommand } from "../ipc/contract";
 import { AppSettings } from "./app-settings";
 import { MainWindow } from "./main-window";
 
@@ -33,9 +33,9 @@ import { MainWindow } from "./main-window";
  *   keeps running.
  * - Go starts with Office, ⌘⇧O, which calls `openOffice`, because the
  *   Office is a place to go, as a thread is. Below a separator it lists
- *   `goThreads`, the first nine threads of the sidebar, with ⌘1 to ⌘9, each
- *   titled with its thread's title. Choosing one calls `openThread` with its
- *   session id. With no thread, one dimmed "No Threads" stands in for them.
+ *   `goItems`, the first nine the page sends, with ⌘1 to ⌘9, each with its
+ *   title. Choosing one calls `openDestination` with its destination. With
+ *   no item, one dimmed "No Threads" stands in for them.
  * - Thread holds Send, ⌘↵, which calls `send`. It is always enabled: main
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
@@ -58,12 +58,12 @@ import { MainWindow } from "./main-window";
 const buildMenuTemplate = (options: {
   readonly development: boolean;
   readonly signedIn: boolean;
-  readonly goThreads: ReadonlyArray<GoMenuThread>;
+  readonly goItems: ReadonlyArray<GoMenuItem>;
   readonly signOut: () => void;
   readonly newThread: () => void;
   readonly openOffice: () => void;
   readonly openSettings: () => void;
-  readonly openThread: (sessionId: string) => void;
+  readonly openDestination: (destination: Destination) => void;
   readonly send: () => void;
 }): Array<MenuItemConstructorOptions> => {
   const appMenu: MenuItemConstructorOptions = {
@@ -127,12 +127,12 @@ const buildMenuTemplate = (options: {
           click: options.openOffice,
         },
         { type: "separator" },
-        ...(options.goThreads.length === 0
+        ...(options.goItems.length === 0
           ? [{ label: "No Threads", enabled: false }]
-          : options.goThreads.map((thread, index) => ({
-              label: thread.title,
+          : options.goItems.map((item, index) => ({
+              label: item.title,
               accelerator: `CmdOrCtrl+${String(index + 1)}`,
-              click: () => options.openThread(thread.sessionId),
+              click: () => options.openDestination(item.destination),
             }))),
       ],
     },
@@ -150,17 +150,17 @@ export class MainMenu extends Context.Service<
   {
     /**
      * Enables Settings…, Sign Out, New Thread and Office when `signedIn` is
-     * true. Otherwise disables them and removes the Go menu's threads, which
+     * true. Otherwise disables them and removes the Go menu's items, which
      * the app can no longer open.
      */
     readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
 
     /**
-     * Replaces the threads the Go menu lists, the first nine of the sidebar.
+     * Replaces the items the Go menu lists, the first nine the page sends.
      * Does nothing while the user is signed out: a page that is still
-     * leaving the shell may send its threads after the user signed out.
+     * leaving the shell may send its items after the user signed out.
      */
-    readonly setGoThreads: (threads: ReadonlyArray<GoMenuThread>) => Effect.Effect<void>;
+    readonly setGoItems: (items: ReadonlyArray<GoMenuItem>) => Effect.Effect<void>;
   }
 >()("hercule/desktop/MainMenu") {}
 
@@ -168,11 +168,11 @@ export class MainMenu extends Context.Service<
  * Builds the MainMenu service on Electron's `Menu`: it builds the menu bar and
  * makes it the app's. The items only a signed-in user can choose, such as
  * Sign Out, start enabled when a login token is stored, and Go lists no
- * thread until the page lists the sidebar's threads.
+ * item until the page sends its items.
  *
  * Choosing Settings…, Sign Out, New Thread, Office or Send shows the window
- * and sends the page that menu command. Choosing a thread in Go shows the
- * window and asks the page to open it. `development` adds the View menu.
+ * and sends the page that menu command. Choosing an item in Go shows the
+ * window and asks the page to open its destination. `development` adds the View menu.
  *
  * Each change builds the menu bar again, because macOS does not show a new
  * label on an item that is already built.
@@ -195,11 +195,11 @@ export const makeMainMenuLayer = (
       };
       // Read from the settings file, so that the items only a signed-in user
       // can choose are right in the first menu bar, while the page still
-      // loads; the page's first token read sets it again. The threads'
+      // loads; the page's first token read sets it again. The waiting
       // notifications start signed out, for the reason
-      // makeThreadNotificationsLayer gives.
+      // makeWaitingNotificationsLayer gives.
       let signedIn = (yield* settings.readEncryptedToken) !== null;
-      let goThreads: ReadonlyArray<GoMenuThread> = [];
+      let goItems: ReadonlyArray<GoMenuItem> = [];
 
       /** Builds the menu bar from the current state and makes it the app's. */
       const installMenuBar = (): void => {
@@ -208,13 +208,14 @@ export const makeMainMenuLayer = (
             buildMenuTemplate({
               development,
               signedIn,
-              goThreads,
+              goItems,
               signOut: () => sendMenuCommand("signOut"),
               newThread: () => sendMenuCommand("newThread"),
               openOffice: () => sendMenuCommand("openOffice"),
               openSettings: () => sendMenuCommand("openSettings"),
               send: () => sendMenuCommand("send"),
-              openThread: (sessionId) => runFork(window.showAndSend("thread.open", { sessionId })),
+              openDestination: (destination) =>
+                runFork(window.showAndSend("destination.open", destination)),
             }),
           ),
         );
@@ -225,13 +226,13 @@ export const makeMainMenuLayer = (
         setSignedIn: (next) =>
           Effect.sync(() => {
             signedIn = next;
-            if (!next) goThreads = [];
+            if (!next) goItems = [];
             installMenuBar();
           }),
-        setGoThreads: (threads) =>
+        setGoItems: (items) =>
           Effect.sync(() => {
             if (!signedIn) return;
-            goThreads = threads;
+            goItems = items;
             installMenuBar();
           }),
       };

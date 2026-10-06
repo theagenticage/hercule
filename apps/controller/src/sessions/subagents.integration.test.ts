@@ -16,6 +16,7 @@
  * - Token Usage adds up across a resume, for the session and for a subagent.
  */
 import { describe, expect, it, vi } from "vitest";
+import { Effect, Fiber } from "effect";
 import type {
   ProviderEvent,
   SessionInterrupt as SessionInterruptFrame,
@@ -23,7 +24,16 @@ import type {
   SessionStart,
 } from "@hercule/protocol";
 import type { Session, Subagent } from "@hercule/contract";
-import { get, post, send } from "../http/testing";
+import {
+  collectMessages,
+  fetchTicket,
+  get,
+  onSocket,
+  post,
+  send,
+  waitForLiveToSettle,
+  waitWithin,
+} from "../http/testing";
 import {
   listMessages,
   readDefaultConversation,
@@ -391,6 +401,96 @@ describe("the open Requests of several agents", () => {
         )?.body;
       expect(bodyFor("sub-req")).toMatch(/^Asked by ` Review the diff `\n\n/);
       expect(bodyFor("main-req") ?? "").not.toContain("Asked by");
+    });
+  });
+
+  it("names the subagent that asked, on the session's read and on the session list", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startTwoRequests(arranged);
+      const response = await get(
+        arranged.harness.base,
+        `/api/v1/sessions?status=busy`,
+        arranged.token,
+      );
+      expect(response.status, await response.clone().text()).toBe(200);
+      const listed = ((await response.json()) as { items: ReadonlyArray<Session> }).items.find(
+        (one) => one.id === session.id,
+      );
+
+      for (const read of [session, listed]) {
+        expect(read?.openRequests[0]).not.toHaveProperty("subagentName");
+        expect(read?.openRequests[1]).toMatchObject({
+          subagentId: "a1",
+          subagentName: "Review the diff",
+        });
+      }
+    });
+  });
+
+  it("names a subagent with no description by its agent type, on the session and in the notification", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      reportEvents(arranged, 2, [
+        { ...buildBase(id), _tag: "subagent.started", subagentId: "e1", agentType: "Explore" },
+        { ...buildBase(id, "e1"), _tag: "turn.started", turnId: "e1-t1" },
+        buildApprovalRequest(id, "explore-req", "e1"),
+      ]);
+
+      const asking = await waitForOpenRequests(arranged, id, ["explore-req"]);
+      expect(asking.openRequests[0]).toMatchObject({ subagentId: "e1", subagentName: "Explore" });
+      const [notification] = await waitUntil("raised the notification", async () => {
+        const found = await readApprovalNotifications(arranged, id);
+        return found.length === 1 ? found : undefined;
+      });
+      expect(notification?.body).toMatch(/^Asked by ` Explore `\n\n/);
+    });
+  });
+
+  it("names a subagent that asked before it had a name once it gets one, and announces the session", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      reportEvents(arranged, 2, [
+        { ...buildBase(id, "late"), _tag: "turn.started", turnId: "l1" },
+        buildApprovalRequest(id, "late-req", "late"),
+      ]);
+      const unnamed = await waitForOpenRequests(arranged, id, ["late-req"]);
+      expect(unnamed.openRequests[0]).toMatchObject({ subagentId: "late" });
+      expect(unnamed.openRequests[0]).not.toHaveProperty("subagentName");
+
+      const ticket = await fetchTicket(arranged.harness.base, arranged.token);
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const announced = yield* collectMessages(client, { topic: "session" });
+          yield* Effect.promise(() => waitForLiveToSettle());
+
+          // Out of the usual order, the introduction comes after the Request.
+          reportEvents(arranged, 4, [
+            {
+              ...buildBase(id),
+              _tag: "subagent.started",
+              subagentId: "late",
+              agentType: "Explore",
+            },
+          ]);
+
+          const heard = yield* Effect.promise(() =>
+            waitWithin(2000, () =>
+              announced.received.some((message) =>
+                (message as { ids?: ReadonlyArray<string> }).ids?.includes(id),
+              ),
+            ),
+          );
+          expect(heard).toBe(true);
+          yield* Fiber.interrupt(announced.fiber);
+        }),
+      );
+      expect((await readSession(arranged, id)).openRequests[0]).toMatchObject({
+        subagentId: "late",
+        subagentName: "Explore",
+      });
     });
   });
 

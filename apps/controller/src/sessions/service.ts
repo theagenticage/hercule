@@ -596,6 +596,33 @@ const make = Effect.gen(function* () {
   const tracking = new Map<string, Tracked>();
 
   /**
+   * Records a change to a session, to announce once the caller's transaction
+   * commits. The announcement names the conversation the session answers, so
+   * a client can tell which assistant's current session may have changed.
+   */
+  const announceSessionChange = (
+    session: Pick<StoredSession, "id" | "conversationId">,
+  ): Effect.Effect<void> =>
+    announce({
+      _tag: "record",
+      topic: "session",
+      id: session.id,
+      conversationId: session.conversationId,
+      kind: "updated",
+    });
+
+  /**
+   * Reads a session and records a change to it, as `announceSessionChange`
+   * does, for a caller that holds only the session's id. Records nothing for
+   * a session that does not exist.
+   */
+  const announceSessionChangeById = (id: string): Effect.Effect<void, SqlError> =>
+    Effect.flatMap(
+      sessions.one(id),
+      Option.match({ onNone: () => Effect.void, onSome: announceSessionChange }),
+    );
+
+  /**
    * Puts an exited session back on the queue, with the spec that resumes its
    * own transcript, when the session may be resumed now. Returns whether it
    * did. It refuses, writing nothing, when:
@@ -651,7 +678,7 @@ const make = Effect.gen(function* () {
           tracking.delete(sessionId);
         });
         if (announceTheMove) {
-          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+          yield* announceSessionChange(session);
         }
         return true;
       }),
@@ -706,13 +733,10 @@ const make = Effect.gen(function* () {
    * Announces each session that moved to `exited` and forgets its token and
    * ingest state, without touching its inputs. Part of `endSessions`.
    */
-  const forgetSessions = (ids: ReadonlyArray<string>): Effect.Effect<void> =>
+  const forgetSessions = (ended: ReadonlyArray<StoredSession>): Effect.Effect<void> =>
     Effect.gen(function* () {
-      yield* Effect.forEach(
-        ids,
-        (id) => announce({ _tag: "record", topic: "session", id, kind: "updated" }),
-        { discard: true },
-      );
+      yield* Effect.forEach(ended, announceSessionChange, { discard: true });
+      const ids = ended.map((session) => session.id);
       // From now on the row's status is what makes the token invalid. This
       // only drops what was cached from the token while the session ran. It
       // runs after the commit, so a call in flight cannot cache the old row
@@ -750,7 +774,8 @@ const make = Effect.gen(function* () {
    *   with the reason that names the event;
    * - each approval Request the event opened raises a notification. When a
    *   subagent asked it, the notification names the subagent by its
-   *   description, from `askers`, which holds the subagents the event names.
+   *   description, else its agent type, as the session record does. Both are
+   *   read from `askers`, which holds the subagents the event names.
    *
    * `session` is the row as it was before the event, and `after` is the list
    * `computeOpenRequestsAfter` returned for it.
@@ -771,7 +796,11 @@ const make = Effect.gen(function* () {
       }
       for (const request of opened) {
         const asker = request.subagentId === undefined ? undefined : askers.get(request.subagentId);
-        const notification = buildApprovalNotification(session, request, asker?.description);
+        const notification = buildApprovalNotification(
+          session,
+          request,
+          asker?.description ?? asker?.agentType,
+        );
         if (notification !== undefined) yield* notifier.createCoreNotification(notification);
       }
     });
@@ -789,13 +818,17 @@ const make = Effect.gen(function* () {
    *
    * A visible change is announced on the `subagent` topic by its session's
    * id. Clearing the process's share of Token Usage is not announced,
-   * because the API does not show it.
+   * because the API does not show it. When a subagent that asked one of the
+   * session's open Requests gains a `description` or an `agentType`, the
+   * session is announced too: each such Request carries the subagent's
+   * name, so a client that reads only sessions shows the new name.
    */
   const applySubagentEvent = (
-    sessionId: string,
+    session: StoredSession,
     event: ProviderEvent,
   ): Effect.Effect<ReadonlyMap<SubagentId, StoredSubagent>, SqlError> =>
     Effect.gen(function* () {
+      const sessionId = session.id;
       const toRead = findSubagentsToRead(event);
       if (toRead !== "all" && toRead.length === 0) return new Map();
       const read =
@@ -809,13 +842,21 @@ const make = Effect.gen(function* () {
         records,
         yield* readSubagentEventFacts(sessionId, event, records),
       );
+      let askerRenamed = false;
       for (const record of changed) {
+        const before = records.get(record.id);
+        askerRenamed ||=
+          (before === undefined ||
+            before.description !== record.description ||
+            before.agentType !== record.agentType) &&
+          session.openRequests.some((request) => request.subagentId === record.id);
         yield* subagents.save(record);
         records.set(record.id, record);
       }
       if (changed.length > 0 && event._tag !== "session.started") {
         yield* announce({ _tag: "record", topic: "subagent", id: sessionId, kind: "updated" });
       }
+      if (askerRenamed) yield* announceSessionChange(session);
       return records;
     });
 
@@ -1018,7 +1059,7 @@ const make = Effect.gen(function* () {
           droppedStepIterations: cancelled?.stepIterations ?? [],
         });
       }
-      yield* forgetSessions(ended.map((session) => session.id));
+      yield* forgetSessions(ended);
     });
 
   /**
@@ -1118,7 +1159,7 @@ const make = Effect.gen(function* () {
         // `applyInputResult` recorded it already, the turn may have ended
         // since, and moving the session now would leave it `busy` for good.
         if (recorded && delivery === "opened") yield* openTurn(runnerId, row.sessionId);
-        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+        yield* announceSessionChangeById(row.sessionId);
       }),
     );
 
@@ -1177,7 +1218,7 @@ const make = Effect.gen(function* () {
         } else {
           yield* inputs.requeue(row.id, row.sentAt, reason);
         }
-        yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+        yield* announceSessionChangeById(row.sessionId);
       }),
     );
 
@@ -1214,7 +1255,7 @@ const make = Effect.gen(function* () {
           after.value.exitedAt ?? (yield* nowIso),
         );
       }
-      yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+      yield* announceSessionChangeById(sessionId);
       return true;
     });
 
@@ -1434,7 +1475,7 @@ const make = Effect.gen(function* () {
         yield* audit.append({
           kind: open.kind,
           actor,
-          record: { topic: "session", id: open.id },
+          record: { topic: "session", id: open.id, conversationId: open.conversationId ?? null },
           payload: {
             ...open.payload,
             sessionId: open.id,
@@ -1533,7 +1574,7 @@ const make = Effect.gen(function* () {
             // The row was read in this transaction, and nothing else writes
             // between that read and this claim.
             const input = Option.getOrThrow(yield* inputs.claim(waiting.value.id, at));
-            yield* announce({ _tag: "record", topic: "session", id: row.id, kind: "updated" });
+            yield* announceSessionChange(row);
             // The account's token is read now rather than stored: the only
             // place it is written is the frame that carries it to the runner.
             const account =
@@ -1782,7 +1823,7 @@ const make = Effect.gen(function* () {
           yield* afterCommit(() => {
             tokens.forgetSessions([sessionId]);
           });
-          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+          yield* announceSessionChangeById(sessionId);
         }),
       ),
 
@@ -1844,7 +1885,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const touched = yield* inputs.cancelStepPromptsOfRun(runId, STEP_RUN_ENDED);
         for (const id of touched) {
-          yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+          yield* announceSessionChangeById(id);
         }
       }),
 
@@ -1866,11 +1907,11 @@ const make = Effect.gen(function* () {
         yield* endSessions(ended, "runner_lost", RUNNER_LOST);
         yield* Effect.forEach(
           ended,
-          ({ id, runnerId }) =>
+          ({ id, runnerId, conversationId }) =>
             audit.append({
               kind: "session.reconciled",
               actor: SYSTEM_ACTOR,
-              record: { topic: "session" as const, id },
+              record: { topic: "session" as const, id, conversationId },
               payload: { sessionId: id, runnerId, reason: "runner_lost" },
               at,
             }),
@@ -1891,7 +1932,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         yield* sessions.setModelSelection(sessionId, modelSelection);
-        yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        yield* announceSessionChangeById(sessionId);
       }),
 
     /**
@@ -1941,12 +1982,7 @@ const make = Effect.gen(function* () {
         if (taking.buildResumeSpec !== undefined) {
           yield* resume(taking.sessionId, taking.buildResumeSpec, taking.at, false);
         }
-        yield* announce({
-          _tag: "record",
-          topic: "session",
-          id: taking.sessionId,
-          kind: "updated",
-        });
+        yield* announceSessionChangeById(taking.sessionId);
         return created;
       }),
 
@@ -1969,12 +2005,7 @@ const make = Effect.gen(function* () {
         const created = yield* inputs.insertMatched(matched);
         if (Option.isNone(created)) return created;
         yield* sessions.setCrashGuardArmed(matched.sessionId, false);
-        yield* announce({
-          _tag: "record",
-          topic: "session",
-          id: matched.sessionId,
-          kind: "updated",
-        });
+        yield* announceSessionChangeById(matched.sessionId);
         return created;
       }),
 
@@ -1986,7 +2017,7 @@ const make = Effect.gen(function* () {
     cancelMatchedInputs: (subscriptionId: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         for (const sessionId of yield* inputs.cancelQueuedForSubscription(subscriptionId, reason)) {
-          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+          yield* announceSessionChangeById(sessionId);
         }
       }),
 
@@ -2024,7 +2055,7 @@ const make = Effect.gen(function* () {
             `the session could not be resumed: ${refusal}`,
           );
           if (cancelled.count === 0) return;
-          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+          yield* announceSessionChange(session);
           yield* observer.inputsDropped({
             session,
             refusal,
@@ -2051,7 +2082,7 @@ const make = Effect.gen(function* () {
     abandonConversation: (conversationId: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         for (const sessionId of yield* inputs.cancelForConversation(conversationId, reason)) {
-          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+          yield* announceSessionChange({ id: sessionId, conversationId });
         }
         const at = yield* nowIso;
         for (const sessionId of yield* sessions.listExitedWithWorkspaceInConversation(
@@ -2134,15 +2165,10 @@ const make = Effect.gen(function* () {
           return yield* withTransaction(
             sql,
             Effect.gen(function* () {
-              if (yield* inputs.markSent(row.id, row.sentAt)) {
-                yield* announce({
-                  _tag: "record",
-                  topic: "session",
-                  id: row.sessionId,
-                  kind: "updated",
-                });
-              }
               const session = Option.getOrThrow(yield* sessions.one(row.sessionId));
+              if (yield* inputs.markSent(row.id, row.sentAt)) {
+                yield* announceSessionChange(session);
+              }
               return {
                 _tag: "unconfirmed",
                 resultRequest: buildAgentStepResultRequest(
@@ -2217,7 +2243,7 @@ const make = Effect.gen(function* () {
           );
           if (!recorded) return;
           if (result.delivery === "opened") yield* openTurn(runnerId, row.sessionId);
-          yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
+          yield* announceSessionChange(session.value);
         }),
       ),
 
@@ -2264,11 +2290,11 @@ const make = Effect.gen(function* () {
           yield* endSessions(gone, "runner_restart");
           yield* Effect.forEach(
             gone,
-            ({ id }) =>
+            ({ id, conversationId }) =>
               audit.append({
                 kind: "session.reconciled",
                 actor: SYSTEM_ACTOR,
-                record: { topic: "session" as const, id },
+                record: { topic: "session" as const, id, conversationId },
                 payload: { sessionId: id, runnerId, reason: "runner_restart" },
                 at,
               }),
@@ -2376,7 +2402,7 @@ const make = Effect.gen(function* () {
         // Before the Requests, so a Request a subagent opens can name it by
         // the description this same event may have filled in.
         const askers = sessionAcceptsChanges
-          ? yield* applySubagentEvent(id, event)
+          ? yield* applySubagentEvent(session, event)
           : new Map<SubagentId, StoredSubagent>();
         let requestsChanged = false;
         if (sessionAcceptsChanges && isRequestEvent(event)) {
@@ -2423,7 +2449,7 @@ const make = Effect.gen(function* () {
             // sends frames.
             exitedHoldingInput = Option.isSome(yield* inputs.oldestWaiting(id));
           } else {
-            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            yield* announceSessionChange(session);
           }
           // Only a session whose turn ended is sent one. A session that
           // becomes idle because its harness started had its oldest input
@@ -2450,12 +2476,13 @@ const make = Effect.gen(function* () {
           //   slow pace, because it changes with almost every turn.
           yield* sessions.touched(id, at);
           if (requestsChanged) {
-            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            yield* announceSessionChange(session);
           } else if (usageChanged) {
             yield* announce({
               _tag: "record",
               topic: "session",
               id,
+              conversationId: session.conversationId,
               kind: "updated",
               usageOnly: true,
             });
@@ -2526,7 +2553,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const row = yield* queuedInput(id, inputId);
             yield* inputs.rewrite(inputId, text);
-            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            yield* announceSessionChangeById(id);
             return { ...row, text };
           }),
         );
@@ -2575,7 +2602,7 @@ const make = Effect.gen(function* () {
             }
             const row = yield* queuedInput(sessionId, inputId);
             yield* inputs.cancel(inputId);
-            yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+            yield* announceSessionChange(session);
             return { ...row, status: "cancelled" as const };
           }),
         );

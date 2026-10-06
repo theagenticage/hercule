@@ -32,6 +32,7 @@ const ADA: Assistant = {
   heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
   rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
   reply: "turn-end",
+  mainConversationId: "01a06d02-c000-7000-8000-000000000001",
   createdAt: AT,
   updatedAt: AT,
 };

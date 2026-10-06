@@ -1,9 +1,10 @@
-/* The screen a thread's route shows when the thread does not exist
+/* The screen a route shows when the record it opens does not exist
    (not-found.tsx). The book has no page for it, so it is laid out as the
    in-shell form of render-failure.css: the headline centred in the main pane
    as the book centres the new-thread page's (`.newbie` in
-   desktop/session-empty.html), and the book's accent .btn below it. */
-.thread-not-found {
+   desktop/session-empty.html), and, when the screen offers one, the book's
+   accent .btn below it. */
+.not-found {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -11,17 +12,14 @@
   flex-direction: column;
   justify-content: center;
   align-items: center;
+  gap: 20px;
   padding: 0 24px 64px;
   text-align: center;
 }
 
-.thread-not-found-headline {
+.not-found-headline {
   margin: 0;
   font-size: var(--t-20);
   font-weight: var(--w-bold);
   letter-spacing: -0.015em;
-}
-
-.thread-not-found-link {
-  margin-top: 20px;
 }

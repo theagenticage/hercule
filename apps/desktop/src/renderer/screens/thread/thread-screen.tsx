@@ -4,7 +4,7 @@
  */
 import { useRef, useState, type JSX } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
+import { Link, useRouteContext } from "@tanstack/react-router";
 import {
   buildSessionAgentState,
   buildThreadBlocks,
@@ -12,6 +12,7 @@ import {
   describeAgent,
 } from "@hercule/client-core";
 import { providersQuery, runnersQuery, sessionQuery, transcriptQuery } from "../../app/queries";
+import { NotFound } from "../not-found";
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
@@ -77,5 +78,19 @@ export function ThreadScreen({ sessionId }: { readonly sessionId: string }): JSX
         ref={setComposerStack}
       />
     </>
+  );
+}
+
+/**
+ * Renders the screen shown when the thread does not exist, with a link to the
+ * new-thread screen.
+ */
+export function ThreadNotFound(): JSX.Element {
+  return (
+    <NotFound headline="This thread was not found.">
+      <Link to="/" className="btn btn--accent">
+        Start a new thread
+      </Link>
+    </NotFound>
   );
 }

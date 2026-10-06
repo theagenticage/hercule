@@ -1,8 +1,9 @@
 /**
- * Decides which thread rows the sidebar shows when there are many, and how
- * many more each section hides behind its "more" row:
+ * Decides which rows the sidebar shows when there are many, and how many more
+ * each section hides behind its "more" row:
  *
- * - Waiting on you shows its 3 newest threads.
+ * - Waiting on you shows the first 3 entries of `listWaiting`: the most
+ *   recently active threads and assistants, mixed.
  * - A project shows at most 5 threads. They are picked by priority: waiting
  *   threads first, then working ones, then the rest, and inside each of those
  *   tiers the newest first. The threads with no project are capped the same
@@ -19,11 +20,12 @@
  * capping a project only removes rows, it never moves one. The workspace
  * groups keep the labels `buildThreadGroups` gave them too.
  */
+import type { Waiting } from "../waiting";
 import type { ProjectGroup, WorkspaceGroup } from "./groups";
 import type { Pose } from "./pose";
 import { compareNewestFirst, type ThreadRow } from "./rows";
 
-/** How many waiting threads Waiting on you shows before it is expanded. */
+/** How many entries Waiting on you shows before it is expanded. */
 const WAITING_LIMIT = 3;
 
 /** How many threads a project picks by priority before it is expanded. */
@@ -31,7 +33,7 @@ const PROJECT_LIMIT = 5;
 
 /** Which sections the user has expanded to show every thread. */
 export interface ExpandedSections {
-  /** Whether Waiting on you shows every waiting thread. */
+  /** Whether Waiting on you shows every entry. */
   readonly waiting: boolean;
   /** The expanded projects, by id. `null` stands for the threads that belong to no project. */
   readonly projectIds: ReadonlySet<string | null>;
@@ -39,9 +41,9 @@ export interface ExpandedSections {
 
 /** The Waiting on you section. */
 export interface WaitingSection {
-  /** The waiting threads it shows, newest activity first. */
-  readonly rows: readonly ThreadRow[];
-  /** How many waiting threads it hides: the number on its "more" row, or 0 for none. */
+  /** The threads and assistants it shows, newest activity first. */
+  readonly rows: readonly Waiting[];
+  /** How many entries it hides: the number on its "more" row, or 0 for none. */
   readonly hiddenCount: number;
 }
 
@@ -60,7 +62,7 @@ export interface ProjectSection extends ProjectGroup {
  * project, each holding only the rows it shows and counting the rows it hides.
  */
 export interface SidebarSections {
-  /** `null` when no thread is waiting, because the section is then not drawn. */
+  /** `null` when nothing is waiting, because the section is then not drawn. */
   readonly waiting: WaitingSection | null;
   /** One section per project group, in the groups' order. */
   readonly projects: readonly ProjectSection[];
@@ -119,25 +121,25 @@ const buildProjectSection = (
  * file.
  *
  * - `groups` is `buildThreadGroups`'s output.
+ * - `waiting` is `listWaiting`'s output, already in the order Waiting on you
+ *   shows it.
  * - `poses` holds each thread's pose by session id. A thread with no pose in
  *   `poses` is treated as neither working nor waiting.
  * - `selectedId` is the session id of the thread the user has open, or `null`.
  */
 export const buildSidebarSections = ({
   groups,
+  waiting,
   poses,
   expanded,
   selectedId,
 }: {
   readonly groups: readonly ProjectGroup[];
+  readonly waiting: readonly Waiting[];
   readonly poses: ReadonlyMap<string, Pose>;
   readonly expanded: ExpandedSections;
   readonly selectedId: string | null;
 }): SidebarSections => {
-  const waiting = groups
-    .flatMap(listRows)
-    .filter((row) => poses.get(row.id) === "waiting")
-    .sort(compareNewestFirst);
   const shownWaiting = expanded.waiting ? waiting : waiting.slice(0, WAITING_LIMIT);
   return {
     waiting:

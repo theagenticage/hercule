@@ -9,6 +9,9 @@
  * - in the first two projects, one more thread, waiting on a Request;
  * - every other thread idle.
  *
+ * It also creates four assistants, which with the one setup creates make the
+ * five the sidebar lists.
+ *
  * On request, `growTranscript` also plays turns into one idle thread until its
  * transcript is long, and `streamTurn` streams a long answer into it.
  *
@@ -29,7 +32,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Project, Runner, Session } from "../../../packages/contract/src/index";
+import type {
+  Assistant,
+  Heartbeat,
+  Project,
+  Runner,
+  Session,
+} from "../../../packages/contract/src/index";
 import {
   deleteMasterKeyItem,
   findCompiledBinary,
@@ -42,6 +51,21 @@ import { pollUntil } from "./poll.ts";
 
 /** The projects the threads are spread over, in the order they are created. */
 const PROJECT_NAMES = ["Webshop", "Payments", "Ops", "Docs"] as const;
+
+/** The assistants the fixture creates. Setup creates a fifth, "Hercule". */
+const ASSISTANT_NAMES = ["Ada", "Milo", "Juno", "Rex"] as const;
+
+/**
+ * The heartbeat each created assistant gets: turned off. The default wakes an
+ * assistant every hour, and a heartbeat that fired during a measured launch
+ * would start a session the launch did not ask for.
+ */
+const HEARTBEAT_OFF: Heartbeat = {
+  enabled: false,
+  schedule: "0 9 * * *",
+  prompt: "Check what you are waiting on.",
+  target: "web",
+};
 
 /**
  * The most threads each runner holds. An idle thread keeps its slot, so the
@@ -171,8 +195,8 @@ export interface ThreadFixture {
 /**
  * Starts a controller from the compiled binary in a scratch Hercule Home,
  * completes its setup, enlists the fleet's two runners and creates the
- * projects, then runs `use` with the fixture. Stops the controller and
- * deletes the Home afterwards. Fails when there is no compiled binary.
+ * projects and the assistants, then runs `use` with the fixture. Stops the
+ * controller and deletes the Home afterwards. Fails when there is no compiled binary.
  */
 export async function runWithThreadFixture<T>(
   use: (fixture: ThreadFixture) => Promise<T>,
@@ -191,6 +215,9 @@ export async function runWithThreadFixture<T>(
       );
       const projects: Project[] = [];
       for (const name of PROJECT_NAMES) projects.push(await fleet.createProject(name));
+      for (const name of ASSISTANT_NAMES) {
+        await call<Assistant>("POST", "/assistants", { name, heartbeat: HEARTBEAT_OFF });
+      }
 
       const listThreads = async (): Promise<readonly Session[]> =>
         (

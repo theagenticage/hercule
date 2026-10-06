@@ -92,8 +92,18 @@ export interface StoredSession {
   readonly parentSessionId: string | null;
   readonly status: SessionStatus;
   readonly resumable: boolean;
-  /** The Requests the session's agents are parked on, oldest first. */
+  /**
+   * The Requests the session's agents are parked on, oldest first, as
+   * stored: without `subagentName`, which is read into `subagentNames`.
+   */
   readonly openRequests: ReadonlyArray<SessionRequest>;
+  /**
+   * The name of each subagent that asked one of `openRequests`, by its id:
+   * its `description`, else its `agentType`. A subagent with neither is left
+   * out. Computed on read, so a name the record gains after its Request
+   * opened shows on the next read, and nothing stale is stored.
+   */
+  readonly subagentNames: ReadonlyMap<SubagentId, string>;
   /** The session's Token Usage over its whole life; `undefined` until a harness reports some. */
   readonly usage: StoredTokenUsage | undefined;
   /** The current process's last usage snapshot; see `addUsageSnapshot`. Never shown by the API. */
@@ -227,6 +237,11 @@ interface SessionRow {
   readonly resumable: number;
   /** A JSON array of the open Requests, oldest first. */
   readonly open_requests: string;
+  /**
+   * A JSON object from the id of each subagent that asked an open Request to
+   * its name, or `null` when it has none.
+   */
+  readonly subagent_names: string;
   readonly usage: string | null;
   readonly usage_process: string | null;
   readonly created_at: string;
@@ -261,7 +276,13 @@ const buildColumnList = (): string =>
   "AND session_inputs.status = 'queued') AS input_waiting, " +
   "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
   "WHERE conversations.id = sessions.conversation_id)) AS conversation_deleted, " +
-  `(${buildResumableClause("sessions")}) AS resumable`;
+  `(${buildResumableClause("sessions")}) AS resumable, ` +
+  // One primary-key lookup per open Request a subagent asked; nothing for a
+  // session that waits on nothing.
+  "(SELECT json_group_object(subagent_id, COALESCE(description, agent_type)) " +
+  "FROM session_subagents WHERE session_subagents.session_id = sessions.id " +
+  "AND subagent_id IN (SELECT json_extract(value, '$.subagentId') " +
+  "FROM json_each(sessions.open_requests))) AS subagent_names";
 
 /**
  * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
@@ -293,6 +314,12 @@ const toSession = (row: SessionRow): StoredSession => ({
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
   openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
+  subagentNames: new Map(
+    Object.entries(JSON.parse(row.subagent_names) as Record<SubagentId, string | null>).flatMap(
+      ([subagentId, name]): Array<[SubagentId, string]> =>
+        name === null ? [] : [[subagentId, name]],
+    ),
+  ),
   usage: parseUsage(row.usage),
   usageProcess: parseUsage(row.usage_process),
   createdAt: row.created_at,
@@ -367,6 +394,8 @@ export interface QueuedSession {
   readonly config: unknown;
   /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
+  /** The assistant's conversation the session answers; `null` for any other session. */
+  readonly conversationId: string | null;
   /** The model selection the session runs under now, which goes with the input its start carries. */
   readonly modelSelection: ModelSelection;
   /** The run whose agent step started the session; `null` for any other session. */
@@ -979,6 +1008,7 @@ const make = Effect.gen(function* () {
           readonly provider_id: string;
           readonly config: string;
           readonly agent_id: Uint8Array | null;
+          readonly conversation_id: Uint8Array | null;
           readonly model_selection: string;
           readonly run_id: Uint8Array | null;
           readonly step_id: string | null;
@@ -991,7 +1021,7 @@ const make = Effect.gen(function* () {
                  -- that checkout since.
                  CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
                  s.github_connection_id, pi.provider_id, pi.config, s.agent_id,
-                 s.model_selection, s.run_id, s.step_id
+                 s.conversation_id, s.model_selection, s.run_id, s.step_id
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
             -- A session waits until its workspace is ready. Starting it
@@ -1016,6 +1046,7 @@ const make = Effect.gen(function* () {
             providerId: row.provider_id,
             config: JSON.parse(row.config) as unknown,
             agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
+            conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
             modelSelection: JSON.parse(row.model_selection) as ModelSelection,
             runId: row.run_id === null ? null : uuidToString(row.run_id),
             stepId: row.step_id,

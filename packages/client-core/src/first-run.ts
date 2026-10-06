@@ -230,8 +230,8 @@ export interface RoomContents {
   readonly wing: RoomWing | null;
   /** The user's desk and hat stand. */
   readonly yourDesk: boolean;
-  /** The oldest assistant, asleep in the club chair. */
-  readonly assistant: { readonly name: string } | null;
+  /** The oldest assistant, asleep in the club chair. Its face is drawn from its id. */
+  readonly assistant: { readonly id: string; readonly name: string } | null;
   /** Triage at its desk, with the note under its name. */
   readonly triage: { readonly note: string } | null;
   /** The GitHub account on the plaque, which also draws the tube to Triage's desk. */
@@ -318,7 +318,8 @@ export const buildRoomContents = (
         ? null
         : buildWing(reads.localRunner, reads.controllerOnThisMac, done.providers, project),
     yourDesk: done.account,
-    assistant: done.account && assistant !== undefined ? { name: assistant.name } : null,
+    assistant:
+      done.account && assistant !== undefined ? { id: assistant.id, name: assistant.name } : null,
     triage:
       done.github || reads.putOff.includes("github")
         ? { note: gitHubAccount === null ? TRIAGE_WITHOUT_CONNECTIONS : TRIAGE_READING_GITHUB }

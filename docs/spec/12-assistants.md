@@ -33,6 +33,7 @@ Rules:
 | `rotation.dailyAt` | `04:00` | 5.2 |
 | `rotation.timezone` | unset = the user's timezone setting | 5.2 |
 | `reply` | `turn-end` | 11.3 |
+| `mainConversationId` | no default; set by the controller to the id of the assistant's main conversation, the one every Hercule app (web, desktop, later mobile) shows; today its web conversation, created with the assistant *(added 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453))* | 2 |
 | `accessMode` | `full-access` (the Agent's field, same default) | 7 |
 | `disallowedTools` | `["edit"]` (the Agent's field; agents generally default to none) | 7 |
 | `systemPrompt` | a shipped persona: a brief, plain assistant that delegates work through the `hercule` CLI and ~~cannot edit files~~ is told "Do not edit files yourself; delegate that work." (the Agent's field) *(added 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92); amended 2026-09-27, [#92](https://github.com/theagenticage/hercule/issues/92): "cannot" was false, because the shell can still write files and Codex does not remove its edit tools, section 7)* | 1 |

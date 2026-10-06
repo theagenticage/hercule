@@ -167,10 +167,10 @@ const buildRequestTitleAndDetail = (
  * returns `undefined` for a `question` request, which raises none.
  *
  * A Request a subagent asked starts its body with "Asked by" and the
- * subagent's description, `askerDescription`, or "Asked by a subagent" when
- * it has none. A session can wait on several Requests at once, and this line
- * tells their notifications apart. The description is the parent agent's
- * text, so it is shown as inline code and cannot format the body.
+ * subagent's name, `askerName`, or "Asked by a subagent" when it has none.
+ * A session can wait on several Requests at once, and this line tells their
+ * notifications apart. The name is the parent agent's or the
+ * harness's text, so it is shown as inline code and cannot format the body.
  *
  * The answers are the decisions the request accepts, in the request's order.
  * Each answer has the same label and the same sentence under it as the
@@ -182,14 +182,14 @@ const buildRequestTitleAndDetail = (
 export const buildApprovalNotification = (
   session: { readonly id: string; readonly title: string },
   request: SessionRequest,
-  askerDescription?: string,
+  askerName?: string,
 ): CoreNotification | undefined => {
   if (request.kind === "question") return undefined;
   const described = buildRequestTitleAndDetail(request);
   const asker =
     request.subagentId === undefined
       ? ""
-      : `Asked by ${askerDescription === undefined ? "a subagent" : formatInlineCode(askerDescription)}\n\n`;
+      : `Asked by ${askerName === undefined ? "a subagent" : formatInlineCode(askerName)}\n\n`;
   const waiting =
     asker +
     (session.title === ""

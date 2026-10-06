@@ -15,9 +15,10 @@ import { app, BrowserWindow, type NativeImage } from "electron";
 import type { Bitmap } from "./compare-bitmaps.ts";
 import { pollUntil } from "./poll.ts";
 
-// The themes every sheet is captured in. The sheets check their theme against
-// the same list.
-export { THEMES } from "../src/renderer/specimens/sheet-themes.ts";
+// The themes the sheets are captured in: the two the book is compared in, and
+// all five for a check by eye. The sheets check their theme against the same
+// file.
+export { ALL_THEMES, THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 
 /** The window's content size in CSS pixels: the size of a Bureau page. */
 export const WIDTH = 1440;
