@@ -82,12 +82,22 @@ export const AssistantReply = Schema.Literals(["turn-end", "segments"]);
 
 export type AssistantReply = Schema.Schema.Type<typeof AssistantReply>;
 
-/** An assistant: every Agent field, plus how it wakes, rotates and replies. */
+/**
+ * An assistant: every Agent field, plus how it wakes, rotates and replies,
+ * and which of its conversations every Hercule app shows.
+ */
 export const Assistant = Schema.Struct({
   ...Agent.fields,
   heartbeat: Heartbeat,
   rotation: Rotation,
   reply: AssistantReply,
+  /**
+   * The id of the assistant's main conversation: the one the web app, the
+   * desktop app and any later app show when the user opens the assistant.
+   * It is created together with the assistant and lives as long as it does.
+   * Today it is the assistant's conversation on the web channel.
+   */
+  mainConversationId: Id,
 });
 
 export type Assistant = Schema.Schema.Type<typeof Assistant>;

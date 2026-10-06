@@ -14,8 +14,9 @@
  * provider instance is the oldest one whose provider this build carries, and
  * the permission profile is the shipped `assistant` profile.
  *
- * Every assistant gets its web conversation in the transaction that creates
- * it, so the web app has a conversation to open from the start.
+ * Every assistant gets its main conversation in the transaction that creates
+ * it, so every app has a conversation to open from the start. The record
+ * names it in `mainConversationId`.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract.
@@ -115,16 +116,23 @@ type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
 type WriteError = ReadError | Validation | GrantsError;
 
-/** Builds the API record from the two rows of one assistant. */
+/** Turns a stored agent row into the Agent fields of the API record. */
+type AgentRecordComposer = (
+  stored: StoredAgent,
+) => Omit<Assistant, "heartbeat" | "rotation" | "reply" | "mainConversationId">;
+
+/** Builds the API record from the two rows of one assistant and its main conversation's id. */
 const composeAssistant = (
-  composeAgent: (stored: StoredAgent) => Omit<Assistant, "heartbeat" | "rotation" | "reply">,
+  composeAgent: AgentRecordComposer,
   agent: StoredAgent,
   fields: StoredAssistantFields,
+  mainConversationId: string,
 ): Assistant => ({
   ...composeAgent(agent),
   heartbeat: fields.heartbeat,
   rotation: fields.rotation,
   reply: fields.reply,
+  mainConversationId,
 });
 
 const make = Effect.gen(function* () {
@@ -159,6 +167,25 @@ const make = Effect.gen(function* () {
         return yield* Effect.fail(createNotFoundError(NO_SUCH_ASSISTANT));
       }
       return { agent: agent.value, fields: fields.value };
+    });
+
+  /**
+   * Returns the API record of the assistant with this id. Fails with
+   * `NotFound` if there is no such assistant.
+   *
+   * The caller runs it in a transaction, so an assistant deleted at the same
+   * time is either read whole or not found.
+   */
+  const readAssistantRecordOrFail = (
+    id: string,
+    composeAgent: AgentRecordComposer,
+  ): Effect.Effect<Assistant, NotFound | SqlError> =>
+    Effect.gen(function* () {
+      const { agent, fields } = yield* readAssistantOrFail(id);
+      const mainConversationIds = yield* conversations.readMainConversationIds([id]);
+      // The main conversation is written and deleted with the assistant's
+      // rows, so an assistant read in one transaction has one.
+      return composeAssistant(composeAgent, agent, fields, mainConversationIds.get(id)!);
     });
 
   /**
@@ -221,36 +248,48 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           createDecodeValidationError,
         );
-        const listing = yield* refuseCursor(
-          assistants.list({
-            limit: limit ?? DEFAULT_PAGE_LIMIT,
-            cursor,
-            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
+        const composeAgent = yield* buildAgentRecordComposer;
+        // The page's three reads run in one transaction, so an assistant
+        // deleted at the same time is either read whole or left out.
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const listing = yield* refuseCursor(
+              assistants.list({
+                limit: limit ?? DEFAULT_PAGE_LIMIT,
+                cursor,
+                direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
+              }),
+            );
+            const agentIds = listing.items.map((fields) => fields.agentId);
+            const byId = new Map(
+              (yield* agents.readMany(agentIds)).map((agent) => [agent.id, agent]),
+            );
+            const mainConversationIds = yield* conversations.readMainConversationIds(agentIds);
+            return {
+              // Both rows and the main conversation are written in one
+              // transaction, so every assistant row has its agent row and its
+              // main conversation.
+              items: listing.items.map((fields) =>
+                composeAssistant(
+                  composeAgent,
+                  byId.get(fields.agentId)!,
+                  fields,
+                  mainConversationIds.get(fields.agentId)!,
+                ),
+              ),
+              ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
+            };
           }),
         );
-        const byId = new Map(
-          (yield* agents.readMany(listing.items.map((fields) => fields.agentId))).map((agent) => [
-            agent.id,
-            agent,
-          ]),
-        );
-        const composeAgent = yield* buildAgentRecordComposer;
-        return {
-          // Both rows are written in one transaction, so every assistant row
-          // has its agent row.
-          items: listing.items.map((fields) =>
-            composeAssistant(composeAgent, byId.get(fields.agentId)!, fields),
-          ),
-          ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
-        };
       }),
 
     /** Returns the assistant with this id. Fails with `NotFound` when there is none. */
     read: (id: Id): Effect.Effect<Assistant, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("assistant.read");
-        const { agent, fields } = yield* readAssistantOrFail(id);
-        return composeAssistant(yield* buildAgentRecordComposer, agent, fields);
+        const composeAgent = yield* buildAgentRecordComposer;
+        return yield* withTransaction(sql, readAssistantRecordOrFail(id, composeAgent));
       }),
 
     /**
@@ -306,7 +345,7 @@ const make = Effect.gen(function* () {
               reply: decoded.reply ?? DEFAULT_REPLY,
               at,
             });
-            yield* conversations.create({
+            const mainConversation = yield* conversations.create({
               assistantId: agent.id,
               channel: "web",
               containerKey: null,
@@ -325,7 +364,7 @@ const make = Effect.gen(function* () {
               },
               at,
             });
-            return composeAssistant(composeAgent, agent, fields);
+            return composeAssistant(composeAgent, agent, fields, mainConversation.id);
           }),
         );
       }),
@@ -383,8 +422,7 @@ const make = Effect.gen(function* () {
               payload: { agentId: id, changed },
               at,
             });
-            const { agent, fields } = yield* readAssistantOrFail(id);
-            return composeAssistant(composeAgent, agent, fields);
+            return yield* readAssistantRecordOrFail(id, composeAgent);
           }),
         );
       }),

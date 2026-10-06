@@ -1,7 +1,7 @@
 /**
  * Tests the assistant over HTTP: its create, read, list and update operations,
  * the defaults the server fills in from a name alone, and the web conversation
- * every assistant gets.
+ * every assistant gets, which its record names as its main conversation.
  *
  * The controller runs with three provider instances, like a fresh install
  * with the three shipped harnesses, so the default instance has a real choice
@@ -193,7 +193,7 @@ describe("assistant.create", () => {
     });
   });
 
-  it("creates exactly one web conversation for the new assistant", async () => {
+  it("creates exactly one web conversation for the new assistant, and names it as the main conversation", async () => {
     await withAssistants(async (arranged) => {
       const created = await createAssistant(arranged, { name: "Ada" });
 
@@ -204,6 +204,10 @@ describe("assistant.create", () => {
         channel: "web",
         containerKey: null,
       });
+      expect(created.mainConversationId).toBe(conversations[0]!.id);
+      expect((await readAssistant(arranged, created.id)).mainConversationId).toBe(
+        conversations[0]!.id,
+      );
     });
   });
 
@@ -393,6 +397,20 @@ describe("assistant.query and assistant.read", () => {
       // Setup made `Hercule` before either of these.
       expect(listed.map((assistant) => assistant.name)).toEqual(["Hercule", "Ada", "Bea"]);
       expect(listed.slice(1)).toEqual([ada, bea]);
+    });
+  });
+
+  it("names each listed assistant's own web conversation as its main conversation", async () => {
+    await withAssistants(async (arranged) => {
+      await createAssistant(arranged, { name: "Ada" });
+      await createAssistant(arranged, { name: "Bea" });
+
+      const listed = await listAssistants(arranged);
+      expect(listed).toHaveLength(3);
+      for (const assistant of listed) {
+        const [web] = await listConversations(arranged, assistant.id);
+        expect(assistant.mainConversationId, assistant.name).toBe(web!.id);
+      }
     });
   });
 
