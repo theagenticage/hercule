@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import type { JSX, ReactNode, Ref } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -6,28 +6,47 @@ import {
   describeStartingRun,
   findAnsweredAssistantId,
   isJoinable,
+  isSubagentWaiting,
+  listSubagentAncestors,
+  nameSubagent,
   type HerculeClient,
   type ThreadTab,
 } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
-import { DoneMark, WorkingMark, cn } from "@hercule/ui";
+import { DoneMark, WorkingMark, cn, useElementWidth } from "@hercule/ui";
 import { projectsQuery, sessionsQuery, workspacesQuery } from "../../app/queries";
 import { HeaderRow } from "../header-row";
+import { SubagentMark } from "../subagents/subagent-mark";
+import { togglePane, useSidePaneLayout } from "../subagents/use-side-pane";
 import { AssistantCrumb } from "./assistant-crumb";
 import { StepSessionCrumb } from "./step-session-crumb";
+
+/**
+ * The header row's width, in pixels, below which "+ New thread here" shrinks
+ * to "+". At 1280px with the side pane open the row is about 560px wide, and
+ * the full button would leave the title little room.
+ */
+const COMPACT_ROW_WIDTH = 640;
 
 /**
  * Renders the header row of one agent's page: the session's own agent's page
  * when `subagentId` is undefined, else that subagent's.
  *
- * It reads the thread's project and the other threads in its workspace,
- * which the header shows beside the title. The crumb is the assistant for an
- * assistant's session, the run for a step session, and the project
- * otherwise.
+ * - On the session's own agent's page, it reads the thread's project and the
+ *   other threads in its workspace, which the header shows beside the title.
+ *   The crumb is the assistant for an assistant's session, the run for a step
+ *   session, and the project otherwise.
+ * - On a subagent's page, the crumb runs from the thread down through the
+ *   subagent's ancestors, and the title is the subagent's mark and name with
+ *   an uppercase SUBAGENT label.
+ *
+ * Both end with the side pane's toggle.
  */
 export function AgentChrome({
   client,
   session,
+  subagents,
+  subagentId,
 }: {
   readonly client: HerculeClient;
   readonly session: Session;
@@ -35,6 +54,26 @@ export function AgentChrome({
   readonly subagents: readonly Subagent[];
   /** The subagent whose page this is; undefined on the thread's own page. */
   readonly subagentId: string | undefined;
+}): JSX.Element {
+  const subagent = subagents.find((each) => each.id === subagentId);
+  return subagent === undefined ? (
+    <SessionAgentChrome client={client} session={session} />
+  ) : (
+    <SubagentChrome session={session} subagents={subagents} subagent={subagent} />
+  );
+}
+
+/**
+ * Renders the header row of the session's own agent's page. As the row gets
+ * narrower, it gives way in this order: "+ New thread here" shrinks to "+",
+ * then the other threads' tabs truncate, then the title truncates.
+ */
+function SessionAgentChrome({
+  client,
+  session,
+}: {
+  readonly client: HerculeClient;
+  readonly session: Session;
 }): JSX.Element {
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
@@ -44,9 +83,15 @@ export function AgentChrome({
   const assistantId = findAnsweredAssistantId(session);
   // A step session's crumb names the run that started it.
   const startingRun = describeStartingRun(session);
+  // Decided on the row's own width, not the window's: the side pane and the
+  // sidebar take their share of the window first. An unmeasured row counts
+  // as wide.
+  const { observeElement, width } = useElementWidth();
+  const compact = width !== undefined && width < COMPACT_ROW_WIDTH;
 
   return (
     <ThreadChrome
+      rowRef={observeElement}
       crumb={
         assistantId !== null ? (
           <AssistantCrumb client={client} assistantId={assistantId} />
@@ -61,16 +106,90 @@ export function AgentChrome({
       actions={
         <>
           {workspace === undefined || !isJoinable(workspace) ? null : (
-            <NewThreadHere projectId={session.projectId} workspaceId={workspace.id} />
+            <NewThreadHere
+              projectId={session.projectId}
+              workspaceId={workspace.id}
+              compact={compact}
+            />
           )}
           <ChromeAction title="More (not built)" icon disabled>
             …
           </ChromeAction>
+          <PaneToggle />
         </>
       }
     />
   );
 }
+
+/**
+ * Renders the header row of a subagent's page: the crumb from the thread
+ * down through the subagent's ancestors, each a link to its page, then the
+ * subagent's mark, its name and an uppercase SUBAGENT label. The page is
+ * marked in words rather than colour, because the design language keeps
+ * colour at word and mark scale.
+ */
+function SubagentChrome({
+  session,
+  subagents,
+  subagent,
+}: {
+  readonly session: Session;
+  readonly subagents: readonly Subagent[];
+  readonly subagent: Subagent;
+}): JSX.Element {
+  const name = nameSubagent(subagent);
+  return (
+    <HeaderRow
+      crumb={
+        <>
+          <Link
+            to="/threads/$sessionId"
+            params={{ sessionId: session.id }}
+            title={session.title}
+            className={CRUMB_LINK}
+          >
+            {session.title}
+          </Link>
+          {listSubagentAncestors(subagent, subagents).map((ancestor) => (
+            <span key={ancestor.id} className="flex items-center gap-2">
+              <span aria-hidden="true">/</span>{" "}
+              <Link
+                to="/threads/$sessionId/subagents/$subagentId"
+                params={{ sessionId: session.id, subagentId: ancestor.id }}
+                title={nameSubagent(ancestor)}
+                className={CRUMB_LINK}
+              >
+                {nameSubagent(ancestor)}
+              </Link>
+            </span>
+          ))}
+        </>
+      }
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="flex w-3 shrink-0 justify-center">
+            <SubagentMark
+              status={subagent.status}
+              waiting={isSubagentWaiting(subagent, session.openRequests)}
+            />
+          </span>
+          <span title={name} className="min-w-0 truncate">
+            {name}
+          </span>
+          <span className="shrink-0 text-label font-emph tracking-[0.1em] text-faint uppercase">
+            Subagent
+          </span>
+        </span>
+      }
+      actions={<PaneToggle />}
+    />
+  );
+}
+
+/** One link of a subagent page's crumb, cut short so a deep chain still fits. */
+const CRUMB_LINK =
+  "inline-block max-w-[120px] truncate rounded-control align-bottom hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live";
 
 /**
  * Renders the thread's header row: the project crumb, then the title, then
@@ -81,7 +200,9 @@ export function AgentChrome({
  *
  * When the thread's workspace holds more than one thread, the title becomes
  * the active tab, with the other threads beside it in the workspace's order.
- * The workspace name is not repeated here, because the lip already shows it.
+ * When the row runs short of room, the other threads' tabs shrink first, down
+ * to their mark, and only then the active one. The workspace name is not
+ * repeated here, because the lip already shows it.
  *
  * The thread screen draws this row instead of the shell's top bar, because
  * the shell's title would repeat the same information one row higher. Spec 14
@@ -92,15 +213,19 @@ export function ThreadChrome({
   title,
   tabs = [],
   actions,
+  rowRef,
 }: {
   /** The project's name, or an assistant's or a step session's crumb; the crumb shows `Threads` when undefined. */
   readonly crumb?: ReactNode;
   readonly title: string;
   readonly tabs?: readonly ThreadTab[];
   readonly actions?: ReactNode;
+  /** Receives the row's element, for a caller that lays the row out by its width. */
+  readonly rowRef?: Ref<HTMLDivElement> | undefined;
 }): JSX.Element {
   return (
     <HeaderRow
+      rowRef={rowRef}
       crumb={crumb ?? "Threads"}
       title={
         tabs.length === 0 ? (
@@ -122,7 +247,11 @@ export function ThreadChrome({
   );
 }
 
-/** One thread's tab in the header. The active tab is not a link. */
+/**
+ * One thread's tab in the header. The active tab is not a link. The other
+ * tabs shrink far faster than the active one, so they give up their room
+ * first, down to their mark and an ellipsis.
+ */
 function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
   const body = (
     <>
@@ -144,17 +273,70 @@ function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
     </>
   );
   const shape = cn(
-    "flex min-w-0 items-center gap-1.5 rounded-[8px] px-2.5 py-[3px] text-body tracking-normal",
+    "flex items-center gap-1.5 rounded-[8px] px-2.5 py-[3px] text-body tracking-normal",
     tab.active
-      ? "border border-line bg-raised font-emph text-ink shadow-card"
-      : "font-normal text-muted hover:text-ink",
+      ? "min-w-0 border border-line bg-raised font-emph text-ink shadow-card"
+      : "min-w-14 shrink-[1000] font-normal text-muted hover:text-ink",
   );
 
-  if (tab.active || tab.sessionId === null) return <span className={shape}>{body}</span>;
+  if (tab.active || tab.sessionId === null) {
+    return (
+      <span title={tab.title} className={shape}>
+        {body}
+      </span>
+    );
+  }
   return (
-    <Link to="/threads/$sessionId" params={{ sessionId: tab.sessionId }} className={shape}>
+    <Link
+      to="/threads/$sessionId"
+      params={{ sessionId: tab.sessionId }}
+      title={tab.title}
+      className={shape}
+    >
       {body}
     </Link>
+  );
+}
+
+/**
+ * Renders the header's toggle for the side pane, in the shape of the
+ * header's other actions. Opening a pane that holds no surface opens it on
+ * Subagents.
+ */
+function PaneToggle(): JSX.Element {
+  const { layout, changeLayout } = useSidePaneLayout();
+  const label = layout.open ? "Hide the side pane" : "Show the side pane";
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={layout.open}
+      onClick={() => {
+        changeLayout(togglePane);
+      }}
+      className={cn(
+        ACTION,
+        "box-content flex h-[1lh] cursor-pointer items-center px-[9px] hover:bg-line-soft hover:text-ink",
+        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+        layout.open && "text-ink",
+      )}
+    >
+      <svg
+        viewBox="0 0 12 12"
+        className="size-3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.15}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x={1.5} y={2} width={9} height={8} rx={1.5} />
+        <path d="M7.5 2v8" />
+        {layout.open ? <path d="M8.6 4.2h.9M8.6 6h.9" /> : null}
+      </svg>
+    </button>
   );
 }
 
@@ -188,14 +370,18 @@ export function ChromeAction(props: {
 /**
  * The New thread here link: starts another thread in the same workspace. A
  * thread without a workspace, or in one that is not ready, does not show it.
+ * In a narrow header it shows only "+", and keeps its words in its tooltip
+ * and its accessible name.
  */
 export function NewThreadHere({
   projectId,
   workspaceId,
+  compact = false,
 }: {
   /** Null when the workspace belongs to no project. */
   readonly projectId: string | null;
   readonly workspaceId: string;
+  readonly compact?: boolean;
 }): JSX.Element {
   return (
     <Link
@@ -204,9 +390,16 @@ export function NewThreadHere({
         ...(projectId === null ? {} : { project: projectId }),
         workspace: workspaceId,
       }}
-      className={cn(ACTION, "px-[11px] hover:bg-line-soft hover:text-ink")}
+      title={compact ? "New thread here" : undefined}
+      aria-label={compact ? "New thread here" : undefined}
+      className={cn(
+        ACTION,
+        compact ? "px-[9px]" : "px-[11px]",
+        "hover:bg-line-soft hover:text-ink",
+        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+      )}
     >
-      + New thread here
+      {compact ? "+" : "+ New thread here"}
     </Link>
   );
 }

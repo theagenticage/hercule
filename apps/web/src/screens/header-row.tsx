@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import type { JSX, ReactNode, Ref } from "react";
 
 /**
  * Renders the header row a screen draws in place of the shell's top bar: a
@@ -21,14 +21,20 @@ export function HeaderRow({
   crumb,
   title,
   actions,
+  rowRef,
 }: {
   readonly crumb: ReactNode;
   readonly title: ReactNode;
   readonly actions?: ReactNode;
+  /** Receives the row's element, for a screen that lays the row out by its width. */
+  readonly rowRef?: Ref<HTMLDivElement> | undefined;
 }): JSX.Element {
   return (
     <div className="sticky top-0 z-10 shrink-0 bg-bg px-8 pt-[22px] pb-3">
-      <div className="flex h-[1lh] items-center gap-2 text-title font-emph tracking-[-0.015em] text-ink">
+      <div
+        ref={rowRef}
+        className="flex h-[1lh] items-center gap-2 text-title font-emph tracking-[-0.015em] text-ink"
+      >
         {/* The spaces keep the crumb and the title apart in the text a screen
             reader or a copy reads; the gap does it on screen. */}
         <span className="flex shrink-0 items-center gap-2 font-normal text-faint">{crumb}</span>{" "}

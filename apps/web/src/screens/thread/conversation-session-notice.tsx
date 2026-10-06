@@ -48,6 +48,7 @@ export function ConversationSessionNotice({
         <div className="flex h-7 shrink-0 items-center gap-1.5">
           {busy ? (
             <StopButton
+              title="Stops the running turn; queued messages wait"
               onStop={() => {
                 stopAgent.stop();
               }}

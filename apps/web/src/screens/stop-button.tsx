@@ -4,7 +4,8 @@ import type { JSX } from "react";
  * The button that stops an agent's work. The composer shows it while a turn
  * runs; the subagent screens show it to stop subagents. `label` names what
  * it stops, such as "Stop all" or "Stop with 2 below", and defaults to
- * "Stop". `title` is the tooltip, which says what else stopping does.
+ * "Stop". `title` is the tooltip, which says what else stopping does; a
+ * button whose label says it all has none.
  *
  * Its line height is set so the button is 28px tall, the height of the
  * composer's send button: a taller Stop would grow the row, and move the text
@@ -12,11 +13,11 @@ import type { JSX } from "react";
  */
 export function StopButton({
   label = "Stop",
-  title = "Stops the running turn; queued messages wait",
+  title,
   onStop,
 }: {
   readonly label?: string;
-  readonly title?: string;
+  readonly title?: string | undefined;
   readonly onStop: () => void;
 }): JSX.Element {
   return (

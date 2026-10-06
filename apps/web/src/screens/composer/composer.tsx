@@ -181,7 +181,9 @@ export function Composer({
             </span>
           </div>
           <VoiceButton />
-          {model.busy ? <StopButton onStop={model.stop} /> : null}
+          {model.busy ? (
+            <StopButton title="Stops the running turn; queued messages wait" onStop={model.stop} />
+          ) : null}
           <SendButton tip={model.sendTip} disabled={!canSend} onSend={model.submit} />
         </div>
         {model.error === null ? null : (
