@@ -10,7 +10,7 @@
  * thread drawn until it has slid away, then lets it go.
  */
 import { Suspense, useEffect, useState, useSyncExternalStore, type JSX } from "react";
-import { ThreadScreen } from "../../screens/thread/thread-screen";
+import { AgentPage } from "../../screens/thread/agent-page";
 import { readOffice, subscribeOffice, type OfficeState } from "../office-store";
 
 /** Milliseconds the drawer keeps its thread after closing: longer than its slide, `--dur-3`. */
@@ -40,7 +40,7 @@ export function ThreadDrawer(): JSX.Element {
       {shownId === null ? null : (
         <div className="office-drawer-thread">
           <Suspense fallback={null}>
-            <ThreadScreen key={shownId} sessionId={shownId} />
+            <AgentPage key={shownId} sessionId={shownId} subagentId={undefined} />
           </Suspense>
         </div>
       )}

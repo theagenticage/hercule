@@ -34,7 +34,7 @@ import { resolveBrowserTimezone, type Pose, type ThreadBlock } from "@hercule/cl
 import { ageClock } from "../../app/age-clock";
 import { AgentMessage, LiveRow, TurnEnding, UserMessage, WaitingNote, WorkDivider } from "./blocks";
 import { useShowsClassicScrollbar } from "./classic-scrollbar";
-import type { AttachOpenParagraph } from "./use-thread-live";
+import type { AttachOpenParagraph } from "./use-agent-live";
 
 /**
  * The space above the first block, under the floating header: the book's
@@ -136,8 +136,10 @@ export interface TranscriptHandle {
 }
 
 /**
- * Renders the transcript of the thread `sessionId`.
+ * Renders one agent's transcript.
  *
+ * - `faceSeed` seeds the agent's face: the session id for the session's own
+ *   agent, `<sessionId>:<subagentId>` for a subagent.
  * - `blocks` are the thread's blocks in reading order.
  * - `pose` is the thread's pose, drawn on the block that holds the working face.
  * - `describeAgent` returns the start of an agent message's meta line, such
@@ -154,7 +156,7 @@ export interface TranscriptHandle {
  * - `ref` receives a `TranscriptHandle`.
  */
 export function Transcript({
-  sessionId,
+  faceSeed,
   blocks,
   pose,
   describeAgent,
@@ -163,7 +165,7 @@ export function Transcript({
   onBottomChange,
   ref,
 }: {
-  readonly sessionId: string;
+  readonly faceSeed: string;
   readonly blocks: readonly ThreadBlock[];
   readonly pose: Pose;
   readonly describeAgent: (model: string) => string;
@@ -289,7 +291,7 @@ export function Transcript({
       case "agent":
         return (
           <AgentMessage
-            sessionId={sessionId}
+            faceSeed={faceSeed}
             itemId={block.itemId}
             agent={describeAgent(block.model)}
             text={block.text}
@@ -302,7 +304,7 @@ export function Transcript({
           />
         );
       case "live":
-        return <LiveRow sessionId={sessionId} agent={describeAgent(block.model)} pose={pose} />;
+        return <LiveRow faceSeed={faceSeed} agent={describeAgent(block.model)} pose={pose} />;
       case "work":
         return (
           <WorkDivider

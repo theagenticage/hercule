@@ -93,3 +93,23 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
     };
   }, [live, queryClient, router]);
 };
+
+/**
+ * Subscribes to `topic` while the calling component is mounted, and
+ * invalidates the query keys each push lists. For a topic only one screen
+ * needs, such as `subagent` while a thread is open: the shell keeps its own
+ * topics with `useLiveConnection`.
+ */
+export const useLiveInvalidation = (
+  live: Live,
+  queryClient: QueryClient,
+  topic: MutableLiveTopic,
+): void => {
+  useEffect(
+    () =>
+      live.subscribe(topic, (keys) => {
+        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+      }),
+    [live, queryClient, topic],
+  );
+};

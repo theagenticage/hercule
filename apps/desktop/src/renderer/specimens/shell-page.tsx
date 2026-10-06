@@ -84,7 +84,7 @@ import {
 } from "../app/pending-submissions";
 import { createQueryClient } from "../app/query-client";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
-import { ThreadScreen } from "../screens/thread/thread-screen";
+import { AgentPage } from "../screens/thread/agent-page";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 
@@ -309,7 +309,7 @@ const buildRouter = (
           path: "threads/$sessionId",
           component: () =>
             openThreadId === undefined ? null : (
-              <ThreadScreen key={openThreadId} sessionId={openThreadId} />
+              <AgentPage key={openThreadId} sessionId={openThreadId} subagentId={undefined} />
             ),
         }),
       ]),

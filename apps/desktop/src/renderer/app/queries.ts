@@ -402,6 +402,28 @@ export const subagentsQuery = (client: HerculeClient, sessionId: string) =>
   });
 
 /**
+ * Reads every subagent of the session `sessionId` once, for the shell to name
+ * the subagent `subagentId` in the thread's notification when it asks the
+ * user something.
+ *
+ * The key holds the asking subagent, so a subagent that starts asking is
+ * always read after it asked and is in the list. A subagent's name never
+ * changes, so one read per asker is enough, and the result never goes
+ * stale. The key sits outside `queryKeys.subagents`, where the `subagent`
+ * live topic of an open thread would read it again on every change.
+ */
+export const askingSubagentQuery = (client: HerculeClient, sessionId: string, subagentId: string) =>
+  queryOptions({
+    queryKey: ["asking subagent", sessionId, subagentId],
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.session.querySubagents({ params: { id: sessionId }, query: page }),
+      ),
+    retry: isWorthRetrying,
+    staleTime: Infinity,
+  });
+
+/**
  * Reads a thread's queued inputs, oldest first: the inputs the controller
  * still holds for delivery when the running turn ends. A push on the
  * `session` topic that names the thread reads them again.
@@ -483,13 +505,15 @@ export const ensureFirstRunData = async (
 };
 
 /**
- * Reads everything the thread screen shows of the thread `sessionId` into
- * `queryClient`: its session, its whole transcript and its queued inputs.
+ * Reads everything the thread's own agent's page shows of the thread
+ * `sessionId` into `queryClient`: its session, its subagents, its whole
+ * transcript and its queued inputs.
  * Resolves once every read is cached, and fails with the first read that
  * fails, such as a `not_found` `ApiError` when no such session exists.
  *
- * The thread's loader calls it, and so does a test that renders one part of
- * the thread screen alone.
+ * The thread's loader calls it, and so do the Office, whose drawer shows the
+ * thread's page outside the thread's route, and a test that renders one
+ * part of the page alone.
  */
 export const ensureThreadData = async (
   queryClient: QueryClient,
@@ -498,6 +522,7 @@ export const ensureThreadData = async (
 ): Promise<void> => {
   await Promise.all([
     queryClient.ensureQueryData(sessionQuery(client, sessionId)),
+    queryClient.ensureQueryData(subagentsQuery(client, sessionId)),
     queryClient.ensureQueryData(transcriptQuery(client, sessionId)),
     queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
   ]);

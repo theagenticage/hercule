@@ -58,7 +58,7 @@ describe("Transcript", () => {
   it("counts a live stretch on the one shared timer, and on none while the window is hidden", () => {
     render(
       <Transcript
-        sessionId={THREAD.session.id}
+        faceSeed={THREAD.session.id}
         blocks={buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session))}
         pose="working"
         describeAgent={() => "Claude Code · Claude Sonnet 5"}
@@ -94,7 +94,7 @@ describe("Transcript", () => {
     expect(blocks.at(-1)?.kind).toBe("live");
     const renderTranscript = (pose: Pose) => (
       <Transcript
-        sessionId={THREAD.session.id}
+        faceSeed={THREAD.session.id}
         blocks={blocks}
         pose={pose}
         describeAgent={() => "Claude Code · Claude Sonnet 5"}

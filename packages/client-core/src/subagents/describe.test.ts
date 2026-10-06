@@ -1,6 +1,6 @@
 /**
  * Tests the words a screen shows for one subagent: `nameSubagent`,
- * `nameSubagentParent`, `isSubagentWaiting`, `decideSubagentMark`,
+ * `nameSubagentParent`, `isSubagentWaiting`, `decideSubagentMark`, `decideSubagentPose`,
  * `describeSubagentState`,
  * `describeSubagentLine`, `formatTokenCount`, `formatSubagentTokens`,
  * `describeSubagentMeta` and `describeSubagentStop`.
@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionRequest } from "@hercule/contract";
 import {
   decideSubagentMark,
+  decideSubagentPose,
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
@@ -72,6 +73,16 @@ describe("decideSubagentMark", () => {
     expect(decideSubagentMark("completed", true)).toBe("done");
     expect(decideSubagentMark("failed", true)).toBe("failed");
     expect(decideSubagentMark("stopped", false)).toBe("stopped");
+  });
+});
+
+describe("decideSubagentPose", () => {
+  it("poses a subagent as its mark, and a stopped one idle", () => {
+    expect(decideSubagentPose("running", false)).toBe("working");
+    expect(decideSubagentPose("running", true)).toBe("waiting");
+    expect(decideSubagentPose("completed", false)).toBe("done");
+    expect(decideSubagentPose("failed", false)).toBe("failed");
+    expect(decideSubagentPose("stopped", true)).toBe("idle");
   });
 });
 

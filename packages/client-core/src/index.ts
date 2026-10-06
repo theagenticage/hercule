@@ -245,6 +245,7 @@ export {
 } from "./subagents/brief";
 export {
   decideSubagentMark,
+  decideSubagentPose,
   describeSubagentLine,
   describeSubagentMeta,
   describeSubagentState,
@@ -375,6 +376,7 @@ export {
 export { decideRelatedReads } from "./threads/related-reads";
 export { findOldestOpenRequest } from "./threads/oldest-request";
 export { formatRequestQuestion } from "./threads/request-question";
+export { dropClosedRequestDrafts } from "./threads/request-drafts";
 export {
   buildQuestionAnswers,
   buildQuestionDraft,

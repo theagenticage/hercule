@@ -1,4 +1,4 @@
-import { Fragment, useId, useState, type JSX, type KeyboardEvent } from "react";
+import { Fragment, useId, type JSX, type KeyboardEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -11,8 +11,10 @@ import {
   pickQuestionOption,
   readErrorMessage,
   typeQuestionAnswer,
+  type QuestionDraft,
 } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
+import { useRequestDraft } from "../../app/thread-drafts";
 import { buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { isSendKey } from "./send-key";
@@ -109,6 +111,10 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  * A decision is sent with `session.respondToApprovalRequest`, and answers
  * with `session.respondToQuestion`. Mount one dock per request, keyed by its
  * id, so an answer given to one request never disables the next.
+ *
+ * What the user has typed, the shown question and whether an answer was
+ * sent are kept in the thread's Request draft (`useRequestDraft`), so they
+ * survive a move to a subagent's page and back.
  */
 export function RequestDock({
   sessionId,
@@ -121,17 +127,26 @@ export function RequestDock({
   const { client } = controller;
   const titleId = useId();
   const card = buildApprovalCard(request);
+  const [requestDraft, changeRequestDraft] = useRequestDraft(request.requestId);
+  // A failed send unlocks the Request, so the user can answer again. The
+  // mutation's own callbacks run even after the dock has unmounted, so the
+  // draft is right when the user comes back.
+  const markAnswered = (answered: boolean): void => {
+    changeRequestDraft((current) => ({ ...current, answered }));
+  };
   // Neither response is written into the cache. It is the session as the
   // controller held it when the answer arrived, still waiting on the
   // request, so writing it could bring back a dock the live `session` push
   // has already cleared. Until that push clears the request, the answers
-  // stay disabled through `isSuccess`.
+  // stay disabled through the draft's `answered`.
   const decide = useMutation({
     mutationFn: (decision: ApprovalDecision) =>
       client.session.respondToApprovalRequest({
         params: { id: sessionId },
         payload: { requestId: request.requestId, decision },
       }),
+    onMutate: () => markAnswered(true),
+    onError: () => markAnswered(false),
   });
   const answer = useMutation({
     mutationFn: (answers: QuestionAnswers) =>
@@ -139,18 +154,23 @@ export function RequestDock({
         params: { id: sessionId },
         payload: { requestId: request.requestId, answers },
       }),
+    onMutate: () => markAnswered(true),
+    onError: () => markAnswered(false),
   });
   // One answer per request. The dock stays until the runner reports the
   // request resolved, and a second answer in that time could contradict the
   // one already sent. The keys obey this too, so the keyboard cannot answer
   // where a click cannot.
-  const locked = [decide, answer].some((sent) => sent.isPending || sent.isSuccess);
+  const locked = requestDraft.answered || decide.isPending || answer.isPending;
   const error = decide.error ?? answer.error;
   // The state of a `question` request: what the user has given so far, and
   // which question is shown. For every other kind the draft stays empty and
   // the index is not used.
-  const [draft, setDraft] = useState(() => buildQuestionDraft(card.questions));
-  const [shownQuestionIndex, setShownQuestionIndex] = useState(0);
+  const draft = requestDraft.question ?? buildQuestionDraft(card.questions);
+  const { shownQuestionIndex } = requestDraft;
+  const setDraft = (question: QuestionDraft): void => {
+    changeRequestDraft((current) => ({ ...current, question }));
+  };
   const question = card.questions[shownQuestionIndex];
   const questionAnswered = question !== undefined && isQuestionAnswered(draft, question);
   const isLastQuestion = shownQuestionIndex === card.questions.length - 1;
@@ -159,7 +179,7 @@ export function RequestDock({
   const advanceQuestions = (): void => {
     if (locked || !questionAnswered) return;
     if (!isLastQuestion) {
-      setShownQuestionIndex(shownQuestionIndex + 1);
+      changeRequestDraft((current) => ({ ...current, shownQuestionIndex: shownQuestionIndex + 1 }));
       return;
     }
     const answers = buildQuestionAnswers(draft, card.questions);

@@ -1,28 +1,19 @@
 /**
- * The thread's drafts: what the user has typed or picked on a thread and not
- * sent yet. That is the composer's Message Draft and unsent picks, and, per
- * open Request, the answer being written and whether one was sent.
+ * The thread's Request drafts: per open Request, the answers typed so far
+ * and whether one was sent, and which Request the dock shows.
  *
- * The thread's layout route provides the drafts, because it stays mounted
- * while the user moves between the thread's page and its subagents' pages.
- * The composer and the Request dock unmount on each move, so drafts kept in
- * their own state would be lost.
+ * The thread's layout route provides them, because it stays mounted while
+ * the user moves between the thread's page and its subagents' pages. The
+ * dock unmounts on each move, so drafts kept in its own state would be lost.
+ *
+ * The composer's Message Draft and picks are not here: the controller's
+ * `pendingSubmissions` keeps them per thread for the whole app run.
  *
  * The drafts live in memory only. Leaving the thread drops them.
  */
 import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
-import {
-  dropClosedRequestDrafts,
-  type QuestionDraft,
-  type ThreadPicks,
-} from "@hercule/client-core";
+import { dropClosedRequestDrafts, type QuestionDraft } from "@hercule/client-core";
 import type { SessionRequest } from "@hercule/contract";
-
-/** The composer's unsent input: the Message Draft and the picks not yet sent. */
-export interface ComposerDraft {
-  readonly message: string;
-  readonly picks: ThreadPicks;
-}
 
 /** What the user has done so far on one open Request. */
 export interface RequestDraft {
@@ -39,9 +30,10 @@ export interface RequestDraft {
 }
 
 interface ThreadDrafts {
-  readonly composer: ComposerDraft;
   /** The drafts of the thread's open Requests, by requestId. */
   readonly requests: ReadonlyMap<string, RequestDraft>;
+  /** The Request the user paged the dock to; undefined until the user pages. */
+  readonly shownRequestId: string | undefined;
 }
 
 interface ThreadDraftsStore {
@@ -49,13 +41,13 @@ interface ThreadDraftsStore {
   readonly update: (change: (drafts: ThreadDrafts) => ThreadDrafts) => void;
 }
 
-const EMPTY_COMPOSER_DRAFT: ComposerDraft = { message: "", picks: {} };
-
 const EMPTY_REQUEST_DRAFT: RequestDraft = {
   answered: false,
   question: null,
   shownQuestionIndex: 0,
 };
+
+const EMPTY_THREAD_DRAFTS: ThreadDrafts = { requests: new Map(), shownRequestId: undefined };
 
 const ThreadDraftsContext = createContext<ThreadDraftsStore | null>(null);
 
@@ -74,10 +66,7 @@ export function ThreadDraftsProvider({
   readonly openRequests: readonly SessionRequest[];
   readonly children: ReactNode;
 }): JSX.Element {
-  const [drafts, setDrafts] = useState<ThreadDrafts>({
-    composer: EMPTY_COMPOSER_DRAFT,
-    requests: new Map(),
-  });
+  const [drafts, setDrafts] = useState(EMPTY_THREAD_DRAFTS);
   // The drafts are pruned while rendering, the way React advises to adjust
   // state when a prop changes, rather than in an effect, which would render
   // the closed Requests' drafts once more first.
@@ -94,50 +83,54 @@ export function ThreadDraftsProvider({
 }
 
 /**
- * Returns the composer's draft and a function that changes it.
+ * Returns the thread's drafts and a function that changes them.
  *
- * Inside a thread the draft is the thread's, so it survives a visit to a
- * subagent's page. A draft thread has no thread layout, and its composer
- * never unmounts while the draft is open, so there the draft is the caller's
- * own state.
+ * Outside a `ThreadDraftsProvider` they are the caller's own state. The
+ * Office's thread drawer draws the thread's page without the thread's
+ * route, and never moves to another of the thread's pages, so its dock has
+ * nothing to keep across a move.
  */
-export function useComposerDraft(): readonly [
-  ComposerDraft,
-  (change: (draft: ComposerDraft) => ComposerDraft) => void,
-] {
+const useThreadDrafts = (): ThreadDraftsStore => {
   const store = useContext(ThreadDraftsContext);
-  const [ownDraft, setOwnDraft] = useState(EMPTY_COMPOSER_DRAFT);
-  if (store === null) return [ownDraft, setOwnDraft];
+  const [ownDrafts, setOwnDrafts] = useState(EMPTY_THREAD_DRAFTS);
+  return store ?? { drafts: ownDrafts, update: setOwnDrafts };
+};
+
+/**
+ * Returns the draft of the open Request `requestId` and a function that
+ * changes it. A Request the user has not touched has the empty draft.
+ */
+export function useRequestDraft(
+  requestId: string,
+): readonly [RequestDraft, (change: (draft: RequestDraft) => RequestDraft) => void] {
+  const { drafts, update } = useThreadDrafts();
   return [
-    store.drafts.composer,
+    drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT,
     (change) => {
-      store.update((drafts) => ({ ...drafts, composer: change(drafts.composer) }));
+      update((current) => {
+        const requests = new Map(current.requests);
+        requests.set(requestId, change(current.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT));
+        return { ...current, requests };
+      });
     },
   ];
 }
 
 /**
- * Returns the draft of the open Request `requestId` and a function that
- * changes it. A Request the user has not touched has the empty draft.
- *
- * Fails when no thread provides drafts: a Request is only ever shown inside
- * its thread.
+ * Returns the id of the Request the user paged the dock to, undefined until
+ * the user pages, and a function that changes it. The dock passes it to
+ * `buildRequestDock`, which falls back to the oldest Request when the id is
+ * no longer open.
  */
-export function useRequestDraft(
-  requestId: string,
-): readonly [RequestDraft, (change: (draft: RequestDraft) => RequestDraft) => void] {
-  const store = useContext(ThreadDraftsContext);
-  if (store === null) {
-    throw new Error("useRequestDraft was called outside a ThreadDraftsProvider.");
-  }
+export function useShownRequestId(): readonly [
+  string | undefined,
+  (requestId: string | undefined) => void,
+] {
+  const { drafts, update } = useThreadDrafts();
   return [
-    store.drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT,
-    (change) => {
-      store.update((drafts) => {
-        const requests = new Map(drafts.requests);
-        requests.set(requestId, change(drafts.requests.get(requestId) ?? EMPTY_REQUEST_DRAFT));
-        return { ...drafts, requests };
-      });
+    drafts.shownRequestId,
+    (shownRequestId) => {
+      update((current) => ({ ...current, shownRequestId }));
     },
   ];
 }

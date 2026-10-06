@@ -1,7 +1,7 @@
 /**
- * Tests the thread screen as the app opens it: the transcript drawn from the
- * stubbed controller's records, the live changes pushed over the stubbed live
- * connection, and the work dividers that expand.
+ * Tests the session's own agent's page as the app opens it: the transcript
+ * drawn from the stubbed controller's records, the live changes pushed over
+ * the stubbed live connection, and the work dividers that expand.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";

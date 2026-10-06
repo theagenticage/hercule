@@ -5,6 +5,7 @@
  */
 import type { SessionRequest, Subagent, SubagentStatus } from "@hercule/contract";
 import { formatDuration } from "../threads/duration";
+import type { Pose } from "../threads/pose";
 import { countUsedTokens } from "../token-usage";
 import { listSubagentDescendants } from "./tree";
 
@@ -118,6 +119,16 @@ export const decideSubagentMark = (status: SubagentStatus, waiting: boolean): Su
     case "stopped":
       return "stopped";
   }
+};
+
+/**
+ * Returns the pose of a subagent's face, from the same rules as
+ * `decideSubagentMark`. A face has no stopped pose, so a stopped subagent
+ * is `idle`: it does nothing, and it is neither done nor failed.
+ */
+export const decideSubagentPose = (status: SubagentStatus, waiting: boolean): Pose => {
+  const mark = decideSubagentMark(status, waiting);
+  return mark === "stopped" ? "idle" : mark;
 };
 
 /** Returns what the user is asked to do about a Request, such as "allow a command". */
