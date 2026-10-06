@@ -19,12 +19,10 @@ import { buildThreadItem, type ThreadItem } from "./turns";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
-type ItemKind = ItemStarted["kind"];
 type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
 /** A tool item in a work stretch, with what its summary counts. */
 export interface WorkItem extends ThreadItem {
-  readonly kind: ItemKind;
   /** The files a file change touched, as its detail names them. Empty for any other item. */
   readonly paths: readonly string[];
 }
@@ -326,7 +324,6 @@ export const buildThreadBlocks = (
           workItems.set(event.itemId, { stretch, index: stretch.items.length });
           stretch.items.push({
             ...buildThreadItem(event),
-            kind: event.kind,
             paths: readChangedPaths(event),
           });
         }

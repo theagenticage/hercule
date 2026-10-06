@@ -230,6 +230,7 @@ describe("buildTurns", () => {
     expect(turns[0]!.items.map((item) => item.itemId)).toEqual(["tool1"]);
     expect(turns[0]!.items[0]).toMatchObject({
       itemId: "tool1",
+      kind: "command_execution",
       verb: "command",
       result: "completed",
     });

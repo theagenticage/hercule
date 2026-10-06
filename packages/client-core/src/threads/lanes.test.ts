@@ -1,11 +1,12 @@
 /**
  * Tests `buildLanes(sessions)`, which groups sessions into the five lanes in
- * their fixed order, `buildHeadline(sessions, now)`, which summarizes the
+ * their fixed order with a thread that has an open Request in the waiting
+ * lane only, `buildHeadline(sessions, now)`, which summarizes the
  * same groups in one sentence, and the functions that sum up, describe and
  * list the step sessions, which sit in no lane.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hercule/contract";
+import type { Session, SessionRequest } from "@hercule/contract";
 import {
   buildHeadline,
   buildLanes,
@@ -44,6 +45,15 @@ const BASE: Session = {
   unenforced: [],
 };
 
+/** An open Request of the session's own agent; `subagentId` makes it a subagent's. */
+const REQUEST: SessionRequest = {
+  requestId: "r-1",
+  itemId: "item-1",
+  kind: "command_approval",
+  decisions: ["allow", "deny"],
+  detail: { command: "rm -rf build" },
+};
+
 const buildSession = (overrides: Partial<Session> & { id: string }): Session => ({
   ...BASE,
   ...overrides,
@@ -63,7 +73,7 @@ describe("buildLanes", () => {
     for (const lane of lanes) expect(lane.sessions).toEqual([]);
   });
 
-  it("places a session of each status in its matching lane, leaving waiting and assistants empty", () => {
+  it("places a session of each status in its matching lane, leaving waiting and assistants empty when nothing asks", () => {
     const busy = buildSession({ id: "busy", status: "busy" });
     const starting = buildSession({ id: "starting", status: "starting" });
     const queued = buildSession({ id: "queued", status: "queued" });
@@ -80,8 +90,7 @@ describe("buildLanes", () => {
     ]);
     expect(byKind.idle!.map((s: Session) => s.id)).toEqual(["idle"]);
     expect(byKind.settled!.map((s: Session) => s.id)).toEqual(["exited"]);
-    // Nothing in this build produces a waiting session, and none of these
-    // sessions answers a conversation.
+    // None of these sessions has an open Request or answers a conversation.
     expect(byKind.waiting).toEqual([]);
     expect(byKind.assistants).toEqual([]);
   });
@@ -121,6 +130,46 @@ describe("buildLanes", () => {
     expect(byKind.idle).toEqual([]);
     expect(byKind.settled).toEqual([]);
     expect(byKind.waiting).toEqual([]);
+  });
+
+  it("places a thread with an open Request in the waiting lane only, whichever agent asked and whatever its status", () => {
+    const busy = buildSession({ id: "busy", status: "busy", openRequests: [REQUEST] });
+    const idle = buildSession({
+      id: "idle",
+      status: "idle",
+      openRequests: [{ ...REQUEST, subagentId: "agent-1" }],
+    });
+    const quiet = buildSession({ id: "quiet", status: "busy" });
+
+    const lanes = buildLanes([busy, idle, quiet]);
+    const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
+
+    expect(byKind.waiting!.map((s: Session) => s.id)).toEqual(["busy", "idle"]);
+    expect(byKind.running!.map((s: Session) => s.id)).toEqual(["quiet"]);
+    expect(byKind.idle).toEqual([]);
+  });
+
+  it("keeps an assistant's session with an open Request in the assistants lane, and a step session in none", () => {
+    const answering = buildSession({
+      id: "answering",
+      status: "busy",
+      agentId: "ada",
+      conversationId: "c",
+      openRequests: [REQUEST],
+    });
+    const step = buildSession({
+      id: "step",
+      status: "busy",
+      agentId: "ada",
+      runId: RUN_ID,
+      openRequests: [REQUEST],
+    });
+
+    const lanes = buildLanes([answering, step]);
+    const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
+
+    expect(byKind.waiting).toEqual([]);
+    expect(byKind.assistants!.map((s: Session) => s.id)).toEqual(["answering"]);
   });
 
   it("places a step session in no lane, whatever its status", () => {
@@ -208,6 +257,20 @@ describe("buildHeadline", () => {
     ];
 
     expect(buildHeadline(sessions, now)).toBe("2 running · 1 idle");
+  });
+
+  it("counts a thread with an open Request as waiting on you, and not also as running or idle", () => {
+    const sessions = [
+      buildSession({ id: "w1", status: "busy", openRequests: [REQUEST] }),
+      buildSession({
+        id: "w2",
+        status: "idle",
+        openRequests: [{ ...REQUEST, subagentId: "agent-1" }],
+      }),
+      buildSession({ id: "r1", status: "busy" }),
+    ];
+
+    expect(buildHeadline(sessions, now)).toBe("2 waiting on you · 1 running");
   });
 
   it("returns No sessions yet only when there are no sessions", () => {
