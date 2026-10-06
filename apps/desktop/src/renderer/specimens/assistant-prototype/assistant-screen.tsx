@@ -15,7 +15,6 @@ import { MicIcon } from "../../icons/mic";
 import { PlusIcon } from "../../icons/plus";
 import { SendIcon } from "../../icons/send";
 import { StopIcon } from "../../icons/stop";
-import { ProviderLogo } from "../../screens/thread/provider-logo";
 import { isSendKey } from "../../screens/thread/send-key";
 import { answerAsAda, answerAsHercule, answerAsJuno, answerAsMilo } from "./answers";
 import { useConversation, type ConversationSetup, type OpenMessage } from "./conversation";
@@ -504,15 +503,7 @@ function Composer({
               <button type="button" className="icon-btn" title="Attach" aria-disabled="true">
                 <PlusIcon />
               </button>
-              <span className="pick">
-                <ChatIcon size={14} />
-                Web chat
-              </span>
               <span className="spacer" />
-              <span className="pick pick--pill">
-                <ProviderLogo providerId="claude-code" size={13} />
-                Claude Code · Sonnet 5
-              </span>
               <button type="button" className="icon-btn" title="Dictate" aria-disabled="true">
                 <MicIcon />
               </button>

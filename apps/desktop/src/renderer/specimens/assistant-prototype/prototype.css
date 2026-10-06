@@ -598,3 +598,11 @@ body:has(.proto-switcher) .app {
   height: 16px;
   background: #444;
 }
+
+/* A rail section with no operation behind it yet: its heading stays readable,
+   its content is drawn at half opacity and takes no clicks, as the book draws
+   anything inert. */
+.is-inert > :not(.section-h) {
+  opacity: 0.5;
+  pointer-events: none;
+}

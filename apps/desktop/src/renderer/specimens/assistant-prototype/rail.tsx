@@ -72,7 +72,8 @@ export function Rail({
         <BeatLine beats={beats} />
       </section>
 
-      <section>
+      {/* Reminders and Memory have no operation behind them yet, so they are drawn inert. */}
+      <section className="is-inert" aria-disabled="true">
         <h2 className="section-h">
           <AlarmIcon size={14} />
           Reminders <b className="count">{reminders.length}</b>
@@ -90,7 +91,7 @@ export function Rail({
         ))}
       </section>
 
-      <section>
+      <section className="is-inert" aria-disabled="true">
         <h2 className="section-h">
           <MemoryIcon size={14} />
           Memory<span className="section-aside">Edit</span>
