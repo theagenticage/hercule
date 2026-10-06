@@ -8,7 +8,9 @@
  * - selecting a colleague reads its thread, so the drawer opens on it at once;
  * - Enter and Open thread open the drawer, and the param follows;
  * - the param opens the drawer, and Escape steps back from the drawer to the
- *   card, then from the card to nothing.
+ *   card, then from the card to nothing;
+ * - the drawer's header has no side pane toggle, because the drawer has no
+ *   side pane.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
@@ -166,5 +168,15 @@ describe("the thread drawer", () => {
 
     expect(readOffice().selectedId).toBeNull();
     expect(findCard(runbook.title).dataset.open).toBe("false");
+  });
+
+  it("draws no side pane toggle in the drawer's header, because the drawer has no side pane", async () => {
+    await openOffice(`/office?session=${runbook.id}`);
+
+    const drawer = findDrawer();
+    expect(
+      await within(drawer).findByRole("navigation", { name: "Threads in this workspace" }),
+    ).toBeTruthy();
+    expect(within(drawer).queryByRole("button", { name: /side pane/ })).toBeNull();
   });
 });

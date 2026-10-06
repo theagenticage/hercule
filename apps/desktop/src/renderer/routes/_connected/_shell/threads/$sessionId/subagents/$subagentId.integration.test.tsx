@@ -1,12 +1,15 @@
 /**
  * Tests a subagent's page as the app opens it: the subagent's transcript read
  * and followed over the subagent's own live topics, the move back to the
- * thread's page, and what it shows when the thread has no such subagent.
+ * thread's page, what it shows when the thread has no such subagent, and
+ * the status card's Stop.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  type Session,
+  type Subagent,
   buildSessionStreamTopic,
   buildSessionTapTopic,
   buildSubagentStreamTopic,
@@ -71,6 +74,10 @@ describe("the subagent's page", () => {
     const { live, calls } = await openApp(`/threads/${SESSION_ID}/subagents/${SUBAGENT_ID}`);
 
     expect(await screen.findByText(SUBAGENT_BRIEF)).toBeTruthy();
+    // The brief is drawn as the brief card, a button that expands it, and
+    // not as a message of the transcript.
+    expect(screen.getByRole("button", { name: SUBAGENT_BRIEF })).toBeTruthy();
+    expect(document.querySelectorAll(".brief-card")).toHaveLength(1);
     expect(screen.queryByText(THREAD_MESSAGE)).toBeNull();
     // A subagent takes no messages, so its page has no composer.
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -150,5 +157,66 @@ describe("the subagent's page", () => {
     await userEvent.click(screen.getByRole("link", { name: "Go to the thread" }));
     expect(router.state.location.pathname).toBe(`/threads/${SESSION_ID}`);
     expect(await screen.findByText(THREAD_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("the subagent's status card", () => {
+  it("stops the subagent alone, and drops its Stop and its Request once the pushes say so", async () => {
+    // The main agent is idle and the subagent waits on the user, so Stop is
+    // how the user turns the subagent's question down.
+    let session: Session = {
+      ...THREAD.session,
+      status: "idle",
+      openRequests: [
+        {
+          requestId: "req-9",
+          itemId: "tool-9",
+          subagentId: SUBAGENT_ID,
+          kind: "command_approval",
+          decisions: ["allow", "deny"],
+          detail: { command: "pnpm test" },
+        },
+      ],
+    };
+    let subagents: readonly Subagent[] = [FIXTURE_SUBAGENT];
+    const interrupt = `/api/v1/sessions/${SESSION_ID}/interrupt`;
+    const calls = stubApi({
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildThreadHandlers(THREAD),
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: session }),
+      [`GET /api/v1/sessions/${SESSION_ID}/subagents`]: () => ({ body: { items: subagents } }),
+      [`POST ${interrupt}`]: () => ({ body: session }),
+    });
+    const { live } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: `/threads/${SESSION_ID}/subagents/${SUBAGENT_ID}` },
+    );
+
+    // The sidebar has a "Waiting on you" heading too, so the card's headline
+    // is found by its place.
+    await waitFor(() => {
+      expect(document.querySelector(".status-card-text b")?.textContent).toBe("Waiting on you");
+    });
+    // The subagent's question is docked above its status card.
+    expect(document.querySelector(".dock")).not.toBeNull();
+    expect(screen.getByText("pnpm test")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path === interrupt).map((call) => call.body)).toEqual([
+        { subagentId: SUBAGENT_ID },
+      ]);
+    });
+
+    // The controller stops the subagent and cancels the Request it asked.
+    session = { ...session, openRequests: [] };
+    subagents = [{ ...FIXTURE_SUBAGENT, status: "stopped", endedAt: "2026-09-10T09:05:00.000Z" }];
+    act(() => {
+      live.pushInvalidation("session", [SESSION_ID]);
+      live.pushInvalidation("subagent", [SESSION_ID]);
+    });
+
+    expect(await screen.findByText("Stopped after 1m 20s")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(document.querySelector(".dock")).toBeNull();
   });
 });

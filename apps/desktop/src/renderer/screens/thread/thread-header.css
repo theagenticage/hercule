@@ -143,3 +143,63 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Not in the book. When the header runs out of room, the other threads'
+   tabs give way first, and only then the open thread's tab. A tab that is
+   not open stops at 72px: its padding, its mark, the gap and about four
+   letters with an ellipsis. On a subagent's page, the earlier crumbs give
+   way the same way. */
+.top nav.pill .ptab:not(.is-on) {
+  flex-shrink: 1000;
+  min-width: 72px;
+}
+
+/* The side pane's toggle. The pane opens on the right, so the sidebar's
+   icon is mirrored, as the subagents prototype (commit 6253a529) draws it. */
+.pane-toggle-icon {
+  display: inline-flex;
+  transform: scaleX(-1);
+}
+
+/* A subagent's page: a crumb from the thread down to the subagent. The
+   rules are the subagents prototype's `.proto-crumbs`, `.proto-crumb-here`
+   and `.proto-tag` (commit 6253a529, variant D, the tinted crumb). */
+.subagent-crumb {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+/* Not in the prototype: an ancestor gives way before the subagent's own
+   name, as the thread's crumb does (see `.ptab:not(.is-on)` above). The
+   ancestor's own tab holds the floor, so its crumb, with the separator,
+   never gets narrower than that tab. */
+.subagent-crumb:not(:last-child) {
+  flex-shrink: 1000;
+  min-width: auto;
+}
+.subagent-crumb-sep {
+  padding: 0 2px;
+  color: var(--faint);
+}
+.subagent-crumbs .ptab {
+  max-width: 260px;
+}
+/* Two classes deep, after `.ptab.is-on` and `.ptab:hover`, so the tint wins
+   over their backgrounds. The prototype wins the same way with a page
+   class. */
+.subagent-crumbs .subagent-crumb-here {
+  max-width: 340px;
+  color: var(--ink);
+  background: var(--who-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 55%, transparent);
+}
+/* Two classes deep, so it wins over `.ptab small` without the prototype's
+   `!important`. */
+.ptab .subagent-tag {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--who);
+  color: var(--face-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+}

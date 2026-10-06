@@ -5,7 +5,7 @@
  * subagents. A subagent takes no messages, so its page has no composer.
  */
 import { useRef, useState, type JSX } from "react";
-import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { notFound, useRouteContext } from "@tanstack/react-router";
 import {
   buildSessionAgentState,
@@ -15,6 +15,7 @@ import {
   decideThreadPose,
   describeAgent,
   isSubagentWaiting,
+  splitSubagentBrief,
 } from "@hercule/client-core";
 import {
   providersQuery,
@@ -26,6 +27,11 @@ import {
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
+import { AgentRequestDock } from "./agent-request-dock";
+import { BriefCard } from "../subagents/brief-card";
+import { SpawnLines } from "../subagents/spawn-lines";
+import { StatusCard } from "../subagents/status-card";
+import { TallyPill } from "../subagents/tally-pill";
 import { buildSubagentFaceSeed } from "../subagents/subagent-face";
 import { useAgentLive } from "./use-agent-live";
 import "./thread.css";
@@ -36,19 +42,23 @@ import "./thread.css";
  *
  * - The session's own agent's page has the header, the transcript and the
  *   composer.
- * - A subagent's page has the header and the subagent's transcript, with
- *   faces seeded `<sessionId>:<subagentId>`, and nothing in the composer's
- *   place.
+ * - A subagent's page has the header, the brief its parent gave it, its
+ *   transcript, with faces seeded `<sessionId>:<subagentId>`, and its status
+ *   card in the composer's place.
+ *
+ * Under each work stretch that started subagents, the transcript draws
+ * their spawn lines, which link to their pages.
  *
  * Mount it keyed by `<sessionId>/<subagentId>`, because the live tail it
  * keeps belongs to one agent. The Office's thread drawer mounts the
- * session's own agent's page outside the thread's route.
+ * session's own agent's page outside the thread's route, where there is no
+ * side pane, so the page leaves out the tally pill and the pane toggle.
  *
  * Everything it reads is in the cache before it renders: the shell's loader
- * reads the providers and runners, the thread's loader the session and its
- * subagents, and each page's loader the agent's transcript. While it is
- * mounted, the agent's stream and tap keep the transcript and the tail
- * current.
+ * reads the providers and runners, the thread's loader (or the Office's,
+ * for the drawer) the session and its subagents, and each page's loader the
+ * agent's transcript. While it is mounted, the agent's stream and tap keep
+ * the transcript and the tail current.
  *
  * Fails with `notFound` when the session has no subagent `subagentId`.
  */
@@ -67,15 +77,9 @@ export function AgentPage({
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId, subagentId)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
-  // Only a subagent's page reads the subagents. The Office's drawer draws
-  // the session's own agent's page without the thread's loader, which is
-  // what reads them, so a suspending read there would hold the drawer empty.
-  const subagents = useQuery({
-    ...subagentsQuery(client, sessionId),
-    enabled: subagentId !== undefined,
-  }).data;
+  const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   const subagent =
-    subagentId === undefined ? undefined : subagents?.find((each) => each.id === subagentId);
+    subagentId === undefined ? undefined : subagents.find((each) => each.id === subagentId);
   // The subagent route's loader has checked that the subagent exists, and a
   // subagent record is never deleted, so this only guards the type. The
   // router acts on a thrown `notFound`, which is a plain descriptor rather
@@ -99,19 +103,30 @@ export function AgentPage({
     subagent === undefined
       ? buildSessionAgentState(session)
       : buildSubagentAgentState(subagent, session);
-  const blocks = buildThreadBlocks(rows, agent);
+  // On a subagent's page, the user message that opens the transcript is the
+  // brief its parent gave it, drawn as the brief card rather than as a
+  // message nobody typed.
+  const { brief, blocks } =
+    subagent === undefined
+      ? { brief: undefined, blocks: buildThreadBlocks(rows, agent) }
+      : splitSubagentBrief(buildThreadBlocks(rows, agent));
   const runner =
     session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
   const instance = instances.find((each) => each.id === session.instanceId);
 
   return (
     <>
-      <ThreadHeader sessionId={sessionId} />
+      <ThreadHeader sessionId={sessionId} subagentId={subagentId} />
       <Transcript
         faceSeed={
           subagentId === undefined ? sessionId : buildSubagentFaceSeed(sessionId, subagentId)
         }
         blocks={blocks}
+        lead={
+          subagent === undefined ? undefined : (
+            <BriefCard subagent={subagent} subagents={subagents} brief={brief} />
+          )
+        }
         pose={
           subagent === undefined
             ? decideThreadPose(session, runner)
@@ -121,6 +136,14 @@ export function AgentPage({
         attachOpenParagraph={attachOpenParagraph}
         composerStack={shrunk ? null : composerStack}
         onBottomChange={setAtBottom}
+        renderSpawnLines={(items, onScreen) => (
+          <SpawnLines
+            sessionId={sessionId}
+            agentSubagentId={subagentId}
+            items={items}
+            onScreen={onScreen}
+          />
+        )}
         ref={transcriptRef}
       />
       {subagent === undefined ? (
@@ -133,10 +156,24 @@ export function AgentPage({
           }}
           ref={setComposerStack}
         />
-      ) : // The subagent's status slot: a subagent takes no messages, so the
-      // composer's place is left empty. A card drawn here passes its element
-      // to `setComposerStack`, so the transcript's last line clears it.
-      null}
+      ) : (
+        // A subagent takes no messages, so its status card takes the
+        // composer's place. The stack is passed to `setComposerStack`, so the
+        // transcript's last line clears the card and what sits on it.
+        <div className="composer-wrap">
+          <div className="composer" ref={setComposerStack}>
+            <div className="fold tally-fold">
+              <TallyPill sessionId={sessionId} />
+            </div>
+            <AgentRequestDock sessionId={sessionId} pageSubagentId={subagent.id} />
+            <StatusCard
+              subagent={subagent}
+              subagents={subagents}
+              openRequests={session.openRequests}
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 }

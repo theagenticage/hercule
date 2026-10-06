@@ -1,0 +1,47 @@
+/* The brief card, copied from the subagents prototype's `.proto-brief`
+   (commit 6253a529). Each departure from the prototype says why. */
+.brief-card {
+  margin-left: 46px;
+  padding: 10px 14px 12px;
+  border-left: 3px solid var(--who);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  /* Not in the prototype, where the tint reads as a loud block in dark.
+     Spec 17 asks the build to tone it down, so a dark theme mixes the tint
+     45% into the page's surface, the share the prototype's quietest page
+     wash used. */
+  background: light-dark(var(--who-tint), color-mix(in oklab, var(--who-tint) 45%, var(--surface)));
+}
+.brief-card-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.brief-card-source b {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+/* A button, so the keyboard can expand the brief too. It keeps the text's
+   own look: the prototype draws a paragraph. Line breaks the parent wrote
+   are kept. */
+.brief-card-text {
+  display: block;
+  width: 100%;
+  margin: 0;
+  font-size: var(--t-14);
+  line-height: 1.55;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: default;
+}
+/* Not in the prototype, which names the class and draws it whole. Three
+   lines until clicked, as spec 14 asks. */
+.brief-card-text.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
