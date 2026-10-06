@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings).
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings). *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 add [the assistant](#design-system).
 
 ## Scope of the first milestone
 
@@ -28,7 +28,7 @@ The first milestone is threads, in a native shell:
 - connecting to a controller, and signing in and out
 - the native behaviour below: the window, the menu and shortcuts, the dock badge and notifications
 
-Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule face and its screens, assistants, All sessions, ~~Settings,~~ the desktop app as installer, and Windows and Linux.
+Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule face and its screens, ~~assistants,~~ All sessions, ~~Settings,~~ the desktop app as installer, and Windows and Linux.
 
 *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run moves into v1: from "the app is installed" to a first thread, with no browser and no terminal ([The first run](#the-first-run)). It brings three pieces with it:
 
@@ -41,6 +41,8 @@ Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule
 *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* The Office moves into v1: the user's threads as colleagues at work in a 3D Bureau office, quiet enough that no fan spins ([The Office](#the-office)). The first run's room stays the still 2D drawing it is.
 
 *(Amended 2026-10-04, [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402).)* Settings moves into v1, as a port of the web app's Settings drawn in Bureau, with an Appearance page the web app does not have ([Settings](#settings)). Providers stays out until the provider remodel ([#406](https://github.com/theagenticage/hercule/issues/406)).
+
+*(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Assistants move into v1: the sidebar lists them, and an assistant's Conversation opens in the main pane ([The assistant](#design-system) under Design system). It is a port of the web's conversation screen, and adds no operation to the public API. The stored look stays post-v1, and so do memory, reminders and channels.
 
 ## Architecture
 
@@ -620,6 +622,38 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 - **The open draft is a row in the sidebar,** as the book draws it: "New thread", with its workspace and machine on the second line, and "draft" at its end. It is the last row of the workspace it joins, as its tab is the header's last. A draft that starts a new workspace has a group of its own under the project's header, and a draft with no project is the last row of "No project".
 - **The draft's text and picks are kept while the app runs,** like a thread's Message Draft, one draft per project and workspace.
 
+**The assistant** *(added 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448); prototype: branch `prototype/desktop-assistant`, commit c733f1b9, `apps/desktop/src/renderer/specimens/assistant-prototype/`, variant B)* follows spec 14's §The assistant conversation and the book's `desktop/assistant.html`, with the differences below. To the user, an assistant is one continuous Conversation. The sessions behind it never show: no link, no "Show work", no session id.
+
+- **The book's layout is not followed.** The book draws a bar header and a rail beside the Conversation. The desktop draws the Conversation full width, under a floating header, and the rail opens as a drawer. This is the first screen on which the desktop does not follow the book's layout, decided with the prototype: the rail holds little the app can fill yet (see the drawer below), and the Conversation is the screen.
+- **The sidebar's Assistants section** sits after the projects, as the book's `crew.js` draws it. Each row is the assistant's face in its pose, its name, and the pose's word at the row's end (`describePose`), in `--you-ink` while it waits on the user. Every assistant is listed, by name. The section is not capped. With no assistant, it is not drawn.
+- **An assistant's pose** is `decideThreadPose` of its newest conversation session, which `findNewestConversationSession` finds, and that session's runner. The two tables agree: an open Request is waiting, a held or unresumable session or an offline runner is away, an exited one asleep. An assistant with no session yet is idle, because the next message starts its first one. No new `client-core` function is needed.
+- **An assistant's face is derived from its id,** as a thread's is from its session id. The stored look stays post-v1 (the book's Spec change 3), so the book's cloche, beret and headset are not drawn.
+- **Assistant sessions show only in the Assistants section.** The thread list still reads `session.query` with `thread: true`, so an assistant's session is never a row of a project, and the foot counts threads only. For each assistant, the Assistants section reads the newest session of its web conversation: `session.query` with the conversation's id, newest first, one row. Assistants are few, so this is a handful of reads, and it never reads the sessions of workflow runs, which are not threads either.
+  - An assistant that waits on the user is also a row of Waiting on you: its face, its name, and the open Request as one question, as a thread's row shows it. The row opens the Conversation, where the Request is answered. The dock badge and the notifications count it as one waiting thread.
+- **The floating header** is the book's glass pill row, over the Conversation's top: the face, the name and the pose's word on the left; on the right the drawer's pill, with the heart and memory icons, and "`<name>`'s record", which opens Settings › Assistants on the assistant's tab. The book's channel pills are not drawn, because the desktop shows no channels.
+- **The drawer** is the book's rail, as a glass panel from the right edge, opened by the header's pill and closed by the pill, by esc or by a click outside it. Its three sections are drawn and inert, at half opacity with no clicks (the book's rule for a button that cannot act), because nothing serves them yet:
+  - **Heartbeat** shows the assistant's schedule from `Assistant.heartbeat`: "Every `<n>` h, `<hh:mm>` to `<hh:mm>`" and the day's strip with a tick at each beat, read with Settings' two cron functions (slice 16). No beat is marked spoke or quiet, because heartbeats do not fire yet ([#94](https://github.com/theagenticage/hercule/issues/94)). A schedule that is not an interval shows its cron expression. An assistant with no heartbeat shows "No heartbeat".
+  - **Reminders** shows "No reminders", because no operation reads them.
+  - **Memory** shows "Nothing remembered yet", because no operation reads it ([#93](https://github.com/theagenticage/hercule/issues/93)).
+  - The prototype fills the three sections with sample data so their look can be judged. The app never draws data it does not have, so the header pill shows its icons without numbers, and the composer's lip shows nothing until memory and heartbeats exist.
+- **Messages.** The owner's message is the thread's bubble, with its time under it. A reply is the book's message: the face, "`<name>` · `<hh:mm>`" and the text. Times follow the thread's rule. A day stamp ("Today", "Yesterday", "4 Sep") sits above the first message of each day, as the book draws it, where spec 14 draws a time stamp above each of the owner's messages.
+  - Only the face of the newest reply moves, and only while its turn runs ([Rules](#rules), rule 2). Every other face is still, in the idle pose.
+  - "@Milo" in a reply is plain text. The book draws it as the other assistant's chip, but nothing says which assistant a name means.
+- **A notice** is the book's notice: the assistant's face, then the notice's text as the controller writes it, such as "Ada was interrupted: its turn was stopped", and its time. The book draws the face in the failed pose and the words before the colon in bold. The desktop draws every notice's face in the failed pose and the text in one weight. The two kinds of notice, "was interrupted" and "can't be reached", differ only in their text, and the app reads no meaning from text, so a stop the user asked for wears the failed face too.
+- **The streaming reply** follows the thread: the newest session's `:stream` and `:tap`, the paragraph being written as plain text with the book's caret in the assistant's hue, and markdown once the paragraph ends. The open reply is drawn from the session until the Conversation's message with the same `turnId` arrives on the `conversation` topic, which then takes its place.
+- **The current session can change.** Rotation, and a message to an unavailable assistant, give the Conversation a new session. When the `conversation` topic names the open Conversation, the screen reads it again, and when its newest session changed, it drops the old session's `:stream` and `:tap` and subscribes to the new one's.
+- **Earlier messages.** The screen reads the newest page of `conversation.queryMessages` and reads the page before when the user scrolls within one screen of the top. A Conversation never ends, so it is never read whole, where a thread is. The book draws no Show earlier messages button, so there is none.
+- **A Request is answered in the Conversation,** on the thread's Requests dock above the composer, with `session.respondToApprovalRequest` on the newest session. Spec 14 links to the session instead. Allow always works as on a thread. The answer leaves no line in the Conversation, because the controller writes none.
+- **The composer** is the thread's, with fewer controls:
+  - no model, model options or access mode. The model is a setting of the assistant (Settings › Assistants), not a choice per message.
+  - no channel pick, and no lip, until the lip has memory and the next heartbeat to show.
+  - `+` and voice are drawn inert, as on a thread.
+  - ⏎ sends with `conversation.send`, also while a turn runs: the controller steers the message into the turn or queues it. The message shows as a bubble at once, and no queued row is drawn, because the Conversation shows nothing of the session behind it.
+  - Stop takes Send's place while a turn runs and calls `session.interrupt` on the newest session. The controller's notice then reads "`<name>` was interrupted: its turn was stopped".
+  - The Message Draft is kept per assistant while the app runs, as a thread's is.
+- **Left out of the book's page,** because no operation reads them: the `.refs` chips under a reply, "heartbeat · 09:00" in a reply's meta line, the reminder card in a reply, the action buttons under a reply, the count of quiet check-ins, and the channel pills and channel pick.
+- **An assistant that is gone** shows "This assistant was not found." Any other failure shows [A screen that fails](#reaching-the-controller).
+
 **How the system is carried over:**
 
 - **Kept as they are:** `tokens.css` and the font files. They are the design system's source. Token names match the web app's (`--bg`, `--surface`, `--raised`, `--ink`, `--muted`, `--faint`, `--line`, `--line-soft`), except that `--attn` becomes `--you` / `--you-ink`.
@@ -714,7 +748,7 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
 - the Tower and the Campus, whose code stays on the prototype branch;
 - event flow and the pneumatic tubes ([Revisit event flow and the tubes in the Office (#331)](https://github.com/theagenticage/hercule/issues/331));
 - the book's "Office: List | Floor" switch, because the List is All sessions, which is post-v1;
-- assistants and the sessions of workflow runs, because the app lists only threads.
+- assistants and the sessions of workflow runs, because the app lists only threads. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* The app now lists assistants too. The Office still seats only threads, until a ticket decides where an assistant sits.
 
 ## Settings
 
@@ -824,7 +858,7 @@ Each section lists what it reads and writes through the contract, its live topic
 - Differs from the web screen: disallowed tools, heartbeat and rotation are new, because the web screen has no fields for them.
 - **Left out of the book's page,** because no operation reads or writes them, or the desktop has no screen for them:
   - the role beside each name ("personal", "ops"), because an assistant has no role;
-  - the line under the name, "personal assistant · working in Web chat", and Open Conversation, because the desktop has no conversation screen;
+  - the line under the name, "personal assistant · working in Web chat", ~~and Open Conversation, because the desktop has no conversation screen~~ because an assistant has no role and the desktop shows no channels. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* Open Conversation is drawn, and opens [the assistant's Conversation](#design-system);
   - the context bar and Start fresh under Rotation;
   - Where the assistant listens, its channel bindings;
   - the Memory and Reminders column. Without it, the body is the one centred column.
@@ -897,6 +931,21 @@ Settings does not open a live topic the shell does not already need, except whil
 | Idle | the idle row with the side pane open and every subagent ended: no timer, and the durations of ended subagents do not tick | the perf script's idle sample |
 | Running subagents | a running row's duration ticks at most once a second, and only while it is on screen; faces in the surface are still | the Performance panel, once |
 | Resizing the pane | layout per pointer move while the user drags, nothing after | the Performance panel, once |
+
+### What the assistant costs
+
+*(Added 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448); [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md).)* The plan for [the assistant](#design-system), measured by slices 20 to 22 and recorded in [Measured](#measured):
+
+| Cost | Expected | Measured by |
+|---|---|---|
+| Processes | none added | the perf script's process count |
+| The first screen's JavaScript | grows only by the sidebar's Assistants section, the Waiting on you row for an assistant, and the `/assistants/$id` route stub. The Conversation and its drawer are one chunk, loaded the first time a Conversation opens | `pnpm build:desktop`'s bundle check, before and after |
+| Live topics | the shell adds `assistant`, because the sidebar lists assistants. A `session` nudge already reaches the shell; with it, the shell reads the assistants' newest sessions again, as it reads the thread list again. A nudge cannot tell the shell which assistant a new session belongs to, so it cannot read less. `conversation` is subscribed only while a Conversation is open, and a nudge causes a read only when it names that Conversation. The open Conversation holds one session's `:stream` and `:tap`, as a thread does | the perf script, with a Conversation open while its assistant replies |
+| Launch | the sidebar's reads grow by `assistant.query` and one `session.query` per assistant, sent together with the thread list's | the perf script's launch steps, before and after, with 5 assistants |
+| Work per streamed token | unchanged: the reply takes the thread's path | the Performance panel, once, while a reply streams |
+| Memory | within the app's memory row with a Conversation of 2,000 messages open, scrolled to its top: only the pages read hold messages, and leaving the Conversation drops them | the perf script |
+| Idle | the idle row, with a Conversation open and the drawer open: no timer, no polling and no animation. The drawer's sections and the header's pill compute nothing after they first draw; the heartbeat strip draws no "now" line | the perf script's idle sample |
+| Opening the drawer | one transform transition of `--dur-3`, nothing after | the Performance panel, once |
 
 ## Performance
 
@@ -1007,7 +1056,7 @@ These rules keep the budgets:
    - TanStack Query for every HTTP read
 2. **Nothing animates unless something is happening:**
    - Faces are drawn still in their pose everywhere. Bureau's idle blink is left out of the first milestone, because of the measurement above. It comes back once research finds a way to draw it within the idle budget (see [Post-v1](#post-v1)).
-   - Only one continuous animation is allowed: the working pose of the face beside the open thread's running turn, while that turn runs. The sidebar and every other list show still poses and still marks.
+   - Only one continuous animation is allowed: the working pose of the face beside the open thread's running turn, while that turn runs. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* On an assistant's Conversation, it is the face of the newest reply, while its turn runs. The sidebar and every other list show still poses and still marks.
      - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The one other is a spinner, and only while Hercule starts or a login waits in [the first run](#the-first-run) or the draft's Log in. Each is a wait the user started, and each ends: the start after at most 90 seconds for the command and 30 for the answer, a login when it ends or its code expires.
      - The first run's room moves only when a step finishes: the camera moves one layer's `transform`, and new pieces settle with `transform` and `opacity`, each over `--dur-3`, by the rules below.
      - *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office's colleagues live: they walk, type, sip tea and sleep, at most 30 frames a second, while the Office is on screen and does not stand still ([The Office's budgets](#the-offices-budgets)). The Office draws them into one WebGL canvas, and the rules below for CSS animations do not apply inside it. The Office's panels and its drawer follow those rules.
@@ -1016,12 +1065,12 @@ These rules keep the budgets:
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
    - Reduce motion turns every animation off. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* macOS's Reduce motion or the Appearance page's. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
-   - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
+   - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, and the open Conversation's newest session's `:tap` *(amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
    - `backgroundThrottling` stays on.
    - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats.
 4. **No polling, and no timers while idle:**
-   - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)* *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell also subscribes to the `connection` topic, so a GitHub Connection made in the web app while the desktop app runs reaches the New project form and the starters' line without a reload.
+   - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)* *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell also subscribes to the `connection` topic, so a GitHub Connection made in the web app while the desktop app runs reaches the New project form and the starters' line without a reload. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* It also subscribes to the `assistant` topic, so the sidebar's Assistants section follows an assistant made, renamed or deleted elsewhere.
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Two waits in [the first run](#the-first-run) poll, because nothing else can tell the app their outcome. Both are bounded waits the user started, and neither runs while the app is idle:
      - GitHub's device flow: the protocol requires the client to ask, so the renderer calls `connection.pollDeviceFlow` at the interval GitHub gives, until the flow is done, expires or is denied.
@@ -1528,6 +1577,23 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 18. **Machines.** The runner tabs, a runner's facts, queue, edit and moves, its provider rows, and Add a machine.
 19. **Plugins.**
 
+*(Added 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 build [the assistant](#design-system), in order. Slice 22's heartbeat needs slice 16's cron functions, and its Open Conversation needs slice 15. Each slice records its costs in [Measured](#measured), as [What the assistant costs](#what-the-assistant-costs) lists them.
+
+20. **Assistants in the sidebar.**
+    - the `assistant` topic in the shell, and each assistant's newest session
+    - the Assistants section, with each assistant's face, pose and word
+    - an assistant in Waiting on you, in the dock badge and in notifications
+    - the `/assistants/$id` route, drawing the floating header over an empty Conversation
+21. **The Conversation.**
+    - the messages, the day stamps and the notices, with earlier pages read on scroll
+    - the streaming reply, and following a new session after rotation
+    - the composer: send, Stop and the kept Message Draft
+    - the Requests dock
+    - the Bureau comparison of the Conversation
+22. **The drawer.**
+    - the header's pill, and the drawer with its three inert sections
+    - "`<name>`'s record", and Open Conversation in Settings › Assistants
+
 ## Testing
 
 - **Unit tests** sit next to the code they test (AGENTS.md §Source layout). They cover:
@@ -1560,11 +1626,15 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - `decideOfficeSeating` has unit tests for the rooms and their order, the desks inside a room, the queue and the Lounge, and the threads left out;
   - an end-to-end test opens the Office from the sidebar's button and from `⌘⇧O`, and checks that a hidden window draws no frames.
 - *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* **Settings' tests:**
-  - `pnpm compare:bureau` compares the main pane of each of the book's three settings pages with the app's section, item by item, then pixel for pixel, in Whitehaven and Orient Express: Appearance, Assistants and Connections. The book's sidebar is not compared there, because it is the Hercule face; the sidebar is compared against `session-active.html` as before. As for the thread, the book's page is edited where the app leaves something out or draws other words ([Settings](#settings)): the Assistants page loses the role, the line under the name, Open Conversation, the context bar, Start fresh, the bindings and the Memory and Reminders column; the Connections page loses the stats strip, three columns and the Channels section; the Appearance page takes the desktop's Density line.
+  - `pnpm compare:bureau` compares the main pane of each of the book's three settings pages with the app's section, item by item, then pixel for pixel, in Whitehaven and Orient Express: Appearance, Assistants and Connections. The book's sidebar is not compared there, because it is the Hercule face; the sidebar is compared against `session-active.html` as before. As for the thread, the book's page is edited where the app leaves something out or draws other words ([Settings](#settings)): the Assistants page loses the role, the line under the name, ~~Open Conversation,~~ *(amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448): Open Conversation stays)* the context bar, Start fresh, the bindings and the Memory and Reminders column; the Connections page loses the stats strip, three columns and the Channels section; the Appearance page takes the desktop's Density line.
   - The book's `settings-assistants.html` draws its sidebar's and its Settings list's group headings larger than its two other settings pages do. Slice 16 finds the cause. If the page is at fault, the slice fixes the book's page, as design tickets edit the book, and says so in its pull request.
   - `pnpm --filter @hercule/desktop capture:settings` captures every section in all five themes, and Appearance at each text size and density, for a check by eye. It writes them to `apps/desktop/out/settings/`. The sections the book does not draw are checked this way.
   - Unit tests cover the heartbeat's two `client-core` functions, main's Appearance in the settings file, `theme-init.js` with a stored Appearance (one theme, and the day and night themes as macOS changes), and the window background of all five themes.
   - An end-to-end test opens Settings from the foot button and from `⌘,`, checks that the inert rows do nothing, changes the theme and the glass level, relaunches, and checks that the window's first frame already has the chosen theme. A second checks that Open on The office launches into the Office.
+- *(Added 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* **The assistant's tests:**
+  - `pnpm compare:bureau` compares the Conversation's column with the book's `assistant.html`, item by item, then pixel for pixel, in Whitehaven and Orient Express: a reply, an owner's message, a day stamp, a notice and the composer. The book's page is edited where the app leaves something out or draws other words: the quiet check-ins, the refs chips, the reminder card, the action buttons, "heartbeat · 09:00", the mention chip, the channel pick and the model pill go, and the notice loses its bold. The header and the drawer are not compared, because the book draws a bar and a rail; they are checked by eye, against the prototype.
+  - `pnpm --filter @hercule/desktop capture:assistant` captures the Conversation and the open drawer in all five themes, and the sidebar with an assistant in each pose, for a check by eye.
+  - An end-to-end test opens an assistant from the sidebar, sends a message, answers a Request on the dock and stops a turn, against a real controller whose assistant runs on a scripted runner, as the composer's test does. A second checks that the window, hidden while a reply streams, drops the tap and shows the whole reply when shown again.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.
 
 ## Post-v1
@@ -1572,7 +1642,8 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-and-scope.md). These are what later milestones add after the first:
 
 - **The Hercule face and its screens:** Intake, Check-in, Tasks, Runs, Workflows, Fleet, Connections and Notifications. Bureau adds the office to them.
-- **Assistants,** with the book's stored look (Spec change 3) and a run that wears its workflow's face (Spec change 4).
+- ~~**Assistants,** with~~ *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448): assistants are slices 20 to 22.)* **The stored look:** the book's stored look (Spec change 3) and a run that wears its workflow's face (Spec change 4).
+- *(Added 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* **On an assistant's Conversation:** the drawer's Heartbeat, Reminders and Memory live, once heartbeats fire ([#94](https://github.com/theagenticage/hercule/issues/94)) and operations read reminders and memory ([#93](https://github.com/theagenticage/hercule/issues/93)); the header pill's numbers and the composer's lip with them; the refs chips; and channels, with Slack and Discord conversations.
 - **All sessions ~~and Settings,~~ ~~including Appearance: Bureau's five themes, System, and the glass level~~.** *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings is slices 11 to 19, except its Providers section, which comes with the provider remodel ([#406](https://github.com/theagenticage/hercule/issues/406)).
 - *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* **Settings' Identities, Permission profiles, Secrets and Bounds,** drawn inert until then. **On Assistants:** memory, reminders, channel bindings and Start fresh, once operations read and write them. **On Connections:** the event counts and the Channels section, once operations read them.
 - **The desktop app as installer:** it ~~runs and~~ installs and upgrades ~~a local controller~~ Hercule's binary ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §Post-v1). Starting a local controller with the binary already there is in v1, as part of [the first run](#the-first-run) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
@@ -1594,6 +1665,7 @@ Tickets:
 - [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313)
 - [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332), with its research ([#333](https://github.com/theagenticage/hercule/issues/333)) and scope ([#334](https://github.com/theagenticage/hercule/issues/334))
 - [Desktop Settings: a quick port, and a new model for providers (#401)](https://github.com/theagenticage/hercule/issues/401) and [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402)
+- [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448), with its prototype on branch `prototype/desktop-assistant`
 - [Web app architecture: observability-first, desktop-shell-ready (#19)](https://github.com/theagenticage/hercule/issues/19)
 
 ADRs:
