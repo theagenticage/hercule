@@ -114,7 +114,7 @@ What a thread runs with: provider instance, model and its options, access mode, 
 _Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup
 
 **Message Draft**:
-The unsent content the composer holds for one thread: text today, attachments and context later. One per thread, draft or active.
+The unsent content the composer holds for one thread or one assistant's Conversation: text today, attachments and context later. One per thread, draft or active, and one per assistant.
 _Avoid_: prompt (the first message as the spawn carries it), composer state
 
 **Submission**:

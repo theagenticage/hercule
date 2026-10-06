@@ -66,7 +66,11 @@ export const ConversationMessage = Schema.Struct({
   text: Schema.String,
   /** The session that produced a reply or a notice; null on an owner message. */
   sessionId: Schema.NullOr(Id),
-  /** The turn that produced a reply or a notice; null on an owner message, and on a notice about a session that ended between turns. */
+  /**
+   * The turn that produced a reply. Null on an owner message and on every
+   * notice. In `segments` reply mode, every reply a turn produces carries
+   * that turn's id.
+   */
   turnId: Schema.NullOr(Schema.String),
   /** Who wrote the message: `user`, `session:<id>`, or the system's stamp. */
   actor: Schema.String,
