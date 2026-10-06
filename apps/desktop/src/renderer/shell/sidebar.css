@@ -231,6 +231,50 @@ button.side-row--more {
   padding: 8px 10px 0;
 }
 
+/* The Assistants section (the book's `.side-sec` with `.side-row--who`). The
+   book draws it in the scrolling list, after the projects. Here it is pinned
+   between the list and the foot, so it stays in one place however many
+   threads there are. It meets the list as the foot does, with a hairline
+   across the sidebar's full width, so the rows that scroll under the list's
+   end do not read as part of it. Inside, it keeps the book's section
+   spacing: 8px above the heading, 1px between rows, and 12px under the last
+   row, the space the list leaves under its own last row.
+
+   Not in the book either: the section takes at most 40% of the sidebar's
+   height, so many assistants cannot squeeze the thread list away. Past that,
+   its rows scroll under a fixed heading, with the system's overlay scroll
+   bar at the sidebar's edge, as the list's is, so a scroll bar never moves
+   a row. */
+.side-sec--who {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  max-height: 40%;
+  margin: 0 -12px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.side-who-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -12px;
+  padding: 0 12px;
+}
+.side-row--who {
+  min-height: 32px;
+  padding-left: 7px;
+}
+.side-row--who .side-name {
+  flex: 1;
+}
+.side-presence.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
 .side-foot {
   display: flex;
   flex-direction: column;

@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { listWaitingThreads } from "@hercule/client-core";
-import type { Session } from "@hercule/contract";
-import type { WaitingThread } from "../ipc/contract";
+import type { WaitingRequest } from "../ipc/contract";
 import { type FakeMainWindow, makeFakeMainWindow } from "./testing";
 import {
-  makeThreadNotificationsLayer,
+  makeWaitingNotificationsLayer,
   type NativeNotification,
-  ThreadNotifications,
-} from "./thread-notifications";
+  WaitingNotifications,
+} from "./waiting-notifications";
 
 /** A fake of Electron's `Notification` that records what is done to it. */
 interface FakeNotification extends NativeNotification {
@@ -39,7 +37,7 @@ interface Seen {
  */
 const runWithNotifications = async (
   focused: boolean,
-  use: (notifications: ThreadNotifications["Service"], seen: Seen) => Effect.Effect<unknown>,
+  use: (notifications: WaitingNotifications["Service"], seen: Seen) => Effect.Effect<unknown>,
 ): Promise<Seen> => {
   const window = makeFakeMainWindow();
   window.focused = focused;
@@ -71,7 +69,7 @@ const runWithNotifications = async (
       this.clickListener();
     }
   }
-  const layer = makeThreadNotificationsLayer({
+  const layer = makeWaitingNotificationsLayer({
     Notification,
     setBadgeCount: (count) => seen.badgeCounts.push(count),
     askToNotify: () => {
@@ -80,7 +78,7 @@ const runWithNotifications = async (
   }).pipe(Layer.provide(window.layer));
   await Effect.runPromise(
     Effect.provide(
-      ThreadNotifications.use((notifications) => use(notifications, seen)),
+      WaitingNotifications.use((notifications) => use(notifications, seen)),
       layer,
     ),
   );
@@ -91,71 +89,29 @@ const runWithNotifications = async (
 const describeNotifications = (seen: Seen) =>
   seen.notifications.map(({ title, body, state }) => ({ title, body, state }));
 
-const LOGIN: WaitingThread = {
-  sessionId: "session-1",
+const LOGIN: WaitingRequest = {
+  destination: { kind: "thread", sessionId: "session-1" },
   requestId: "request-1",
   title: "Fix the login bug",
   question: "Run the migration?",
 };
-const CHECKOUT: WaitingThread = {
-  sessionId: "session-2",
+const CHECKOUT: WaitingRequest = {
+  destination: { kind: "thread", sessionId: "session-2" },
   requestId: "request-2",
   title: "Speed up checkout",
   question: "Run pnpm test?",
 };
-
-/** A session parked on a `question` request, as the controller lists it. */
-const PARKED_ON_QUESTION: Session = {
-  id: "session-3",
-  title: "Save drafts",
-  status: "busy",
-  resumable: false,
-  resumeHeld: false,
-  permissionProfileId: "profile-1",
-  agentId: null,
-  conversationId: null,
-  runId: null,
-  stepId: null,
-  instanceId: "instance-1",
-  runnerId: "runner-1",
-  workspaceId: null,
-  projectId: null,
-  requestedAccessMode: "approval-required",
-  accessMode: "approval-required",
-  nativeSessionId: null,
-  modelSelection: { model: "claude-sonnet-5", options: {} },
-  parentSessionId: null,
-  openRequests: [
-    {
-      requestId: "request-4",
-      itemId: "tool-1",
-      kind: "question",
-      detail: {
-        questions: [
-          {
-            question: "Which storage should drafts use?",
-            header: "Storage",
-            options: [
-              { label: "localStorage", description: "" },
-              { label: "IndexedDB", description: "" },
-            ],
-            multiSelect: false,
-          },
-        ],
-      },
-    },
-  ],
-  createdAt: "2026-10-01T09:00:00.000Z",
-  startedAt: "2026-10-01T09:00:01.000Z",
-  exitedAt: null,
-  lastActivityAt: "2026-10-01T09:01:00.000Z",
-  unenforced: [],
+const ADA: WaitingRequest = {
+  destination: { kind: "assistant", assistantId: "assistant-1" },
+  requestId: "request-5",
+  title: "Ada",
+  question: "Book the train to Utrecht?",
 };
 
-describe("ThreadNotifications", () => {
+describe("WaitingNotifications", () => {
   it("counts the first list after signing in on the badge, and shows no notification for it", async () => {
     const seen = await runWithNotifications(false, (notifications) =>
-      Effect.all([notifications.setSignedIn(true), notifications.setWaitingThreads([LOGIN])]),
+      Effect.all([notifications.setSignedIn(true), notifications.setWaitingRequests([LOGIN])]),
     );
     expect(seen.badgeCounts).toEqual([1]);
     expect(seen.notifications).toEqual([]);
@@ -165,8 +121,8 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
       ]),
     );
     expect(seen.badgeCounts).toEqual([0, 1]);
@@ -179,8 +135,8 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(true, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
       ]),
     );
     expect(seen.badgeCounts).toEqual([0, 1]);
@@ -191,9 +147,9 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
-        notifications.setWaitingThreads([
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
+        notifications.setWaitingRequests([
           { ...LOGIN, requestId: "request-3", question: "Deploy it?" },
         ]),
       ]),
@@ -208,12 +164,12 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications, seen) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
         Effect.sync(() => {
           seen.window.focused = true;
         }),
-        notifications.setWaitingThreads([{ ...LOGIN, requestId: "request-3" }]),
+        notifications.setWaitingRequests([{ ...LOGIN, requestId: "request-3" }]),
       ]),
     );
     expect(describeNotifications(seen).map(({ state }) => state)).toEqual(["closed"]);
@@ -223,9 +179,9 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN, CHECKOUT]),
-        notifications.setWaitingThreads([CHECKOUT]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN, CHECKOUT]),
+        notifications.setWaitingRequests([CHECKOUT]),
       ]),
     );
     expect(seen.badgeCounts).toEqual([0, 2, 1]);
@@ -239,11 +195,11 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
         // The reloaded page reads the token again, then sends its first list.
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([LOGIN, CHECKOUT]),
+        notifications.setWaitingRequests([LOGIN, CHECKOUT]),
       ]),
     );
     expect(describeNotifications(seen).map(({ title, state }) => [title, state])).toEqual([
@@ -256,21 +212,23 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications, seen) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
         Effect.sync(() => seen.notifications[0]?.click()),
       ]),
     );
-    expect(seen.window.calls).toEqual(['showAndSend thread.open {"sessionId":"session-1"}']);
+    expect(seen.window.calls).toEqual([
+      'showAndSend destination.open {"kind":"thread","sessionId":"session-1"}',
+    ]);
   });
 
   it("does nothing when a notification it removed is clicked", async () => {
     const seen = await runWithNotifications(false, (notifications, seen) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
-        notifications.setWaitingThreads([]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
+        notifications.setWaitingRequests([]),
         Effect.sync(() => seen.notifications[0]?.click()),
       ]),
     );
@@ -288,8 +246,8 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(false),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN]),
       ]),
     );
     expect(seen.asks).toBe(0);
@@ -301,29 +259,50 @@ describe("ThreadNotifications", () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads([LOGIN, CHECKOUT]),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([LOGIN, CHECKOUT]),
         notifications.setSignedIn(false),
-        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingRequests([LOGIN]),
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([LOGIN, CHECKOUT]),
+        notifications.setWaitingRequests([LOGIN, CHECKOUT]),
       ]),
     );
     expect(seen.badgeCounts).toEqual([0, 2, 0, 2]);
     expect(describeNotifications(seen).map(({ state }) => state)).toEqual(["closed", "closed"]);
   });
 
-  it("shows a notification with the first question for a thread that starts waiting on a question", async () => {
+  it("shows an assistant's notification with the title it is sent, and asks the page to open the assistant when it is clicked", async () => {
+    const seen = await runWithNotifications(false, (notifications, seen) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingRequests([LOGIN]),
+        notifications.setWaitingRequests([LOGIN, ADA]),
+        Effect.sync(() => seen.notifications[0]?.click()),
+      ]),
+    );
+    expect(seen.badgeCounts).toEqual([1, 2]);
+    expect(describeNotifications(seen)).toEqual([
+      { title: "Ada", body: "Book the train to Utrecht?", state: "shown" },
+    ]);
+    expect(seen.window.calls).toEqual([
+      'showAndSend destination.open {"kind":"assistant","assistantId":"assistant-1"}',
+    ]);
+  });
+
+  it("keeps an assistant's notification while it waits on the same Request, and replaces it for a new one", async () => {
     const seen = await runWithNotifications(false, (notifications) =>
       Effect.all([
         notifications.setSignedIn(true),
-        notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads(listWaitingThreads([PARKED_ON_QUESTION])),
+        notifications.setWaitingRequests([]),
+        notifications.setWaitingRequests([ADA]),
+        notifications.setWaitingRequests([ADA, LOGIN]),
+        notifications.setWaitingRequests([LOGIN, { ...ADA, requestId: "request-6" }]),
       ]),
     );
-    expect(seen.badgeCounts).toEqual([0, 1]);
-    expect(describeNotifications(seen)).toEqual([
-      { title: "Save drafts", body: "Which storage should drafts use?", state: "shown" },
+    expect(describeNotifications(seen).map(({ title, state }) => [title, state])).toEqual([
+      ["Ada", "closed"],
+      ["Fix the login bug", "shown"],
+      ["Ada", "shown"],
     ]);
   });
 });

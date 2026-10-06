@@ -2,7 +2,8 @@
  * Tests `buildSidebarSections`, which caps the sidebar's sections when there
  * are many threads. The tests check that:
  *
- * - Waiting on you shows its 3 newest threads and counts the rest;
+ * - Waiting on you shows its first 3 entries, threads and assistants alike,
+ *   and counts the rest;
  * - a project picks 5 threads, waiting first, then working, then the rest,
  *   newest first inside each tier, and shows them in the groups' order;
  * - the selected thread is shown in its project even when it is not picked,
@@ -13,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
+import type { Waiting } from "../waiting";
 import { buildThreadGroups, type DraftPlace, type ProjectGroup } from "./groups";
 import type { Pose } from "./pose";
 import { buildSidebarSections, type ExpandedSections } from "./sidebar-sections";
@@ -64,26 +66,43 @@ const listLanes = (section: ProjectGroup | undefined) =>
   }));
 
 describe("buildSidebarSections: Waiting on you", () => {
-  // 30 waiting threads, split over two projects, the newest ones in ops.
-  const WAITING = Array.from({ length: 30 }, (_, index) =>
-    buildThread(`s-wait-${String(index)}`, index, {
-      projectId: index % 2 === 0 ? WEBSHOP_PROJECT.id : OPS_PROJECT.id,
-    }),
-  );
-  const POSES = buildPoses(
-    WAITING,
-    Object.fromEntries(WAITING.map((session) => [session.id, "waiting"])),
-  );
+  /** Returns a waiting thread's entry, active `minutes` after 09:00. */
+  const buildWaitingThread = (sessionId: string, minutes: number): Waiting => ({
+    kind: "thread",
+    sessionId,
+    requestId: `r-${sessionId}`,
+    title: "A thread",
+    question: "Run git push?",
+    activityAt: buildTimestamp(minutes),
+  });
 
-  it("shows the 3 newest waiting threads across every project, and counts the other 27", () => {
+  /** Returns a waiting assistant's entry, active `minutes` after 09:00. */
+  const buildWaitingAssistant = (assistantId: string, minutes: number): Waiting => ({
+    kind: "assistant",
+    assistantId,
+    name: "Ada",
+    sessionId: `s-${assistantId}`,
+    requestId: `r-${assistantId}`,
+    question: "Run git push?",
+    activityAt: buildTimestamp(minutes),
+  });
+
+  // 30 waiting threads, the newest first, as `listWaiting` orders them.
+  const WAITING = Array.from({ length: 30 }, (_, index) =>
+    buildWaitingThread(`s-wait-${String(29 - index)}`, 29 - index),
+  );
+  const THREADS = [buildThread("s-idle", 1)];
+
+  it("shows the 3 newest entries, and counts the other 27", () => {
     const sections = buildSidebarSections({
-      groups: buildGroups(WAITING),
-      poses: POSES,
+      groups: buildGroups(THREADS),
+      waiting: WAITING,
+      poses: buildPoses(THREADS),
       expanded: COLLAPSED,
       selectedId: null,
     });
 
-    expect(sections.waiting?.rows.map((row) => row.id)).toEqual([
+    expect(sections.waiting?.rows.map((row) => row.sessionId)).toEqual([
       "s-wait-29",
       "s-wait-28",
       "s-wait-27",
@@ -91,42 +110,48 @@ describe("buildSidebarSections: Waiting on you", () => {
     expect(sections.waiting?.hiddenCount).toBe(27);
   });
 
-  it("shows every waiting thread, newest first, once expanded", () => {
+  it("shows waiting assistants among the threads, and counts both in what it hides", () => {
+    const waiting = [
+      buildWaitingThread("s-wait-3", 3),
+      buildWaitingAssistant("a-ada", 2),
+      buildWaitingThread("s-wait-1", 1),
+      buildWaitingAssistant("a-bob", 0),
+    ];
     const sections = buildSidebarSections({
-      groups: buildGroups(WAITING),
-      poses: POSES,
+      groups: buildGroups(THREADS),
+      waiting,
+      poses: buildPoses(THREADS),
+      expanded: COLLAPSED,
+      selectedId: null,
+    });
+
+    expect(sections.waiting?.rows).toEqual(waiting.slice(0, 3));
+    expect(sections.waiting?.hiddenCount).toBe(1);
+  });
+
+  it("shows every entry, in the order given, once expanded", () => {
+    const sections = buildSidebarSections({
+      groups: buildGroups(THREADS),
+      waiting: WAITING,
+      poses: buildPoses(THREADS),
       expanded: { ...COLLAPSED, waiting: true },
       selectedId: null,
     });
 
-    expect(sections.waiting?.rows).toHaveLength(30);
-    expect(sections.waiting?.rows[0]?.id).toBe("s-wait-29");
+    expect(sections.waiting?.rows).toEqual(WAITING);
     expect(sections.waiting?.hiddenCount).toBe(0);
-  });
-
-  it("breaks a tie in activity time by session id", () => {
-    const tied = ["s-e", "s-c", "s-a", "s-d", "s-b"].map((id) =>
-      buildThread(id, 5, { projectId: WEBSHOP_PROJECT.id }),
-    );
-    const sections = buildSidebarSections({
-      groups: buildGroups(tied),
-      poses: buildPoses(tied, Object.fromEntries(tied.map((session) => [session.id, "waiting"]))),
-      expanded: COLLAPSED,
-      selectedId: null,
-    });
-
-    expect(sections.waiting?.rows.map((row) => row.id)).toEqual(["s-a", "s-b", "s-c"]);
   });
 
   it("gives the selected thread no place of its own", () => {
     const sections = buildSidebarSections({
-      groups: buildGroups(WAITING),
-      poses: POSES,
+      groups: buildGroups(THREADS),
+      waiting: WAITING,
+      poses: buildPoses(THREADS),
       expanded: COLLAPSED,
       selectedId: "s-wait-0",
     });
 
-    expect(sections.waiting?.rows.map((row) => row.id)).toEqual([
+    expect(sections.waiting?.rows.map((row) => row.sessionId)).toEqual([
       "s-wait-29",
       "s-wait-28",
       "s-wait-27",
@@ -135,10 +160,10 @@ describe("buildSidebarSections: Waiting on you", () => {
   });
 
   it("has no Waiting on you section when nothing waits", () => {
-    const threads = [buildThread("s-idle", 1)];
     const sections = buildSidebarSections({
-      groups: buildGroups(threads),
-      poses: buildPoses(threads),
+      groups: buildGroups(THREADS),
+      waiting: [],
+      poses: buildPoses(THREADS),
       expanded: COLLAPSED,
       selectedId: null,
     });
@@ -167,6 +192,7 @@ describe("buildSidebarSections: a project", () => {
   it("picks the working thread, then the 4 newest others, and keeps the groups' order", () => {
     const [webshop] = buildSidebarSections({
       groups: buildGroups(THREADS),
+      waiting: [],
       poses: POSES,
       expanded: COLLAPSED,
       selectedId: null,
@@ -196,6 +222,7 @@ describe("buildSidebarSections: a project", () => {
     });
     const [webshop] = buildSidebarSections({
       groups: buildGroups(THREADS),
+      waiting: [],
       poses,
       expanded: COLLAPSED,
       selectedId: null,
@@ -214,6 +241,7 @@ describe("buildSidebarSections: a project", () => {
   it("shows the selected thread beyond the 5, in its own group with its label", () => {
     const [webshop] = buildSidebarSections({
       groups: buildGroups(THREADS),
+      waiting: [],
       poses: POSES,
       expanded: COLLAPSED,
       selectedId: "s-tree-2",
@@ -233,6 +261,7 @@ describe("buildSidebarSections: a project", () => {
     for (const selectedId of ["s-main-15", "s-ops"]) {
       const [webshop] = buildSidebarSections({
         groups: buildGroups(THREADS),
+        waiting: [],
         poses: POSES,
         expanded: COLLAPSED,
         selectedId,
@@ -254,6 +283,7 @@ describe("buildSidebarSections: a project", () => {
     );
     const [webshop] = buildSidebarSections({
       groups: buildGroups(tied),
+      waiting: [],
       poses: buildPoses(tied),
       expanded: COLLAPSED,
       selectedId: null,
@@ -273,6 +303,7 @@ describe("buildSidebarSections: a project", () => {
     const groups = buildGroups(THREADS);
     const [webshop] = buildSidebarSections({
       groups,
+      waiting: [],
       poses: POSES,
       expanded: { ...COLLAPSED, projectIds: new Set([WEBSHOP_PROJECT.id]) },
       selectedId: null,
@@ -286,6 +317,7 @@ describe("buildSidebarSections: a project", () => {
     const groups = buildGroups(few);
     const [webshop] = buildSidebarSections({
       groups,
+      waiting: [],
       poses: buildPoses(few),
       expanded: COLLAPSED,
       selectedId: null,
@@ -303,6 +335,7 @@ describe("buildSidebarSections: a project", () => {
 
     const collapsed = buildSidebarSections({
       groups: buildGroups(all),
+      waiting: [],
       poses: buildPoses(all),
       expanded: COLLAPSED,
       selectedId: null,
@@ -315,6 +348,7 @@ describe("buildSidebarSections: a project", () => {
 
     const expanded = buildSidebarSections({
       groups: buildGroups(all),
+      waiting: [],
       poses: buildPoses(all),
       expanded: { ...COLLAPSED, projectIds: new Set([null]) },
       selectedId: null,
@@ -333,6 +367,7 @@ describe("buildSidebarSections: a project", () => {
         workspaceId: null,
         createsWorkspace: true,
       }),
+      waiting: [],
       poses: POSES,
       expanded: COLLAPSED,
       selectedId: null,

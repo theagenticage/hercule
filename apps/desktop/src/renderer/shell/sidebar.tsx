@@ -1,6 +1,7 @@
 import { useCallback, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
+import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
 import {
   projectsQuery,
@@ -13,11 +14,13 @@ import {
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
 import { useSendOnChange } from "../app/send-on-change";
+import { useWaiting } from "../app/waiting";
 import { ComposeIcon } from "../icons/compose";
 import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
 import { SidebarIcon } from "../icons/sidebar";
-import { buildSidebar, listGoMenuThreads, type SectionKey } from "./sidebar-items";
+import { AssistantsSection } from "./assistants-section";
+import { buildSidebar, listGoMenuItems, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import "./sidebar.css";
@@ -31,9 +34,12 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * - one row of actions: New thread, which calls `onNewThread`, then Search
  *   and the Office as square icon buttons, where the book draws New thread
  *   and Search as two rows and has no Office button;
- * - the thread list: Waiting on you, then the threads grouped by project and
+ * - the thread list: Waiting on you, with the threads and the assistants
+ *   that wait on the user, then the threads grouped by project and
  *   workspace, with the Draft Thread's row, while one is open, in the group
  *   it will join;
+ * - the Assistants section, pinned under the list, while there is an
+ *   assistant;
  * - the foot: the thread counts, the signed-in user and the Settings button.
  *
  * Hide the sidebar and Search are drawn but do nothing yet, and carry
@@ -51,8 +57,8 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * shell's loader reads them, so nothing here waits in practice. A live push
  * updates the cache, and only the rows whose thread changed draw again.
  *
- * It also sends main the threads it shows, top to bottom, for the Go menu,
- * each time they or their titles change.
+ * It also sends main the threads and the waiting assistants its list shows,
+ * top to bottom, for the Go menu, each time they or their titles change.
  */
 export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
@@ -64,6 +70,8 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
+  const assistantRows = useAssistantRows();
+  const waiting = useWaiting();
   useRelatedReads(threads, projects, workspaces);
   // The Draft Thread the new-thread screen shows, while that screen is open.
   // Its row reads the draft as the screen does, see `useDraftThread`.
@@ -94,6 +102,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
 
   const { items, counts } = buildSidebar({
     threads,
+    waiting,
     projects,
     workspaces,
     resources,
@@ -103,7 +112,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
     expanded,
     selectedId,
   });
-  useSendOnChange(listGoMenuThreads(items), bridge.goMenu.set, "Could not update the Go menu:");
+  useSendOnChange(listGoMenuItems(items), bridge.goMenu.set, "Could not update the Go menu:");
 
   return (
     <aside className="side">
@@ -135,6 +144,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
         </Link>
       </div>
       <SidebarList items={items} officeOpen={officeOpen} onExpand={expandSection} />
+      <AssistantsSection rows={assistantRows} />
       <SidebarFoot
         working={counts.working}
         waiting={counts.waiting}

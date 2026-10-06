@@ -1,25 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Outlet, redirect, useMatch, useNavigate } from "@tanstack/react-router";
-import { decideThreadPose, isSeatedPose, listWaitingThreads } from "@hercule/client-core";
+import { useCallback, useEffect, useState, type JSX } from "react";
+import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
-import { ensureShellData, runnersQuery, threadsQuery } from "../../app/queries";
+import { ensureShellData } from "../../app/queries";
+import { useWaiting } from "../../app/waiting";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { Shell } from "../../shell";
-
-// The project picker and the New project dialog are each loaded the first
-// time they open, so their code is not part of the first screen's scripts
-// (spec 17 §Performance).
-const ProjectPicker = lazy(() =>
-  import("../../screens/new-thread/project-picker").then((module) => ({
-    default: module.ProjectPicker,
-  })),
-);
-const NewProjectDialog = lazy(() =>
-  import("../../screens/new-project").then((module) => ({ default: module.NewProjectDialog })),
-);
+import { buildWaitingRequest, useOpenDestination } from "./-destinations";
+import { NewThreadDialogs, type NewThreadDialog } from "./-new-thread-dialogs";
 
 /**
  * The shell's layout route. Every screen inside the app is a child of this
@@ -34,12 +23,11 @@ const NewProjectDialog = lazy(() =>
  * picker's last row opens. A project added there opens a Draft Thread in it.
  * Go > Office (⌘⇧O) opens the Office, and Settings… (⌘,) opens Settings.
  *
- * While the user is signed in, the shell sends main the threads waiting on
- * the user whenever the thread list changes, for the dock badge and the
- * threads' notifications. It opens the thread main names when the user
- * chooses it in the Go menu or clicks its notification: in the Office's
- * drawer while the Office is open and the thread has a colleague there, and
- * on its own screen otherwise.
+ * While the user is signed in, the shell sends main the threads and the
+ * assistants waiting on the user whenever that list changes, for the dock
+ * badge and the notifications. It opens the destination main names when the
+ * user chooses it in the Go menu or clicks its notification, as
+ * `useOpenDestination` describes.
  */
 export const Route = createFileRoute("/_connected/_shell")({
   loader: async ({ context: { controller, queryClient } }) => {
@@ -68,10 +56,9 @@ function ShellLayout(): JSX.Element {
   const { bridge, controller, queryClient } = Route.useRouteContext();
   const navigate = useNavigate();
   useLiveConnection(controller.live, queryClient);
-  const threads = useSuspenseQuery(threadsQuery(controller.client)).data;
-  // The dialog New thread has open: the project picker, or the New project
-  // dialog its last row opens.
-  const [dialog, setDialog] = useState<"picker" | "new-project" | null>(null);
+  const waiting = useWaiting();
+  const openDestination = useOpenDestination();
+  const [dialog, setDialog] = useState<NewThreadDialog | null>(null);
 
   // Opens the Draft Thread in `projectId`, or in no project when it is
   // `undefined`, with the focus in its message field. A draft that mounts
@@ -93,11 +80,11 @@ function ShellLayout(): JSX.Element {
   }, []);
 
   // Main shows the badge and the notifications, and keeps which it has
-  // shown, but only the page holds the thread list.
+  // shown, but only the page holds the threads and the assistants.
   useSendOnChange(
-    listWaitingThreads(threads),
-    bridge.waitingThreads.set,
-    "Could not update the dock badge and the threads' notifications:",
+    waiting.map(buildWaitingRequest),
+    bridge.waiting.set,
+    "Could not update the dock badge and the notifications:",
   );
 
   // Only a signed-in user can start a thread, open the Office or open
@@ -121,36 +108,15 @@ function ShellLayout(): JSX.Element {
     [bridge, navigate, openNewThread],
   );
 
-  // A thread opened from the menu or a notification replaces whatever the
-  // user was doing, the project picker included. While the Office is open, a
-  // thread with a colleague there opens in the Office's drawer, as its
-  // sidebar row does, and any other thread opens on its own screen. The
-  // thread and its runner are read from the cache when the thread is opened,
-  // so the listener is not replaced each time the threads change.
-  const officeOpen =
-    useMatch({ from: "/_connected/_shell/office", shouldThrow: false }) !== undefined;
+  // A thread or an assistant opened from the menu or a notification replaces
+  // whatever the user was doing, the project picker included.
   useEffect(
     () =>
-      bridge.thread.onOpen(({ sessionId }) => {
+      bridge.destination.onOpen((destination) => {
         setDialog(null);
-        const { client } = controller;
-        const session = queryClient
-          .getQueryData(threadsQuery(client).queryKey)
-          ?.find((each) => each.id === sessionId);
-        const runner = queryClient
-          .getQueryData(runnersQuery(client).queryKey)
-          ?.find((each) => each.id === session?.runnerId);
-        if (
-          officeOpen &&
-          session !== undefined &&
-          isSeatedPose(decideThreadPose(session, runner))
-        ) {
-          void navigate({ to: "/office", search: { session: sessionId } });
-        } else {
-          void navigate({ to: "/threads/$sessionId", params: { sessionId } });
-        }
+        openDestination(destination);
       }),
-    [bridge, controller, navigate, officeOpen, queryClient],
+    [bridge, openDestination],
   );
 
   return (
@@ -158,31 +124,7 @@ function ShellLayout(): JSX.Element {
       <Shell onNewThread={openNewThread}>
         <Outlet />
       </Shell>
-      {/* Without a boundary of their own, a dialog's load would suspend the
-          shell behind it. */}
-      <Suspense fallback={null}>
-        {dialog === "picker" ? (
-          <ProjectPicker
-            onPick={openDraft}
-            onNewProject={() => {
-              setDialog("new-project");
-            }}
-            onClose={() => {
-              // The picker's close event fires after New project has already
-              // asked for the next dialog, which must stay.
-              setDialog((current) => (current === "picker" ? null : current));
-            }}
-          />
-        ) : null}
-        {dialog === "new-project" ? (
-          <NewProjectDialog
-            onAdded={openDraft}
-            onClose={() => {
-              setDialog(null);
-            }}
-          />
-        ) : null}
-      </Suspense>
+      <NewThreadDialogs dialog={dialog} setDialog={setDialog} onDraft={openDraft} />
     </>
   );
 }

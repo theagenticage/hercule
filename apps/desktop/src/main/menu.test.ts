@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import type { Menu as ElectronMenu, MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { GoMenuThread } from "../ipc/contract";
+import type { GoMenuItem } from "../ipc/contract";
 import { MainMenu, makeMainMenuLayer } from "./menu";
 import {
   makeFakeMainWindow,
@@ -57,9 +57,10 @@ interface MenuRun {
   readonly window: Array<string>;
 }
 
-const THREADS: ReadonlyArray<GoMenuThread> = [
-  { sessionId: "session-1", title: "Fix the login bug" },
-  { sessionId: "session-2", title: "Write the release notes" },
+const GO_ITEMS: ReadonlyArray<GoMenuItem> = [
+  { destination: { kind: "thread", sessionId: "session-1" }, title: "Fix the login bug" },
+  { destination: { kind: "thread", sessionId: "session-2" }, title: "Write the release notes" },
+  { destination: { kind: "assistant", assistantId: "assistant-1" }, title: "Ada" },
 ];
 
 /** The controller URL a settings file with a stored token names. */
@@ -235,36 +236,41 @@ describe("MainMenu", () => {
     expect(window).toEqual(['showAndSend menu.command "openOffice"']);
   });
 
-  it("lists the threads the page sends in Go, with ⌘1, ⌘2 and on, while the user is signed in", async () => {
+  it("lists the items the page sends in Go, with ⌘1, ⌘2 and on, while the user is signed in", async () => {
     const { menuBar } = await runWithMenu((menu) =>
-      Effect.all([menu.setSignedIn(true), menu.setGoThreads(THREADS)]),
+      Effect.all([menu.setSignedIn(true), menu.setGoItems(GO_ITEMS)]),
     );
     expect(listMenuItems(menuBar, "Go").map((item) => [item.label, item.accelerator])).toEqual([
       ["Office", "CmdOrCtrl+Shift+O"],
       [undefined, undefined],
       ["Fix the login bug", "CmdOrCtrl+1"],
       ["Write the release notes", "CmdOrCtrl+2"],
+      ["Ada", "CmdOrCtrl+3"],
     ]);
   });
 
-  it("shows the window and asks the page to open the thread's session when a thread in Go is chosen", async () => {
+  it("shows the window and asks the page to open the item's destination when an item in Go is chosen", async () => {
     const { window } = await runWithMenu((menu, choose) =>
       Effect.all([
         menu.setSignedIn(true),
-        menu.setGoThreads(THREADS),
+        menu.setGoItems(GO_ITEMS),
         choose("Go", "Write the release notes"),
+        choose("Go", "Ada"),
       ]),
     );
-    expect(window).toEqual(['showAndSend thread.open {"sessionId":"session-2"}']);
+    expect(window).toEqual([
+      'showAndSend destination.open {"kind":"thread","sessionId":"session-2"}',
+      'showAndSend destination.open {"kind":"assistant","assistantId":"assistant-1"}',
+    ]);
   });
 
-  it("empties Go when the user signs out, and ignores the threads the page sends after", async () => {
+  it("empties Go when the user signs out, and ignores the items the page sends after", async () => {
     const { menuBar } = await runWithMenu((menu) =>
       Effect.all([
         menu.setSignedIn(true),
-        menu.setGoThreads(THREADS),
+        menu.setGoItems(GO_ITEMS),
         menu.setSignedIn(false),
-        menu.setGoThreads(THREADS),
+        menu.setGoItems(GO_ITEMS),
       ]),
     );
     expect(listMenuItems(menuBar, "Go").map((item) => item.label)).toEqual([

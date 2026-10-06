@@ -25,6 +25,7 @@ import {
   buildSessionStreamTopic,
   buildSessionTapTopic,
   GITHUB_CONNECTION_TYPE,
+  type Assistant,
   type Connection,
   type Input,
   type ModelOption,
@@ -66,12 +67,15 @@ export interface FakeBridge {
   readonly savedUrls: readonly string[];
   /** Sends a menu command, as main does when the user picks the menu item. */
   readonly sendMenuCommand: (command: MenuCommand) => void;
-  /** Each list of threads the app sent main for the Go menu, oldest first. */
+  /** Each list of items the app sent main for the Go menu, oldest first. */
   readonly goMenus: readonly EncodedIpcRequest<"goMenu.set">[];
-  /** Each list of threads waiting on the user the app sent main, oldest first. */
-  readonly waitingThreadLists: readonly EncodedIpcRequest<"waitingThreads.set">[];
-  /** Asks the app to open a thread, as main does for Go and a notification's click. */
-  readonly openThread: (sessionId: string) => void;
+  /** Each list of Requests waiting on the user the app sent main, oldest first. */
+  readonly waitingLists: readonly EncodedIpcRequest<"waiting.set">[];
+  /**
+   * Asks the app to open a thread or an assistant, as main does for a Go
+   * menu item and a notification's click.
+   */
+  readonly openDestination: (destination: EncodedIpcPayload<"destination.open">) => void;
   /** What the app asked main to keep of the first run, oldest first. `null` forgets it. */
   readonly firstRunWrites: readonly (FirstRunProgress | null)[];
   /** The URLs the app asked main to open in the browser, oldest first. */
@@ -125,9 +129,9 @@ export const createFakeBridge = ({
   let starts = 0;
   let logsFolderShows = 0;
   const menuListeners = new Set<(command: MenuCommand) => void>();
-  const threadListeners = new Set<(payload: EncodedIpcPayload<"thread.open">) => void>();
+  const destinationListeners = new Set<(payload: EncodedIpcPayload<"destination.open">) => void>();
   const goMenus: EncodedIpcRequest<"goMenu.set">[] = [];
-  const waitingThreadLists: EncodedIpcRequest<"waitingThreads.set">[] = [];
+  const waitingLists: EncodedIpcRequest<"waiting.set">[] = [];
   return {
     bridge: {
       controllerUrl: {
@@ -151,14 +155,14 @@ export const createFakeBridge = ({
         report: () => Promise.resolve(undefined),
       },
       goMenu: {
-        set: (threads) => {
-          goMenus.push(threads);
+        set: (items) => {
+          goMenus.push(items);
           return Promise.resolve(undefined);
         },
       },
-      waitingThreads: {
-        set: (threads) => {
-          waitingThreadLists.push(threads);
+      waiting: {
+        set: (requests) => {
+          waitingLists.push(requests);
           return Promise.resolve(undefined);
         },
       },
@@ -204,17 +208,17 @@ export const createFakeBridge = ({
           return () => menuListeners.delete(listener);
         },
       },
-      thread: {
+      destination: {
         onOpen: (listener) => {
-          threadListeners.add(listener);
-          return () => threadListeners.delete(listener);
+          destinationListeners.add(listener);
+          return () => destinationListeners.delete(listener);
         },
       },
     },
     tokenWrites,
     savedUrls,
     goMenus,
-    waitingThreadLists,
+    waitingLists,
     firstRunWrites,
     openedLinks,
     startCount: () => starts,
@@ -226,9 +230,9 @@ export const createFakeBridge = ({
         for (const listener of menuListeners) listener(command);
       });
     },
-    openThread: (sessionId) => {
+    openDestination: (destination) => {
       act(() => {
-        for (const listener of threadListeners) listener({ sessionId });
+        for (const listener of destinationListeners) listener(destination);
       });
     },
   };
@@ -305,6 +309,15 @@ export interface SidebarRecords {
   readonly providers: readonly ProviderInstance[];
   /** The signed-in user's name. */
   readonly username: string;
+  /** The assistants, each with the current session of its main conversation. None when absent. */
+  readonly assistants?: readonly AssistantRecords[];
+}
+
+/** An assistant as the stubbed controller holds it. */
+export interface AssistantRecords {
+  readonly assistant: Assistant;
+  /** The current session of the assistant's main conversation, or `null` when none has started. */
+  readonly session: Session | null;
 }
 
 /** A controller that holds no threads, projects, workspaces, resources, runners or providers. */
@@ -319,8 +332,25 @@ export const NO_SIDEBAR_RECORDS: SidebarRecords = {
 };
 
 /**
- * Returns the handlers that answer the sidebar's seven reads from `records`.
- * Each list comes back as one page, with no cursor to a next one.
+ * Answers a session listing from `records`. A listing filtered to one
+ * conversation, which is how the app reads an assistant's current session,
+ * gets that assistant's session, or no session. Any other listing gets the
+ * threads.
+ */
+const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
+  const conversationId = new URLSearchParams(call.search).get("conversationId");
+  if (conversationId === null) return { body: { items: records.threads } };
+  const session = records.assistants?.find(
+    ({ assistant }) => assistant.mainConversationId === conversationId,
+  )?.session;
+  return { body: { items: session ? [session] : [] } };
+};
+
+/**
+ * Returns the handlers that answer the sidebar's reads from `records`: the
+ * threads, projects, workspaces, resources, runners, providers, the user, the
+ * assistants and each assistant's current session. Each list comes back as
+ * one page, with no cursor to a next one.
  *
  * They also answer the three reads a Draft Thread adds, which the app makes
  * whenever it opens at `/`: the settings, with none set, the profiles, and
@@ -329,7 +359,10 @@ export const NO_SIDEBAR_RECORDS: SidebarRecords = {
 export const buildSidebarHandlers = (
   records: SidebarRecords,
 ): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/sessions": { body: { items: records.threads } },
+  "GET /api/v1/sessions": (call) => answerSessionQuery(records, call),
+  "GET /api/v1/assistants": {
+    body: { items: (records.assistants ?? []).map(({ assistant }) => assistant) },
+  },
   "GET /api/v1/projects": { body: { items: records.projects } },
   "GET /api/v1/workspaces": { body: { items: records.workspaces } },
   "GET /api/v1/resources": { body: { items: records.resources } },
@@ -392,6 +425,44 @@ const buildFixtureThread = (
     runnerId: WORLD.MOSS.id,
     permissionProfileId: PROFILE_ID,
     instanceId: INSTANCE_ID,
+    ...over,
+  });
+
+/**
+ * Returns a fixture assistant with every field the contract requires. The
+ * caller picks its id, name and main conversation, in the UUIDv7 format the
+ * contract accepts.
+ */
+export const buildFixtureAssistant = (
+  over: Partial<Assistant> & Pick<Assistant, "id" | "name" | "mainConversationId">,
+): Assistant => ({
+  systemPrompt: `You are ${over.name}.`,
+  instanceId: INSTANCE_ID,
+  permissionProfileId: PROFILE_ID,
+  accessMode: "auto-accept-edits",
+  model: null,
+  disallowedTools: [],
+  unenforced: [],
+  heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
+  rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
+  reply: "turn-end",
+  createdAt: "2026-09-10T09:00:00.000Z",
+  updatedAt: "2026-09-10T09:00:00.000Z",
+  ...over,
+});
+
+/**
+ * Returns a session of `assistant`'s main conversation on moss, idle unless
+ * `over` says otherwise.
+ */
+export const buildFixtureAssistantSession = (
+  assistant: Assistant,
+  over: Partial<Session> & { readonly id: string },
+): Session =>
+  buildFixtureThread({
+    title: assistant.name,
+    agentId: assistant.id,
+    conversationId: assistant.mainConversationId,
     ...over,
   });
 

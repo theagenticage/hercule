@@ -15,6 +15,8 @@ import userEvent from "@testing-library/user-event";
 import { describePose } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
+  buildFixtureAssistant,
+  buildFixtureAssistantSession,
   buildSidebarHandlers,
   buildThreadHandlers,
   CONTROLLER_URL,
@@ -493,7 +495,7 @@ describe("the sidebar", () => {
 
     expect(listWaitingRows()).toHaveLength(5);
     expect(within(nav).queryByRole("button", { name: /more/ })).toBeNull();
-    expect(readFocusedKey()).toBe(`waiting:${waiting[3]!.id}`);
+    expect(readFocusedKey()).toBe(`waiting:thread:${waiting[3]!.id}`);
   });
 
   it("shows 5 threads of a project, and every thread once its more row is pressed", async () => {
@@ -552,7 +554,7 @@ describe("the sidebar", () => {
     act(() => {
       waitingRow!.focus();
     });
-    expect(readFocusedKey()).toBe(`waiting:${FIXTURE_THREAD_IDS.runbook}`);
+    expect(readFocusedKey()).toBe(`waiting:thread:${FIXTURE_THREAD_IDS.runbook}`);
 
     threads = threads.map((session) =>
       session.id === FIXTURE_THREAD_IDS.runbook ? { ...session, openRequests: [] } : session,
@@ -562,7 +564,9 @@ describe("the sidebar", () => {
     });
 
     await waitFor(() => {
-      expect(nav.querySelector(`[data-key='waiting:${FIXTURE_THREAD_IDS.runbook}']`)).toBeNull();
+      expect(
+        nav.querySelector(`[data-key='waiting:thread:${FIXTURE_THREAD_IDS.runbook}']`),
+      ).toBeNull();
     });
     expect(readFocusedKey()).toBe("header:waiting");
     expect(document.activeElement?.textContent).toBe("Waiting on you 1");
@@ -588,5 +592,72 @@ describe("the sidebar", () => {
     expect(screen.getByRole("heading", { name: "This thread was not found." })).toBeTruthy();
     expect(within(nav).getByText("No threads yet")).toBeTruthy();
     expect(within(nav).queryAllByRole("link")).toEqual([]);
+  });
+});
+
+describe("the sidebar's assistants", () => {
+  const ADA = buildFixtureAssistant({
+    id: "01a06d02-7700-7000-8000-000000000001",
+    name: "Ada",
+    mainConversationId: "01a06d02-7800-7000-8000-000000000001",
+  });
+  const MILO = buildFixtureAssistant({
+    id: "01a06d02-7700-7000-8000-000000000002",
+    name: "Milo",
+    mainConversationId: "01a06d02-7800-7000-8000-000000000002",
+  });
+  /** Ada's current session, waiting on the user's approval of `git push`, older than every thread. */
+  const ADA_WAITING = buildFixtureAssistantSession(ADA, {
+    id: "01a06d02-7400-7000-8000-000000000101",
+    status: "busy",
+    openRequests: [APPROVAL],
+    lastActivityAt: "2026-09-10T08:00:00.000Z",
+  });
+
+  it("lists every assistant, by name, in the pinned section between the threads and the foot", async () => {
+    await startSidebar({
+      records: {
+        ...SIDEBAR_FIXTURE,
+        assistants: [
+          { assistant: MILO, session: null },
+          { assistant: ADA, session: ADA_WAITING },
+        ],
+      },
+    });
+
+    const section = screen.getByRole("navigation", { name: "Assistants" });
+    expect(
+      within(section)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("aria-label")),
+    ).toEqual(["Ada, waiting on you", "Milo, idle"]);
+    expect(section.nextElementSibling?.classList.contains("side-foot")).toBe(true);
+    // The foot counts threads only, not the waiting assistant.
+    expect(readCounts()).toBe("1 working · 1 waiting · 2 idle");
+  });
+
+  it("lists a waiting assistant in Waiting on you, linked to its screen", async () => {
+    const { nav } = await startSidebar({
+      records: { ...SIDEBAR_FIXTURE, assistants: [{ assistant: ADA, session: ADA_WAITING }] },
+    });
+
+    const row = nav.querySelector(`[data-key='waiting:assistant:${ADA.id}']`)!;
+    expect(row.getAttribute("href")).toBe(`/assistants/${ADA.id}`);
+    expect(row.textContent).toBe("Ada" + "Run git push?");
+    expect(within(nav).getByText("Waiting on you").parentElement?.textContent).toBe(
+      "Waiting on you 2",
+    );
+  });
+
+  it("shows the section also when there are no threads", async () => {
+    await startSidebar({
+      records: { ...NO_SIDEBAR_RECORDS, assistants: [{ assistant: MILO, session: null }] },
+    });
+    expect(screen.getByRole("navigation", { name: "Assistants" })).toBeTruthy();
+  });
+
+  it("draws no section when there are no assistants", async () => {
+    await startSidebar();
+    expect(screen.queryByRole("navigation", { name: "Assistants" })).toBeNull();
   });
 });

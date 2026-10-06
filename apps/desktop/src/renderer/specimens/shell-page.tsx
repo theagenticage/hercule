@@ -8,7 +8,9 @@
  * - thread.tsx, which also opens a thread, and whose thread screen
  *   `pnpm compare:bureau` compares with the book's;
  * - draft.tsx, which opens a Draft Thread in a project, and whose draft
- *   screen `pnpm compare:bureau` compares with the book's.
+ *   screen `pnpm compare:bureau` compares with the book's;
+ * - assistant-states.tsx, which draws the Assistants section and opens an
+ *   assistant's page.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
@@ -38,9 +40,11 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useParams,
   useSearch,
 } from "@tanstack/react-router";
 import type {
+  Assistant,
   Connection,
   Input,
   Project,
@@ -61,7 +65,9 @@ import {
 } from "@hercule/client-core";
 import type { Bridge } from "../../ipc/bridge";
 import {
+  assistantsQuery,
   connectionsQuery,
+  currentConversationSessionQuery,
   localRunnerQuery,
   profilesQuery,
   projectsQuery,
@@ -83,14 +89,23 @@ import {
   type PendingSubmissions,
 } from "../app/pending-submissions";
 import { createQueryClient } from "../app/query-client";
+import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { ThreadScreen } from "../screens/thread/thread-screen";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 
+/** An assistant, and the current session of its main conversation, or `null` before its first. */
+export interface SpecimenAssistant {
+  readonly assistant: Assistant;
+  readonly currentSession: Session | null;
+}
+
 /** Every list the sidebar reads, as the controller would return it. */
 export interface SidebarRecords {
   readonly threads: ReadonlyArray<Session>;
+  /** The assistants, in the order the controller lists them. The sidebar sorts them by name. */
+  readonly assistants: ReadonlyArray<SpecimenAssistant>;
   readonly projects: ReadonlyArray<Project>;
   readonly workspaces: ReadonlyArray<Workspace>;
   readonly resources: ReadonlyArray<Resource>;
@@ -152,7 +167,8 @@ const buildBridgeCallError = (call: string): Error =>
  * The bridge the page passes to the app. It refuses every call, for the same
  * reason the client refuses every request, except what the shell sends main
  * for the Go menu, the dock badge and the notifications: it accepts that,
- * and ignores it. It sends no menu command and opens no thread.
+ * and ignores it. It sends no menu command and opens no thread or
+ * assistant.
  */
 const REFUSING_BRIDGE: Bridge = {
   controllerUrl: {
@@ -172,7 +188,7 @@ const REFUSING_BRIDGE: Bridge = {
   goMenu: {
     set: () => Promise.resolve(undefined),
   },
-  waitingThreads: {
+  waiting: {
     set: () => Promise.resolve(undefined),
   },
   localController: {
@@ -201,7 +217,7 @@ const REFUSING_BRIDGE: Bridge = {
   menu: {
     onCommand: () => () => undefined,
   },
-  thread: {
+  destination: {
     onOpen: () => () => undefined,
   },
 };
@@ -227,6 +243,16 @@ const seedQueryCache = (
   queryClient.setQueryData(runnersQuery(client).queryKey, records.runners);
   queryClient.setQueryData(providersQuery(client).queryKey, records.instances);
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
+  queryClient.setQueryData(
+    assistantsQuery(client).queryKey,
+    records.assistants.map(({ assistant }) => assistant),
+  );
+  for (const { assistant, currentSession } of records.assistants) {
+    queryClient.setQueryData(
+      currentConversationSessionQuery(client, assistant.mainConversationId).queryKey,
+      currentSession,
+    );
+  }
   queryClient.setQueryData(settingsQuery(client).queryKey, { controller: {}, user: {} });
   queryClient.setQueryData(profilesQuery(client).queryKey, []);
   queryClient.setQueryData(localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey, null);
@@ -263,16 +289,24 @@ function NewThreadScreen(): JSX.Element {
   return <DraftScreen projectId={search.project ?? null} workspaceId={search.workspace ?? null} />;
 }
 
+/** Renders the page of the assistant the address names, as the app's assistant route does. */
+function AssistantRoute(): JSX.Element {
+  const { assistantId } = useParams({ from: "/_connected/_shell/assistants/$assistantId" });
+  return <AssistantScreen key={assistantId} assistantId={assistantId} />;
+}
+
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
- * and the two screens the sidebar links to, `/` and `/threads/$sessionId`,
- * starting at `path`. The ids are the app's, because the sidebar and the
+ * and the three screens the sidebar links to, `/`, `/threads/$sessionId` and
+ * `/assistants/$assistantId`, starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
  *
  * `/` draws the draft screen, as in the app. The thread's screen draws the
  * thread screen for `openThreadId`, when one is given, and nothing
- * otherwise.
+ * otherwise. An assistant's address draws the assistant's page, which shows
+ * that the assistant was not found when the fixture holds no assistant with
+ * the address's id.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -311,6 +345,11 @@ const buildRouter = (
             openThreadId === undefined ? null : (
               <ThreadScreen key={openThreadId} sessionId={openThreadId} />
             ),
+        }),
+        createRoute({
+          getParentRoute: () => shellRoute,
+          path: "assistants/$assistantId",
+          component: AssistantRoute,
         }),
       ]),
     ]),

@@ -20,7 +20,7 @@ import { MainMenu } from "../menu";
 import { RunnerIdentity } from "../runner-identity";
 import { openInBrowser } from "../security";
 import { StoredToken } from "../stored-token";
-import { ThreadNotifications } from "../thread-notifications";
+import { WaitingNotifications } from "../waiting-notifications";
 import { answerIpcMessage } from "./message";
 
 /**
@@ -35,7 +35,7 @@ type IpcHandlerServices =
   | RunnerIdentity
   | StoredToken
   | ThisMac
-  | ThreadNotifications;
+  | WaitingNotifications;
 
 /**
  * The errors a handler fails with when the request makes no sense in main's
@@ -59,9 +59,9 @@ const IPC_HANDLERS: {
   "token.write": (token) => StoredToken.use((storedToken) => storedToken.write(token)),
   "runnerIdentity.read": ({ port }) => RunnerIdentity.use((identity) => identity.read(port)),
   "firstScreen.report": () => MainWindow.use((window) => window.showFirstTime),
-  "goMenu.set": (threads) => MainMenu.use((menu) => menu.setGoThreads(threads)),
-  "waitingThreads.set": (threads) =>
-    ThreadNotifications.use((notifications) => notifications.setWaitingThreads(threads)),
+  "goMenu.set": (items) => MainMenu.use((menu) => menu.setGoItems(items)),
+  "waiting.set": (requests) =>
+    WaitingNotifications.use((notifications) => notifications.setWaitingRequests(requests)),
   "localController.find": () => ThisMac.use((thisMac) => thisMac.findLocalController),
   "localController.start": () => ThisMac.use((thisMac) => thisMac.startLocalController),
   "logsFolder.show": () => ThisMac.use((thisMac) => thisMac.showLogsFolder),

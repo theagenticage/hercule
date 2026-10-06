@@ -12,7 +12,7 @@ import {
   makeTemporarySettingsFile,
   type TemporarySettingsFile,
 } from "./testing";
-import { ThreadNotifications } from "./thread-notifications";
+import { WaitingNotifications } from "./waiting-notifications";
 
 let settingsFile: TemporarySettingsFile;
 
@@ -73,14 +73,14 @@ const runWithStoredToken = async <A, E>(
             Effect.sync(() => {
               signedIn.push(next);
             }),
-          setGoThreads: () => Effect.void,
+          setGoItems: () => Effect.void,
         }),
-        Layer.succeed(ThreadNotifications)({
+        Layer.succeed(WaitingNotifications)({
           setSignedIn: (next) =>
             Effect.sync(() => {
               notificationsSignedIn.push(next);
             }),
-          setWaitingThreads: () => Effect.void,
+          setWaitingRequests: () => Effect.void,
         }),
       ),
     ),

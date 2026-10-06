@@ -153,7 +153,7 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
       draw: (p) => (
         <>
           {drawSideTable(p, 20.0, 17.7)}
-          {drawClubChair(p, 21.4, 16.9, buildLook(assistant.name))}
+          {drawClubChair(p, 21.4, 16.9, buildLook(assistant.id))}
         </>
       ),
       placeLabel: (p) => ({

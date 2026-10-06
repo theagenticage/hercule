@@ -205,7 +205,9 @@ const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
     reason:
       "The desktop renderer is a sandboxed web page, so it never imports electron or a Node built-in.\n" +
       DESKTOP_PACKAGES_REASON,
-    firstParty: { own: ["."], packages: CLIENT_PACKAGES },
+    // All three layers import the IPC contract's folder (spec 17, Package). The
+    // renderer needs the destination key that main uses too.
+    firstParty: { own: [".", "../ipc"], packages: CLIENT_PACKAGES },
     forbidden: [
       { what: "electron", pattern: /^electron(\/|$)/ },
       { what: "a Node or Bun built-in", pattern: RUNTIME_BUILT_IN },

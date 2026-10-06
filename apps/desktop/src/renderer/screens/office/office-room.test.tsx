@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { RoomContents } from "@hercule/client-core";
 import { buildProject } from "@hercule/client-core/threads/testing";
+import { buildLook } from "../../faces";
 import { OfficeRoom, type RoomShot } from ".";
+
+/** The assistant the first run seats in the club chair. */
+const HERCULE = { id: "a-hercule", name: "Hercule" };
 
 /** The room before anything is set up: the lights off and nothing in it but the shell and its dressing. */
 const BARE: RoomContents = {
@@ -24,7 +28,7 @@ const FURNISHED: RoomContents = {
     firstThread: { projectId: "p-webshop", projectName: "webshop" },
   },
   yourDesk: true,
-  assistant: { name: "Hercule" },
+  assistant: HERCULE,
   triage: { note: "reads GitHub" },
   gitHubAccount: "rogier",
 };
@@ -102,11 +106,22 @@ describe("OfficeRoom", () => {
   });
 
   it("seats the assistant asleep in the club chair", () => {
-    const { room } = renderRoom({ ...BARE, assistant: { name: "Hercule" } });
+    const { room } = renderRoom({ ...BARE, assistant: HERCULE });
     expect(room.querySelectorAll(".cr")).toHaveLength(1);
     expect(room.querySelector(".cr--asleep")).not.toBeNull();
     expect(room.querySelector(".table-top")).not.toBeNull();
     expect(readLabels(room)).toEqual(["Herculeyour assistant"]);
+  });
+
+  it("draws the assistant's face from its id, not its name", () => {
+    const fromId = buildLook(HERCULE.id).hue;
+    expect(fromId).not.toBe(buildLook(HERCULE.name).hue);
+
+    const { room } = renderRoom({ ...BARE, assistant: HERCULE });
+
+    expect(room.querySelector<SVGSVGElement>(".cr")?.style.getPropertyValue("--hue")).toBe(
+      `var(--hue-${fromId})`,
+    );
   });
 
   it("lays the wing's field with its desks, two rows of four at most", () => {
@@ -183,7 +198,7 @@ describe("OfficeRoom arrivals", () => {
 
   it("settles a colleague on the character layer", () => {
     const { room, change } = renderRoom(BARE);
-    change({ ...BARE, assistant: { name: "Hercule" } });
+    change({ ...BARE, assistant: HERCULE });
     expect(room.querySelector(".room-arrival--character .cr--asleep")).not.toBeNull();
   });
 
