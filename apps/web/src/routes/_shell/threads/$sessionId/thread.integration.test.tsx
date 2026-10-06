@@ -3228,7 +3228,7 @@ describe("Thread: answering the agent's questions", () => {
 
     await screen.findByText("Which storage should drafts use?");
     expect(screen.queryByText("Which features should ship?")).toBeNull();
-    expect(screen.getByText(/\b1 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 1 of 2")).toBeDefined();
     expect(findChoice("radio", "localStorage")).toBeDefined();
     expect(findChoice("radio", "IndexedDB")).toBeDefined();
     expect(screen.queryAllByRole("checkbox")).toEqual([]);
@@ -3239,7 +3239,7 @@ describe("Thread: answering the agent's questions", () => {
 
     expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
     expect(screen.getByText("Which features should ship?")).toBeDefined();
-    expect(screen.getByText(/\b2 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 2 of 2")).toBeDefined();
     expect(findChoice("checkbox", "Sync")).toBeDefined();
     expect(findChoice("checkbox", "Search")).toBeDefined();
     // The shell's own segmented control is a radio group too, so only the
@@ -3350,7 +3350,7 @@ describe("Thread: answering the agent's questions", () => {
     await screen.findByText("Which storage should drafts use?");
     await user.type(readOwnAnswer(), "a sqlite file{Enter}");
 
-    expect(screen.getByText(/\b2 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 2 of 2")).toBeDefined();
     expect(readBodies(api.calls)).toEqual([]);
   });
 
@@ -3361,7 +3361,7 @@ describe("Thread: answering the agent's questions", () => {
     await screen.findByText("Which storage should drafts use?");
     await user.type(readOwnAnswer(), "{Enter}");
 
-    expect(screen.getByText(/\b1 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 1 of 2")).toBeDefined();
     expect(readBodies(api.calls)).toEqual([]);
   });
 

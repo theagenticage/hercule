@@ -16,9 +16,9 @@ import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@her
 
 /**
  * Renders the permission card: one Request the session's agents are parked
- * on, docked onto the composer. The thread screen passes the oldest
- * (`findOldestOpenRequest`). The card always appears in the same place and is never
- * repeated in the transcript. Its answers form the same ledger as a
+ * on, docked onto the composer, or onto a subagent's status card. The Request
+ * dock passes the Request it shows. The card always appears in the same place
+ * and is never repeated in the transcript. Its answers form the same ledger as a
  * decision's answers in the notification center.
  *
  * The dock mirrors the composer's bottom lip above the card: the same 14px
@@ -31,8 +31,9 @@ import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@her
  *
  * A `question` request is not an approval. Where a command or path would
  * otherwise go, it shows the question form, and the user answers there. It
- * has no ledger: a question offers no decision, and to turn it down the user
- * stops the turn with the composer's Stop.
+ * has no ledger: a question offers no decision. To turn down the session's
+ * own agent's question, the user stops the turn with the composer's Stop; to
+ * turn down a subagent's, the user stops that subagent from its page.
  *
  * The request's text, its questions and its answers come from
  * `buildApprovalCard`, so an answer is described the same way everywhere and
@@ -180,7 +181,9 @@ function QuestionForm({
         </span>
         {questions.length === 1 ? null : (
           <span className="text-[11px] text-faint tabular-nums">
-            {shownQuestionIndex + 1} of {questions.length}
+            {/* "Question" keeps this count apart from the dock's "1 of 2",
+                which pages through Requests. */}
+            Question {shownQuestionIndex + 1} of {questions.length}
           </span>
         )}
       </div>
