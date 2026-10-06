@@ -313,6 +313,31 @@ describe("All sessions", () => {
     }
   });
 
+  it("puts Waiting on you first, and draws the decision mark on its rows, idle threads included", async () => {
+    // The main agent is idle while its subagent asks: idle and waiting at once.
+    const idleWaiting = buildSession({
+      ...WAITING,
+      id: "01a06d02-2000-7000-8000-000000000005",
+      title: "Rename the invoice columns",
+      status: "idle",
+    });
+    await openApp([...THREE_STATUSES, WAITING, idleWaiting]);
+
+    await waitFor(() => {
+      expect(findLane("Waiting on you")).not.toBeNull();
+    });
+    const lanes = [...document.querySelectorAll("section")].filter(
+      (section) => section.closest("nav") === null,
+    );
+    expect(lanes[0]).toBe(findLane("Waiting on you"));
+    const rows = within(findLane("Waiting on you")!).getAllByRole("link");
+    expect(rows.map((row) => row.querySelector("[data-mark]")?.getAttribute("data-mark"))).toEqual([
+      "decision",
+      "decision",
+    ]);
+    expect(readPageText(findLane("Idle"))).not.toContain(idleWaiting.title);
+  });
+
   it("shows one row per session, with its title and provider display name", async () => {
     await openApp(THREE_STATUSES);
 
