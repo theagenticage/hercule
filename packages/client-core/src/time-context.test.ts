@@ -2,6 +2,7 @@ import { assert, describe, it } from "vitest";
 import {
   chooseStamps,
   formatDay,
+  formatDayStamp,
   formatPreciseStamp,
   formatSince,
   formatStamp,
@@ -193,5 +194,75 @@ describe("isSameDay", () => {
   it("returns false for an invalid date or a zone this runtime cannot format", () => {
     assert.isFalse(isSameDay(new Date("not a date"), MONDAY_MORNING, "UTC"));
     assert.isFalse(isSameDay(MONDAY_MORNING, MONDAY_MORNING, "Not/A_Zone"));
+  });
+});
+
+describe("formatDayStamp", () => {
+  const NOW = new Date("2026-10-07T10:00:00Z");
+
+  it('returns "Today" and "Yesterday" for the date of now and the date before it', () => {
+    assert.strictEqual(formatDayStamp(new Date("2026-10-07T06:00:00Z"), "UTC", NOW), "Today");
+    assert.strictEqual(formatDayStamp(new Date("2026-10-06T23:59:00Z"), "UTC", NOW), "Yesterday");
+    assert.strictEqual(formatDayStamp(new Date("2026-10-06T00:00:00Z"), "UTC", NOW), "Yesterday");
+  });
+
+  it("returns the day and month for an earlier date in the same year", () => {
+    assert.strictEqual(formatDayStamp(new Date("2026-10-05T23:59:00Z"), "UTC", NOW), "5 Oct");
+    assert.strictEqual(formatDayStamp(new Date("2026-09-04T12:00:00Z"), "UTC", NOW), "4 Sep");
+  });
+
+  it("adds the year for a date in another year", () => {
+    assert.strictEqual(formatDayStamp(new Date("2025-09-04T12:00:00Z"), "UTC", NOW), "4 Sep 2025");
+  });
+
+  it("returns the day and month for a date after now, as a clock that runs ahead gives", () => {
+    assert.strictEqual(formatDayStamp(new Date("2026-10-08T12:00:00Z"), "UTC", NOW), "8 Oct");
+  });
+
+  it("reads the dates in the given zone, not in UTC", () => {
+    // 01:00 UTC on the 7th is 10:00 on the 7th in Tokyo, but 18:00 on the
+    // 6th in Los Angeles; now is 19:00 on the 7th in Tokyo and 03:00 on the
+    // 7th in Los Angeles.
+    const instant = new Date("2026-09-07T01:00:00Z");
+    const now = new Date("2026-09-07T10:00:00Z");
+    assert.strictEqual(formatDayStamp(instant, "Asia/Tokyo", now), "Today");
+    assert.strictEqual(formatDayStamp(instant, "America/Los_Angeles", now), "Yesterday");
+  });
+
+  it('keeps "Yesterday" across a 25-hour day', () => {
+    // Amsterdam's clocks go back an hour on 25 October 2026. At 23:30 that
+    // day, 24 hours earlier is still 25 October, at 00:30.
+    const now = new Date("2026-10-25T22:30:00Z");
+    const lateOnThe24th = new Date("2026-10-24T21:00:00Z");
+    const earlyOnThe25th = new Date("2026-10-24T22:10:00Z");
+    assert.strictEqual(formatDayStamp(lateOnThe24th, "Europe/Amsterdam", now), "Yesterday");
+    assert.strictEqual(formatDayStamp(earlyOnThe25th, "Europe/Amsterdam", now), "Today");
+  });
+
+  it('does not call two days ago "Yesterday" after a 23-hour day', () => {
+    // Amsterdam's clocks go forward an hour on 29 March 2026. At 00:30 on the
+    // 30th, 24 hours earlier is 23:30 on the 28th, two dates back.
+    const now = new Date("2026-03-29T22:30:00Z");
+    const lateOnThe28th = new Date("2026-03-28T22:30:00Z");
+    const lateOnThe29th = new Date("2026-03-29T21:50:00Z");
+    assert.strictEqual(formatDayStamp(lateOnThe28th, "Europe/Amsterdam", now), "28 Mar");
+    assert.strictEqual(formatDayStamp(lateOnThe29th, "Europe/Amsterdam", now), "Yesterday");
+  });
+
+  it("takes the year from the zone at a new year", () => {
+    // 23:30 UTC on 31 December 2025 is already 00:30 on 1 January 2026 in
+    // Amsterdam.
+    const instant = new Date("2025-12-31T23:30:00Z");
+    const newYearsMorning = new Date("2026-01-01T10:00:00Z");
+    assert.strictEqual(formatDayStamp(instant, "Europe/Amsterdam", newYearsMorning), "Today");
+    assert.strictEqual(formatDayStamp(instant, "UTC", newYearsMorning), "Yesterday");
+    assert.strictEqual(formatDayStamp(instant, "Europe/Amsterdam", NOW), "1 Jan");
+    assert.strictEqual(formatDayStamp(instant, "UTC", NOW), "31 Dec 2025");
+  });
+
+  it("returns undefined for an invalid date or a zone this runtime cannot format", () => {
+    assert.isUndefined(formatDayStamp(new Date("not a date"), "UTC", NOW));
+    assert.isUndefined(formatDayStamp(NOW, "UTC", new Date(Number.NaN)));
+    assert.isUndefined(formatDayStamp(NOW, "Not/A_Zone", NOW));
   });
 });

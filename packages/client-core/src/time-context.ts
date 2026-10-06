@@ -21,6 +21,7 @@
 const SHAPES = {
   context: { weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
   day: { day: "numeric", month: "short" },
+  date: { year: "numeric", month: "numeric", day: "numeric" },
   stamp: {
     day: "numeric",
     month: "short",
@@ -181,6 +182,47 @@ export const isSameDay = (a: Date, b: Date, timezone: string): boolean => {
   const partOfB = buildPartReader("precise", b, timezone);
   if (partOfA === undefined || partOfB === undefined || partOfA("day") === "") return false;
   return (["year", "month", "day"] as const).every((type) => partOfA(type) === partOfB(type));
+};
+
+/**
+ * Returns the calendar date an instant falls on in `timezone`, as the number
+ * of days since 1 January 1970: two instants on consecutive dates differ by
+ * exactly 1, however long the day between them was. Also returns that date's
+ * year. Returns `undefined` in the same cases as `formatTimeContext`.
+ */
+const readCalendarDate = (
+  instant: Date,
+  timezone: string,
+): { readonly dayNumber: number; readonly year: number } | undefined => {
+  const part = buildPartReader("date", instant, timezone);
+  if (part === undefined || part("day") === "") return undefined;
+  const year = Number(part("year"));
+  const dayNumber = Date.UTC(year, Number(part("month")) - 1, Number(part("day"))) / 86_400_000;
+  return { dayNumber, year };
+};
+
+/**
+ * Formats the day stamp shown above the first message of each day in a
+ * conversation, relative to `now` in `timezone`:
+ *
+ * - "Today" and "Yesterday" for the date of `now` and the date before it;
+ * - "4 Sep" for any other date in the year of `now`;
+ * - "4 Sep 2025" for a date in another year.
+ *
+ * Dates are compared as calendar dates in the zone, never by subtracting 24
+ * hours, because the day a clock moves for daylight saving time is 23 or 25
+ * hours long. Returns `undefined` when either instant is not a valid date or
+ * the zone cannot be formatted.
+ */
+export const formatDayStamp = (instant: Date, timezone: string, now: Date): string | undefined => {
+  const date = readCalendarDate(instant, timezone);
+  const today = readCalendarDate(now, timezone);
+  if (date === undefined || today === undefined) return undefined;
+  if (date.dayNumber === today.dayNumber) return "Today";
+  if (date.dayNumber === today.dayNumber - 1) return "Yesterday";
+  const day = formatDay(instant, timezone);
+  if (day === undefined) return undefined;
+  return date.year === today.year ? day : `${day} ${String(date.year)}`;
 };
 
 /** Formats the time context as the moment a screen counts from: "since Sunday 22:10". */
