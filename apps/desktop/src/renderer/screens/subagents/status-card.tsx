@@ -4,10 +4,11 @@
  * surface, spec 17 §Thread, Subagents).
  */
 import type { JSX } from "react";
-import { Link, linkOptions, useRouteContext } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { Link, linkOptions, notFound, useRouteContext } from "@tanstack/react-router";
 import { describeStatusCard, isSubagentWaiting, readErrorMessage } from "@hercule/client-core";
-import type { SessionRequest, Subagent } from "@hercule/contract";
 import { ageClock, useDurationText } from "../../app/age-clock";
+import { sessionQuery, subagentsQuery } from "../../app/queries";
 import { StopIcon } from "../../icons/stop";
 import { useStopAgent } from "../use-stop-agent";
 import { SubagentFace } from "./subagent-face";
@@ -17,7 +18,8 @@ import "./status-card.css";
 const FACE_SIZE = 26;
 
 /**
- * Renders the status card of `subagent`. It shows:
+ * Renders the status card of the subagent `subagentId` of the thread
+ * `sessionId`. It shows:
  *
  * - the subagent's face, still;
  * - how the subagent stands, such as "Working for 16m 2s", kept current
@@ -28,21 +30,30 @@ const FACE_SIZE = 26;
  * - Stop while it runs, which also stops every subagent below it. When a
  *   Stop fails, the card shows the error's message under the words.
  *
- * `subagents` are the session's subagents and `openRequests` its open
- * Requests. Stop is how the user turns down a subagent's question, so the
- * card keeps it even while the main agent is idle.
+ * Stop is how the user turns down a subagent's question, so the card keeps
+ * it even while the main agent is idle.
+ *
+ * The card reads the session and its subagents itself, because it owns the
+ * Stop that acts on them. Both are in the cache before it renders, read by
+ * the thread's loader. Fails with `notFound` when the session has no
+ * subagent `subagentId`.
  */
 export function StatusCard({
-  subagent,
-  subagents,
-  openRequests,
+  sessionId,
+  subagentId,
 }: {
-  readonly subagent: Subagent;
-  readonly subagents: readonly Subagent[];
-  readonly openRequests: readonly SessionRequest[];
+  readonly sessionId: string;
+  readonly subagentId: string;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
-  const stopAgent = useStopAgent(controller.client, subagent.sessionId);
+  const { openRequests } = useSuspenseQuery(sessionQuery(controller.client, sessionId)).data;
+  const subagents = useSuspenseQuery(subagentsQuery(controller.client, sessionId)).data;
+  const subagent = subagents.find((each) => each.id === subagentId);
+  // The subagent's page has already checked that the subagent exists, and a
+  // subagent record is never deleted, so this only guards the type.
+  // eslint-disable-next-line @typescript-eslint/only-throw-error
+  if (subagent === undefined) throw notFound();
+  const stopAgent = useStopAgent(controller.client, sessionId);
   const headline = useDurationText(
     subagent.startedAt,
     subagent.status === "running",

@@ -46,13 +46,7 @@ const renderStatusCard = (
 ) => {
   const { thread = THREAD_FIXTURES.delegating, failInterrupt = false } = options;
   return renderThreadPart(
-    () => (
-      <StatusCard
-        subagent={subagents.find((each) => each.id === subagentId)!}
-        subagents={subagents}
-        openRequests={thread.session.openRequests}
-      />
-    ),
+    () => <StatusCard sessionId={thread.session.id} subagentId={subagentId} />,
     {
       thread: { ...thread, subagents },
       handlers: {

@@ -426,7 +426,7 @@ describe("the dock for a question", () => {
 
     expect(queryDockText("Which storage should drafts use?")).not.toBeNull();
     expect(queryDockText("Which features should ship?")).toBeNull();
-    expect(queryDockText(/\b1 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 1 of 2")).not.toBeNull();
     expect(findChoice("radio", "localStorage")).toBeTruthy();
     expect(findChoice("radio", "IndexedDB")).toBeTruthy();
     expect(within(readQuestionDock()).queryAllByRole("checkbox")).toEqual([]);
@@ -437,7 +437,7 @@ describe("the dock for a question", () => {
 
     expect(queryDockText("Which storage should drafts use?")).toBeNull();
     expect(queryDockText("Which features should ship?")).not.toBeNull();
-    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
     expect(findChoice("checkbox", "Sync")).toBeTruthy();
     expect(findChoice("checkbox", "Search")).toBeTruthy();
     expect(within(readQuestionDock()).queryAllByRole("radio")).toEqual([]);
@@ -546,7 +546,7 @@ describe("the dock for a question", () => {
     focus(readQuestionDock());
     await user.keyboard("{Enter}");
 
-    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
     expect(queryDockText("Which features should ship?")).not.toBeNull();
     expect(readBodies(calls)).toEqual([]);
   });
@@ -559,7 +559,7 @@ describe("the dock for a question", () => {
     await user.click(findChoice("radio", "IndexedDB"));
     await user.keyboard("{Enter}");
 
-    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
     expect(readBodies(calls)).toEqual([]);
   });
 
@@ -569,7 +569,7 @@ describe("the dock for a question", () => {
 
     focus(readQuestionDock());
     await user.keyboard("{Enter}");
-    expect(queryDockText(/\b1 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 1 of 2")).not.toBeNull();
 
     // Answering both questions sends one body, so a stray body sent by the ↩
     // above would show up before it.
@@ -619,7 +619,7 @@ describe("the dock for a question", () => {
     await user.type(readOwnAnswer(), "a sqlite file");
     await user.keyboard("{Enter}");
 
-    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
     expect(readBodies(calls)).toEqual([]);
   });
 
@@ -631,7 +631,7 @@ describe("the dock for a question", () => {
     const pressed = fireEvent.keyDown(readOwnAnswer(), { key: "Enter", isComposing: true });
 
     expect(pressed).toBe(true);
-    expect(queryDockText(/\b1 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 1 of 2")).not.toBeNull();
     expect(readBodies(calls)).toEqual([]);
   });
 
@@ -644,7 +644,7 @@ describe("the dock for a question", () => {
 
     // A prevented key press is what keeps the menu's Send from firing.
     expect(pressed).toBe(false);
-    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
     expect(readBodies(calls)).toEqual([]);
   });
 
@@ -657,7 +657,7 @@ describe("the dock for a question", () => {
     const pressed = fireEvent.keyDown(next, { key: "Enter", metaKey: true });
 
     expect(pressed).toBe(false);
-    expect(queryDockText(/\b2 of 2\b/)).not.toBeNull();
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
     expect(readBodies(calls)).toEqual([]);
   });
 

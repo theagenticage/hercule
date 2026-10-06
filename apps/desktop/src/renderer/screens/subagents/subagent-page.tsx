@@ -50,7 +50,7 @@ const drawSubagentParts: DrawSubagentParts = ({ session, subagent, subagents, br
         <TallyPill sessionId={subagent.sessionId} />
       </div>
       <AgentRequestDock sessionId={subagent.sessionId} pageSubagentId={subagent.id} />
-      <StatusCard subagent={subagent} subagents={subagents} openRequests={session.openRequests} />
+      <StatusCard sessionId={subagent.sessionId} subagentId={subagent.id} />
     </>
   ),
 });
