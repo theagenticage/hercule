@@ -93,15 +93,15 @@ const describeNotifications = (seen: Seen) =>
 
 const LOGIN: WaitingThread = {
   sessionId: "session-1",
-  requestId: "request-1",
   title: "Fix the login bug",
-  question: "Run the migration?",
+  body: "Run the migration?",
+  openRequestIds: ["request-1"],
 };
 const CHECKOUT: WaitingThread = {
   sessionId: "session-2",
-  requestId: "request-2",
   title: "Speed up checkout",
-  question: "Run pnpm test?",
+  body: "Run pnpm test?",
+  openRequestIds: ["request-2"],
 };
 
 /** A session parked on a `question` request, as the controller lists it. */
@@ -194,7 +194,7 @@ describe("ThreadNotifications", () => {
         notifications.setWaitingThreads([]),
         notifications.setWaitingThreads([LOGIN]),
         notifications.setWaitingThreads([
-          { ...LOGIN, requestId: "request-3", question: "Deploy it?" },
+          { ...LOGIN, openRequestIds: ["request-3"], body: "Deploy it?" },
         ]),
       ]),
     );
@@ -213,7 +213,7 @@ describe("ThreadNotifications", () => {
         Effect.sync(() => {
           seen.window.focused = true;
         }),
-        notifications.setWaitingThreads([{ ...LOGIN, requestId: "request-3" }]),
+        notifications.setWaitingThreads([{ ...LOGIN, openRequestIds: ["request-1", "request-3"] }]),
       ]),
     );
     expect(describeNotifications(seen).map(({ state }) => state)).toEqual(["closed"]);
@@ -318,12 +318,90 @@ describe("ThreadNotifications", () => {
       Effect.all([
         notifications.setSignedIn(true),
         notifications.setWaitingThreads([]),
-        notifications.setWaitingThreads(listWaitingThreads([PARKED_ON_QUESTION])),
+        notifications.setWaitingThreads(listWaitingThreads([PARKED_ON_QUESTION], new Map())),
       ]),
     );
     expect(seen.badgeCounts).toEqual([0, 1]);
     expect(describeNotifications(seen)).toEqual([
       { title: "Save drafts", body: "Which storage should drafts use?", state: "shown" },
     ]);
+  });
+
+  it("replaces a thread's notification when a subagent asks a new Request, and says how many more wait", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([]),
+        notifications.setWaitingThreads([LOGIN]),
+        notifications.setWaitingThreads([
+          {
+            ...LOGIN,
+            body: "Explore the auth module asks: Run git push? +1 more waiting",
+            openRequestIds: ["request-1", "request-3"],
+          },
+        ]),
+      ]),
+    );
+    expect(seen.badgeCounts).toEqual([0, 1, 1]);
+    expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+      ["Run the migration?", "closed"],
+      ["Explore the auth module asks: Run git push? +1 more waiting", "shown"],
+    ]);
+  });
+
+  it("removes the notification of an answered newest Request, and shows none for the older Requests still open", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([]),
+        notifications.setWaitingThreads([
+          {
+            ...LOGIN,
+            body: "Deploy it? +1 more waiting",
+            openRequestIds: ["request-1", "request-3"],
+          },
+        ]),
+        notifications.setWaitingThreads([LOGIN]),
+      ]),
+    );
+    expect(seen.badgeCounts).toEqual([0, 1, 1]);
+    expect(describeNotifications(seen).map(({ body, state }) => [body, state])).toEqual([
+      ["Deploy it? +1 more waiting", "closed"],
+    ]);
+  });
+
+  it("removes a notification and drops the badge when its Request is answered anywhere", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([CHECKOUT]),
+        notifications.setWaitingThreads([CHECKOUT, LOGIN]),
+        notifications.setWaitingThreads([CHECKOUT]),
+      ]),
+    );
+    expect(seen.badgeCounts).toEqual([1, 2, 1]);
+    expect(describeNotifications(seen).map(({ title, state }) => [title, state])).toEqual([
+      ["Fix the login bug", "closed"],
+    ]);
+  });
+
+  it("keeps a notification while an older Request of its thread is answered", async () => {
+    const seen = await runWithNotifications(false, (notifications) =>
+      Effect.all([
+        notifications.setSignedIn(true),
+        notifications.setWaitingThreads([]),
+        notifications.setWaitingThreads([
+          {
+            ...LOGIN,
+            body: "Deploy it? +1 more waiting",
+            openRequestIds: ["request-1", "request-3"],
+          },
+        ]),
+        notifications.setWaitingThreads([
+          { ...LOGIN, body: "Deploy it?", openRequestIds: ["request-3"] },
+        ]),
+      ]),
+    );
+    expect(describeNotifications(seen).map(({ state }) => state)).toEqual(["shown"]);
   });
 });

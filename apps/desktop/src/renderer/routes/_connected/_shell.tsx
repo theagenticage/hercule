@@ -1,11 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useMatch, useNavigate } from "@tanstack/react-router";
 import { decideThreadPose, isSeatedPose, listWaitingThreads } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
-import { ensureShellData, runnersQuery, threadsQuery } from "../../app/queries";
+import {
+  askingSubagentQuery,
+  ensureShellData,
+  runnersQuery,
+  threadsQuery,
+} from "../../app/queries";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { Shell } from "../../shell";
 
@@ -92,11 +97,36 @@ function ShellLayout(): JSX.Element {
     setDialog("picker");
   }, []);
 
+  // A notification names the subagent that asked a thread's newest Request,
+  // so the shell reads the subagents of those threads only, once per asker.
+  // The shell holds no `subagent` topic of its own (spec 17 §What subagents
+  // cost).
+  const askers = threads.flatMap((session) => {
+    const subagentId = session.openRequests.at(-1)?.subagentId;
+    return subagentId === undefined ? [] : [{ sessionId: session.id, subagentId }];
+  });
+  const askerReads = useQueries({
+    queries: askers.map(({ sessionId, subagentId }) =>
+      askingSubagentQuery(controller.client, sessionId, subagentId),
+    ),
+  });
+  const subagentsBySession = new Map(
+    askers.flatMap(({ sessionId }, index) => {
+      const subagents = askerReads[index]?.data;
+      return subagents === undefined ? [] : [[sessionId, subagents] as const];
+    }),
+  );
+
   // Main shows the badge and the notifications, and keeps which it has
-  // shown, but only the page holds the thread list.
+  // shown, but only the page holds the thread list. Main shows a Request's
+  // notification once and never changes its words, so the list waits until
+  // every asking subagent has been read: sent sooner, its notification would
+  // read "A subagent asks:" for good. A read that fails sends the list with
+  // that name.
+  const namesPending = askerReads.some((read) => read.isPending);
   useSendOnChange(
-    listWaitingThreads(threads),
-    bridge.waitingThreads.set,
+    namesPending ? null : listWaitingThreads(threads, subagentsBySession),
+    (waiting) => (waiting === null ? Promise.resolve() : bridge.waitingThreads.set(waiting)),
     "Could not update the dock badge and the threads' notifications:",
   );
 

@@ -31,8 +31,12 @@ describe("the requests of the renderer-to-main channels", () => {
     { name: "goMenu.set", valid: buildGoMenuThreads(9), invalid: buildGoMenuThreads(10) },
     {
       name: "waitingThreads.set",
-      valid: [{ sessionId: "s-1", requestId: "r-1", title: "A thread", question: "Run git push?" }],
-      invalid: [{ sessionId: "s-1", title: "A thread", question: "Run git push?" }],
+      valid: [
+        { sessionId: "s-1", title: "A thread", body: "Run git push?", openRequestIds: ["r-1"] },
+      ],
+      invalid: [
+        { sessionId: "s-1", title: "A thread", body: "Run git push?", openRequestIds: "r-1" },
+      ],
     },
     { name: "localController.find", valid: undefined, invalid: "now" },
     { name: "localController.start", valid: undefined, invalid: "now" },

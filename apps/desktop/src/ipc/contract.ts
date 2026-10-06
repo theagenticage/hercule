@@ -237,9 +237,9 @@ export type GoMenuThread = typeof GoMenuThread.Type;
  */
 export const WaitingThread = Schema.Struct({
   sessionId: Schema.String,
-  requestId: Schema.String,
   title: Schema.String,
-  question: Schema.String,
+  body: Schema.String,
+  openRequestIds: Schema.Array(Schema.String),
 } satisfies {
   readonly [Field in keyof ClientCore.WaitingThread]: Schema.Codec<ClientCore.WaitingThread[Field]>;
 });
