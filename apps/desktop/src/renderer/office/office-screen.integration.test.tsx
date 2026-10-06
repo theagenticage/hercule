@@ -9,8 +9,8 @@
  * - Enter and Open thread open the drawer, and the param follows;
  * - the param opens the drawer, and Escape steps back from the drawer to the
  *   card, then from the card to nothing;
- * - the drawer's header has no side pane toggle, because the drawer has no
- *   side pane.
+ * - the drawer shows neither the side pane toggle nor the tally pill,
+ *   because the drawer has no side pane.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
@@ -57,22 +57,23 @@ const flakyAsking: Session = {
 /**
  * Starts the app signed in at `path`, with the sidebar fixture's threads and
  * `flakyAsking` in place of the working flaky thread, so two colleagues wait.
- * The waiting runbook's thread answers its reads, for the drawer.
+ * `drawerThread`, the waiting runbook's unless given, answers its reads, for
+ * the drawer.
  */
-const openOffice = async (path = "/office") => {
-  stubApi({
+const openOffice = async (path = "/office", drawerThread = THREAD_FIXTURES.waiting) => {
+  const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
       threads: SIDEBAR_FIXTURE.threads.map((thread) =>
         thread.id === flakyAsking.id ? flakyAsking : thread,
       ),
     }),
-    ...buildThreadHandlers(THREAD_FIXTURES.waiting),
+    ...buildThreadHandlers(drawerThread),
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
   const app = await renderApp(fake, { path });
   await screen.findByRole("group", { name: "Who is doing what" });
-  return { user: userEvent.setup(), ...app };
+  return { user: userEvent.setup(), calls, ...app };
 };
 
 /** Returns the dossier card of the colleague named `name`. */
@@ -170,13 +171,21 @@ describe("the thread drawer", () => {
     expect(findCard(runbook.title).dataset.open).toBe("false");
   });
 
-  it("draws no side pane toggle in the drawer's header, because the drawer has no side pane", async () => {
-    await openOffice(`/office?session=${runbook.id}`);
+  it("draws neither the side pane toggle nor the tally pill, because the drawer has no side pane", async () => {
+    const delegating = THREAD_FIXTURES.delegating;
+    const { calls } = await openOffice(`/office?session=${delegating.session.id}`, delegating);
 
     const drawer = findDrawer();
     expect(
       await within(drawer).findByRole("navigation", { name: "Threads in this workspace" }),
     ).toBeTruthy();
+    // The drawer has read the thread's subagent, so only the missing side
+    // pane keeps the tally pill out.
+    expect(delegating.subagents).toHaveLength(1);
+    expect(
+      calls.some((call) => call.path === `/api/v1/sessions/${delegating.session.id}/subagents`),
+    ).toBe(true);
     expect(within(drawer).queryByRole("button", { name: /side pane/ })).toBeNull();
+    expect(within(drawer).queryByRole("button", { name: /^Subagents/ })).toBeNull();
   });
 });
