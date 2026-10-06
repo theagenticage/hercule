@@ -27,7 +27,7 @@
  * because the app's age clock reads the time as soon as its module loads.
  */
 import "../styles/base-layer.css";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
@@ -123,6 +123,18 @@ export interface DraftScreenRecords {
 interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
   readonly draft?: DraftScreenRecords;
+  /** PROTOTYPE (#448): the assistant prototype's screen and sidebar section. */
+  readonly assistant?: AssistantPrototype;
+}
+
+/** PROTOTYPE (#448): what the assistant prototype adds to the shell. */
+export interface AssistantPrototype {
+  /** The screen drawn at `/assistants/$assistantId`. */
+  readonly screen: () => JSX.Element;
+  /** The sidebar's Assistants section. */
+  readonly section: ReactNode;
+  /** Drawn beside the shell, such as the prototype's switcher. */
+  readonly overlay: ReactNode;
 }
 
 /** An address that never answers. The client sends nothing to it. */
@@ -246,11 +258,18 @@ const seedQueryCache = (
  * Renders the shell around the matched screen, as the app's `_shell` layout
  * route does. New thread does nothing: the page has no project picker.
  */
-function ShellLayout(): JSX.Element {
+function ShellLayout({
+  assistant,
+}: {
+  readonly assistant: AssistantPrototype | undefined;
+}): JSX.Element {
   return (
-    <Shell onNewThread={() => undefined}>
-      <Outlet />
-    </Shell>
+    <>
+      <Shell onNewThread={() => undefined} assistants={assistant?.section}>
+        <Outlet />
+      </Shell>
+      {assistant?.overlay}
+    </>
   );
 }
 
@@ -279,6 +298,7 @@ const buildRouter = (
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
+  assistant?: AssistantPrototype,
 ) => {
   const rootRoute = createRootRoute();
   const connectedRoute = createRoute({
@@ -298,7 +318,7 @@ const buildRouter = (
   const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,
     id: "_shell",
-    component: ShellLayout,
+    component: () => <ShellLayout assistant={assistant} />,
   });
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
@@ -312,6 +332,15 @@ const buildRouter = (
               <ThreadScreen key={openThreadId} sessionId={openThreadId} />
             ),
         }),
+        ...(assistant === undefined
+          ? []
+          : [
+              createRoute({
+                getParentRoute: () => shellRoute,
+                path: "assistants/$assistantId",
+                component: assistant.screen,
+              }),
+            ]),
       ]),
     ]),
   ]);
@@ -350,7 +379,11 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
   if (document.querySelector(".side-row") === null) {
     throw new Error("The sidebar drew no thread row. Check the page's console for the error.");
   }
-  if (screens.thread !== undefined && document.querySelector(".tx-item") === null) {
+  if (
+    screens.thread !== undefined &&
+    screens.assistant === undefined &&
+    document.querySelector(".tx-item") === null
+  ) {
     throw new Error("The thread screen drew no block. Check the page's console for the error.");
   }
   if (screens.draft !== undefined) {
@@ -384,7 +417,8 @@ async function mountShellSpecimen(
   path: string,
   screens: OpenScreens,
 ): Promise<void> {
-  applySheetTheme();
+  // The assistant prototype offers all five themes and sets its own.
+  if (screens.assistant === undefined) applySheetTheme();
   const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);
@@ -395,7 +429,13 @@ async function mountShellSpecimen(
       screens.draft.picks,
     );
   }
-  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
+  const router = buildRouter(
+    client,
+    pendingSubmissions,
+    path,
+    screens.thread?.session.id,
+    screens.assistant,
+  );
   await router.load();
 
   const root = document.getElementById("root");
@@ -456,4 +496,18 @@ export async function mountDraftSpecimen(
   draft: DraftScreenRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft });
+}
+
+/**
+ * PROTOTYPE (#448): draws the shell from `records` with the assistant
+ * prototype's route and sidebar section, opening `path`. `thread` stays
+ * openable, so the prototype's links to it land on the real thread screen.
+ */
+export async function mountAssistantPrototype(
+  records: SidebarRecords,
+  thread: ThreadScreenRecords,
+  assistant: AssistantPrototype,
+  path: string,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { thread, assistant });
 }

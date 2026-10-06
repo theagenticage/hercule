@@ -1,0 +1,600 @@
+/* PROTOTYPE (#448). The assistant page: the Bureau book's
+   desktop/assistant.html rules and the system.css rules the desktop app has
+   not needed yet, plus what the variants add. */
+
+/* ---------- Sidebar: the Assistants section (book: .side-sec, .side-row--who) */
+.side-sec--who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 0 12px;
+}
+.side-row--who {
+  min-height: 32px;
+  padding-left: 7px;
+}
+.side-row--who .side-name {
+  flex: 1;
+}
+.side-presence.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- The page */
+.apage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px 0 24px;
+  flex: none;
+}
+/* The bar sits in the window's drag strip; its controls take clicks. */
+.bar > :not(.spacer) {
+  -webkit-app-region: no-drag;
+}
+.title {
+  margin: 0;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.time {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.bar .who-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.who-head .title {
+  color: var(--ink);
+}
+.who-head small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.apage[data-pose="waiting"] .presence {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.chan {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.chan.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 316px;
+}
+.convo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.apage--A .convo .column {
+  width: min(660px, 100% - 48px);
+}
+.apage--A .composer {
+  width: min(660px, 100%);
+}
+
+/* ---------- The Conversation. Not the thread's virtualized `.tx`: a flex
+   column with the book's 20px gap. */
+.tx.atx {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 0 196px;
+}
+.apage--B .tx.atx {
+  padding-top: var(--header-clearance);
+}
+.stamp {
+  display: flex;
+  justify-content: center;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.msg-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  color: var(--who-ink);
+  user-select: none;
+}
+.msg-name small {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  font-size: var(--t-12);
+}
+.msg-body p {
+  margin: 0 0 10px;
+}
+.msg-body > :last-child,
+.msg-body > .with-mention:last-child > :last-child {
+  margin-bottom: 0;
+}
+.quiet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.quiet::before,
+.quiet::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+.quiet span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* A Notice is the system speaking about the assistant, never in its voice. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  align-self: center;
+  max-width: 560px;
+  padding: 8px 14px 8px 8px;
+  border-radius: var(--r-lg);
+  background: var(--fail-tint);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.notice b {
+  color: var(--fail-ink);
+}
+.notice--away {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.notice--away b {
+  color: var(--ink);
+}
+.notice .time {
+  margin-left: 6px;
+}
+.refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  transition: box-shadow var(--dur-1);
+}
+.ref:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--shadow-2);
+}
+.ref .you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.reminder {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 14px 10px 12px;
+  border-radius: var(--r-lg);
+  background: var(--who-tint);
+}
+.reminder .ic {
+  color: var(--who-ink);
+}
+.reminder b {
+  display: block;
+  font-size: var(--t-13);
+}
+.reminder span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+  vertical-align: -3px;
+}
+.with-mention {
+  margin-bottom: 10px;
+}
+.with-mention > p {
+  display: inline;
+}
+/* The book's caret blinks. Spec 17 allows one animation, the working face's
+   paws, so here it stands still. */
+.caret {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: var(--who-ink);
+  vertical-align: -3px;
+}
+
+/* ---------- An empty Conversation */
+.hello-who {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: calc(100% - 140px);
+  padding: 0 48px;
+  text-align: center;
+}
+.hello-who h2 {
+  margin: 10px 0 0;
+  font-size: var(--t-20, 20px);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.hello-who p {
+  max-width: 340px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---------- The composer */
+.composer-card.is-off {
+  opacity: 0.5;
+}
+.lip .lip-you {
+  color: var(--you-ink);
+}
+
+/* ---------- The rail: what the assistant keeps between turns */
+.rail {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px 24px;
+  border-left: 1px solid var(--line-soft);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  scrollbar-width: thin;
+}
+.rail .section-h {
+  margin-bottom: 10px;
+}
+.section-aside {
+  margin-left: auto;
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+.section-h .count {
+  height: 17px;
+}
+.beat {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(17, 1fr);
+  align-items: end;
+  height: 34px;
+  gap: 3px;
+}
+.beat i {
+  height: 8px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.beat i.q {
+  background: color-mix(in oklab, var(--who) 38%, transparent);
+}
+.beat i.s {
+  height: 22px;
+  background: var(--who);
+}
+.beat-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.beat-line {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.beat-line b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.rem {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: 10px;
+  margin: 0 -8px;
+  padding: 8px 8px 7px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-12);
+  /* The hairline spans the text, not the 8px the tint reaches past it. */
+  background: linear-gradient(var(--line-soft), var(--line-soft)) 8px 0 / calc(100% - 16px) 1px
+    no-repeat;
+  transition: background-color 1.2s var(--ease-out);
+}
+.rem:first-of-type {
+  background: none;
+}
+/* A reminder just set in the Conversation shows in the assistant's tint,
+   and fades back to the rail's ground. */
+.rem.is-fresh {
+  background-color: var(--who-tint);
+}
+.rem time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rem b {
+  font-weight: var(--w-medium);
+}
+.core {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.core-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--t-12);
+}
+.core-top span:last-child {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.core p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.meter {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--who, var(--ink));
+}
+.topic {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  width: 100%;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-12);
+  text-align: left;
+  text-rendering: inherit;
+}
+.topic b {
+  font-weight: var(--w-medium);
+}
+button.topic:hover b {
+  color: var(--who-ink);
+}
+.topic small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.topic span {
+  grid-column: 1 / 3;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topic.is-open span {
+  white-space: normal;
+  line-height: 1.5;
+}
+.topic--more {
+  grid-template-columns: 1fr;
+}
+
+/* ---------- Variant B: pills over the Conversation, the rail in a drawer */
+.pill--who {
+  gap: 8px;
+  padding: 0 6px 0 6px;
+}
+.pill--who b {
+  font-weight: var(--w-bold);
+}
+.pill--who .presence {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pill--who .chan {
+  height: 26px;
+}
+.pill-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--line-soft);
+}
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  transition: background var(--dur-1);
+}
+.pill-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.pill-btn.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.pill-btn .ic {
+  color: var(--who-ink);
+}
+.pill-dot {
+  width: 3px;
+  height: 3px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.rail--drawer {
+  position: absolute;
+  z-index: 6;
+  top: 56px;
+  right: 14px;
+  bottom: 14px;
+  width: 316px;
+  border-left: 0;
+  border-radius: var(--r-xl);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out);
+}
+.rail--drawer.is-open {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+/* ---------- The prototype's switcher: never part of the design. It sits in
+   a black strip below the window, so it covers nothing the design draws. */
+body:has(.proto-switcher) .app {
+  height: calc(100vh - 48px);
+}
+.proto-switcher {
+  position: fixed;
+  z-index: 1000;
+  inset: auto 0 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 6px;
+  background: #111;
+  color: #fff;
+  font:
+    500 12px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  -webkit-app-region: no-drag;
+}
+.proto-switcher button,
+.proto-switcher select {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: #2a2a2a;
+  color: #fff;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.proto-switcher button:hover {
+  background: #3a3a3a;
+}
+.proto-variant {
+  min-width: 250px;
+  text-align: center;
+  white-space: nowrap;
+}
+.proto-variant b {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: #fff;
+  color: #111;
+}
+.proto-sep {
+  width: 1px;
+  height: 16px;
+  background: #444;
+}

@@ -24,6 +24,7 @@ import {
   useState,
   type FocusEvent,
   type JSX,
+  type ReactNode,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
@@ -171,10 +172,13 @@ export function SidebarList({
   items,
   officeOpen,
   onExpand,
+  after,
 }: {
   readonly items: readonly SidebarItem[];
   readonly officeOpen: boolean;
   readonly onExpand: (section: SectionKey) => void;
+  /** PROTOTYPE (#448): what the list draws after the threads, such as the Assistants section. */
+  readonly after?: ReactNode;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
   const [focus, setFocus] = useState<Focus>(NO_FOCUS);
@@ -295,6 +299,7 @@ export function SidebarList({
           {drawn}
         </div>
       )}
+      {after}
     </nav>
   );
 }

@@ -17,14 +17,17 @@ import "./shell.css";
 export function Shell({
   onNewThread,
   children,
+  assistants,
 }: {
   readonly onNewThread: () => void;
   readonly children: ReactNode;
+  /** PROTOTYPE (#448): the sidebar's Assistants section. */
+  readonly assistants?: ReactNode;
 }): JSX.Element {
   return (
     <div className="app">
       <div className="drag-strip" />
-      <Sidebar onNewThread={onNewThread} />
+      <Sidebar onNewThread={onNewThread} assistants={assistants} />
       <main className="main">{children}</main>
     </div>
   );

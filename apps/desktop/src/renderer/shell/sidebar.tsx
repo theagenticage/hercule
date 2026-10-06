@@ -1,4 +1,4 @@
-import { useCallback, useState, type JSX } from "react";
+import { useCallback, useState, type JSX, type ReactNode } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useDraftThread } from "../app/draft-thread";
@@ -54,7 +54,14 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * It also sends main the threads it shows, top to bottom, for the Go menu,
  * each time they or their titles change.
  */
-export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): JSX.Element {
+export function Sidebar({
+  onNewThread,
+  assistants,
+}: {
+  readonly onNewThread: () => void;
+  /** PROTOTYPE (#448): the Assistants section, drawn after the threads. */
+  readonly assistants?: ReactNode;
+}): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
@@ -134,7 +141,12 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
           <OfficeIcon />
         </Link>
       </div>
-      <SidebarList items={items} officeOpen={officeOpen} onExpand={expandSection} />
+      <SidebarList
+        items={items}
+        officeOpen={officeOpen}
+        onExpand={expandSection}
+        after={assistants}
+      />
       <SidebarFoot
         working={counts.working}
         waiting={counts.waiting}
