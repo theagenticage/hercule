@@ -148,7 +148,7 @@ function SubagentRow({
     <li>
       <div
         className={cn(
-          "relative flex gap-2 rounded-control px-2 py-1.5 hover:bg-line-soft",
+          "group relative flex gap-2 rounded-control px-2 py-1.5 hover:bg-line-soft",
           current && "bg-line-soft",
         )}
       >
@@ -173,22 +173,16 @@ function SubagentRow({
             >
               {name}
             </Link>
-            <span className="ml-auto shrink-0 font-mono text-fine text-muted tabular-nums">
-              {state.duration}
+            <span
+              className={cn(
+                "ml-auto shrink-0 text-meta whitespace-nowrap",
+                stop !== null && "group-hover:opacity-0 group-has-focus-visible:opacity-0",
+              )}
+            >
+              <span className={SUBAGENT_HUE_CLASSES[state.hue]}>{state.word}</span>
+              <span className="text-faint"> · </span>
+              <span className="font-mono text-fine text-muted tabular-nums">{state.duration}</span>
             </span>
-            {stop === null ? null : (
-              // The pill is taller than the line, so it overhangs the row's
-              // padding and a running row stays as tall as a settled one.
-              <span className="relative z-10 -my-1.5 shrink-0">
-                <StopButton
-                  label={stop.label}
-                  title={stop.title}
-                  onStop={() => {
-                    context.stop(subagent.id);
-                  }}
-                />
-              </span>
-            )}
           </span>
           {line === null ? null : (
             <span className={cn("truncate text-meta", SUBAGENT_HUE_CLASSES[line.hue])}>
@@ -199,6 +193,19 @@ function SubagentRow({
             {describeSubagentMeta(subagent)}
           </span>
         </span>
+        {stop === null ? null : (
+          // The pill is taller than the first line, so it is centred on that
+          // line and overhangs the row's padding rather than growing the row.
+          <span className="absolute top-0.5 right-2 z-10 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100">
+            <StopButton
+              label={stop.label}
+              title={stop.title}
+              onStop={() => {
+                context.stop(subagent.id);
+              }}
+            />
+          </span>
+        )}
       </div>
       {children.length === 0 ? null : (
         <ul className="mt-0.5 ml-[13px] flex flex-col gap-0.5 border-l border-line-soft pl-1.5">
