@@ -16,6 +16,7 @@ import {
   buildErrorBody,
   buildFixtureAssistant,
   buildFixtureAssistantSession,
+  buildConversationHandlers,
   buildSidebarHandlers,
   buildThreadHandlers,
   CONTROLLER_URL,
@@ -96,10 +97,14 @@ const MILO_SESSION = buildFixtureAssistantSession(MILO, {
 });
 
 /** The sidebar fixture's handlers, with Ada and her waiting session added. */
-const WITH_ADA = buildSidebarHandlers({
-  ...SIDEBAR_FIXTURE,
-  assistants: [{ assistant: ADA, session: ADA_SESSION }],
-});
+const WITH_ADA = {
+  ...buildSidebarHandlers({
+    ...SIDEBAR_FIXTURE,
+    assistants: [{ assistant: ADA, session: ADA_SESSION }],
+  }),
+  // Ada's page reads her Conversation, which holds no message.
+  ...buildConversationHandlers({ assistant: ADA, session: ADA_SESSION, messages: [] }),
+};
 
 /**
  * Starts the app signed in, at `path`, with the sidebar fixture and

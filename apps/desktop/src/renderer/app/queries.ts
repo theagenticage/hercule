@@ -6,6 +6,7 @@
  * uses.
  */
 import {
+  infiniteQueryOptions,
   keepPreviousData,
   queryOptions,
   type EnsureQueryDataOptions,
@@ -14,17 +15,20 @@ import {
 } from "@tanstack/react-query";
 import {
   ApiError,
+  collectRunningTurnRows,
   detectLocalRunner,
   queryKeys,
   readEveryPage,
   type HerculeClient,
 } from "@hercule/client-core";
 import {
+  DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   type Input,
   type Runner,
   type Session,
   type Task,
+  type TranscriptRow,
 } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
 
@@ -367,6 +371,84 @@ export const currentConversationSessionQuery = (client: HerculeClient, conversat
         query: { conversationId, sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
       });
       return page.items[0] ?? null;
+    },
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads one page of a conversation's messages, newest first: the newest page
+ * when `cursor` is `undefined`, else the page the cursor points to, which
+ * holds older messages.
+ */
+export const readMessagePage = (
+  client: HerculeClient,
+  conversationId: string,
+  cursor: string | undefined,
+) =>
+  client.conversation.queryMessages({
+    params: { id: conversationId },
+    query: {
+      sort: [{ field: "position", direction: "desc" }],
+      limit: DEFAULT_PAGE_LIMIT,
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+  });
+
+/**
+ * Reads a conversation's messages a page at a time, newest page first, for an
+ * assistant's Conversation. The first read holds the newest page only; each
+ * `fetchNextPage` adds the page of older messages before it, as the user
+ * scrolls up.
+ *
+ * Nothing reads the pages again on its own. While the Conversation is open,
+ * a push on the `conversation` topic reads the newest page and merges it into
+ * the held pages (see `useConversationLive`), so the pages read earlier are
+ * never read twice.
+ */
+export const conversationMessagesQuery = (client: HerculeClient, conversationId: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.conversationMessages(conversationId),
+    queryFn: ({ pageParam }) => readMessagePage(client, conversationId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads the rows of a session's running turn, oldest first: the rows from its
+ * newest `turn.started` on, or every row when the session has none. An
+ * assistant's Conversation draws the reply being written from them.
+ *
+ * The transcript is read newest first, a page at a time, and the read stops
+ * at the page that holds the newest `turn.started`. A long conversation then
+ * costs one or two pages, not its whole history.
+ *
+ * After this read, only the live connection changes the cached rows:
+ * `useSessionLive` merges each row the session's stream delivers, and reads
+ * the rows again when the stream reports a reset.
+ */
+export const runningTurnQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.runningTurn(sessionId),
+    queryFn: async (): Promise<readonly TranscriptRow[]> => {
+      const rowsNewestFirst: TranscriptRow[] = [];
+      let cursor: string | undefined;
+      for (;;) {
+        const page = await client.transcript.read({
+          params: { id: sessionId },
+          query: {
+            sort: [{ field: "position", direction: "desc" }],
+            limit: MAX_PAGE_LIMIT,
+            ...(cursor === undefined ? {} : { cursor }),
+          },
+        });
+        rowsNewestFirst.push(...page.items);
+        const collected = collectRunningTurnRows(rowsNewestFirst);
+        if (collected.reachedTurnStart || page.nextCursor === undefined) return collected.rows;
+        cursor = page.nextCursor;
+      }
     },
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,

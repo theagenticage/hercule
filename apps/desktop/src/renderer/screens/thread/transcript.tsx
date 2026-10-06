@@ -25,15 +25,14 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type JSX,
   type Ref,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { resolveBrowserTimezone, type Pose, type ThreadBlock } from "@hercule/client-core";
-import { ageClock } from "../../app/age-clock";
 import { buildLook } from "../../faces";
 import { AgentMessage, UserMessage } from "../session/messages";
+import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
 import { LiveRow, TurnEnding, WaitingNote, WorkDivider } from "./blocks";
 import { useShowsClassicScrollbar } from "./classic-scrollbar";
@@ -113,23 +112,6 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
  */
 const measureBlock = (element: Element, entry: ResizeObserverEntry | undefined): number =>
   entry?.borderBoxSize[0]?.blockSize ?? element.getBoundingClientRect().height;
-
-/** Returns the first moment of the local day `now` falls on, in milliseconds since the epoch. */
-const findStartOfDay = (now: Date): number =>
-  new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-
-/** Registers with the age clock to be told when the local day changes. */
-const subscribeToDayChange = (onChange: () => void): (() => void) =>
-  ageClock.watch((now) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1), onChange);
-
-/**
- * Returns the start of the current local day, in milliseconds since the epoch,
- * and draws the caller again when the day changes. The day is read from the
- * age clock, which keeps one timer for every label on screen, so the day
- * change costs no timer of its own.
- */
-const useStartOfToday = (): number =>
-  useSyncExternalStore(subscribeToDayChange, () => findStartOfDay(ageClock.readNow()));
 
 /** What the thread screen can ask of the transcript. */
 export interface TranscriptHandle {

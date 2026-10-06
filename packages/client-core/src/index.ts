@@ -21,6 +21,7 @@ export {
   buildConversationBlocks,
   collectRunningTurnRows,
   decideOpenReply,
+  describeOpenReply,
   type ConversationBlock,
   type DayStampBlock,
   type OpenReplyBlock,

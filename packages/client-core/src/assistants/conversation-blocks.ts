@@ -20,7 +20,7 @@
 import type { Assistant, ConversationMessage, Session, TranscriptRow } from "@hercule/contract";
 import { formatMessageTime } from "../threads/message-time";
 import { findOpenItem } from "../threads/open-item";
-import type { Pose } from "../threads/pose";
+import { describePose, type Pose } from "../threads/pose";
 import { formatDayStamp } from "../time-context";
 
 type ProviderEvent = TranscriptRow["event"];
@@ -291,9 +291,12 @@ const STORED_MESSAGE_KINDS = {
  *   in place when the reply is stored.
  *
  * `messages` must be oldest first, as `flattenMessagePages` returns them. The
- * other inputs are those of `decideOpenReply`. A stamp's key is built from the
- * id of the first message of its day, and a message's from its id, so keys
- * stay the same as earlier messages are read and new ones arrive.
+ * other inputs are those of `decideOpenReply`. A stamp's key is built from its
+ * label, which no other stamp shows, and a message's from its id. Keys then
+ * stay the same as earlier messages are read and new ones arrive: a stamp
+ * keyed by the first message of its day would change key when an earlier
+ * page adds messages from that day, and so would the stamp above the open
+ * reply when the reply is stored.
  */
 export const buildConversationBlocks = (input: {
   readonly messages: readonly ConversationMessage[];
@@ -307,15 +310,15 @@ export const buildConversationBlocks = (input: {
   const { timezone, now } = input;
   const blocks: ConversationBlock[] = [];
   let shownDay: string | undefined;
-  const placeStamp = (label: string | undefined, key: string): void => {
+  const placeStamp = (label: string | undefined): void => {
     if (label === undefined || label === shownDay) return;
     shownDay = label;
-    blocks.push({ kind: "stamp", key: `stamp:${key}`, label });
+    blocks.push({ kind: "stamp", key: `stamp:${label}`, label });
   };
 
   for (const message of input.messages) {
     const createdAt = new Date(message.createdAt);
-    placeStamp(formatDayStamp(createdAt, timezone, now), message.id);
+    placeStamp(formatDayStamp(createdAt, timezone, now));
     blocks.push({
       kind: STORED_MESSAGE_KINDS[message.senderRole],
       key: `message:${message.id}`,
@@ -326,8 +329,24 @@ export const buildConversationBlocks = (input: {
 
   const openReply = decideOpenReply(input);
   if (openReply !== null) {
-    placeStamp(formatDayStamp(now, timezone, now), openReply.key);
+    placeStamp(formatDayStamp(now, timezone, now));
     blocks.push(openReply);
   }
   return blocks;
 };
+
+/**
+ * Returns the words beside the assistant's name on the open reply, where a
+ * stored reply shows its time:
+ *
+ * - "answering…" while the assistant works and the reply has text;
+ * - "thinking…" while the assistant works and only the caret shows;
+ * - otherwise the word for the pose, such as "waiting on you" while a
+ *   Request is open, by `describePose`.
+ */
+export const describeOpenReply = (block: OpenReplyBlock): string =>
+  block.pose !== "working"
+    ? describePose(block.pose)
+    : block.items.length === 0
+      ? "thinking…"
+      : "answering…";

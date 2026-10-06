@@ -1,9 +1,12 @@
 import type { JSX } from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import { queryKeys } from "@hercule/client-core";
 import {
   assistantsQuery,
+  conversationMessagesQuery,
   currentConversationSessionQuery,
   runnersQuery,
+  runningTurnQuery,
 } from "../../../../app/queries";
 import { AssistantNotFound, AssistantScreen } from "../../../../screens/assistant/assistant-screen";
 
@@ -12,10 +15,15 @@ import { AssistantNotFound, AssistantScreen } from "../../../../screens/assistan
  *
  * Its loader reads every assistant, finds this one, and reads the current
  * session of its main conversation, from which the pose is drawn. The live
- * connection keeps all three reads current, so the shell's own reads are
- * usually what it finds. When no assistant has the id, the route shows
- * `AssistantNotFound`. Any other failure shows `RenderFailure`, the router's
- * default.
+ * connection keeps those reads current, so the shell's own reads are usually
+ * what it finds. The loader then reads the newest page of the Conversation's
+ * messages and, when a session has started, the rows of its running turn.
+ * When no assistant has the id, the route shows `AssistantNotFound`. Any
+ * other failure shows `RenderFailure`, the router's default.
+ *
+ * Leaving the page drops the messages and the running turn's rows. Only the
+ * open Conversation keeps them current, so the cache would otherwise hold
+ * them out of date, and every page the user scrolled back through.
  */
 export const Route = createFileRoute("/_connected/_shell/assistants/$assistantId")({
   staticData: { title: "Assistant" },
@@ -30,9 +38,25 @@ export const Route = createFileRoute("/_connected/_shell/assistants/$assistantId
     // rather than an Error.
     // eslint-disable-next-line @typescript-eslint/only-throw-error
     if (assistant === undefined) throw notFound();
-    await queryClient.ensureQueryData(
-      currentConversationSessionQuery(client, assistant.mainConversationId),
+    const conversationId = assistant.mainConversationId;
+    const [session] = await Promise.all([
+      queryClient.ensureQueryData(currentConversationSessionQuery(client, conversationId)),
+      queryClient.ensureInfiniteQueryData(conversationMessagesQuery(client, conversationId)),
+    ]);
+    if (session !== null) await queryClient.ensureQueryData(runningTurnQuery(client, session.id));
+  },
+  onLeave: ({ context: { controller, queryClient }, params: { assistantId } }) => {
+    const { client } = controller;
+    const assistant = queryClient
+      .getQueryData(assistantsQuery(client).queryKey)
+      ?.find((each) => each.id === assistantId);
+    if (assistant === undefined) return;
+    const conversationId = assistant.mainConversationId;
+    queryClient.removeQueries({ queryKey: queryKeys.conversationMessages(conversationId) });
+    const session = queryClient.getQueryData(
+      currentConversationSessionQuery(client, conversationId).queryKey,
     );
+    if (session != null) queryClient.removeQueries({ queryKey: queryKeys.runningTurn(session.id) });
   },
   component: AssistantRoute,
   notFoundComponent: AssistantNotFound,

@@ -22,14 +22,26 @@
  * - `sidebar-many-assistants`: fourteen assistants, more than the section's
  *   40% of the sidebar holds, so its rows scroll under its heading.
  *
- * The page scenes, each with the whole window captured:
- * - `page-idle`: Hercule, who has no session yet;
- * - `page-waiting`: Ada, whose session waits on the user;
- * - `page-working`: Milo, whose session works;
+ * The page scenes, each with the whole window captured, draw the
+ * assistant's Conversation:
+ * - `page-idle`: Hercule, who has no session and no message yet, so the
+ *   Conversation shows the greeting;
+ * - `page-waiting`: Ada, whose session waits on the user to approve a
+ *   command: yesterday's and today's messages under their day stamps, the
+ *   open reply with the caret alone, and the dock above the composer;
+ * - `page-working`: Milo, whose session works: a notice from yesterday, and
+ *   the open reply with the text Milo is writing;
  * - `page-long-name`: the assistant whose name is too long for the sidebar;
  * - `page-not-found`: an address whose assistant does not exist.
  */
-import type { Assistant, OpenRequest, Runner, Session } from "@hercule/contract";
+import type {
+  Assistant,
+  ConversationMessage,
+  OpenRequest,
+  Runner,
+  Session,
+  TranscriptRow,
+} from "@hercule/contract";
 import { buildProject, buildRunner } from "@hercule/client-core/threads/testing";
 import {
   buildSpecimenSession,
@@ -102,6 +114,134 @@ const ADA_REQUEST: OpenRequest = {
   detail: { command: "tail -n 200 /var/log/pg-backup.log" },
 };
 
+/** A message of a conversation, without the fields `buildConversation` fills in. */
+interface MessageStep {
+  readonly senderRole: ConversationMessage["senderRole"];
+  /** When the message was stored, as the API spells a time. */
+  readonly createdAt: string;
+  readonly text: string;
+}
+
+/**
+ * Returns the messages of `assistant`'s main conversation built from `steps`,
+ * oldest first, with positions from 1. A reply and a notice come from the
+ * assistant's current session, and a reply from its turn `turnId`.
+ */
+const buildConversation = (
+  assistant: Assistant,
+  steps: ReadonlyArray<MessageStep>,
+): ConversationMessage[] =>
+  steps.map(({ senderRole, createdAt, text }, index) => {
+    const position = index + 1;
+    const owner = senderRole === "owner";
+    return {
+      id: `01a0ec64-6e80-7000-8000-d${assistant.id.slice(-2)}000000${String(position).padStart(3, "0")}`,
+      conversationId: assistant.mainConversationId,
+      containerKey: null,
+      position,
+      senderRole,
+      senderLabel: owner ? "rogier" : assistant.name,
+      text,
+      sessionId: owner ? null : `s-${assistant.id}`,
+      turnId: senderRole === "assistant" ? `turn-${String(position)}` : null,
+      actor: owner ? "user" : `session:s-${assistant.id}`,
+      createdAt,
+    };
+  });
+
+/** One event of a running turn, without the fields every event has. */
+type EventBody = TranscriptRow["event"] extends infer Event
+  ? Event extends unknown
+    ? Omit<Event, "eventId" | "sessionId" | "at">
+    : never
+  : never;
+
+/**
+ * Returns the rows of the running turn of `assistant`'s current session, all
+ * at `at`, with positions from 1.
+ */
+const buildRunningTurn = (
+  assistant: Assistant,
+  at: string,
+  events: ReadonlyArray<EventBody>,
+): TranscriptRow[] =>
+  events.map((body, index) => ({
+    position: index + 1,
+    at,
+    event: {
+      ...body,
+      eventId: `event-${assistant.name}-${String(index + 1)}`,
+      sessionId: `s-${assistant.id}`,
+      at,
+    },
+  }));
+
+/**
+ * Ada's conversation: an evening question yesterday, then this morning's
+ * heartbeat, a reminder, and the question her running turn answers.
+ */
+const ADA_MESSAGES = buildConversation(ADA, [
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-28T16:12:00.000Z",
+    text: "Anything urgent before I log off?",
+  },
+  {
+    senderRole: "assistant",
+    createdAt: "2026-09-28T16:13:00.000Z",
+    text: "Nothing urgent. The staging deploy is green and no Task is waiting on you.",
+  },
+  {
+    senderRole: "assistant",
+    createdAt: "2026-09-29T09:00:00.000Z",
+    text:
+      "Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure " +
+      "have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your " +
+      "OK to push. Also: Marta at Brightline wants her invoice in the company name - I can " +
+      "draft that.",
+  },
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-29T09:20:00.000Z",
+    text: "Remind me Friday to renew the SSL cert for ops.",
+  },
+  {
+    senderRole: "assistant",
+    createdAt: "2026-09-29T09:20:00.000Z",
+    text: "Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.",
+  },
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-29T09:38:00.000Z",
+    text: "What's the status of the backup job?",
+  },
+]);
+
+/** Milo's conversation: a turn that failed yesterday, and today's question. */
+const MILO_MESSAGES = buildConversation(MILO, [
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-28T18:40:00.000Z",
+    text: "Check why last night's backup ran so long.",
+  },
+  {
+    senderRole: "notice",
+    createdAt: "2026-09-28T18:41:00.000Z",
+    text: "Milo could not answer: the runner build-box went offline during the turn.",
+  },
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-29T09:35:00.000Z",
+    text: "build-box is back. Try the backup job again?",
+  },
+]);
+
+/** The text Milo is writing, not finished yet. */
+const MILO_OPEN_TEXT =
+  "So far: the backup job's `pg_dump` has been slower each night since the table `events` " +
+  "passed 40 GB, and last night it ran past the end of its window, finishing at 05:12.\n\n" +
+  "Two ways out, both small:";
+
 /** Every assistant, each in its own pose. */
 const ASSISTANTS: ReadonlyArray<SpecimenAssistant> = [
   {
@@ -111,10 +251,32 @@ const ASSISTANTS: ReadonlyArray<SpecimenAssistant> = [
       minutesAgo: 2,
       openRequests: [ADA_REQUEST],
     }),
+    messages: ADA_MESSAGES,
+    runningTurn: buildRunningTurn(ADA, "2026-09-29T09:38:00.000Z", [
+      { _tag: "turn.started", turnId: "turn-ada-backup", model: CLAUDE_SONNET.slug },
+      { _tag: "request.opened", request: ADA_REQUEST },
+    ]),
   },
   {
     assistant: MILO,
     currentSession: buildAssistantSession(MILO, { status: "busy", minutesAgo: 1 }),
+    messages: MILO_MESSAGES,
+    runningTurn: buildRunningTurn(MILO, "2026-09-29T09:36:00.000Z", [
+      { _tag: "turn.started", turnId: "turn-milo-backup", model: CLAUDE_SONNET.slug },
+      {
+        _tag: "item.started",
+        turnId: "turn-milo-backup",
+        itemId: "it-milo-answer",
+        kind: "assistant_message",
+      },
+      {
+        _tag: "content.delta",
+        turnId: "turn-milo-backup",
+        itemId: "it-milo-answer",
+        streamKind: "assistant_text",
+        delta: MILO_OPEN_TEXT,
+      },
+    ]),
   },
   {
     assistant: JUNO,

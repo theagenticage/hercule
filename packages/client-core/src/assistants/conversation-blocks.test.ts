@@ -6,6 +6,8 @@
  *   running turn from the rows read so far.
  * - `decideOpenReply(input)` decides the reply the assistant is writing, as
  *   far as no stored message holds it.
+ * - `describeOpenReply(block)` returns the words beside the open reply's
+ *   name.
  * - `buildConversationBlocks(input)` lays out the day stamps, the stored
  *   messages and the open reply.
  *
@@ -20,7 +22,9 @@ import {
   buildConversationBlocks,
   collectRunningTurnRows,
   decideOpenReply,
+  describeOpenReply,
   type ConversationBlock,
+  type OpenReplyBlock,
 } from "./conversation-blocks";
 
 type ProviderEvent = TranscriptRow["event"];
@@ -431,7 +435,7 @@ describe("buildConversationBlocks", () => {
     const notice = buildMessage("notice", { createdAt: "2026-10-07T09:05:00.000Z" });
 
     expect(build({ messages: [owner, reply, notice] })).toEqual([
-      { kind: "stamp", key: `stamp:${owner.id}`, label: "Today" },
+      { kind: "stamp", key: "stamp:Today", label: "Today" },
       { kind: "owner", key: `message:${owner.id}`, message: owner, time: "09:00" },
       { kind: "reply", key: `message:${reply.id}`, message: reply, time: "09:00" },
       { kind: "notice", key: `message:${notice.id}`, message: notice, time: "09:05" },
@@ -499,7 +503,14 @@ describe("buildConversationBlocks", () => {
       "stamp Today",
       "open-reply",
     ]);
-    expect(blocks[2]?.key).toBe("stamp:open-reply");
+  });
+
+  it("keeps a day stamp's key when earlier messages of its day are added", () => {
+    const later = buildMessage("owner", { createdAt: "2026-10-07T09:30:00.000Z" });
+    const earlier = buildMessage("owner", { createdAt: "2026-10-07T08:00:00.000Z" });
+
+    expect(build({ messages: [later] })[0]?.key).toBe("stamp:Today");
+    expect(build({ messages: [earlier, later] })[0]?.key).toBe("stamp:Today");
   });
 
   it("shows the stored partial reply and the notice after an interrupted turn, and no open reply", () => {
@@ -521,5 +532,28 @@ describe("buildConversationBlocks", () => {
       "reply",
       "notice",
     ]);
+  });
+});
+
+describe("describeOpenReply", () => {
+  const OPEN: OpenReplyBlock = {
+    kind: "open-reply",
+    key: "open-reply",
+    turnId: "t1",
+    items: [{ itemId: "i1", storedText: "Hello" }],
+    openItemId: "i1",
+    pose: "working",
+  };
+
+  it("says the assistant is answering while it writes", () => {
+    expect(describeOpenReply(OPEN)).toBe("answering…");
+  });
+
+  it("says the assistant is thinking while only the caret shows", () => {
+    expect(describeOpenReply({ ...OPEN, items: [], openItemId: null })).toBe("thinking…");
+  });
+
+  it("names the pose while the assistant does not work", () => {
+    expect(describeOpenReply({ ...OPEN, pose: "waiting" })).toBe("waiting on you");
   });
 });
