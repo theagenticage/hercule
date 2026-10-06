@@ -54,6 +54,16 @@ describe("buildSubagentTree", () => {
     expect(readIds(buildSubagentTree([A1X, B]))).toEqual(["b", "a1x"]);
   });
 
+  it("breaks a tie in start time by id, as the controller lists them", () => {
+    const at = "2026-10-05T09:00:00.000Z";
+    const tree = buildSubagentTree([
+      buildSubagent({ id: "c", startedAt: at }),
+      buildSubagent({ id: "a", startedAt: at }),
+      buildSubagent({ id: "b", startedAt: at }),
+    ]);
+    expect(tree.map((node) => node.subagent.id)).toEqual(["a", "b", "c"]);
+  });
+
   it("returns no roots for no subagents", () => {
     expect(buildSubagentTree([])).toEqual([]);
   });

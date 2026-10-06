@@ -46,19 +46,10 @@ const A1X = buildSubagent({ id: "a1x", parentSubagentId: "a1", itemId: "spawn-a1
 const SUBAGENTS = [A, B, A1, A1X];
 
 describe("buildSpawnLines", () => {
-  it("builds one line per subagent item whose record is read, in item order", () => {
+  it("builds one line per subagent item whose record is read, ordered by start and then by id", () => {
     const lines = buildSpawnLines(TURN, SUBAGENTS, [], NOW);
 
     expect(lines).toEqual([
-      {
-        subagentId: "b",
-        status: "completed",
-        waiting: false,
-        name: "Read the docs",
-        state: { word: "done", hue: "muted", duration: "45s" },
-        below: 0,
-        waitsOnYou: false,
-      },
       {
         subagentId: "a",
         status: "running",
@@ -68,17 +59,26 @@ describe("buildSpawnLines", () => {
         below: 2,
         waitsOnYou: false,
       },
+      {
+        subagentId: "b",
+        status: "completed",
+        waiting: false,
+        name: "Read the docs",
+        state: { word: "done", hue: "muted", duration: "45s" },
+        below: 0,
+        waitsOnYou: false,
+      },
     ]);
   });
 
   it("says one waits on you when a subagent below it asks, without marking it waiting itself", () => {
-    const [, a] = buildSpawnLines(TURN, SUBAGENTS, [buildRequest("r-1", "a1x")], NOW);
+    const [a] = buildSpawnLines(TURN, SUBAGENTS, [buildRequest("r-1", "a1x")], NOW);
 
     expect(a).toMatchObject({ waiting: false, waitsOnYou: true, state: { word: "working" } });
   });
 
   it("marks a subagent that asks itself as waiting on you", () => {
-    const [, a] = buildSpawnLines(TURN, SUBAGENTS, [buildRequest("r-1", "a")], NOW);
+    const [a] = buildSpawnLines(TURN, SUBAGENTS, [buildRequest("r-1", "a")], NOW);
 
     expect(a).toMatchObject({ waiting: true, waitsOnYou: true, state: { word: "waiting on you" } });
   });

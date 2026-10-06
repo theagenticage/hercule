@@ -11,9 +11,14 @@ export interface SubagentNode {
   readonly children: readonly SubagentNode[];
 }
 
-/** Sorts subagents by when they started, oldest first. */
-const compareStartedAt = (a: Subagent, b: Subagent): number =>
-  Date.parse(a.startedAt) - Date.parse(b.startedAt);
+/**
+ * Compares two subagents by when they started, oldest first, and by id when
+ * they started in the same millisecond. An agent can start several subagents
+ * in one message, so ties are common; breaking them by id, as the controller
+ * lists them, keeps every screen in one order.
+ */
+export const compareSubagentStarts = (a: Subagent, b: Subagent): number =>
+  Date.parse(a.startedAt) - Date.parse(b.startedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
  * Returns the subagents `parentId` started, oldest first. `parentId`
@@ -23,7 +28,9 @@ const listChildren = (
   subagents: readonly Subagent[],
   parentId: SubagentId | undefined,
 ): readonly Subagent[] =>
-  subagents.filter((subagent) => subagent.parentSubagentId === parentId).sort(compareStartedAt);
+  subagents
+    .filter((subagent) => subagent.parentSubagentId === parentId)
+    .sort(compareSubagentStarts);
 
 /**
  * Builds the tree of `subagents`. Its roots are the subagents the session's
@@ -41,7 +48,7 @@ export const buildSubagentTree = (subagents: readonly Subagent[]): readonly Suba
     .filter(
       (subagent) => subagent.parentSubagentId === undefined || !ids.has(subagent.parentSubagentId),
     )
-    .sort(compareStartedAt)
+    .sort(compareSubagentStarts)
     .map(buildNode);
 };
 

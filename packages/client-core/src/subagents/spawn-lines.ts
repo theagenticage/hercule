@@ -10,7 +10,7 @@ import {
   nameSubagent,
   type SubagentState,
 } from "./describe";
-import { listSubagentDescendants } from "./tree";
+import { compareSubagentStarts, listSubagentDescendants } from "./tree";
 
 /** One subagent a turn started, as its spawn line shows it. */
 export interface SpawnLine {
@@ -28,7 +28,8 @@ export interface SpawnLine {
 
 /**
  * Builds the spawn lines of `turn`: one for each `subagent` item of the turn
- * whose subagent is in `subagents`, in the order the items started.
+ * whose subagent is in `subagents`, ordered as the side pane orders siblings,
+ * so the two never disagree.
  * `openRequests` are the session's open Requests, and `now` is the moment a
  * running subagent's duration is measured to.
  *
@@ -43,20 +44,18 @@ export const buildSpawnLines = (
 ): readonly SpawnLine[] =>
   turn.items
     .filter((item) => item.kind === "subagent")
-    .flatMap((item) => {
-      const subagent = subagents.find((each) => each.itemId === item.itemId);
-      if (subagent === undefined) return [];
+    .flatMap((item) => subagents.filter((each) => each.itemId === item.itemId))
+    .sort(compareSubagentStarts)
+    .map((subagent) => {
       const waiting = isSubagentWaiting(subagent, openRequests);
       const descendants = listSubagentDescendants(subagent, subagents);
-      return [
-        {
-          subagentId: subagent.id,
-          status: subagent.status,
-          waiting,
-          name: nameSubagent(subagent),
-          state: describeSubagentState(subagent, waiting, now),
-          below: descendants.length,
-          waitsOnYou: waiting || descendants.some((each) => isSubagentWaiting(each, openRequests)),
-        },
-      ];
+      return {
+        subagentId: subagent.id,
+        status: subagent.status,
+        waiting,
+        name: nameSubagent(subagent),
+        state: describeSubagentState(subagent, waiting, now),
+        below: descendants.length,
+        waitsOnYou: waiting || descendants.some((each) => isSubagentWaiting(each, openRequests)),
+      };
     });
