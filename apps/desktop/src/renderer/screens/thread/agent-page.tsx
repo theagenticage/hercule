@@ -26,6 +26,7 @@ import {
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
+import { buildSubagentFaceSeed } from "../subagents/subagent-face";
 import { useAgentLive } from "./use-agent-live";
 import "./thread.css";
 
@@ -107,7 +108,9 @@ export function AgentPage({
     <>
       <ThreadHeader sessionId={sessionId} />
       <Transcript
-        faceSeed={subagentId === undefined ? sessionId : `${sessionId}:${subagentId}`}
+        faceSeed={
+          subagentId === undefined ? sessionId : buildSubagentFaceSeed(sessionId, subagentId)
+        }
         blocks={blocks}
         pose={
           subagent === undefined
