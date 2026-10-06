@@ -1,10 +1,11 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { type HerculeClient, readErrorMessage } from "@hercule/client-core";
 import { buildButtonClassName } from "@hercule/ui";
 import { answeredAssistantQuery } from "../../app/queries";
-import { StopButton } from "../composer/controls";
+import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
+import { useStopAgent } from "../use-stop-agent";
 
 /**
  * The card an assistant's session shows where a thread has its composer. The
@@ -32,12 +33,7 @@ export function ConversationSessionNotice({
   readonly busy: boolean;
 }): JSX.Element {
   const assistant = useSuspenseQuery(answeredAssistantQuery(client, assistantId)).data;
-  const interrupt = useMutation({
-    mutationFn: () => client.session.interrupt({ params: { id: sessionId }, payload: {} }),
-    // The response is not written into the cache. It is the session as the
-    // controller read it before the interrupt, still busy, so writing it
-    // could bring back a Stop the live `session` push has already cleared.
-  });
+  const stopAgent = useStopAgent(client, sessionId);
 
   return (
     <div className="relative z-[1] flex flex-col gap-1 rounded-[14px] border border-line bg-raised py-2 pr-2.5 pl-3.5 shadow-lift">
@@ -52,8 +48,9 @@ export function ConversationSessionNotice({
         <div className="flex h-7 shrink-0 items-center gap-1.5">
           {busy ? (
             <StopButton
+              title={SESSION_STOP_TITLE}
               onStop={() => {
-                if (!interrupt.isPending) interrupt.mutate();
+                stopAgent.stop();
               }}
             />
           ) : null}
@@ -68,9 +65,9 @@ export function ConversationSessionNotice({
           )}
         </div>
       </div>
-      {interrupt.error === null ? null : (
+      {stopAgent.error === null ? null : (
         <p className="text-fine text-fail" role="alert">
-          {readErrorMessage(interrupt.error)}
+          {readErrorMessage(stopAgent.error)}
         </p>
       )}
     </div>

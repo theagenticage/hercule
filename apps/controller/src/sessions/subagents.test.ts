@@ -397,6 +397,21 @@ describe("findSubagentsNamedBy", () => {
 });
 
 describe("buildSubagentActivity", () => {
+  it("names the target a Claude item keeps under detail.input", () => {
+    expect(
+      buildSubagentActivity("command_execution", { name: "Bash", input: { command: "npm test" } }),
+    ).toBe("Running npm test");
+    expect(
+      buildSubagentActivity("file_change", { name: "Edit", input: { file_path: "src/a.ts" } }),
+    ).toBe("Editing src/a.ts");
+    expect(
+      buildSubagentActivity("subagent", {
+        name: "Agent",
+        input: { description: "Read the schema" },
+      }),
+    ).toBe("Delegating: Read the schema");
+  });
+
   it("names the item's kind and what it works on", () => {
     expect(buildSubagentActivity("file_change", { path: "src/a.ts" })).toBe("Editing src/a.ts");
     expect(buildSubagentActivity("reasoning", undefined)).toBe("Thinking");

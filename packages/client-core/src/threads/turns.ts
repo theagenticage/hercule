@@ -24,6 +24,8 @@ type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
 export interface ThreadItem {
   readonly itemId: string;
+  /** The item's kind as the transcript names it, such as `command_execution` or `subagent`. */
+  readonly kind: ItemKind;
   readonly verb: string;
   readonly target: string;
   /**
@@ -110,6 +112,7 @@ const summarizeDetail = (detail: unknown): string => {
  */
 export const buildThreadItem = (event: ItemStarted): ThreadItem => ({
   itemId: event.itemId,
+  kind: event.kind,
   verb: readItemVerb(event.kind),
   target: summarizeDetail(event.detail),
   result: "running",

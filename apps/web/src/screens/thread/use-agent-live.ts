@@ -1,9 +1,14 @@
 /**
- * Subscribes the thread surface to its live topics and returns the ref for
- * the live tail element.
+ * Subscribes one agent's page to that agent's live topics and returns the ref
+ * for the live tail element. The agent is the session's own agent when
+ * `subagentId` is undefined, else that subagent. A page follows exactly one
+ * agent, so a subagent's page holds the subagent's topics in place of the
+ * session's.
  *
- * - `session:<id>:stream` appends rows to the transcript cache.
- * - `session:<id>:tap` streams token deltas into a `TailBuffer`, which keeps
+ * - The agent's stream (`session:<id>:stream`, or
+ *   `session:<id>:subagent:<subagentId>:stream`) appends rows to the agent's
+ *   transcript cache.
+ * - The agent's tap streams token deltas into a `TailBuffer`, which keeps
  *   the text of each assistant message that no row holds yet. The open item's
  *   tail is written, unchanged, into one DOM element. The finished prose above
  *   it is made of block elements, so the tail already starts on its own line
@@ -21,8 +26,9 @@
  * - when the live connection tells the tap to `reset` because it subscribes
  *   again, after a reconnect or after the controller ended it;
  * - when the stream's replay lands. It holds the rows written while the stream
- *   was not subscribed, such as during an outage, and an item that started in
- *   them may have sent taps nobody received.
+ *   was not subscribed, such as during an outage or while another agent's page
+ *   was open, and an item that started in them may have sent taps nobody
+ *   received.
  *
  * A long replay is sent in pages, and only the first page is known to be the
  * replay. An item that starts in a later page and is still open can show its
@@ -55,20 +61,23 @@ import {
 import {
   buildSessionStreamTopic,
   buildSessionTapTopic,
+  buildSubagentStreamTopic,
+  buildSubagentTapTopic,
   type TranscriptRow,
 } from "@hercule/contract";
 
-export const useThreadLive = (
+export const useAgentLive = (
   live: Live,
   queryClient: QueryClient,
   sessionId: string,
+  subagentId: string | undefined,
   rows: readonly TranscriptRow[],
   /** Called after a paint changes the tail's text: the one way the column grows without a React render. */
   onTapFlush: () => void,
 ): RefObject<HTMLSpanElement | null> => {
   const tailRef = useRef<HTMLSpanElement | null>(null);
-  // One buffer for the life of the screen. When the session changes, the tap
-  // is subscribed again, and that drops every tail the buffer still holds.
+  // One buffer for the life of the page. When the agent changes, the tap is
+  // subscribed again, and that drops every tail the buffer still holds.
   const [tail] = useState(createTailBuffer);
 
   const openItemId = useMemo(() => findOpenItem(rows), [rows]);
@@ -93,7 +102,9 @@ export const useThreadLive = (
   /** Skips the items open in the cached transcript, whose earlier taps may be lost. */
   const skipOpenItems = useEffectEvent(() => {
     tail.skipOpenItems(
-      queryClient.getQueryData<readonly TranscriptRow[]>(queryKeys.transcript(sessionId)) ?? [],
+      queryClient.getQueryData<readonly TranscriptRow[]>(
+        queryKeys.transcript(sessionId, subagentId),
+      ) ?? [],
     );
     if (!rowsLandingRef.current) paintTail();
   });
@@ -107,11 +118,13 @@ export const useThreadLive = (
   }, [rows]);
 
   useEffect(() => {
-    const key = queryKeys.transcript(sessionId);
+    const key = queryKeys.transcript(sessionId, subagentId);
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(key) ?? [];
     const unsubscribe = live.subscribe(
-      buildSessionStreamTopic(sessionId),
+      subagentId === undefined
+        ? buildSessionStreamTopic(sessionId)
+        : buildSubagentStreamTopic(sessionId, subagentId),
       (delta) => {
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
@@ -140,33 +153,44 @@ export const useThreadLive = (
       // render. When this effect re-runs, it then resumes from where the
       // transcript actually is, instead of replaying every row since the page
       // opened into the cache a second time.
+      //
+      // The same read is how a page that opens again catches up. The
+      // transcript query never refetches on its own, so after a visit to a
+      // subagent's page the thread's cache still holds only the rows it had
+      // when the thread's page closed. The subscription starts after the last
+      // of them, and the controller replays every row written since.
       buildStreamCursor(readHeldRows()),
     );
     return unsubscribe;
-  }, [live, queryClient, sessionId, tail]);
+  }, [live, queryClient, sessionId, subagentId, tail]);
 
   useEffect(() => {
     let frame: number | null = null;
     skipOpenItems();
-    const unsubscribe = live.subscribe(buildSessionTapTopic(sessionId), (delta) => {
-      const delivery = decideTapDelivery(delta);
-      if (delivery.kind === "gone") {
-        unsubscribe();
-      } else if (delivery.kind === "reset") {
-        skipOpenItems();
-      } else {
-        for (const tap of delivery.taps) tail.appendTap(tap);
-        frame ??= requestAnimationFrame(() => {
-          frame = null;
-          if (!rowsLandingRef.current) paintTail();
-        });
-      }
-    });
+    const unsubscribe = live.subscribe(
+      subagentId === undefined
+        ? buildSessionTapTopic(sessionId)
+        : buildSubagentTapTopic(sessionId, subagentId),
+      (delta) => {
+        const delivery = decideTapDelivery(delta);
+        if (delivery.kind === "gone") {
+          unsubscribe();
+        } else if (delivery.kind === "reset") {
+          skipOpenItems();
+        } else {
+          for (const tap of delivery.taps) tail.appendTap(tap);
+          frame ??= requestAnimationFrame(() => {
+            frame = null;
+            if (!rowsLandingRef.current) paintTail();
+          });
+        }
+      },
+    );
     return () => {
       unsubscribe();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [live, sessionId, tail]);
+  }, [live, sessionId, subagentId, tail]);
 
   return tailRef;
 };

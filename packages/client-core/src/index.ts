@@ -237,6 +237,35 @@ export {
   isSameDay,
 } from "./time-context";
 export { readPriorityGlyph, describeProvenanceTarget, shouldTaskRecede } from "./task-display";
+export { findSubagentBrief, type SubagentBrief } from "./subagents/brief";
+export {
+  describeSubagentLine,
+  describeSubagentMeta,
+  describeSubagentState,
+  describeSubagentStop,
+  formatTokenCount,
+  isSubagentWaiting,
+  nameSubagent,
+  nameSubagentParent,
+  type SubagentHue,
+  type SubagentLine,
+  type SubagentState,
+  type SubagentStop,
+} from "./subagents/describe";
+export {
+  buildRequestDock,
+  type RequestAsker,
+  type RequestDockState,
+} from "./subagents/request-dock";
+export { buildSpawnLines, findSpawnedSubagents, type SpawnLine } from "./subagents/spawn-lines";
+export { describeStatusCard, type StatusCardText } from "./subagents/status-card";
+export { describeSubagentTally, summarizeSubagents, type SubagentTally } from "./subagents/tally";
+export {
+  buildSubagentTree,
+  listSubagentAncestors,
+  listSubagentDescendants,
+  type SubagentNode,
+} from "./subagents/tree";
 export { resolveThreadRowsMode } from "./thread-rows";
 export { countUsedTokens, describeTokenUsage } from "./token-usage";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
@@ -329,6 +358,7 @@ export {
   isQuestionAnswered,
   pickQuestionOption,
   typeQuestionAnswer,
+  type QuestionDraft,
 } from "./threads/question-draft";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";

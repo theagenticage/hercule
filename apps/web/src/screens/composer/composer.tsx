@@ -26,7 +26,8 @@ import {
 } from "../../app/queries";
 import { AccessModeSelector } from "./access-mode-selector";
 import { ComposerCard } from "./composer-card";
-import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
+import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
+import { AttachButton, SendButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
 import { buildLoginSlot } from "./login-slot";
@@ -180,7 +181,7 @@ export function Composer({
             </span>
           </div>
           <VoiceButton />
-          {model.busy ? <StopButton onStop={model.stop} /> : null}
+          {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
           <SendButton tip={model.sendTip} disabled={!canSend} onSend={model.submit} />
         </div>
         {model.error === null ? null : (

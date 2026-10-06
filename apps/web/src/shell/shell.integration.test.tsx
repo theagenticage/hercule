@@ -305,6 +305,44 @@ describe("the Threads face's session rows", () => {
     }
   });
 
+  it("draws the decision mark on a thread waiting on the user, working or idle, and on no other", async () => {
+    const request = {
+      requestId: "request-1",
+      itemId: "item-1",
+      kind: "command_approval",
+      decisions: ["allow", "deny"],
+      detail: { command: "pnpm migrate" },
+    } as const;
+    // The working thread's subagent asks; the idle thread's own agent asks.
+    const waiting = [
+      buildSession({
+        id: "01a06d02-2000-7000-8000-000000000011",
+        title: "Migrate the billing tables",
+        status: "busy",
+        openRequests: [{ ...request, subagentId: "agent-1" }],
+      }),
+      buildSession({
+        id: "01a06d02-2000-7000-8000-000000000012",
+        title: "Rename the invoice columns",
+        status: "idle",
+        openRequests: [request],
+      }),
+    ];
+    await renderApp({
+      path: "/",
+      api: stubApi(withThreads([...THREE_SESSIONS, ...waiting])).fetch,
+      token: "held",
+    });
+
+    const readMark = async (title: string): Promise<string | null | undefined> =>
+      (await getThreadsNav().findByRole("link", { name: new RegExp(title) }))
+        .querySelector("[data-mark]")
+        ?.getAttribute("data-mark");
+    for (const session of waiting) expect(await readMark(session.title)).toBe("decision");
+    expect(await readMark(THREE_SESSIONS[0]!.title)).toBe("working");
+    expect(await readMark(THREE_SESSIONS[1]!.title)).toBeUndefined();
+  });
+
   it("shows the model slug in meta mode and hides it in plain mode", async () => {
     const target = THREE_SESSIONS[0]!;
 

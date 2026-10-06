@@ -15,7 +15,7 @@ import {
   createLive,
   type LiveQueryKey,
 } from "../../packages/client-core/src/index";
-import type { RequestKind } from "../../apps/desktop/scripts/scripted-runner";
+import type { RequestKind, ScriptedQuestions } from "../../apps/desktop/scripts/scripted-runner";
 import { arrangeFleet } from "./harness";
 
 const REQUEST_KINDS: ReadonlyArray<RequestKind> = [
@@ -25,6 +25,16 @@ const REQUEST_KINDS: ReadonlyArray<RequestKind> = [
   "tool_approval",
   "question",
 ];
+
+/** Builds a single-choice question headed `header`, with one option, "Either". */
+function buildQuestion(header: string): ScriptedQuestions[number] {
+  return {
+    question: `Which ${header.toLowerCase()} do you want?`,
+    header,
+    options: [{ label: "Either", description: "Any is fine." }],
+    multiSelect: false,
+  };
+}
 
 /**
  * Waits until the live socket has pushed at least once and then nothing for a
@@ -116,6 +126,104 @@ describe("the scripted fleet", () => {
       await expect.poll(async () => (await readSession(id)).openRequests).toEqual([]);
     }
     expect((await readSession(id)).status).toBe("busy");
+  });
+
+  it("opens Requests of subagents at any depth, and stops a subagent with every subagent below it", async () => {
+    const { fleet, client, waitForStatus } = await arrangeFleet();
+    const readSession = (id: string) => client.session.read({ params: { id } });
+    const readSubagents = async (id: string) =>
+      (await client.session.querySubagents({ params: { id }, query: {} })).items;
+    const runner = await fleet.enlistRunner("scripted-1");
+    const { thread, played } = await fleet.spawnScriptedThread({ runner }, [
+      {
+        kind: "subagent",
+        subagentId: "asker",
+        description: "Plan the migration",
+        brief: "Plan it.",
+        background: true,
+        steps: [
+          {
+            kind: "subagent",
+            subagentId: "nested",
+            description: "Dry-run the deploy",
+            brief: "Dry-run it.",
+            background: true,
+            steps: [{ kind: "command", command: "./deploy.sh --dry-run", ask: true }],
+          },
+          {
+            kind: "question",
+            questions: [
+              buildQuestion("Downtime"),
+              buildQuestion("Backfill"),
+              buildQuestion("Checks"),
+            ],
+          },
+          { kind: "command", command: "pnpm db:migrate --dry-run", forMs: 60_000 },
+        ],
+      },
+      {
+        kind: "subagent",
+        subagentId: "sibling",
+        description: "Find the flaky tests",
+        brief: "Find them.",
+        background: true,
+        steps: [{ kind: "command", command: "pnpm test", forMs: 60_000 }],
+      },
+      { kind: "end", state: "completed" },
+    ]);
+    const id = thread.id;
+
+    // The session's own agent is done, while two subagents wait on the user.
+    // The two subagents race, so their Requests are compared sorted by
+    // subagent, not in the order they opened.
+    await expect
+      .poll(async () =>
+        (await readSession(id)).openRequests
+          .map(({ kind, subagentId }) => ({ kind, subagentId }))
+          .toSorted((a, b) => (a.subagentId ?? "").localeCompare(b.subagentId ?? "")),
+      )
+      .toEqual([
+        { kind: "question", subagentId: "asker" },
+        { kind: "command_approval", subagentId: "nested" },
+      ]);
+    await waitForStatus(id, "idle");
+    expect((await readSubagents(id)).find((one) => one.id === "nested")?.parentSubagentId).toBe(
+      "asker",
+    );
+
+    // Answering the question lets its subagent go on to its next step.
+    const question = (await readSession(id)).openRequests.find(
+      (request) => request.kind === "question",
+    )!;
+    await client.session.respondToQuestion({
+      params: { id },
+      payload: {
+        requestId: question.requestId,
+        answers: { Downtime: "Either", Backfill: "Either", Checks: "Either" },
+      },
+    });
+    await expect
+      .poll(async () => (await readSubagents(id)).find((one) => one.id === "asker")?.activity)
+      .toMatch(/^Running/);
+
+    // Stopping the asker stops the subagent below it and cancels that
+    // subagent's Request. Its sibling goes on.
+    await client.session.interrupt({ params: { id }, payload: { subagentId: "asker" } });
+    await expect
+      .poll(async () =>
+        (await readSubagents(id))
+          .map(({ id, status }) => ({ id, status }))
+          .toSorted((a, b) => a.id.localeCompare(b.id)),
+      )
+      .toEqual([
+        { id: "asker", status: "stopped" },
+        { id: "nested", status: "stopped" },
+        { id: "sibling", status: "running" },
+      ]);
+    expect((await readSession(id)).openRequests).toEqual([]);
+
+    await client.session.interrupt({ params: { id }, payload: {} });
+    await expect(played).resolves.toBeUndefined();
   });
 
   it("takes a runner offline, and reconnects it with its threads", async () => {

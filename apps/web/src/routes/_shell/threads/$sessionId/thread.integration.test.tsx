@@ -35,6 +35,8 @@ import {
   APPROVAL_ANSWER_LABELS,
   buildSessionStreamTopic,
   buildSessionTapTopic,
+  buildSubagentStreamTopic,
+  buildSubagentTapTopic,
 } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -47,44 +49,19 @@ import {
   type FakeScrollGeometry,
   type Handler,
   type LiveStub,
-} from "../../../app/testing";
-
-const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
-const ZONE = "Europe/Amsterdam";
-
-const BASE_SESSION: Session = {
-  id: SESSION_ID,
-  title: "Fix the login bug",
-  status: "idle",
-  resumable: false,
-  resumeHeld: false,
-  permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
-  agentId: null,
-  conversationId: null,
-  runId: null,
-  stepId: null,
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
-  runnerId: "01a06d02-3000-7000-8000-000000000001",
-  workspaceId: null,
-  projectId: null,
-  requestedAccessMode: "approval-required",
-  accessMode: "approval-required",
-  nativeSessionId: null,
-  modelSelection: { model: "claude-sonnet-5", options: {} },
-  parentSessionId: null,
-  openRequests: [],
-  createdAt: "2026-09-08T09:59:00.000Z",
-  startedAt: "2026-09-08T09:59:01.000Z",
-  exitedAt: null,
-  lastActivityAt: "2026-09-08T10:01:03.000Z",
-  unenforced: [],
-};
-
-const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE_SESSION, ...overrides });
+} from "../../../../app/testing";
+import {
+  SESSION,
+  SESSION_ID,
+  ZONE,
+  buildController,
+  buildSession,
+  buildSubagent,
+} from "./-fixtures";
 
 /**
  * Fixtures for the composer tests:
- * - A provider instance, a runner and a profile with `BASE_SESSION`'s ids,
+ * - A provider instance, a runner and a profile with `SESSION`'s ids,
  *   which the started thread's read-only fields and model menu read.
  * - A second instance, runner and profile, which exist only to prove that
  *   they never show up in a started thread's read-only fields or its
@@ -120,7 +97,7 @@ const buildInstanceSnapshot = (
 });
 
 const INSTANCE_STARTED: ProviderInstance = {
-  id: BASE_SESSION.instanceId,
+  id: SESSION.instanceId,
   providerId: "claude-code",
   secretFields: [],
   name: "personal",
@@ -129,7 +106,7 @@ const INSTANCE_STARTED: ProviderInstance = {
   binaryName: "claude",
   declared: DECLARED,
   snapshots: [
-    buildInstanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] },
       { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
     ]),
@@ -160,7 +137,7 @@ const EFFORT: ModelOption = {
 const INSTANCE_OPTIONS: ProviderInstance = {
   ...INSTANCE_STARTED,
   snapshots: [
-    buildInstanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [EFFORT] },
       { slug: "claude-opus-5", name: "Claude Opus 5", options: [EFFORT] },
     ]),
@@ -172,14 +149,14 @@ const INSTANCE_OTHER: ProviderInstance = {
   id: "01a06d02-1000-7000-8000-000000000099",
   name: "work",
   snapshots: [
-    buildInstanceSnapshot(BASE_SESSION.runnerId, "work@example.com", "Claude Pro", [
+    buildInstanceSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
       { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
     ]),
   ],
 };
 
 const RUNNER_STARTED: Runner = {
-  id: BASE_SESSION.runnerId,
+  id: SESSION.runnerId,
   name: "moss",
   connectivity: "online",
   lifecycle: "active",
@@ -200,7 +177,7 @@ const RUNNER_OTHER: Runner = {
 };
 
 const PROFILE_STARTED: Profile = {
-  id: BASE_SESSION.permissionProfileId,
+  id: SESSION.permissionProfileId,
   name: "unrestricted",
   grants: [],
   shipped: true,
@@ -214,39 +191,33 @@ const PROFILE_OTHER: Profile = {
   name: "worker",
 };
 
-/** Builds the stubbed controller routes for the app and for the thread of `fixture`. */
-const buildController = (
+/**
+ * Builds the stubbed controller routes for the app and for the thread of
+ * `fixture`, with no subagents, the transcript `rows`, and the composer's
+ * instances, runners and profiles. `extra` is added over them.
+ */
+const buildThreadRoutes = (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
-): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/setup": { body: { complete: true } },
-  "GET /api/v1/settings": {
-    body: {
-      controller: {},
-      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE },
+): Readonly<Record<string, Handler>> =>
+  buildController(
+    { session: fixture, subagents: [] },
+    {
+      [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
+      "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
+      "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
+      "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
+      ...extra,
     },
-  },
-  [`GET /api/v1/sessions/${fixture.id}`]: { body: fixture },
-  [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
-  // The composer's reads. A test that needs specific queued
-  // inputs overrides the `/inputs` route below with its own `extra`.
-  "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
-  "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
-  "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
-  [`GET /api/v1/sessions/${fixture.id}/inputs`]: { body: { items: [] } },
-  // The sidebar's Assistants group reads the assistants; a test of an
-  // assistant's session overrides this with its own `extra`.
-  "GET /api/v1/assistants": { body: { items: [] } },
-  ...extra,
-});
+  );
 
 const openApp = async (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
-  const api = stubApi(buildController(fixture, rows, extra));
+  const api = stubApi(buildThreadRoutes(fixture, rows, extra));
   const app = await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
   return { ...app, api };
 };
@@ -1589,7 +1560,7 @@ describe("Thread: the transcript cache only grows forwards", () => {
 });
 
 describe("Thread: live subscriptions", () => {
-  it("subscribes to exactly the session's stream and tap topics while mounted, and ends them on unmount", async () => {
+  it("subscribes to exactly the session's stream and tap topics and the subagent topic while mounted, and ends them on unmount", async () => {
     const { live, router } = await openApp(
       buildSession({ status: "idle" }),
       buildTwoCompletedTurns(),
@@ -1597,13 +1568,14 @@ describe("Thread: live subscriptions", () => {
 
     // The shell has its own subscriptions whatever screen is open (for
     // example the sidebar's `session` invalidation topic). The assertion
-    // therefore checks only the topics that start with `session:`, not the
-    // whole set.
-    const listSessionTopics = () => live.topics().filter((topic) => topic.startsWith("session:"));
+    // therefore checks only the per-session topics, which start with
+    // `session:`, and the `subagent` topic, which only a thread opens.
+    const listThreadTopics = () =>
+      live.topics().filter((topic) => topic.startsWith("session:") || topic === "subagent");
 
     await waitFor(() => {
-      expect([...listSessionTopics()].sort()).toEqual(
-        [buildSessionStreamTopic(SESSION_ID), buildSessionTapTopic(SESSION_ID)].sort(),
+      expect([...listThreadTopics()].sort()).toEqual(
+        [buildSessionStreamTopic(SESSION_ID), buildSessionTapTopic(SESSION_ID), "subagent"].sort(),
       );
     });
 
@@ -1612,7 +1584,7 @@ describe("Thread: live subscriptions", () => {
     });
 
     await waitFor(() => {
-      expect(listSessionTopics()).toEqual([]);
+      expect(listThreadTopics()).toEqual([]);
     });
   });
 
@@ -1693,6 +1665,7 @@ describe("Thread: live subscriptions", () => {
       {
         [`GET /api/v1/sessions/${OTHER_ID}`]: { body: other },
         [`GET /api/v1/sessions/${OTHER_ID}/transcript`]: { body: { items: [] } },
+        [`GET /api/v1/sessions/${OTHER_ID}/subagents`]: { body: { items: [] } },
       },
     );
 
@@ -1713,6 +1686,180 @@ describe("Thread: live subscriptions", () => {
     // the beginning of its log. Any other value means the previous thread's
     // cursor leaked.
     expect(live.readCursor(buildSessionStreamTopic(OTHER_ID))).toBe("0");
+  });
+});
+
+const SUBAGENT_ID = "toolu_explore_auth";
+
+const SUBAGENT = buildSubagent({
+  id: SUBAGENT_ID,
+  description: "Explore the auth module",
+  toolCalls: 2,
+  startedAt: "2026-09-08T10:00:01.000Z",
+});
+
+/** The subagent's own transcript: one turn whose answer is a single message. */
+const buildSubagentTranscript = (): TranscriptRow[] =>
+  buildTranscript(
+    buildTurnStart("s1", "2026-09-08T10:00:01.000Z"),
+    buildAssistantMessage(
+      "s1",
+      "2026-09-08T10:00:02.000Z",
+      "sa1",
+      "The auth module has two entry points.",
+    ),
+  );
+
+/**
+ * Builds the routes for a thread with `SUBAGENT`. The transcript route
+ * answers with the subagent's rows when the request names the subagent, and
+ * with the session's own rows otherwise, as the controller does.
+ */
+const buildSubagentRoutes = (
+  sessionRows: readonly TranscriptRow[],
+): Readonly<Record<string, Handler>> => ({
+  [`GET /api/v1/sessions/${SESSION_ID}/subagents`]: { body: { items: [SUBAGENT] } },
+  [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: (call: Call) => ({
+    body: {
+      items: call.search.includes(`subagentId=${SUBAGENT_ID}`)
+        ? buildSubagentTranscript()
+        : sessionRows,
+    },
+  }),
+});
+
+describe("Thread: a subagent's page", () => {
+  it("shows the subagent's transcript and subscribes to its topics in place of the session's", async () => {
+    const rows = buildTwoCompletedTurns();
+    const { live, router } = await openApp(
+      buildSession({ status: "busy" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+
+    await screen.findByText("The auth module has two entry points.");
+    expect(screen.queryByText("Added a test too.")).toBeNull();
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSubagentStreamTopic(SESSION_ID, SUBAGENT_ID));
+    });
+    expect(live.topics()).toContain(buildSubagentTapTopic(SESSION_ID, SUBAGENT_ID));
+    expect(live.topics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+    expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+    // The thread's layout stays mounted, so the `subagent` topic stays open.
+    expect(live.topics()).toContain("subagent");
+    // A subagent takes no messages from the user, so its page has no composer.
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("shows the rows the thread wrote while its subagent's page was open after going back", async () => {
+    // The thread's transcript stays cached while the subagent's page is open,
+    // but nothing appends to it: the session's stream is not subscribed. Going
+    // back subscribes again from the cached rows' cursor, and the controller
+    // replays every row written after it, so the thread catches up.
+    const rows = buildTwoCompletedTurns();
+    const { live, router } = await openApp(
+      buildSession({ status: "busy" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+
+    await act(async () => {
+      await router.navigate({ to: "/threads/$sessionId", params: { sessionId: SESSION_ID } });
+    });
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+    // The new subscription resumes after the last cached row, not at the head
+    // of the log, so the rows written meanwhile are replayed.
+    expect(live.readCursor(buildSessionStreamTopic(SESSION_ID))).toBe("15");
+
+    const written = [
+      ...buildTurnStart("t3", "2026-09-08T10:02:00.000Z"),
+      ...buildAssistantMessage("t3", "2026-09-08T10:02:01.000Z", "a3", "Merged the fix."),
+    ].map((event, index) =>
+      buildTranscriptRow(16 + index, { ...event, eventId: `e${16 + index}` }),
+    );
+    act(() => {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: written,
+        cursor: String(written.at(-1)!.position),
+      });
+    });
+
+    await screen.findByText("Merged the fix.");
+    expect(screen.getByText("Added a test too.")).toBeDefined();
+    // The subagent's rows are cached under their own key and never show here.
+    expect(screen.queryByText("The auth module has two entry points.")).toBeNull();
+  });
+
+  it("says the thread has no such subagent for an unknown subagent id", async () => {
+    const rows = buildTwoCompletedTurns();
+    const { router } = await openApp(
+      buildSession({ status: "idle" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: "toolu_unknown" },
+      });
+    });
+
+    await screen.findByText("This thread has no subagent with this id.");
+    expect(screen.getByRole("link", { name: "Go to the thread" })).toBeDefined();
+  });
+
+  it("keeps the composer's unsent message after a visit to a subagent's page", async () => {
+    const user = userEvent.setup();
+    const rows = buildTwoCompletedTurns();
+    const { router } = await openApp(
+      buildSession({ status: "idle" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await user.type(await screen.findByPlaceholderText("Reply…"), "Also check the logout path");
+
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+    await screen.findByText("The auth module has two entry points.");
+    await act(async () => {
+      await router.navigate({ to: "/threads/$sessionId", params: { sessionId: SESSION_ID } });
+    });
+
+    expect(await screen.findByPlaceholderText("Reply…")).toHaveProperty(
+      "value",
+      "Also check the logout path",
+    );
   });
 });
 
@@ -2836,7 +2983,7 @@ describe("Thread: the permission card", () => {
     let current = buildSession({ status: "busy", openRequests: [REQUEST] });
     let release: (() => void) | undefined;
     const api = stubApi({
-      ...buildController(current, buildParkedRows()),
+      ...buildThreadRoutes(current, buildParkedRows()),
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
       // The response is held until the test releases it, and it still has
       // the open request. The response is a snapshot from when the request
@@ -2904,7 +3051,7 @@ describe("Thread: the permission card", () => {
     const user = userEvent.setup();
     const current = buildSession({ status: "busy", openRequests: [REQUEST] });
     const api = stubApi({
-      ...buildController(current, buildParkedRows()),
+      ...buildThreadRoutes(current, buildParkedRows()),
       [`POST /api/v1/sessions/${SESSION_ID}/respond-to-approval-request`]: { body: current },
     });
     await renderApp({ path: `/threads/${SESSION_ID}`, api: api.fetch, token: "held" });
@@ -3071,7 +3218,7 @@ describe("Thread: answering the agent's questions", () => {
 
     await screen.findByText("Which storage should drafts use?");
     expect(screen.queryByText("Which features should ship?")).toBeNull();
-    expect(screen.getByText(/\b1 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 1 of 2")).toBeDefined();
     expect(findChoice("radio", "localStorage")).toBeDefined();
     expect(findChoice("radio", "IndexedDB")).toBeDefined();
     expect(screen.queryAllByRole("checkbox")).toEqual([]);
@@ -3082,7 +3229,7 @@ describe("Thread: answering the agent's questions", () => {
 
     expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
     expect(screen.getByText("Which features should ship?")).toBeDefined();
-    expect(screen.getByText(/\b2 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 2 of 2")).toBeDefined();
     expect(findChoice("checkbox", "Sync")).toBeDefined();
     expect(findChoice("checkbox", "Search")).toBeDefined();
     // The shell's own segmented control is a radio group too, so only the
@@ -3193,7 +3340,7 @@ describe("Thread: answering the agent's questions", () => {
     await screen.findByText("Which storage should drafts use?");
     await user.type(readOwnAnswer(), "a sqlite file{Enter}");
 
-    expect(screen.getByText(/\b2 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 2 of 2")).toBeDefined();
     expect(readBodies(api.calls)).toEqual([]);
   });
 
@@ -3204,7 +3351,7 @@ describe("Thread: answering the agent's questions", () => {
     await screen.findByText("Which storage should drafts use?");
     await user.type(readOwnAnswer(), "{Enter}");
 
-    expect(screen.getByText(/\b1 of 2\b/)).toBeDefined();
+    expect(screen.getByText("Question 1 of 2")).toBeDefined();
     expect(readBodies(api.calls)).toEqual([]);
   });
 
@@ -3347,6 +3494,7 @@ const buildThreadWorldRoutes = (
   "GET /api/v1/sessions": { body: { items: sessions } },
   [`GET /api/v1/sessions/${SIBLING_ID}`]: { body: SIBLING },
   [`GET /api/v1/sessions/${SIBLING_ID}/transcript`]: { body: { items: [] } },
+  [`GET /api/v1/sessions/${SIBLING_ID}/subagents`]: { body: { items: [] } },
 });
 
 const findThreadChrome = async (): Promise<HTMLElement> => {
@@ -3455,7 +3603,7 @@ describe("Draft: a draft joining a workspace", () => {
       workspaceId: workspace.id,
     });
     const api = stubApi({
-      ...buildController(
+      ...buildThreadRoutes(
         fixture,
         buildTwoCompletedTurns(),
         buildThreadWorldRoutes([workspace], [fixture]),
@@ -3493,8 +3641,8 @@ const ADA: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are a helpful assistant.",
-  instanceId: BASE_SESSION.instanceId,
-  permissionProfileId: BASE_SESSION.permissionProfileId,
+  instanceId: SESSION.instanceId,
+  permissionProfileId: SESSION.permissionProfileId,
   accessMode: "approval-required",
   model: null,
   disallowedTools: [],
@@ -3592,7 +3740,7 @@ describe("Thread: the session view of an assistant's session", () => {
     const user = userEvent.setup();
     const fixture = buildAssistantSession({ status: "busy", openRequests: [REQUEST] });
     const api = stubApi({
-      ...buildController(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
+      ...buildThreadRoutes(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
       [`POST /api/v1/sessions/${fixture.id}/respond-to-approval-request`]: { body: fixture },
     });
     await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });

@@ -229,6 +229,7 @@ const buildController = (
   // does not fail with a 404 and break the navigation under test.
   [`GET /api/v1/sessions/${NEW_SESSION.id}`]: { body: NEW_SESSION },
   [`GET /api/v1/sessions/${NEW_SESSION.id}/transcript`]: { body: { items: [] } },
+  [`GET /api/v1/sessions/${NEW_SESSION.id}/subagents`]: { body: { items: [] } },
   ...extra,
 });
 
