@@ -5,6 +5,7 @@ import {
   buildAssistantDraft,
   buildAssistantUpdate,
   type AssistantDraft,
+  NEW_ASSISTANT_NAME,
   readErrorMessage,
 } from "@hercule/client-core";
 import { Button, EmptyState } from "@hercule/ui";
@@ -31,9 +32,6 @@ export const Route = createFileRoute("/_shell/settings/assistants")({
     ]),
   component: Assistants,
 });
-
-/** The name a new assistant starts with. The user renames it in the form. */
-const NEW_ASSISTANT_NAME = "Hercule";
 
 /** What the user asked to do next that would throw away the form's unsaved edits. */
 type Leaving =

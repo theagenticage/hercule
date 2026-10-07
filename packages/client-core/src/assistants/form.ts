@@ -5,11 +5,18 @@
  */
 import type { Assistant, AssistantUpdateInput } from "@hercule/contract";
 
-/** The assistant fields the settings form edits. */
+/** The name a new assistant starts with. The user renames it in Settings. */
+export const NEW_ASSISTANT_NAME = "Hercule";
+
+/**
+ * The assistant fields the settings form edits. `model` is the model's slug,
+ * or `null` for the instance's default model; the form does not edit the
+ * model's options.
+ */
 export type AssistantDraft = Pick<
   Assistant,
   "name" | "systemPrompt" | "instanceId" | "permissionProfileId" | "accessMode" | "reply"
->;
+> & { readonly model: string | null };
 
 /** Returns the form's starting values: the assistant's stored fields. */
 export const buildAssistantDraft = (assistant: Assistant): AssistantDraft => ({
@@ -19,6 +26,7 @@ export const buildAssistantDraft = (assistant: Assistant): AssistantDraft => ({
   permissionProfileId: assistant.permissionProfileId,
   accessMode: assistant.accessMode,
   reply: assistant.reply,
+  model: assistant.model?.model ?? null,
 });
 
 /**
@@ -47,6 +55,9 @@ export const mergeAssistantEdits = (
  * Returns the `assistant.update` payload that holds only the fields the draft
  * changed. The payload is empty when nothing changed.
  *
+ * A changed model is sent without options, so the controller drops the
+ * stored options: they belonged to the old model.
+ *
  * An unchanged field is left out rather than sent again, so a save never
  * overwrites a field that another writer (an agent, a second browser) changed
  * since the form opened. Values are compared exactly: a name with a trailing
@@ -64,6 +75,7 @@ export const buildAssistantUpdate = (
   }),
   ...(draft.accessMode !== assistant.accessMode && { accessMode: draft.accessMode }),
   ...(draft.reply !== assistant.reply && { reply: draft.reply }),
+  ...(draft.model !== (assistant.model?.model ?? null) && { model: draft.model }),
 });
 
 /**

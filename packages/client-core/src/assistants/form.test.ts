@@ -46,7 +46,14 @@ describe("buildAssistantDraft", () => {
       permissionProfileId: ADA.permissionProfileId,
       accessMode: "auto-accept-edits",
       reply: "turn-end",
+      model: null,
     });
+  });
+
+  it("holds the model's slug, without its options", () => {
+    const assistant = { ...ADA, model: { model: "claude-sonnet-5", options: { effort: "high" } } };
+
+    expect(buildAssistantDraft(assistant).model).toBe("claude-sonnet-5");
   });
 });
 
@@ -62,6 +69,10 @@ describe("mergeAssistantEdits", () => {
     expect(mergeAssistantEdits(ADA, { name: "Ada L" }, { name: "Ada Lovelace" })).toEqual({
       name: "Ada Lovelace",
     });
+  });
+
+  it("forgets a model edit that is back at the stored model", () => {
+    expect(mergeAssistantEdits(ADA, { model: "claude-opus-5" }, { model: null })).toEqual({});
   });
 
   it("drops a field whose new value equals the stored value, and keeps the others", () => {
@@ -90,6 +101,7 @@ describe("buildAssistantUpdate", () => {
       permissionProfileId: "01a06d02-3000-7000-8000-000000000002",
       accessMode: "full-access" as const,
       reply: "segments" as const,
+      model: "claude-sonnet-5",
     };
 
     expect(buildAssistantUpdate(ADA, draft)).toEqual(draft);
@@ -99,6 +111,27 @@ describe("buildAssistantUpdate", () => {
     const draft = { ...buildAssistantDraft(ADA), name: "Ada " };
 
     expect(buildAssistantUpdate(ADA, draft)).toEqual({ name: "Ada " });
+  });
+
+  it("sends no model when the draft keeps the stored one", () => {
+    const assistant = { ...ADA, model: { model: "claude-sonnet-5", options: { effort: "high" } } };
+    const draft = { ...buildAssistantDraft(assistant), name: "Ada L" };
+
+    expect(buildAssistantUpdate(assistant, draft)).toEqual({ name: "Ada L" });
+  });
+
+  it("sends a changed model, and null to go back to the instance's default", () => {
+    const assistant = { ...ADA, model: { model: "claude-sonnet-5", options: {} } };
+
+    expect(
+      buildAssistantUpdate(assistant, {
+        ...buildAssistantDraft(assistant),
+        model: "claude-opus-5",
+      }),
+    ).toEqual({ model: "claude-opus-5" });
+    expect(
+      buildAssistantUpdate(assistant, { ...buildAssistantDraft(assistant), model: null }),
+    ).toEqual({ model: null });
   });
 
   it("leaves out a field changed and then changed back", () => {
@@ -122,6 +155,12 @@ describe("dropSavedEdits", () => {
         { name: "Ada L", reply: "segments" },
       ),
     ).toEqual({ name: "Ada Lovelace" });
+  });
+
+  it("drops a saved model edit, including one back to the default model", () => {
+    expect(dropSavedEdits({ model: null, name: "Ada L" }, { model: null })).toEqual({
+      name: "Ada L",
+    });
   });
 
   it("keeps an edit the save did not send", () => {

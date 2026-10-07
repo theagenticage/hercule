@@ -20,6 +20,7 @@
 /** Each format, and the `Intl.DateTimeFormat` options it uses. */
 const SHAPES = {
   context: { weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
+  clock: { hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
   day: { day: "numeric", month: "short" },
   date: { year: "numeric", month: "numeric", day: "numeric" },
   stamp: {
@@ -97,6 +98,17 @@ export const formatTimeContext = (instant: Date, timezone: string): string | und
   const part = buildPartReader("context", instant, timezone);
   if (part === undefined) return undefined;
   return `${part("weekday")} ${part("hour")}:${part("minute")}`;
+};
+
+/**
+ * Computes the minutes since midnight of `instant` in `timezone`: 0 at
+ * midnight, 1439 at 23:59. Returns `undefined` when the instant is not a
+ * valid date or the zone cannot be formatted.
+ */
+export const computeMinutesOfDay = (instant: Date, timezone: string): number | undefined => {
+  const part = buildPartReader("clock", instant, timezone);
+  if (part === undefined) return undefined;
+  return Number(part("hour")) * 60 + Number(part("minute"));
 };
 
 /**
