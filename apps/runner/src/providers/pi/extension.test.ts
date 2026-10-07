@@ -17,7 +17,11 @@ import {
   ACCESS_MODE_VARIABLE,
   EXTENSION_SOURCE,
   OUTPUT_SCHEMA_VARIABLE,
+  SUBAGENT_DIALOG,
+  SUBAGENT_TOOL,
+  SUBAGENTS_VARIABLE,
   SUBMIT_RESULT_TOOL,
+  type SubagentReply,
 } from "./extension";
 import { requiresApproval } from "./policy";
 
@@ -30,7 +34,10 @@ const MODES: ReadonlyArray<string> = [
   "a mode from a newer controller",
 ];
 
-/** pi 0.85.1's built-in tools, `submit_result`, and one tool that is not built in. */
+/**
+ * pi 0.85.1's built-in tools, `submit_result`, `subagent`, and one tool that
+ * is not built in.
+ */
 const TOOLS: ReadonlyArray<string> = [
   "read",
   "grep",
@@ -41,6 +48,7 @@ const TOOLS: ReadonlyArray<string> = [
   "write",
   "edit",
   SUBMIT_RESULT_TOOL,
+  SUBAGENT_TOOL,
   "mcp__jira__create",
 ];
 
@@ -93,16 +101,30 @@ const OUTPUT_SCHEMA = {
 interface RegisteredTool {
   readonly name: string;
   readonly parameters: unknown;
-  readonly execute: (args: unknown, ctx: unknown) => unknown;
+  /**
+   * pi calls it with the call id, the arguments, the abort signal, the update
+   * callback and the context. `submit_result` reads none of them.
+   */
+  readonly execute: (...args: ReadonlyArray<unknown>) => unknown;
 }
 
 /**
- * A stand-in for typebox's `Type`. `Type.Unsafe` returns a JSON Schema
- * unchanged, which is why the extension uses it. typebox is pi's dependency,
- * not the runner's, so this test drops the extension's import and passes this
- * object in its place.
+ * A stand-in for typebox's `Type`, with the builders the extension uses.
+ * `Type.Unsafe` returns a JSON Schema unchanged, which is why the extension
+ * uses it for the output schema. `Type.Object` and `Type.String` build the
+ * JSON Schema typebox builds for them. typebox is pi's dependency, not the
+ * runner's, so this test drops the extension's import and passes this object
+ * in its place.
  */
-const TYPE = { Unsafe: (schema: unknown) => schema };
+const TYPE = {
+  Unsafe: (schema: unknown) => schema,
+  Object: (properties: Record<string, unknown>) => ({
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+  }),
+  String: (options: Record<string, unknown>) => ({ type: "string", ...options }),
+};
 
 /**
  * Loads the extension the way pi loads it, and returns the tools it
@@ -157,5 +179,128 @@ describe("the submit_result tool of a session with an output schema", () => {
     // A Thread answers in prose. A `submit_result` tool on every session
     // would be a tool the model can call with nothing to validate the call.
     expect(listRegisteredTools({})).toEqual([]);
+  });
+});
+
+describe("the subagent tool", () => {
+  const SUBAGENTS_ENV = { [SUBAGENTS_VARIABLE]: "1" };
+
+  it("is registered for an agent that may start subagents, asking for a task and a prompt", () => {
+    const tools = listRegisteredTools(SUBAGENTS_ENV);
+
+    expect(tools.map((tool) => tool.name)).toEqual([SUBAGENT_TOOL]);
+    // The runner reads both fields from the call, so both must be required.
+    expect(tools[0]!.parameters).toMatchObject({
+      required: ["description", "prompt"],
+      properties: { description: { type: "string" }, prompt: { type: "string" } },
+    });
+  });
+
+  it("is registered under full access too", () => {
+    // A full-access agent registers no approval hook, but it delegates the
+    // same way as any other agent.
+    const tools = listRegisteredTools({ ...SUBAGENTS_ENV, [ACCESS_MODE_VARIABLE]: "full-access" });
+
+    expect(tools.map((tool) => tool.name)).toEqual([SUBAGENT_TOOL]);
+  });
+
+  it("is registered beside submit_result for an agent with an output schema", () => {
+    const tools = listRegisteredTools({
+      ...SUBAGENTS_ENV,
+      [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(OUTPUT_SCHEMA),
+    });
+
+    expect(tools.map((tool) => tool.name)).toEqual([SUBMIT_RESULT_TOOL, SUBAGENT_TOOL]);
+  });
+
+  it("is not registered at the deepest level, where the variable is left out", () => {
+    // An agent there that could still call the tool would start a subagent
+    // the runner has to refuse.
+    expect(listRegisteredTools({})).toEqual([]);
+    expect(listRegisteredTools({ [SUBAGENTS_VARIABLE]: "0" })).toEqual([]);
+  });
+
+  const CALL_ID = "call_subagent_1";
+
+  /** One `ctx.ui.input` call the tool made: the dialog's title, its placeholder, and its options. */
+  interface DialogCall {
+    readonly title: string;
+    readonly placeholder: string;
+    readonly options: unknown;
+  }
+
+  /**
+   * Runs the tool's execute the way pi does, with a context whose dialog
+   * returns `answer`. Returns the result, or the error the tool threw, and
+   * every dialog call it made.
+   */
+  const callSubagentTool = async (
+    answer: string | undefined,
+  ): Promise<{
+    readonly outcome: { readonly result: unknown } | { readonly error: unknown };
+    readonly dialogs: ReadonlyArray<DialogCall>;
+    readonly signal: AbortSignal;
+  }> => {
+    const tool = listRegisteredTools(SUBAGENTS_ENV)[0]!;
+    const signal = new AbortController().signal;
+    const dialogs: Array<DialogCall> = [];
+    const ctx = {
+      ui: {
+        input: (title: string, placeholder: string, options: unknown) => {
+          dialogs.push({ title, placeholder, options });
+          return Promise.resolve(answer);
+        },
+      },
+    };
+    const params = { description: "Count the tests", prompt: "Count the test files in src." };
+    try {
+      const result = await tool.execute(CALL_ID, params, signal, () => undefined, ctx);
+      return { outcome: { result }, dialogs, signal };
+    } catch (error) {
+      return { outcome: { error }, dialogs, signal };
+    }
+  };
+
+  it("asks the runner for a subagent through the dialog, with the call's request as JSON", async () => {
+    const reply: SubagentReply = { text: "There are 12." };
+    const { dialogs, signal } = await callSubagentTool(JSON.stringify(reply));
+
+    expect(dialogs).toHaveLength(1);
+    // The runner recognises the dialog by its title, and reads the request
+    // from its placeholder.
+    expect(dialogs[0]!.title).toBe(SUBAGENT_DIALOG);
+    expect(JSON.parse(dialogs[0]!.placeholder)).toEqual({
+      toolCallId: CALL_ID,
+      description: "Count the tests",
+      prompt: "Count the test files in src.",
+    });
+    // Without the signal, an aborted turn leaves the call waiting forever.
+    expect(dialogs[0]!.options).toEqual({ signal });
+  });
+
+  it("returns the subagent's final message as the call's result", async () => {
+    const reply: SubagentReply = { text: "There are 12." };
+    const { outcome } = await callSubagentTool(JSON.stringify(reply));
+
+    expect(outcome).toEqual({
+      result: { content: [{ type: "text", text: "There are 12." }], details: {} },
+    });
+  });
+
+  it("fails the call with the runner's error, so the agent sees what went wrong", async () => {
+    const reply: SubagentReply = { error: "The subagent's pi process exited." };
+    const { outcome } = await callSubagentTool(JSON.stringify(reply));
+
+    expect("error" in outcome && outcome.error).toBeInstanceOf(Error);
+    expect("error" in outcome && (outcome.error as Error).message).toBe(
+      "The subagent's pi process exited.",
+    );
+  });
+
+  it("fails the call when the dialog gets no answer", async () => {
+    // pi gives no answer when the turn was aborted or the dialog cancelled.
+    const { outcome } = await callSubagentTool(undefined);
+
+    expect("error" in outcome && outcome.error).toBeInstanceOf(Error);
   });
 });

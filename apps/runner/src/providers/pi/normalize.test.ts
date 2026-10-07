@@ -14,8 +14,9 @@
  * the cases below. The tests do not check event ids or `at` timestamps.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderEvent } from "@hercule/protocol";
-import { normalize, buildNormalizingState } from "./normalize";
+import type { ProviderEvent, SubagentId } from "@hercule/protocol";
+import { normalize, buildNormalizingState, buildSubagentState } from "./normalize";
+import { SUBAGENT_TOOL } from "./extension";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -271,6 +272,173 @@ describe("normalizing a tool call on a pi turn", () => {
     expect(filterByTag(edited, "item.started")[0]?.kind).toBe("file_change");
     expect(filterByTag(written, "item.started")[0]?.kind).toBe("file_change");
     expect(filterByTag(other, "item.started")[0]?.kind).toBe("tool_call");
+  });
+});
+
+describe("normalizing a subagent call on a pi turn", () => {
+  const CHILD: SubagentId = "pi-child-1";
+  const TASK = { description: "Count the tests", prompt: "Count the test files in src." };
+
+  it("reports a subagent call as a subagent item, named by its task", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      buildToolStart(SUBAGENT_TOOL, TASK),
+    ]);
+
+    const started = filterByTag(events, "item.started")[0];
+    expect(started?.kind).toBe("subagent");
+    // The prompt can be long, so the row shows only the task's short name.
+    expect(started?.detail).toEqual({ name: SUBAGENT_TOOL, description: "Count the tests" });
+  });
+
+  it("lists the subagent the call started on the call's completion", () => {
+    const state = buildTestState();
+    normalizeEvents(state, [{ type: "agent_start" }, buildToolStart(SUBAGENT_TOOL, TASK)]);
+    // The adapter records the subagent on the call's item once it started it.
+    state.tools.get(CALL)!.subagentId = CHILD;
+
+    const events = normalizeEvents(state, [buildToolEnd(false)]);
+
+    expect(filterByTag(events, "item.completed")[0]?.detail).toEqual({
+      name: SUBAGENT_TOOL,
+      description: "Count the tests",
+      subagentIds: [CHILD],
+    });
+  });
+
+  it("lists the subagent on a call the turn's end completes as failed", () => {
+    const state = buildTestState();
+    normalizeEvents(state, [{ type: "agent_start" }, buildToolStart(SUBAGENT_TOOL, TASK)]);
+    state.tools.get(CALL)!.subagentId = CHILD;
+
+    const events = normalizeEvents(state, [{ type: "agent_settled" }]);
+
+    const completed = filterByTag(events, "item.completed")[0];
+    expect(completed?.status).toBe("failed");
+    // Without the id, the row of a call cut off by the turn's end would lose
+    // its link to the subagent it started.
+    expect(completed?.detail).toEqual({
+      name: SUBAGENT_TOOL,
+      description: "Count the tests",
+      subagentIds: [CHILD],
+    });
+  });
+
+  it("lists no subagent on a call that started none", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      buildToolStart(SUBAGENT_TOOL, TASK),
+      buildToolEnd(true),
+    ]);
+
+    expect(filterByTag(events, "item.completed")[0]?.detail).toEqual({
+      name: SUBAGENT_TOOL,
+      description: "Count the tests",
+    });
+  });
+});
+
+describe("the last text an agent wrote in a turn", () => {
+  const TOOL_ONLY = [{ type: "toolCall", id: CALL, name: "bash", arguments: { command: "ls" } }];
+
+  it("is the text of the last message that has any, skipping messages that only call tools", () => {
+    const state = buildTestState();
+
+    normalizeEvents(state, [
+      { type: "agent_start" },
+      { type: "turn_end", message: buildMessage([{ type: "text", text: "Looking." }]) },
+      {
+        type: "turn_end",
+        message: buildMessage([
+          { type: "text", text: "There are " },
+          { type: "thinking", thinking: "counted" },
+          { type: "text", text: "12." },
+        ]),
+      },
+      { type: "turn_end", message: buildMessage(TOOL_ONLY) },
+    ]);
+
+    // A subagent's reply to its parent is this text, so a last message that
+    // only calls tools must not blank it out.
+    expect(state.lastAssistantText).toBe("There are 12.");
+  });
+
+  it("starts empty again with the next turn", () => {
+    const state = buildTestState();
+    normalizeEvents(state, ANSWERING);
+    expect(state.lastAssistantText).toBe("OK");
+
+    normalizeEvents(state, [{ type: "agent_start" }]);
+
+    // A turn that writes nothing must not reply with the previous turn's text.
+    expect(state.lastAssistantText).toBe("");
+  });
+});
+
+describe("normalizing a subagent's pi process", () => {
+  const CHILD: SubagentId = "pi-child-1";
+
+  /** Returns the session's own state after one answered turn, and a subagent state built from it. */
+  const buildRootAndChild = () => {
+    const root = buildTestState();
+    normalizeEvents(root, ANSWERING);
+    return { root, child: buildSubagentState(root, CHILD) };
+  };
+
+  it("attributes every event to the subagent, except the session's total", () => {
+    const { child } = buildRootAndChild();
+
+    const events = normalizeEvents(child, ANSWERING);
+
+    const unattributed = events.filter((event) => !("subagentId" in event));
+    expect(listEventTags(unattributed)).toEqual(["session.usage.updated"]);
+    for (const event of events) {
+      if ("subagentId" in event) expect(event.subagentId).toBe(CHILD);
+    }
+    expect(events.length).toBeGreaterThan(unattributed.length);
+  });
+
+  it("reports its own usage and the session's total, which now includes it", () => {
+    const { child } = buildRootAndChild();
+
+    const events = normalizeEvents(child, ANSWERING);
+
+    const [own, session] = filterByTag(events, "session.usage.updated");
+    expect(own?.subagentId).toBe(CHILD);
+    expect(own?.usage).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+    expect(session !== undefined && "subagentId" in session).toBe(false);
+    // The session's own agent spent one answer, and the subagent another.
+    expect(session?.usage).toMatchObject({ inputTokens: 240, outputTokens: 16 });
+  });
+
+  it("completes its turn with its own usage and cost", () => {
+    const { child } = buildRootAndChild();
+
+    const completed = filterByTag(normalizeEvents(child, ANSWERING), "turn.completed")[0];
+
+    expect(completed?.subagentId).toBe(CHILD);
+    expect(completed?.usage).toMatchObject({ inputTokens: 120, outputTokens: 8 });
+    expect(completed?.costUsd).toBe(usage.cost.total);
+  });
+
+  it("leaves the subagent out of the usage on the session's own turn", () => {
+    const { root, child } = buildRootAndChild();
+    normalizeEvents(child, ANSWERING);
+
+    const events = normalizeEvents(root, ANSWERING);
+
+    // The session's own agent answered twice; the subagent's answer is not
+    // its own.
+    expect(filterByTag(events, "turn.completed")[0]?.usage).toMatchObject({
+      inputTokens: 240,
+      outputTokens: 16,
+    });
+    // The session's total still counts the subagent, after it ended.
+    expect(filterByTag(events, "session.usage.updated")).toHaveLength(1);
+    expect(filterByTag(events, "session.usage.updated")[0]?.usage).toMatchObject({
+      inputTokens: 360,
+      outputTokens: 24,
+    });
   });
 });
 

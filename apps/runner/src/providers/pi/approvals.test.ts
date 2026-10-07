@@ -1,8 +1,8 @@
 /**
  * Tests parking on an approval: the request the user sees when the Hercule
  * extension holds a tool call, the response written back to pi for each
- * decision, and what happens to a second approval asked while the first is
- * still open. A request nobody can answer leaves the session silently stuck,
+ * decision, and a second approval asked while the first is still open: pi
+ * runs a message's tool calls at the same time, so both are open at once. A request nobody can answer leaves the session silently stuck,
  * so the tests check that no response is sent too early as carefully as they
  * check the response itself.
  *
@@ -11,10 +11,6 @@
  * `createDialogPromise` in `dist/modes/rpc/rpc-mode.js` emits for
  * `ctx.ui.confirm`. The responses use the `extension_ui_response` shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares: `{ confirmed }` or `{ cancelled }`.
- *
- * pi's response frame has no field for a reason. So a second approval asked
- * while one is open gets a plain deny, and the reason goes on the session's
- * stream as a runtime warning.
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -253,42 +249,62 @@ describe("what each decision does to the parked session", () => {
 });
 
 describe("a second approval asked while one is open", () => {
-  it("denies it at once and opens no second card", async () => {
+  /**
+   * Parks on a shell command, then pushes a second call and its dialog, as pi
+   * does when it runs two tool calls of one message at the same time.
+   */
+  const parkOnTwoCommands = async (): Promise<DrivenAdapter> => {
     const run = await parkOnCommand();
     await awaitOpenedRequest(run);
-
+    run.child.push({
+      type: "tool_execution_start",
+      toolCallId: SECOND_CALL,
+      toolName: "bash",
+      args: { command: "ls" },
+    });
     run.child.push({
       type: "extension_ui_request",
       id: SECOND_UI,
       method: "confirm",
-      title: "Run a shell command?",
+      title: "Approve bash?",
       message: buildDialogMessage(SECOND_CALL, "bash"),
     });
+    await waitUntil("docked both", () => filterByTag(run.seen, "request.opened").length === 2);
+    return run;
+  };
 
-    const written = await awaitAnswer(run, SECOND_UI);
-    expect(written["confirmed"]).toBe(false);
+  it("opens a second card while the first is still open, and answers pi nothing yet", async () => {
+    const run = await parkOnTwoCommands();
     await settle();
-    // The composer holds one docked card; a second would have nowhere to go.
-    expect(filterByTag(run.seen, "request.opened")).toHaveLength(1);
-    expect(listSentCommands(run.sent, "extension_ui_response")).toHaveLength(1);
+    expect(listSentCommands(run.sent, "extension_ui_response")).toHaveLength(0);
   });
 
-  it("warns about why it was denied", async () => {
-    const run = await parkOnCommand();
-    await awaitOpenedRequest(run);
+  it("answers each dialog on its own, the second one first", async () => {
+    const run = await parkOnTwoCommands();
+    const [first, second] = filterByTag(run.seen, "request.opened");
 
-    run.child.push({
-      type: "extension_ui_request",
-      id: SECOND_UI,
-      method: "confirm",
-      title: "Run a shell command?",
-      message: buildDialogMessage(SECOND_CALL, "bash"),
-    });
-    await awaitAnswer(run, SECOND_UI);
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, second!.request.requestId, "deny"),
+    );
+    expect((await awaitAnswer(run, SECOND_UI))["confirmed"]).toBe(false);
+    expect(listSentCommands(run.sent, "extension_ui_response")).toHaveLength(1);
 
-    const said = filterByTag(run.seen, "runtime.warning")
-      .map((event) => event.message)
-      .join(" ");
-    expect(said.toLowerCase()).toContain("one approval at a time");
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, first!.request.requestId, "allow"),
+    );
+    expect((await awaitAnswer(run, UI))["confirmed"]).toBe(true);
+    expect(filterByTag(run.seen, "request.resolved").map((resolved) => resolved.requestId)).toEqual(
+      [second!.request.requestId, first!.request.requestId],
+    );
+  });
+
+  it("cancels both when the session is interrupted", async () => {
+    const run = await parkOnTwoCommands();
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+
+    expect((await awaitAnswer(run, UI))["cancelled"]).toBe(true);
+    expect((await awaitAnswer(run, SECOND_UI))["cancelled"]).toBe(true);
+    expect(filterByTag(run.seen, "request.resolved")).toHaveLength(2);
   });
 });

@@ -171,6 +171,8 @@ export interface Spawn {
   readonly cwd: string | null;
   /** Pushes an event to pi's stdout, as pi does with everything but responses. */
   readonly push: (event: unknown) => void;
+  /** The commands the adapter wrote to this pi alone, in the order written. */
+  readonly sent: ReadonlyArray<Sent>;
   readonly stdinClosed: () => boolean;
   readonly kills: () => number;
   /**
@@ -274,6 +276,7 @@ export const buildFakePiSeam = (
   ) => {
     const out = createLines();
     const err = createLines();
+    const sentToThisPi: Array<Sent> = [];
     let kills = 0;
     let closed = false;
     let resolveExited: (code: number) => void = () => undefined;
@@ -291,6 +294,7 @@ export const buildFakePiSeam = (
       const type = frame["type"];
       if (typeof type !== "string") return;
       sent.push({ type, command: frame });
+      sentToThisPi.push({ type, command: frame });
       // An extension UI response is not a command, so pi never responds to it.
       if (type === "extension_ui_response") return;
       const reply = replies[type]?.(frame);
@@ -333,6 +337,7 @@ export const buildFakePiSeam = (
       env,
       cwd,
       push: (event) => out.push(JSON.stringify(event)),
+      sent: sentToThisPi,
       stdinClosed: () => closed,
       kills: () => kills,
       crash: (...complaints) => {
@@ -401,8 +406,9 @@ export const startTestSession = async (
 /** Starts a session with a turn running, so the next input steers that turn. */
 export const startBusySession = async (
   behaviour: FakePiBehaviour = {},
+  spec: SessionSpec = SPEC,
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
-  const run = await startTestSession(behaviour);
+  const run = await startTestSession(behaviour, spec);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.child.push({ type: "agent_start" });
   await waitUntil(

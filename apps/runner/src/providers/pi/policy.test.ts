@@ -13,15 +13,16 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import type { AccessMode } from "@hercule/protocol";
-import { SUBMIT_RESULT_TOOL } from "./extension";
+import { SUBAGENT_TOOL, SUBMIT_RESULT_TOOL } from "./extension";
 import { requiresApproval } from "./policy";
 import { cleanupHomes, settle, SPEC, startTestSession, filterByTag, waitUntil } from "./testing";
 
 afterAll(cleanupHomes);
 
 /**
- * pi 0.85.1's built-in tools, Hercule's `submit_result` tool, and one tool that
- * is not built in: it stands for an MCP tool or a tool a later pi adds.
+ * pi 0.85.1's built-in tools, Hercule's `submit_result` and `subagent` tools,
+ * and one tool that is not built in: it stands for an MCP tool or a tool a
+ * later pi adds.
  */
 type Tool =
   | "read"
@@ -33,6 +34,7 @@ type Tool =
   | "write"
   | "edit"
   | "submit_result"
+  | "subagent"
   | "mcp__jira__create";
 
 /** True means the approval hook holds the call and asks; false means it lets the call run. */
@@ -52,6 +54,9 @@ const TABLE: Readonly<
     // Hercule's own tool: recording the session's answer changes nothing, and
     // an unattended session has nobody to approve it.
     submit_result: false,
+    // Hercule's own tool: starting a subagent changes nothing by itself, and
+    // each of the subagent's own calls is asked about under the same mode.
+    subagent: false,
     mcp__jira__create: true,
   },
   "auto-accept-edits": {
@@ -65,6 +70,7 @@ const TABLE: Readonly<
     write: false,
     edit: false,
     submit_result: false,
+    subagent: false,
     mcp__jira__create: true,
   },
   "full-access": {
@@ -77,6 +83,7 @@ const TABLE: Readonly<
     write: false,
     edit: false,
     submit_result: false,
+    subagent: false,
     mcp__jira__create: false,
   },
 };
@@ -98,6 +105,17 @@ describe("the submit_result tool", () => {
       // copied into the extension as source and cannot import anything. This
       // test checks that its spelling matches the registered tool name.
       expect(requiresApproval(mode, SUBMIT_RESULT_TOOL)).toBe(false);
+    });
+  }
+});
+
+describe("the subagent tool", () => {
+  for (const mode of Object.keys(TABLE) as ReadonlyArray<AccessMode>) {
+    it(`runs without asking under ${mode}`, () => {
+      // Spelled out in `requiresApproval` for the same reason as
+      // `submit_result`. This test checks that the spelling matches the
+      // registered tool name.
+      expect(requiresApproval(mode, SUBAGENT_TOOL)).toBe(false);
     });
   }
 });

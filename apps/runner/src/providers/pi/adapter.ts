@@ -1,6 +1,6 @@
 /**
- * The pi adapter. It runs one pi process per session and talks to it in pi's
- * RPC mode. Everything the process reads or writes lives under the instance's
+ * The pi adapter. It runs one pi process per session, plus one per running
+ * subagent, and talks to each in pi's RPC mode. Everything the process reads or writes lives under the instance's
  * own agent directory. If pi used the developer's own directory, Hercule's
  * sessions would mix with the user's login, skills and settings. The one
  * exception is a Thread on the controller's local runner, which also reads the
@@ -28,6 +28,7 @@ import type {
   SessionSpec,
   SubagentId,
   TurnInput,
+  TurnState,
 } from "@hercule/protocol";
 import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
 import { buildUserMessage } from "../events";
@@ -40,12 +41,16 @@ import {
   EXTENSION_FILE,
   EXTENSION_SOURCE,
   OUTPUT_SCHEMA_VARIABLE,
+  SUBAGENT_DIALOG,
+  SUBAGENTS_VARIABLE,
   SUBMIT_RESULT_TOOL,
+  type SubagentReply,
 } from "./extension";
 import {
   endTurn,
   normalize,
   buildNormalizingState,
+  buildSubagentState,
   type Normalizing,
   type RunningTool,
 } from "./normalize";
@@ -91,16 +96,41 @@ export interface PiSeam {
 }
 
 /**
- * An approval the session is parked on. `request` is what every surface shows
- * and answers. `dialogId` is pi's own id for the dialog: pi reads only that id
- * and a value back, so the answer is sent under it.
+ * An approval one of the session's agents is parked on. `request` is what
+ * every surface shows and answers. `dialogId` is pi's own id for the dialog:
+ * pi reads only that id and a value back, so the answer is sent under it.
  */
 interface Park {
   readonly request: OpenRequest;
+  /** The agent whose pi holds the call, and which reads the answer. */
+  readonly agent: PiProcess;
   readonly dialogId: string;
   /** pi's id for the held tool call, used to recognise the call when it ends. */
   readonly toolCallId: string;
 }
+
+/** One pi process of a session: the session's own agent, or one of its subagents. */
+interface PiProcess {
+  readonly child: PiChild;
+  readonly rpc: PiRpc;
+  /** The normalizer's state for this process. Its `subagentId` names the agent. */
+  readonly state: Normalizing;
+  /** How many levels below the session's own agent this agent runs: 0 for the session's own. */
+  readonly depth: number;
+}
+
+/** A subagent: an agent that another agent of the session started with its `subagent` tool. */
+interface Subagent extends PiProcess {
+  readonly subagentId: SubagentId;
+  /** The agent whose `subagent` call started this subagent, and waits for its reply. */
+  readonly parent: PiProcess;
+  /** pi's id for that call's dialog, which the reply is sent under. */
+  readonly dialogId: string;
+  /** The item id of that call in the parent's transcript. */
+  readonly toolCallItemId: string | undefined;
+}
+
+const isSubagent = (agent: PiProcess): agent is Subagent => "parent" in agent;
 
 /**
  * The prompt the runner sends when a turn finishes without calling
@@ -130,12 +160,38 @@ const MAX_REPROMPTS = 2;
  */
 const MAX_REFUSED_ANSWERS = 3;
 
-/** A session this adapter hosts, and the adapter's state for its pi process. */
+/**
+ * How many subagents one session may run at once. pi runs a message's tool
+ * calls at the same time, and each subagent is a pi process with its own
+ * model calls, so a model that asked for many at once could exhaust the
+ * machine or the key's rate limit. A call over the limit fails at once and
+ * the agent can try again later (spec 06 section 13.7).
+ */
+const MAX_RUNNING_SUBAGENTS = 4;
+
+/**
+ * How many levels of subagents a session may have below its own agent. An
+ * agent at this depth gets no `subagent` tool, so a subagent's subagent cannot
+ * start another (spec 06 section 13.7).
+ */
+const MAX_SUBAGENT_DEPTH = 2;
+
+/** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {
   readonly binding: SessionBinding;
-  readonly child: PiChild;
-  readonly rpc: PiRpc;
-  readonly state: Normalizing;
+  readonly spec: SessionSpec;
+  readonly ctx: ProviderRunnerContext;
+  /** The session's own agent, whose pi process is the session's. */
+  readonly root: PiProcess;
+  /** The subagents running now, by id. An ended subagent is removed. */
+  readonly subagents: Map<SubagentId, Subagent>;
+  /** The approvals the session's agents are parked on, by request id. */
+  readonly parks: Map<string, Park>;
+  /**
+   * The model and thinking level the session runs on now. An input can change
+   * them, and a subagent starts on whatever the session uses at that moment.
+   */
+  modelSelection: ModelSelection;
   /**
    * The file the session's instructions were written to, if it has any.
    * Nothing reads the file after the session's pi is gone, so it is deleted
@@ -146,8 +202,6 @@ interface Held {
   stopping: boolean;
   /** Counts Stops so an input waiting on an RPC reply cannot continue after its Stop. */
   inputGeneration: number;
-  /** The approval this session is parked on, if any. There is at most one at a time. */
-  park: Park | undefined;
 }
 
 /**
@@ -201,17 +255,27 @@ const buildOpenRequest = (requestId: string, item: RunningTool, kind: ParkKind):
   return { ...common, kind, detail: { toolName: truncateFact(item.toolName) } };
 };
 
-/** A pi approval dialog that holds a tool call, and the id of that call. */
-interface Dialog {
-  readonly id: string;
-  readonly toolCallId: string;
-}
+/**
+ * A pi dialog the extension opened, and the tool call it is about. Either the
+ * approval hook holds the call until the user decides, or the `subagent` tool
+ * asks the runner to start a subagent with the call's task.
+ */
+type Dialog =
+  | { readonly kind: "approval"; readonly id: string; readonly toolCallId: string }
+  | {
+      readonly kind: "subagent";
+      readonly id: string;
+      readonly toolCallId: string;
+      readonly description: string;
+      readonly prompt: string;
+    };
 
 /**
- * Parses the dialog message the approval hook wrote, which is JSON naming the
- * held call. Returns an empty object when the message is not a JSON object.
+ * Parses the JSON the extension wrote into a dialog: the held call for an
+ * approval, or the task for a subagent. Returns an empty object when the text
+ * is not a JSON object.
  */
-const parseHeldCall = (message: unknown): Record<string, unknown> => {
+const parseDialogJson = (message: unknown): Record<string, unknown> => {
   if (typeof message !== "string") return {};
   try {
     const parsed: unknown = JSON.parse(message);
@@ -228,23 +292,57 @@ const readString = (record: Record<string, unknown>, key: string): string =>
   typeof record[key] === "string" ? record[key] : "";
 
 /**
- * Parses a frame as a pi approval dialog. Returns undefined for any other
- * frame. Only `confirm` requests count: pi also sends notifications and status
- * updates as requests, and those need no response.
+ * Parses a frame as a dialog the extension opened. Returns undefined for any
+ * other frame. Only two requests count: a `confirm` from the approval hook,
+ * and an `input` from the `subagent` tool, which pi sends with the JSON in
+ * its placeholder. pi also sends notifications and status updates as
+ * requests, and those need no response.
  */
 const parseDialog = (frame: unknown): Dialog | undefined => {
   if (typeof frame !== "object" || frame === null) return undefined;
   const asked = frame as Record<string, unknown>;
   const id = asked["id"];
-  if (
-    asked["type"] !== "extension_ui_request" ||
-    asked["method"] !== "confirm" ||
-    typeof id !== "string"
-  ) {
-    return undefined;
+  if (asked["type"] !== "extension_ui_request" || typeof id !== "string") return undefined;
+  if (asked["method"] === "confirm") {
+    const held = parseDialogJson(asked["message"]);
+    return { kind: "approval", id, toolCallId: readString(held, "toolCallId") };
   }
-  return { id, toolCallId: readString(parseHeldCall(asked["message"]), "toolCallId") };
+  if (asked["method"] === "input" && asked["title"] === SUBAGENT_DIALOG) {
+    const task = parseDialogJson(asked["placeholder"]);
+    return {
+      kind: "subagent",
+      id,
+      toolCallId: readString(task, "toolCallId"),
+      description: readString(task, "description"),
+      prompt: readString(task, "prompt"),
+    };
+  }
+  return undefined;
 };
+
+/**
+ * Builds the reply a subagent gives its parent from how its turn ended: its
+ * last message when the turn completed, and otherwise why it has none.
+ */
+const buildSubagentReply = (
+  ended: TurnState,
+  lastAssistantText: string,
+  error: string | undefined,
+): SubagentReply => {
+  if (ended === "completed") {
+    return {
+      text:
+        lastAssistantText === ""
+          ? "The subagent finished without a final message."
+          : lastAssistantText,
+    };
+  }
+  if (ended === "interrupted") return { error: "The subagent was stopped before it finished." };
+  return { error: error === undefined ? "The subagent failed." : `The subagent failed: ${error}` };
+};
+
+/** The reply a subagent's parent gets when the user stops the subagent. */
+const STOPPED_BY_USER: SubagentReply = { error: "The user stopped this subagent." };
 
 /** Checks whether a frame is pi's `agent_settled` event: pi has nothing left to run for now. */
 const announcesAgentSettled = (frame: unknown): boolean =>
@@ -350,17 +448,33 @@ const buildUserMaterialFlags = (material: UserMaterial | undefined): ReadonlyArr
       ];
 
 /**
- * Builds pi's command-line arguments for a session. A new session gets
- * Hercule's session id with `--session-id`. A resume passes the transcript with
- * `--session` instead: pi rejects the two together, because the transcript
- * already has its own session id.
+ * The session's own pi process, as opposed to a subagent's: its id, and the
+ * transcript it continues, if any.
+ */
+interface SessionProcess {
+  readonly sessionId: string;
+  readonly transcript: string | undefined;
+}
+
+/**
+ * Builds pi's command-line arguments for a session's own pi process, or for a
+ * subagent's when `session` is undefined.
+ *
+ * - A new session gets Hercule's session id with `--session-id`. A resume
+ *   passes the transcript with `--session` instead: pi rejects the two
+ *   together, because the transcript already has its own session id.
+ * - A subagent keeps no transcript (`--no-session`), because it lives only
+ *   as long as its one task. It gets the same tools, access and user material
+ *   as the session, but not the Agent's instructions: its parent's prompt is
+ *   its whole brief.
  */
 const buildArgv = (
   spec: SessionSpec,
   ctx: ProviderRunnerContext,
-  sessionId: string,
-  transcript: string | undefined,
+  selection: ModelSelection,
+  session: SessionProcess | undefined,
 ): ReadonlyArray<string> => {
+  const transcript = session?.transcript;
   const resuming = spec.continue?.mode === "resume" && transcript !== undefined;
   const excluded = (spec.disallowedTools ?? []).flatMap((family) => PI_TOOLS_BY_FAMILY[family]);
   return [
@@ -389,19 +503,25 @@ const buildArgv = (
     "--offline",
     "-e",
     buildExtensionPath(ctx.home),
-    "--session-dir",
-    buildSessionsDir(ctx.home),
-    ...(resuming ? ["--session", transcript] : ["--session-id", sessionId]),
-    ...(spec.continue?.mode === "fork" && transcript !== undefined ? ["--fork", transcript] : []),
+    ...(session === undefined
+      ? ["--no-session"]
+      : [
+          "--session-dir",
+          buildSessionsDir(ctx.home),
+          ...(resuming ? ["--session", transcript] : ["--session-id", session.sessionId]),
+          ...(spec.continue?.mode === "fork" && transcript !== undefined
+            ? ["--fork", transcript]
+            : []),
+        ]),
     "--model",
-    `${ZAI}/${spec.modelSelection.model}`,
+    `${ZAI}/${selection.model}`,
     "--thinking",
-    getSessionThinkingLevel(spec.modelSelection),
+    getSessionThinkingLevel(selection),
     // Added after pi's own system prompt, never replacing it, and passed as
     // the path `prepareHome` wrote it to, not as the text.
-    ...(spec.systemPrompt === undefined
+    ...(spec.systemPrompt === undefined || session === undefined
       ? []
-      : ["--append-system-prompt", buildSystemPromptPath(ctx.home, sessionId)]),
+      : ["--append-system-prompt", buildSystemPromptPath(ctx.home, session.sessionId)]),
     // A Thread on the controller's local runner is the exception to the
     // `--no-*` flags above: it also sees the user's own skills, prompt
     // templates and instructions (spec 06 section 9.1). pi still loads a
@@ -454,75 +574,84 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     }
   };
 
-  /** Tells pi what was decided about the call it is holding. */
-  const sendDecision = (held: Held, dialogId: string, decision: ApprovalDecision): void => {
+  /** Writes one response to a dialog the extension opened in `agent`'s pi. */
+  const answerDialog = (
+    agent: PiProcess,
+    dialogId: string,
+    answer: Record<string, unknown>,
+  ): void => {
     attempt(() =>
-      held.child.write(
-        `${JSON.stringify({ type: "extension_ui_response", id: dialogId, ...buildDialogAnswer(decision) })}\n`,
+      agent.child.write(
+        `${JSON.stringify({ type: "extension_ui_response", id: dialogId, ...answer })}\n`,
       ),
     );
   };
 
+  /** Sends a subagent's reply to the `subagent` call in its parent that waits for it. */
+  const answerParent = (subagent: Subagent, reply: SubagentReply): void => {
+    answerDialog(subagent.parent, subagent.dialogId, { value: JSON.stringify(reply) });
+  };
+
   /**
-   * Resolves the approval the session is parked on, if any. It sends the
-   * decision to pi, so the held call runs or is blocked, and emits
-   * `request.resolved`, so surfaces stop offering the card. Does nothing when
-   * the session is not parked.
+   * Resolves one open approval. It sends the decision to the pi that holds
+   * the call, so the call runs or is blocked, and emits `request.resolved`,
+   * so surfaces stop offering the card.
    */
-  const resolvePark = (held: Held, decision: ApprovalDecision): void => {
-    const park = held.park;
-    if (park === undefined) return;
-    held.park = undefined;
+  const resolvePark = (held: Held, park: Park, decision: ApprovalDecision): void => {
+    held.parks.delete(park.request.requestId);
     // Mark the call as declined, so the transcript shows the user's decision
     // instead of a failed call.
-    if (decision !== "allow") held.state.declined.add(park.toolCallId);
-    sendDecision(held, park.dialogId, decision);
+    if (decision !== "allow") park.agent.state.declined.add(park.toolCallId);
+    answerDialog(park.agent, park.dialogId, buildDialogAnswer(decision));
+    const subagentId = park.agent.state.subagentId;
     emit({
       _tag: "request.resolved",
       eventId: crypto.randomUUID(),
       sessionId: held.binding.sessionId,
       at: now(),
+      ...(subagentId === undefined ? {} : { subagentId }),
       requestId: park.request.requestId,
       decision,
     });
   };
 
+  /** Cancels every open approval of `agent`. Nobody decided them; their agent stopped waiting. */
+  const cancelParksOf = (held: Held, agent: PiProcess): void => {
+    for (const park of [...held.parks.values()]) {
+      if (park.agent === agent) resolvePark(held, park, "cancel");
+    }
+  };
+
   /**
-   * Aborts the turn pi is running. The `turn.completed` event reports the end.
-   * The reason is recorded here in `endedBySystem` instead of read back from
-   * pi, because pi reports an abort during a tool call as an error on the
-   * message in flight, while the turn actually ended because the system asked.
+   * Aborts the turn an agent's pi is running. The `turn.completed` event
+   * reports the end. The reason is recorded here in `endedBySystem` instead of
+   * read back from pi, because pi reports an abort during a tool call as an
+   * error on the message in flight, while the turn actually ended because the
+   * system asked.
    */
   const abortTurn = (
-    held: Held,
+    agent: PiProcess,
     reason: NonNullable<Normalizing["endedBySystem"]>,
   ): Effect.Effect<void> =>
     Effect.suspend(() => {
-      held.state.endedBySystem ??= reason;
-      return Effect.ignore(held.rpc.send({ type: "abort" }));
+      agent.state.endedBySystem ??= reason;
+      return Effect.ignore(agent.rpc.send({ type: "abort" }));
     });
 
   /**
-   * Handles a pi approval dialog: opens an approval request for the held call,
-   * or denies the dialog at once when the session is already parked or the
-   * call is unknown.
+   * Handles a pi approval dialog: opens an approval request for the held
+   * call, or denies the dialog at once when the call is unknown. Each agent
+   * may have several approvals open at once, because pi runs a message's tool
+   * calls at the same time; each is answered on its own.
    */
-  const openPark = (held: Held, dialog: Dialog): void => {
+  const openPark = (held: Held, agent: PiProcess, dialog: Dialog): void => {
     const sessionId = held.binding.sessionId;
-    if (held.park !== undefined) {
-      sendDecision(held, dialog.id, "deny");
-      warn(
-        sessionId,
-        "pi asked for a second approval while the first was still open. The pi adapter handles one approval at a time, so the second was denied; pi can ask again later.",
-      );
-      return;
-    }
-    const item = held.state.tools.get(dialog.toolCallId);
+    const item = agent.state.tools.get(dialog.toolCallId);
     if (item === undefined) {
       // The approval card is shown on the call it is about, and no such call
       // is running. Denying is the only way to avoid pi holding a call that
       // nobody will ever answer.
-      sendDecision(held, dialog.id, "deny");
+      answerDialog(agent, dialog.id, buildDialogAnswer("deny"));
       warn(sessionId, "pi asked for approval of a tool call that is not running, so it was denied");
       return;
     }
@@ -531,20 +660,179 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       item,
       APPROVALS[item.kind] ?? "tool_approval",
     );
-    held.park = { request, dialogId: dialog.id, toolCallId: dialog.toolCallId };
+    held.parks.set(request.requestId, {
+      request,
+      agent,
+      dialogId: dialog.id,
+      toolCallId: dialog.toolCallId,
+    });
+    const subagentId = agent.state.subagentId;
     emit({
       _tag: "request.opened",
       eventId: crypto.randomUUID(),
       sessionId,
       at: now(),
+      ...(subagentId === undefined ? {} : { subagentId }),
       request,
     });
   };
 
+  /** Returns the running subagents `agent` started itself. */
+  const listStartedBy = (held: Held, agent: PiProcess): ReadonlyArray<Subagent> =>
+    [...held.subagents.values()].filter((subagent) => subagent.parent === agent);
+
   /**
-   * Ends a session, whichever way it ended: removes its entry, cancels its
-   * open approval, ends its turn and emits `session.exited`. `message` is pi's
-   * last stderr output; it becomes both the turn's error and the exit message.
+   * Closes a subagent's pi: aborts whatever it is running, closes its stdin,
+   * which makes pi exit, and kills it if it is still running after
+   * `STOP_DEADLINE`. A subagent keeps no transcript, so nothing is lost either
+   * way, but a pi left running would keep the instance's key and its model
+   * calls.
+   */
+  const closeProcess = (child: PiChild): void => {
+    // Without the abort, a subagent stopped mid model call waits for that
+    // call before it reads the end of its input. Nothing waits for pi's
+    // response, because the process is going away.
+    attempt(() => child.write(`${JSON.stringify({ type: "abort" })}\n`));
+    attempt(() => child.end());
+    Effect.runFork(
+      Effect.timeoutOption(
+        Effect.promise(() => child.exited),
+        STOP_DEADLINE,
+      ).pipe(
+        Effect.tap((exited) =>
+          Option.isNone(exited) ? Effect.sync(() => attempt(() => child.kill())) : Effect.void,
+        ),
+      ),
+    );
+  };
+
+  /**
+   * Ends a running subagent, after first ending every subagent below it. Does
+   * nothing when the subagent has already ended. For the subagent it:
+   *
+   * - cancels its open approvals;
+   * - ends its turn as `ended` says, when the turn is still open;
+   * - sends `reply` to its parent, unless `reply` is undefined because the
+   *   parent's call no longer waits for one;
+   * - closes its pi process.
+   */
+  const endSubagent = (
+    held: Held,
+    subagent: Subagent,
+    ended: Normalizing["stopped"],
+    reply: SubagentReply | undefined,
+  ): void => {
+    if (held.subagents.get(subagent.subagentId) !== subagent) return;
+    held.subagents.delete(subagent.subagentId);
+    // The parent of each of these is ending too, so none of them is answered.
+    for (const below of listStartedBy(held, subagent)) {
+      endSubagent(held, below, { state: "interrupted" }, undefined);
+    }
+    cancelParksOf(held, subagent);
+    for (const event of endTurn(subagent.state, ended)) emit(event);
+    if (reply !== undefined) answerParent(subagent, reply);
+    closeProcess(subagent.child);
+  };
+
+  /**
+   * Starts the subagent an agent's `subagent` tool asked for: a pi process of
+   * its own, on the session's current model, prompted with the call's task.
+   * The call fails at once, with the reason as its result, when the session
+   * already runs `MAX_RUNNING_SUBAGENTS` subagents or the process cannot start.
+   */
+  const startSubagent = (
+    held: Held,
+    parent: PiProcess,
+    dialog: Extract<Dialog, { kind: "subagent" }>,
+  ): void => {
+    const refuse = (error: string): void => {
+      answerDialog(parent, dialog.id, { value: JSON.stringify({ error } satisfies SubagentReply) });
+    };
+    if (held.subagents.size >= MAX_RUNNING_SUBAGENTS) {
+      refuse(
+        `This session already runs ${String(MAX_RUNNING_SUBAGENTS)} subagents, the most it may run at once. Wait for one of them to finish, or do the task yourself.`,
+      );
+      return;
+    }
+    const binary = held.ctx.binary;
+    if (binary === undefined) {
+      refuse(`There is no ${PI_BINARY} on this machine to run the subagent.`);
+      return;
+    }
+    const subagentId = crypto.randomUUID();
+    const depth = parent.depth + 1;
+    let child: PiChild;
+    try {
+      child = seam.spawn(
+        [binary, ...buildArgv(held.spec, held.ctx, held.modelSelection, undefined)],
+        buildAgentEnv(held.ctx, held.spec, depth),
+        held.ctx.cwd,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      refuse(`The subagent could not start: ${message}`);
+      warn(held.binding.sessionId, `could not start a pi subagent: ${message}`);
+      return;
+    }
+    const state = buildSubagentState(held.root.state, subagentId);
+    const item = parent.state.tools.get(dialog.toolCallId);
+    if (item !== undefined) item.subagentId = subagentId;
+    const subagent: Subagent = {
+      child,
+      rpc: makeRpc(child, (line, frame) => onLine(held, subagent, line, frame)),
+      state,
+      depth,
+      subagentId,
+      parent,
+      dialogId: dialog.id,
+      toolCallItemId: item?.itemId,
+    };
+    held.subagents.set(subagentId, subagent);
+    const parentSubagentId = parent.state.subagentId;
+    emit({
+      _tag: "subagent.started",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      subagentId,
+      ...(parentSubagentId === undefined ? {} : { parentSubagentId }),
+      ...(item === undefined ? {} : { itemId: item.itemId }),
+      ...(dialog.description === "" ? {} : { description: truncateMessage(dialog.description) }),
+    });
+    watchChild(held, subagent);
+    Effect.runFork(subagent.rpc.pump);
+    // Create the id before sending, as `sendInput` does: pi's `agent_start`
+    // can arrive before its response to the prompt.
+    const turnId = (state.turnId = crypto.randomUUID());
+    for (const event of buildUserMessage({
+      sessionId: held.binding.sessionId,
+      subagentId,
+      turnId,
+      text: dialog.prompt,
+      steered: false,
+      providerRefs: { nativeSessionId: held.binding.nativeSessionId },
+    })) {
+      emit(event);
+    }
+    Effect.runFork(
+      Effect.catch(subagent.rpc.send({ type: "prompt", message: dialog.prompt }), (error) =>
+        Effect.sync(() =>
+          endSubagent(
+            held,
+            subagent,
+            { state: "failed", error: `pi did not take the subagent's task: ${error}` },
+            { error: `The subagent could not start: ${error}` },
+          ),
+        ),
+      ),
+    );
+  };
+
+  /**
+   * Ends a session, whichever way it ended: removes its entry, ends its
+   * subagents, cancels its open approvals, ends its turn and emits
+   * `session.exited`. `message` is pi's last stderr output; it becomes both
+   * the turn's error and the exit message.
    */
   const exitSession = (sessionId: string, reason: ExitReason, message?: string): void => {
     const held = sessions.get(sessionId);
@@ -557,15 +845,19 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     // every session ever started in this instance.
     const instructions = held.systemPromptFile;
     if (instructions !== undefined) attempt(() => rmSync(instructions, { force: true }));
+    // A subagent never outlives its session. No event is made up for its
+    // turn: the controller stops every running subagent when the session
+    // exits (spec 06 section 13.2).
+    endAllSubagents(held);
     // Nobody can answer an approval on a session that is gone. Cancel it
     // instead of denying it, because nobody decided.
-    resolvePark(held, "cancel");
+    cancelParksOf(held, held.root);
     // The turn and its items end with pi. An item left running would show a
     // spinner for as long as anyone looks at the session. A stop marks the
     // turn interrupted; a pi that exited by itself mid-turn marks it failed,
     // with its stderr as the error.
     for (const event of endTurn(
-      held.state,
+      held.root.state,
       held.stopping
         ? { state: "interrupted" }
         : {
@@ -586,19 +878,33 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /**
+   * Closes every subagent's pi without reporting anything about their turns,
+   * for a session that is ending. Their open approvals are cancelled, because
+   * those cards could never be answered.
+   */
+  const endAllSubagents = (held: Held): void => {
+    for (const subagent of held.subagents.values()) {
+      cancelParksOf(held, subagent);
+      closeProcess(subagent.child);
+    }
+    held.subagents.clear();
+  };
+
+  /**
    * Re-prompts the turn to call `submit_result`, inside the turn already open.
    * It sends pi's `prompt` command directly instead of a session input, because
    * an input would show up in the transcript as a message the user never wrote.
    */
   const askAgain = (held: Held): void => {
-    held.state.reprompts += 1;
+    const state = held.root.state;
+    state.reprompts += 1;
     Effect.runFork(
-      Effect.catch(held.rpc.send({ type: "prompt", message: REPROMPT }), (error) =>
+      Effect.catch(held.root.rpc.send({ type: "prompt", message: REPROMPT }), (error) =>
         Effect.sync(() => {
           // Nothing will end this turn now, so end it here. A turn left open
           // would make the session look busy forever.
           warn(held.binding.sessionId, `could not ask pi again for an answer: ${error}`);
-          for (const event of endTurn(held.state)) emit(event);
+          for (const event of endTurn(state)) emit(event);
         }),
       ),
     );
@@ -614,54 +920,95 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       held.binding.sessionId,
       `pi rejected ${String(MAX_REFUSED_ANSWERS)} calls to ${SUBMIT_RESULT_TOOL} because their arguments do not match this session's output schema, so the turn was ended after the last one`,
     );
-    Effect.runFork(abortTurn(held, "schema"));
+    Effect.runFork(abortTurn(held.root, "schema"));
   };
 
   /**
-   * Handles one line of pi's stdout that is not a response to a command. An
-   * approval dialog is handled here. Anything else goes to the normalizer,
-   * which turns it into the session's events.
+   * Checks whether `agent` is still one of `held`'s running agents. Lines from
+   * a pi the adapter has already let go of are ignored.
    */
-  const onLine = (sessionId: string, line: string, frame: unknown): void => {
-    const held = sessions.get(sessionId);
-    if (held === undefined) return;
+  const isRunning = (held: Held, agent: PiProcess): boolean =>
+    sessions.get(held.binding.sessionId) === held &&
+    (!isSubagent(agent) || held.subagents.get(agent.subagentId) === agent);
+
+  /**
+   * Handles one line of an agent's pi stdout that is not a response to a
+   * command. A dialog is handled here. Anything else goes to the normalizer,
+   * which turns it into the session's events.
+   *
+   * When an agent's turn ends, so does every subagent it started that is
+   * still running: a call that no longer waits for a reply leaves its
+   * subagent with nobody to work for. A subagent's own turn ending ends the
+   * subagent, and its last message goes to its parent as the reply.
+   */
+  const onLine = (held: Held, agent: PiProcess, line: string, frame: unknown): void => {
+    if (!isRunning(held, agent)) return;
     // When the turn still owes an answer, pi settling does not end the turn.
     // The normalizer never sees this settle, so the turn stays open while the
     // runner re-prompts.
-    if (announcesAgentSettled(frame) && owesAnswer(held.state)) {
+    if (announcesAgentSettled(frame) && owesAnswer(agent.state)) {
       askAgain(held);
       return;
     }
     const dialog = parseDialog(frame);
     // A dialog is not an event about what pi did, so the normalizer never
     // sees it.
-    if (dialog !== undefined) {
-      openPark(held, dialog);
+    if (dialog?.kind === "approval") {
+      openPark(held, agent, dialog);
       return;
     }
-    for (const event of normalize(held.state, line, frame)) {
+    if (dialog?.kind === "subagent") {
+      startSubagent(held, agent, dialog);
+      return;
+    }
+    let completed: Extract<ProviderEvent, { _tag: "turn.completed" }> | undefined;
+    for (const event of normalize(agent.state, line, frame)) {
+      // A `subagent` call normally ends after its subagent replied. One that
+      // ends first, because its turn was aborted, no longer waits for the
+      // subagent, so the subagent stops with nobody to answer.
+      if (event._tag === "item.completed" && event.kind === "subagent") {
+        for (const subagent of listStartedBy(held, agent)) {
+          if (subagent.toolCallItemId === event.itemId) {
+            endSubagent(held, subagent, { state: "interrupted" }, undefined);
+          }
+        }
+      }
       if (event._tag === "turn.completed") {
+        completed = event;
         // pi no longer holds the call once the turn ends, so an approval card
         // left open could never be answered.
-        resolvePark(held, "cancel");
+        cancelParksOf(held, agent);
+        for (const subagent of listStartedBy(held, agent)) {
+          endSubagent(held, subagent, { state: "interrupted" }, undefined);
+        }
       }
       emit(event);
     }
+    if (completed !== undefined && isSubagent(agent)) {
+      endSubagent(
+        held,
+        agent,
+        { state: completed.state },
+        buildSubagentReply(completed.state, agent.state.lastAssistantText, completed.error),
+      );
+      return;
+    }
     if (
-      held.state.refusedAnswers >= MAX_REFUSED_ANSWERS &&
-      held.state.endedBySystem === undefined
+      agent.state.refusedAnswers >= MAX_REFUSED_ANSWERS &&
+      agent.state.endedBySystem === undefined
     ) {
       stopAsking(held);
     }
   };
 
   /**
-   * Watches the child process: keeps its last stderr lines, and ends the
-   * session with them when pi exits by itself.
+   * Watches an agent's pi process: keeps its last stderr lines, and reports
+   * them when pi exits by itself. The session's own pi exiting ends the
+   * session; a subagent's pi exiting ends that subagent, and its parent gets
+   * the error as the reply.
    */
-  const watchChild = (held: Held): void => {
-    const child = held.child;
-    const sessionId = held.binding.sessionId;
+  const watchChild = (held: Held, agent: PiProcess): void => {
+    const child = agent.child;
     const complaints: Array<string> = [];
     const drained = (async () => {
       try {
@@ -682,7 +1029,18 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       // pi's last stderr lines can still be in the pipe when the exit arrives.
       // Wait for them, so a crash is reported with its reason.
       await drained;
-      exitSession(sessionId, "process_exit", code === 0 ? "" : complaints.join("\n"));
+      const message = code === 0 ? "" : complaints.join("\n");
+      if (!isSubagent(agent)) {
+        exitSession(held.binding.sessionId, "process_exit", message);
+        return;
+      }
+      const error = message === "" ? "its pi process exited" : message;
+      endSubagent(
+        held,
+        agent,
+        { state: "failed", error },
+        { error: `The subagent failed: ${error}` },
+      );
     };
     void child.exited.then(onChildGone, () => onChildGone(undefined));
   };
@@ -743,6 +1101,29 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     return env;
   };
 
+  /**
+   * Builds the environment of one agent's pi process: the instance's own, plus
+   * what the extension reads. Every agent gets the session's access mode, and
+   * the `subagent` tool unless it runs at `MAX_SUBAGENT_DEPTH`. Only the
+   * session's own agent gets the output schema, because only it answers with
+   * one.
+   */
+  const buildAgentEnv = (
+    ctx: ProviderRunnerContext,
+    spec: SessionSpec,
+    depth: number,
+  ): Record<string, string | undefined> =>
+    buildEnv(ctx, {
+      [ACCESS_MODE_VARIABLE]: spec.accessMode,
+      ...(depth < MAX_SUBAGENT_DEPTH ? { [SUBAGENTS_VARIABLE]: "1" } : {}),
+      // The schema goes in the environment, not the command line, so the
+      // arguments stay exactly as this adapter built them, whatever the schema
+      // contains.
+      ...(spec.outputSchema === undefined || depth > 0
+        ? {}
+        : { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema) }),
+    });
+
   const probe = makeProbe(seam.spawn, seam.run);
 
   const getHostedSession = (sessionId: string): Effect.Effect<Held, string> =>
@@ -765,17 +1146,20 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     generation: number,
   ): Effect.Effect<void, string> =>
     Effect.gen(function* () {
-      yield* held.rpc.send({ type: "set_model", provider: ZAI, modelId: selection.model });
+      const root = held.root;
+      yield* root.rpc.send({ type: "set_model", provider: ZAI, modelId: selection.model });
       // Record the model now, not after the level: pi has already switched
       // model, and if pi then rejected the level, turns would report the old
       // model.
-      held.state.model = selection.model;
+      root.state.model = selection.model;
+      held.modelSelection = { ...held.modelSelection, model: selection.model };
       if (held.inputGeneration !== generation || held.stopping)
         return yield* Effect.fail("the input was stopped before delivery");
-      yield* held.rpc.send({
+      yield* root.rpc.send({
         type: "set_thinking_level",
         level: getSessionThinkingLevel(selection),
       });
+      held.modelSelection = selection;
     });
 
   return {
@@ -821,16 +1205,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           try: () => {
             prepareHome(ctx, sessionId, spec);
             return seam.spawn(
-              [binary, ...buildArgv(spec, ctx, sessionId, transcript)],
-              buildEnv(ctx, {
-                [ACCESS_MODE_VARIABLE]: spec.accessMode,
-                // The schema goes in the environment, not the command line,
-                // so the arguments stay exactly as this adapter built them,
-                // whatever the schema contains.
-                ...(spec.outputSchema === undefined
-                  ? {}
-                  : { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema) }),
-              }),
+              [binary, ...buildArgv(spec, ctx, spec.modelSelection, { sessionId, transcript })],
+              buildAgentEnv(ctx, spec, 0),
               // The session's working directory. pi resolves every relative
               // path against the directory it starts in, so a child that
               // inherited the runner's directory would write the user's work
@@ -851,21 +1227,28 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
         const state = buildNormalizingState(sessionId, nativeSessionId, spec.outputSchema);
         state.model = spec.modelSelection.model;
-        const rpc = makeRpc(child, (line, frame) => onLine(sessionId, line, frame));
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
+        const root: PiProcess = {
+          child,
+          rpc: makeRpc(child, (line, frame) => onLine(held, root, line, frame)),
+          state,
+          depth: 0,
+        };
         const held: Held = {
           binding,
-          child,
-          rpc,
-          state,
+          spec,
+          ctx,
+          root,
+          subagents: new Map(),
+          parks: new Map(),
+          modelSelection: spec.modelSelection,
           systemPromptFile: instructions,
           stopping: false,
           inputGeneration: 0,
-          park: undefined,
         };
         sessions.set(sessionId, held);
-        watchChild(held);
-        Effect.runFork(rpc.pump);
+        watchChild(held, root);
+        Effect.runFork(root.rpc.pump);
         // The native id goes on this event because the controller has no
         // other way to learn it: a session started after the runner's hello
         // is not listed again.
@@ -890,25 +1273,26 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // A turn is in flight exactly while the state holds its id. An input
         // during a turn steers it, instead of opening a second turn and
         // leaving the first one with nothing to end it.
-        const steered = held.state.turnId !== undefined;
+        const root = held.root;
+        const steered = root.state.turnId !== undefined;
         // Create the id before sending, not after: pi's `agent_start` can
         // arrive before its response to the prompt, and the normalizer uses
         // whatever turn id the state holds at that moment.
-        const turnId = (held.state.turnId ??= crypto.randomUUID());
+        const turnId = (root.state.turnId ??= crypto.randomUUID());
         yield* Effect.tapError(
-          held.rpc.send({ type: steered ? "steer" : "prompt", message: input.text }),
+          root.rpc.send({ type: steered ? "steer" : "prompt", message: input.text }),
           () =>
             // A prompt pi rejected opened no turn. Leaving its id would make
             // the next input steer a turn that never started.
             Effect.sync(() => {
-              if (!steered) held.state.turnId = undefined;
+              if (!steered) root.state.turnId = undefined;
             }),
         );
         // A successful prompt reply acknowledges delivery even when Stop
         // raced it. Abort again if that reply accepted work after the first
         // abort; never let the delayed acceptance restart the stopped turn.
-        if (held.inputGeneration !== generation && held.state.turnId === turnId && !held.stopping)
-          yield* abortTurn(held, "interrupt");
+        if (held.inputGeneration !== generation && root.state.turnId === turnId && !held.stopping)
+          yield* abortTurn(root, "interrupt");
         for (const event of buildUserMessage({
           sessionId,
           turnId,
@@ -923,20 +1307,33 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
 
     interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
-        // This adapter reports no subagents yet, so no subagent id can name
-        // work it runs, and stopping the session's own turn instead would stop
-        // work the user did not ask to stop. Stopping a subagent is built
-        // together with reporting them (#438).
-        if (subagentId !== undefined) return Effect.void;
         const held = sessions.get(sessionId);
         if (held === undefined) return Effect.void;
+        if (subagentId !== undefined) {
+          // Stops that subagent and every subagent below it. Its parent keeps
+          // working, with the stop as the call's result. A subagent that
+          // already ended has nothing left to stop.
+          const subagent = held.subagents.get(subagentId);
+          if (subagent !== undefined) {
+            endSubagent(held, subagent, { state: "interrupted" }, STOPPED_BY_USER);
+          }
+          return Effect.void;
+        }
         held.inputGeneration += 1;
-        // Cancel the open approval first. Nobody denied the call; its turn was
-        // stopped. An approval hook still waiting for an answer would keep the
-        // turn open through the abort meant to end it.
-        resolvePark(held, "cancel");
+        // Stop all work in the session: every subagent, then the session's
+        // own turn. The subagents get no reply, because the abort below also
+        // ends the calls waiting for them.
+        for (const subagent of listStartedBy(held, held.root)) {
+          endSubagent(held, subagent, { state: "interrupted" }, undefined);
+        }
+        // Cancel the open approvals first. Nobody denied the calls; their
+        // turn was stopped. An approval hook still waiting for an answer would
+        // keep the turn open through the abort meant to end it.
+        cancelParksOf(held, held.root);
         // The `turn.completed` event reports the interrupt; nothing else does.
-        return held.state.turnId === undefined ? Effect.void : abortTurn(held, "interrupt");
+        return held.root.state.turnId === undefined
+          ? Effect.void
+          : abortTurn(held.root, "interrupt");
       }),
 
     respondToApprovalRequest: (
@@ -946,21 +1343,21 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     ): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
-        const park = held?.park;
+        const park = held?.parks.get(requestId);
         // The approval was already answered, or its session is gone: there is
         // nothing left to decide.
-        if (held === undefined || park === undefined || park.request.requestId !== requestId) {
-          return Effect.void;
-        }
-        resolvePark(held, decision);
-        // A cancel blocks the call and also ends the turn. pi treats a blocked
-        // call as one tool it may not run, and would otherwise carry on with
-        // the rest of its plan.
-        return decision === "cancel" ? abortTurn(held, "interrupt") : Effect.void;
+        if (held === undefined || park === undefined) return Effect.void;
+        resolvePark(held, park, decision);
+        // A cancel blocks the call and also ends the turn of the agent that
+        // asked, and only that agent's. pi treats a blocked call as one tool
+        // it may not run, and would otherwise carry on with the rest of its
+        // plan.
+        return decision === "cancel" ? abortTurn(park.agent, "interrupt") : Effect.void;
       }),
 
     // pi parks only on a confirm dialog, never on a question, so there is
-    // never a question here to answer.
+    // never a question here to answer. The `subagent` tool's input dialog is
+    // answered by the runner itself and never reaches the user.
     respondToQuestion: (): Effect.Effect<void> => Effect.void,
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
@@ -969,12 +1366,16 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // pi already exited, and that exit already ended this session.
         if (held === undefined) return;
         held.stopping = true;
+        // The subagents hold the instance's key too, and keep no transcript,
+        // so they are closed first and not waited for.
+        endAllSubagents(held);
+        const child = held.root.child;
         // Closing stdin tells pi to exit. Killing it outright would skip the
         // transcript flush that makes the session resumable. If the pipe is
         // already broken, pi is already exiting.
-        attempt(() => held.child.end());
+        attempt(() => child.end());
         const leaving = Effect.timeoutOption(
-          Effect.promise(() => held.child.exited),
+          Effect.promise(() => child.exited),
           STOP_DEADLINE,
         );
         if (Option.isSome(yield* leaving)) {
@@ -983,7 +1384,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         }
         // pi did not exit, so kill it: nothing else will make it exit, and it
         // holds the instance's key for as long as it runs.
-        attempt(() => held.child.kill());
+        attempt(() => child.kill());
         // Wait for the exit, because the session entry is what stops a second
         // pi from starting on this transcript. Removing it while the first pi
         // is still writing would put two processes on one file.

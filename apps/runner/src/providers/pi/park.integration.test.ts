@@ -100,7 +100,7 @@ const startLiveSession = async (
 /** Waits for `ready`, and on timeout lists the events the session had reported. */
 const waitReportingEvents = (live: Live, what: string, ready: () => boolean): Promise<void> =>
   waitUntil(
-    `${what}, having reported ${live.seen.map((event) => event._tag).join(", ")}`,
+    () => `${what}, having reported ${live.seen.map((event) => event._tag).join(", ")}`,
     ready,
     BUDGET_MS / 2,
   );

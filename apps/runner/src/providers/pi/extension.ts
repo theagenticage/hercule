@@ -40,6 +40,36 @@ export const OUTPUT_SCHEMA_VARIABLE = "HERCULE_OUTPUT_SCHEMA";
  */
 export const SUBMIT_RESULT_TOOL = "submit_result";
 
+/**
+ * The name of the tool an agent calls to hand a task to a subagent. pi has no
+ * subagents of its own, so the extension adds this tool, and the runner starts
+ * each subagent as a pi process of its own (spec 06 section 13.6).
+ */
+export const SUBAGENT_TOOL = "subagent";
+
+/**
+ * The environment variable that gives an agent the `subagent` tool. The
+ * adapter sets it to "1" for every agent that may start subagents, and leaves
+ * it out for an agent at the deepest level, so a subagent there cannot start
+ * another.
+ */
+export const SUBAGENTS_VARIABLE = "HERCULE_SUBAGENTS";
+
+/**
+ * The title of the dialog the `subagent` tool opens to ask the runner for a
+ * subagent. The dialog's placeholder is the request as JSON:
+ * `{ toolCallId, description, prompt }`. The runner recognises the dialog by
+ * this title, so it never reaches the user.
+ */
+export const SUBAGENT_DIALOG = "Start a subagent";
+
+/**
+ * The runner's answer to the `subagent` dialog, sent back as JSON: the
+ * subagent's final message, or why there is none. The extension turns an
+ * error into a failed tool result, so the agent sees what went wrong.
+ */
+export type SubagentReply = { readonly text: string } | { readonly error: string };
+
 export const EXTENSION_SOURCE = `import { Type } from "@sinclair/typebox";
 
 /**
@@ -81,6 +111,38 @@ export default function (pi) {
         // turn's result has to wait until the agent stops on its own.
         terminate: true,
       }),
+    });
+  }
+  // The runner, not this extension, runs the subagent: the tool asks for one
+  // through a dialog and waits for the reply. Registered before the mode check,
+  // because a full-access agent delegates the same way.
+  if (process.env.${SUBAGENTS_VARIABLE} === "1") {
+    pi.registerTool({
+      name: "${SUBAGENT_TOOL}",
+      label: "Subagent",
+      description:
+        "Hand a self-contained task to a subagent: a new agent with your tools and your working directory, but none of this conversation. It works on its own, and its final message is this call's result. Several calls in one message run at the same time.",
+      parameters: Type.Object({
+        description: Type.String({
+          description: "A short name for the task, three to six words. The user sees it.",
+        }),
+        prompt: Type.String({
+          description: "The whole task. The subagent sees nothing else, so include everything it needs.",
+        }),
+      }),
+      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        const request = JSON.stringify({
+          toolCallId,
+          description: params.description,
+          prompt: params.prompt,
+        });
+        const answer = await ctx.ui.input("${SUBAGENT_DIALOG}", request, { signal });
+        // pi gives no answer when the turn was aborted or the dialog cancelled.
+        if (answer === undefined) throw new Error("The subagent was stopped.");
+        const reply = JSON.parse(answer);
+        if (typeof reply.error === "string") throw new Error(reply.error);
+        return { content: [{ type: "text", text: reply.text }], details: {} };
+      },
     });
   }
   // Full access asks about nothing, so no handler is registered and no tool

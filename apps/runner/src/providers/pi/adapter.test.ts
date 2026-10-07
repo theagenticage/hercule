@@ -429,10 +429,11 @@ describe("how a turn ends after the user stops it", () => {
     expect(filterByTag(run.seen, "runtime.error")).toEqual([]);
   });
 
-  it("is not stopped by an interrupt that names a subagent, because the adapter reports no subagents yet", async () => {
+  it("is not stopped by an interrupt that names a subagent that is not running", async () => {
     const run = await startBusySession();
 
-    // The user asked to stop one subagent, not the session's own turn.
+    // The user asked to stop one subagent, not the session's own turn, and
+    // stopping a subagent that already ended does nothing.
     await Effect.runPromise(run.adapter.interrupt(SESSION, "child-1"));
     expect(listSentCommands(run.sent, "abort")).toEqual([]);
 
