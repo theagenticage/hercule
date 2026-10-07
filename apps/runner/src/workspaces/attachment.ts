@@ -62,7 +62,13 @@ export const attachWorkspace = async (
       selection.commonDirectory !== identity.commonDirectory ||
       selection.commonDirectoryIdentity !== identity.commonDirectoryIdentity ||
       selection.remoteName !== attachment.remoteName ||
-      selection.primaryWorkspaceId !== frame.workspaceId)
+      (selection.primaryWorkspaceId !== frame.workspaceId &&
+        !(
+          selection.primaryWorkspaceId !== null &&
+          substrate.registry.readRemoval(selection.primaryWorkspaceId)?.instruction._tag ===
+            "workspaceDetach" &&
+          substrate.registry.readRemoval(selection.primaryWorkspaceId)?.report?.status === "deleted"
+        )))
   )
     throw new Error(
       "A different checkout is already selected for this resource. Repeat the original attachment path and remote.",

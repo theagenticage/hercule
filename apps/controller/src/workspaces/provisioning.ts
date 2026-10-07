@@ -169,7 +169,6 @@ export const openWorkspace = (
  * primary - `workspace.provision`, and a spawn that wants the main workspace -
  * and both write the same things:
  *
- * - a failed earlier primary is marked `deleted`, so this one replaces it
  * - the workspace row, with its single whole-repo checkout
  * - the audit entry
  *
@@ -189,16 +188,11 @@ export const openPrimary = (
   { readonly workspace: StoredWorkspace; readonly frame: WorkspaceProvision },
   SqlError
 > =>
-  Effect.gen(function* () {
-    // A primary that failed to provision holds nothing. It is marked deleted
-    // here so the new one replaces it rather than existing beside it.
-    yield* writers.workspaces.supersedeFailedPrimary(input.resource.id, input.runnerId, input.at);
-    return yield* openWorkspace(writers, {
-      runnerId: input.runnerId,
-      kind: "primary",
-      designatedConnectionId: input.resource.connectionId,
-      checkouts: [{ resource: input.resource, form: "worktree", subdirectory: null, branch: null }],
-      actor: input.actor,
-      at: input.at,
-    });
+  openWorkspace(writers, {
+    runnerId: input.runnerId,
+    kind: "primary",
+    designatedConnectionId: input.resource.connectionId,
+    checkouts: [{ resource: input.resource, form: "worktree", subdirectory: null, branch: null }],
+    actor: input.actor,
+    at: input.at,
   });

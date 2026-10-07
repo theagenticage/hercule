@@ -16,13 +16,11 @@
  * what it asked for and the branch this module named for it, and gets back
  * where the session works.
  *
- * A primary is provisioned by name and never torn down: it is the repo's main
- * workspace on that runner, shared by every session that runs in it. An
- * ephemeral workspace is created by the spawn that asked for it, and is
- * disposed of by hand or by the expiry sweep. The sweep reads only the
- * workspace's leases. Each session and run that used the workspace released
- * its lease with a retention, and the workspace is kept until the latest
- * kept-until time among them.
+ * A primary is the repo's main workspace on that runner. Managed files may
+ * be removed explicitly; an existing primary may only be detached. Workspaces
+ * used by human threads are retained until explicit disposal. Automatic
+ * ephemeral workspaces are eligible for the sweep after every holder releases
+ * its lease and the latest retention deadline expires.
  *
  * Nothing here sends anything to a runner. A frame is returned as a value -
  * what to provision, what to dispose, the answer to a credential request - and
@@ -48,7 +46,9 @@ import {
   type CredentialAnswer,
   type CredentialRequest,
   type GitIdentity,
+  type WorkspaceRemoval,
   type WorkspaceDispose,
+  type WorkspaceDetach,
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
@@ -78,6 +78,8 @@ import {
 import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import {
   nowIso,
+  mintUuid,
+  uuidToString,
   buildPageInputFields,
   refuseCursor,
   resolveSortDirection,
@@ -145,7 +147,8 @@ const NO_SUCH_WORKSPACE = "no such workspace";
 
 const NO_SUCH_RESOURCE = "no such resource";
 
-const PRIMARY_STANDS = "a main workspace is never torn down";
+const EXISTING_DISPOSAL =
+  "Attached checkout files belong to the user and cannot be discarded. Detach the workspace registration instead.";
 
 const NOT_IN_PROJECT = "that repo is not filed under that project";
 
@@ -340,12 +343,14 @@ const make = Effect.gen(function* () {
       const ids = rows.map((row) => row.id);
       const checkouts = yield* workspaces.listCheckouts(ids);
       const active = yield* workspaces.listActiveHolders(ids);
-      // Only an ephemeral workspace that is not gone can still be deleted by
-      // the sweep, so only such a workspace has a kept-until time to show.
+      // Manual retention and pending removal have no automatic deadline.
       const keptUntil = yield* workspaces.listKeptUntil(
         rows
           .filter(
-            (row) => row.kind === "ephemeral" && row.status !== "deleted" && row.status !== "lost",
+            (row) =>
+              row.kind === "ephemeral" &&
+              row.retentionPolicy === "automatic" &&
+              (row.status === "ready" || row.status === "failed"),
           )
           .map((row) => row.id),
       );
@@ -356,6 +361,7 @@ const make = Effect.gen(function* () {
         status: row.status,
         ownership: row.ownership,
         path: row.path,
+        retentionPolicy: row.retentionPolicy,
         observedAt: row.observedAt,
         warnings: row.warnings,
         checkouts: (checkouts.get(row.id) ?? []).map(toCheckoutRecord),
@@ -603,7 +609,7 @@ const make = Effect.gen(function* () {
         }
         const standing = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(standing)) {
-          if (standing.value.status === "failed")
+          if (standing.value.status === "failed" || standing.value.status === "disposing")
             return yield* Effect.fail(
               createValidationError([
                 {
@@ -640,7 +646,10 @@ const make = Effect.gen(function* () {
             selected === undefined
               ? yield* workspaces.primaryOn(resource.id, input.runnerId)
               : Option.some(selected);
-          if (Option.isSome(standing) && standing.value.status === "failed")
+          if (
+            Option.isSome(standing) &&
+            (standing.value.status === "failed" || standing.value.status === "disposing")
+          )
             return yield* Effect.fail(
               createValidationError([
                 {
@@ -747,18 +756,95 @@ const make = Effect.gen(function* () {
    * branch is named after whatever the workspace is for: a thread
    * (`buildThreadBranch`) or a run (`buildRunBranch`).
    *
-   * For an `existing` workspace, this does not check again whether it is
-   * ready: `machineFor` checked that before the session was placed, because
-   * the workspace decides which runner the session runs on. This only checks
-   * what `machineFor` does not: whether the repos in it belong to this project.
+   * Existing workspaces are checked again while acquiring the lease in the
+   * caller's transaction. A removal reserved after initial placement therefore
+   * cannot admit a new holder. The repository must also belong to this project.
    */
   const openFor = (input: OpenInput): Effect.Effect<Opened, Validation | SqlError> =>
     Effect.gen(function* () {
       const opened = yield* openWithoutLease(input);
       if (opened.workspaceId !== null) {
-        yield* workspaces.acquireLease(opened.workspaceId, input.holder, input.at);
+        if (!(yield* workspaces.acquireLease(opened.workspaceId, input.holder, input.at, true)))
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["workspace"],
+                message:
+                  "The workspace is being disposed of or is unavailable. Wait for its removal outcome before starting work.",
+              },
+            ]),
+          );
       }
       return opened;
+    });
+
+  const reserveRemoval = (
+    workspace: StoredWorkspace,
+    tag: "workspaceDispose" | "workspaceDetach",
+    actor: string,
+    discardChanges = false,
+    expired?: ExpiredLease,
+  ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
+    Effect.gen(function* () {
+      const previous = yield* workspaces.readRemoval(workspace.id);
+      if (workspace.status === "disposing") {
+        if (
+          Option.isSome(previous) &&
+          previous.value.frame._tag === tag &&
+          (tag === "workspaceDetach" ||
+            (previous.value.frame._tag === "workspaceDispose" &&
+              (previous.value.frame.discardChanges ?? false) === discardChanges))
+        )
+          return previous.value.frame;
+        return yield* Effect.fail(
+          createInvalidStateError(
+            "A different workspace removal is still pending. Wait for its outcome before changing the removal policy or discarding changes.",
+          ),
+        );
+      }
+      const requestId = uuidToString(mintUuid());
+      const frame: WorkspaceRemoval =
+        tag === "workspaceDetach"
+          ? { _tag: "workspaceDetach", workspaceId: workspace.id, requestId }
+          : {
+              _tag: "workspaceDispose",
+              workspaceId: workspace.id,
+              requestId,
+              ...(discardChanges ? { discardChanges: true } : {}),
+            };
+      yield* workspaces.reserveRemoval(workspace.id, frame, {
+        actor,
+        ...(expired === undefined
+          ? {}
+          : { reason: expired.retention, holder: formatHolder(expired.holder) }),
+      });
+      yield* audit.append({
+        kind: "workspace.disposalRequested",
+        actor,
+        payload: {
+          workspaceId: workspace.id,
+          runnerId: workspace.runnerId,
+          requestId,
+          operation: tag,
+          discardChanges,
+        },
+        at: yield* nowIso,
+      });
+      return frame;
+    });
+
+  const requireRemovalSupport = (runnerId: string): Effect.Effect<void, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const runner = yield* runners.read(runnerId);
+      if (
+        Option.isNone(runner) ||
+        !(runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+      )
+        return yield* Effect.fail(
+          createInvalidStateError(
+            "This runner does not support safe workspace removal. Upgrade and reconnect it before disposing or detaching a workspace.",
+          ),
+        );
     });
 
   return {
@@ -901,6 +987,12 @@ const make = Effect.gen(function* () {
             primary.value.status !== "deleted" &&
             primary.value.status !== "lost"
           ) {
+            if (primary.value.status === "disposing")
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  "This checkout is being detached. Wait for detachment before reattaching the selected checkout.",
+                ),
+              );
             if (yield* workspaces.retryAttachment(primary.value.id)) {
               yield* audit.append({
                 kind: "workspace.attachmentRetried",
@@ -915,11 +1007,8 @@ const make = Effect.gen(function* () {
               frame: yield* rebuildProvisionFrame(updated),
             };
           }
-          return yield* Effect.fail(
-            createInvalidStateError(
-              "The selected existing checkout has no active registration. Restore its registration before creating work here.",
-            ),
-          );
+          // The fixed checkout survives detachment. A new registration may
+          // point only at that same selected path and remote.
         }
         yield* workspaces.reserveRepositorySelection(resource.id, input.runnerId, {
           mode: "existing",
@@ -945,7 +1034,7 @@ const make = Effect.gen(function* () {
      * Returns the workspace if a user may dispose of it. Fails with
      * `NotFound` if there is no such workspace, and with `InvalidState` if:
      *
-     * - it is a primary, which is never torn down
+     * - it is an existing checkout, whose files are never removed
      * - it is already deleted or lost
      * - a holder's lease on it is active:
      *   - a run that has not finished, because the run's next steps work in
@@ -959,8 +1048,8 @@ const make = Effect.gen(function* () {
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const workspace = yield* readStoredWorkspaceOrFail(id);
-        if (workspace.kind === "primary")
-          return yield* Effect.fail(createInvalidStateError(PRIMARY_STANDS));
+        if (workspace.ownership === "existing")
+          return yield* Effect.fail(createInvalidStateError(EXISTING_DISPOSAL));
         if (workspace.status === "deleted" || workspace.status === "lost") {
           return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
         }
@@ -968,6 +1057,26 @@ const make = Effect.gen(function* () {
         if (active.length > 0) {
           return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
         }
+        yield* requireRemovalSupport(workspace.runnerId);
+        return workspace;
+      }),
+
+    /** Returns an attached main whose registration may be forgotten without removing its files. */
+    detachable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        const workspace = yield* readStoredWorkspaceOrFail(id);
+        if (workspace.ownership !== "existing" || workspace.kind !== "primary")
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "Only an attached main workspace may be detached. Dispose of managed workspaces instead.",
+            ),
+          );
+        if (workspace.status === "deleted" || workspace.status === "lost")
+          return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
+        const active = (yield* workspaces.listActiveHolders([id])).get(id) ?? [];
+        if (active.length > 0)
+          return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
+        yield* requireRemovalSupport(workspace.runnerId);
         return workspace;
       }),
 
@@ -1002,10 +1111,13 @@ const make = Effect.gen(function* () {
         const found = yield* workspaces.one(id);
         if (
           Option.isNone(found) ||
+          found.value.retentionPolicy !== "automatic" ||
+          found.value.ownership !== "managed" ||
           (found.value.status !== "ready" && found.value.status !== "failed")
         ) {
           return undefined;
         }
+        if (Option.isSome(yield* workspaces.readRemoval(id))) return undefined;
         const expired = yield* workspaces.findExpiredLease(id, yield* nowIso);
         return Option.isNone(expired)
           ? undefined
@@ -1022,7 +1134,23 @@ const make = Effect.gen(function* () {
       holder: WorkspaceHolder,
       workspaceId: string,
       at: string,
-    ): Effect.Effect<void, SqlError> => workspaces.acquireLease(workspaceId, holder, at),
+    ): Effect.Effect<void, SqlError | InvalidState> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (!(yield* workspaces.acquireLease(workspaceId, holder, at)))
+            return yield* Effect.fail(
+              createInvalidStateError(
+                "The workspace is being disposed of or is unavailable, so the session cannot resume there. Wait for a ready workspace before resuming.",
+              ),
+            );
+          if (holder.kind === "session") yield* workspaces.retainForThread(holder.id, workspaceId);
+        }),
+      ),
+
+    /** Applies manual retention using the actual stored session's Thread classification. */
+    retainForThread: (sessionId: string, workspaceId: string): Effect.Effect<void, SqlError> =>
+      workspaces.retainForThread(sessionId, workspaceId),
 
     /**
      * Releases every lease the holder has, with this retention, in the
@@ -1047,43 +1175,37 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Marks a workspace as `deleted`, records the audit entry, and returns the
-     * frame that removes it from disk. The row is written first: if the runner
-     * never receives the frame, a directory is left behind, which the user can
-     * remove. A row left `ready` for a workspace nobody uses would never be
-     * cleaned up.
-     *
-     * The sweep passes the lease that kept the workspace longest. The audit
-     * entry records its retention as the reason, and its holder, so a reader
-     * can tell which rule let the workspace go.
+     * Reserves a durable removal and returns its frozen runner instruction.
+     * Keeps the workspace disposing until that request's outcome arrives.
+     * Refuses a different policy while removal is pending. A sweep records
+     * the expired lease's rule and holder as the reason for requesting removal.
      */
     markGone: (
       workspace: StoredWorkspace,
-      actor: typeof USER_ACTOR | typeof SYSTEM_ACTOR,
+      actor: string,
       expired?: ExpiredLease,
-    ): Effect.Effect<WorkspaceDispose, SqlError> =>
-      Effect.gen(function* () {
-        yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            yield* workspaces.markDisposed(workspace.id, at);
-            yield* audit.append({
-              kind: "workspace.deleted",
-              actor,
-              payload: {
-                workspaceId: workspace.id,
-                runnerId: workspace.runnerId,
-                ...(expired === undefined
-                  ? {}
-                  : { reason: expired.retention, holder: formatHolder(expired.holder) }),
-              },
-              at,
-            });
-          }),
-        );
-        return { _tag: "workspaceDispose", workspaceId: workspace.id };
-      }),
+      discardChanges = false,
+    ): Effect.Effect<WorkspaceDispose, SqlError | InvalidState> =>
+      Effect.map(
+        reserveRemoval(workspace, "workspaceDispose", actor, discardChanges, expired),
+        (frame) => frame as WorkspaceDispose,
+      ),
+
+    /** Records a registration-only removal before asking its runner to forget the attachment. */
+    markDetached: (
+      workspace: StoredWorkspace,
+      actor: string,
+    ): Effect.Effect<WorkspaceDetach, SqlError | InvalidState> =>
+      Effect.map(
+        reserveRemoval(workspace, "workspaceDetach", actor),
+        (frame) => frame as WorkspaceDetach,
+      ),
+
+    /** Returns persisted removal instructions, including detachment, until their matching outcome arrives. */
+    listOwedDisposals: (
+      runnerId: string,
+    ): Effect.Effect<ReadonlyArray<WorkspaceRemoval>, SqlError> =>
+      workspaces.listOwedDisposals(runnerId),
 
     /** Returns whether this runner can execute the workspace's recorded attachment semantics. */
     supportsProvisionFrame: (
@@ -1158,6 +1280,70 @@ const make = Effect.gen(function* () {
             current.value.observedAt === null ||
             (report.observedAt !== undefined && report.observedAt >= current.value.observedAt);
           const at = yield* nowIso;
+          if (current.value.status === "disposing") {
+            const removal = yield* workspaces.readRemoval(report.workspaceId);
+            if (
+              Option.isNone(removal) ||
+              report.requestId === undefined ||
+              report.requestId !== removal.value.frame.requestId
+            ) {
+              yield* workspaces.recordCreationFacts(report.workspaceId, report.checkouts ?? []);
+              if (report.requestId === undefined && report.status !== "deleted")
+                yield* workspaces.recordPreparationDuringRemoval(
+                  report.workspaceId,
+                  report.status,
+                  at,
+                );
+              if (fresh && report.observedAt !== undefined && report.status !== "deleted")
+                yield* workspaces.recordObservation(report.workspaceId, report);
+              return undefined;
+            }
+            if (report.status === "deleted") {
+              yield* workspaces.markDisposed(report.workspaceId, at);
+              yield* audit.append({
+                kind:
+                  removal.value.frame._tag === "workspaceDetach"
+                    ? "workspace.detached"
+                    : "workspace.deleted",
+                actor: removal.value.audit.actor,
+                payload: {
+                  workspaceId: report.workspaceId,
+                  runnerId,
+                  requestId: report.requestId,
+                  ...(removal.value.audit.reason === undefined
+                    ? {}
+                    : { reason: removal.value.audit.reason, holder: removal.value.audit.holder }),
+                },
+                at,
+              });
+              return { workspaceId: report.workspaceId, moved: "deleted" };
+            }
+            if (report.status !== "failed") return undefined;
+            if (fresh && report.observedAt !== undefined)
+              yield* workspaces.recordObservation(report.workspaceId, report);
+            const actual = yield* workspaces.one(report.workspaceId);
+            const restored =
+              (Option.isSome(actual) ? actual.value.available : null) === false
+                ? "failed"
+                : removal.value.previousStatus;
+            const message = `${report.message ?? "The runner refused safe removal."} The workspace is retained. Automatic cleanup will not retry this removal. Inspect it, resolve the refusal, and explicitly retry removal.`;
+            yield* workspaces.refuseRemoval(report.workspaceId, restored, message);
+            yield* audit.append({
+              kind: "workspace.disposalRefused",
+              actor: removal.value.audit.actor,
+              payload: {
+                workspaceId: report.workspaceId,
+                runnerId,
+                requestId: report.requestId,
+                message,
+              },
+              at,
+            });
+            return restored === "ready"
+              ? { workspaceId: report.workspaceId, moved: "ready" }
+              : undefined;
+          }
+          if (report.requestId !== undefined || report.status === "deleted") return undefined;
           yield* workspaces.recordCreationFacts(report.workspaceId, report.checkouts ?? []);
           if (report.warnings !== undefined && (fresh || current.value.status === "provisioning"))
             yield* workspaces.recordWarnings(report.workspaceId, report.warnings);
@@ -1199,11 +1385,8 @@ const make = Effect.gen(function* () {
                   );
               }
               break;
-            case "deleted":
-              changed = yield* workspaces.markDisposed(report.workspaceId, at);
-              break;
           }
-          if (fresh && report.observedAt !== undefined && report.status !== "deleted") {
+          if (fresh && report.observedAt !== undefined) {
             const observed = yield* workspaces.recordObservation(report.workspaceId, report);
             if (observed) {
               yield* audit.append({

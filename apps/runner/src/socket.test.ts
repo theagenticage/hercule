@@ -1638,3 +1638,89 @@ describe("concurrent real-Git workspace requests on the runner socket", () => {
     }
   });
 });
+
+it("echoes durable disposal and detach receipts through the socket while preserving an attached source", async () => {
+  const remote = workspaceFixtures.makeRemote();
+  const world = workspaceFixtures.createTemporaryDir("hercule-socket-detach-source-");
+  const source = joinPath(world, "user checkout");
+  workspaceFixtures.runGitOrThrow(world, "clone", remote.url, source);
+  const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-removal-home-");
+  const manager = makeWorkspaces({ storageDir });
+  const resourceId = workspaceFixtures.createId();
+  const attached = {
+    ...workspaceFixtures.buildProvisionFrame({
+      kind: "primary",
+      checkouts: [workspaceFixtures.buildCheckout({ resourceId, remote: remote.url })],
+    }),
+    attachment: { path: source, remoteName: "origin" },
+  };
+  expect((await manager.provision(attached)).status).toBe("ready");
+  const derived = workspaceFixtures.buildProvisionFrame({
+    kind: "ephemeral",
+    checkouts: [
+      {
+        ...workspaceFixtures.buildCheckout({
+          resourceId,
+          remote: remote.url,
+          branch: "test/socket-derived",
+        }),
+        repositoryWorkspaceId: attached.workspaceId,
+        startingRevision: { kind: "current" },
+      },
+    ],
+  });
+  expect((await manager.provision(derived)).status).toBe("ready");
+  const cwd = manager.resolve(derived.workspaceId)!.cwd;
+  const sourceBefore = workspaceFixtures.hashContents(source);
+  const stub = await stubController((hello) => ({
+    ...hello,
+    capabilities: ["workspaceLifecycle"],
+  }));
+  const pending = runConnection(buildPin(stub), { workspaces: manager });
+  try {
+    await waitUntilProven(stub);
+    stub.say({
+      _tag: "workspaceDetach",
+      workspaceId: attached.workspaceId,
+      requestId: "socket-detach-intent",
+    });
+    await waitUntil(() =>
+      stub.received.some(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-detach-intent",
+      ),
+    );
+    expect(
+      stub.received.find(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-detach-intent",
+      ),
+    ).toMatchObject({ status: "deleted", workspaceId: attached.workspaceId });
+    expect(workspaceFixtures.hashContents(source)).toBe(sourceBefore);
+    expect(manager.resolve(derived.workspaceId)?.cwd).toBe(cwd);
+    writeFileSync(joinPath(cwd, "README.md"), "remaining derived changes\n");
+    stub.say({
+      _tag: "workspaceDispose",
+      workspaceId: derived.workspaceId,
+      requestId: "socket-discard-intent",
+      discardChanges: true,
+    });
+    await waitUntil(() =>
+      stub.received.some(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-discard-intent",
+      ),
+    );
+    expect(
+      stub.received.find(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-discard-intent",
+      ),
+    ).toMatchObject({ status: "deleted", workspaceId: derived.workspaceId });
+    expect(existsSync(cwd)).toBe(false);
+    expect(existsSync(joinPath(source, ".git", "objects"))).toBe(true);
+    expect(
+      workspaceFixtures.runGitOrThrow(source, "rev-parse", "refs/heads/test/socket-derived"),
+    ).toMatch(/^[a-f0-9]{40}$/);
+  } finally {
+    stub.hangUp();
+    await pending;
+    workspaceFixtures.cleanTemporaries();
+  }
+});

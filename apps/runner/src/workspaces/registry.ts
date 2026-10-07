@@ -15,6 +15,7 @@ import {
   WorkspaceReport,
   StartingRevision,
   CheckoutForm,
+  WorkspaceRemoval,
 } from "@hercule/protocol";
 
 const RegisteredCheckout = Schema.Struct({
@@ -73,10 +74,21 @@ const RepositorySelection = Schema.Struct({
 
 export type RepositorySelection = Schema.Schema.Type<typeof RepositorySelection>;
 
+const Removal = Schema.Struct({
+  workspaceId: StorageId,
+  instruction: WorkspaceRemoval,
+  phase: Schema.Literals(["pending", "terminal"]),
+  workspace: Schema.optionalKey(RegisteredWorkspace),
+  report: Schema.optionalKey(WorkspaceReport),
+});
+
+export type Removal = Schema.Schema.Type<typeof Removal>;
+
 const RegistryState = Schema.Struct({
   version: Schema.Literal(1),
   workspaces: Schema.Array(RegisteredWorkspace),
   repositories: Schema.Array(RepositorySelection),
+  removals: Schema.optionalKey(Schema.Array(Removal)),
 });
 
 type RegistryState = Schema.Schema.Type<typeof RegistryState>;
@@ -151,6 +163,9 @@ const writeRegistry = (storageDir: string, state: RegistryState): void => {
 
 export interface Registry {
   readonly all: () => ReadonlyArray<RegisteredWorkspace>;
+  readonly readRemoval: (workspaceId: string) => Removal | undefined;
+  /** Records removal intent or its terminal result before acknowledging it. */
+  readonly recordRemoval: (removal: Removal) => Promise<void>;
   readonly selectedRepository: (resourceId: string) => RepositorySelection | undefined;
   readonly selectRepository: (selection: RepositorySelection) => Promise<void>;
   readonly held: (workspaceId: string) => RegisteredWorkspace | undefined;
@@ -173,6 +188,26 @@ export const makeRegistry = (storageDir: string): Registry => {
   let pending: Promise<void> = Promise.resolve();
   return {
     all: () => readRegistry(storageDir).workspaces,
+    readRemoval: (workspaceId) =>
+      readRegistry(storageDir).removals?.find((held) => held.workspaceId === workspaceId),
+    recordRemoval: (removal) => {
+      const done = pending.then(() => {
+        const state = readRegistry(storageDir);
+        writeRegistry(storageDir, {
+          ...state,
+          removals: [
+            ...(state.removals ?? []).filter((held) => held.workspaceId !== removal.workspaceId),
+            removal,
+          ],
+          workspaces:
+            removal.report?.status === "deleted"
+              ? state.workspaces.filter((held) => held.workspaceId !== removal.workspaceId)
+              : state.workspaces,
+        });
+      });
+      pending = done.catch(() => undefined);
+      return done;
+    },
     selectedRepository: (resourceId) =>
       readRegistry(storageDir).repositories.find(
         (selection) => selection.resourceId === resourceId,
@@ -191,18 +226,28 @@ export const makeRegistry = (storageDir: string): Registry => {
       pending = done.catch(() => undefined);
       return done;
     },
-    held: (workspaceId) =>
-      readRegistry(storageDir).workspaces.find((entry) => entry.workspaceId === workspaceId),
-    primaryOf: (resourceId) =>
-      readRegistry(storageDir).workspaces.find(
+    held: (workspaceId) => {
+      const state = readRegistry(storageDir);
+      const removal = state.removals?.find((held) => held.workspaceId === workspaceId);
+      return removal?.phase === "pending" || removal?.report?.status === "deleted"
+        ? undefined
+        : state.workspaces.find((entry) => entry.workspaceId === workspaceId);
+    },
+    primaryOf: (resourceId) => {
+      const state = readRegistry(storageDir);
+      return state.workspaces.find(
         (entry) =>
           entry.kind === "primary" &&
+          !state.removals?.some(
+            (removal) => removal.workspaceId === entry.workspaceId && removal.phase === "pending",
+          ) &&
           (entry.preparation === undefined ||
             (entry.preparation.phase === "terminal" &&
               entry.preparation.report.status === "ready")) &&
           isStillOnDisk(entry) &&
-          entry.checkouts.some((one) => one.resourceId === resourceId),
-      ),
+          entry.checkouts.some((checkout) => checkout.resourceId === resourceId),
+      );
+    },
     update: (change) => {
       const done = pending.then(() => {
         const state = readRegistry(storageDir);

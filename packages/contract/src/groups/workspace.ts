@@ -5,13 +5,14 @@
  * A workspace is a kind and a list of checkouts; every git detail - the
  * branch, a subdirectory, how the copy was made - is stored on a checkout. A
  * primary workspace is the resource's own long-lived checkout on that machine,
- * shared by whatever runs in it and never torn down. An ephemeral one is made
- * for a piece of work and disposed of afterwards.
+ * shared by whatever runs in it. An ephemeral one is made for a piece of
+ * work. Retention determines whether expiry may collect its managed files.
  *
  * Managed paths remain runner-local. Attachment accepts an explicit path
  * scoped to one runner, whose validation preserves the existing working copy.
  */
 import { Schema } from "effect";
+import * as SchemaGetter from "effect/SchemaGetter";
 import {
   CheckoutForm,
   GitRemoteName,
@@ -74,15 +75,27 @@ export const Branch = Schema.String.check(
 );
 
 /**
- * The status of a workspace. `failed` and `lost` are both final: a `failed`
- * workspace could not be made, and a `lost` one was on a machine that was
- * retired.
+ * Records preparation, availability and removal. `disposing` reserves removal
+ * while the runner acts; `deleted` means the runner confirmed completion.
+ * A failed attachment can recover after validating the same restored checkout.
  */
-export const WORKSPACE_STATUSES = ["provisioning", "ready", "failed", "deleted", "lost"] as const;
+export const WORKSPACE_STATUSES = [
+  "provisioning",
+  "ready",
+  "failed",
+  "disposing",
+  "deleted",
+  "lost",
+] as const;
 
 export const WorkspaceStatus = Schema.Literals(WORKSPACE_STATUSES);
 
 export type WorkspaceStatus = Schema.Schema.Type<typeof WorkspaceStatus>;
+
+/** Chooses whether expiry may collect the workspace after its active holders leave. */
+export const WorkspaceRetentionPolicy = Schema.Literals(["manual", "automatic"]);
+
+export type WorkspaceRetentionPolicy = Schema.Schema.Type<typeof WorkspaceRetentionPolicy>;
 
 /** One working copy of one resource inside a workspace. */
 export const Checkout = Schema.Struct({
@@ -124,6 +137,7 @@ export const Workspace = Schema.Struct({
   kind: WorkspaceKind,
   status: WorkspaceStatus,
   ownership: WorkspaceOwnership,
+  retentionPolicy: WorkspaceRetentionPolicy,
   /** The normalized attached root on the selected runner; null for managed storage. */
   path: Schema.NullOr(WorkspacePath),
   observedAt: Schema.NullOr(Timestamp),
@@ -136,9 +150,9 @@ export const Workspace = Schema.Struct({
   /** The sessions working in it: each holds an active lease on it until it exits. */
   sessionIds: Schema.Array(Id),
   /**
-   * When the sweep may delete this workspace. Fixed when its last holder
-   * released it; a settings change does not move it. Null for a primary, for
-   * a workspace that is gone, and while a session or run still holds it.
+   * When the sweep may collect an automatic workspace. Fixed when its last
+   * holder releases it. Null for manual retention, a primary, a gone workspace
+   * and while a session or run still holds it.
    */
   keptUntil: Schema.NullOr(Timestamp),
   createdAt: Timestamp,
@@ -172,6 +186,20 @@ export const WorkspaceAttachInput = closedStruct({
 });
 
 export type WorkspaceAttachInput = Schema.Schema.Type<typeof WorkspaceAttachInput>;
+
+export const WorkspaceDisposeInput = closedStruct({
+  discardChanges: Schema.optionalKey(Schema.Boolean),
+});
+
+export type WorkspaceDisposeInput = Schema.Schema.Type<typeof WorkspaceDisposeInput>;
+
+/** Keeps bodyless deletion requests compatible with existing clients. */
+const WorkspaceDisposeWithoutBody = Schema.Null.pipe(
+  Schema.decodeTo(WorkspaceDisposeInput, {
+    decode: SchemaGetter.transform(() => ({})),
+    encode: SchemaGetter.transform(() => null),
+  }),
+);
 
 export const WorkspaceFilter = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
@@ -212,6 +240,12 @@ export const workspace = HttpApiGroup.make("workspace")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("dispose", "/workspaces/:id", {
+      params: { id: Id },
+      payload: [WorkspaceDisposeInput, WorkspaceDisposeWithoutBody],
+      success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("detach", "/workspaces/:id/detach", {
       params: { id: Id },
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],

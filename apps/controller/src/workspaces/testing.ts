@@ -14,7 +14,7 @@ import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type * as Duration from "effect/Duration";
 import type { ModelDescriptor, RunnerFacts, SessionStart } from "@hercule/protocol";
-import type { Session } from "@hercule/contract";
+import type { Session, WorkspaceRetentionPolicy } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -161,6 +161,8 @@ export interface WorkspaceRecord {
   readonly runnerId: string;
   readonly kind: string;
   readonly status: string;
+  readonly observedAt: string | null;
+  readonly retentionPolicy: WorkspaceRetentionPolicy;
   readonly checkouts: ReadonlyArray<CheckoutRecord>;
   readonly designatedConnectionId: string | null;
   readonly provisionedAt: string | null;

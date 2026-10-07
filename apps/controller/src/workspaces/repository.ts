@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  WorkspaceRemoval,
   WorkspaceProvision,
   type StartingRevision,
   type CheckoutReport,
@@ -45,6 +46,7 @@ export interface StoredWorkspace {
   readonly kind: WorkspaceKind;
   readonly status: WorkspaceStatus;
   readonly ownership: "managed" | "existing";
+  readonly retentionPolicy: "manual" | "automatic";
   readonly path: string | null;
   readonly observedAt: string | null;
   readonly available: boolean | null;
@@ -141,7 +143,7 @@ export const buildReadyClause = (alias: string): string =>
   `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
 
 /** The statuses a workspace can still leave. Every other status is final. */
-const LIVE_STATUSES = "('provisioning', 'ready', 'failed')";
+const LIVE_STATUSES = "('provisioning', 'ready', 'failed', 'disposing')";
 
 /**
  * A condition on a lease's `workspace_id`, true when a released lease on that
@@ -159,11 +161,11 @@ const NO_RETENTION_CLAUSE =
   "WHERE kind = 'primary' OR status IN ('deleted', 'lost'))";
 
 /**
- * The statuses in which a primary blocks another primary of the same repo on
- * the same runner. A primary that failed to provision holds nothing, so it
- * does not block a new one.
+ * Keeps an established main workspace selected during preparation and removal.
+ * A failed managed attempt that never became ready may retain files, but does
+ * not prevent a fresh attempt with its own path.
  */
-const PRIMARY_STANDING = "('provisioning', 'ready')";
+const PRIMARY_STANDING = "('provisioning', 'ready', 'disposing')";
 
 export interface RepositorySelection {
   readonly mode: "managed" | "existing";
@@ -188,6 +190,7 @@ interface WorkspaceRow {
   readonly provisioned_at: string | null;
   readonly last_used_at: string | null;
   readonly disposed_at: string | null;
+  readonly retention_policy: "manual" | "automatic";
 }
 
 interface CheckoutRow {
@@ -208,7 +211,7 @@ interface CheckoutRow {
 
 const COLUMNS =
   "id, runner_id, kind, status, designated_connection_id, message, created_at, " +
-  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available";
+  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available, retention_policy";
 
 /** The same columns, for the one query that joins the checkouts table. */
 const WORKSPACE_COLUMNS = COLUMNS.split(", ")
@@ -224,6 +227,7 @@ const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   kind: row.kind as WorkspaceKind,
   status: row.status as WorkspaceStatus,
   ownership: row.ownership,
+  retentionPolicy: row.retention_policy,
   path: row.path,
   observedAt: row.observed_at,
   available: row.available === null ? null : row.available === 1,
@@ -258,6 +262,19 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "workspace.query",
   sort: [{ field: "createdAt", direction }],
 });
+
+const RemovalAudit = Schema.Struct({
+  actor: Schema.String,
+  reason: Schema.optionalKey(Schema.Literals(["none", "orphan", "idle", "inspection"])),
+  holder: Schema.optionalKey(Schema.String),
+  refusalMessage: Schema.optionalKey(Schema.String),
+});
+export type RemovalAudit = Schema.Schema.Type<typeof RemovalAudit>;
+export interface StoredRemoval {
+  readonly frame: WorkspaceRemoval;
+  readonly previousStatus: "provisioning" | "ready" | "failed";
+  readonly audit: RemovalAudit;
+}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -322,6 +339,93 @@ const make = Effect.gen(function* () {
     one,
     listCheckouts,
     recordCreationFacts,
+
+    /** Returns the frozen removal instruction and its initiating actor, including retained refusals. */
+    readRemoval: (id: string): Effect.Effect<Option.Option<StoredRemoval>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly disposal_frame: string | null;
+          readonly disposal_previous_status: StoredRemoval["previousStatus"];
+          readonly disposal_audit: string;
+        }>`
+          SELECT disposal_frame, disposal_previous_status, disposal_audit FROM workspaces WHERE id = ${uuidFromString(id)}`;
+        const row = rows[0];
+        if (row?.disposal_frame == null) return Option.none();
+        const frame = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceRemoval))(
+          row.disposal_frame,
+        ).pipe(Effect.orDie);
+        const audit = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(RemovalAudit))(
+          row.disposal_audit,
+        ).pipe(Effect.orDie);
+        return Option.some({ frame, audit, previousStatus: row.disposal_previous_status });
+      }),
+
+    /** Reserves a removal before runner I/O, keeping the status from before the first reservation. */
+    reserveRemoval: (
+      id: string,
+      frame: WorkspaceRemoval,
+      audit: RemovalAudit,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sql`UPDATE workspaces SET
+          disposal_previous_status = CASE WHEN status = 'disposing' THEN disposal_previous_status ELSE status END,
+          disposal_frame = ${JSON.stringify(frame)}, disposal_audit = ${JSON.stringify(audit)}, status = 'disposing'
+          WHERE id = ${uuidFromString(id)} AND status IN ${sql.literal(LIVE_STATUSES)}`;
+        yield* announceChange(id);
+      }),
+
+    /** Records preparation's terminal outcome without clearing a pending removal. */
+    recordPreparationDuringRemoval: (
+      id: string,
+      status: "ready" | "failed",
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE workspaces SET disposal_previous_status = ${status},
+        provisioned_at = CASE WHEN ${status} = 'ready' THEN COALESCE(provisioned_at, ${at}) ELSE provisioned_at END
+        WHERE id = ${uuidFromString(id)} AND status = 'disposing' AND disposal_previous_status = 'provisioning'`,
+      ).pipe(Effect.andThen(announceChange(id))),
+
+    /** Returns pending instructions exactly as persisted for this runner. */
+    listOwedDisposals: (
+      runnerId: string,
+    ): Effect.Effect<ReadonlyArray<WorkspaceRemoval>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly disposal_frame: string;
+        }>`SELECT disposal_frame FROM workspaces
+          WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'disposing' ORDER BY created_at`;
+        return yield* Effect.forEach(rows, (row) =>
+          Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceRemoval))(
+            row.disposal_frame,
+          ).pipe(Effect.orDie),
+        );
+      }),
+
+    /** Restores the recorded status after refusal while keeping the intent as a retained cleanup reason. */
+    refuseRemoval: (
+      id: string,
+      status: "provisioning" | "ready" | "failed",
+      message: string | null,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sql`UPDATE workspaces SET status = ${status}, message = ${message},
+          disposal_audit = json_set(disposal_audit, '$.refusalMessage', ${message})
+          WHERE id = ${uuidFromString(id)} AND status = 'disposing'`;
+        yield* announceChange(id);
+      }),
+
+    /** Makes a workspace manual only when the actual stored session is a Thread. */
+    retainForThread: (sessionId: string, workspaceId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const moved = yield* sql<{
+          readonly id: Uint8Array;
+        }>`UPDATE workspaces SET retention_policy = 'manual'
+          WHERE id = ${uuidFromString(workspaceId)} AND retention_policy <> 'manual'
+            AND EXISTS (SELECT 1 FROM sessions WHERE id = ${uuidFromString(sessionId)} AND agent_id IS NULL)
+          RETURNING id`;
+        if (moved.length > 0) yield* announceChange(workspaceId);
+      }),
 
     /** Returns the fixed repository choice for this Resource on this runner. */
     readRepositorySelection: (
@@ -451,6 +555,7 @@ const make = Effect.gen(function* () {
           kind: workspace.kind,
           status: "provisioning",
           ownership: workspace.ownership ?? "managed",
+          retentionPolicy: "automatic",
           path: workspace.path ?? null,
           observedAt: null,
           available: null,
@@ -500,9 +605,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the primary of this resource on this runner that is ready or
-     * still provisioning, or `none`. A second primary conflicts with this one,
-     * and a thread that asks for the main workspace is given this one.
+     * Returns the main workspace that still reserves this resource on this
+     * runner, or `none`. Established and attached sources remain reserved when
+     * unavailable; failed managed preparation permits a fresh attempt.
      */
     primaryOn: (
       resourceId: string,
@@ -543,29 +648,6 @@ const make = Effect.gen(function* () {
           ORDER BY created_at
         `,
         (rows) => rows.map(toWorkspace),
-      ),
-
-    /**
-     * Marks a failed primary of this resource as `deleted`, so a new one can
-     * replace it. The row is kept as a record of the attempt and of what the
-     * runner reported about it.
-     */
-    supersedeFailedPrimary: (
-      resourceId: string,
-      runnerId: string,
-      at: string,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.flatMap(
-        sql<{ readonly id: Uint8Array }>`
-        UPDATE workspaces SET status = 'deleted', disposed_at = ${at}
-        WHERE runner_id = ${uuidFromString(runnerId)} AND kind = 'primary' AND status = 'failed' AND ownership = 'managed'
-          AND id IN (SELECT workspace_id FROM checkouts
-                     WHERE resource_id = ${uuidFromString(resourceId)})
-      RETURNING id`,
-        (rows) =>
-          Effect.forEach(rows, (row) => announceChange(uuidToString(row.id), "deleted"), {
-            discard: true,
-          }),
       ),
 
     /**
@@ -627,8 +709,11 @@ const make = Effect.gen(function* () {
               WHEN status = 'ready' AND ${!available} THEN 'failed'
               WHEN status = 'failed' AND provisioned_at IS NOT NULL AND ${available} THEN 'ready'
               ELSE status END,
-            message = CASE WHEN provisioned_at IS NOT NULL OR (status = 'provisioning' AND ${report.status} = 'failed') THEN ${report.message ?? null} ELSE message END
-          WHERE id = ${uuidFromString(id)} AND status IN ('provisioning', 'ready', 'failed')
+            message = CASE WHEN status = 'disposing' THEN message
+              WHEN ${available} AND disposal_frame IS NOT NULL THEN COALESCE(json_extract(disposal_audit, '$.refusalMessage'), message)
+              WHEN provisioned_at IS NOT NULL OR (status = 'provisioning' AND ${report.status} = 'failed') THEN ${report.message ?? null}
+              ELSE message END
+          WHERE id = ${uuidFromString(id)} AND status IN ('provisioning', 'ready', 'failed', 'disposing')
             AND (observed_at IS NULL OR observed_at <= ${report.observedAt})
           RETURNING id
         `;
@@ -681,7 +766,7 @@ const make = Effect.gen(function* () {
     markDisposed: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const moved = yield* sql<{ readonly id: Uint8Array }>`
-          UPDATE workspaces SET status = 'deleted', disposed_at = ${at}
+          UPDATE workspaces SET status = 'deleted', disposed_at = ${at}, disposal_frame = NULL, disposal_previous_status = NULL, disposal_audit = NULL
           WHERE id = ${uuidFromString(id)} AND status IN ${sql.literal(LIVE_STATUSES)}
           RETURNING id
         `;
@@ -734,17 +819,19 @@ const make = Effect.gen(function* () {
       workspaceId: string,
       holder: WorkspaceHolder,
       at: string,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(
-        sql`
-        INSERT INTO workspace_leases (workspace_id, holder_kind, holder_id, acquired_at)
-        VALUES (${uuidFromString(workspaceId)}, ${holder.kind}, ${uuidFromString(holder.id)},
-                ${at})
-        ON CONFLICT (workspace_id, holder_kind, holder_id) DO UPDATE
-        SET acquired_at = excluded.acquired_at, released_at = NULL, retention = NULL,
-            kept_until = NULL
-      `,
-      ).pipe(Effect.andThen(announceChange(workspaceId))),
+      allowProvisioning = false,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const acquired = yield* sql<{ readonly workspace_id: Uint8Array }>`
+          INSERT INTO workspace_leases (workspace_id, holder_kind, holder_id, acquired_at)
+          SELECT id, ${holder.kind}, ${uuidFromString(holder.id)}, ${at} FROM workspaces
+          WHERE id = ${uuidFromString(workspaceId)} AND (status = 'ready' OR (${allowProvisioning} AND status = 'provisioning'))
+          ON CONFLICT (workspace_id, holder_kind, holder_id) DO UPDATE
+          SET acquired_at = excluded.acquired_at, released_at = NULL, retention = NULL, kept_until = NULL
+          RETURNING workspace_id`;
+        if (acquired.length > 0) yield* announceChange(workspaceId);
+        return acquired.length > 0;
+      }),
 
     /**
      * Releases every lease this holder has, with this retention, and stamps
@@ -831,6 +918,8 @@ const make = Effect.gen(function* () {
             sql<{ readonly workspace_id: Uint8Array; readonly kept_until: string }>`
               SELECT workspace_id, MAX(kept_until) AS kept_until FROM workspace_leases
               WHERE workspace_id IN ${sql.in(ids.map(uuidFromString))}
+                AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = workspace_leases.workspace_id
+                  AND w.retention_policy = 'automatic' AND w.disposal_frame IS NULL)
               GROUP BY workspace_id
               HAVING COUNT(released_at) = COUNT(*)
             `,
@@ -892,7 +981,7 @@ const make = Effect.gen(function* () {
           SELECT w.id
           FROM workspaces w JOIN runners r ON r.id = w.runner_id
             JOIN workspace_leases l ON l.workspace_id = w.id
-          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed')
+          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed') AND w.retention_policy = 'automatic' AND w.disposal_frame IS NULL
             AND ${sql.literal(buildOnlineClause("r"))}
           GROUP BY w.id
           HAVING COUNT(l.released_at) = COUNT(*) AND MAX(l.kept_until) < ${now}

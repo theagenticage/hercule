@@ -401,6 +401,7 @@ const PRIMARY: Workspace = {
   kind: "primary",
   status: "ready",
   ownership: "managed",
+  retentionPolicy: "manual",
   path: null,
   observedAt: null,
   warnings: [],

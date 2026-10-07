@@ -172,9 +172,16 @@ export const resolveCommit = async (
     );
   return resolved.stdout;
 };
-/** Removes a clean worktree, returning Git's refusal when local files would be lost. */
-export const removeWorktree = (cache: string, dir: string, env: GitEnv): Promise<GitOutcome> =>
-  runGit(["-C", cache, "worktree", "remove", "--", dir], { env });
+/** Removes a worktree through Git, forcing removal only after explicit discard authorization. */
+export const removeWorktree = (
+  cache: string,
+  dir: string,
+  env: GitEnv,
+  discardChanges = false,
+): Promise<GitOutcome> =>
+  runGit(["-C", cache, "worktree", "remove", ...(discardChanges ? ["--force"] : []), "--", dir], {
+    env,
+  });
 
 /**
  * Makes the cache forget worktrees whose directories are gone. Call it after

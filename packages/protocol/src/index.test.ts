@@ -180,6 +180,18 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     ],
   },
   {
+    _tag: "workspaceInspection",
+    requestId: REQUEST_ID,
+    report: {
+      _tag: "workspaceReport",
+      workspaceId: WORKSPACE_ID,
+      status: "ready",
+      available: true,
+      observedAt: "2026-10-07T12:00:00.000Z",
+      checkouts: [],
+    },
+  },
+  {
     _tag: "credentialRequest",
     requestId: REQUEST_ID,
     remote: "github.com/acme/web",
@@ -264,7 +276,14 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
       },
     ],
   },
-  { _tag: "workspaceDispose", workspaceId: WORKSPACE_ID },
+  {
+    _tag: "workspaceDispose",
+    workspaceId: WORKSPACE_ID,
+    requestId: REQUEST_ID,
+    discardChanges: true,
+  },
+  { _tag: "workspaceDetach", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
+  { _tag: "workspaceInspect", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
   // The git identity is sent once on `sessionStart`, not with every credential.
   { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
   { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },

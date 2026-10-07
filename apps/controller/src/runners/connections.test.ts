@@ -260,6 +260,52 @@ it("refuses attachment frames when a capable runner reconnects with an older bin
   expect(result.report.report.message).toMatch(/upgrade/i);
 });
 
+it.each([
+  { _tag: "workspaceDispose", workspaceId: "workspace", requestId: "ordinary-disposal" },
+  {
+    _tag: "workspaceDispose",
+    workspaceId: "workspace",
+    requestId: "forced-disposal",
+    discardChanges: true,
+  },
+  { _tag: "workspaceDetach", workspaceId: "workspace", requestId: "detach-registration" },
+] as const)(
+  "refuses $requestId on a replacement runner that lacks safe lifecycle support",
+  async (frame) => {
+    const written: Array<ControllerToRunner> = [];
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const hello = {
+          binaryVersion: "0.1.0",
+          protocolVersion: PROTOCOL_VERSION,
+          negotiatedCapabilities: [WORKSPACE_LIFECYCLE_CAPABILITY],
+          facts: FACTS,
+        };
+        yield* connections.greeted(runner!.id, mintConnection(), HELD, hello);
+        yield* connections.greeted(
+          runner!.id,
+          mintConnection(),
+          { ...HELD, ask: (message) => Effect.sync(() => written.push(message)) },
+          { ...hello, negotiatedCapabilities: [] },
+        );
+        const sent = yield* connections.tell(runner!.id, frame);
+        const report = yield* connections.fleetTraffic.pipe(Stream.runHead);
+        return { sent, report: Option.getOrThrow(report) };
+      }).pipe(Effect.provide(layer)),
+    );
+    expect(result.sent).toBe(false);
+    expect(written).toEqual([]);
+    expect(result.report).toMatchObject({
+      _tag: "workspaceReported",
+      report: { workspaceId: frame.workspaceId, requestId: frame.requestId, status: "failed" },
+    });
+    if (result.report._tag !== "workspaceReported") throw new Error("Expected workspace failure");
+    expect(result.report.report.message).toMatch(/upgrade/i);
+  },
+);
+
 describe("a draining runner whose socket drops", () => {
   it("becomes unreachable without coming off the drain", async () => {
     const row = await Effect.runPromise(

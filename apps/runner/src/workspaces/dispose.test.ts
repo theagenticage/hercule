@@ -91,7 +91,7 @@ describe("disposing a primary", () => {
     const report = await workspaces.dispose(buildDisposeFrame(workspaceId));
 
     expect(report.status).toBe("failed");
-    expect(report.message).toBe("a main workspace is never torn down");
+    expect(report.message).toMatch(/explicit discard changes/i);
     expect(existsSync(directory)).toBe(true);
     expect(hashContents(directory)).toBe(before);
     // Still registered, so a session can still be placed in it.

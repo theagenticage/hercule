@@ -952,18 +952,38 @@ export const CLI = {
   },
   "workspace.dispose": {
     command: "workspace dispose",
-    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down. Use it to delete the workspace a failed or cancelled run kept for inspection before its window ends.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Removes a managed workspace after its holders stop. Ordinary removal preserves tracked changes, untracked files, ignored files and files outside checkouts. Choose --discard-changes true to discard those managed files explicitly. Committed branches and the source Git repository remain. A managed main workspace requires --discard-changes true even when clean. A standalone main clone contains its source repository and cannot be discarded. An attached checkout must be detached instead.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--discard-changes", "true"] }],
     fields: {
       id: {
         positional: true,
         help: "The workspace's id, or a tail of eight or more characters.",
         resolves: "workspace.query",
       },
+      discardChanges: {
+        flag: "discard-changes",
+        help: "true explicitly discards remaining changes in known managed paths. Only the user may authorize this; automated cleanup always preserves remaining files.",
+      },
     },
     errors: {
       invalid_state:
-        "a main workspace is never torn down, a workspace that is already gone has nothing left to tear down, and a workspace still in use stays: stop the sessions in it that have not exited, or cancel the run that has not finished",
+        "stop active sessions and runs first; use detach for an attached checkout, and upgrade an unsupported runner before disposal",
+    },
+  },
+  "workspace.detach": {
+    command: "workspace detach",
+    help: "Forgets an attached main workspace registration after its holders stop. All checkout files, Git configuration and the shared repository remain. Existing generated worktrees retain their source binding; new work requires reattaching the same selected checkout.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The attached workspace's id, or a tail of eight or more characters.",
+        resolves: "workspace.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "detach requires an attached main workspace with no active holders and a supported runner",
     },
   },
 

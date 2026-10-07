@@ -1373,6 +1373,7 @@ const buildWorkspace = (
   kind,
   status: "ready",
   ownership: "managed",
+  retentionPolicy: "manual",
   path: null,
   observedAt: null,
   warnings: [],

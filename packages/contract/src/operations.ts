@@ -164,6 +164,11 @@ const TABLE = {
     method: "DELETE",
     path: "/api/v1/workspaces/:id",
   },
+  "workspace.detach": {
+    requires: "workspace.write",
+    method: "POST",
+    path: "/api/v1/workspaces/:id/detach",
+  },
 
   "event.query": { requires: "event.read", method: "GET", path: "/api/v1/events" },
   "event.read": { requires: "event.read", method: "GET", path: "/api/v1/events/:id" },

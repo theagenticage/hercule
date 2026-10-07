@@ -1,36 +1,23 @@
 /**
- * The workspace expiry sweep, on the workspaces of threads.
- *
- * Every session holds a lease on its workspace while it runs, and releases
- * it when it exits. The controller decides what to dispose of from the
- * leases alone, and the runner deletes it:
- *
- * - A thread that cannot be resumed releases its lease as `orphan`, and its
- *   workspace is disposed of after the orphan window.
- * - A thread that can still be resumed holds work the user may come back to,
- *   so it releases its lease as `idle`, and its workspace is disposed of only
- *   after the longer idle window.
- * - A workspace with an active lease is never disposed of, and neither is a
- *   primary or any workspace on a runner that is offline.
- * - The window is fixed when the lease is released: a settings change moves
- *   only later releases.
- *
- * The test passes in the sweep interval, as it does the ping and probe
- * intervals: the shipped ten minutes is longer than a test can wait, and a
- * real Bun listener cannot be driven by a `TestClock`. The tests cross the
- * windows by ageing the leases rather than by waiting, since the shortest
- * value either setting allows is an hour.
+ * Verifies the expiry sweep through public session operations and runner reports.
+ * Agent-backed workspaces retain lease-based expiry. Human Threads make their
+ * workspaces manual, while active leases still protect running work and govern
+ * credentials. Deletion is recorded only after the runner confirms removal.
+ * Tests age released leases because real listeners cannot use a TestClock.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
-import type { SessionStart } from "@hercule/protocol";
-import { get, send } from "../http/testing";
+import type { SessionStart, WorkspaceDispose } from "@hercule/protocol";
+import { get, post, send } from "../http/testing";
 import {
   waitForFrames,
   reportEvent,
+  findInstanceId,
+  readProfileNamed,
   spawnSessionOrFail,
   waitUntil,
   type Arranged,
+  type Wire,
 } from "../sessions/testing";
 import {
   ageLeases,
@@ -64,6 +51,53 @@ const at = "2026-09-16T10:00:00.000Z";
 const spawnThreadIn = (arranged: Arranged, resourceId: string, count: number) =>
   spawnThread(arranged, { kind: "ephemeral", checkouts: [{ resourceId }] }, count);
 
+/** Creates an Agent-backed session so lease expiry remains automatic in production. */
+const spawnAutomaticIn = async (
+  arranged: Arranged,
+  resourceId: string,
+  count: number,
+  kind: "primary" | "ephemeral" = "ephemeral",
+) => {
+  const profile = await readProfileNamed(arranged, "worker");
+  const created = await post(
+    arranged.harness.base,
+    "/api/v1/agents",
+    {
+      name: `sweep-worker-${count}`,
+      systemPrompt: "Complete this automatic work.",
+      instanceId: findInstanceId(arranged, "test-provider"),
+      permissionProfileId: profile.id,
+    },
+    arranged.token,
+  );
+  expect(created.status, await created.clone().text()).toBe(200);
+  const agentId = ((await created.json()) as { id: string }).id;
+  const session = await spawnSessionOrFail(arranged, {
+    prompt: "automatic work",
+    agentId,
+    workspace: kind === "primary" ? { kind, resourceId } : { kind, checkouts: [{ resourceId }] },
+  });
+  expect(session.agentId).toBe(agentId);
+  await reportWorkspaceReady(arranged, session.workspaceId!);
+  await waitForFrames<SessionStart>(arranged.wire, "sessionStart", count);
+  reportEvent(arranged.wire, 1, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "session.started",
+  });
+  await waitUntil("started the Agent session", async () => {
+    const response = await get(
+      arranged.harness.base,
+      `/api/v1/sessions/${session.id}`,
+      arranged.token,
+    );
+    return ((await response.json()) as { status: string }).status === "busy" ? true : undefined;
+  });
+  expect((await readWorkspace(arranged, session.workspaceId!)).retentionPolicy).toBe("automatic");
+  return session;
+};
+
 /** Returns the time `hours` after `from`, as the API writes a timestamp. */
 const addHours = (from: string, hours: number): string =>
   new Date(Date.parse(from) + hours * HOUR_MS).toISOString();
@@ -79,7 +113,7 @@ const waitForSeveralSweeps = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, Duration.toMillis(SWEEP) * 6));
 
 /**
- * Creates a workspace that the same sweep must dispose of: its thread ended
+ * Creates an automatic workspace the same sweep must dispose of: its Agent session ended
  * with nothing to resume, and its lease is aged past the orphan window.
  * Returns its id. A negative test waits for this workspace to be disposed of
  * rather than for a stretch of wall-clock time, so "left alone" is a decision
@@ -90,24 +124,44 @@ const createDecoy = async (
   resourceId: string,
   count: number,
 ): Promise<string> => {
-  const session = await spawnThreadIn(arranged, resourceId, count);
+  const session = await spawnAutomaticIn(arranged, resourceId, count);
   await endUnresumable(arranged, session);
   const workspaceId = String(session.workspaceId);
   await ageLeases(arranged, workspaceId, 25);
   return workspaceId;
 };
 
-const waitForDisposed = (arranged: Arranged, id: string): Promise<WorkspaceRecord> =>
-  waitUntil("disposed the workspace", async () => {
+const waitForDisposed = async (
+  arranged: Arranged,
+  id: string,
+  wire: Wire = arranged.wire,
+): Promise<WorkspaceRecord> => {
+  const frame = await waitUntil(
+    "reserved disposal before runner I/O",
+    () =>
+      listFramesTagged(wire, "workspaceDispose").find((item) => item["workspaceId"] === id) as
+        WorkspaceDispose | undefined,
+  );
+  expect((await readWorkspace(arranged, id)).status).toBe("disposing");
+  expect(frame.discardChanges ?? false).toBe(false);
+  expect(frame.requestId).toEqual(expect.any(String));
+  wire.send({
+    _tag: "workspaceReport",
+    workspaceId: id,
+    requestId: frame.requestId!,
+    status: "deleted",
+  });
+  return await waitUntil("recorded confirmed deletion", async () => {
     const one = await readWorkspace(arranged, id);
     return one.status === "deleted" ? one : undefined;
   });
+};
 
 /**
  * Waits until at least `count` dispose frames were sent to the runner, and
  * returns their workspace ids. The sweep updates the row in its transaction
  * and sends the frame after the commit, so a test that reads the wire as soon
- * as the row is `deleted` would be asserting on a race.
+ * as the row is `disposing` would be asserting on a race.
  */
 const waitForDisposeFrames = (arranged: Arranged, count: number): Promise<ReadonlyArray<unknown>> =>
   waitUntil(`sent ${String(count)} workspaceDispose frames`, () => {
@@ -144,11 +198,11 @@ describe("the workspace expiry sweep", () => {
   it("disposes of an orphaned ephemeral workspace past the orphan window, and leaves a newer one", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
-      const old = await spawnThreadIn(arranged, web, 1);
+      const old = await spawnAutomaticIn(arranged, web, 1);
       await endUnresumable(arranged, old);
       const oldWorkspace = String(old.workspaceId);
 
-      const young = await spawnThreadIn(arranged, web, 2);
+      const young = await spawnAutomaticIn(arranged, web, 2);
       await endUnresumable(arranged, young);
       const youngWorkspace = String(young.workspaceId);
 
@@ -169,27 +223,28 @@ describe("the workspace expiry sweep", () => {
       const swept = await listWorkspaceDeletions(arranged);
       expect(swept).toHaveLength(1);
       expect(swept[0]?.actor).toBe("system");
-      expect(swept[0]?.payload).toEqual({
+      expect(swept[0]?.payload).toMatchObject({
         workspaceId: oldWorkspace,
         runnerId: arranged.runnerId,
         reason: "orphan",
         holder: `session:${old.id}`,
       });
+      expect(swept[0]?.payload["requestId"]).toEqual(expect.any(String));
     });
   });
 
-  it("keeps a resumable thread's workspace past the orphan window, and disposes of it after the idle window", async () => {
+  it("keeps a human Thread workspace beyond both orphan and idle windows", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnThreadIn(arranged, web, 1);
       await endResumable(arranged, session);
       const workspaceId = String(session.workspaceId);
 
-      // The idle window, thirty days by default, runs from the exit.
+      // Manual retention keeps these working files independently of the released lease.
       const kept = await readWorkspace(arranged, workspaceId);
       expect(kept.sessionIds).toEqual([]);
-      const exited = await readThreadExit(arranged, session.id);
-      expect(kept.keptUntil).toBe(addHours(exited, 30 * 24));
+      expect(kept.retentionPolicy).toBe("manual");
+      expect(kept.keptUntil).toBeNull();
 
       // Past one day, but well short of thirty.
       await ageLeases(arranged, workspaceId, 25);
@@ -198,8 +253,12 @@ describe("the workspace expiry sweep", () => {
       expect(listFramesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
 
       await ageLeases(arranged, workspaceId, 30 * 24);
-      const gone = await waitForDisposed(arranged, workspaceId);
-      expect(gone.status).toBe("deleted");
+      const decoy = await createDecoy(arranged, web, 2);
+      await waitForDisposed(arranged, decoy);
+      expect((await readWorkspace(arranged, workspaceId)).status).toBe("ready");
+      expect(
+        listFramesTagged(arranged.wire, "workspaceDispose").map((frame) => frame["workspaceId"]),
+      ).toEqual([decoy]);
     });
   });
 
@@ -209,7 +268,7 @@ describe("the workspace expiry sweep", () => {
       const session = await spawnThreadIn(arranged, web, 1);
       await endResumable(arranged, session);
       const workspaceId = String(session.workspaceId);
-      expect((await readWorkspace(arranged, workspaceId)).keptUntil).not.toBeNull();
+      expect((await readWorkspace(arranged, workspaceId)).keptUntil).toBeNull();
 
       // A new message resumes the session in the workspace it exited from.
       const input = await send(
@@ -228,7 +287,7 @@ describe("the workspace expiry sweep", () => {
       expect(resumed.sessionIds).toEqual([session.id]);
       expect(resumed.keptUntil).toBeNull();
 
-      // However far back the old release is moved, the active lease keeps it.
+      // The resumed Thread has an active lease as well as manual retention.
       await ageLeases(arranged, workspaceId, 90 * 24);
       const taken = await createDecoy(arranged, web, 3);
       await waitForDisposed(arranged, taken);
@@ -236,7 +295,7 @@ describe("the workspace expiry sweep", () => {
     });
   });
 
-  it("disposes of the workspace past the orphan window when the thread's conversation was deleted before it exited", async () => {
+  it("retains human files even when the Thread conversation was deleted before exit", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnThreadIn(arranged, web, 1);
@@ -244,7 +303,7 @@ describe("the workspace expiry sweep", () => {
       const workspaceId = String(session.workspaceId);
       // The session answers a conversation that is deleted while it runs. It
       // then takes no input, so it can never be resumed, and its worktree
-      // holds no work anyone can come back to.
+      // still contains human work despite the deleted conversation.
       await Effect.runPromise(
         Effect.orDie(
           Effect.gen(function* () {
@@ -264,18 +323,19 @@ describe("the workspace expiry sweep", () => {
       const exited = await reportThreadExit(arranged, session, "stopped");
       expect(exited.resumable).toBe(false);
 
-      // Past one day, well short of thirty: only a lease released as
-      // `orphan` lets the workspace go this early.
+      // Past one day, well short of thirty: a released orphan lease still cannot authorize deleting human work.
       await ageLeases(arranged, workspaceId, 25);
-      const gone = await waitForDisposed(arranged, workspaceId);
-      expect(gone.status).toBe("deleted");
+      const decoy = await createDecoy(arranged, web, 2);
+      await waitForDisposed(arranged, decoy);
+      expect((await readWorkspace(arranged, workspaceId)).status).toBe("ready");
+      expect((await readWorkspace(arranged, workspaceId)).retentionPolicy).toBe("manual");
     });
   });
 
   it("leaves a workspace with a running session", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
-      const session = await spawnThreadIn(arranged, web, 1);
+      const session = await spawnAutomaticIn(arranged, web, 1);
       const workspaceId = String(session.workspaceId);
       const running = await readWorkspace(arranged, workspaceId);
       expect(running.sessionIds).toEqual([session.id]);
@@ -298,7 +358,7 @@ describe("the workspace expiry sweep", () => {
         runnerId: arranged.runnerId,
       });
       await reportWorkspaceReady(arranged, primary.id);
-      const thread = await spawnThread(arranged, { kind: "primary", resourceId: web }, 1);
+      const thread = await spawnAutomaticIn(arranged, web, 1, "primary");
       expect(thread.workspaceId).toBe(primary.id);
       await endUnresumable(arranged, thread);
       await ageLeases(arranged, primary.id, 90 * 24);
@@ -345,7 +405,7 @@ describe("the workspace expiry sweep", () => {
   it("waits for an offline runner to come back before disposing of its workspace", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
-      const session = await spawnThreadIn(arranged, web, 1);
+      const session = await spawnAutomaticIn(arranged, web, 1);
       await endUnresumable(arranged, session);
       const workspaceId = String(session.workspaceId);
       await ageLeases(arranged, workspaceId, 90 * 24);
@@ -365,8 +425,8 @@ describe("the workspace expiry sweep", () => {
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
 
       // The first sweep after the runner reconnects disposes of it.
-      await arranged.reconnect();
-      await waitForDisposed(arranged, workspaceId);
+      const reconnected = await arranged.reconnect();
+      await waitForDisposed(arranged, workspaceId, reconnected);
     });
   });
 
@@ -418,7 +478,7 @@ describe("the windows the sweep reads", () => {
   it("fixes each window when the lease is released, so a settings change moves only later releases", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
-      const before = await spawnThreadIn(arranged, web, 1);
+      const before = await spawnAutomaticIn(arranged, web, 1);
       await endUnresumable(arranged, before);
       const beforeWorkspace = String(before.workspaceId);
       const keptUntil = (await readWorkspace(arranged, beforeWorkspace)).keptUntil;
@@ -431,15 +491,15 @@ describe("the windows the sweep reads", () => {
       expect(patched.status, await patched.clone().text()).toBe(200);
       expect((await readWorkspace(arranged, beforeWorkspace)).keptUntil).toBe(keptUntil);
 
-      // A thread that exits after the change is kept for the new hour.
-      const after = await spawnThreadIn(arranged, web, 2);
+      // An Agent session that exits after the change uses the new hour.
+      const after = await spawnAutomaticIn(arranged, web, 2);
       await endUnresumable(arranged, after);
       const afterWorkspace = String(after.workspaceId);
       expect((await readWorkspace(arranged, afterWorkspace)).keptUntil).toBe(
         addHours(await readThreadExit(arranged, after.id), 1),
       );
 
-      // Two hours on, only the thread released under the new window has run out.
+      // Two hours on, only the Agent session released under the new window has run out.
       await ageLeases(arranged, beforeWorkspace, 2);
       await ageLeases(arranged, afterWorkspace, 2);
       await waitForDisposed(arranged, afterWorkspace);

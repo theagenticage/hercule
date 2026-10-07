@@ -386,6 +386,7 @@ export const connect = (
     const answerWorkspace = (
       workspaceId: string,
       making: () => Promise<WorkspaceReport>,
+      requestId?: string,
     ): Effect.Effect<void> =>
       Effect.promise(making).pipe(
         Effect.flatMap((report) => write(encodeFrameText(report))),
@@ -396,6 +397,7 @@ export const connect = (
                 _tag: "workspaceReport",
                 workspaceId,
                 status: "failed",
+                ...(requestId === undefined ? {} : { requestId }),
                 message: describeCause(cause, MAX_MESSAGE_LENGTH),
               }),
             ),
@@ -727,7 +729,22 @@ export const connect = (
           case "workspaceDispose":
             return yield* Effect.asVoid(
               Effect.forkIn(
-                answerWorkspace(message.workspaceId, () => options.workspaces.dispose(message)),
+                answerWorkspace(
+                  message.workspaceId,
+                  () => options.workspaces.dispose(message),
+                  message.requestId,
+                ),
+                connection,
+              ),
+            );
+          case "workspaceDetach":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerWorkspace(
+                  message.workspaceId,
+                  () => options.workspaces.detach(message),
+                  message.requestId,
+                ),
                 connection,
               ),
             );

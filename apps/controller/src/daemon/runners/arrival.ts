@@ -3,14 +3,15 @@
  * still owes it, rebuilt from the rows, because anything sent while it was
  * away was lost. In order:
  *
- * 1. the provision of every workspace on it that is still provisioning and
+ * 1. every pending workspace disposal or detachment;
+ * 2. the provision of every workspace on it that is still provisioning and
  *    has no step running in it;
- * 2. every workspace step still running on it: a workspace action again,
+ * 3. every workspace step still running on it: a workspace action again,
  *    after the provision of its workspace when that workspace is still
  *    provisioning, and for an agent step whose prompt is `sent` or
  *    `delivered`, a request for the step's result;
- * 3. a stop for every session on it whose run ended while it was away;
- * 4. then the runs waiting for a runner are woken, because this one may be
+ * 4. a stop for every session on it whose run ended while it was away;
+ * 5. then the runs waiting for a runner are woken, because this one may be
  *    able to take them.
  *
  * Each delivery is idempotent by its key, so a runner that already has the
@@ -40,6 +41,8 @@ const make = Effect.gen(function* () {
   /** Sends a runner that has just connected the work owed to it, and wakes the runs waiting for one. */
   const sendOwedWork = (runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
+      for (const frame of yield* workspaces.listOwedDisposals(runnerId))
+        yield* connections.tell(runnerId, frame);
       const steps = yield* runs.listOwedWorkspaceSteps(runnerId);
       // Starting an action step sends its workspace's provision first, so
       // those workspaces are left out here rather than provisioned twice. A

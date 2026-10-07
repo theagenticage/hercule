@@ -12,12 +12,14 @@ import * as Semaphore from "effect/Semaphore";
 import {
   MAX_MESSAGE_LENGTH,
   type WorkspaceDispose,
+  type WorkspaceDetach,
+  type WorkspaceRemoval,
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import { attachWorkspace, reserveManagedRepositories } from "./attachment";
 import { hasExpectedCheckoutIdentity } from "./identity";
-import { disposeWorkspace } from "./dispose";
+import { disposeWorkspace, detachWorkspace, hasSameRemovalIntent } from "./dispose";
 import { observeWorkspace, provisionWorkspace, reprovision } from "./provision";
 import {
   makeRegistry,
@@ -42,8 +44,10 @@ export interface Resolved {
 export interface Workspaces {
   /** Idempotent: a workspace this runner already has is reported again, not created again. */
   readonly provision: (frame: WorkspaceProvision) => Promise<WorkspaceReport>;
-  /** Idempotent: disposing an id this runner never had reports it as deleted. */
+  /** Replays removal outcomes and refuses remaining files without recorded ownership. */
   readonly dispose: (frame: WorkspaceDispose) => Promise<WorkspaceReport>;
+  /** Forgets an attached workspace registration without deleting working files. */
+  readonly detach: (frame: WorkspaceDetach) => Promise<WorkspaceReport>;
   readonly resolve: (workspaceId: string) => Resolved | undefined;
   /**
    * Waits until the provisioning of this workspace that is in progress, if
@@ -166,6 +170,7 @@ export const makeWorkspaces = (options: {
    * a directory that no longer exists, so such a workspace counts as unknown.
    */
   const findStandingWorkspace = (workspaceId: string): RegisteredWorkspace | undefined => {
+    if (removalsInFlight.has(workspaceId)) return undefined;
     let entry: RegisteredWorkspace | undefined;
     try {
       entry = substrate.registry.held(workspaceId);
@@ -224,8 +229,57 @@ export const makeWorkspaces = (options: {
     }
   };
 
+  const removalsInFlight = new Map<
+    string,
+    { instruction: WorkspaceRemoval; result: Promise<WorkspaceReport> }
+  >();
+  const remove = (instruction: WorkspaceRemoval): Promise<WorkspaceReport> => {
+    const active = removalsInFlight.get(instruction.workspaceId);
+    if (active !== undefined) {
+      if (hasSameRemovalIntent(active.instruction, instruction)) return active.result;
+      return Promise.resolve({
+        _tag: "workspaceReport",
+        workspaceId: instruction.workspaceId,
+        status: "failed",
+        ...(instruction.requestId === undefined ? {} : { requestId: instruction.requestId }),
+        message:
+          "A different removal request is pending. Retry the original request before changing the removal intent.",
+      });
+    }
+    const result = (async (): Promise<WorkspaceReport> => {
+      try {
+        await inFlight.get(instruction.workspaceId)?.result;
+        return await (instruction._tag === "workspaceDispose"
+          ? disposeWorkspace(substrate, instruction)
+          : detachWorkspace(substrate, instruction));
+      } catch (error) {
+        return {
+          _tag: "workspaceReport",
+          workspaceId: instruction.workspaceId,
+          status: "failed",
+          ...(instruction.requestId === undefined ? {} : { requestId: instruction.requestId }),
+          message: (error instanceof Error ? error.message : String(error)).slice(
+            0,
+            MAX_MESSAGE_LENGTH,
+          ),
+        };
+      }
+    })();
+    removalsInFlight.set(instruction.workspaceId, { instruction, result });
+    void result.finally(() => removalsInFlight.delete(instruction.workspaceId));
+    return result;
+  };
+
   return {
     provision: async (frame) => {
+      if (removalsInFlight.has(frame.workspaceId))
+        return {
+          _tag: "workspaceReport",
+          workspaceId: frame.workspaceId,
+          status: "failed",
+          message:
+            "Workspace removal is in progress. Complete the removal request before creating a fresh workspace.",
+        };
       const running = inFlight.get(frame.workspaceId);
       if (running !== undefined) {
         if (
@@ -246,6 +300,11 @@ export const makeWorkspaces = (options: {
       const started = (async (): Promise<WorkspaceReport> => {
         try {
           // Read before any Git inspection so corruption cannot alter the registry or candidate files.
+          const removal = substrate.registry.readRemoval(frame.workspaceId);
+          if (removal?.phase === "pending" || removal?.report?.status === "deleted")
+            throw new Error(
+              "This workspace is being removed or its registration was deleted. Use a fresh workspace ID after completing removal.",
+            );
           const entry = substrate.registry.held(frame.workspaceId);
           const resources = frame.checkouts.map((checkout) => checkout.resourceId);
           if (frame.attachment !== undefined)
@@ -298,15 +357,8 @@ export const makeWorkspaces = (options: {
         inFlight.delete(frame.workspaceId);
       }
     },
-    dispose: async (frame) => {
-      // Wait for any provisioning of this workspace to finish first. Otherwise
-      // the teardown could remove a directory git is still writing into, and
-      // the provisioning would then register the directory the teardown had
-      // just removed. The provisioning's result is ignored: this call reports
-      // the result of the teardown.
-      await inFlight.get(frame.workspaceId)?.result.catch(() => undefined);
-      return disposeWorkspace(substrate, frame);
-    },
+    dispose: remove,
+    detach: remove,
     resolve: (workspaceId) => {
       const entry = findStandingWorkspace(workspaceId);
       return entry === undefined
@@ -332,7 +384,8 @@ export const makeWorkspaces = (options: {
     },
     inspect,
     reportAfterSession: async (workspaceId) => {
-      if (substrate.registry.held(workspaceId) === undefined) return undefined;
+      if (removalsInFlight.has(workspaceId) || substrate.registry.held(workspaceId) === undefined)
+        return undefined;
       return inspect(workspaceId);
     },
     runExclusively: (workspaceId, work) =>

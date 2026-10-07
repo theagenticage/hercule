@@ -549,8 +549,9 @@ const make = Effect.gen(function* () {
         const held = reachable.get(id);
         if (held === undefined) return Effect.succeed(false);
         if (
-          frame._tag === "workspaceProvision" &&
-          requiresWorkspaceLifecycle(frame) &&
+          ((frame._tag === "workspaceProvision" && requiresWorkspaceLifecycle(frame)) ||
+            frame._tag === "workspaceDispose" ||
+            frame._tag === "workspaceDetach") &&
           !held.capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY)
         )
           return Effect.as(
@@ -560,9 +561,12 @@ const make = Effect.gen(function* () {
               report: {
                 _tag: "workspaceReport",
                 workspaceId: frame.workspaceId,
+                ...(frame._tag === "workspaceProvision" || frame.requestId === undefined
+                  ? {}
+                  : { requestId: frame.requestId }),
                 status: "failed",
                 message:
-                  "This runner does not support the selected repository and starting revision. Upgrade the runner before preparing this workspace.",
+                  "This runner does not support the requested workspace lifecycle operation. Upgrade and reconnect the runner before retrying.",
               },
             }),
             false,

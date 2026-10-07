@@ -88,6 +88,7 @@ export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Works
   kind: "primary",
   status: "ready",
   ownership: "managed",
+  retentionPolicy: "manual",
   path: null,
   observedAt: null,
   warnings: [],

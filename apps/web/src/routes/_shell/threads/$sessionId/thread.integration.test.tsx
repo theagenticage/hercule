@@ -3437,6 +3437,7 @@ const buildEphemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
   kind: "ephemeral",
   status: "ready",
   ownership: "managed",
+  retentionPolicy: "manual",
   path: null,
   observedAt: null,
   warnings: [],

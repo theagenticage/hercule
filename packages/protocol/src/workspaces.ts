@@ -120,9 +120,25 @@ export const requiresWorkspaceLifecycle = (frame: WorkspaceProvision): boolean =
 export const WorkspaceDispose = Schema.Struct({
   _tag: Schema.Literal("workspaceDispose"),
   workspaceId: StorageId,
+  requestId: Schema.optionalKey(Fact),
+  discardChanges: Schema.optionalKey(Schema.Boolean),
 });
 
 export type WorkspaceDispose = Schema.Schema.Type<typeof WorkspaceDispose>;
+
+/** Forgets an attached registration without changing the checkout or its Git repository. */
+export const WorkspaceDetach = Schema.Struct({
+  _tag: Schema.Literal("workspaceDetach"),
+  workspaceId: StorageId,
+  requestId: Schema.optionalKey(Fact),
+});
+
+export type WorkspaceDetach = Schema.Schema.Type<typeof WorkspaceDetach>;
+
+/** Removes managed files or forgets an existing checkout registration. */
+export const WorkspaceRemoval = Schema.Union([WorkspaceDispose, WorkspaceDetach]);
+
+export type WorkspaceRemoval = Schema.Schema.Type<typeof WorkspaceRemoval>;
 
 /** The state of one working copy, once the machine has made it. */
 export const CheckoutReport = Schema.Struct({
@@ -153,6 +169,8 @@ export type CheckoutReport = Schema.Schema.Type<typeof CheckoutReport>;
 export const WorkspaceReport = Schema.Struct({
   _tag: Schema.Literal("workspaceReport"),
   workspaceId: StorageId,
+  /** Correlates a removal outcome with its durable instruction. */
+  requestId: Schema.optionalKey(Fact),
   status: Schema.Literals(["ready", "failed", "deleted"]),
   /** The normalized attached root, never an ordinary managed directory. */
   path: Schema.optionalKey(WorkspacePath),

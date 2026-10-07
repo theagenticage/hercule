@@ -324,7 +324,10 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
       .handle("provision", ({ payload }) => withApiErrors(provisioning.provisionWorkspace(payload)))
       .handle("attach", ({ payload }) => withApiErrors(provisioning.attachWorkspace(payload)))
       .handle("inspect", ({ params }) => withApiErrors(provisioning.inspectWorkspace(params.id)))
-      .handle("dispose", ({ params }) => withApiErrors(provisioning.disposeWorkspace(params.id)));
+      .handle("dispose", ({ params, payload }) =>
+        withApiErrors(provisioning.disposeWorkspace(params.id, payload)),
+      )
+      .handle("detach", ({ params }) => withApiErrors(provisioning.detachWorkspace(params.id)));
   }),
 );
 

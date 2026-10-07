@@ -135,6 +135,7 @@ export interface ComposerFields {
  */
 const UNREADY_WORKSPACE_REASONS: Readonly<Record<Exclude<WorkspaceStatus, "ready">, string>> = {
   provisioning: "The workspace it joins is still being set up",
+  disposing: "The workspace it joins is being removed",
   failed: "The workspace it joins could not be set up",
   deleted: "The workspace it joins was deleted",
   lost: "The workspace it joins was lost when its machine was retired",
