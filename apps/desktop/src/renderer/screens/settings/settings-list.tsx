@@ -46,7 +46,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
   {
     heading: "Crew",
     rows: [
-      { label: "Assistants", Icon: CrewIcon, to: null },
+      { label: "Assistants", Icon: CrewIcon, to: "/settings/assistants" },
       { label: "Connections", Icon: ConnectionsIcon, to: null, carriesConnectionDot: true },
       { label: "Providers", Icon: CpuIcon, to: null },
       { label: "Machines", Icon: FleetIcon, to: null },

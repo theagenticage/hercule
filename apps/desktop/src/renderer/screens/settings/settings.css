@@ -29,6 +29,12 @@
   margin-left: -6px;
 }
 
+/* Not in the book, whose button sits in the header itself. The open section
+   draws its actions into this element, which adds no box of its own. */
+.bar-actions {
+  display: contents;
+}
+
 /* The Settings list beside the section's body. */
 .settings {
   flex: 1;
@@ -127,6 +133,11 @@
 .set-row > .field--select {
   min-width: 214px;
 }
+/* The book's field is as wide as the value it shows. A native select is as
+   wide as its longest option, so it is sized to the option it shows. */
+.set-row > .field--select > select {
+  field-sizing: content;
+}
 
 /* The book's Assistants page sets this inline on a row that follows a
    heading with no lead under it. */
@@ -145,16 +156,44 @@
   line-height: 1.45;
 }
 
+/* Not in the book. A setting whose value is a long text, such as an
+   assistant's persona, stacks: the label and hint above, a textarea the
+   width of the section under them. The textarea grows with its text, so it
+   never shows a scrollbar, and the user cannot drag its size. It is at least
+   two lines tall, so an empty one still reads as a box for text. */
+.set-row.set-row--text {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.set-row--text > textarea.field {
+  display: block;
+  height: auto;
+  min-height: calc(2lh + 16px);
+  padding: 8px 11px;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  line-height: 1.5;
+  field-sizing: content;
+  overflow: hidden;
+  resize: none;
+}
+.set-row--text > textarea.field:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 /* The head of a section about one person, from the book's Assistants page:
    the avatar beside the name. */
-.set-col > .head {
+.set-col .head {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 /* A long name is one word, which a flex item would not shrink below, so it
    breaks anywhere instead of pushing the section wider than the window. */
-.set-col > .head h2 {
+.set-col .head h2 {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;

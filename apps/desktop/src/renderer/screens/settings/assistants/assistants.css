@@ -1,0 +1,120 @@
+/* Settings > Assistants, from the Bureau book's Assistants page
+   (desktop/settings-assistants.html). The book's short class names, such as
+   `.rec` and `.person`, would reach any element of the app that uses them,
+   so each rule here carries a name of its own and says which of the book's
+   rules it follows. The chips, the switch, the heartbeat and the rotation
+   have files of their own. */
+
+/* The book's page starts its body 22px from the header, not 28px. */
+.set-body:has(> .set-col > .assistant-settings) {
+  padding-top: 22px;
+}
+
+/* The book lays the record out in two columns, 940px wide, with a column of
+   memory, topics and reminders on the right. The app does not draw that
+   column (spec 17 §Settings, Assistants), so the record is one column, as
+   wide as every other section's: 760px. The book's `.rec`. */
+.assistant-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+/* The book's `.rec-main`. */
+.assistant-record {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+}
+.assistant-settings .set-row {
+  min-height: 50px;
+}
+
+/* Assistants as tabs: pick a colleague by face. The book's tab also names
+   the assistant's role, which an assistant does not have, so it is left out.
+   The book's `.people` and `.person`. */
+.assistant-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line-soft);
+  /* Not in the book, which draws three tabs. Many tabs wrap onto a second
+     line rather than pushing the section wider than the window. */
+  flex-wrap: wrap;
+}
+.assistant-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px 0 6px;
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.assistant-tab:hover {
+  background: var(--hover);
+}
+.assistant-tab[aria-current="page"] {
+  background: var(--who-tint);
+  color: var(--ink);
+}
+
+/* Not in the book, whose rows show values rather than controls. The Name
+   field is as wide as the selects under it. */
+.assistant-settings .set-row > span.field:not(.field--select) {
+  width: 214px;
+}
+
+/* Not in the book: a failed create, above the tabs. */
+.set-col > .set-err {
+  margin: 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* Not in the book, which always has assistants: the section with none. */
+.empty-assistants {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 64px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+.empty-assistants b {
+  color: var(--ink);
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.empty-assistants span {
+  max-width: 380px;
+}
+
+/* Not in the book: the dialog that confirms Delete, on the glass of the
+   app's other dialogs. */
+.delete-assistant-dialog {
+  width: 400px;
+}
+.pop-sec.delete-assistant-body {
+  padding: 14px;
+}
+.delete-assistant-body > p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.delete-assistant-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+@container (width < 520px) {
+  .assistant-settings .set-row > span.field:not(.field--select) {
+    width: auto;
+  }
+}

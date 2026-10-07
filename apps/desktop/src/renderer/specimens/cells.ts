@@ -22,6 +22,7 @@ import type { MarkState } from "../marks";
 export type IconName =
   | "bound"
   | "branch"
+  | "chat"
   | "check"
   | "chevron-right"
   | "clock"
@@ -35,6 +36,8 @@ export type IconName =
   | "eye"
   | "file"
   | "fleet"
+  | "globe"
+  | "heart"
   | "id"
   | "intake"
   | "key"
@@ -58,7 +61,9 @@ export type IconName =
   | "stop"
   | "system"
   | "tasks"
+  | "terminal"
   | "threads"
+  | "undo"
   | "user"
   | "workspace";
 
@@ -95,6 +100,7 @@ const MARK_STATES: ReadonlyArray<MarkState> = [
 const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["bound", []],
   ["branch", [13, 14]],
+  ["chat", [13]],
   ["check", [12, 14]],
   ["chevron-right", [13]],
   ["clock", [14]],
@@ -108,6 +114,8 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["eye", [14]],
   ["file", [12, 14]],
   ["fleet", []],
+  ["globe", [12]],
+  ["heart", [15]],
   ["id", []],
   ["intake", [13, 14]],
   ["key", [14]],
@@ -131,7 +139,9 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["stop", [14]],
   ["system", []],
   ["tasks", [14]],
+  ["terminal", [12]],
   ["threads", []],
+  ["undo", [15]],
   ["user", []],
   ["workspace", [13, 14, 18, 20]],
 ];

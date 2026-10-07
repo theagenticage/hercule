@@ -32,7 +32,6 @@ import {
 const INERT_ROWS = [
   "Appearance",
   "Threads",
-  "Assistants",
   "Connections",
   "Providers",
   "Machines",
