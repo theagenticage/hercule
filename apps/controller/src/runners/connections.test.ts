@@ -10,7 +10,7 @@
  * rather than over the socket, because it is about the previous run.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber, Layer, Option } from "effect";
+import { Duration, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   RunnerConnectivity,
@@ -21,6 +21,7 @@ import type {
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   PROTOCOL_VERSION,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
   type ControllerToRunner,
   type SessionInput,
   type SessionInputResult,
@@ -187,6 +188,49 @@ const WATERMARK: RunnerWatermark = {
 
 /** A connection these tests never write to: they test the row, not the socket. */
 const HELD = { close: () => undefined, askForFacts: Effect.void, ask: () => Effect.void };
+
+it("refuses attachment frames when a capable runner reconnects with an older binary", async () => {
+  const written: Array<ControllerToRunner> = [];
+  const result = await Effect.runPromise(
+    Effect.gen(function* () {
+      const connections = yield* RunnerConnections;
+      const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+      const hello = {
+        binaryVersion: "0.1.0",
+        protocolVersion: PROTOCOL_VERSION,
+        negotiatedCapabilities: [WORKSPACE_LIFECYCLE_CAPABILITY],
+        facts: FACTS,
+      };
+      yield* connections.greeted(runner!.id, mintConnection(), HELD, hello);
+      yield* connections.greeted(
+        runner!.id,
+        mintConnection(),
+        { ...HELD, ask: (frame) => Effect.sync(() => written.push(frame)) },
+        { ...hello, negotiatedCapabilities: [] },
+      );
+      const sent = yield* connections.tell(runner!.id, {
+        _tag: "workspaceProvision",
+        workspaceId: "workspace-attachment",
+        kind: "primary",
+        attachment: { path: "/checkout", remoteName: "origin" },
+        checkouts: [],
+      });
+      const report = yield* connections.fleetTraffic.pipe(Stream.runHead);
+      return { sent, report: Option.getOrThrow(report) };
+    }).pipe(Effect.provide(layer)),
+  );
+  expect(result.sent).toBe(false);
+  expect(written).toEqual([]);
+  expect(result.report).toMatchObject({
+    _tag: "workspaceReported",
+    report: {
+      workspaceId: "workspace-attachment",
+      status: "failed",
+    },
+  });
+  if (result.report._tag !== "workspaceReported") throw new Error("Expected workspace failure");
+  expect(result.report.report.message).toMatch(/upgrade/i);
+});
 
 describe("a draining runner whose socket drops", () => {
   it("becomes unreachable without coming off the drain", async () => {

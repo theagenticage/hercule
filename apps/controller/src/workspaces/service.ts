@@ -43,6 +43,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   Subdirectory,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
   type CredentialAnswer,
   type CredentialRequest,
   type GitIdentity,
@@ -71,6 +72,7 @@ import {
   type Validation,
   type Workspace,
   type WorkspaceStatus,
+  type WorkspaceAttachInput,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import {
@@ -347,6 +349,8 @@ const make = Effect.gen(function* () {
         runnerId: row.runnerId,
         kind: row.kind,
         status: row.status,
+        ownership: row.ownership,
+        path: row.path,
         checkouts: (checkouts.get(row.id) ?? []).map(toCheckoutRecord),
         designatedConnectionId: row.designatedConnectionId,
         message: row.message,
@@ -422,6 +426,47 @@ const make = Effect.gen(function* () {
       }
     });
 
+  /** Returns the attached main workspace that new work must use, refusing unavailable sources. */
+  const readSelectedExistingWorkspace = (
+    resourceId: string,
+    runnerId: string,
+  ): Effect.Effect<StoredWorkspace | undefined, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const selection = yield* workspaces.readRepositorySelection(resourceId, runnerId);
+      if (Option.isNone(selection) || selection.value.mode === "managed") return undefined;
+      const source =
+        selection.value.primaryWorkspaceId === null
+          ? Option.none()
+          : yield* workspaces.one(selection.value.primaryWorkspaceId);
+      if (Option.isNone(source) || source.value.status !== "ready") {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["workspace"],
+              message:
+                "The selected existing checkout is unavailable or still being validated. Reattach the same checkout and wait until it is ready.",
+            },
+          ]),
+        );
+      }
+      const runner = yield* runners.read(runnerId);
+      if (
+        Option.isNone(runner) ||
+        !(runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+      ) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["runnerId"],
+              message:
+                "This runner does not support existing checkout attachment. Upgrade and reconnect the runner before starting work.",
+            },
+          ]),
+        );
+      }
+      return source.value;
+    });
+
   /**
    * Returns the workspace's frozen creation instruction. Legacy workspaces
    * lack that snapshot, so their first resend records the instruction rebuilt
@@ -473,6 +518,37 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
+        if (row.value.status !== "ready") {
+          return yield* Effect.fail(
+            createValidationError([
+              { path: ["workspace", "workspaceId"], message: WORKSPACE_NOT_READY },
+            ]),
+          );
+        }
+        const instruction = yield* workspaces.readProvisionFrame(joined);
+        if (
+          row.value.ownership === "existing" ||
+          (Option.isSome(instruction) &&
+            instruction.value.checkouts.some(
+              (checkout) => checkout.repositoryWorkspaceId !== undefined,
+            ))
+        ) {
+          const runner = yield* runners.read(row.value.runnerId);
+          if (
+            Option.isNone(runner) ||
+            !(runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+          ) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["runnerId"],
+                  message:
+                    "This runner does not support this workspace's existing repository. Upgrade and reconnect it before starting work.",
+                },
+              ]),
+            );
+          }
+        }
         const held = (yield* workspaces.listCheckouts([joined])).get(joined) ?? [];
         // An existing workspace's repos must still belong to this project, so
         // joining a workspace is not a way around project filing.
@@ -489,6 +565,14 @@ const make = Effect.gen(function* () {
 
       if (wish.kind === "primary") {
         const resource = yield* readCheckoutableRepoOrFail(wish.resourceId, input.projectId);
+        const selected = yield* readSelectedExistingWorkspace(resource.id, input.runnerId);
+        if (selected !== undefined) {
+          return {
+            workspaceId: selected.id,
+            checkoutBranch: wish.branch,
+            designatedConnectionId: selected.designatedConnectionId,
+          };
+        }
         const standing = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(standing)) {
           return {
@@ -510,13 +594,11 @@ const make = Effect.gen(function* () {
       }
 
       const repos = yield* Effect.forEach(wish.checkouts, (checkout) =>
-        Effect.map(
-          readCheckoutableRepoOrFail(checkout.resourceId, input.projectId),
-          (resource) => ({
-            resource,
-            baseBranch: checkout.baseBranch,
-          }),
-        ),
+        Effect.gen(function* () {
+          const resource = yield* readCheckoutableRepoOrFail(checkout.resourceId, input.projectId);
+          const selected = yield* readSelectedExistingWorkspace(resource.id, input.runnerId);
+          return { resource, baseBranch: checkout.baseBranch, repositoryWorkspaceId: selected?.id };
+        }),
       );
       // Each checkout gets its own directory, named after the repo. So a
       // workspace with one repo twice, or with two repos of the same name,
@@ -552,6 +634,9 @@ const make = Effect.gen(function* () {
         subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
         branch: input.branch,
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
+        ...(repo.repositoryWorkspaceId === undefined
+          ? {}
+          : { repositoryWorkspaceId: repo.repositoryWorkspaceId }),
       }));
       const opened = yield* openWorkspace(
         { workspaces, audit },
@@ -669,6 +754,14 @@ const make = Effect.gen(function* () {
         const resource = yield* readRepoOrFail(input.resourceId);
         const runner = yield* runners.read(input.runnerId);
         if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
+        const selection = yield* workspaces.readRepositorySelection(resource.id, input.runnerId);
+        if (Option.isSome(selection) && selection.value.mode === "existing") {
+          return yield* Effect.fail(
+            createConflictError(
+              "This repository already uses an existing checkout on this runner. Reattach that checkout instead of selecting managed storage.",
+            ),
+          );
+        }
         const held = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(held)) {
           return yield* Effect.fail(
@@ -681,6 +774,96 @@ const make = Effect.gen(function* () {
         const opened = yield* openPrimary(
           { workspaces, audit },
           { resource, runnerId: input.runnerId, actor: USER_ACTOR, at },
+        );
+        return { workspace: yield* readWorkspaceRecord(opened.workspace), frame: opened.frame };
+      }),
+
+    /** Opens or revalidates the user's fixed existing checkout on its selected runner. */
+    openAttachmentFor: (
+      input: WorkspaceAttachInput,
+    ): Effect.Effect<
+      { readonly workspace: Workspace; readonly frame: WorkspaceProvision },
+      Conflict | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        const resource = yield* readRepoOrFail(input.resourceId);
+        const runner = yield* runners.read(input.runnerId);
+        if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
+        if (runner.value.lifecycle === "retired") {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner is retired and cannot validate an attachment. Join it as a new runner before attaching a checkout.",
+            ),
+          );
+        }
+        if (!(runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY)) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner does not support existing checkout attachment. Upgrade and reconnect it before attaching a checkout.",
+            ),
+          );
+        }
+        const remoteName = input.remoteName ?? "origin";
+        const selection = yield* workspaces.readRepositorySelection(resource.id, input.runnerId);
+        if (Option.isSome(selection)) {
+          const held = selection.value;
+          const primary =
+            held.primaryWorkspaceId === null
+              ? Option.none()
+              : yield* workspaces.one(held.primaryWorkspaceId);
+          if (
+            held.mode !== "existing" ||
+            held.remoteName !== remoteName ||
+            (held.path !== input.path &&
+              (Option.isNone(primary) || primary.value.path !== input.path))
+          ) {
+            return yield* Effect.fail(
+              createConflictError(
+                "This repository already has a different storage choice on this runner. Use its selected checkout; replacement is not supported.",
+              ),
+            );
+          }
+          if (
+            Option.isSome(primary) &&
+            primary.value.status !== "deleted" &&
+            primary.value.status !== "lost"
+          ) {
+            if (yield* workspaces.retryAttachment(primary.value.id)) {
+              yield* audit.append({
+                kind: "workspace.attachmentRetried",
+                actor: USER_ACTOR,
+                payload: { workspaceId: primary.value.id, runnerId: input.runnerId },
+                at: yield* nowIso,
+              });
+            }
+            const updated = yield* readStoredWorkspaceOrFail(primary.value.id);
+            return {
+              workspace: yield* readWorkspaceRecord(updated),
+              frame: yield* rebuildProvisionFrame(updated),
+            };
+          }
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "The selected existing checkout has no active registration. Restore its registration before creating work here.",
+            ),
+          );
+        }
+        yield* workspaces.reserveRepositorySelection(resource.id, input.runnerId, {
+          mode: "existing",
+          path: input.path,
+          remoteName,
+        });
+        const opened = yield* openWorkspace(
+          { workspaces, audit },
+          {
+            runnerId: input.runnerId,
+            kind: "primary",
+            attachment: { path: input.path, remoteName },
+            designatedConnectionId: resource.connectionId,
+            checkouts: [{ resource, form: "clone", subdirectory: null, branch: null }],
+            actor: USER_ACTOR,
+            at: yield* nowIso,
+          },
         );
         return { workspace: yield* readWorkspaceRecord(opened.workspace), frame: opened.frame };
       }),
@@ -829,6 +1012,24 @@ const make = Effect.gen(function* () {
         return { _tag: "workspaceDispose", workspaceId: workspace.id };
       }),
 
+    /** Returns whether this runner can execute the workspace's recorded attachment semantics. */
+    supportsProvisionFrame: (
+      runnerId: string,
+      frame: WorkspaceProvision,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        if (
+          frame.attachment === undefined &&
+          frame.checkouts.every((checkout) => checkout.repositoryWorkspaceId === undefined)
+        )
+          return true;
+        const runner = yield* runners.read(runnerId);
+        return (
+          Option.isSome(runner) &&
+          (runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+        );
+      }),
+
     /**
      * Returns a provision frame for every workspace on this runner that is
      * still `provisioning`, so they can be sent again. Without this, a frame
@@ -887,8 +1088,16 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             switch (report.status) {
-              case "ready":
-                return yield* workspaces.markReady(report.workspaceId, report.checkouts ?? [], at);
+              case "ready": {
+                const changed = yield* workspaces.markReady(
+                  report.workspaceId,
+                  report.checkouts ?? [],
+                  at,
+                );
+                if (report.path !== undefined)
+                  yield* workspaces.recordAttachmentPath(report.workspaceId, report.path);
+                return changed;
+              }
               case "failed":
                 return yield* workspaces.markFailed(report.workspaceId, report.message ?? null, at);
               case "deleted":

@@ -83,6 +83,8 @@ export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Works
   runnerId: SLOTS.moss,
   kind: "primary",
   status: "ready",
+  ownership: "managed",
+  path: null,
   checkouts: [],
   designatedConnectionId: null,
   message: null,

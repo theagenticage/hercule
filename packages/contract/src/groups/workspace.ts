@@ -8,12 +8,17 @@
  * shared by whatever runs in it and never torn down. An ephemeral one is made
  * for a piece of work and disposed of afterwards.
  *
- * The controller neither stores nor accepts a path. The machine decides where
- * the folder is: a primary workspace is always a Hercule-managed clone under
- * that machine's own storage.
+ * Managed paths remain runner-local. Attachment accepts an explicit path
+ * scoped to one runner, whose validation preserves the existing working copy.
  */
 import { Schema } from "effect";
-import { CheckoutForm, WorkspaceKind } from "@hercule/protocol";
+import {
+  CheckoutForm,
+  GitRemoteName,
+  WorkspaceKind,
+  WorkspaceOwnership,
+  WorkspacePath,
+} from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -31,7 +36,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 
 /** The kinds and forms come from the runner protocol; the API returns them unchanged. */
-export { CheckoutForm, WorkspaceKind };
+export { CheckoutForm, GitRemoteName, WorkspaceKind, WorkspaceOwnership, WorkspacePath };
 
 /** The longest branch name; git's own limit is the filesystem's. */
 export const MAX_BRANCH_LENGTH = 255;
@@ -106,6 +111,9 @@ export const Workspace = Schema.Struct({
   runnerId: Id,
   kind: WorkspaceKind,
   status: WorkspaceStatus,
+  ownership: WorkspaceOwnership,
+  /** The normalized attached root on the selected runner; null for managed storage. */
+  path: Schema.NullOr(WorkspacePath),
   checkouts: Schema.Array(Checkout),
   /** The Connection of its first checkout's resource; null on a scratch workspace. */
   designatedConnectionId: Schema.NullOr(Id),
@@ -142,6 +150,15 @@ export const WorkspaceProvisionInput = closedStruct({
 
 export type WorkspaceProvisionInput = Schema.Schema.Type<typeof WorkspaceProvisionInput>;
 
+export const WorkspaceAttachInput = closedStruct({
+  resourceId: Id,
+  runnerId: Id,
+  path: WorkspacePath,
+  remoteName: Schema.optionalKey(GitRemoteName),
+});
+
+export type WorkspaceAttachInput = Schema.Schema.Type<typeof WorkspaceAttachInput>;
+
 export const WorkspaceFilter = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
   resourceId: Schema.optionalKey(Id),
@@ -167,6 +184,11 @@ export const workspace = HttpApiGroup.make("workspace")
     }),
     HttpApiEndpoint.post("provision", "/workspaces", {
       payload: WorkspaceProvisionInput,
+      success: Workspace,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("attach", "/workspaces/attach", {
+      payload: WorkspaceAttachInput,
       success: Workspace,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
     }),

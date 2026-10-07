@@ -21,7 +21,7 @@ describe("workspace preparation instructions migration", () => {
                  ('preparing', 'runner', 'ephemeral', 'provisioning', NULL, 'old'),
                  ('failed', 'runner', 'ephemeral', 'failed', 'exit 7', 'old')`;
         const before = yield* sql`SELECT * FROM workspaces ORDER BY id`;
-        yield* runMigrations();
+        yield* runMigrations(migrations.filter(([id]) => id <= 51));
         const after = yield* sql`SELECT * FROM workspaces ORDER BY id`;
         const violations = yield* sql`PRAGMA foreign_key_check`;
         return { before, after, violations };

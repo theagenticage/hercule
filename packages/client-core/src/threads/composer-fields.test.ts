@@ -400,6 +400,8 @@ const PRIMARY: Workspace = {
   runnerId: LOCAL.id,
   kind: "primary",
   status: "ready",
+  ownership: "managed",
+  path: null,
   checkouts: [
     {
       checkoutId: "co-primary",

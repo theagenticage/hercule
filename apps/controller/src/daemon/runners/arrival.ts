@@ -20,6 +20,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../../db";
+import { SessionService } from "../../sessions";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { RunnerConnections } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
@@ -27,6 +30,8 @@ import { WorkspaceService } from "../../workspaces";
 import { forkAndAbsorbFailures } from "../absorbing";
 
 const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const sessions = yield* SessionService;
   const connections = yield* RunnerConnections;
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
@@ -42,10 +47,35 @@ const make = Effect.gen(function* () {
       const startedWorkspaceIds = new Set(
         steps.flatMap((step) => (step.kind === "action" ? [step.workspaceId] : [])),
       );
+      const rejectedWorkspaceIds = new Set<string>();
       for (const frame of yield* workspaces.listOwedProvisioning(runnerId)) {
+        if (!(yield* workspaces.supportsProvisionFrame(runnerId, frame))) {
+          const message =
+            "This runner does not support the recorded existing checkout instruction. Upgrade and reconnect the runner, then reattach the same checkout.";
+          yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const settled = yield* workspaces.reported(runnerId, {
+                _tag: "workspaceReport",
+                workspaceId: frame.workspaceId,
+                status: "failed",
+                message,
+              });
+              if (settled?.moved === "failed") {
+                yield* sessions.endForWorkspace(frame.workspaceId, message);
+                yield* runs.failRunsInWorkspace(frame.workspaceId, message);
+              }
+            }),
+          );
+          rejectedWorkspaceIds.add(frame.workspaceId);
+          continue;
+        }
         if (!startedWorkspaceIds.has(frame.workspaceId)) yield* connections.tell(runnerId, frame);
       }
-      for (const step of steps) yield* workspaceSteps.start(step);
+      for (const step of steps) {
+        if (step.kind === "action" && rejectedWorkspaceIds.has(step.workspaceId)) continue;
+        yield* workspaceSteps.start(step);
+      }
       yield* runs.stopSessionsOfEndedRuns(runnerId);
       yield* runs.wakeRunsWaitingForRunner();
     });
@@ -68,5 +98,10 @@ export class Arrival extends Context.Service<Arrival, Effect.Success<typeof make
 export const ArrivalLayer: Layer.Layer<
   Arrival,
   never,
-  RunnerConnections | WorkspaceService | RunService | WorkspaceSteps
+  | SqlClient.SqlClient
+  | SessionService
+  | RunnerConnections
+  | WorkspaceService
+  | RunService
+  | WorkspaceSteps
 > = Layer.effect(Arrival)(make);

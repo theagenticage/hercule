@@ -25,6 +25,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createDecodeValidationError,
+  createForbiddenError,
+  WorkspaceAttachInput,
   Id,
   WorkspaceProvisionInput,
   type Conflict,
@@ -35,11 +37,13 @@ import {
   type Validation,
   type Workspace,
 } from "@hercule/contract";
-import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
+import { CurrentActor, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
 import { withTransaction } from "../../db";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
+
+const decodeAttach = Schema.decodeUnknownEffect(WorkspaceAttachInput);
 
 const decodeProvision = Schema.decodeUnknownEffect(WorkspaceProvisionInput);
 
@@ -80,6 +84,29 @@ const make = Effect.gen(function* () {
   });
 
   return {
+    /** Persists a user-authorized attachment before asking its runner to validate the checkout. */
+    attachWorkspace: (
+      input: WorkspaceAttachInput,
+    ): Effect.Effect<Workspace, WorkspaceError | Conflict> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workspace.attach");
+        if ((yield* CurrentActor)._tag !== "user") {
+          return yield* Effect.fail(
+            createForbiddenError(
+              "workspace.write",
+              "Only the user may attach an existing checkout. No session or workflow grant authorizes an external path.",
+            ),
+          );
+        }
+        const decoded = yield* Effect.mapError(decodeAttach(input), createDecodeValidationError);
+        const { workspace, frame } = yield* withTransaction(
+          sql,
+          workspaces.openAttachmentFor(decoded),
+        );
+        yield* connections.tell(decoded.runnerId, frame);
+        return workspace;
+      }),
+
     /**
      * Provisions the main workspace of a repo resource on one runner: a fresh
      * clone under the runner's own storage. Returns the workspace row, before

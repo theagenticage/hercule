@@ -889,6 +889,48 @@ export const CLI = {
       invalid_state: "only a repo is checked out; a folder and a mailbox are records",
     },
   },
+  "workspace.attach": {
+    command: "workspace attach",
+    help: "Registers an existing Git checkout as the main workspace on one runner. Only the user may attach. The runner validates the selected remote and normalizes the path without changing files, branches or configuration, cloning, fetching, or running setup. An offline runner validates the recorded instruction when it returns. Read the workspace to see its result.",
+    examples: [
+      { args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5", "--path", "/Users/me/Code/repo"] },
+      {
+        args: [
+          "--resource",
+          "1f3a9c2e",
+          "--runner",
+          "7b41d0a5",
+          "--path",
+          "/srv/code/repo",
+          "--remote",
+          "upstream",
+        ],
+      },
+    ],
+    fields: {
+      resourceId: {
+        flag: "resource",
+        help: "The repository Resource whose canonical remote must match the checkout.",
+      },
+      runnerId: {
+        flag: "runner",
+        help: "The runner on which this path exists. The path is never used on another runner.",
+      },
+      path: {
+        flag: "path",
+        help: "An absolute checkout path on that runner. A subdirectory is normalized to its repository root.",
+      },
+      remoteName: {
+        flag: "remote",
+        help: "The checkout's configured remote to validate; defaults to origin.",
+      },
+    },
+    errors: {
+      conflict:
+        "that repository already has a different path or storage mode selected on this runner",
+      invalid_state: "the runner must support workspace attachment; upgrade it before attaching",
+    },
+  },
   "workspace.dispose": {
     command: "workspace dispose",
     help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down. Use it to delete the workspace a failed or cancelled run kept for inspection before its window ends.",

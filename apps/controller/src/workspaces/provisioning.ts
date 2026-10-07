@@ -10,9 +10,8 @@
  * the rows: the remote to clone, the setup command to run, and the
  * `.workspaceinclude` list. So the resource is passed in beside each checkout.
  *
- * No path is sent to the runner. A primary is always a Hercule-managed clone
- * under the runner's own storage, so the runner is only told which repository
- * to clone.
+ * Explicit attachment paths are scoped to the selected runner. Managed
+ * workspaces continue to use runner-local storage.
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -26,6 +25,7 @@ import type { StoredCheckout, StoredWorkspace, workspaceRepository } from "./rep
 interface CheckoutPlan {
   readonly checkout: StoredCheckout;
   readonly resource: StoredRepo;
+  readonly repositoryWorkspaceId?: string;
 }
 
 /**
@@ -49,6 +49,9 @@ export const buildProvisionFrame = (
     baseBranch: plan.checkout.baseBranch,
     setupCommand: plan.resource.setupCommand,
     workspaceInclude: plan.resource.workspaceInclude,
+    ...(plan.repositoryWorkspaceId === undefined
+      ? {}
+      : { repositoryWorkspaceId: plan.repositoryWorkspaceId }),
   })),
 });
 
@@ -60,6 +63,7 @@ export interface OpeningCheckout {
   readonly branch: string | null;
   /** The branch a new branch starts from; absent means the resource's default. */
   readonly baseBranch?: string;
+  readonly repositoryWorkspaceId?: string;
 }
 
 /** The two writers that opening a workspace needs, which the service already holds. */
@@ -73,6 +77,7 @@ export const openWorkspace = (
   input: {
     readonly runnerId: string;
     readonly kind: WorkspaceKind;
+    readonly attachment?: { readonly path: string; readonly remoteName: string };
     /** The Connection that work in the workspace acts through, fixed here and stored. */
     readonly designatedConnectionId: string | null;
     readonly checkouts: ReadonlyArray<OpeningCheckout>;
@@ -84,9 +89,17 @@ export const openWorkspace = (
   SqlError
 > =>
   Effect.gen(function* () {
+    for (const checkout of input.checkouts) {
+      if (input.attachment === undefined && checkout.repositoryWorkspaceId === undefined) {
+        yield* writers.workspaces.reserveRepositorySelection(checkout.resource.id, input.runnerId, {
+          mode: "managed",
+        });
+      }
+    }
     const workspace = yield* writers.workspaces.insert({
       runnerId: input.runnerId,
       kind: input.kind,
+      ownership: input.attachment === undefined ? "managed" : "existing",
       designatedConnectionId: input.designatedConnectionId,
       at: input.at,
     });
@@ -112,13 +125,27 @@ export const openWorkspace = (
       },
       at: input.at,
     });
-    const frame = buildProvisionFrame(
+    const creation = buildProvisionFrame(
       workspace,
       input.checkouts.map((checkout, index) => ({
         checkout: rows[index]!,
         resource: checkout.resource,
+        ...(checkout.repositoryWorkspaceId === undefined
+          ? {}
+          : { repositoryWorkspaceId: checkout.repositoryWorkspaceId }),
       })),
     );
+    const frame: WorkspaceProvision = {
+      ...creation,
+      ...(input.attachment === undefined ? {} : { attachment: input.attachment }),
+    };
+    if (input.kind === "primary") {
+      yield* writers.workspaces.setRepositoryPrimary(
+        input.checkouts[0]!.resource.id,
+        input.runnerId,
+        workspace.id,
+      );
+    }
     yield* writers.workspaces.freezeProvisionFrame(workspace.id, frame);
     return { workspace, frame };
   });

@@ -149,6 +149,11 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/workspaces",
   },
+  "workspace.attach": {
+    requires: "workspace.write",
+    method: "POST",
+    path: "/api/v1/workspaces/attach",
+  },
   "workspace.dispose": {
     requires: "workspace.write",
     method: "DELETE",

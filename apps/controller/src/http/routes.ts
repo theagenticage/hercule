@@ -322,6 +322,7 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
       .handle("query", ({ query }) => withApiErrors(workspaces.query(query)))
       .handle("read", ({ params }) => withApiErrors(workspaces.read(params.id)))
       .handle("provision", ({ payload }) => withApiErrors(provisioning.provisionWorkspace(payload)))
+      .handle("attach", ({ payload }) => withApiErrors(provisioning.attachWorkspace(payload)))
       .handle("dispose", ({ params }) => withApiErrors(provisioning.disposeWorkspace(params.id)));
   }),
 );

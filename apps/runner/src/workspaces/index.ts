@@ -14,6 +14,7 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
+import { attachWorkspace, matchesAttachedCheckout, reserveManagedRepositories } from "./attachment";
 import { disposeWorkspace } from "./dispose";
 import { observeWorkspace, provisionWorkspace, reprovision } from "./provision";
 import {
@@ -102,7 +103,34 @@ export const makeWorkspaces = (options: {
    * must wait for the original result rather than treating its recorded
    * in-progress phase as an interrupted preparation.
    */
-  const inFlight = new Map<string, Promise<WorkspaceReport>>();
+  const inFlight = new Map<
+    string,
+    { readonly instruction: WorkspaceProvision; readonly result: Promise<WorkspaceReport> }
+  >();
+  const selectionRequests = new Map<string, Promise<void>>();
+  const coordinateRepositorySelection = async <A>(
+    resourceIds: ReadonlyArray<string>,
+    work: () => Promise<A>,
+  ): Promise<A> => {
+    const resources = [...new Set(resourceIds)];
+    const preceding = resources
+      .map((id) => selectionRequests.get(id))
+      .filter((wait): wait is Promise<void> => wait !== undefined);
+    let release!: () => void;
+    const completed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    for (const id of resources) selectionRequests.set(id, completed);
+    try {
+      await Promise.all(preceding);
+      return await work();
+    } finally {
+      release();
+      for (const id of resources)
+        if (selectionRequests.get(id) === completed) selectionRequests.delete(id);
+    }
+  };
+
   /**
    * The lock of each workspace that has work running or waiting in
    * `runExclusively`, with the number of callers holding or waiting for it.
@@ -128,7 +156,8 @@ export const makeWorkspaces = (options: {
     return entry !== undefined &&
       (entry.preparation === undefined ||
         (entry.preparation.phase === "terminal" && entry.preparation.report.status === "ready")) &&
-      isStillOnDisk(entry)
+      isStillOnDisk(entry) &&
+      matchesAttachedCheckout(entry, substrate.gitEnv)
       ? entry
       : undefined;
   };
@@ -136,10 +165,38 @@ export const makeWorkspaces = (options: {
   return {
     provision: async (frame) => {
       const running = inFlight.get(frame.workspaceId);
-      if (running !== undefined) return running;
+      if (running !== undefined) {
+        if (
+          (running.instruction.attachment !== undefined || frame.attachment !== undefined) &&
+          (JSON.stringify(running.instruction.attachment) !== JSON.stringify(frame.attachment) ||
+            JSON.stringify(running.instruction.checkouts) !== JSON.stringify(frame.checkouts))
+        ) {
+          return {
+            _tag: "workspaceReport",
+            workspaceId: frame.workspaceId,
+            status: "failed",
+            message:
+              "A different checkout instruction is already being selected for this workspace. Repeat the original request.",
+          };
+        }
+        return running.result;
+      }
       const started = (async (): Promise<WorkspaceReport> => {
         try {
+          // Read before any Git inspection so corruption cannot alter the registry or candidate files.
           const entry = substrate.registry.held(frame.workspaceId);
+          const resources = frame.checkouts.map((checkout) => checkout.resourceId);
+          if (frame.attachment !== undefined)
+            return await coordinateRepositorySelection(resources, () =>
+              attachWorkspace(substrate, frame),
+            );
+          if (entry?.ownership === "existing")
+            throw new Error(
+              "This workspace already has an existing checkout selected. Repeat the original attachment request.",
+            );
+          await coordinateRepositorySelection(resources, () =>
+            reserveManagedRepositories(substrate, frame),
+          );
           return await (entry === undefined
             ? provisionWorkspace(substrate, frame)
             : reprovision(substrate, entry));
@@ -155,7 +212,7 @@ export const makeWorkspaces = (options: {
           };
         }
       })();
-      inFlight.set(frame.workspaceId, started);
+      inFlight.set(frame.workspaceId, { instruction: frame, result: started });
       try {
         return await started;
       } finally {
@@ -168,7 +225,7 @@ export const makeWorkspaces = (options: {
       // the provisioning would then register the directory the teardown had
       // just removed. The provisioning's result is ignored: this call reports
       // the result of the teardown.
-      await inFlight.get(frame.workspaceId)?.catch(() => undefined);
+      await inFlight.get(frame.workspaceId)?.result.catch(() => undefined);
       return disposeWorkspace(substrate, frame);
     },
     resolve: (workspaceId) => {
@@ -178,7 +235,7 @@ export const makeWorkspaces = (options: {
         : { root: entry.root, cwd: chooseCwd(entry), checkouts: entry.checkouts };
     },
     waitForProvisioning: async (workspaceId) => {
-      await inFlight.get(workspaceId)?.catch(() => undefined);
+      await inFlight.get(workspaceId)?.result.catch(() => undefined);
     },
     hasFailedProvisioning: (workspaceId) => {
       try {

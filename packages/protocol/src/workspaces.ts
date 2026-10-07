@@ -3,9 +3,8 @@
  * down, what the machine reports back, and the git credential exchange that
  * runs while it does.
  *
- * Ids cross this boundary and paths do not. The machine decides where a
- * working copy goes: the controller gives the repository and the machine
- * picks where under its storage the clone or the worktree goes.
+ * Managed paths are resolved on the runner. Explicit attachment paths are
+ * scoped to their named runner and are never sent to another machine.
  *
  * A credential is requested per operation and granted for that request only:
  * the machine holds no token, and the controller grants one only when the
@@ -23,6 +22,34 @@ export const MAX_CHECKOUTS = 32;
 
 /** The most branches a machine reports for one checkout. */
 export const MAX_BRANCHES = 1024;
+
+/** Negotiates attachment and the safe workspace lifecycle as one coherent feature. */
+export const WORKSPACE_LIFECYCLE_CAPABILITY = "workspaceLifecycle";
+
+/** An explicitly supplied absolute path on one supported runner. */
+export const WorkspacePath = Schema.String.check(
+  Schema.isLengthBetween(1, 4096),
+  // eslint-disable-next-line no-control-regex
+  Schema.isPattern(/^\/[^\u0000]*$/, { title: "workspace path", description: "an absolute path" }),
+);
+
+/** A configured Git remote name, passed to Git as an argument rather than shell text. */
+export const GitRemoteName = Schema.String.check(
+  Schema.isLengthBetween(1, 255),
+  // eslint-disable-next-line no-control-regex
+  Schema.isPattern(/^(?!-)[^\u0000-\u0020\u007f]+$/, { title: "Git remote name" }),
+);
+
+export const WorkspaceOwnership = Schema.Literals(["managed", "existing"]);
+
+export type WorkspaceOwnership = Schema.Schema.Type<typeof WorkspaceOwnership>;
+
+export const WorkspaceAttachment = Schema.Struct({
+  path: WorkspacePath,
+  remoteName: GitRemoteName,
+});
+
+export type WorkspaceAttachment = Schema.Schema.Type<typeof WorkspaceAttachment>;
 
 /** How a working copy was made: cloned in full, or a worktree off the cache. */
 export const CheckoutForm = Schema.Literals(["clone", "worktree"]);
@@ -53,6 +80,8 @@ export const ProvisionCheckout = Schema.Struct({
   setupCommand: Schema.NullOr(Message),
   /** Whether the primary's `.workspaceinclude` is copied into this copy. */
   workspaceInclude: Schema.Boolean,
+  /** The selected existing main workspace on this runner; absence never transfers another runner's path. */
+  repositoryWorkspaceId: Schema.optionalKey(StorageId),
 });
 
 export type ProvisionCheckout = Schema.Schema.Type<typeof ProvisionCheckout>;
@@ -61,6 +90,7 @@ export const WorkspaceProvision = Schema.Struct({
   _tag: Schema.Literal("workspaceProvision"),
   workspaceId: StorageId,
   kind: WorkspaceKind,
+  attachment: Schema.optionalKey(WorkspaceAttachment),
   /** An empty list makes a scratch workspace: a directory with no working copy at all. */
   checkouts: Schema.Array(ProvisionCheckout).check(Schema.isMaxLength(MAX_CHECKOUTS)),
 });
@@ -99,6 +129,9 @@ export const WorkspaceReport = Schema.Struct({
   _tag: Schema.Literal("workspaceReport"),
   workspaceId: StorageId,
   status: Schema.Literals(["ready", "failed", "deleted"]),
+  /** The normalized attached root, never an ordinary managed directory. */
+  path: Schema.optionalKey(WorkspacePath),
+  ownership: Schema.optionalKey(WorkspaceOwnership),
   checkouts: Schema.optionalKey(
     Schema.Array(CheckoutReport).check(Schema.isMaxLength(MAX_CHECKOUTS)),
   ),

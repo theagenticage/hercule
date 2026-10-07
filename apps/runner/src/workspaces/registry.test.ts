@@ -132,9 +132,11 @@ describe("provisioning a workspace this runner already has", () => {
     const root = manager.resolve(frame.workspaceId)!.root;
     writeFileSync(join(root, "unfinished.txt"), "keep my work");
     const registryPath = join(storageDir, "workspaces.json");
-    const entries = JSON.parse(readFileSync(registryPath, "utf8")) as Array<{
-      preparation?: unknown;
-    }>;
+    const entries = (
+      JSON.parse(readFileSync(registryPath, "utf8")) as {
+        workspaces: Array<{ preparation?: unknown }>;
+      }
+    ).workspaces;
     for (const entry of entries) delete entry.preparation;
     writeFileSync(registryPath, JSON.stringify(entries));
     const report = await makeWorkspaces({ storageDir }).provision({

@@ -38,6 +38,8 @@ export interface StoredWorkspace {
   readonly runnerId: string;
   readonly kind: WorkspaceKind;
   readonly status: WorkspaceStatus;
+  readonly ownership: "managed" | "existing";
+  readonly path: string | null;
   /** The Connection that work in the workspace acts through, fixed when it was opened. */
   readonly designatedConnectionId: string | null;
   readonly message: string | null;
@@ -158,11 +160,20 @@ const NO_RETENTION_CLAUSE =
  */
 const PRIMARY_STANDING = "('provisioning', 'ready')";
 
+export interface RepositorySelection {
+  readonly mode: "managed" | "existing";
+  readonly path: string | null;
+  readonly remoteName: string | null;
+  readonly primaryWorkspaceId: string | null;
+}
+
 interface WorkspaceRow {
   readonly id: Uint8Array;
   readonly runner_id: Uint8Array;
   readonly kind: string;
   readonly status: string;
+  readonly ownership: "managed" | "existing";
+  readonly path: string | null;
   readonly designated_connection_id: Uint8Array | null;
   readonly message: string | null;
   readonly created_at: string;
@@ -185,7 +196,7 @@ interface CheckoutRow {
 
 const COLUMNS =
   "id, runner_id, kind, status, designated_connection_id, message, created_at, " +
-  "provisioned_at, last_used_at, disposed_at";
+  "provisioned_at, last_used_at, disposed_at, ownership, path";
 
 /** The same columns, for the one query that joins the checkouts table. */
 const WORKSPACE_COLUMNS = COLUMNS.split(", ")
@@ -200,6 +211,8 @@ const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   runnerId: uuidToString(row.runner_id),
   kind: row.kind as WorkspaceKind,
   status: row.status as WorkspaceStatus,
+  ownership: row.ownership,
+  path: row.path,
   designatedConnectionId:
     row.designated_connection_id === null ? null : uuidToString(row.designated_connection_id),
   message: row.message,
@@ -263,6 +276,73 @@ const make = Effect.gen(function* () {
     one,
     listCheckouts,
 
+    /** Returns the fixed repository choice for this Resource on this runner. */
+    readRepositorySelection: (
+      resourceId: string,
+      runnerId: string,
+    ): Effect.Effect<Option.Option<RepositorySelection>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly mode: "managed" | "existing";
+          readonly path: string | null;
+          readonly remote_name: string | null;
+          readonly primary_workspace_id: Uint8Array | null;
+        }>`
+        SELECT mode, path, remote_name, primary_workspace_id FROM workspace_repositories
+        WHERE resource_id = ${uuidFromString(resourceId)} AND runner_id = ${uuidFromString(runnerId)}
+      `,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            mode: row.mode,
+            path: row.path,
+            remoteName: row.remote_name,
+            primaryWorkspaceId:
+              row.primary_workspace_id === null ? null : uuidToString(row.primary_workspace_id),
+          })),
+      ),
+
+    /** Reserves a repository choice without replacing one already established. */
+    reserveRepositorySelection: (
+      resourceId: string,
+      runnerId: string,
+      selection: {
+        readonly mode: "managed" | "existing";
+        readonly path?: string;
+        readonly remoteName?: string;
+      },
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO workspace_repositories (resource_id, runner_id, mode, path, remote_name)
+        VALUES (${uuidFromString(resourceId)}, ${uuidFromString(runnerId)}, ${selection.mode}, ${selection.path ?? null}, ${selection.remoteName ?? null})
+        ON CONFLICT (resource_id, runner_id) DO NOTHING
+      `),
+
+    /** Associates the selected repository with its main workspace. */
+    setRepositoryPrimary: (
+      resourceId: string,
+      runnerId: string,
+      workspaceId: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`UPDATE workspace_repositories SET primary_workspace_id = ${uuidFromString(workspaceId)}
+        WHERE resource_id = ${uuidFromString(resourceId)} AND runner_id = ${uuidFromString(runnerId)}`),
+
+    /** Retries validation of the same attachment without creating another workspace. */
+    retryAttachment: (id: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+        }>`UPDATE workspaces SET status = 'provisioning', message = NULL
+        WHERE id = ${uuidFromString(id)} AND ownership = 'existing' AND status = 'failed'
+        RETURNING id`,
+        (rows) => rows.length > 0,
+      ),
+
+    /** Records the validated root and normalizes that same path in the replay instruction. */
+    recordAttachmentPath: (id: string, path: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`UPDATE workspaces SET path = ${path},
+        provision_frame = json_set(provision_frame, '$.attachment.path', ${path})
+        WHERE id = ${uuidFromString(id)} AND ownership = 'existing' AND status = 'ready'`),
+
     /** Records the first creation instruction and returns the instruction that won the write. */
     freezeProvisionFrame: (
       id: string,
@@ -296,6 +376,8 @@ const make = Effect.gen(function* () {
     insert: (workspace: {
       readonly runnerId: string;
       readonly kind: WorkspaceKind;
+      readonly ownership?: "managed" | "existing";
+      readonly path?: string;
       readonly designatedConnectionId: string | null;
       readonly at: string;
     }): Effect.Effect<StoredWorkspace, SqlError> =>
@@ -303,7 +385,7 @@ const make = Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
           INSERT INTO workspaces (id, runner_id, kind, status, designated_connection_id,
-                                  created_at, last_used_at)
+                                  created_at, last_used_at, ownership, path)
           VALUES (${id}, ${uuidFromString(workspace.runnerId)}, ${workspace.kind},
                   'provisioning',
                   ${
@@ -311,13 +393,15 @@ const make = Effect.gen(function* () {
                       ? null
                       : uuidFromString(workspace.designatedConnectionId)
                   },
-                  ${workspace.at}, ${workspace.at})
+                  ${workspace.at}, ${workspace.at}, ${workspace.ownership ?? "managed"}, ${workspace.path ?? null})
         `;
         return {
           id: uuidToString(id),
           runnerId: workspace.runnerId,
           kind: workspace.kind,
           status: "provisioning",
+          ownership: workspace.ownership ?? "managed",
+          path: workspace.path ?? null,
           designatedConnectionId: workspace.designatedConnectionId,
           message: null,
           createdAt: workspace.at,
@@ -372,7 +456,7 @@ const make = Effect.gen(function* () {
           FROM workspaces w JOIN checkouts c ON c.workspace_id = w.id
           WHERE w.runner_id = ${uuidFromString(runnerId)} AND w.kind = 'primary'
             AND c.resource_id = ${uuidFromString(resourceId)}
-            AND w.status IN ${sql.literal(PRIMARY_STANDING)}
+            AND (w.status IN ${sql.literal(PRIMARY_STANDING)} OR (w.ownership = 'existing' AND w.status = 'failed'))
           LIMIT 1
         `,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkspace),
@@ -415,7 +499,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE workspaces SET status = 'deleted', disposed_at = ${at}
-        WHERE runner_id = ${uuidFromString(runnerId)} AND kind = 'primary' AND status = 'failed'
+        WHERE runner_id = ${uuidFromString(runnerId)} AND kind = 'primary' AND status = 'failed' AND ownership = 'managed'
           AND id IN (SELECT workspace_id FROM checkouts
                      WHERE resource_id = ${uuidFromString(resourceId)})
       `),
@@ -469,10 +553,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Marks a provisioning workspace as `failed`, and returns whether the
-     * status changed. A report that arrives twice, or that is about a
-     * workspace that became ready in the meantime, changes nothing, and the
-     * caller must then do nothing either.
+     * Records preparation failure or loss of availability for an attached
+     * repository and its derived workspaces. Returns whether the status changed.
+     * A duplicate failure changes nothing. Ordinary managed preparation cannot
+     * replace a recorded successful outcome with a later failed report.
      */
     markFailed: (
       id: string,
@@ -482,7 +566,14 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           UPDATE workspaces SET status = 'failed', message = ${message}, last_used_at = ${at}
-          WHERE id = ${uuidFromString(id)} AND status = 'provisioning'
+          WHERE id = ${uuidFromString(id)} AND (
+            status = 'provisioning' OR (status = 'ready' AND (
+              ownership = 'existing' OR EXISTS (
+                SELECT 1 FROM json_each(provision_frame, '$.checkouts')
+                WHERE json_extract(value, '$.repositoryWorkspaceId') IS NOT NULL
+              )
+            ))
+          )
           RETURNING id
         `,
         (rows) => rows.length > 0,

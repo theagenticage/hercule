@@ -3436,6 +3436,8 @@ const buildEphemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
   runnerId: RUNNER_STARTED.id,
   kind: "ephemeral",
   status: "ready",
+  ownership: "managed",
+  path: null,
   checkouts: [
     {
       checkoutId: "01a06d02-7300-7000-8000-000000000002",

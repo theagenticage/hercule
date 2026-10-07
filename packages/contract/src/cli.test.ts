@@ -109,6 +109,7 @@ const COMMANDS: Record<string, string> = {
   "workspace.query": "workspace list",
   "workspace.read": "workspace read",
   "workspace.provision": "workspace provision",
+  "workspace.attach": "workspace attach",
   "workspace.dispose": "workspace dispose",
 
   "event.query": "event list",

@@ -31,6 +31,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { VERSION } from "@hercule/home/version";
 import {
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
   PeerVersion,
   PROTOCOL_VERSION,
@@ -87,6 +88,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;

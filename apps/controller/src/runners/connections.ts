@@ -27,6 +27,7 @@ import {
   GOING_AWAY_CLOSE_CODE,
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
   type InstallRequest,
   type InstallResult,
   type LoginCode,
@@ -188,6 +189,7 @@ export interface Connected {
 
 interface Reachable extends Connected {
   readonly connection: Connection;
+  readonly capabilities: ReadonlyArray<string>;
   /**
    * The callers waiting for an answer, keyed by request id. It is kept per
    * connection, so closing the connection ends every wait on it, and an answer
@@ -384,7 +386,13 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, { connection, ...connected, pending: new Map(), reported: false });
+        reachable.set(id, {
+          connection,
+          ...connected,
+          capabilities: hello.negotiatedCapabilities,
+          pending: new Map(),
+          reported: false,
+        });
         if (previous !== undefined) {
           // The replaced connection will send nothing more, and its map entry
           // is gone, so its waiting callers are released now.
@@ -518,6 +526,26 @@ const make = Effect.gen(function* () {
       Effect.suspend(() => {
         const held = reachable.get(id);
         if (held === undefined) return Effect.succeed(false);
+        if (
+          frame._tag === "workspaceProvision" &&
+          (frame.attachment !== undefined ||
+            frame.checkouts.some((checkout) => checkout.repositoryWorkspaceId !== undefined)) &&
+          !held.capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+        )
+          return Effect.as(
+            publish(id, held.connection, {
+              _tag: "workspaceReported",
+              runnerId: id,
+              report: {
+                _tag: "workspaceReport",
+                workspaceId: frame.workspaceId,
+                status: "failed",
+                message:
+                  "This runner does not support the selected local repository. Upgrade the runner before preparing this workspace.",
+              },
+            }),
+            false,
+          );
         return Effect.as(held.ask(frame), true);
       }),
 

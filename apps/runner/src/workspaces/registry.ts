@@ -15,6 +15,9 @@ const RegisteredCheckout = Schema.Struct({
   resourceId: StorageId,
   remote: Schema.String,
   path: Schema.String,
+  commonDirectory: Schema.optionalKey(Schema.String),
+  commonDirectoryIdentity: Schema.optionalKey(Schema.String),
+  remoteName: Schema.optionalKey(Schema.String),
 });
 
 /** One checkout, as the registry records it. */
@@ -39,11 +42,32 @@ const RegisteredWorkspace = Schema.Struct({
   root: Schema.String,
   checkouts: Schema.Array(RegisteredCheckout),
   preparation: Schema.optionalKey(Preparation),
+  ownership: Schema.optionalKey(Schema.Literals(["managed", "existing"])),
 });
 
 export type RegisteredWorkspace = Schema.Schema.Type<typeof RegisteredWorkspace>;
 
-const decodeEntry = Schema.decodeUnknownResult(RegisteredWorkspace);
+const RepositorySelection = Schema.Struct({
+  resourceId: StorageId,
+  mode: Schema.Literals(["managed", "existing"]),
+  commonDirectory: Schema.NullOr(Schema.String),
+  commonDirectoryIdentity: Schema.optionalKey(Schema.String),
+  sourceRoot: Schema.NullOr(Schema.String),
+  primaryWorkspaceId: Schema.NullOr(StorageId),
+  remoteName: Schema.String,
+});
+
+export type RepositorySelection = Schema.Schema.Type<typeof RepositorySelection>;
+
+const RegistryState = Schema.Struct({
+  version: Schema.Literal(1),
+  workspaces: Schema.Array(RegisteredWorkspace),
+  repositories: Schema.Array(RepositorySelection),
+});
+
+type RegistryState = Schema.Schema.Type<typeof RegistryState>;
+
+const decodeRegistry = Schema.decodeUnknownResult(RegistryState);
 
 /**
  * Checks that the workspace root and every checkout directory in the entry
@@ -61,12 +85,13 @@ const buildRegistryPath = (storageDir: string): string => joinPath(storageDir, "
  * registry. Fails on unreadable content so no existing files can be recreated
  * from an incomplete account of the runner's workspaces.
  */
-const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> => {
+const readRegistry = (storageDir: string): RegistryState => {
   let content: string;
   try {
     content = readFileSync(buildRegistryPath(storageDir), "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { version: 1, workspaces: [], repositories: [] };
     throw new Error(
       "Cannot read the workspace registry. Restore its readable contents before provisioning.",
       { cause: error },
@@ -81,19 +106,15 @@ const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> =>
       { cause: error },
     );
   }
-  if (!Array.isArray(parsed))
+  const decoded = decodeRegistry(
+    Array.isArray(parsed) ? { version: 1, workspaces: parsed, repositories: [] } : parsed,
+  );
+  if (Result.isFailure(decoded))
     throw new Error(
-      "The workspace registry must be a list. Restore a valid registry before provisioning.",
+      "The workspace registry contains invalid state. Restore a valid registry before provisioning.",
+      { cause: decoded.failure },
     );
-  return parsed.map((entry) => {
-    const decoded = decodeEntry(entry);
-    if (Result.isFailure(decoded))
-      throw new Error(
-        "The workspace registry contains an invalid entry. Restore a valid registry before provisioning.",
-        { cause: decoded.failure },
-      );
-    return decoded.success;
-  });
+  return decoded.success;
 };
 
 /**
@@ -101,12 +122,12 @@ const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> =>
  * the same way `runner.json` is written. A half-written registry would lose
  * every workspace on the runner at once.
  */
-const writeRegistry = (storageDir: string, entries: ReadonlyArray<RegisteredWorkspace>): void => {
+const writeRegistry = (storageDir: string, state: RegistryState): void => {
   const path = buildRegistryPath(storageDir);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(entries, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     renameSync(temporary, path);
   } catch (error) {
     rmSync(temporary, { force: true });
@@ -116,6 +137,8 @@ const writeRegistry = (storageDir: string, entries: ReadonlyArray<RegisteredWork
 
 export interface Registry {
   readonly all: () => ReadonlyArray<RegisteredWorkspace>;
+  readonly selectedRepository: (resourceId: string) => RepositorySelection | undefined;
+  readonly selectRepository: (selection: RepositorySelection) => Promise<void>;
   readonly held: (workspaceId: string) => RegisteredWorkspace | undefined;
   /**
    * Returns this runner's primary for a resource, or undefined if it has none.
@@ -135,11 +158,29 @@ export const makeRegistry = (storageDir: string): Registry => {
    */
   let pending: Promise<void> = Promise.resolve();
   return {
-    all: () => readRegistry(storageDir),
+    all: () => readRegistry(storageDir).workspaces,
+    selectedRepository: (resourceId) =>
+      readRegistry(storageDir).repositories.find(
+        (selection) => selection.resourceId === resourceId,
+      ),
+    selectRepository: (selection) => {
+      const done = pending.then(() => {
+        const state = readRegistry(storageDir);
+        writeRegistry(storageDir, {
+          ...state,
+          repositories: [
+            ...state.repositories.filter((held) => held.resourceId !== selection.resourceId),
+            selection,
+          ],
+        });
+      });
+      pending = done.catch(() => undefined);
+      return done;
+    },
     held: (workspaceId) =>
-      readRegistry(storageDir).find((entry) => entry.workspaceId === workspaceId),
+      readRegistry(storageDir).workspaces.find((entry) => entry.workspaceId === workspaceId),
     primaryOf: (resourceId) =>
-      readRegistry(storageDir).find(
+      readRegistry(storageDir).workspaces.find(
         (entry) =>
           entry.kind === "primary" &&
           (entry.preparation === undefined ||
@@ -150,7 +191,8 @@ export const makeRegistry = (storageDir: string): Registry => {
       ),
     update: (change) => {
       const done = pending.then(() => {
-        writeRegistry(storageDir, change(readRegistry(storageDir)));
+        const state = readRegistry(storageDir);
+        writeRegistry(storageDir, { ...state, workspaces: change(state.workspaces) });
       });
       // Even a failed write leaves the queue usable for the next caller.
       pending = done.catch(() => undefined);

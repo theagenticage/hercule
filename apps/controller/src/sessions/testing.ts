@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
   buildWorkspaceActionCapability,
   ControllerToRunner,
   PROTOCOL_VERSION,
@@ -53,6 +54,7 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
 ];
 
 /**
