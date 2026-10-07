@@ -19,12 +19,15 @@
   flex-direction: column;
   gap: 22px;
 }
-/* The book's `.rec-main`. */
+/* The book's `.rec-main`. Not in the book: a name can be 128 characters
+   with no space, in the headings, the leads and the hints, so text breaks
+   anywhere rather than pushing the section wider than the window. */
 .assistant-record {
   display: flex;
   flex-direction: column;
   gap: 30px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .assistant-settings .set-row {
   min-height: 50px;
@@ -47,11 +50,20 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
   height: 38px;
   padding: 0 14px 0 6px;
   border-radius: var(--r-pill);
   color: var(--muted);
   font-weight: var(--w-medium);
+}
+/* Not in the book. A tab is one line, so a name too long for the row ends
+   in an ellipsis; the tab's title holds the whole name. */
+.assistant-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .assistant-tab:hover {
   background: var(--hover);

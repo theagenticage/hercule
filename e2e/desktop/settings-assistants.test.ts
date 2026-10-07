@@ -5,6 +5,8 @@
  *
  * - New assistant creates an assistant and picks its tab;
  * - the Name field saves when it loses focus, and the tab shows the new name;
+ * - a name as long as the contract allows ends in an ellipsis on its tab, and
+ *   nothing in the section scrolls sideways;
  * - the heartbeat's switch turns it off, and the interval saves a new
  *   schedule;
  * - a disallowed tool is added from Add and removed with its ×;
@@ -76,6 +78,23 @@ describe("Settings > Assistants", () => {
     expect((await read()).name).toBe("Hercule");
     await name.press("Tab");
     await expect.poll(async () => (await read()).name).toBe("Ada");
+    await expect.poll(() => readPickedTab(page)).toBe("Ada");
+
+    // The longest name, one word, fits its tab and the section.
+    const longName = "A".repeat(128);
+    await name.fill(longName);
+    await name.press("Tab");
+    await expect.poll(() => readPickedTab(page)).toBe(longName);
+    const tabs = page.getByRole("navigation", { name: "Choose an assistant" });
+    const tab = tabs.locator('[aria-current="page"]');
+    const tabsBox = (await tabs.boundingBox())!;
+    const tabBox = (await tab.boundingBox())!;
+    expect(tabBox.x + tabBox.width).toBeLessThanOrEqual(tabsBox.x + tabsBox.width);
+    expect(await tab.getAttribute("title")).toBe(longName);
+    const body = page.locator(".set-body");
+    expect(await body.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await name.fill("Ada");
+    await name.press("Tab");
     await expect.poll(() => readPickedTab(page)).toBe("Ada");
 
     // The interval.

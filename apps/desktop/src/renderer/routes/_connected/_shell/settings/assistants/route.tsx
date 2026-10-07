@@ -116,9 +116,10 @@ function Assistants(): JSX.Element {
                 className="assistant-tab"
                 aria-current={row.id === picked.id ? "page" : undefined}
                 style={buildHueStyle(buildLook(row.id).hue)}
+                title={row.name}
               >
                 <Face look={buildLook(row.id)} pose={row.pose} size={28} />
-                {row.name}
+                <span className="assistant-tab-name">{row.name}</span>
               </Link>
             ))}
           </nav>
