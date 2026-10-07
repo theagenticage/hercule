@@ -264,10 +264,12 @@ export const buildFakePiSeam = (
   readonly spawns: Array<Spawn>;
   readonly sent: Array<Sent>;
   readonly runs: Array<RunCall>;
+  readonly cleanedFiles: Array<string>;
 } => {
   const spawns: Array<Spawn> = [];
   const sent: Array<Sent> = [];
   const runs: Array<RunCall> = [];
+  const cleanedFiles: Array<string> = [];
   const replies: Answers = { ...DEFAULT_ANSWERS, ...behaviour.answers };
   const spawn = (
     command: ReadonlyArray<string>,
@@ -361,8 +363,11 @@ export const buildFakePiSeam = (
       if (args === "auth check --provider zai --json") return Effect.succeed(answerAuthCheck(env));
       return Effect.succeed({ code: 1, stdout: "", stderr: `unknown command: ${args}` });
     },
+    // A fake pi starts no bash call, so no process holds its file. The file is
+    // recorded, so a test can check that an agent's leftovers were killed.
+    killProcessesHolding: (file) => Effect.sync(() => void cleanedFiles.push(file)),
   };
-  return { seam, spawns, sent, runs };
+  return { seam, spawns, sent, runs, cleanedFiles };
 };
 
 /** Creates an adapter on a fake pi, and collects every event it emits. */
@@ -375,15 +380,24 @@ export const createDriving = (
   readonly spawns: Array<Spawn>;
   readonly sent: Array<Sent>;
   readonly runs: Array<RunCall>;
+  readonly cleanedFiles: Array<string>;
   readonly seen: Array<ProviderEvent>;
 } => {
-  const { seam, spawns, sent, runs } = buildFakePiSeam(behaviour);
+  const { seam, spawns, sent, runs, cleanedFiles } = buildFakePiSeam(behaviour);
   const adapter = makePiAdapter(seam);
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
-  return { adapter, ctx: buildContext(createPiHome(), cwd), spawns, sent, runs, seen };
+  return {
+    adapter,
+    ctx: buildContext(createPiHome(), cwd),
+    spawns,
+    sent,
+    runs,
+    cleanedFiles,
+    seen,
+  };
 };
 
 export const listSentCommands = (

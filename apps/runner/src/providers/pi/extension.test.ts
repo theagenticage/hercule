@@ -6,15 +6,16 @@
  * take the source back out of the extension, evaluate it, and check that it
  * gives the same results as the original function, without running pi.
  *
- * One thing is not checked here: whether pi's loader resolves the typebox
- * import at the top of the source. This repository does not have that package,
- * so the test drops the import and passes `Type` in. Only the live test proves
- * that a real pi loads the file.
+ * One thing is not checked here: whether pi's loader resolves the imports at
+ * the top of the source. This repository has neither typebox nor pi's own
+ * package, so the test drops the imports and passes stand-ins in. Only the
+ * live test proves that a real pi loads the file.
  */
 import { describe, expect, it } from "vitest";
 import type { AccessMode } from "@hercule/protocol";
 import {
   ACCESS_MODE_VARIABLE,
+  AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -127,13 +128,23 @@ const TYPE = {
 };
 
 /**
- * Loads the extension the way pi loads it, and returns the tools it
+ * A stand-in for pi's `createBashToolDefinition`, which builds pi's own bash
+ * tool. It returns the options the extension passed, so a test can check them.
+ */
+const createBashToolDefinition = (cwd: string, options: Record<string, unknown>) => ({
+  name: "bash",
+  cwd,
+  ...options,
+});
+
+/**
+ * Loads the extension the way pi loads it, and returns every tool it
  * registered. It evaluates the source and runs the default export against a
  * fake pi that records registrations. The environment is the only input,
  * because the adapter tells the extension about the session through the
  * environment.
  */
-const listRegisteredTools = (
+const loadRegisteredTools = (
   env: Readonly<Record<string, string | undefined>>,
 ): ReadonlyArray<RegisteredTool> => {
   const body = EXTENSION_SOURCE.split("\n")
@@ -142,7 +153,11 @@ const listRegisteredTools = (
     .replace("export default ", "return ");
   // Evaluating source is the point of this test - pi evaluates the same text.
   // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call
-  const load = new Function("process", "Type", body)({ env }, TYPE) as (pi: unknown) => void;
+  const load = new Function("process", "Type", "createBashToolDefinition", body)(
+    { env, cwd: () => "/workspace" },
+    TYPE,
+    createBashToolDefinition,
+  ) as (pi: unknown) => void;
   const tools: Array<RegisteredTool> = [];
   load({
     on: () => undefined,
@@ -152,6 +167,30 @@ const listRegisteredTools = (
   });
   return tools;
 };
+
+/**
+ * Returns the tools the extension adds to pi's own. It leaves out the
+ * extension's bash, which every agent gets in place of pi's built-in bash.
+ */
+const listRegisteredTools = (
+  env: Readonly<Record<string, string | undefined>>,
+): ReadonlyArray<RegisteredTool> => loadRegisteredTools(env).filter((tool) => tool.name !== "bash");
+
+describe("the bash tool", () => {
+  it("replaces pi's own, and opens the agent's file before every command, so whatever the command starts holds it", () => {
+    const bash = loadRegisteredTools({}).filter((tool) => tool.name === "bash");
+
+    // The runner finds what an agent's bash calls left running by the
+    // processes that hold the file open.
+    expect(bash).toEqual([
+      {
+        name: "bash",
+        cwd: "/workspace",
+        commandPrefix: `exec 9<"$${AGENT_FILE_VARIABLE}"`,
+      },
+    ]);
+  });
+});
 
 describe("the submit_result tool of a session with an output schema", () => {
   const SCHEMA_ENV = { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(OUTPUT_SCHEMA) };

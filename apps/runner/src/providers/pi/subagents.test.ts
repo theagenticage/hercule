@@ -19,7 +19,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, ProviderEvent, SessionSpec, SubagentId } from "@hercule/protocol";
 import {
-  EXTENSION_FILE,
+  AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -281,21 +281,25 @@ describe("how a subagent's pi is started", () => {
     expect(grandchild.child.env).not.toHaveProperty(SUBAGENTS_VARIABLE);
   });
 
-  it("loads a copy of the extension written for it alone, and deletes the copy once its pi exits", async () => {
+  it("loads a copy of the extension written for it alone, and once its pi exits kills what its bash calls left running, then deletes the copy", async () => {
     const run = await startBusySession();
     const subagent = await askForSubagent(run, run.child);
-    const copy = join(run.ctx.home, `subagent-extension-${subagent.subagentId}.ts`);
+    const copy = join(run.ctx.home, `extension-${subagent.subagentId}.ts`);
+    const rootCopy = join(run.ctx.home, `extension-${SESSION}.ts`);
 
     const readExtensionArg = (command: ReadonlyArray<string>) => command[command.indexOf("-e") + 1];
     expect(readExtensionArg(subagent.child.command)).toBe(copy);
-    expect(readExtensionArg(run.child.command)).toBe(join(run.ctx.home, EXTENSION_FILE));
+    expect(subagent.child.env[AGENT_FILE_VARIABLE]).toBe(copy);
+    expect(readExtensionArg(run.child.command)).toBe(rootCopy);
+    expect(run.child.env[AGENT_FILE_VARIABLE]).toBe(rootCopy);
     expect(readFileSync(copy, "utf8")).toBe(EXTENSION_SOURCE);
 
     await openSubagentTurn(run, subagent);
     pushFinishedTurn(subagent.child, "Two tests fail.", { input: 30, output: 3 });
 
     await waitUntil("deleted the subagent's extension", () => !existsSync(copy));
-    expect(existsSync(join(run.ctx.home, EXTENSION_FILE))).toBe(true);
+    expect(run.cleanedFiles).toEqual([copy]);
+    expect(existsSync(rootCopy)).toBe(true);
   });
 });
 
@@ -577,6 +581,34 @@ describe("the limits on subagents", () => {
     await settle();
     expect(run.spawns).toHaveLength(spawned);
     expect(filterByTag(run.seen, "subagent.started")).toHaveLength(4);
+  });
+
+  it("counts a stopped subagent against the limit until its pi has exited", async () => {
+    const run = await startBusySession({ lingers: true });
+    const subagents = [];
+    for (const number of [1, 2, 3, 4]) {
+      subagents.push(await askForSubagent(run, run.child, `Task number ${String(number)}`));
+    }
+    const stopped = subagents[0]!;
+    await openSubagentTurn(run, stopped);
+    await Effect.runPromise(run.adapter.interrupt(SESSION, stopped.subagentId));
+    await awaitTurnCompleted(run, stopped.subagentId);
+    expect(stopped.child.stdinClosed()).toBe(true);
+
+    // Its pi still runs, and so may what its bash calls started.
+    pushSubagentCall(run.child, "call_early", "Task number 5");
+    expect(await awaitRefusal(run.child, "call_early", "Task number 5")).toContain(
+      "still stopping",
+    );
+
+    const spawned = run.spawns.length;
+    stopped.child.crash();
+    // The copy is deleted just before the slot is given back.
+    const copy = join(run.ctx.home, `extension-${stopped.subagentId}.ts`);
+    await waitUntil("released the stopped subagent", () => !existsSync(copy));
+    expect(run.cleanedFiles).toEqual([copy]);
+    await askForSubagent(run, run.child, "Task number 6");
+    expect(run.spawns).toHaveLength(spawned + 1);
   });
 
   it("refuses a request about no running call, or about a call of another tool, and warns", async () => {

@@ -76,11 +76,14 @@ const SPEC_UNDER_TEST: SessionSpec = {
  * a subagent. `act` is the agent's first reply, `finish` its reply once a tool
  * result arrives, and `promptTokens` the usage every reply of this agent
  * reports. Each agent reports a different count, so a sum that counted one
- * agent twice, or left one out, comes out wrong.
+ * agent twice, or left one out, comes out wrong. `actAgain`, when present, is
+ * a second reply of tool calls, made once the results of `act` arrive and
+ * before `finish`.
  */
 interface ScriptedAgent {
   readonly input: string;
   readonly act: ReadonlyArray<FakeToolCall>;
+  readonly actAgain?: ReadonlyArray<FakeToolCall>;
   readonly finish: string;
   readonly promptTokens: number;
 }
@@ -113,9 +116,12 @@ const buildScript = (
     }
     requestLog.requests.push({ agent: agent.input, request });
     const usage = { promptTokens: agent.promptTokens, completionTokens: 1 };
-    return endsWithToolResult(request)
-      ? { text: agent.finish, usage }
-      : { toolCalls: agent.act, usage };
+    const results = request.messages.filter((message) => message.role === "tool").length;
+    if (!endsWithToolResult(request)) return { toolCalls: agent.act, usage };
+    if (agent.actAgain !== undefined && results === agent.act.length) {
+      return { toolCalls: agent.actAgain, usage };
+    }
+    return { text: agent.finish, usage };
   };
   return { script, requestLog };
 };
@@ -141,10 +147,23 @@ interface Live {
 }
 
 /**
+ * Builds a shell call that writes `started` at once and `late` after a second,
+ * both from a background process. The call itself returns at once, leaving the
+ * background process running after the call has completed.
+ */
+const callBashInBackground = (started: string, late: string): FakeToolCall => ({
+  name: "bash",
+  args: { command: `(echo started > ${started}; sleep 1; echo late > ${late}) >/dev/null 2>&1 &` },
+});
+
+/**
  * Starts a real pi session on a fake model that plays the given agents, and
  * sends the main agent's input. The first agent is the main agent.
  */
-const startLiveSession = async (agents: ReadonlyArray<ScriptedAgent>): Promise<Live> => {
+const startLiveSession = async (
+  agents: ReadonlyArray<ScriptedAgent>,
+  spec: SessionSpec = SPEC_UNDER_TEST,
+): Promise<Live> => {
   const { script, requestLog } = buildScript(agents);
   const upstream = startScriptedModelServer(script);
   upstreams.push(upstream);
@@ -167,7 +186,7 @@ const startLiveSession = async (agents: ReadonlyArray<ScriptedAgent>): Promise<L
       }),
     ),
   );
-  await Effect.runPromise(pi.startSession(sessionId, SPEC_UNDER_TEST, ctx));
+  await Effect.runPromise(pi.startSession(sessionId, spec, ctx));
   const live: Live = {
     sessionId,
     seen,
@@ -563,6 +582,133 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
         false,
       );
       await live.stop();
+    },
+    BUDGET_MS,
+  );
+});
+
+/**
+ * Checks that what an agent's bash calls left running ends with the agent. pi
+ * starts each bash call as a process group of its own and stops only the call
+ * that is running, so a background process from a call that has completed
+ * outlives a stopped agent unless the runner ends it.
+ */
+describe.skipIf(binary === undefined)("a real pi agent's background processes", () => {
+  /** Waits past the point where a background process left running would have written `late`. */
+  const LATE_MS = 2_500;
+
+  /**
+   * Allows the agent's background command, then waits for its second command
+   * to park on an approval, so the agent is still running.
+   */
+  const runInBackgroundThenPark = async (
+    live: Live,
+    subagentId: string | undefined,
+    started: string,
+  ): Promise<void> => {
+    await waitReportingEvents(
+      live,
+      "asked to run the background command",
+      () => listOpenedRequests(live, subagentId).length === 1,
+    );
+    const background = listOpenedRequests(live, subagentId)[0]!;
+    await Effect.runPromise(
+      pi.respondToApprovalRequest(live.sessionId, background.request.requestId, "allow"),
+    );
+    await waitReportingEvents(live, "started the background process", () => existsSync(started));
+    await waitReportingEvents(
+      live,
+      "parked on the second command",
+      () => listOpenedRequests(live, subagentId).length === 2,
+    );
+  };
+
+  it(
+    "ends a stopped subagent's background process",
+    async () => {
+      const dir = createScratchDir();
+      const [started, late] = [join(dir, "started"), join(dir, "late")];
+      const mainInput = "Start one subagent that works in the background.";
+      const brief = "You are the child. Start a background job, then run one more command.";
+      const live = await startLiveSession([
+        {
+          input: mainInput,
+          act: [callSubagent("child", brief)],
+          finish: "The main agent carried on.",
+          promptTokens: 100,
+        },
+        {
+          input: brief,
+          act: [callBashInBackground(started, late)],
+          actAgain: [callBash(join(dir, "never"))],
+          finish: "The child is done.",
+          promptTokens: 10,
+        },
+      ]);
+      await waitReportingEvents(
+        live,
+        "started the child",
+        () => findSubagent(live, "child") !== undefined,
+      );
+      const child = findSubagent(live, "child")!;
+      await runInBackgroundThenPark(live, child.subagentId, started);
+
+      await Effect.runPromise(pi.interrupt(live.sessionId, child.subagentId));
+
+      await waitReportingEvents(
+        live,
+        "ended the child",
+        () => findTurnEnd(live, child.subagentId) !== undefined,
+      );
+      await new Promise((resolve) => setTimeout(resolve, LATE_MS));
+      expect(existsSync(late), "the child's background process outlived the child").toBe(false);
+      expect(live.requestLog.unscripted).toEqual([]);
+      await live.stop();
+    },
+    BUDGET_MS,
+  );
+
+  it(
+    "ends the background process of the session's own agent when the session is stopped",
+    async () => {
+      const dir = createScratchDir();
+      const [started, late] = [join(dir, "started"), join(dir, "late")];
+      const live = await startLiveSession([
+        {
+          input: "Start a background job, then run one more command.",
+          act: [callBashInBackground(started, late)],
+          actAgain: [callBash(join(dir, "never"))],
+          finish: "Done.",
+          promptTokens: 100,
+        },
+      ]);
+      await runInBackgroundThenPark(live, undefined, started);
+
+      await live.stop();
+
+      await new Promise((resolve) => setTimeout(resolve, LATE_MS));
+      expect(existsSync(late), "the agent's background process outlived the session").toBe(false);
+    },
+    BUDGET_MS,
+  );
+
+  it(
+    "offers no bash tool to a session that may not use the shell, although the extension adds its own",
+    async () => {
+      const input = "Say hello.";
+      const live = await startLiveSession(
+        [{ input, act: [], finish: "Hello.", promptTokens: 100 }],
+        { ...SPEC_UNDER_TEST, disallowedTools: ["shell"] },
+      );
+      await waitReportingEvents(live, "asked the model", () => live.upstream.asked() >= 1);
+      await live.stop();
+
+      const body = JSON.parse(live.upstream.requests()[0]!) as {
+        readonly tools?: ReadonlyArray<{ readonly function: { readonly name: string } }>;
+      };
+      const names = (body.tools ?? []).map((tool) => tool.function.name);
+      expect(names).toContain("read");
+      expect(names).not.toContain("bash");
     },
     BUDGET_MS,
   );

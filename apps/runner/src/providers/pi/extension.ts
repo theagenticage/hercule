@@ -1,21 +1,20 @@
 /**
  * The source of the extension pi loads for a Hercule session. The adapter
- * writes it into the instance's home at every session start. It is a string
- * constant, not a file read from disk, because the runner ships as a compiled
- * binary with no source tree beside it. Writing it at every start keeps the
- * file in step with the runner build that starts pi.
+ * writes a copy of it for each agent, the session's own and each subagent,
+ * and deletes the copy when that agent's pi exits. It is a string constant,
+ * not a file read from disk, because the runner ships as a compiled binary
+ * with no source tree beside it. Writing it at every start keeps the file in
+ * step with the runner build that starts pi.
  *
  * The extension imports nothing from the runner. pi loads a `-e` file itself,
  * so anything the file imported would have to exist on the machine the session
- * runs on. The one exception is pi's own typebox, which pi's loader resolves
- * for the file. The extension does not have its own copy of the approval rules
- * either: the source of `requiresApproval` is pasted in, so the function that
- * runs inside pi is the same function the adapter uses and the tests cover.
+ * runs on. The exceptions are pi's own package and its typebox, which pi's
+ * loader resolves for the file. The extension does not have its own copy of the
+ * approval rules either: the source of `requiresApproval` is pasted in, so the
+ * function that runs inside pi is the same function the adapter uses and the
+ * tests cover.
  */
 import { requiresApproval } from "./policy";
-
-/** The file name the adapter writes the extension to, and passes to pi with `-e`. */
-export const EXTENSION_FILE = "hercule-extension.ts";
 
 /**
  * The environment variable that tells the approval hook the session's access
@@ -70,7 +69,18 @@ export const SUBAGENT_DIALOG = "Start a subagent";
  */
 export type SubagentReply = { readonly text: string } | { readonly error: string };
 
-export const EXTENSION_SOURCE = `import { Type } from "@sinclair/typebox";
+/**
+ * The environment variable that names the agent's own copy of the extension.
+ * Every bash call opens that file first, as file descriptor 9, so every
+ * process the call starts holds it open, a background one included. When the
+ * agent's pi exits, the runner kills every process that still holds the file.
+ * pi itself ends only the calls still running, and a process left in the
+ * background by a finished call would outlive a stopped agent.
+ */
+export const AGENT_FILE_VARIABLE = "HERCULE_AGENT_FILE";
+
+export const EXTENSION_SOURCE = `import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 
 /**
  * Hercule's tool approval hook. Written by the Hercule runner at session start; edits here
@@ -85,6 +95,16 @@ const DENIED = "The user did not approve this in Hercule.";
 const LOST = "Hercule could not ask the user for approval because its connection to pi failed.";
 
 export default function (pi) {
+  // pi's own bash tool, registered again under the same name, with one line
+  // run before each command: it opens the agent's file, which every process
+  // the command starts inherits. The runner finds those processes by that
+  // open file. Excluding bash still removes this tool, because pi applies
+  // --exclude-tools to every tool by name.
+  pi.registerTool(
+    createBashToolDefinition(process.cwd(), {
+      commandPrefix: 'exec 9<"$${AGENT_FILE_VARIABLE}"',
+    }),
+  );
   // A session with an output schema gives its answer by calling a tool, not in
   // prose. The schema constrains what the model can send, and the runner reads
   // the answer from the call. The tool is registered before the mode check,

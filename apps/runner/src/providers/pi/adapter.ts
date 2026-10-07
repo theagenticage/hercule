@@ -1,11 +1,11 @@
 /**
  * The pi adapter. It runs one pi process per session, plus one per running
  * subagent, and talks to each in pi's RPC mode. Everything the processes read
- * or write lives under the instance's own agent directory. If pi used the developer's own directory, Hercule's
- * sessions would mix with the user's login, skills and settings. The one
- * exception is a Thread on the controller's local runner, which also reads the
- * user's own skills, prompt templates and instructions, each named on its
- * command line.
+ * or write lives under the instance's own agent directory. If pi used the
+ * developer's own directory, Hercule's sessions would mix with the user's
+ * login, skills and settings. The one exception is a Thread on the
+ * controller's local runner, which also reads the user's own skills, prompt
+ * templates and instructions, each named on its command line.
  */
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,12 +33,12 @@ import type {
 import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
 import { buildUserMessage } from "../events";
 import { buildFailedProbe } from "../probe";
-import { runProcess, spawnPi, type Run } from "../process";
+import { killProcessesHolding, runProcess, spawnPi, type Run } from "../process";
 import { truncateFact, truncateMessage } from "../text";
 import { now } from "../../report";
 import {
   ACCESS_MODE_VARIABLE,
-  EXTENSION_FILE,
+  AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
@@ -95,6 +95,8 @@ export interface PiSeam {
   /** The line-framed child a session is hosted on. */
   readonly spawn: PiSpawn;
   readonly run: Run;
+  /** Kills every process that holds a file open (see `spawnAgent`). */
+  readonly killProcessesHolding: (file: string) => Effect.Effect<void>;
 }
 
 /**
@@ -189,6 +191,13 @@ interface Held {
   readonly root: RunningAgent;
   /** The subagents running now, by id. An ended subagent is removed. */
   readonly subagents: Map<SubagentId, Subagent>;
+  /**
+   * How many subagent pi processes have not been released yet: those running,
+   * and those stopped whose process has not exited or been cleaned up. The
+   * running limit counts these, not `subagents`, because a stopped
+   * subagent's process can live on for up to `STOP_DEADLINE`.
+   */
+  subagentProcesses: number;
   /** The approvals the session's agents are parked on, by request id. */
   readonly parks: Map<string, Park>;
   /**
@@ -382,11 +391,13 @@ const owesAnswer = (state: Normalizing): boolean =>
  */
 const buildSessionsDir = (home: string): string => join(home, "sessions");
 
-const buildExtensionPath = (home: string): string => join(home, EXTENSION_FILE);
-
-/** Returns the path of the copy of the extension one subagent loads (see `startSubagent`). */
-const buildSubagentExtensionPath = (home: string, subagentId: SubagentId): string =>
-  join(home, `subagent-extension-${subagentId}.ts`);
+/**
+ * Returns the path of the copy of the extension one agent loads, named after
+ * the agent: the session's id for the session's own agent, or the subagent's
+ * id (see `spawnAgent`).
+ */
+const buildExtensionPath = (home: string, agentId: string): string =>
+  join(home, `extension-${agentId}.ts`);
 
 /**
  * Returns the path the Agent's instructions for one session are written to,
@@ -457,8 +468,7 @@ const buildUserMaterialFlags = (material: UserMaterial | undefined): ReadonlyArr
 
 /**
  * Which pi process `buildArgv` builds the arguments for: the session's own,
- * with the transcript it continues, if any, or a subagent's, with the copy of
- * the extension written for it alone.
+ * with the transcript it continues, if any, or a subagent's.
  */
 type AgentLaunch =
   | {
@@ -466,7 +476,7 @@ type AgentLaunch =
       readonly sessionId: string;
       readonly transcript: string | undefined;
     }
-  | { readonly kind: "subagent"; readonly extensionFile: string };
+  | { readonly kind: "subagent" };
 
 /**
  * Builds pi's command-line arguments for a session's own pi process, or for a
@@ -485,6 +495,7 @@ const buildArgv = (
   ctx: ProviderRunnerContext,
   selection: ModelSelection,
   launch: AgentLaunch,
+  extensionFile: string,
 ): ReadonlyArray<string> => {
   const session = launch.kind === "session" ? launch : undefined;
   const transcript = session?.transcript;
@@ -515,7 +526,7 @@ const buildArgv = (
     "--no-approve",
     "--offline",
     "-e",
-    launch.kind === "session" ? buildExtensionPath(ctx.home) : launch.extensionFile,
+    extensionFile,
     ...(session === undefined
       ? ["--no-session"]
       : [
@@ -774,8 +785,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     if (held.stopping || parent.state.endedBySystem !== undefined) {
       return "This agent is being stopped, so it cannot start a subagent.";
     }
-    if (held.subagents.size >= MAX_RUNNING_SUBAGENTS) {
-      return `This session already runs ${String(MAX_RUNNING_SUBAGENTS)} subagents, the most it may run at once. Wait for one of them to finish, or do the task yourself.`;
+    if (held.subagentProcesses >= MAX_RUNNING_SUBAGENTS) {
+      return `This session already has ${String(MAX_RUNNING_SUBAGENTS)} subagents running or still stopping, the most it may have at once. Wait for one of them to finish, or do the task yourself.`;
     }
     return undefined;
   };
@@ -785,12 +796,6 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * its own, on the session's current model, prompted with the call's task.
    * The call fails at once, with the reason as its result, when `findRefusal`
    * refuses it or the process cannot start.
-   *
-   * The subagent loads a copy of the extension written for it alone, under a
-   * name that includes its new id, and deleted when it exits. An agent that
-   * may write files without asking could otherwise rewrite the shared
-   * extension file before the subagent loads it, and so run the subagent
-   * without the approval hook.
    */
   const startSubagent = (
     held: Held,
@@ -813,30 +818,34 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     }
     const subagentId = crypto.randomUUID();
     const depth = parent.depth + 1;
-    const extensionFile = buildSubagentExtensionPath(held.ctx.home, subagentId);
-    const removeExtension = (): void => attempt(() => rmSync(extensionFile, { force: true }));
+    const extensionFile = buildExtensionPath(held.ctx.home, subagentId);
     let child: PiChild;
     try {
-      writeFileAtomically(extensionFile, EXTENSION_SOURCE);
-      child = seam.spawn(
+      child = spawnAgent(
         [
           held.binary,
-          ...buildArgv(held.spec, held.ctx, held.modelSelection, {
-            kind: "subagent",
+          ...buildArgv(
+            held.spec,
+            held.ctx,
+            held.modelSelection,
+            { kind: "subagent" },
             extensionFile,
-          }),
+          ),
         ],
-        buildAgentEnv(held.ctx, held.spec, depth),
+        buildAgentEnv(held.ctx, held.spec, depth, extensionFile),
         held.ctx.cwd,
+        extensionFile,
+        () => {
+          held.subagentProcesses -= 1;
+        },
       );
     } catch (error) {
-      removeExtension();
       const message = error instanceof Error ? error.message : String(error);
       refuse(`The subagent could not start: ${message}`);
       warn(held.binding.sessionId, `could not start a pi subagent: ${message}`);
       return;
     }
-    void child.exited.then(removeExtension, removeExtension);
+    held.subagentProcesses += 1;
     item.subagentId = subagentId;
     const state = buildSubagentState(held.root.state, subagentId);
     const subagent: Subagent = {
@@ -1133,15 +1142,52 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /**
+   * Starts one agent's pi process with `argv`, on its own copy of the
+   * extension at `extensionFile`, and returns the process. Throws when the
+   * copy cannot be written or pi cannot start, after deleting the copy.
+   *
+   * When the process exits, every process its bash calls left running is
+   * killed, the copy is deleted, and then `onReleased` runs. Each bash call
+   * holds the copy open (see `AGENT_FILE_VARIABLE`), so the copy is how those
+   * processes are found.
+   *
+   * The copy is the agent's alone, under a name that includes the agent's
+   * id. An agent that may write files without asking could otherwise rewrite
+   * a shared extension file before another agent loads it, and so run that
+   * agent without the approval hook.
+   */
+  const spawnAgent = (
+    argv: ReadonlyArray<string>,
+    env: Record<string, string | undefined>,
+    cwd: string | null,
+    extensionFile: string,
+    onReleased: () => void = () => undefined,
+  ): PiChild => {
+    const removeExtension = (): void => attempt(() => rmSync(extensionFile, { force: true }));
+    let child: PiChild;
+    try {
+      writeFileAtomically(extensionFile, EXTENSION_SOURCE);
+      child = seam.spawn(argv, env, cwd);
+    } catch (error) {
+      removeExtension();
+      throw error;
+    }
+    const release = (): Promise<void> =>
+      Effect.runPromise(seam.killProcessesHolding(extensionFile)).then(() => {
+        removeExtension();
+        onReleased();
+      });
+    void child.exited.then(release, release);
+    return child;
+  };
+
+  /**
    * Prepares the instance's home for a session: creates the sessions
-   * directory and writes the extension and the session's instructions. Throws
-   * when a write fails.
+   * directory and writes the session's instructions. Throws when a write
+   * fails.
    */
   const prepareHome = (ctx: ProviderRunnerContext, sessionId: string, spec: SessionSpec): void => {
     mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
-    // Written at every start, not once, so each session runs this build's
-    // approval hook.
-    writeFileAtomically(buildExtensionPath(ctx.home), EXTENSION_SOURCE);
     if (spec.systemPrompt !== undefined) {
       writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), spec.systemPrompt);
     }
@@ -1176,15 +1222,17 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * what the extension reads. Every agent gets the session's access mode, and
    * the `subagent` tool unless it runs at `MAX_SUBAGENT_DEPTH`. Only the
    * session's own agent gets the output schema, because only it answers with
-   * one.
+   * one. `extensionFile` is the agent's own copy of the extension.
    */
   const buildAgentEnv = (
     ctx: ProviderRunnerContext,
     spec: SessionSpec,
     depth: number,
+    extensionFile: string,
   ): Record<string, string | undefined> =>
     buildEnv(ctx, {
       [ACCESS_MODE_VARIABLE]: spec.accessMode,
+      [AGENT_FILE_VARIABLE]: extensionFile,
       // Both variables are given even when they do not apply, as undefined,
       // so `buildEnv` removes them. A runner started from inside a pi session
       // would otherwise pass that session's values on.
@@ -1275,24 +1323,28 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // ends or never starts.
         const instructions =
           spec.systemPrompt === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
+        const extensionFile = buildExtensionPath(ctx.home, sessionId);
         const child = yield* Effect.try({
           try: () => {
             prepareHome(ctx, sessionId, spec);
-            return seam.spawn(
+            return spawnAgent(
               [
                 binary,
-                ...buildArgv(spec, ctx, spec.modelSelection, {
-                  kind: "session",
-                  sessionId,
-                  transcript,
-                }),
+                ...buildArgv(
+                  spec,
+                  ctx,
+                  spec.modelSelection,
+                  { kind: "session", sessionId, transcript },
+                  extensionFile,
+                ),
               ],
-              buildAgentEnv(ctx, spec, 0),
+              buildAgentEnv(ctx, spec, 0, extensionFile),
               // The session's working directory. pi resolves every relative
               // path against the directory it starts in, so a child that
               // inherited the runner's directory would write the user's work
               // into whatever directory the runner was started from.
               ctx.cwd,
+              extensionFile,
             );
           },
           catch: (error) => {
@@ -1322,6 +1374,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           binary,
           root,
           subagents: new Map(),
+          subagentProcesses: 0,
           parks: new Map(),
           modelSelection: spec.modelSelection,
           systemPromptFile: instructions,
@@ -1483,4 +1536,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 };
 
-export const pi: ProviderAdapter = makePiAdapter({ spawn: spawnPi, run: runProcess });
+export const pi: ProviderAdapter = makePiAdapter({
+  spawn: spawnPi,
+  run: runProcess,
+  killProcessesHolding,
+});

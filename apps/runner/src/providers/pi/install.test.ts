@@ -26,6 +26,7 @@ const stubInstall = (answer: {
     spawn: () => {
       throw new Error("an install spawns no pi");
     },
+    killProcessesHolding: () => Effect.void,
     run: (command, env) => {
       commands.push(command);
       envs.push(env);
