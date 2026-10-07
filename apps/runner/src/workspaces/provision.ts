@@ -275,7 +275,12 @@ const makeWorkingCopies = async (
           ],
           { env },
         );
-        if (!added.ok) throw new Error(added.stderr);
+        if (!added.ok)
+          throw new Error(
+            /a branch named .* already exists/.test(added.stderr)
+              ? `${added.stderr} Choose a different branch name for the fresh workspace. The existing branch and its commits are preserved.`
+              : added.stderr,
+          );
         made.push(checkout);
       });
     }

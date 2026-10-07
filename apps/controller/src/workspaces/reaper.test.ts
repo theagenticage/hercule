@@ -430,11 +430,11 @@ describe("the workspace expiry sweep", () => {
 
       expect(listFramesTagged(older, "workspaceDispose")).toEqual([]);
       const [stored] = await Effect.runPromise(
-        Effect.orDie(arranged.harness.sql<{ readonly disposal_frame: string | null }>`
-          SELECT disposal_frame FROM workspaces
+        Effect.orDie(arranged.harness.sql<{ readonly removal_instruction: string | null }>`
+          SELECT removal_instruction FROM workspaces
           WHERE id = unhex(replace(${workspaceId}, '-', ''))`),
       );
-      expect(stored?.disposal_frame).toBeNull();
+      expect(stored?.removal_instruction).toBeNull();
       expect(await readWorkspace(arranged, workspaceId)).toMatchObject({
         status: "ready",
         retentionPolicy: "automatic",

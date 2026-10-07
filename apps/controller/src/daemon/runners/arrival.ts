@@ -52,7 +52,7 @@ const make = Effect.gen(function* () {
       );
       const rejectedWorkspaceIds = new Set<string>();
       for (const frame of yield* workspaces.listOwedProvisioning(runnerId)) {
-        if (!(yield* workspaces.supportsProvisionFrame(runnerId, frame))) {
+        if (!(yield* workspaces.supportsPreparationInstruction(runnerId, frame))) {
           const message =
             "This runner does not support the recorded existing checkout instruction. Upgrade and reconnect the runner, then reattach the same checkout.";
           yield* withTransaction(

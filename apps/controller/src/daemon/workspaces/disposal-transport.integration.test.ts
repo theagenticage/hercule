@@ -149,10 +149,13 @@ describe("disposal intent after a complete controller process restart", () => {
         const persisted = new Database(join(home, "data", "hercule.db"), { readonly: true });
         try {
           const durable = persisted
-            .query("SELECT status, disposal_frame FROM workspaces WHERE lower(hex(id)) = ?")
-            .get(workspaceId.replaceAll("-", "")) as { status: string; disposal_frame: string };
+            .query("SELECT status, removal_instruction FROM workspaces WHERE lower(hex(id)) = ?")
+            .get(workspaceId.replaceAll("-", "")) as {
+            status: string;
+            removal_instruction: string;
+          };
           expect(durable.status).toBe("disposing");
-          expect(JSON.parse(durable.disposal_frame)).toEqual(originalIntent);
+          expect(JSON.parse(durable.removal_instruction)).toEqual(originalIntent);
         } finally {
           persisted.close();
         }

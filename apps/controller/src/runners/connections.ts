@@ -27,7 +27,7 @@ import {
   GOING_AWAY_CLOSE_CODE,
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
-  WORKSPACE_LIFECYCLE_CAPABILITY,
+  supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
   type WorkspaceInspect,
   type WorkspaceInspection,
@@ -296,7 +296,7 @@ const make = Effect.gen(function* () {
       const held = reachable.get(id);
       if (
         held === undefined ||
-        (requiresWorkspaceLifecycle && !held.capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY))
+        (requiresWorkspaceLifecycle && !supportsWorkspaceLifecycle(held.capabilities))
       )
         return Effect.succeed(NOT_SENT);
       // Registered and removed as a resource: the removal runs however the
@@ -552,7 +552,7 @@ const make = Effect.gen(function* () {
           ((frame._tag === "workspaceProvision" && requiresWorkspaceLifecycle(frame)) ||
             frame._tag === "workspaceDispose" ||
             frame._tag === "workspaceDetach") &&
-          !held.capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+          !supportsWorkspaceLifecycle(held.capabilities)
         )
           return Effect.as(
             publish(id, held.connection, {

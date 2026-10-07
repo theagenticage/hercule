@@ -79,7 +79,9 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const found = yield* workspaces.sweepable(id);
           if (found === undefined) return undefined;
-          const frame = yield* workspaces.markGone(found.workspace, SYSTEM_ACTOR, found.expired);
+          const frame = yield* workspaces.reserveDisposal(found.workspace, SYSTEM_ACTOR, {
+            expired: found.expired,
+          });
           return { runnerId: found.workspace.runnerId, frame };
         }),
       );
@@ -199,12 +201,9 @@ const make = Effect.gen(function* () {
             const workspace = yield* workspaces.disposable(id);
             return {
               runnerId: workspace.runnerId,
-              frame: yield* workspaces.markGone(
-                workspace,
-                actor,
-                undefined,
-                decoded.discardChanges ?? false,
-              ),
+              frame: yield* workspaces.reserveDisposal(workspace, actor, {
+                discardChanges: decoded.discardChanges ?? false,
+              }),
             };
           }),
         );
@@ -225,7 +224,7 @@ const make = Effect.gen(function* () {
             const workspace = yield* workspaces.detachable(id);
             return {
               runnerId: workspace.runnerId,
-              frame: yield* workspaces.markDetached(workspace, actor),
+              frame: yield* workspaces.reserveDetachment(workspace, actor),
             };
           }),
         );

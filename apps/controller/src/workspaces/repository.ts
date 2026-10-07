@@ -354,15 +354,15 @@ const make = Effect.gen(function* () {
     readRemoval: (id: string): Effect.Effect<Option.Option<StoredRemoval>, SqlError> =>
       Effect.gen(function* () {
         const rows = yield* sql<{
-          readonly disposal_frame: string | null;
+          readonly removal_instruction: string | null;
           readonly disposal_previous_status: StoredRemoval["previousStatus"];
           readonly disposal_audit: string;
         }>`
-          SELECT disposal_frame, disposal_previous_status, disposal_audit FROM workspaces WHERE id = ${uuidFromString(id)}`;
+          SELECT removal_instruction, disposal_previous_status, disposal_audit FROM workspaces WHERE id = ${uuidFromString(id)}`;
         const row = rows[0];
-        if (row?.disposal_frame == null) return Option.none();
+        if (row?.removal_instruction == null) return Option.none();
         const frame = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceRemoval))(
-          row.disposal_frame,
+          row.removal_instruction,
         ).pipe(Effect.orDie);
         const audit = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(RemovalAudit))(
           row.disposal_audit,
@@ -379,7 +379,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* sql`UPDATE workspaces SET
           disposal_previous_status = CASE WHEN status = 'disposing' THEN disposal_previous_status ELSE status END,
-          disposal_frame = ${JSON.stringify(frame)}, disposal_audit = ${JSON.stringify(audit)}, status = 'disposing'
+          removal_instruction = ${JSON.stringify(frame)}, disposal_audit = ${JSON.stringify(audit)}, status = 'disposing'
           WHERE id = ${uuidFromString(id)} AND status IN ${sql.literal(LIVE_STATUSES)}`;
         yield* announceChange(id);
       }),
@@ -402,12 +402,12 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<ReadonlyArray<WorkspaceRemoval>, SqlError> =>
       Effect.gen(function* () {
         const rows = yield* sql<{
-          readonly disposal_frame: string;
-        }>`SELECT disposal_frame FROM workspaces
+          readonly removal_instruction: string;
+        }>`SELECT removal_instruction FROM workspaces
           WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'disposing' ORDER BY created_at`;
         return yield* Effect.forEach(rows, (row) =>
           Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceRemoval))(
-            row.disposal_frame,
+            row.removal_instruction,
           ).pipe(Effect.orDie),
         );
       }),
@@ -502,32 +502,34 @@ const make = Effect.gen(function* () {
     recordAttachmentPath: (id: string, path: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE workspaces SET path = ${path},
-        provision_frame = json_set(provision_frame, '$.attachment.path', ${path})
+        preparation_instruction = json_set(preparation_instruction, '$.attachment.path', ${path})
         WHERE id = ${uuidFromString(id)} AND ownership = 'adopted' AND status = 'ready'`,
       ).pipe(Effect.andThen(announceChange(id))),
 
     /** Records the first creation instruction and returns the instruction that won the write. */
-    freezeProvisionFrame: (
+    freezePreparationInstruction: (
       id: string,
       frame: WorkspaceProvision,
     ): Effect.Effect<WorkspaceProvision, SqlError> =>
       Effect.gen(function* () {
-        const rows = yield* sql<{ readonly provision_frame: string }>`
-          UPDATE workspaces SET provision_frame = COALESCE(provision_frame, ${JSON.stringify(frame)})
-          WHERE id = ${uuidFromString(id)} RETURNING provision_frame
+        const rows = yield* sql<{ readonly preparation_instruction: string }>`
+          UPDATE workspaces SET preparation_instruction = COALESCE(preparation_instruction, ${JSON.stringify(frame)})
+          WHERE id = ${uuidFromString(id)} RETURNING preparation_instruction
         `;
         return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceProvision))(
-          rows[0]?.provision_frame,
+          rows[0]?.preparation_instruction,
         ).pipe(Effect.orDie);
       }),
 
     /** Returns the frozen creation instruction, or none for a legacy workspace. */
-    readProvisionFrame: (id: string): Effect.Effect<Option.Option<WorkspaceProvision>, SqlError> =>
+    readPreparationInstruction: (
+      id: string,
+    ): Effect.Effect<Option.Option<WorkspaceProvision>, SqlError> =>
       Effect.gen(function* () {
-        const rows = yield* sql<{ readonly provision_frame: string | null }>`
-          SELECT provision_frame FROM workspaces WHERE id = ${uuidFromString(id)}
+        const rows = yield* sql<{ readonly preparation_instruction: string | null }>`
+          SELECT preparation_instruction FROM workspaces WHERE id = ${uuidFromString(id)}
         `;
-        const frame = rows[0]?.provision_frame;
+        const frame = rows[0]?.preparation_instruction;
         if (frame === undefined || frame === null) return Option.none();
         return Option.some(
           yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceProvision))(frame).pipe(
@@ -722,7 +724,7 @@ const make = Effect.gen(function* () {
               WHEN status = 'failed' AND provisioned_at IS NOT NULL AND ${available} THEN 'ready'
               ELSE status END,
             message = CASE WHEN status = 'disposing' THEN message
-              WHEN ${available} AND disposal_frame IS NOT NULL THEN COALESCE(json_extract(disposal_audit, '$.refusalMessage'), message)
+              WHEN ${available} AND removal_instruction IS NOT NULL THEN COALESCE(json_extract(disposal_audit, '$.refusalMessage'), message)
               WHEN provisioned_at IS NOT NULL OR (status = 'provisioning' AND ${report.status} = 'failed') THEN ${report.message ?? null}
               ELSE message END
           WHERE id = ${uuidFromString(id)} AND status IN ('provisioning', 'ready', 'failed', 'disposing')
@@ -752,15 +754,15 @@ const make = Effect.gen(function* () {
       id: string,
       message: string | null,
       at: string,
-      allowReadinessLoss = false,
+      options: { readonly invalidateReadiness?: boolean } = {},
     ): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           UPDATE workspaces SET status = 'failed', message = ${message}, last_used_at = ${at}
           WHERE id = ${uuidFromString(id)} AND (
             status = 'provisioning' OR (status = 'ready' AND (
-              ${allowReadinessLoss} OR ownership = 'adopted' OR EXISTS (
-                SELECT 1 FROM json_each(provision_frame, '$.checkouts')
+              ${options.invalidateReadiness ?? false} OR ownership = 'adopted' OR EXISTS (
+                SELECT 1 FROM json_each(preparation_instruction, '$.checkouts')
                 WHERE json_extract(value, '$.repositoryWorkspaceId') IS NOT NULL
               )
             ))
@@ -778,7 +780,7 @@ const make = Effect.gen(function* () {
     markDisposed: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const moved = yield* sql<{ readonly id: Uint8Array }>`
-          UPDATE workspaces SET status = 'deleted', disposed_at = ${at}, disposal_frame = NULL, disposal_previous_status = NULL, disposal_audit = NULL
+          UPDATE workspaces SET status = 'deleted', disposed_at = ${at}, removal_instruction = NULL, disposal_previous_status = NULL, disposal_audit = NULL
           WHERE id = ${uuidFromString(id)} AND status IN ${sql.literal(LIVE_STATUSES)}
           RETURNING id
         `;
@@ -931,7 +933,7 @@ const make = Effect.gen(function* () {
               SELECT workspace_id, MAX(kept_until) AS kept_until FROM workspace_leases
               WHERE workspace_id IN ${sql.in(ids.map(uuidFromString))}
                 AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = workspace_leases.workspace_id
-                  AND w.retention_policy = 'automatic' AND w.disposal_frame IS NULL)
+                  AND w.retention_policy = 'automatic' AND w.removal_instruction IS NULL)
               GROUP BY workspace_id
               HAVING COUNT(released_at) = COUNT(*)
             `,
@@ -993,7 +995,7 @@ const make = Effect.gen(function* () {
           SELECT w.id
           FROM workspaces w JOIN runners r ON r.id = w.runner_id
             JOIN workspace_leases l ON l.workspace_id = w.id
-          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed') AND w.retention_policy = 'automatic' AND w.disposal_frame IS NULL
+          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed') AND w.retention_policy = 'automatic' AND w.removal_instruction IS NULL
             AND ${sql.literal(buildOnlineClause("r"))}
           GROUP BY w.id
           HAVING COUNT(l.released_at) = COUNT(*) AND MAX(l.kept_until) < ${now}

@@ -52,12 +52,12 @@ describe("freezing legacy preparation instructions", () => {
         };
         const delivered = yield* Effect.all(
           [
-            repository.freezeProvisionFrame(workspace.id, frame),
-            repository.freezeProvisionFrame(workspace.id, edited),
+            repository.freezePreparationInstruction(workspace.id, frame),
+            repository.freezePreparationInstruction(workspace.id, edited),
           ],
           { concurrency: "unbounded" },
         );
-        const stored = yield* repository.readProvisionFrame(workspace.id);
+        const stored = yield* repository.readPreparationInstruction(workspace.id);
         return { delivered, stored };
       }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
     );

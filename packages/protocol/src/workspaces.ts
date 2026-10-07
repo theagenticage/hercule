@@ -26,6 +26,10 @@ export const MAX_BRANCHES = 1024;
 /** Negotiates attachment and the safe workspace lifecycle as one coherent feature. */
 export const WORKSPACE_LIFECYCLE_CAPABILITY = "workspaceLifecycle";
 
+/** Checks whether the negotiated capabilities support the selected-repository workspace lifecycle. */
+export const supportsWorkspaceLifecycle = (capabilities: ReadonlyArray<string>): boolean =>
+  capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY);
+
 /** An explicitly supplied absolute path on one supported runner. */
 export const WorkspacePath = Schema.String.check(
   Schema.isLengthBetween(1, 4096),

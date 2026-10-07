@@ -27,7 +27,9 @@ describe("workspace preparation instructions migration", () => {
         return { before, after, violations };
       }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
     );
-    expect(result.after).toEqual(result.before.map((row) => ({ ...row, provision_frame: null })));
+    expect(result.after).toEqual(
+      result.before.map((row) => ({ ...row, preparation_instruction: null })),
+    );
     expect(result.violations).toEqual([]);
   });
 });

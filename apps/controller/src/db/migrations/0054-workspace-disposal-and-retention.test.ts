@@ -15,7 +15,7 @@ describe("durable workspace removal migration", () => {
         VALUES ('runner', 'laptop', 'online', 'active', 0, '{}', 'hash', 'old', 'old')`;
         yield* sql`INSERT INTO resources (id, kind, remote, canonical_remote, workspace_include, created_at, updated_at)
         VALUES ('repo', 'repo', 'https://github.com/acme/main', 'github.com/acme/main', 1, 'old', 'old')`;
-        yield* sql`INSERT INTO workspaces (id, runner_id, kind, status, message, created_at, provisioned_at, last_used_at, ownership, path, observed_at, available, warnings, provision_frame, derived_workspace_ids)
+        yield* sql`INSERT INTO workspaces (id, runner_id, kind, status, message, created_at, provisioned_at, last_used_at, ownership, path, observed_at, available, warnings, preparation_instruction, derived_workspace_ids)
         VALUES ('main', 'runner', 'primary', 'ready', 'kept warning', 'old', 'prepared', 'used', 'adopted', '/human/main', 'observed', 1, '["warning"]', '{"frozen":"original"}', '["derived"]'),
           ('derived', 'runner', 'ephemeral', 'failed', 'setup failed', 'new', null, 'used', 'managed', null, null, null, '[]', null, null)`;
         yield* sql`INSERT INTO checkouts (id, workspace_id, resource_id, form, subdirectory, branch, branches, default_branch, position, created_at, base_branch, starting_revision, base_commit, head_commit, remote_branches)
@@ -46,7 +46,7 @@ describe("durable workspace removal migration", () => {
           indices:
             yield* sql`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('workspaces', 'checkouts', 'workspace_leases', 'workspace_repositories') ORDER BY name`,
         };
-        yield* sql`UPDATE workspaces SET status = 'disposing', disposal_frame = '{"_tag":"workspaceDetach","workspaceId":"main","requestId":"intent"}', disposal_previous_status = 'ready', disposal_audit = '{"actor":"user"}' WHERE id = 'main'`;
+        yield* sql`UPDATE workspaces SET status = 'disposing', removal_instruction = '{"_tag":"workspaceDetach","workspaceId":"main","requestId":"intent"}', disposal_previous_status = 'ready', disposal_audit = '{"actor":"user"}' WHERE id = 'main'`;
         return {
           before,
           after,
@@ -61,7 +61,7 @@ describe("durable workspace removal migration", () => {
       result.before.workspaces.map((row) => ({
         ...row,
         retention_policy: row.id === "main" ? "manual" : "automatic",
-        disposal_frame: null,
+        removal_instruction: null,
         disposal_previous_status: null,
         disposal_audit: null,
       })),

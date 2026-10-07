@@ -26,7 +26,7 @@ describe("repository availability reports", () => {
             designatedConnectionId: null,
             at: "old",
           });
-          yield* repository.freezeProvisionFrame(workspace.id, {
+          yield* repository.freezePreparationInstruction(workspace.id, {
             _tag: "workspaceProvision",
             workspaceId: workspace.id,
             kind: "ephemeral",

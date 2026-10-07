@@ -8,6 +8,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* sql`ALTER TABLE workspaces ADD COLUMN provision_frame TEXT
-            CHECK (provision_frame IS NULL OR json_valid(provision_frame))`;
+  yield* sql`ALTER TABLE workspaces ADD COLUMN preparation_instruction TEXT
+            CHECK (preparation_instruction IS NULL OR json_valid(preparation_instruction))`;
 });

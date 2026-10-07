@@ -159,7 +159,7 @@ export const openWorkspace = (
         workspace.id,
       );
     }
-    yield* writers.workspaces.freezeProvisionFrame(workspace.id, frame);
+    yield* writers.workspaces.freezePreparationInstruction(workspace.id, frame);
     return { workspace, frame };
   });
 

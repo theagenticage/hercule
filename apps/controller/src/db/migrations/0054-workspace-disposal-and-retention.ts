@@ -16,7 +16,7 @@ export default Effect.gen(function* () {
       provisioned_at TEXT,
       last_used_at TEXT,
       disposed_at TEXT,
-      provision_frame TEXT CHECK (provision_frame IS NULL OR json_valid(provision_frame)),
+      preparation_instruction TEXT CHECK (preparation_instruction IS NULL OR json_valid(preparation_instruction)),
       ownership TEXT NOT NULL DEFAULT 'managed' CHECK (ownership IN ('managed', 'adopted')),
       path TEXT,
       observed_at TEXT,
@@ -24,17 +24,17 @@ export default Effect.gen(function* () {
       warnings TEXT NOT NULL DEFAULT '[]',
       derived_workspace_ids TEXT CHECK (derived_workspace_ids IS NULL OR json_valid(derived_workspace_ids)),
       retention_policy TEXT NOT NULL DEFAULT 'automatic' CHECK (retention_policy IN ('manual', 'automatic')),
-      disposal_frame TEXT CHECK (disposal_frame IS NULL OR json_valid(disposal_frame)),
+      removal_instruction TEXT CHECK (removal_instruction IS NULL OR json_valid(removal_instruction)),
       disposal_previous_status TEXT CHECK (disposal_previous_status IN ('provisioning', 'ready', 'failed')),
       disposal_audit TEXT CHECK (disposal_audit IS NULL OR json_valid(disposal_audit))
     )
   `;
   yield* sql`
     INSERT INTO workspaces_next (id, runner_id, kind, status, message, designated_connection_id,
-      created_at, provisioned_at, last_used_at, disposed_at, provision_frame, ownership, path,
+      created_at, provisioned_at, last_used_at, disposed_at, preparation_instruction, ownership, path,
       observed_at, available, warnings, derived_workspace_ids, retention_policy)
     SELECT id, runner_id, kind, status, message, designated_connection_id,
-      created_at, provisioned_at, last_used_at, disposed_at, provision_frame, ownership, path,
+      created_at, provisioned_at, last_used_at, disposed_at, preparation_instruction, ownership, path,
       observed_at, available, warnings, derived_workspace_ids,
       CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.workspace_id = workspaces.id AND s.agent_id IS NULL)
         THEN 'manual' ELSE 'automatic' END
