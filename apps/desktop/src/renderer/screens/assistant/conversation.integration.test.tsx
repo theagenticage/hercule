@@ -706,7 +706,7 @@ describe("the Conversation's live topics", () => {
     // pushed to nobody; the controller's first push on the subscription is
     // what makes the page read it.
     const messages = [QUESTION];
-    const reply = buildReply(2, "The backup finished at 03:12.");
+    const reply = buildReply(2, "backup", "The backup finished at 03:12.");
     const calls = stubApi({
       ...buildSidebarHandlers({
         ...NO_SIDEBAR_RECORDS,
