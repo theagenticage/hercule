@@ -1,4 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useId } from "react";
+import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import type { Assistant, AssistantUpdateInput } from "@hercule/contract";
 import { assistantsQuery } from "../../../../../app/queries";
@@ -9,8 +10,10 @@ import type { SavedField } from "../../../../../app/saved-field";
  * every change (spec 17 §Settings, The frame, Saving).
  *
  * - `stored` is the saved value.
- * - `applyChange` returns the value a change makes of the shown one, which
- *   the control shows while the change saves.
+ * - `applyChange` returns the value a change makes of the shown one. While
+ *   saves run, the control shows every change still saving applied to
+ *   `stored` in order, so a change made while an earlier one saves does not
+ *   hide the earlier one.
  * - `buildPayload` builds the `assistant.update` payload that applies the
  *   change to `latest`, the assistant as the cache holds it when the save
  *   starts. An empty payload saves nothing.
@@ -39,7 +42,15 @@ export function useSavedAssistantField<Value, Change>(
 ): SavedField<Value, Change> {
   const queryClient = useQueryClient();
   const { queryKey } = assistantsQuery(client);
+  // A key of this field's own, so the changes still saving are this field's
+  // and not those of another field of the same assistant.
+  const mutationKey = ["assistant-field", useId()];
+  const pending = useMutationState({
+    filters: { mutationKey, status: "pending" },
+    select: (each) => each.state.variables as Change,
+  });
   const mutation = useMutation({
+    mutationKey,
     scope: { id: `assistant:${assistantId}` },
     mutationFn: async (change: Change): Promise<Assistant | null> => {
       const latest = queryClient.getQueryData(queryKey)?.find(({ id }) => id === assistantId);
@@ -58,7 +69,7 @@ export function useSavedAssistantField<Value, Change>(
     },
   });
   return {
-    value: mutation.isPending ? applyChange(stored, mutation.variables) : stored,
+    value: pending.reduce(applyChange, stored),
     error: mutation.error === null ? null : `Could not save: ${readErrorMessage(mutation.error)}`,
     save: mutation.mutate,
   };

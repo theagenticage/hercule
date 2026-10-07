@@ -193,6 +193,42 @@ describe("Settings > Assistants", () => {
     });
   });
 
+  it("shows every heartbeat change still saving, and builds the next one on all of them", async () => {
+    const store = storeAssistants();
+    const patch = `PATCH /api/v1/assistants/${ADA.id}`;
+    const saveToStore = store[patch]!;
+    const first = holdAnswer();
+    let held = false;
+    const { calls } = await openAssistants({
+      ...store,
+      // The first save waits until the test lets it answer; the rest answer at once.
+      [patch]: async (call) => {
+        if (held) return saveToStore(call);
+        held = true;
+        await first.handler();
+        return saveToStore(call);
+      },
+    });
+    const interval = screen.getByRole("combobox", { name: "Interval" });
+
+    await userEvent.selectOptions(interval, "3 h");
+    await userEvent.click(screen.getByRole("switch", { name: "Heartbeat" }));
+    const from = screen.getByRole("textbox", { name: "From" });
+    await userEvent.clear(from);
+    await userEvent.type(from, "10:00{Enter}");
+
+    expect((interval as HTMLSelectElement).value).toBe("3");
+    first.answer({ body: {} });
+    await waitFor(() => {
+      expect(listUpdates(calls, ADA)).toEqual([
+        { heartbeat: { ...ADA.heartbeat, schedule: "0 7-22/3 * * *" } },
+        { heartbeat: { ...ADA.heartbeat, enabled: true, schedule: "0 7-22/3 * * *" } },
+        { heartbeat: { ...ADA.heartbeat, enabled: true, schedule: "0 10-22/3 * * *" } },
+      ]);
+    });
+    expect((interval as HTMLSelectElement).value).toBe("3");
+  });
+
   it("saves the rotation's and the disallowed tools' changes onto the stored values", async () => {
     const { calls } = await openAssistants();
 
