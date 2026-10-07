@@ -34,8 +34,17 @@ export function AssistantRecord({
     client,
     assistant.id,
     assistant.heartbeat,
-    (value, change: Partial<Heartbeat>) => ({ ...value, ...change }),
+    (value, change: Partial<Omit<Heartbeat, "prompt">>) => ({ ...value, ...change }),
     (latest, change) => ({ heartbeat: { ...latest.heartbeat, ...change } }),
+  );
+  // The prompt saves on its own, so a failed save shows under its row and
+  // not under the schedule.
+  const prompt = useSavedAssistantField(
+    client,
+    assistant.id,
+    assistant.heartbeat.prompt,
+    (_value, change: string) => change,
+    (latest, change) => ({ heartbeat: { ...latest.heartbeat, prompt: change } }),
   );
   const rotation = useSavedAssistantField(
     client,
@@ -55,12 +64,14 @@ export function AssistantRecord({
       <HowItWorksSection assistant={assistant} />
       <HeartbeatSection
         assistantName={assistant.name}
-        heartbeat={heartbeat.value}
+        heartbeat={{ ...heartbeat.value, prompt: prompt.value }}
         nowMinutes={now.nowMinutes}
         nowTimezone={now.timezone}
         unknownTimezone={now.unknownTimezone}
         error={heartbeat.error}
         onSave={heartbeat.save}
+        promptError={prompt.error}
+        onSavePrompt={prompt.save}
       />
       <RotationSection
         assistantName={assistant.name}

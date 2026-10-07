@@ -39,8 +39,10 @@ import "./schedule.css";
  * was read in. A line under the lead then names both, because the "now"
  * line would otherwise sit at the wrong hour with nothing to explain it.
  *
- * `error` is the last failed save's message. A refused time shows in its
- * place until the next change.
+ * `error` is the last failed save's message of the switch or the schedule,
+ * shown under the schedule. A refused time shows in its place until the
+ * next change. The prompt saves on its own, through `onSavePrompt`, and
+ * `promptError`, its last failed save's message, shows under its row.
  */
 export function HeartbeatSection({
   assistantName,
@@ -50,6 +52,8 @@ export function HeartbeatSection({
   unknownTimezone,
   error,
   onSave,
+  promptError,
+  onSavePrompt,
 }: {
   readonly assistantName: string;
   readonly heartbeat: Heartbeat;
@@ -57,13 +61,15 @@ export function HeartbeatSection({
   readonly nowTimezone: string;
   readonly unknownTimezone: string | null;
   readonly error: string | null;
-  readonly onSave: (change: Partial<Heartbeat>) => void;
+  readonly onSave: (change: Partial<Omit<Heartbeat, "prompt">>) => void;
+  readonly promptError: string | null;
+  readonly onSavePrompt: (prompt: string) => void;
 }): JSX.Element {
   const heartbeatWindow = parseHeartbeatWindow(heartbeat.schedule);
   const [timeError, setTimeError] = useState<string | null>(null);
   const shownError = timeError ?? error;
 
-  const save = (change: Partial<Heartbeat>): void => {
+  const save = (change: Partial<Omit<Heartbeat, "prompt">>): void => {
     setTimeError(null);
     onSave(change);
   };
@@ -174,9 +180,10 @@ export function HeartbeatSection({
         label="Prompt"
         hint={`What ${assistantName} is told at each heartbeat.`}
         value={heartbeat.prompt}
-        error={null}
+        error={promptError}
         onCommit={(prompt) => {
-          save({ prompt });
+          setTimeError(null);
+          onSavePrompt(prompt);
         }}
       />
     </section>

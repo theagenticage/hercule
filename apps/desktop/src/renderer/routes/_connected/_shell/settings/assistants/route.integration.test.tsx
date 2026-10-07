@@ -316,4 +316,22 @@ describe("Settings > Assistants", () => {
     // The error sits right under the reply mode's row.
     expect(error.previousElementSibling?.contains(segments)).toBe(true);
   });
+
+  it("shows a failed prompt save under the Prompt row", async () => {
+    await openAssistants({
+      [`PATCH /api/v1/assistants/${ADA.id}`]: {
+        status: 500,
+        body: buildErrorBody("internal", "The database is locked."),
+      },
+    });
+    const prompt = screen.getByRole("textbox", { name: "Prompt" });
+
+    await userEvent.type(prompt, "!");
+    await userEvent.tab();
+
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toBe("Could not save: The database is locked.");
+    expect(error.previousElementSibling?.contains(prompt)).toBe(true);
+    expect(prompt).toHaveProperty("value", ADA.heartbeat.prompt);
+  });
 });
