@@ -952,7 +952,7 @@ export function buildCountedMessage(): CountedMessage {
  * and the function that ends it. The message stops streaming there until
  * `resume` is called.
  */
-function createMessagePause(afterWords: number): {
+export function createMessagePause(afterWords: number): {
   readonly pause: MessagePause;
   readonly resume: () => void;
 } {

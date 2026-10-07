@@ -23,6 +23,7 @@ import type { ScriptedRunner } from "../../apps/desktop/scripts/scripted-runner"
 import {
   arrangeFleet,
   buildCountedMessage,
+  createMessagePause,
   buildLiveCheck,
   buildTapCheck,
   joinShownText,
@@ -134,8 +135,11 @@ describe("the Conversation", () => {
     await stop.waitFor();
     expect(await send.count()).toBe(0);
 
+    // The first text pauses a few words in, so the test sees it half written
+    // however slowly the app catches up with the stream.
+    const halfWritten = createMessagePause(4);
     const played = runner.playScript(session.id, [
-      { kind: "message", text: FIRST_TEXT, deltaMs: 40 },
+      { kind: "message", text: FIRST_TEXT, deltaMs: 40, pauses: [halfWritten.pause] },
       { kind: "command", command: "pnpm test", ask: true },
       { kind: "message", text: SECOND_TEXT, deltaMs: 40 },
     ]);
@@ -143,11 +147,15 @@ describe("the Conversation", () => {
     // The reply streams in: the open paragraph shows part of the first text
     // before the whole text is written.
     await expect
-      .poll(async () => {
-        const paragraph = (await readOpenParagraph(page)) ?? "";
-        return paragraph !== "" && paragraph !== FIRST_TEXT && FIRST_TEXT.startsWith(paragraph);
-      })
+      .poll(
+        async () => {
+          const paragraph = (await readOpenParagraph(page)) ?? "";
+          return paragraph !== "" && paragraph !== FIRST_TEXT && FIRST_TEXT.startsWith(paragraph);
+        },
+        { timeout: 10_000 },
+      )
       .toBe(true);
+    halfWritten.resume();
 
     const dock = page.getByRole("group", { name: "Run this command?" });
     await dock.waitFor();
