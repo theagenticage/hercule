@@ -10,7 +10,9 @@
  * - draft.tsx, which opens a Draft Thread in a project, and whose draft
  *   screen `pnpm compare:bureau` compares with the book's;
  * - assistant-states.tsx, which draws the Assistants section and opens an
- *   assistant's page.
+ *   assistant's page;
+ * - settings-assistants.tsx, which opens Settings > Assistants, and whose
+ *   main pane `pnpm compare:bureau` compares with the book's.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
@@ -48,6 +50,7 @@ import type {
   Connection,
   ConversationMessage,
   Input,
+  Profile,
   Project,
   ProviderInstance,
   Resource,
@@ -96,6 +99,8 @@ import { createQueryClient } from "../app/query-client";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { AgentPage } from "../screens/thread/agent-page";
+import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
+import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/route";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 
@@ -145,10 +150,19 @@ export interface DraftScreenRecords {
   readonly picks: ThreadPicks;
 }
 
+/** What Settings > Assistants reads besides the sidebar's lists. */
+export interface AssistantsSettingsRecords {
+  /** The permission profiles the Permission profile row offers. */
+  readonly profiles: ReadonlyArray<Profile>;
+  /** The Connections the Settings list reads for its Connections row's dot. */
+  readonly connections: ReadonlyArray<Connection>;
+}
+
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
 interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
   readonly draft?: DraftScreenRecords;
+  readonly assistantsSettings?: AssistantsSettingsRecords;
 }
 
 /** An address that never answers. The client sends nothing to it. */
@@ -245,7 +259,7 @@ const seedQueryCache = (
   queryClient: QueryClient,
   client: HerculeClient,
   records: SidebarRecords,
-  { thread, draft }: OpenScreens,
+  { thread, draft, assistantsSettings }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
   queryClient.setQueryData(projectsQuery(client).queryKey, records.projects);
@@ -278,6 +292,10 @@ const seedQueryCache = (
   if (draft !== undefined) {
     queryClient.setQueryData(startTasksQuery(client, draft.projectId).queryKey, draft.startTasks);
     queryClient.setQueryData(connectionsQuery(client).queryKey, draft.connections);
+  }
+  if (assistantsSettings !== undefined) {
+    queryClient.setQueryData(profilesQuery(client).queryKey, assistantsSettings.profiles);
+    queryClient.setQueryData(connectionsQuery(client).queryKey, assistantsSettings.connections);
   }
   if (thread !== undefined) {
     const sessionId = thread.session.id;
@@ -318,8 +336,9 @@ function AssistantRoute(): JSX.Element {
 
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
- * and the three screens the sidebar links to, `/`, `/threads/$sessionId` and
- * `/assistants/$assistantId`, starting at `path`. The ids are the app's, because the sidebar and the
+ * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
+ * `/assistants/$assistantId`, and Settings with its Assistants section,
+ * starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
  *
@@ -328,6 +347,13 @@ function AssistantRoute(): JSX.Element {
  * otherwise. An assistant's address draws the assistant's page, which shows
  * that the assistant was not found when the fixture holds no assistant with
  * the address's id.
+ *
+ * Settings and its Assistants section are the app's own routes, attached
+ * under this router's `_shell`, because their components read their search
+ * and their context through their own `Route`. The Assistants route is
+ * attached without its loader: the loader reads the permission profiles and
+ * the settings again each time the section opens, and the query cache
+ * already holds both.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -355,6 +381,21 @@ const buildRouter = (
     id: "_shell",
     component: ShellLayout,
   });
+  // `update` is typed for the options a route may change once it is built,
+  // which leave out its id, its path and its parent. The router reads those
+  // from the same options, and the generated route tree attaches every file
+  // route to its parent this way, so the options are cast as it casts them.
+  const settingsRoute = SettingsRoute.update({
+    id: "/settings",
+    path: "/settings",
+    getParentRoute: () => shellRoute,
+  } as never);
+  const assistantsSettingsRoute = AssistantsSettingsRoute.update({
+    id: "/assistants",
+    path: "/assistants",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -372,6 +413,7 @@ const buildRouter = (
           path: "assistants/$assistantId",
           component: AssistantRoute,
         }),
+        settingsRoute.addChildren([assistantsSettingsRoute]),
       ]),
     ]),
   ]);
@@ -395,8 +437,9 @@ const waitForElement = async (selector: string): Promise<void> => {
 
 /**
  * Checks that the page drew the sidebar's thread rows, the transcript when
- * `screens` opens a thread, and the start cards with the focus in the message
- * field when it opens a draft, and started no read. Fails with the keys of the
+ * `screens` opens a thread, an assistant's settings when it opens Settings >
+ * Assistants, and the start cards with the focus in the message field when
+ * it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
  */
 const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void => {
@@ -412,6 +455,14 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
   }
   if (screens.thread !== undefined && document.querySelector(".tx-item") === null) {
     throw new Error("The thread screen drew no block. Check the page's console for the error.");
+  }
+  if (
+    screens.assistantsSettings !== undefined &&
+    document.querySelector(".assistant-record") === null
+  ) {
+    throw new Error(
+      "Settings > Assistants drew no assistant's settings. Check the page's console for the error.",
+    );
   }
   if (screens.draft !== undefined) {
     if (document.querySelector(".start") === null) {
@@ -516,4 +567,21 @@ export async function mountDraftSpecimen(
   draft: DraftScreenRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Assistants open at `path`, such as
+ * `/settings/assistants?assistant=<id>`: the main pane shows the app's real
+ * Settings frame and Assistants section, which read the permission profiles
+ * from `settings`. Returns once the section is in the document. Fails when
+ * the page has no `#root`, draws no sidebar row or no assistant's settings,
+ * or tries to read a record the cache does not hold.
+ */
+export async function mountAssistantsSettingsSpecimen(
+  records: SidebarRecords,
+  path: string,
+  settings: AssistantsSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { assistantsSettings: settings });
 }

@@ -86,8 +86,8 @@ export const buildAssistant = (suffix: string, name: string): Assistant => ({
 });
 
 export const ADA = buildAssistant("10", "Ada");
-const MILO = buildAssistant("3b", "Milo");
-const JUNO = buildAssistant("1e", "Juno");
+export const MILO = buildAssistant("3b", "Milo");
+export const JUNO = buildAssistant("1e", "Juno");
 const HERCULE = buildAssistant("4c", "Hercule");
 const WREN = buildAssistant("27", "Wren");
 // Nearly 128 characters, the longest name an assistant may have.

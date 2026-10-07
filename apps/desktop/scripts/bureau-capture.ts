@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares eight pairs of
+ * For each theme, Whitehaven and Orient Express, it compares ten pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -33,7 +33,12 @@
  * - the Conversation (the main pane below its floating header) of
  *   assistant.html: the book's page edited by
  *   specimens/conversation-reference.ts, and the Conversation specimen
- *   (conversation.html).
+ *   (conversation.html);
+ * - Settings > Assistants (the main pane) of settings-assistants.html: the
+ *   book's page edited by specimens/settings-assistants-reference.ts, and
+ *   the Settings > Assistants specimen (settings-assistants.html);
+ * - the same section scrolled to its end, because it is taller than the
+ *   window. Both pages are opened with `?state=scrolled`.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -350,6 +355,59 @@ const CONVERSATION_REGION: Rect = {
   height: MAIN_PANE_REGION.height - CONVERSATION_TOP,
 };
 
+// Every part of Settings > Assistants whose box is compared, as a selector
+// inside `main.main`: the header, the Settings list, and the section. The
+// fields are compared as boxes: the app's hold a native input or select
+// where the book's hold text, and the pixel comparison checks the text.
+// Where the app names a part differently from the book, so that the book's
+// short class names do not reach the rest of the app, the selector names
+// both, and each page finds its own.
+const ASSISTANTS_SETTINGS_PARTS = [
+  ".bar",
+  ".bar > .crumb",
+  ".bar > .title",
+  ".bar .btn",
+  ".bar .btn > svg",
+  ".set-nav",
+  ".set-nav .side-h",
+  ".set-nav .nav-row",
+  ".set-nav .nav-row > svg",
+  ".set-body",
+  ".people, .assistant-tabs",
+  ".person, .assistant-tab",
+  ".person > svg, .assistant-tab > svg",
+  ".rec-main, .assistant-record",
+  ".head",
+  ".head > svg",
+  ".head > h2",
+  ".set-sec",
+  ".set-sec > h2",
+  ".set-sec > h2 > svg",
+  ".set-sec > h2 > .toggle",
+  ".set-sec > p",
+  ".set-row",
+  ".set-label",
+  ".set-label > b",
+  ".set-label > span",
+  ".set-row > .field",
+  ".set-row > .field > svg",
+  ".set-row > .btn",
+  ".tools, .disallowed-tools",
+  ".chip",
+  ".chip svg",
+  ".tools > .btn, .disallowed-tools > .btn",
+  ".tools > .btn > svg, .disallowed-tools > .btn > svg",
+  ".seg",
+  ".seg > button",
+  ".inline, .schedule-sentence",
+  ".inline > .field, .schedule-sentence > .field",
+  ".inline > .field > svg, .schedule-sentence > .field > svg",
+  ".day, .heartbeat-day",
+  ".day-now, .heartbeat-day-now",
+  ".day-axis, .heartbeat-day-axis",
+  ".day-axis > span, .heartbeat-day-axis > span",
+];
+
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
@@ -417,6 +475,25 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     region: CONVERSATION_REGION,
     scope: "main.main",
     parts: CONVERSATION_PARTS,
+  },
+  {
+    name: "settings-assistants",
+    bookPage: "settings-assistants.html",
+    referenceModule: "settings-assistants-reference.ts",
+    specimenPage: "settings-assistants.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: ASSISTANTS_SETTINGS_PARTS,
+  },
+  {
+    name: "scrolled-settings-assistants",
+    bookPage: "settings-assistants.html",
+    referenceModule: "settings-assistants-reference.ts",
+    specimenPage: "settings-assistants.html",
+    state: "scrolled",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: ASSISTANTS_SETTINGS_PARTS,
   },
 ];
 

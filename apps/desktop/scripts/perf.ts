@@ -15,9 +15,9 @@
  * 1. Through Playwright, to sign in on the sign-in screen, as a user does
  *    once. The app saves the token with the mock keychain, so the run never
  *    touches the real Keychain.
- * 2. Five measured launches: with 40 threads, with 40 threads and one row
- *    that shows minutes, with 40 threads and Settings › Profile open (see
- *    `openSettingsSection`), and, after spawning 460 more, with 500 threads,
+ * 2. Six measured launches: with 40 threads, with 40 threads and one row
+ *    that shows minutes, with 40 threads and Settings › Profile open, the
+ *    same with Settings › Assistants open (see `openSettingsSection`), and, after spawning 460 more, with 500 threads,
  *    the last time with a thread of 500 transcript rows open (see step 3).
  *    Spec 17 §What Settings costs asks for Settings' memory and idle to be
  *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
@@ -191,7 +191,7 @@ const LONG_THREAD_ROWS = 500;
  * open, by the name that the section's row in the Settings list and its
  * header title show.
  */
-const SETTINGS_SECTIONS = ["Profile"] as const;
+const SETTINGS_SECTIONS = ["Profile", "Assistants"] as const;
 
 type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
