@@ -326,7 +326,7 @@ const CONVERSATION_PARTS = [
 /**
  * How far the first block of a main pane sits below the window's top, in CSS
  * pixels: the room left for the floating header. It is the app's
- * `--header-clearance` (screens/thread/thread-header.css).
+ * `--header-clearance` (screens/session/floating-header.css).
  */
 const HEADER_CLEARANCE = 108;
 

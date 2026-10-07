@@ -29,8 +29,8 @@
  * changes are dropped. This is what an answer that fails after the user left
  * must do: it must not bring the session's drafts back.
  *
- * The composer's Message Draft and picks are not here: the controller's
- * `pendingSubmissions` keeps them per thread and per assistant for the whole
+ * The composer's Message Draft and picks are not here: the app's
+ * `pendingSubmissions` store keeps them per thread and per assistant for the whole
  * app run.
  *
  * The drafts live in memory only.

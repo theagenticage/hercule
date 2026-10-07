@@ -33,8 +33,8 @@ import { readMessagePage, removeQueryOnceUnobserved, storeNewestMessages } from 
  * one after every reconnect.
  *
  * When the calling component unmounts, the pages of messages held are
- * dropped, after the topic is left (see `removeQueryOnceUnobserved`). Only an open Conversation keeps them
- * current, so the cache would otherwise hold them out of date, with every
+ * dropped, after the topic is left (see `removeQueryOnceUnobserved`). Only
+ * an open Conversation keeps them current, so the cache would otherwise hold them out of date, with every
  * page the user scrolled back through. They are dropped here rather than
  * when the route is left, so a push or a send that lands in between cannot
  * bring them back.

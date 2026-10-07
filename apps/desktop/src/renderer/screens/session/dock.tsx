@@ -143,7 +143,7 @@ export function RequestDock({
   const [requestDraft, changeRequestDraft] = useRequestDraft(sessionId, request.requestId);
   // A failed send unlocks the Request, so the user can answer again. The
   // mutation's own callbacks run even after the dock has unmounted, and the
-  // draft is changed through the thread's drafts, so the unlock lands
+  // draft is changed through the session's Request drafts, so the unlock lands
   // whether or not the dock is still shown.
   const markAnswered = (answered: boolean): void => {
     changeRequestDraft((current) => ({ ...current, answered }));
