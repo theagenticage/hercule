@@ -162,7 +162,8 @@ export type ScriptedQuestions = Extract<
  * Claude Code adapter reports for the same work:
  *
  * - `message` streams `text` as an assistant message item, one delta per
- *   word, `deltaMs` apart (20 by default).
+ *   word, `deltaMs` apart (20 by default). At each of its `pauses`, the
+ *   stream stops until the pause's promise resolves.
  * - `stream` streams one long assistant message of generated Markdown, one
  *   delta per word, `deltaMs` apart (2 by default), for `forMs`. It stops at
  *   the first block boundary after that, so the Markdown is never cut off
@@ -191,7 +192,12 @@ export type ScriptedQuestions = Extract<
  *   subagent's turn without one completes after its last step.
  */
 export type ScriptStep =
-  | { readonly kind: "message"; readonly text: string; readonly deltaMs?: number }
+  | {
+      readonly kind: "message";
+      readonly text: string;
+      readonly deltaMs?: number;
+      readonly pauses?: ReadonlyArray<MessagePause>;
+    }
   | { readonly kind: "stream"; readonly forMs: number; readonly deltaMs?: number }
   | {
       readonly kind: "command";
@@ -222,6 +228,18 @@ export type ScriptStep =
       readonly background?: boolean;
     }
   | { readonly kind: "end"; readonly state: TurnState };
+
+/**
+ * A point inside a scripted message where its stream stops until `until`
+ * resolves. A test uses it to keep a message streaming across a step of its
+ * own, however long that step takes on a loaded machine.
+ */
+export interface MessagePause {
+  /** How many of the message's words stream before the pause. */
+  readonly afterWords: number;
+  /** Resolves when the message may go on. */
+  readonly until: Promise<void>;
+}
 
 /** A tool call a script step makes, in the shape Claude Code reports it. */
 interface ToolCall {
@@ -541,7 +559,9 @@ export async function enlistScriptedRunner(
    * Reports one assistant message the way Claude Code streams it:
    * `item.started`, one `content.delta` per piece of text, `delayMs` apart,
    * and `item.completed`. The item id has the shape Claude Code gives a
-   * streamed block: the API message's id and the block's index.
+   * streamed block: the API message's id and the block's index. At each of
+   * `pauses`, the stream waits for the pause's promise. Fails when the
+   * agent's script is stopped during a wait.
    */
   const streamMessage = async (
     session: HostedSession,
@@ -550,12 +570,18 @@ export async function enlistScriptedRunner(
     pieces: Iterable<string>,
     delayMs: number,
     signal: AbortSignal,
+    pauses: ReadonlyArray<MessagePause> = [],
   ): Promise<void> => {
     const itemId = `msg_${randomBytes(12).toString("hex")}#0`;
     const kind = "assistant_message";
     const stamp = () => stampAgentEvent(session.sessionId, agent);
     reportEvent(session, { _tag: "item.started", ...stamp(), turnId, itemId, kind });
+    let streamed = 0;
     for (const delta of pieces) {
+      for (const pause of pauses) {
+        if (pause.afterWords === streamed) await waitForPause(pause.until, signal);
+      }
+      streamed += 1;
       await sleep(delayMs, undefined, { signal });
       reportEvent(session, {
         _tag: "content.delta",
@@ -797,6 +823,7 @@ export async function enlistScriptedRunner(
           splitIntoWords(step.text),
           step.deltaMs ?? WORD_DELAY_MS,
           signal,
+          step.pauses,
         );
       case "stream":
         return streamMessage(
@@ -1272,6 +1299,17 @@ function buildToolCall(
         },
       };
   }
+}
+
+/**
+ * Waits until `until` resolves. Fails with the abort's reason when `signal`
+ * aborts first, as it does when the turn ends while a message is paused.
+ */
+function waitForPause(until: Promise<void>, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
+    until.then(resolve, reject);
+  });
 }
 
 /**

@@ -324,12 +324,31 @@ const CONVERSATION_PARTS = [
 ];
 
 /**
+ * How far the first block of a main pane sits below the window's top, in CSS
+ * pixels: the room left for the floating header. It is the app's
+ * `--header-clearance` (screens/thread/thread-header.css).
+ */
+const HEADER_CLEARANCE = 108;
+
+/**
+ * The gap between two blocks of the Conversation, in CSS pixels: the 20px
+ * the Conversation's column takes off `--header-clearance` at its top
+ * (screens/assistant/assistant.css), because each block carries the gap
+ * above it.
+ */
+const CONVERSATION_BLOCK_GAP = 20;
+
+/**
  * The Conversation's region of the window: the main pane below its floating
  * header. The header is left out, because the book draws a bar there; the
- * region starts 20px above the first block, at the header's clearance less
- * the gap between two blocks.
+ * region starts one block gap above the first block.
  */
-const CONVERSATION_REGION: Rect = { x: 272, y: 88, width: WIDTH - 272, height: HEIGHT - 88 };
+const CONVERSATION_TOP = HEADER_CLEARANCE - CONVERSATION_BLOCK_GAP;
+const CONVERSATION_REGION: Rect = {
+  ...MAIN_PANE_REGION,
+  y: CONVERSATION_TOP,
+  height: MAIN_PANE_REGION.height - CONVERSATION_TOP,
+};
 
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [

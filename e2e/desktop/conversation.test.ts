@@ -22,14 +22,21 @@ import type { Session } from "../../packages/contract/src/index";
 import type { ScriptedRunner } from "../../apps/desktop/scripts/scripted-runner";
 import {
   arrangeFleet,
+  buildCountedMessage,
   buildLiveCheck,
   buildTapCheck,
+  joinShownText,
   keepWindowOnTop,
   launchPlainAppForTest,
   openSignedIn,
   readAssistant,
   readNewestSession,
+  READ_AGENT_TEXTS,
+  READ_LAST_AGENT_TEXT,
+  readWordNumbers,
   recordFrames,
+  recordLastAgentText,
+  type AgentTextSnapshot,
   type TapSubscriptions,
 } from "./harness";
 
@@ -91,53 +98,6 @@ function readOpenParagraph(page: Page): Promise<string | null> {
   );
 }
 
-/** What the last reply in the Conversation showed at one moment. */
-interface ReplySnapshot {
-  /** The reply's text drawn as markdown: everything but its name line and the paragraph being written. */
-  readonly text: string;
-  /** The paragraph being written, as plain text, or `null` once the reply is stored. */
-  readonly openParagraph: string | null;
-}
-
-/** The page's global object, with what `recordLastReply` keeps on it. */
-type RecordingGlobal = typeof globalThis & { replySnapshots?: ReplySnapshot[] };
-
-/**
- * Starts recording what the last reply in the Conversation shows, each time
- * the page changes it, in `replySnapshots` on the page's global object, as
- * the thread test's `recordLastMessage` does for a thread's last message.
- *
- * It runs in the page, handed over as source text, so it closes over nothing
- * in this file.
- */
-function recordLastReply(): void {
-  const snapshots: ReplySnapshot[] = [];
-  (globalThis as RecordingGlobal).replySnapshots = snapshots;
-  const conversation = document.querySelector('section[aria-label="Conversation"]')!;
-  const takeSnapshot = () => {
-    const body = [...conversation.querySelectorAll(".msg > .msg-body")].at(-1);
-    if (body === undefined) return;
-    const openParagraph = body.querySelector(".streaming")?.textContent ?? null;
-    const text = [...body.children]
-      .filter((part) => !part.matches(".msg-name, .streaming"))
-      .map((part) => part.textContent)
-      .join("");
-    const last = snapshots.at(-1);
-    if (last?.text === text && last.openParagraph === openParagraph) return;
-    snapshots.push({ text, openParagraph });
-  };
-  new MutationObserver(takeSnapshot).observe(conversation, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-  });
-  takeSnapshot();
-}
-
-/** Returns the text a snapshot shows: its markdown's text, then the paragraph being written. */
-const readShownText = ({ text, openParagraph }: ReplySnapshot): string =>
-  `${text}${openParagraph ?? ""}`;
-
 /** The text the assistant writes before it asks to run the tests. */
 const FIRST_TEXT = "Let me run the tests first, then I will look at the failure.";
 
@@ -148,7 +108,7 @@ describe("the Conversation", () => {
   it("sends a message from the composer, streams the reply, answers a Request on the dock, and stops the turn", async () => {
     const { url, fleet, client } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio");
-    const hercule = await readAssistant(client, "Hercule");
+    const assistant = await readAssistant(client, "Hercule");
     const { app, page } = await openSignedIn(url);
     await keepWindowOnTop(app);
 
@@ -170,7 +130,7 @@ describe("the Conversation", () => {
     // empties in the same frame.
     await page.locator(".msg--me .bubble", { hasText: "Run the tests, please" }).waitFor();
     expect(await field.inputValue()).toBe("");
-    const session = await waitForBusySession(client, hercule.mainConversationId, runner);
+    const session = await waitForBusySession(client, assistant.mainConversationId, runner);
     await stop.waitFor();
     expect(await send.count()).toBe(0);
 
@@ -223,21 +183,19 @@ describe("the Conversation", () => {
   it("drops the tap while the window is hidden, and shows the whole reply once it is shown again", async () => {
     const { url, fleet, client } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio");
-    const hercule = await readAssistant(client, "Hercule");
+    const assistant = await readAssistant(client, "Hercule");
     await client.conversation.send({
-      params: { id: hercule.mainConversationId },
+      params: { id: assistant.mainConversationId },
       payload: { text: "Count to three thousand" },
     });
-    const session = await waitForBusySession(client, hercule.mainConversationId, runner);
-    // As in the thread's test: 3,000 numbered words stream for about 7 s, at
-    // 2 ms a word, which leaves time to hide the window, see rows land while
-    // it is hidden, and show it again before the reply ends. The script
-    // waits on a Request until the Conversation is open.
-    const wordCount = 3_000;
-    const counted = Array.from({ length: wordCount }, (_, index) => `w${index + 1}`).join(" ");
+    const session = await waitForBusySession(client, assistant.mainConversationId, runner);
+    // The script waits on a Request until the Conversation is open, and the
+    // message pauses until the window is hidden and until it is shown again;
+    // see buildCountedMessage.
+    const message = buildCountedMessage();
     const played = runner.playScript(session.id, [
       { kind: "command", command: "pnpm test", ask: true },
-      { kind: "message", text: counted, deltaMs: 2 },
+      message.step,
       { kind: "end", state: "completed" },
     ]);
     await fleet.waitForTurn(session.id, 1, "waiting");
@@ -248,7 +206,7 @@ describe("the Conversation", () => {
     const readVisibility = () => evaluateInPage("document.visibilityState");
     const readTaps = () => evaluateInPage(buildTapCheck(session.id)) as Promise<TapSubscriptions>;
     const readLastSnapshot = () =>
-      evaluateInPage("globalThis.replySnapshots.at(-1)") as Promise<ReplySnapshot | undefined>;
+      evaluateInPage(READ_LAST_AGENT_TEXT) as Promise<AgentTextSnapshot | undefined>;
 
     const assistantRow = `document.querySelector('nav[aria-label="Assistants"] a')`;
     await expect
@@ -263,7 +221,9 @@ describe("the Conversation", () => {
     await expect
       .poll(() => evaluateInPage(buildLiveCheck(session.id)), { timeout: 10_000 })
       .toBe(true);
-    await evaluateInPage(`(${recordLastReply.toString()})()`);
+    await evaluateInPage(
+      `(${recordLastAgentText.toString()})(${JSON.stringify('section[aria-label="Conversation"]')})`,
+    );
 
     const [openRequest] = (await client.session.read({ params: { id: session.id } })).openRequests;
     await client.session.respondToApprovalRequest({
@@ -279,34 +239,33 @@ describe("the Conversation", () => {
     await expect.poll(async () => (await readTaps()).ended).toBeGreaterThan(0);
     const tapsWhenHidden = await readTaps();
     expect(tapsWhenHidden.made).toBe(tapsWhenHidden.ended);
-    const shownWhenHidden = readShownText((await readLastSnapshot())!);
+    const shownWhenHidden = joinShownText((await readLastSnapshot())!);
     // The stream stays subscribed while the window is hidden, so the rows
     // keep landing. A hidden page runs its timers at most once a second.
+    message.resumeAfterHide();
     await expect
-      .poll(async () => readShownText((await readLastSnapshot())!).length, { timeout: 10_000 })
+      .poll(async () => joinShownText((await readLastSnapshot())!).length, { timeout: 10_000 })
       .toBeGreaterThan(shownWhenHidden.length);
     expect(await readTaps()).toEqual(tapsWhenHidden);
 
     await callWindowMethod("show");
     await expect.poll(readVisibility).toBe("visible");
-    // The reply must still be streaming, or the window was shown too late
-    // for this test to check anything.
+    // The reply is paused, so it is still being written.
     expect((await readLastSnapshot())!.openParagraph).not.toBeNull();
     await expect.poll(readTaps).toEqual({
       made: tapsWhenHidden.made + 1,
       ended: tapsWhenHidden.ended,
     });
+    message.resumeAfterShow();
 
     await played;
     await fleet.waitForTurn(session.id, 1, "completed");
     await expect.poll(async () => (await readLastSnapshot())!.openParagraph).toBeNull();
-    const snapshots = (await evaluateInPage("globalThis.replySnapshots")) as ReplySnapshot[];
-    const readWordNumbers = (snapshot: ReplySnapshot): number[] =>
-      [...readShownText(snapshot).matchAll(/w(\d+)/g)].map((match) => Number(match[1]));
+    const snapshots = (await evaluateInPage(READ_AGENT_TEXTS)) as AgentTextSnapshot[];
     const broken = snapshots
       .map(readWordNumbers)
       .find((numbers) => numbers.some((number, index) => number !== index + 1));
     expect(broken, "a snapshot doubled or skipped a word").toBeUndefined();
-    expect(readWordNumbers(snapshots.at(-1)!).length).toBe(wordCount);
+    expect(readWordNumbers(snapshots.at(-1)!).length).toBe(message.wordCount);
   });
 });
