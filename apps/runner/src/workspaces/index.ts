@@ -198,7 +198,41 @@ export const makeWorkspaces = (options: {
           throw new Error(
             "This runner has no record of the workspace. Restore its registry before continuing.",
           );
-        const report = await observeWorkspace(entry, substrate.gitEnv);
+        let report = await observeWorkspace(entry, substrate.gitEnv);
+        const source =
+          entry.kind === "primary" && entry.ownership === "adopted"
+            ? entry.checkouts[0]
+            : undefined;
+        if (source !== undefined) {
+          const candidates = substrate.registry
+            .all()
+            .filter(
+              (workspace) =>
+                workspace.workspaceId !== workspaceId && workspace.ownership !== "adopted",
+            );
+          const unknown = candidates.some((workspace) =>
+            workspace.checkouts.some(
+              (checkout) =>
+                checkout.resourceId === source.resourceId &&
+                checkout.commonDirectoryIdentity === undefined,
+            ),
+          );
+          const derivedWorkspaceIds =
+            source.commonDirectory === undefined ||
+            source.commonDirectoryIdentity === undefined ||
+            unknown
+              ? null
+              : candidates
+                  .filter((workspace) =>
+                    workspace.checkouts.some(
+                      (checkout) =>
+                        checkout.commonDirectory === source.commonDirectory &&
+                        checkout.commonDirectoryIdentity === source.commonDirectoryIdentity,
+                    ),
+                  )
+                  .map((workspace) => workspace.workspaceId);
+          report = { ...report, derivedWorkspaceIds };
+        }
         const available =
           isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv);
         if (entry.ownership === "adopted" && entry.available !== available)

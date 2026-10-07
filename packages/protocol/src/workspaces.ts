@@ -182,6 +182,8 @@ export const WorkspaceReport = Schema.Struct({
   ownership: Schema.optionalKey(WorkspaceOwnership),
   /** The actual observation time; replay keeps the original receipt's time. */
   observedAt: Schema.optionalKey(Timestamp),
+  /** The registered managed workspaces sharing this adopted checkout's recorded Git source. */
+  derivedWorkspaceIds: Schema.optionalKey(Schema.NullOr(Schema.Array(StorageId))),
   /** Whether the recorded working files and Git binding exist, independent of preparation success. */
   available: Schema.optionalKey(Schema.Boolean),
   checkouts: Schema.optionalKey(

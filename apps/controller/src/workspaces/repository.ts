@@ -52,6 +52,7 @@ export interface StoredWorkspace {
   readonly retentionPolicy: WorkspaceRetentionPolicy;
   readonly path: string | null;
   readonly observedAt: string | null;
+  readonly derivedWorkspaceIds: ReadonlyArray<string> | null;
   readonly available: boolean | null;
   readonly warnings: ReadonlyArray<string>;
   /** The Connection that work in the workspace acts through, fixed when it was opened. */
@@ -186,6 +187,7 @@ interface WorkspaceRow {
   readonly ownership: WorkspaceOwnership;
   readonly path: string | null;
   readonly observed_at: string | null;
+  readonly derived_workspace_ids: string | null;
   readonly available: number | null;
   readonly warnings: string;
   readonly designated_connection_id: Uint8Array | null;
@@ -215,7 +217,7 @@ interface CheckoutRow {
 
 const COLUMNS =
   "id, runner_id, kind, status, designated_connection_id, message, created_at, " +
-  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available, retention_policy";
+  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available, retention_policy, derived_workspace_ids";
 
 /** The same columns, for the one query that joins the checkouts table. */
 const WORKSPACE_COLUMNS = COLUMNS.split(", ")
@@ -234,6 +236,10 @@ const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   retentionPolicy: row.retention_policy,
   path: row.path,
   observedAt: row.observed_at,
+  derivedWorkspaceIds:
+    row.derived_workspace_ids === null
+      ? null
+      : (JSON.parse(row.derived_workspace_ids) as ReadonlyArray<string>),
   available: row.available === null ? null : row.available === 1,
   warnings: JSON.parse(row.warnings) as ReadonlyArray<string>,
   designatedConnectionId:
@@ -562,6 +568,7 @@ const make = Effect.gen(function* () {
           retentionPolicy: "automatic",
           path: workspace.path ?? null,
           observedAt: null,
+          derivedWorkspaceIds: null,
           available: null,
           warnings: [],
           designatedConnectionId: workspace.designatedConnectionId,
@@ -708,6 +715,7 @@ const make = Effect.gen(function* () {
         const changed = yield* sql<{ readonly id: Uint8Array }>`
           UPDATE workspaces SET observed_at = ${report.observedAt}, available = ${available ? 1 : 0},
             warnings = COALESCE(${report.warnings === undefined ? null : JSON.stringify(report.warnings)}, warnings),
+            derived_workspace_ids = ${report.derivedWorkspaceIds == null ? null : JSON.stringify(report.derivedWorkspaceIds)},
             path = COALESCE(${report.path ?? null}, path),
             status = CASE
               WHEN status = 'ready' AND ${!available} THEN 'failed'

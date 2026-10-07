@@ -114,6 +114,8 @@ const pickFolder = async ({
   const dialog = await screen.findByRole<HTMLDialogElement>("dialog", { name: "New project" });
   await userEvent.click(await within(dialog).findByRole("button", { name: "Choose a folder…" }));
   await within(dialog).findByText(folder._tag === "Cancelled" ? "Choose a folder…" : folder.name);
+  const existing = within(dialog).queryByRole("radio", { name: /^Use this checkout/ });
+  if (existing !== null) await userEvent.click(existing);
   return { calls, dialog, view: within(dialog), ...app };
 };
 

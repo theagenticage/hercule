@@ -204,6 +204,77 @@ describe("a primary the runner failed to provision", () => {
 });
 
 describe("the runner's workspace report", () => {
+  it("persists observed derived workspace IDs and their updates in public workspace reads", async () => {
+    await withWorkspaces(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/derived-observation");
+      const primary = await provisionWorkspaceOrFail(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        checkouts: [],
+      });
+      await waitForWorkspace(arranged, primary.id, (record) => record.status === "ready");
+      const derived = await spawnSessionOrFail(arranged, {
+        prompt: "prepare derived work",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const observedAt = new Date().toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt,
+        derivedWorkspaceIds: [String(derived.workspaceId)],
+      } as never);
+      const observed = await waitForWorkspace(
+        arranged,
+        primary.id,
+        (record) => record.observedAt === observedAt,
+      );
+      expect(observed).toMatchObject({ derivedWorkspaceIds: [derived.workspaceId] });
+      const refreshedAt = new Date(Date.parse(observedAt) + 1).toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt: refreshedAt,
+        derivedWorkspaceIds: [],
+      } as never);
+      const refreshed = await waitForWorkspace(
+        arranged,
+        primary.id,
+        (record) => record.observedAt === refreshedAt,
+      );
+      expect(refreshed).toMatchObject({ derivedWorkspaceIds: [] });
+      const knownAt = new Date(Date.parse(refreshedAt) + 1).toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt: knownAt,
+        derivedWorkspaceIds: [String(derived.workspaceId)],
+      });
+      await waitForWorkspace(arranged, primary.id, (record) => record.observedAt === knownAt);
+      const olderRunnerObservedAt = new Date(Date.parse(knownAt) + 1).toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt: olderRunnerObservedAt,
+      });
+      const unknown = await waitForWorkspace(
+        arranged,
+        primary.id,
+        (record) => record.observedAt === olderRunnerObservedAt,
+      );
+      expect(unknown).toMatchObject({ derivedWorkspaceIds: null });
+    });
+  });
+
   /**
    * A primary is reported again after every session that runs in it, and that
    * report is the only way to learn which branch the agent left the checkout

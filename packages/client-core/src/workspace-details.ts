@@ -20,9 +20,12 @@ export interface WorkspaceDetails {
   readonly status: string;
   readonly retention: string;
   readonly observation: string | null;
+  readonly observedAt: string | null;
   readonly checkouts: readonly WorkspaceCheckoutDetails[];
   readonly warnings: readonly string[];
   readonly message: string | null;
+  readonly recovery: string | null;
+  readonly derivedWorkspaces?: readonly { readonly id: string; readonly label: string }[] | null;
   readonly activeSessionCount: number;
   readonly actionReason: string | null;
   readonly canRefresh: boolean;
@@ -59,7 +62,15 @@ const describeWorkspaceRetention = (workspace: Workspace, timezone: string): str
  */
 export const buildWorkspaceDetails = (
   workspace: Workspace,
-  { runners, timezone }: { readonly runners: readonly Runner[]; readonly timezone: string },
+  {
+    runners,
+    workspaces,
+    timezone,
+  }: {
+    readonly runners: readonly Runner[];
+    readonly workspaces: readonly Workspace[];
+    readonly timezone: string;
+  },
 ): WorkspaceDetails => {
   const runner = runners.find((each) => each.id === workspace.runnerId);
   const available =
@@ -81,6 +92,7 @@ export const buildWorkspaceDetails = (
       workspace.observedAt === null
         ? null
         : (formatPreciseStamp(new Date(workspace.observedAt), timezone) ?? workspace.observedAt),
+    observedAt: workspace.observedAt,
     checkouts: workspace.checkouts.map((checkout) => ({
       resourceId: checkout.resourceId,
       branch: checkout.branch,
@@ -95,6 +107,27 @@ export const buildWorkspaceDetails = (
     })),
     warnings: workspace.warnings,
     message: workspace.message,
+    recovery:
+      workspace.status !== "failed"
+        ? null
+        : workspace.ownership === "adopted"
+          ? "Restore the selected checkout, then explicitly reattach the same path and remote. Refresh checks its current availability."
+          : workspace.provisionedAt === null
+            ? "Create a fresh workspace to try preparation again. This failed attempt keeps its files; setup will not be replayed."
+            : "Restore this workspace's working files and source repository, then refresh. Create a new workspace if the original cannot be restored.",
+    ...(workspace.ownership === "adopted" && workspace.kind === "primary"
+      ? {
+          derivedWorkspaces:
+            workspace.derivedWorkspaceIds?.map((id) => {
+              const derived = workspaces.find((each) => each.id === id);
+              const branches = derived?.checkouts
+                .map((checkout) => checkout.branch)
+                .filter(Boolean)
+                .join(", ");
+              return { id, label: branches || derived?.path || id };
+            }) ?? null,
+        }
+      : {}),
     activeSessionCount: workspace.sessionIds.length,
     actionReason: legacySource
       ? "This legacy checkout contains the source Git repository. Keep it; create a new workspace for separate work."

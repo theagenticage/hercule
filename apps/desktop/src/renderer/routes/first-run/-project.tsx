@@ -5,7 +5,7 @@ import { NewProjectForm } from "../../screens/new-project";
 
 /**
  * Renders the project step around the New project form. Without GitHub, the
- * form names the project from the folder and adds no repository yet, and
+ * form accepts a folder or a typed name and adds no repository yet, and
  * `onConnectGitHub` goes back to the GitHub step.
  */
 export function ProjectCard({
@@ -26,7 +26,7 @@ export function ProjectCard({
       <p className="st-sub">
         {gitHubConnected
           ? "A project is a set of repositories your agents work in. Adopt an existing folder or let Hercule manage its own checkout."
-          : "A project is a set of repositories your agents work in. Pick one on this Mac to name the project; its repository joins it once GitHub is connected."}
+          : "A project is a set of repositories your agents work in. Pick a folder or name the project now; add its repository once GitHub is connected."}
       </p>
       <NewProjectForm client={client} onAdded={onAdded} onConnectGitHub={onConnectGitHub} />
     </>

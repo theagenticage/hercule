@@ -41,3 +41,11 @@
 .workspace-details-error {
   color: var(--fail-ink);
 }
+.workspace-details-derived {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.workspace-details-derived small {
+  display: block;
+  color: var(--muted);
+}

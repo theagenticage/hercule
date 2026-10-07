@@ -333,3 +333,64 @@ describe("repository onboarding", () => {
     },
   );
 });
+
+it("creates a project manually without a repository or a positively identified local runner", async () => {
+  let picks = 0;
+  const { calls, view } = await openProject({
+    identities: {},
+    pick: () => {
+      picks++;
+      return Promise.resolve(FOLDER);
+    },
+  });
+  await userEvent.type(
+    await view.findByRole("textbox", { name: "Project name" }),
+    "Manual project",
+  );
+  await userEvent.click(view.getByRole("button", { name: /(?:add|create).*without.*repository/i }));
+  await waitFor(() => expect(readCalls(calls, "POST", "/api/v1/projects")).toHaveLength(1));
+  expect(readCalls(calls, "POST", "/api/v1/projects")[0]?.body).toMatchObject({
+    name: "Manual project",
+  });
+  expect(readCalls(calls, "POST", "/api/v1/resources")).toEqual([]);
+  expect(readCalls(calls, "POST", "/api/v1/workspaces/attach")).toEqual([]);
+  expect(readCalls(calls, "POST", "/api/v1/workspaces")).toEqual([]);
+  expect(picks).toBe(0);
+});
+
+it("creates a repository project from a remote URL without native folder access or implicit local placement", async () => {
+  let picks = 0;
+  const { calls, view } = await openProject({
+    identities: {},
+    pick: () => {
+      picks++;
+      return Promise.resolve(FOLDER);
+    },
+  });
+  const remote = "https://github.com/fixture/manual-remote.git";
+  await userEvent.type(
+    await view.findByRole("textbox", { name: "Project name" }),
+    "Remote project",
+  );
+  await userEvent.type(view.getByRole("textbox", { name: "Remote URL" }), remote);
+  await userEvent.click(view.getByRole("button", { name: "Add project" }));
+  await waitFor(() => expect(readCalls(calls, "POST", "/api/v1/resources")).toHaveLength(1));
+  expect(readCalls(calls, "POST", "/api/v1/projects")).toHaveLength(1);
+  expect(readCalls(calls, "POST", "/api/v1/resources")[0]?.body).toMatchObject({ remote });
+  expect(readCalls(calls, "POST", "/api/v1/workspaces/attach")).toEqual([]);
+  expect(readCalls(calls, "POST", "/api/v1/workspaces")).toEqual([]);
+  expect(picks).toBe(0);
+});
+
+it("requires an affirmative checkout ownership choice after picking a folder", async () => {
+  const { calls, view } = await openProject();
+  await chooseFolder(view);
+  const choices = view.getAllByRole<HTMLInputElement>("radio");
+  expect(choices).toHaveLength(2);
+  expect(choices.every((choice) => !choice.checked)).toBe(true);
+  expect(view.getByRole<HTMLButtonElement>("button", { name: "Add project" }).disabled).toBe(true);
+  await userEvent.type(view.getByRole("textbox", { name: "Project name" }), "{Enter}");
+  expect(readCalls(calls, "POST", "/api/v1/projects")).toEqual([]);
+  expect(readCalls(calls, "POST", "/api/v1/workspaces/attach")).toEqual([]);
+  expect(readCalls(calls, "POST", "/api/v1/workspaces")).toEqual([]);
+});

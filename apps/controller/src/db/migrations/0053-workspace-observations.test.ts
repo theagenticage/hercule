@@ -40,6 +40,7 @@ describe("workspace observation migration", () => {
       result.beforeWorkspace.map((row) => ({
         ...row,
         observed_at: null,
+        derived_workspace_ids: null,
         warnings: "[]",
         available: null,
       })),

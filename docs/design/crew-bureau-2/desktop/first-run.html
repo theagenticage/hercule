@@ -1026,7 +1026,7 @@
           codex: "idle",
           // The machine whose Hercule the app talks to: this Mac, or REMOTE once the user connects there.
           host: ME,
-          form: { remote: "", user: ME.user, pass: "", code: "", token: "", name: REPO.name, setup: "", url: "" },
+          form: { remote: "", user: ME.user, pass: "", code: "", token: "", name: REPO.name, setup: "", url: "", manualName: "", manualRemote: "" },
         };
         S.state = STATES[S.step].indexOf(q.get("state")) !== -1 ? q.get("state") : frozen ? STATES[S.step][0] : "searching";
         applyState();
@@ -1539,7 +1539,7 @@
             kicker("project") +
             '<h1 class="st-h">Add your first project</h1>' +
             (noRepo
-              ? '<p class="st-sub">A project is a set of repositories your agents work in. Pick one on this Mac to name the project; its repository joins it once GitHub is connected.</p>'
+              ? '<p class="st-sub">A project is a set of repositories your agents work in. Pick a folder or name the project now; add its repository once GitHub is connected.</p>'
               : '<p class="st-sub">A project is a set of repositories your agents work in. Adopt an existing folder or let Hercule manage its own checkout.</p>');
           if (st === "empty") {
             return (
@@ -1547,7 +1547,13 @@
               '<button class="pick-folder" data-act="pick"><span class="ico">' + icon("worktree", 20) + "</span><b>Choose a folder…</b><span>or drop one here</span></button>" +
               (noRepo
                 ? '<p class="st-note">' + icon("worktree", 14) + "<span>Until the repository joins, threads work without a checkout. <b>The folder you pick stays as it is.</b></span></p>"
-                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads can work directly in your checkout, or in their own separate copies. The choice is yours.</span></p>")
+                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads can work directly in your checkout, or in their own separate copies. The choice is yours.</span></p>") +
+              '<p class="st-note">Or name a project and add its remote repository without choosing a folder.</p>' +
+              '<div class="st-form">' + field({ key: "manualName", label: "Project name" }) +
+              (noRepo ? "" : field({ key: "manualRemote", label: "Remote URL", mono: true })) + "</div>" +
+              '<div class="st-actions">' +
+              (noRepo ? "" : '<button class="btn btn--accent btn--lg" disabled>Add project</button>') +
+              '<button class="btn btn--quiet" data-act="add">Add project without a repository</button></div>'
             );
           }
           var card = function (sub, badge) {

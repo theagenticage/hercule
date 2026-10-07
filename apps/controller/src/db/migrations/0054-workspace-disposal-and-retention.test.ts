@@ -15,9 +15,9 @@ describe("durable workspace removal migration", () => {
         VALUES ('runner', 'laptop', 'online', 'active', 0, '{}', 'hash', 'old', 'old')`;
         yield* sql`INSERT INTO resources (id, kind, remote, canonical_remote, workspace_include, created_at, updated_at)
         VALUES ('repo', 'repo', 'https://github.com/acme/main', 'github.com/acme/main', 1, 'old', 'old')`;
-        yield* sql`INSERT INTO workspaces (id, runner_id, kind, status, message, created_at, provisioned_at, last_used_at, ownership, path, observed_at, available, warnings, provision_frame)
-        VALUES ('main', 'runner', 'primary', 'ready', 'kept warning', 'old', 'prepared', 'used', 'adopted', '/human/main', 'observed', 1, '["warning"]', '{"frozen":"original"}'),
-          ('derived', 'runner', 'ephemeral', 'failed', 'setup failed', 'new', null, 'used', 'managed', null, null, null, '[]', null)`;
+        yield* sql`INSERT INTO workspaces (id, runner_id, kind, status, message, created_at, provisioned_at, last_used_at, ownership, path, observed_at, available, warnings, provision_frame, derived_workspace_ids)
+        VALUES ('main', 'runner', 'primary', 'ready', 'kept warning', 'old', 'prepared', 'used', 'adopted', '/human/main', 'observed', 1, '["warning"]', '{"frozen":"original"}', '["derived"]'),
+          ('derived', 'runner', 'ephemeral', 'failed', 'setup failed', 'new', null, 'used', 'managed', null, null, null, '[]', null, null)`;
         yield* sql`INSERT INTO checkouts (id, workspace_id, resource_id, form, subdirectory, branch, branches, default_branch, position, created_at, base_branch, starting_revision, base_commit, head_commit, remote_branches)
         VALUES ('checkout', 'main', 'repo', 'clone', null, 'local-only', '["local-only"]', 'main', 0, 'old', 'deprecated', '{"kind":"current"}', 'base', 'head', '["origin/main"]'),
           ('derived-checkout', 'derived', 'repo', 'worktree', 'main', 'feature', '["feature"]', null, 0, 'new', null, null, null, null, '[]')`;

@@ -143,6 +143,8 @@ export const Workspace = Schema.Struct({
   /** The normalized attached root on the selected runner; null for managed storage. */
   path: Schema.NullOr(WorkspacePath),
   observedAt: Schema.NullOr(Timestamp),
+  /** The runner's last observed derived workspaces; absent or null when their bindings are unknown. */
+  derivedWorkspaceIds: Schema.optionalKey(Schema.NullOr(Schema.Array(Id))),
   warnings: Schema.Array(Schema.String),
   checkouts: Schema.Array(Checkout),
   /** The Connection of its first checkout's resource; null on a scratch workspace. */

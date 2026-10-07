@@ -328,6 +328,66 @@ describe("safe managed disposal", () => {
 });
 
 describe("attached sources and detachment", () => {
+  it("observes derived workspace IDs by the adopted source repository and drops disposed worktrees", async () => {
+    const remote = makeRemote();
+    const world = createTemporaryDir("hercule-derived-observation-source-");
+    const source = join(world, "selected checkout");
+    const unrelatedSource = join(world, "unrelated checkout");
+    runGitOrThrow(world, "clone", remote.url, source);
+    runGitOrThrow(world, "clone", remote.url, unrelatedSource);
+    const remoteUrl = `https://fixture.invalid/acme/${createId()}`;
+    for (const path of [source, unrelatedSource])
+      runGitOrThrow(path, "remote", "set-url", "origin", remoteUrl);
+    const storageDir = createTemporaryDir("hercule-derived-observation-home-");
+    const manager = makeWorkspaces({ storageDir });
+    const derivedIds: Array<string> = [];
+    const primaries: Array<string> = [];
+    for (const path of [source, unrelatedSource]) {
+      const resourceId = createId();
+      const primary = {
+        ...buildProvisionFrame({
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remoteUrl })],
+        }),
+        attachment: { path, remoteName: "origin" },
+      };
+      expect((await manager.provision(primary)).status).toBe("ready");
+      primaries.push(primary.workspaceId);
+      const derived = buildProvisionFrame({
+        kind: "ephemeral",
+        checkouts: [
+          {
+            ...buildCheckout({ resourceId, remote: remoteUrl, branch: `derived-${createId()}` }),
+            repositoryWorkspaceId: primary.workspaceId,
+            startingRevision: { kind: "current" },
+          },
+        ],
+      });
+      expect((await manager.provision(derived)).status).toBe("ready");
+      derivedIds.push(derived.workspaceId);
+    }
+    expect(await manager.inspect(primaries[0]!)).toMatchObject({
+      status: "ready",
+      derivedWorkspaceIds: [derivedIds[0]],
+    });
+    expect(await manager.inspect(primaries[1]!)).toMatchObject({
+      status: "ready",
+      derivedWorkspaceIds: [derivedIds[1]],
+    });
+    expect(
+      (
+        await manager.dispose({
+          _tag: "workspaceDispose",
+          workspaceId: derivedIds[0]!,
+        })
+      ).status,
+    ).toBe("deleted");
+    expect(await manager.inspect(primaries[0]!)).toMatchObject({
+      status: "ready",
+      derivedWorkspaceIds: [],
+    });
+  });
+
   it("never disposes attached files, and detaches only registration while derived work remains usable", async () => {
     const remote = makeRemote();
     const world = createTemporaryDir("hercule-lifecycle-attached-source-");

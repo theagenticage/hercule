@@ -24,7 +24,7 @@ export const describeRunWorkspace = (
   timezone: string,
 ): RunWorkspaceReading => {
   if (workspace?.kind !== "ephemeral" || workspace.status === "lost") return NOTHING;
-  const details = buildWorkspaceDetails(workspace, { runners: [], timezone });
+  const details = buildWorkspaceDetails(workspace, { runners: [], workspaces: [], timezone });
   if (workspace.status === "deleted" || workspace.status === "disposing")
     return { ...NOTHING, note: details.retention };
   if (run.status === "pending" || run.status === "running")

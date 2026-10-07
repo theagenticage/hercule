@@ -208,3 +208,52 @@ it("updates the label through workspace pushes without inspection per token or s
   await waitFor(() => expect(screen.getAllByText(/externally-renamed/).length).toBeGreaterThan(0));
   expect(callsTo(calls, "POST", operation)).toHaveLength(initialInspections);
 });
+
+it("explains fresh-workspace recovery after managed setup failed instead of offering setup replay", async () => {
+  await openDetails({
+    ...retained,
+    status: "failed",
+    provisionedAt: null,
+    message: "The setup command failed with exit code 7.",
+  });
+  const details = within(screen.getByRole("dialog", { name: "Workspace details" }));
+  expect(details.getByText(/setup command failed with exit code 7/)).toBeTruthy();
+  expect(details.getByText(/(?:fresh|new).*workspace/i)).toBeTruthy();
+  expect(details.queryByRole("button", { name: /retry.*setup|rerun.*setup/i })).toBeNull();
+});
+
+it("explains restoring and explicitly reattaching the same unavailable checkout", async () => {
+  const path = "/human/missing checkout";
+  await openDetails({
+    ...retained,
+    kind: "primary",
+    ownership: "adopted",
+    path,
+    status: "failed",
+    message: "The selected checkout directory is unavailable.",
+  });
+  const details = within(screen.getByRole("dialog", { name: "Workspace details" }));
+  expect(details.getByText(/selected checkout directory is unavailable/)).toBeTruthy();
+  expect(details.getByText(/restore.*reattach|reattach.*restor/i)).toBeTruthy();
+  expect(details.getByText(path)).toBeTruthy();
+  expect(details.queryByRole("button", { name: /^Discard workspace$/ })).toBeNull();
+});
+
+it("shows both the last observation timestamp and its age, including after refresh returns older facts", async () => {
+  const observedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const { calls } = await openDetails({ ...retained, observedAt });
+  const details = within(screen.getByRole("dialog", { name: "Workspace details" }));
+  const timestamp = details.getByText(/last observed/i).nextElementSibling?.textContent ?? "";
+  expect(timestamp).toMatch(/\d{1,2}:\d{2}/);
+  expect(
+    details.getByText(/2\s*(?:hours?|h)\b|120\s*minutes?/i, { selector: "span:not([hidden])" }),
+  ).toBeTruthy();
+  const operation = `/api/v1/workspaces/${retained.id}/inspect`;
+  await waitFor(() => expect(callsTo(calls, "POST", operation)).toHaveLength(1));
+  await userEvent.click(details.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(callsTo(calls, "POST", operation)).toHaveLength(2));
+  expect(details.getByText(/last observed/i).nextElementSibling?.textContent).toBe(timestamp);
+  expect(
+    details.getByText(/2\s*(?:hours?|h)\b|120\s*minutes?/i, { selector: "span:not([hidden])" }),
+  ).toBeTruthy();
+});

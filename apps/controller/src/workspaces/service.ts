@@ -363,6 +363,7 @@ const make = Effect.gen(function* () {
         path: row.path,
         retentionPolicy: row.retentionPolicy,
         observedAt: row.observedAt,
+        derivedWorkspaceIds: row.derivedWorkspaceIds,
         warnings: row.warnings,
         checkouts: (checkouts.get(row.id) ?? []).map(toCheckoutRecord),
         designatedConnectionId: row.designatedConnectionId,

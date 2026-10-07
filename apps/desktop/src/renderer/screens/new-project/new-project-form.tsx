@@ -41,7 +41,7 @@ const submitOnEnter =
   };
 
 /**
- * Renders explicit checkout choices on the positively identified local runner.
+ * Renders manual project creation and explicit checkout choices for a local folder.
  * Keeps successful project and Resource writes through workspace preparation and
  * retries. Live Workspace records decide when the project can open.
  */
@@ -68,7 +68,7 @@ export function NewProjectForm({
   const [name, setName] = useState("");
   const [remote, setRemote] = useState("");
   const [setupCommand, setSetupCommand] = useState("");
-  const [mode, setMode] = useState<ProjectWorkspaceSelection["mode"]>("existing");
+  const [mode, setMode] = useState<ProjectWorkspaceSelection["mode"] | null>(null);
   // What the last submission left: what exists, and why the rest does not.
   const [lastSubmission, setLastSubmission] = useState<NewProjectSubmission | null>(null);
 
@@ -109,6 +109,7 @@ export function NewProjectForm({
       setName(outcome.name);
       setRemote(outcome._tag === "Repository" ? outcome.remote : "");
       setSetupCommand("");
+      setMode(null);
       setLastSubmission(null);
     },
   });
@@ -127,27 +128,16 @@ export function NewProjectForm({
     },
   });
 
-  if (folder === null) {
-    return (
-      <ChooseFolder
-        pending={pick.isPending || localRunner === null}
-        error={pick.error === null ? null : readErrorMessage(pick.error)}
-        localRunnerUnavailable={localRunner === null}
-        hasGitHub={gitHub !== undefined}
-        onPick={() => pick.mutate()}
-      />
-    );
-  }
-
   const projectId = submission?.projectId ?? null;
   const repository = submission?.repositories[0];
-  const projectName = name.trim() === "" ? folder.name : name.trim();
+  const projectName = name.trim() === "" ? (folder?.name ?? "Your project") : name.trim();
   const pending =
     create.isPending || (submission !== null && isProjectWorkspacePending(submission));
 
   /** Sends the form, with the folder's repository or without it. */
   const submit = (withRepository: boolean): void => {
-    if (pending || (withRepository && localRunner === null)) return;
+    if (pending || (withRepository && folder !== null && (localRunner === null || mode === null)))
+      return;
     create.mutate({
       name,
       projectId,
@@ -160,18 +150,92 @@ export function NewProjectForm({
                 connectionId: gitHub.id,
                 createdId: repository?.createdId ?? null,
                 message: null,
-                workspaceSelection: repository?.workspaceSelection ?? {
-                  mode,
-                  runnerId: localRunner!.id,
-                  path:
-                    folder._tag === "Repository" || folder._tag === "NoRemote" ? folder.path : "",
-                },
+                ...(folder === null
+                  ? {}
+                  : {
+                      workspaceSelection: repository?.workspaceSelection ?? {
+                        mode: mode!,
+                        runnerId: localRunner!.id,
+                        path:
+                          folder._tag === "Repository" || folder._tag === "NoRemote"
+                            ? folder.path
+                            : "",
+                      },
+                    }),
                 workspace: repository?.workspace ?? null,
               },
             ]
           : [],
     });
   };
+
+  const nameField = (
+    <FormField label="Project name" error={submission?.failure ?? null}>
+      <input
+        value={name}
+        disabled={projectId !== null}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={submitOnEnter(() =>
+          submit(gitHub !== undefined && (folder !== null || remote.trim() !== "")),
+        )}
+      />
+    </FormField>
+  );
+
+  if (folder === null) {
+    return (
+      <>
+        <ChooseFolder
+          pending={pick.isPending || localRunner === null || pending || projectId !== null}
+          error={pick.error === null ? null : readErrorMessage(pick.error)}
+          localRunnerUnavailable={localRunner === null}
+          hasGitHub={gitHub !== undefined}
+          onPick={() => pick.mutate()}
+        />
+        <p className="st-note">
+          Or name a project and add its remote repository without choosing a folder.
+        </p>
+        <div className="st-form">
+          {nameField}
+          {gitHub === undefined ? null : (
+            <FormField label="Remote URL" error={repository?.message ?? null}>
+              <input
+                className="mono"
+                value={remote}
+                disabled={repository?.createdId != null}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(event) => setRemote(event.target.value)}
+                onKeyDown={submitOnEnter(() => remote.trim() !== "" && submit(true))}
+              />
+            </FormField>
+          )}
+        </div>
+        <div className="st-actions">
+          {gitHub === undefined ? null : (
+            <button
+              type="button"
+              className="btn btn--accent btn--lg"
+              disabled={pending || remote.trim() === ""}
+              onClick={() => submit(true)}
+            >
+              Add project
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn--quiet"
+            disabled={pending}
+            onClick={() => submit(false)}
+          >
+            Add project without a repository
+          </button>
+        </div>
+      </>
+    );
+  }
 
   const card = (
     <FolderCard
@@ -204,19 +268,6 @@ export function NewProjectForm({
   // Mac, is treated as one with no remote: the user enters the remote.
   const asksForRemote =
     gitHub !== undefined && (folder._tag === "NoRemote" || !isClonableRemote(folder.remote));
-
-  const nameField = (
-    <FormField label="Project name" error={submission?.failure ?? null}>
-      <input
-        value={name}
-        disabled={projectId !== null}
-        spellCheck={false}
-        autoComplete="off"
-        onChange={(event) => setName(event.target.value)}
-        onKeyDown={submitOnEnter(() => submit(gitHub !== undefined))}
-      />
-    </FormField>
-  );
 
   if (gitHub === undefined) {
     return (
@@ -352,7 +403,12 @@ export function NewProjectForm({
         <button
           type="button"
           className="btn btn--accent btn--lg"
-          disabled={pending || localRunner === null || (asksForRemote && remote.trim() === "")}
+          disabled={
+            pending ||
+            localRunner === null ||
+            mode === null ||
+            (asksForRemote && remote.trim() === "")
+          }
           onClick={() => submit(true)}
         >
           {repository?.createdId !== null && repository?.message

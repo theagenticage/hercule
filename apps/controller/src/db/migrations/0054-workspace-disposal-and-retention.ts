@@ -22,6 +22,7 @@ export default Effect.gen(function* () {
       observed_at TEXT,
       available INTEGER CHECK (available IN (0, 1)),
       warnings TEXT NOT NULL DEFAULT '[]',
+      derived_workspace_ids TEXT CHECK (derived_workspace_ids IS NULL OR json_valid(derived_workspace_ids)),
       retention_policy TEXT NOT NULL DEFAULT 'automatic' CHECK (retention_policy IN ('manual', 'automatic')),
       disposal_frame TEXT CHECK (disposal_frame IS NULL OR json_valid(disposal_frame)),
       disposal_previous_status TEXT CHECK (disposal_previous_status IN ('provisioning', 'ready', 'failed')),
@@ -31,10 +32,10 @@ export default Effect.gen(function* () {
   yield* sql`
     INSERT INTO workspaces_next (id, runner_id, kind, status, message, designated_connection_id,
       created_at, provisioned_at, last_used_at, disposed_at, provision_frame, ownership, path,
-      observed_at, available, warnings, retention_policy)
+      observed_at, available, warnings, derived_workspace_ids, retention_policy)
     SELECT id, runner_id, kind, status, message, designated_connection_id,
       created_at, provisioned_at, last_used_at, disposed_at, provision_frame, ownership, path,
-      observed_at, available, warnings,
+      observed_at, available, warnings, derived_workspace_ids,
       CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.workspace_id = workspaces.id AND s.agent_id IS NULL)
         THEN 'manual' ELSE 'automatic' END
     FROM workspaces

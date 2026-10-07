@@ -10,7 +10,23 @@ import {
 import type { Workspace } from "@hercule/contract";
 import { runnersQuery, settingsQuery, workspacesQuery } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
+import { AgeLabel } from "../age-label";
 import "./workspace-details.css";
+
+const REMOVAL_CHOICES = {
+  discard: {
+    label: "Discard workspace",
+    question: "Discard workspace?",
+    explanation:
+      "Uncommitted tracked changes, untracked files and ignored files in this workspace will be lost. Committed branches remain in the repository.",
+  },
+  detach: {
+    label: "Detach existing checkout",
+    question: "Detach existing checkout?",
+    explanation:
+      "The existing checkout's files stay in place. This removes its registration in Hercule. Derived workspaces keep their existing Git repository; detachment does not move or remove their files.",
+  },
+} as const;
 
 /** Reads live workspace facts and offers deliberate refresh, discard and detach actions. */
 export function WorkspaceDetails({
@@ -33,11 +49,13 @@ export function WorkspaceDetails({
       ? undefined
       : buildWorkspaceDetails(workspace, {
           runners,
+          workspaces,
           timezone: resolveDisplayTimezone(settings.user.timezone),
         });
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inspected = useRef(false);
   const [confirmation, setConfirmation] = useState<"discard" | "detach" | null>(null);
+  const choice = confirmation === null ? null : REMOVAL_CHOICES[confirmation];
   const inspection = useMutation({
     mutationFn: () => client.workspace.inspect({ params: { id: workspaceId } }),
     onSuccess: (current) => {
@@ -70,23 +88,11 @@ export function WorkspaceDetails({
     <GlassDialog
       dialogRef={dialogRef}
       className="workspace-details-dialog"
-      label={
-        confirmation === "discard"
-          ? "Discard workspace"
-          : confirmation === "detach"
-            ? "Detach existing checkout"
-            : "Workspace details"
-      }
+      label={choice?.label ?? "Workspace details"}
       onClose={onClose}
     >
       <div className="pop-h">
-        <b>
-          {confirmation === "discard"
-            ? "Discard workspace?"
-            : confirmation === "detach"
-              ? "Detach existing checkout?"
-              : "Workspace details"}
-        </b>
+        <b>{choice?.question ?? "Workspace details"}</b>
         <button className="link" type="button" onClick={() => dialogRef.current?.close()}>
           Close
         </button>
@@ -96,11 +102,7 @@ export function WorkspaceDetails({
           <p>This workspace is no longer registered.</p>
         ) : confirmation !== null ? (
           <>
-            <p>
-              {confirmation === "discard"
-                ? "Uncommitted tracked changes, untracked files and ignored files in this workspace will be lost. Committed branches remain in the repository."
-                : "The existing checkout's files stay in place. This removes its registration in Hercule. Derived workspaces keep their existing Git repository; detachment does not move or remove their files."}
-            </p>
+            <p>{choice?.explanation}</p>
             <div className="workspace-details-actions">
               <button
                 className="link"
@@ -119,11 +121,7 @@ export function WorkspaceDetails({
                 }
                 onClick={() => removal.mutate(confirmation)}
               >
-                {removal.isPending
-                  ? "Requesting removal…"
-                  : confirmation === "discard"
-                    ? "Discard workspace"
-                    : "Detach existing checkout"}
+                {removal.isPending ? "Requesting removal…" : choice?.label}
               </button>
             </div>
           </>
@@ -138,10 +136,19 @@ export function WorkspaceDetails({
               <dd>{details.ownership}</dd>
               <dt>Status</dt>
               <dd>{details.status}</dd>
-              {details.observation === null ? null : (
+              {details.observedAt === null ? null : (
                 <>
                   <dt>Last observed</dt>
                   <dd>{details.observation}</dd>
+                  <dt>Observation age</dt>
+                  <dd aria-describedby={`workspace-observation-${workspaceId}`}>
+                    <AgeLabel
+                      at={details.observedAt}
+                      onScreen
+                      descriptionId={`workspace-observation-${workspaceId}`}
+                      as="span"
+                    />
+                  </dd>
                 </>
               )}
             </dl>
@@ -178,6 +185,9 @@ export function WorkspaceDetails({
             ))}
             <p className="workspace-details-note">{details.retention}</p>
             {details.message === null ? null : <p role="status">{details.message}</p>}
+            {details.recovery === null ? null : (
+              <p className="workspace-details-note">{details.recovery}</p>
+            )}
             {details.warnings.map((warning) => (
               <p key={warning} className="workspace-details-note">
                 {warning}
@@ -191,6 +201,31 @@ export function WorkspaceDetails({
                 Detaching keeps your files in place. Derived workspaces keep their existing Git
                 repository.
               </p>
+            ) : null}
+            {details.derivedWorkspaces !== undefined ? (
+              <section aria-label="Derived workspaces">
+                <b>Derived workspaces</b>
+                {details.derivedWorkspaces === null ? (
+                  <p className="workspace-details-note">
+                    No source binding observation is available. Refresh to check derived workspaces.
+                  </p>
+                ) : details.derivedWorkspaces.length === 0 ? (
+                  <p className="workspace-details-note">No derived workspaces were observed.</p>
+                ) : (
+                  <ul className="workspace-details-derived">
+                    {details.derivedWorkspaces.map(({ id, label }) => (
+                      <li key={id}>
+                        <span>{label}</span>
+                        {label !== id ? (
+                          <small>
+                            <code>{id}</code>
+                          </small>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             ) : null}
             <div className="workspace-details-actions">
               <button
