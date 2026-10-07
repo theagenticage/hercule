@@ -1,5 +1,5 @@
 /**
- * Tests the assistant form's four functions:
+ * Tests the assistant form's five functions:
  * - `buildAssistantDraft(assistant)` fills the form from the stored assistant.
  * - `mergeAssistantEdits(assistant, edits, fields)` records an edit, and
  *   forgets one that is back at the stored value.
@@ -7,12 +7,15 @@
  *   changed, so a save leaves every other field as it is on the controller.
  * - `dropSavedEdits(edits, sent)` keeps the edits a landed save did not
  *   store, such as text typed while the save ran.
+ * - `describeWhenAssistantChangesApply(name)` says when each kind of saved
+ *   change reaches the session of the assistant `name`.
  */
 import { describe, expect, it } from "vitest";
 import type { Assistant } from "@hercule/contract";
 import {
   buildAssistantDraft,
   buildAssistantUpdate,
+  describeWhenAssistantChangesApply,
   dropSavedEdits,
   mergeAssistantEdits,
 } from "./form";
@@ -167,5 +170,13 @@ describe("dropSavedEdits", () => {
     expect(dropSavedEdits({ name: "Ada L", accessMode: "auto" }, { name: "Ada L" })).toEqual({
       accessMode: "auto",
     });
+  });
+});
+
+describe("describeWhenAssistantChangesApply", () => {
+  it("names the assistant whose session a resume or a new session picks the change up in", () => {
+    expect(describeWhenAssistantChangesApply("Ada")).toBe(
+      "Reply applies at once. Access mode and permission profile apply when Ada's session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.",
+    );
   });
 });

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describeWhenAssistantChangesApply } from "@hercule/client-core";
 import type { Assistant, AssistantUpdateInput, Profile } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import {
@@ -135,6 +136,13 @@ describe("Settings > Assistants", () => {
     expect(within(tabs).getByRole("link", { name: "Milo" }).getAttribute("aria-current")).toBe(
       "page",
     );
+  });
+
+  it("says under How it works when a saved change reaches the session", async () => {
+    await openAssistants();
+
+    const heading = screen.getByRole("heading", { level: 2, name: "How Ada works" });
+    expect(heading.nextElementSibling?.textContent).toBe(describeWhenAssistantChangesApply("Ada"));
   });
 
   it("creates an assistant from the header's button and picks it", async () => {

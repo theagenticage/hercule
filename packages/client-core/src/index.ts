@@ -30,6 +30,7 @@ export {
 export {
   buildAssistantDraft,
   buildAssistantUpdate,
+  describeWhenAssistantChangesApply,
   dropSavedEdits,
   mergeAssistantEdits,
   NEW_ASSISTANT_NAME,

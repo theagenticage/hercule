@@ -53,12 +53,16 @@
  * 12. inserts a faint line under the heartbeat's lead and under the
  *     rotation's, which say the schedule is saved but not run yet: this
  *     version of the controller stores both but runs neither (#94). The
- *     lines are styled by the app's rule, injected here.
+ *     lines are styled by the app's rule, injected here;
+ * 13. gives How Ada works a lead, which says when a saved change reaches
+ *     the assistant's session: spec 12 §7 asks the Assistants settings
+ *     screen to say so, and the book draws no lead there. The lead is
+ *     styled by the app's rule, injected here.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
-import { formatAccessMode } from "@hercule/client-core";
+import { describeWhenAssistantChangesApply, formatAccessMode } from "@hercule/client-core";
 import { buildLook } from "../faces/look";
 import { ADA, JUNO, MILO } from "./assistant-states-fixture";
 import { findElement, findElementByText, findElements } from "./book-page";
@@ -116,7 +120,8 @@ stillBookPage();
 
 // The app's rules for what the book does not draw: a row that stacks its
 // label over a text area, and the text area itself (settings.css), a
-// heartbeat's mark and the line under a lead (schedule.css).
+// heartbeat's mark and the line under a lead (schedule.css), and How it
+// works' lead (assistants.css).
 const style = document.createElement("style");
 style.textContent = `
 .set-row.set-row--text { flex-direction: column; align-items: stretch; gap: 10px; }
@@ -124,6 +129,7 @@ style.textContent = `
 .heartbeat-day-beat { position: absolute; top: 10px; width: 2px; height: 10px; background: var(--who); }
 .heartbeat-day-beat[data-end] { transform: translateX(-100%); }
 .set-sec > p.schedule-note { margin-top: -9px; color: var(--faint); font-size: var(--t-12); line-height: 18px; }
+.set-sec > p.changes-lead { line-height: 19px; }
 `;
 document.head.append(style);
 
@@ -162,10 +168,13 @@ main.style.setProperty("--hue", adaHue);
 const head = findElement(main, ".head");
 head.replaceChildren(redrawFace(findElement(head, "svg.cr"), ADA.id), findElement(head, "h2"));
 
-// 5 and 6. How Ada works: the app's rows, values and hints.
+// 5, 6 and 13. How Ada works: the lead, and the app's rows, values and hints.
 const howItWorks = findSection(main, `How ${ada.name} works`);
+findElement(howItWorks, ":scope > h2").after(
+  buildElement("p", "changes-lead", describeWhenAssistantChangesApply(ada.name)),
+);
 const provider = findRow(howItWorks, "Provider");
-// The app sets the gap under the heading with a rule, on whichever row comes first.
+// The book sets the gap under the heading on its first row; the lead's margin sets it in the app.
 provider.style.removeProperty("margin-top");
 const nameField = buildElement("span", "field", ada.name);
 nameField.style.width = "214px";
@@ -174,7 +183,6 @@ const nameRow = buildRow(
   "The name it signs with, in the sidebar and in every channel.",
   nameField,
 );
-nameRow.style.marginTop = "10px";
 provider.before(
   nameRow,
   buildTextRow(

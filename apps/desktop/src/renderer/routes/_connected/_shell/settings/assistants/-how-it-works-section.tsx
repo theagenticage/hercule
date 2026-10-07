@@ -6,6 +6,7 @@ import {
   buildAssistantProviderField,
   buildAssistantUpdate,
   buildIdOptions,
+  describeWhenAssistantChangesApply,
   formatAccessMode,
   setDisallowedTool,
   type AssistantDraft,
@@ -35,7 +36,8 @@ const REPLY_MODES: ReadonlyArray<{ readonly value: AssistantReply; readonly labe
 /**
  * Renders "How <name> works": the assistant's name, persona, provider and
  * model, permission profile, access mode, disallowed tools and reply mode.
- * Each row saves on its own, as soon as its value changes.
+ * Each row saves on its own, as soon as its value changes. The lead says
+ * when a saved change reaches the assistant's session (spec 12 §7).
  */
 export function HowItWorksSection({ assistant }: { readonly assistant: Assistant }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -68,6 +70,7 @@ export function HowItWorksSection({ assistant }: { readonly assistant: Assistant
   return (
     <section className="set-sec">
       <h2>How {assistant.name} works</h2>
+      <p className="changes-lead">{describeWhenAssistantChangesApply(assistant.name)}</p>
       <SettingRow
         label="Name"
         hint="The name it signs with, in the sidebar and in every channel."

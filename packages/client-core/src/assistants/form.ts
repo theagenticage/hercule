@@ -9,6 +9,15 @@ import type { Assistant, AssistantUpdateInput } from "@hercule/contract";
 export const NEW_ASSISTANT_NAME = "Hercule";
 
 /**
+ * Returns the sentence that says when a saved change to the assistant named
+ * `name` reaches its session (spec 12 §7). A running session keeps what it
+ * was started with, so without the sentence a saved access mode would look
+ * like it already applies.
+ */
+export const describeWhenAssistantChangesApply = (name: string): string =>
+  `Reply applies at once. Access mode and permission profile apply when ${name}'s session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.`;
+
+/**
  * The assistant fields the settings form edits. `model` is the model's slug,
  * or `null` for the instance's default model; the form does not edit the
  * model's options.

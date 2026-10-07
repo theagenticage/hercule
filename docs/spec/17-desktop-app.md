@@ -874,6 +874,7 @@ Each section lists what it reads and writes through the contract, its live topic
 - The book's tabs, one per assistant, with its face and name, and New assistant in the header.
 - The book's profile block: the large face and the name.
 - How it works:
+  - *(Amended 2026-10-07, [#414](https://github.com/theagenticage/hercule/issues/414)/[#415](https://github.com/theagenticage/hercule/issues/415).)* a lead under the heading that says when a saved change reaches the assistant's session, as spec 12 §7 asks of the Assistants settings screen. The book draws no lead there. The sentence is the web form's, from one `client-core` function both apps call;
   - the web form's fields: name, persona (`systemPrompt`), provider instance and model, permission profile, access mode, and reply mode (Turn end or Segments);
   - disallowed tools, as the book's chips with Add, and an × on each chip;
   - ~~the delete move, at the foot of the section, with a confirmation.~~ *(Amended 2026-10-07, [#414](https://github.com/theagenticage/hercule/issues/414).)* The delete move is its own section, "Delete `<name>`", at the foot of the page after Rotation, with a confirmation. At the foot of How it works it would sit between the fields and the Heartbeat, where a destructive move is easy to hit while editing.
