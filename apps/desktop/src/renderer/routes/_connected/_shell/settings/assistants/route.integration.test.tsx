@@ -69,7 +69,7 @@ const CREATED = buildFixtureAssistant({
  * Ada. A read after a save answers with what the save stored, as the
  * controller's does.
  */
-const storeAssistants = (): Readonly<Record<string, Handler>> => {
+const storeAssistants = (): Readonly<Record<string, (call: Call) => Answer>> => {
   let stored = [ADA, MILO];
   return {
     "GET /api/v1/assistants": () => ({ body: { items: stored } }),
