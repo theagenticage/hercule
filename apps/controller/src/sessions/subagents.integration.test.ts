@@ -26,6 +26,7 @@ import type {
 import type { Session, Subagent } from "@hercule/contract";
 import {
   collectPushes,
+  expectHeld,
   fetchTicket,
   get,
   onSocket,
@@ -464,7 +465,12 @@ describe("the open Requests of several agents", () => {
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
           const announced = yield* collectPushes(client, "session");
+          yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, "session"));
+          // The session's earlier changes can still be waiting in the live
+          // window when the subscription opens, and then arrive on it naming
+          // this session. Only pushes after them count as the announcement.
           yield* Effect.promise(() => waitForLiveToSettle());
+          const before = announced.received.length;
 
           // Out of the usual order, the introduction comes after the Request.
           reportEvents(arranged, 4, [
@@ -478,9 +484,9 @@ describe("the open Requests of several agents", () => {
 
           const heard = yield* Effect.promise(() =>
             waitWithin(2000, () =>
-              announced.received.some((message) =>
-                (message as { ids?: ReadonlyArray<string> }).ids?.includes(id),
-              ),
+              announced.received
+                .slice(before)
+                .some((message) => (message as { ids?: ReadonlyArray<string> }).ids?.includes(id)),
             ),
           );
           expect(heard).toBe(true);
