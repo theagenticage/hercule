@@ -220,13 +220,13 @@ The identity of a repo resource: `host/owner/repo`, lowercased, with the scheme,
 _Avoid_: URL, origin, clone URL (for the identity; those are spellings of it)
 
 **Workspace**:
-A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared) and **ephemeral** workspaces (provisioned for one run, disposed after; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its agent steps. A session may also run with no workspace at all.
+A provisioned working area on a runner in which sessions do their work, containing zero or more checkouts. Two kinds: a **primary** workspace (exactly one checkout; at most one per resource per runner; long-lived and shared) and **ephemeral** workspaces (created for a thread or run; zero checkouts makes a scratch workspace, several makes a multi-repo workspace). A run has exactly one workspace, shared by all its Workspace Steps. A session may also run with no workspace at all.
 
-The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It is always Hercule's own clone under the runner's storage - Hercule never takes over a folder the user already has.
-_Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them), adopt (adopting a folder in place is not built)
+The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It uses either an existing checkout explicitly registered by the user or a managed working copy. That choice belongs to one resource on one runner; it never transfers files or local commits to another runner.
+_Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them), adopt (registering an existing checkout does not transfer ownership)
 
 **Workspace Lease**:
-A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks how long the workspace is kept, and that time is fixed then. The sweep deletes an ephemeral workspace once no lease is active and every lease's kept-until time has passed.
+A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks a retention window, fixed then. Active leases protect current use; a workspace's separate retention policy decides whether automatic cleanup is allowed. A Thread makes its workspace manually retained, including after the Thread exits.
 _Avoid_: claim (a Subscription is a claim), pin (a run is pinned to a runner), reference count
 
 **Checkout**:

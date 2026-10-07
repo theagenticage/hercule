@@ -398,6 +398,12 @@ Identity: Hercule id. A repo Resource is additionally **unique on `(kind, canoni
 
 Status axis: none.
 
+*(Amended 2026-10-07, [#459](https://github.com/theagenticage/hercule/issues/459), [ADR 0039](../adr/0039-workspaces-preserve-runner-local-git-state-and-human-work.md).)* The managed-only and lease-only workspace rules below are historical where superseded by this amendment and [spec 03](./03-controller-and-runners.md) section 6.8. A Resource remains portable identity, while existing or managed Git storage is selected independently for each Resource/Runner pair. An existing checkout may be registered as its main Workspace. Registration retains user ownership. A newly created managed main Checkout is a worktree of the same selected repository used for new worktrees; existing standalone clones and cache worktrees keep their topology.
+
+Workspace fields add `ownership: managed | existing`, `retentionPolicy: manual | automatic` and nullable `observedAt`. Thread use makes retention manual in the transaction that acquires its lease, permanently after exit; existing Thread workspaces are backfilled. Automatic lease deadlines never authorize deletion of manual workspaces. The status axis adds `disposing`, reserved before removal and refusing admission; `deleted` requires a confirmed successful outcome. An unavailable attached path is reported visibly and never recreated elsewhere. An attached primary may be detached without deleting its files.
+
+Checkout fields add nullable `headCommit`, `startingRevision` and `baseCommit`. The requested starting revision and resolved commit are creation facts; branch/HEAD and usable refs are observed runner facts. Each Checkout is durably bound to its actual local Git repository. The shared-Git branch occupancy rule applies to every checkout using the same common directory, including an attached main and its derived worktrees. Resource setup runs in every newly created managed working copy, including managed main; registration never runs setup. These rules supersede the old fresh-ephemeral-only setup and standalone-primary statements.
+
 ### Workspace
 
 Purpose: a provisioned working area on one runner in which sessions do their work ([ADR 0003](../adr/0003-sessions-run-as-bare-processes.md)).
@@ -606,7 +612,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Trigger (start) | `active`, `paused` | none | 07 |
 | Workflow | `enabled`, `disabled` | none | this document |
 | Runner | `online`, `offline`, `unreachable`, `draining`, `retired` | `retired` | 03 |
-| Workspace | `provisioning`, `ready`, `failed`, `deleted`, `lost` | `deleted`, `lost` | 03 |
+| Workspace | `provisioning`, `ready`, `failed`, `disposing`, `deleted`, `lost` | `deleted`, `lost` | 03 |
 | Connection | `connected`, `needs-reauth`, `error`, `disabled` | none | 08 |
 | Notification | `open`, `resolved` (resolution kind `decided` / `handled` / `withdrawn`; informational born `resolved`) | `resolved` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
