@@ -141,6 +141,15 @@ const removeManagedWorkspace = async (
   entry: RegisteredWorkspace,
   discardChanges: boolean,
 ): Promise<void> => {
+  const parent = resolve(
+    substrate.storageDir,
+    entry.kind === "primary" ? "primaries" : "workspaces",
+  );
+  const expectedRoot = resolve(parent, entry.workspaceId);
+  if (dirname(expectedRoot) !== parent || resolve(entry.root) !== expectedRoot)
+    throw new Error(
+      "The recorded root does not belong to this managed workspace. Preserve its files and restore the workspace registry before disposal.",
+    );
   validateManagedPath(substrate, entry.root);
   const canonicalRoot = resolve(
     realpathSync(substrate.storageDir),
@@ -314,6 +323,10 @@ const removeWorkspace = async (
     recorded?.phase === "pending"
       ? recorded.workspace
       : substrate.registry.all().find((workspace) => workspace.workspaceId === workspaceId);
+  if (entry !== undefined && entry.workspaceId !== workspaceId)
+    throw new Error(
+      "The recorded removal snapshot belongs to a different workspace. Preserve its files and restore the removal record before retrying.",
+    );
   const pending: Removal = {
     workspaceId,
     instruction,

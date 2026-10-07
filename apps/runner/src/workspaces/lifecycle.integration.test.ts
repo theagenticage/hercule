@@ -60,6 +60,86 @@ const makeRemainingFile = (cwd: string, kind: "tracked" | "untracked" | "ignored
 };
 
 describe("safe managed disposal", () => {
+  it("refuses a mismatched pending removal snapshot without deleting another workspace", async () => {
+    const fixture = await createManaged();
+    writeFileSync(join(fixture.cwd, "human-notes.txt"), "preserve this workspace\n");
+    const registry = makeRegistry(fixture.storageDir);
+    const victim = registry.held(fixture.frame.workspaceId)!;
+    const before = hashContents(victim.root);
+    const sourceBefore = hashContents(fixture.common);
+    const instruction = {
+      _tag: "workspaceDispose" as const,
+      workspaceId: createId(),
+      discardChanges: true,
+    };
+    await registry.recordRemoval({
+      workspaceId: instruction.workspaceId,
+      instruction,
+      phase: "pending",
+      workspace: victim,
+    });
+
+    const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
+    const report = await restarted.dispose(instruction);
+    expect(report.workspaceId).toBe(instruction.workspaceId);
+    expect(report.status, report.message).toBe("failed");
+    expect(report.message).toMatch(/record|registry|workspace|match|preserve/i);
+    expect(hashContents(victim.root)).toBe(before);
+    expect(hashContents(fixture.common)).toBe(sourceBefore);
+    expect(restarted.resolve(victim.workspaceId)?.cwd).toBe(fixture.cwd);
+  });
+
+  it("refuses a legacy workspace record that points at a source cache instead of its own root", async () => {
+    const storageDir = createTemporaryDir("hercule-misbound-cache-home-");
+    const cache = join(storageDir, "cache");
+    runGitOrThrow(storageDir, "init", "--bare", cache);
+    writeFileSync(join(cache, "source-notes.txt"), "preserve the source repository\n");
+    const before = hashContents(cache);
+    const workspaceId = createId();
+    writeFileSync(
+      join(storageDir, "workspaces.json"),
+      JSON.stringify([{ workspaceId, kind: "ephemeral", root: cache, checkouts: [] }]),
+    );
+
+    const report = await makeWorkspaces({ storageDir }).dispose({
+      _tag: "workspaceDispose",
+      workspaceId,
+      discardChanges: true,
+    });
+    expect(report.status, report.message).toBe("failed");
+    expect(report.message).toMatch(/record|registry|root|ownership|managed|preserve/i);
+    expect(hashContents(cache)).toBe(before);
+    expect(runGitOrThrow(cache, "rev-parse", "--is-bare-repository")).toBe("true");
+  });
+
+  it("refuses a workspace record that points at another managed workspace's root", async () => {
+    const fixture = await createManaged();
+    writeFileSync(join(fixture.cwd, "human-notes.txt"), "the other workspace owns these files\n");
+    const root = fixture.manager.resolve(fixture.frame.workspaceId)!.root;
+    const before = hashContents(root);
+    const sourceBefore = hashContents(fixture.common);
+    const workspaceId = createId();
+    writeFileSync(
+      join(fixture.storageDir, "workspaces.json"),
+      JSON.stringify([
+        ...makeRegistry(fixture.storageDir).all(),
+        { workspaceId, kind: "ephemeral", root, checkouts: [] },
+      ]),
+    );
+
+    const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
+    const report = await restarted.dispose({
+      _tag: "workspaceDispose",
+      workspaceId,
+      discardChanges: true,
+    });
+    expect(report.status, report.message).toBe("failed");
+    expect(report.message).toMatch(/record|registry|root|ownership|managed|preserve/i);
+    expect(hashContents(root)).toBe(before);
+    expect(hashContents(fixture.common)).toBe(sourceBefore);
+    expect(restarted.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.cwd);
+  });
+
   it.each(["tracked", "untracked", "ignored"] as const)(
     "retains %s files on ordinary removal and removes them only after explicit discard",
     async (kind) => {

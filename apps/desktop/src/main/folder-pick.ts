@@ -78,7 +78,11 @@ export const describeFolder = (folder: string): Effect.Effect<FolderPickOutcome>
       return root.stderr.includes("not a git repository")
         ? ({ _tag: "NotGit", name } as const)
         : ({ _tag: "GitFailed", name, line: describeFailedExit(root, "Git") } as const);
-    const path = realpathSync(root.stdout.trim());
+    const path = yield* Effect.try({
+      try: () => realpathSync(root.stdout.trim()),
+      catch: (cause) =>
+        new Error("The selected checkout could not be read. Choose its folder again.", { cause }),
+    });
     const remote = yield* runGit(path, ["config", "--get", "remote.origin.url"]);
     if (remote.exitCode !== 0 && remote.exitCode !== NO_SUCH_REMOTE_EXIT_CODE) {
       return remote.stderr.includes("not a git repository")
@@ -105,7 +109,7 @@ export const describeFolder = (folder: string): Effect.Effect<FolderPickOutcome>
       Effect.succeed({
         _tag: "GitFailed",
         name: basename(folder),
-        line: `Git could not be started: ${error.message}`,
+        line: `The selected folder could not be read: ${error.message}`,
       } as const),
     ),
   );

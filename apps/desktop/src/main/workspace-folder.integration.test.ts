@@ -100,6 +100,20 @@ const readPaths = (root: string) =>
   );
 
 describe("workspace onboarding folder discovery", () => {
+  it("returns an actionable failure when Git reports a working root that cannot be canonicalized", async () => {
+    const root = await createRepository("unavailable working root");
+    const unavailable = join(folder, "missing checkout");
+    await runGit(root, ["config", "core.worktree", unavailable]);
+    const before = readPaths(root);
+
+    const outcome = await runDescribeFolder(root);
+    expect(outcome).toMatchObject({ _tag: "GitFailed", name: "unavailable working root" });
+    expect(outcome._tag === "GitFailed" && outcome.line).toMatch(
+      /path|folder|checkout|directory|unavailable|missing|read|resolve|canonical/i,
+    );
+    expect(readPaths(root)).toEqual(before);
+  });
+
   it("returns the normalized repository root for a selected nested folder and preserves all files", async () => {
     const root = await createRepository("source with spaces");
     await runGit(root, ["remote", "add", "origin", "https://example.com/ada/api.git"]);

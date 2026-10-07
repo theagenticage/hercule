@@ -1103,8 +1103,9 @@ const make = Effect.gen(function* () {
     /**
      * Returns the workspace and the lease that kept it longest, if the sweep
      * may still dispose of it now. Returns `undefined` if its files are gone,
-     * if a lease on it is active again, or if a lease keeps it for longer
-     * now. Runs in the caller's transaction, which also disposes of it.
+     * if a lease on it is active again, if a lease keeps it for longer now,
+     * or if its runner cannot remove it safely. Runs in the caller's
+     * transaction, which also disposes of it.
      *
      * A sweep lists its candidates up front, and the leases can change before
      * a candidate's turn comes: a session can be resumed in it, or a released
@@ -1129,6 +1130,13 @@ const make = Effect.gen(function* () {
           return undefined;
         }
         if (Option.isSome(yield* workspaces.readRemoval(id))) return undefined;
+        const runner = yield* runners.read(found.value.runnerId);
+        // Reserving unsupported removal would permanently stop automatic cleanup after an upgrade.
+        if (
+          Option.isNone(runner) ||
+          !(runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+        )
+          return undefined;
         const expired = yield* workspaces.findExpiredLease(id, yield* nowIso);
         return Option.isNone(expired)
           ? undefined

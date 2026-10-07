@@ -1,4 +1,4 @@
-import type { Workspace } from "@hercule/contract";
+import type { RunnerDetail, Workspace } from "@hercule/contract";
 /**
  * Verifies the expiry sweep through public session operations and runner reports.
  * Agent-backed workspaces retain lease-based expiry. Human Threads make their
@@ -17,6 +17,7 @@ import {
   readProfileNamed,
   spawnSessionOrFail,
   waitUntil,
+  waitForRunnerGone,
   type Arranged,
   type Wire,
 } from "../sessions/testing";
@@ -399,6 +400,53 @@ describe("the workspace expiry sweep", () => {
       expect(input.status, await input.clone().text()).toBe(200);
       await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2);
       expect((await readWorkspace(arranged, primary.id)).sessionIds).toEqual([thread.id]);
+    });
+  });
+
+  it("keeps unsupported automatic cleanup eligible after the runner upgrades", async () => {
+    await withSweep(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnAutomaticIn(arranged, web, 1);
+      await endUnresumable(arranged, session);
+      const workspaceId = String(session.workspaceId);
+
+      arranged.wire.close();
+      await waitForRunnerGone(arranged);
+      const older = await arranged.reconnect({ capabilities: [] });
+      older.send({ _tag: "sessionsReport", sessions: [] });
+      await waitUntil("negotiated the online older runner", async () => {
+        const response = await get(
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}`,
+          arranged.token,
+        );
+        const runner = (await response.json()) as RunnerDetail;
+        return runner.connectivity === "online" && runner.negotiatedCapabilities?.length === 0
+          ? true
+          : undefined;
+      });
+      await ageLeases(arranged, workspaceId, 25);
+      await waitForSeveralSweeps();
+
+      expect(listFramesTagged(older, "workspaceDispose")).toEqual([]);
+      const [stored] = await Effect.runPromise(
+        Effect.orDie(arranged.harness.sql<{ readonly disposal_frame: string | null }>`
+          SELECT disposal_frame FROM workspaces
+          WHERE id = unhex(replace(${workspaceId}, '-', ''))`),
+      );
+      expect(stored?.disposal_frame).toBeNull();
+      expect(await readWorkspace(arranged, workspaceId)).toMatchObject({
+        status: "ready",
+        retentionPolicy: "automatic",
+        message: null,
+      });
+
+      older.close();
+      await waitForRunnerGone(arranged);
+      const upgraded = await arranged.reconnect();
+      const removed = await waitForDisposed(arranged, workspaceId, upgraded);
+      expect(removed.status).toBe("deleted");
+      expect(await countLeases(arranged, workspaceId)).toBe(0);
     });
   });
 
