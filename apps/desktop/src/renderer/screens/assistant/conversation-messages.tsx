@@ -81,7 +81,7 @@ export const Notice = memo(function Notice({
   readonly time: string | undefined;
 }): JSX.Element {
   return (
-    <div className="notice" role="status">
+    <div className="notice">
       <Face look={look} pose="failed" size={NOTICE_FACE_SIZE} />
       <span>
         {text}
@@ -125,11 +125,11 @@ export function OpenReply({
               <OpenMessageText
                 key={item.itemId}
                 itemId={item.itemId}
-                storedText={item.storedText}
+                storedText={item.rowText}
                 attachOpenParagraph={attachOpenParagraph}
               />
             ) : (
-              <Markdown key={item.itemId} text={item.storedText} />
+              <Markdown key={item.itemId} text={item.rowText} />
             ),
           )
         )}

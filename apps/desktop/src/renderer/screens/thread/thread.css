@@ -1,40 +1,13 @@
-/* The thread's transcript. The rules are the Bureau book's `.transcript`
-   and `.worked` (system.css) and the session page's own `.tx` and
-   `.waiting-note`. The messages it draws are styled in
-   ../session/messages.css. Each departure from the book says why. */
+/* The thread's transcript: what it draws that an assistant's Conversation
+   does not. The view, the column and the space around the blocks are in
+   ../session/transcript.css, and the messages in ../session/messages.css.
+   The rules are the Bureau book's `.worked` (system.css) and the session
+   page's own `.tx` and `.waiting-note`. Each departure from the book is
+   explained in a comment. */
 
-.transcript {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-/* Not in the book, whose transcript does not stream. The one scroll anchor
-   is the end of the transcript, so the view follows new text while the
-   reader is at the bottom without a script scrolling it: a script's scroll
-   shows macOS's overlay scroll bar, and a streaming turn would keep it on
-   screen. The end is a line 1px high, because a box with no height is never
-   chosen as an anchor, and its negative margin takes that 1px back out of
-   the layout. Away from the bottom the end is out of view, so nothing is
-   anchored, and the virtualizer alone keeps the view still when a block
-   above it changes height. */
-.transcript-end {
-  height: 1px;
-  margin-top: -1px;
-}
-.column {
-  width: min(760px, 100% - 48px);
-  margin: 0 auto;
-}
 /* The book's `.tx` is a flex column with a 22px gap. Here each block is an
    item of the virtualizer, which measures it, so the gap is the item's own
-   top padding, and each item is the flex column its block sits in.
-   The bottom padding is the book's until the composer is measured; then
-   transcript.tsx sets it from the composer's height. */
-.tx {
-  padding: var(--header-clearance) 0 360px;
-  /* The blocks are never the scroll anchor: see `.transcript-end`. */
-  overflow-anchor: none;
-}
+   top padding, and each item is the flex column its block sits in. */
 .tx-item {
   display: flex;
   flex-direction: column;

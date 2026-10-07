@@ -117,7 +117,8 @@ describe("the subagent's page", () => {
     // The rows the thread's agent wrote while its page was closed arrive as
     // the replay of its stream.
     const [started, text] = buildNextRows(
-      THREAD,
+      THREAD.session.id,
+      THREAD.transcript,
       { _tag: "item.started", turnId: "turn-1", itemId: "turn-1-late", kind: "assistant_message" },
       {
         _tag: "content.delta",

@@ -14,7 +14,7 @@ import {
   type QuestionDraft,
 } from "@hercule/client-core";
 import type { ApprovalDecision, QuestionAnswers, SessionRequest } from "@hercule/contract";
-import { useRequestDraft } from "../../app/thread-drafts";
+import { useRequestDraft } from "../../app/request-drafts";
 import { buildLook, Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { buildAgentFaceSeed } from "../subagents/subagent-face";
@@ -76,9 +76,9 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
 /**
  * Renders one Request the session `sessionId` is waiting on, docked on top
  * of the composer, as the Bureau book's `.dock` draws it. On a thread's
- * agent page, `AgentRequestDock` decides which Request and pages between
- * them; the Office's dossier and an assistant's Conversation show the
- * oldest.
+ * agent page `AgentRequestDock`, and in an assistant's Conversation
+ * `ConversationRequestDock`, decides which Request and pages between them;
+ * the Office's dossier shows the oldest.
  *
  * - the question: the face of the agent that asked, in the waiting pose,
  *   then the card's title with what it asks about in `code`. A subagent's

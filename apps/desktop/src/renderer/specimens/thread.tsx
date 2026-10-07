@@ -24,6 +24,12 @@ import { computeScrolledTop, markSheetReady } from "./sheet-page";
 async function scrollTranscriptAway(): Promise<void> {
   const transcript = document.querySelector(".transcript");
   if (transcript === null) throw new Error("The thread specimen draws no transcript.");
+  // A reader scrolls only once the page has been drawn. By then the
+  // transcript has noted that it opened at the bottom, so the scroll below
+  // counts as a scroll up, which is what shrinks the composer.
+  for (let frame = 0; frame < 2; frame += 1) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
   transcript.scrollTop = computeScrolledTop(transcript);
   // The composer shrinks after the scroll event, which arrives with a later frame.
   while (document.querySelector(".composer.is-scrolled") === null) {

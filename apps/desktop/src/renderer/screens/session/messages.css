@@ -2,7 +2,7 @@
    the user's bubble, and the markdown inside both. The thread's transcript
    and an assistant's Conversation draw them. The rules are the Bureau book's
    `.msg` through `.bubble-meta` (system.css). Each departure from the book
-   says why. */
+   is explained in a comment. */
 
 .msg {
   display: grid;

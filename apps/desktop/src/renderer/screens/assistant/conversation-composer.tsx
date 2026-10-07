@@ -1,23 +1,16 @@
 import { useSyncExternalStore, type JSX, type Ref } from "react";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import {
-  buildRequestDock,
-  isMutationRunning,
-  queryKeys,
-  readErrorMessage,
-  type MessagePages,
-} from "@hercule/client-core";
-import type { Assistant, ConversationMessage, Session } from "@hercule/contract";
+import { buildRequestDock, isMutationRunning, readErrorMessage } from "@hercule/client-core";
+import type { Assistant, Session } from "@hercule/contract";
 import { buildAssistantDraftKey } from "../../app/pending-submissions";
-import { readMessagePage } from "../../app/queries";
-import { useShownRequestId } from "../../app/thread-drafts";
+import { storeSentMessage } from "../../app/queries";
+import { useShownRequestId } from "../../app/request-drafts";
 import type { Look } from "../../faces";
 import { ComposerFrame } from "../session/composer-frame";
 import { RequestDock } from "../session/dock";
+import { RequestPager } from "../session/request-pager";
 import { useSendOnMenuCommand } from "../session/send-key";
-import { RequestPager } from "../thread/agent-request-dock";
-import { storeNewestMessages } from "./use-conversation-live";
 
 /**
  * Renders the composer of `assistant`'s Conversation in a `ComposerFrame`,
@@ -73,36 +66,16 @@ export function ConversationComposer({
   const sendKey = ["conversation-send", assistant.id];
   const sending = useIsMutating({ mutationKey: sendKey }) > 0;
 
-  /**
-   * Returns the newest page to merge the sent `message` into the pages held:
-   * the message alone when it comes right after the newest message held, or
-   * a fresh read of the newest page when more messages were stored since,
-   * which a page holding the message alone would leave a gap before. Returns
-   * `null` when that read fails: the `conversation` push that follows every
-   * stored message reads the newest page again.
-   */
-  const readNewestAfterSend = async (message: ConversationMessage) => {
-    const held = queryClient.getQueryData<MessagePages>(
-      queryKeys.conversationMessages(conversationId),
-    );
-    const heldNewest = held?.pages[0]?.items[0];
-    if (heldNewest === undefined || message.position <= heldNewest.position + 1) {
-      return { items: [message] };
-    }
-    return readMessagePage(client, conversationId, undefined).catch(() => null);
-  };
-
   const send = useMutation({
     mutationKey: sendKey,
     mutationFn: (text: string) =>
       client.conversation.send({ params: { id: conversationId }, payload: { text } }),
     // Registered here rather than passed to `mutate`, so it also runs when
     // the user has left the Conversation before the send returns.
-    // The draft is cleared once the message is in the cache, so the text
-    // leaves the field in the same frame its bubble appears.
     onSuccess: async (message, text) => {
-      const newest = await readNewestAfterSend(message);
-      if (newest !== null) await storeNewestMessages(queryClient, conversationId, newest);
+      // The draft is cleared once the message is in the cache, so the text
+      // leaves the field in the same frame its bubble appears.
+      await storeSentMessage(queryClient, client, conversationId, message);
       // A Conversation takes no picks, so the draft's own empty picks are
       // passed, which leaves them as they are.
       pendingSubmissions.clearSent(draftKey, {
@@ -120,8 +93,10 @@ export function ConversationComposer({
   });
 
   const busy = session?.status === "busy";
-  const error =
-    pending.failure ?? (interrupt.error === null ? null : readErrorMessage(interrupt.error));
+  // A failed Stop is shown only while the turn it tried to stop runs: once
+  // the turn ends, or another session takes over, it no longer applies.
+  const stopFailed = interrupt.isError && busy && interrupt.variables === session.id;
+  const error = pending.failure ?? (stopFailed ? readErrorMessage(interrupt.error) : null);
   const canSend = pending.message.text.trim() !== "" && !sending;
 
   const submit = (): void => {
@@ -148,14 +123,12 @@ export function ConversationComposer({
       readOnly={false}
       canSend={canSend}
       onSend={submit}
-      busy={busy}
-      stopping={interrupt.isPending}
-      onStop={stop}
+      stop={busy ? { stopping: interrupt.isPending, onStop: stop } : undefined}
       error={error}
       above={session === null ? null : <ConversationRequestDock session={session} look={look} />}
       shrunk={shrunk}
       onFocusChange={onFocusChange}
-      scrollTranscriptToBottom={scrollConversationToBottom}
+      scrollMessagesToBottom={scrollConversationToBottom}
       ref={ref}
     />
   );
@@ -178,17 +151,15 @@ function ConversationRequestDock({
   readonly look: Look;
 }): JSX.Element | null {
   const [shownRequestId, setShownRequestId] = useShownRequestId(session.id);
+  // A Conversation's session starts no subagents, so every Request is its
+  // own agent's, and the line above the card is drawn only to page.
   const dock = buildRequestDock(session.openRequests, [], undefined, shownRequestId);
   if (dock === null) return null;
   return (
     <>
-      {dock.position === null ? null : (
-        <RequestPager
-          sessionId={session.id}
-          dock={{ ...dock, asker: null }}
-          onShow={setShownRequestId}
-        />
-      )}
+      {dock.showsAskerLine ? (
+        <RequestPager sessionId={session.id} dock={dock} asker={null} onShow={setShownRequestId} />
+      ) : null}
       <RequestDock
         key={dock.request.requestId}
         sessionId={session.id}

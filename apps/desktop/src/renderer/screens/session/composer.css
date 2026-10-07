@@ -163,7 +163,7 @@ button.pick:not([aria-disabled="true"]):hover,
    the fade holds only while the composer is full size. At the bottom of the
    transcript the faded strip holds only the space under the last block, so
    the fade shows only while the reader is scrolled up. The mask itself is
-   in thread-header.css. */
+   in floating-header.css. */
 .transcript:has(~ .composer-wrap > .composer:not(.is-scrolled)) {
   --lip-clearance: calc(18px + 7px + 1.45 * var(--t-12));
   --transcript-bottom-fade:

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { ageClock } from "../../app/age-clock";
 
 /** Returns the first moment of the local day `now` falls on, in milliseconds since the epoch. */
-const findStartOfDay = (now: Date): number =>
+const computeStartOfDay = (now: Date): number =>
   new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
 /** Registers with the age clock to be told when the local day changes. */
@@ -19,4 +19,4 @@ const subscribeToDayChange = (onChange: () => void): (() => void) =>
  * against it, so "09:04" becomes "4 Sep 09:04" when the day changes.
  */
 export const useStartOfToday = (): number =>
-  useSyncExternalStore(subscribeToDayChange, () => findStartOfDay(ageClock.readNow()));
+  useSyncExternalStore(subscribeToDayChange, () => computeStartOfDay(ageClock.readNow()));

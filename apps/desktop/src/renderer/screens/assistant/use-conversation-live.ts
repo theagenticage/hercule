@@ -1,49 +1,17 @@
 /**
  * Keeps an assistant's Conversation current through the live connection
- * while it is open: the messages it holds and its current session.
+ * while it is open: the messages it holds and its current session. Drops
+ * the messages when it closes.
  */
 import { useEffect } from "react";
 import { partialMatchKey, type QueryClient } from "@tanstack/react-query";
 import {
   invalidateWithoutCancelling,
-  mergeNewestMessagePage,
   queryKeys,
   type HerculeClient,
   type Live,
-  type MessagePage,
-  type MessagePages,
 } from "@hercule/client-core";
-import { readMessagePage } from "../../app/queries";
-
-/**
- * Merges `newest`, a fresh read of the newest messages, into the pages of the
- * conversation `conversationId` held in `queryClient`, by
- * `mergeNewestMessagePage`. Resolves once the merge is in the cache.
- *
- * While an earlier page is being read, the merge is made twice: at once, and
- * again when that read ends. A read of a page writes back the pages it found
- * when it started, with the new page added, so it would undo a merge made in
- * between. Merging the same page twice gives the same pages, so the second
- * merge is harmless when the first one was kept.
- */
-export const storeNewestMessages = async (
-  queryClient: QueryClient,
-  conversationId: string,
-  newest: MessagePage,
-): Promise<void> => {
-  const queryKey = queryKeys.conversationMessages(conversationId);
-  const merge = (): void => {
-    queryClient.setQueryData<MessagePages>(queryKey, (held) =>
-      mergeNewestMessagePage(held, newest),
-    );
-  };
-  merge();
-  const query = queryClient.getQueryCache().find({ queryKey, exact: true });
-  const reading = query?.state.fetchStatus === "fetching" ? query.promise : undefined;
-  if (reading === undefined) return;
-  await reading.catch(() => undefined);
-  merge();
-};
+import { readMessagePage, removeQueryOnceUnobserved, storeNewestMessages } from "../../app/queries";
 
 /**
  * Subscribes to the `conversation` topic while the calling component is
@@ -64,8 +32,16 @@ export const storeNewestMessages = async (
  * The next push reads the newest page again, and the live connection sends
  * one after every reconnect.
  *
+ * When the calling component unmounts, the pages of messages held are
+ * dropped, after the topic is left (see `removeQueryOnceUnobserved`). Only an open Conversation keeps them
+ * current, so the cache would otherwise hold them out of date, with every
+ * page the user scrolled back through. They are dropped here rather than
+ * when the route is left, so a push or a send that lands in between cannot
+ * bring them back.
+ *
  * `live` is `null` to draw the Conversation without live changes, as the
- * specimen does: nothing is subscribed then.
+ * specimen does: nothing is subscribed or dropped then, because the
+ * specimen's pages are seeded once and never read.
  */
 export const useConversationLive = (
   live: Live | null,
@@ -90,6 +66,7 @@ export const useConversationLive = (
     return () => {
       subscribed = false;
       unsubscribe();
+      removeQueryOnceUnobserved(queryClient, messagesKey);
     };
   }, [live, queryClient, client, conversationId]);
 };

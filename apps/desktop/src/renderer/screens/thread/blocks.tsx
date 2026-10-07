@@ -1,14 +1,16 @@
 /**
  * The blocks of the thread's transcript that only a thread draws, one
  * component per kind of `ThreadBlock`, drawn as the Bureau book's session
- * page draws them. The messages, which an assistant's Conversation draws
- * too, are in `../session/messages`.
+ * page draws them. The pieces a message is made of, which an assistant's
+ * Conversation draws too, are in `../session/messages`.
  *
- * Every block is presentational, apart from the shared age clock that
- * `WorkDivider` and `WaitingNote` read. Every block is `memo`: the transcript draws again each time
- * its visible range changes, and a block whose props did not change is
+ * Every block is presentational, apart from the finished paragraphs an open
+ * message keeps and the shared age clock that `WorkDivider` and
+ * `WaitingNote` read. Every block is `memo`: the transcript draws again each
+ * time its visible range changes, and a block whose props did not change is
  * skipped. The props are the block from `buildThreadBlocks`, whose identity
- * changes only when the transcript does, and plain values.
+ * changes only when the transcript does, `Look`s from `buildLook`, which
+ * returns the same object for the same seed, and plain values.
  *
  * Times are drawn by `formatMessageTime` against `today`, the start of the
  * current day, so every block draws again when the day changes and "09:04"
@@ -16,6 +18,7 @@
  */
 import { memo, type JSX } from "react";
 import {
+  describeMessageMeta,
   describeTurnEnding,
   describeWaitingNote,
   describeWorkStretch,
@@ -27,7 +30,64 @@ import {
 import { useAgeLabel, useDurationText } from "../../app/age-clock";
 import type { Look } from "../../faces";
 import { Mark } from "../../marks";
-import { AgentFace, formatBlockTime } from "../session/messages";
+import { Markdown } from "../session/markdown";
+import { AgentFace, formatBlockTime, OpenMessageText } from "../session/messages";
+import type { AttachOpenParagraph } from "../session/use-session-live";
+
+/**
+ * Renders a message the agent wrote: the face, then the meta line "Claude
+ * Code · Opus 5.5 · 09:04", then the text as markdown.
+ *
+ * - `look` is the face's look, from `buildLook`.
+ * - `agent` is the first part of the meta line, before the time: the
+ *   provider and the model.
+ * - `pose` is the face's pose: the session's pose while this message holds
+ *   the working face, else `idle`.
+ * - `text` is the text the transcript's rows hold. While the message is
+ *   `open`, the agent is still writing it: see `OpenMessageText`.
+ */
+export const AgentMessage = memo(function AgentMessage({
+  look,
+  itemId,
+  agent,
+  text,
+  startedAt,
+  timezone,
+  today,
+  pose,
+  open,
+  attachOpenParagraph,
+}: {
+  readonly look: Look;
+  readonly itemId: string;
+  readonly agent: string;
+  readonly text: string;
+  readonly startedAt: string;
+  readonly timezone: string;
+  readonly today: number;
+  readonly pose: Pose;
+  readonly open: boolean;
+  readonly attachOpenParagraph: AttachOpenParagraph;
+}): JSX.Element {
+  const meta = describeMessageMeta(agent, formatBlockTime(startedAt, timezone, today));
+  return (
+    <div className="msg">
+      <AgentFace look={look} pose={pose} />
+      <div className="msg-body">
+        <div className="msg-meta">{meta}</div>
+        {open ? (
+          <OpenMessageText
+            itemId={itemId}
+            storedText={text}
+            attachOpenParagraph={attachOpenParagraph}
+          />
+        ) : (
+          <Markdown text={text} />
+        )}
+      </div>
+    </div>
+  );
+});
 
 /**
  * Renders the working row at the bottom of a running turn while no message

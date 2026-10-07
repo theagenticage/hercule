@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import type { Project, Runner, Session } from "@hercule/contract";
 import { ComposeIcon } from "../../icons/compose";
 import { MorePill, ThreadTabsPill } from "../thread/header-pills";
+import "../session/floating-header.css";
 import "../thread/thread-header.css";
 
 /**

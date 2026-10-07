@@ -105,7 +105,8 @@ const NEXT_ITEM_ID = "turn-1-fix";
  */
 const buildNextMessageRows = (thread: ThreadRecords, text: string) => {
   const [finishOpen, startNext, storedText, finishNext, endTurn] = buildNextRows(
-    thread,
+    thread.session.id,
+    thread.transcript,
     {
       _tag: "item.completed",
       turnId: "turn-1",

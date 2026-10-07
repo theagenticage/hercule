@@ -54,6 +54,7 @@ import {
   SPECIMEN_INSTANCES,
   STUDIO_MAC,
 } from "./sidebar-fixture";
+import type { EventBody } from "../app/testing";
 import type { SidebarRecords, SpecimenAssistant } from "./shell-page";
 
 /** A runner that has gone offline. An assistant whose session runs on it is away. */
@@ -138,7 +139,7 @@ const ADA_QUESTION: OpenRequest = {
   },
 };
 
-/** A message of a conversation, without the fields `buildConversation` fills in. */
+/** A message of a conversation, without the fields `buildConversationMessages` fills in. */
 export interface MessageStep {
   readonly senderRole: ConversationMessage["senderRole"];
   /** When the message was stored, as the API spells a time. */
@@ -151,7 +152,7 @@ export interface MessageStep {
  * oldest first, with positions from 1. A reply and a notice come from the
  * assistant's current session, and a reply from its turn `turnId`.
  */
-export const buildConversation = (
+export const buildConversationMessages = (
   assistant: Assistant,
   steps: ReadonlyArray<MessageStep>,
 ): ConversationMessage[] =>
@@ -173,18 +174,11 @@ export const buildConversation = (
     };
   });
 
-/** One event of a running turn, without the fields every event has. */
-export type EventBody = TranscriptRow["event"] extends infer Event
-  ? Event extends unknown
-    ? Omit<Event, "eventId" | "sessionId" | "at">
-    : never
-  : never;
-
 /**
  * Returns the rows of the running turn of `assistant`'s current session, all
  * at `at`, with positions from 1.
  */
-export const buildRunningTurn = (
+export const buildRunningTurnRows = (
   assistant: Assistant,
   at: string,
   events: ReadonlyArray<EventBody>,
@@ -201,25 +195,17 @@ export const buildRunningTurn = (
   }));
 
 /**
- * Ada's conversation: an evening question yesterday, then this morning's
- * heartbeat, a reminder, and the question her running turn answers.
+ * Ada's messages this morning, as the Bureau book's desktop/assistant.html
+ * draws them: her heartbeat at 09:00, a reminder at 09:20, and at 09:38 the
+ * question her running turn answers. "3‑D" holds the book's non-breaking
+ * hyphen. The Conversation specimen draws them too (conversation-fixture.ts).
  */
-const ADA_MESSAGES = buildConversation(ADA, [
-  {
-    senderRole: "owner",
-    createdAt: "2026-09-28T16:12:00.000Z",
-    text: "Anything urgent before I log off?",
-  },
-  {
-    senderRole: "assistant",
-    createdAt: "2026-09-28T16:13:00.000Z",
-    text: "Nothing urgent. The staging deploy is green and no Task is waiting on you.",
-  },
+export const ADA_MORNING_STEPS: ReadonlyArray<MessageStep> = [
   {
     senderRole: "assistant",
     createdAt: "2026-09-29T09:00:00.000Z",
     text:
-      "Morning Rogier. Triage found one urgent thing: EU card payments that need 3-D Secure " +
+      "Morning Rogier. Triage found one urgent thing: EU card payments that need 3‑D Secure " +
       "have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your " +
       "OK to push. Also: Marta at Brightline wants her invoice in the company name - I can " +
       "draft that.",
@@ -239,10 +225,28 @@ const ADA_MESSAGES = buildConversation(ADA, [
     createdAt: "2026-09-29T09:38:00.000Z",
     text: "What's the status of the backup job?",
   },
+];
+
+/**
+ * Ada's conversation: an evening question yesterday, then this morning's
+ * heartbeat, a reminder, and the question her running turn answers.
+ */
+const ADA_MESSAGES = buildConversationMessages(ADA, [
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-28T16:12:00.000Z",
+    text: "Anything urgent before I log off?",
+  },
+  {
+    senderRole: "assistant",
+    createdAt: "2026-09-28T16:13:00.000Z",
+    text: "Nothing urgent. The staging deploy is green and no Task is waiting on you.",
+  },
+  ...ADA_MORNING_STEPS,
 ]);
 
 /** Milo's conversation: a turn that failed yesterday, and today's question. */
-const MILO_MESSAGES = buildConversation(MILO, [
+const MILO_MESSAGES = buildConversationMessages(MILO, [
   {
     senderRole: "owner",
     createdAt: "2026-09-28T18:40:00.000Z",
@@ -276,7 +280,7 @@ const ASSISTANTS: ReadonlyArray<SpecimenAssistant> = [
       openRequests: [ADA_REQUEST],
     }),
     messages: ADA_MESSAGES,
-    runningTurn: buildRunningTurn(ADA, "2026-09-29T09:38:00.000Z", [
+    runningTurn: buildRunningTurnRows(ADA, "2026-09-29T09:38:00.000Z", [
       { _tag: "turn.started", turnId: "turn-ada-backup", model: CLAUDE_SONNET.slug },
       { _tag: "request.opened", request: ADA_REQUEST },
     ]),
@@ -285,7 +289,7 @@ const ASSISTANTS: ReadonlyArray<SpecimenAssistant> = [
     assistant: MILO,
     currentSession: buildAssistantSession(MILO, { status: "busy", minutesAgo: 1 }),
     messages: MILO_MESSAGES,
-    runningTurn: buildRunningTurn(MILO, "2026-09-29T09:36:00.000Z", [
+    runningTurn: buildRunningTurnRows(MILO, "2026-09-29T09:36:00.000Z", [
       { _tag: "turn.started", turnId: "turn-milo-backup", model: CLAUDE_SONNET.slug },
       {
         _tag: "item.started",
@@ -328,7 +332,7 @@ const ASSISTANTS: ReadonlyArray<SpecimenAssistant> = [
 ];
 
 /** Juno's conversation: her stored reply, then the message the user has just sent. */
-const JUNO_MESSAGES = buildConversation(JUNO, [
+const JUNO_MESSAGES = buildConversationMessages(JUNO, [
   {
     senderRole: "owner",
     createdAt: "2026-09-29T09:30:00.000Z",
@@ -368,7 +372,7 @@ const TWO_REQUESTS_ASSISTANTS: ReadonlyArray<SpecimenAssistant> = ASSISTANTS.map
           openRequests: [ADA_REQUEST, ADA_QUESTION],
         }),
         messages: ADA_MESSAGES,
-        runningTurn: buildRunningTurn(ADA, "2026-09-29T09:38:00.000Z", [
+        runningTurn: buildRunningTurnRows(ADA, "2026-09-29T09:38:00.000Z", [
           { _tag: "turn.started", turnId: "turn-ada-backup", model: CLAUDE_SONNET.slug },
           { _tag: "request.opened", request: ADA_REQUEST },
           { _tag: "request.opened", request: ADA_QUESTION },

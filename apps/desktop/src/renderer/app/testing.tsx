@@ -649,7 +649,8 @@ type OmitEventBase<Event> = Event extends unknown
 
 /**
  * A provider event without the fields every event has, which `buildTranscript`
- * and `buildNextRows` fill in.
+ * and `buildNextRows` fill in. The specimens' fixtures import it too, as a
+ * type only, because this module imports vitest.
  */
 export type EventBody = OmitEventBase<ProviderEvent>;
 
@@ -675,14 +676,17 @@ export const buildTranscript = (
   });
 
 /**
- * Returns the rows that follow `thread`'s transcript, one per body, as the
- * thread's stream delivers them. Positions continue from the last row, and
- * every row has the last row's time. Throws when the thread has no rows.
+ * Returns the rows that follow `rows`, one per body, as the stream of the
+ * session `sessionId` delivers them. Positions continue from the last row,
+ * and every row has the last row's time. Throws when `rows` is empty.
  */
-export const buildNextRows = (thread: ThreadRecords, ...bodies: EventBody[]): TranscriptRow[] => {
-  const last = thread.transcript.at(-1);
-  if (last === undefined) throw new Error("buildNextRows needs a thread with at least one row.");
-  const sessionId = thread.session.id;
+export const buildNextRows = (
+  sessionId: string,
+  rows: readonly TranscriptRow[],
+  ...bodies: readonly EventBody[]
+): TranscriptRow[] => {
+  const last = rows.at(-1);
+  if (last === undefined) throw new Error("buildNextRows needs at least one row to follow.");
   return bodies.map((body, index) => {
     const position = last.position + index + 1;
     return {

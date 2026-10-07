@@ -10,7 +10,7 @@
      scroll area.
    - the header's clearance as more padding at each end: in a window too
      short for the column, its top then sits below the header's fade
-     (thread-header.css). Added at both ends, it keeps the column exactly
+     (../session/floating-header.css). Added at both ends, it keeps the column exactly
      where the book puts it whenever it fits. */
 .hello {
   flex: 1;
@@ -21,7 +21,7 @@
   justify-content: safe center;
   padding: var(--header-clearance) 0 calc(64px + var(--header-clearance));
 }
-/* The book's `.column` rule, centring it, is on the thread screen's sheet,
+/* The book's `.column` rule, centring it, is in ../session/transcript.css,
    which this screen does not load. */
 .hello .column {
   width: min(700px, 100% - 48px);

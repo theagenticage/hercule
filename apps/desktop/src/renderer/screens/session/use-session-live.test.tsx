@@ -22,7 +22,7 @@ import {
 import { buildNextRows, setVisibility, THREAD_FIXTURES, type EventBody } from "../../app/testing";
 import { buildLook } from "../../faces";
 import { holdAnimationFrames, type HeldFrames } from "../thread/testing";
-import { AgentMessage } from "./messages";
+import { AgentMessage } from "../thread/blocks";
 import { useSessionLive } from "./use-session-live";
 
 /** A thread whose turn has finished, so no item is open when the hook mounts. */
@@ -171,14 +171,14 @@ function Page({
     staleTime: Infinity,
   });
   const rows = data ?? [];
-  const attachOpenParagraph = useSessionLive(
+  const attachOpenParagraph = useSessionLive({
     live,
     queryClient,
-    SESSION_ID,
+    sessionId: SESSION_ID,
     subagentId,
-    queryKeys.transcript(SESSION_ID, subagentId),
+    rowsKey: queryKeys.transcript(SESSION_ID, subagentId),
     rows,
-  );
+  });
   const started = rows.some(
     ({ event }) => event._tag === "item.started" && event.itemId === NEW_ITEM_ID,
   );
@@ -247,7 +247,7 @@ describe("useSessionLive", () => {
       { topic: TAP_TOPIC, cursor: undefined },
     ]);
 
-    const rows = buildNextRows(THREAD, NEW_ITEM_STARTED);
+    const rows = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
     fake.pushRows(rows);
     await settle();
     expect(readHeldRows(queryClient)).toEqual([...THREAD.transcript, ...rows]);
@@ -255,7 +255,7 @@ describe("useSessionLive", () => {
 
   it("paints the open item's taps at most once per frame, however many arrive", async () => {
     const { fake, findOpenParagraph } = mountHook();
-    fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
     await settle();
     const requestedBefore = frames.countRequested();
 
@@ -284,14 +284,14 @@ describe("useSessionLive", () => {
     frames.run();
     expect(findOpenParagraph()).toBeNull();
 
-    fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
     await settle();
     expect(findOpenParagraph()?.textContent).toBe("Early ");
   });
 
   it("draws each finished paragraph as markdown, and the paragraph being written as plain text", async () => {
     const { fake, findOpenParagraph, readFinishedBlocks } = mountHook();
-    fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The **fix** is ");
     frames.run();
@@ -309,7 +309,7 @@ describe("useSessionLive", () => {
 
   it("keeps a code block being written as plain text until it closes", async () => {
     const { fake, findOpenParagraph, readFinishedBlocks } = mountHook();
-    fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
     await settle();
     // A blank line inside a code block does not end a paragraph.
     fake.pushTaps("```ts\nawait retry();\n\nreturn");
@@ -326,7 +326,12 @@ describe("useSessionLive", () => {
   it("joins a landed row's text to the tail in the render that shows the row", async () => {
     const { fake, findOpenParagraph } = mountHook();
     // The row ends inside a word, as the rows' 4 KB cut can.
-    const [started, stored] = buildNextRows(THREAD, NEW_ITEM_STARTED, buildTextRow("The f"));
+    const [started, stored] = buildNextRows(
+      THREAD.session.id,
+      THREAD.transcript,
+      NEW_ITEM_STARTED,
+      buildTextRow("The f"),
+    );
     fake.pushRows([started!]);
     await settle();
     fake.pushTaps("The fix ", "is to ");
@@ -346,7 +351,12 @@ describe("useSessionLive", () => {
 
   it("leaves the paragraph as it is when a delivery repeats rows already held", async () => {
     const { fake, queryClient, findOpenParagraph } = mountHook();
-    const [started, stored] = buildNextRows(THREAD, NEW_ITEM_STARTED, buildTextRow("The fix "));
+    const [started, stored] = buildNextRows(
+      THREAD.session.id,
+      THREAD.transcript,
+      NEW_ITEM_STARTED,
+      buildTextRow("The fix "),
+    );
     fake.pushRows([started!]);
     await settle();
     fake.pushTaps("The fix ", "is to ");
@@ -367,7 +377,7 @@ describe("useSessionLive", () => {
 
   it("reads the transcript again on a reset, and clears the open item's tail", async () => {
     const { fake, findOpenParagraph, readTranscript } = mountHook();
-    fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The fix ");
     frames.run();
@@ -387,7 +397,12 @@ describe("useSessionLive", () => {
 
   it("draws fewer finished paragraphs when the tail is dropped", async () => {
     const { fake, findOpenParagraph, readFinishedBlocks } = mountHook();
-    const [started, stored] = buildNextRows(THREAD, NEW_ITEM_STARTED, buildTextRow("First.\n\n"));
+    const [started, stored] = buildNextRows(
+      THREAD.session.id,
+      THREAD.transcript,
+      NEW_ITEM_STARTED,
+      buildTextRow("First.\n\n"),
+    );
     fake.pushRows([started!]);
     await settle();
     fake.pushTaps("First.\n\n", "Second.\n\nThird");
@@ -407,7 +422,7 @@ describe("useSessionLive", () => {
 
   it("drops the tap while the window is hidden, keeps the stream, and skips the open item on show", async () => {
     const { fake, findOpenParagraph } = mountHook();
-    fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The fix ");
     frames.run();
@@ -426,7 +441,7 @@ describe("useSessionLive", () => {
 
   it("skips the open item when the live connection tells the tap to reset", async () => {
     const { fake, findOpenParagraph } = mountHook();
-    fake.pushRows(buildNextRows(THREAD, NEW_ITEM_STARTED));
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
     await settle();
     fake.pushTaps("The fix ");
     frames.run();
@@ -451,7 +466,10 @@ describe("useSessionLive", () => {
       const { fake, findOpenParagraph } = mountHook();
       fake.deliver(TAP_TOPIC, { reset: true });
       if (tapsFirst) fake.pushTaps("is 42.");
-      fake.deliver(STREAM_TOPIC, { items: buildNextRows(THREAD, NEW_ITEM_STARTED), replay: true });
+      fake.deliver(STREAM_TOPIC, {
+        items: buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED),
+        replay: true,
+      });
       await settle();
       if (!tapsFirst) fake.pushTaps("is 42.");
       frames.run();
@@ -461,7 +479,7 @@ describe("useSessionLive", () => {
 
   it("keeps the open item's tail when the replay holds no row it did not have", async () => {
     const { fake, findOpenParagraph } = mountHook();
-    const rows = buildNextRows(THREAD, NEW_ITEM_STARTED);
+    const rows = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
     fake.pushRows(rows);
     await settle();
     fake.pushTaps("The fix ");
@@ -483,7 +501,7 @@ describe("useSessionLive", () => {
       { topic: tap, cursor: undefined },
     ]);
 
-    const rows = buildNextRows(THREAD, NEW_ITEM_STARTED);
+    const rows = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
     fake.deliver(stream, { items: rows });
     await settle();
     expect(readHeldRows(queryClient, SUBAGENT_ID)).toEqual([...THREAD.transcript, ...rows]);

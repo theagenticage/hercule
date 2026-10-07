@@ -3,26 +3,33 @@
  * thread screen's form: the header floating over the Conversation, and the
  * composer floating over its bottom.
  */
-import { useDeferredValue, useRef, useState, type JSX, type Ref } from "react";
+import { useDeferredValue, useEffect, useRef, useState, type JSX, type Ref } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { decideAssistantPose, describePose, queryKeys, type Pose } from "@hercule/client-core";
+import {
+  decideAssistantPose,
+  describePose,
+  queryKeys,
+  trimToRunningTurn,
+  type Pose,
+} from "@hercule/client-core";
 import type { Assistant, Session, TranscriptRow } from "@hercule/contract";
 import {
   assistantsQuery,
   currentConversationSessionQuery,
+  removeQueryOnceUnobserved,
   runnersQuery,
   runningTurnQuery,
 } from "../../app/queries";
-import { useKeepRequestDrafts } from "../../app/thread-drafts";
+import { useKeepRequestDrafts } from "../../app/request-drafts";
 import { buildLook, Face, type Look } from "../../faces";
 import { NotFound } from "../not-found";
 import { useSessionLive, type AttachOpenParagraph } from "../session/use-session-live";
 import { Conversation, type ConversationHandle } from "./conversation";
 import { ConversationComposer } from "./conversation-composer";
 import { useConversationLive } from "./use-conversation-live";
-import "../thread/thread-header.css";
-import "../thread/thread.css";
+import "../session/floating-header.css";
+import "../session/transcript.css";
 import "./assistant.css";
 
 /** Renders the screen shown when no assistant has the id the address names. */
@@ -138,8 +145,8 @@ function AssistantPage({ assistant }: { readonly assistant: Assistant }): JSX.El
 /**
  * Renders the Conversation while `session` is its current session: reads
  * the session's running turn, and keeps it and the reply being written
- * current through the session's live topics. The other props are
- * `Conversation`'s.
+ * current through the session's live topics. Drops the running turn's rows
+ * when it unmounts. The other props are `Conversation`'s.
  */
 function SessionConversation({
   session,
@@ -156,13 +163,24 @@ function SessionConversation({
   const { client, live } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
   const rows = useSuspenseQuery(runningTurnQuery(client, session.id)).data;
-  const attachOpenParagraph = useSessionLive(
+  const attachOpenParagraph = useSessionLive({
     live,
     queryClient,
-    session.id,
-    undefined,
-    queryKeys.runningTurn(session.id),
+    sessionId: session.id,
+    subagentId: undefined,
+    rowsKey: queryKeys.runningTurn(session.id),
     rows,
+    trimRows: trimToRunningTurn,
+  });
+  // Declared after `useSessionLive`, so its cleanup runs after the session's
+  // topics are left, and no late stream row can bring the rows back. Only a
+  // mounted Conversation keeps them current, so they would otherwise stay
+  // in the cache out of date.
+  useEffect(
+    () => () => {
+      removeQueryOnceUnobserved(queryClient, queryKeys.runningTurn(session.id));
+    },
+    [queryClient, session.id],
   );
   return (
     <Conversation

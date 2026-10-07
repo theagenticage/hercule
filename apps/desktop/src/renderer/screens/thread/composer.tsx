@@ -216,9 +216,7 @@ export function ThreadComposer({
       readOnly={readOnly !== null}
       canSend={canSend}
       onSend={submit}
-      busy={busy}
-      stopping={stopAgent.isPending}
-      onStop={stop}
+      stop={busy ? { stopping: stopAgent.isPending, onStop: stop } : undefined}
       error={error}
       start={
         <>
@@ -295,7 +293,7 @@ export function ThreadComposer({
       }
       shrunk={shrunk}
       onFocusChange={onFocusChange}
-      scrollTranscriptToBottom={scrollTranscriptToBottom}
+      scrollMessagesToBottom={scrollTranscriptToBottom}
       ref={ref}
     />
   );

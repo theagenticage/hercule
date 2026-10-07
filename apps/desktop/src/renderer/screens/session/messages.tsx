@@ -1,25 +1,21 @@
 /**
- * The messages of a session on screen: the user's bubble and the agent's
- * message, drawn as the Bureau book's session page draws them. The thread's
- * transcript and an assistant's Conversation both draw them.
+ * The pieces of a message that the thread's transcript and an assistant's
+ * Conversation both draw, as the Bureau book's session page draws them: the
+ * user's bubble, the agent's face beside a message, and the text of a
+ * message the agent is still writing. The agent's message itself differs
+ * between the two: the thread's is in `../thread/blocks`, the Conversation's
+ * reply in `../assistant/conversation-messages`.
  *
- * Every message is presentational, apart from the finished paragraphs an
- * open message keeps. Every message is `memo`: one whose props did not
- * change is skipped when the list around it draws again. The props are plain
- * values, and a `Look` from `buildLook`, which returns the same object for
- * the same seed.
+ * Every piece is presentational, apart from the finished paragraphs an open
+ * message keeps. The user's bubble is `memo`: one whose props did not change
+ * is skipped when the list around it draws again.
  *
  * Times are drawn by `formatMessageTime` against `today`, the start of the
  * current day, so every message draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
 import { memo, useState, type JSX } from "react";
-import {
-  describeMessageMeta,
-  formatMessageTime,
-  splitStreamingText,
-  type Pose,
-} from "@hercule/client-core";
+import { formatMessageTime, splitStreamingText, type Pose } from "@hercule/client-core";
 import { Face, type Look } from "../../faces";
 import { Markdown } from "./markdown";
 import type { AttachOpenParagraph } from "./use-session-live";
@@ -70,62 +66,6 @@ export const UserMessage = memo(function UserMessage({
           <Markdown text={text} breaks />
         </div>
         <div className="bubble-meta">{formatBlockTime(at, timezone, today)}</div>
-      </div>
-    </div>
-  );
-});
-
-/**
- * Renders a message the agent wrote: the face, then the meta line "Claude
- * Code · Opus 5.5 · 09:04", then the text as markdown.
- *
- * - `look` is the face's look: the thread's, or the assistant's.
- * - `agent` is the first part of the meta line, before the time: the
- *   provider and the model on a thread, the assistant's name in a
- *   Conversation.
- * - `pose` is the face's pose: the session's pose while this message holds
- *   the working face, else `idle`.
- * - `text` is the text the transcript's rows hold. While the message is
- *   `open`, the agent is still writing it: see `OpenMessageText`.
- */
-export const AgentMessage = memo(function AgentMessage({
-  look,
-  itemId,
-  agent,
-  text,
-  startedAt,
-  timezone,
-  today,
-  pose,
-  open,
-  attachOpenParagraph,
-}: {
-  readonly look: Look;
-  readonly itemId: string;
-  readonly agent: string;
-  readonly text: string;
-  readonly startedAt: string;
-  readonly timezone: string;
-  readonly today: number;
-  readonly pose: Pose;
-  readonly open: boolean;
-  readonly attachOpenParagraph: AttachOpenParagraph;
-}): JSX.Element {
-  const meta = describeMessageMeta(agent, formatBlockTime(startedAt, timezone, today));
-  return (
-    <div className="msg">
-      <AgentFace look={look} pose={pose} />
-      <div className="msg-body">
-        <div className="msg-meta">{meta}</div>
-        {open ? (
-          <OpenMessageText
-            itemId={itemId}
-            storedText={text}
-            attachOpenParagraph={attachOpenParagraph}
-          />
-        ) : (
-          <Markdown text={text} />
-        )}
       </div>
     </div>
   );

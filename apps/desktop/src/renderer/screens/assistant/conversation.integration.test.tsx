@@ -26,11 +26,13 @@ import {
   buildFixtureAssistant,
   buildFixtureAssistantSession,
   buildFixtureMessage,
+  buildNextRows,
   buildSidebarHandlers,
   buildThreadHandlers,
   buildTranscript,
   CONTROLLER_URL,
   createFakeBridge,
+  holdAnswer,
   NO_SIDEBAR_RECORDS,
   renderApp,
   stubApi,
@@ -179,22 +181,6 @@ const buildAdaTranscript = (...bodies: readonly EventBody[]): TranscriptRow[] =>
     bodies.map((body, index) => [index, body] as const),
   );
 
-/** Returns the rows that follow `rows`, one per body, as the session's stream delivers them. */
-const buildRowsAfter = (
-  rows: readonly TranscriptRow[],
-  ...bodies: readonly EventBody[]
-): TranscriptRow[] => {
-  const last = rows.at(-1)!;
-  return bodies.map((body, index) => {
-    const position = last.position + index + 1;
-    return {
-      position,
-      at: last.at,
-      event: { ...body, eventId: `event-${position}`, sessionId: SESSION_ID, at: last.at },
-    };
-  });
-};
-
 const TURN_STARTED: EventBody = {
   _tag: "turn.started",
   turnId: "turn-1",
@@ -202,7 +188,7 @@ const TURN_STARTED: EventBody = {
 };
 
 /** Returns the events of the assistant message `itemId`: its start, and its text when given. */
-const startAnswer = (itemId: string, text?: string): EventBody[] => [
+const buildAnswerStartEvents = (itemId: string, text?: string): EventBody[] => [
   { _tag: "item.started", turnId: "turn-1", itemId, kind: "assistant_message" },
   ...(text === undefined
     ? []
@@ -218,7 +204,7 @@ const startAnswer = (itemId: string, text?: string): EventBody[] => [
 ];
 
 /** Returns the event that completes the assistant message `itemId`. */
-const completeAnswer = (itemId: string): EventBody => ({
+const buildAnswerCompletedEvent = (itemId: string): EventBody => ({
   _tag: "item.completed",
   turnId: "turn-1",
   itemId,
@@ -276,9 +262,7 @@ describe("an assistant's Conversation", () => {
     expect(within(conversation).getByText("03:00").tagName).toBe("STRONG");
     // A stored reply's face rests; a notice's face shows the failure, still.
     expect(conversation.querySelector(".msg .cr")?.getAttribute("class")).toBe("cr cr--idle");
-    expect(within(conversation).getByRole("status").querySelector(".cr")?.classList).toContain(
-      "cr--failed",
-    );
+    expect(conversation.querySelector(".notice .cr")?.classList).toContain("cr--failed");
     expect(conversation.querySelector(".cr--animated")).toBeNull();
     // The newest page, newest first, and no other.
     const reads = findPageReads(calls);
@@ -308,7 +292,7 @@ describe("an assistant's Conversation", () => {
       findOpenParagraph().closest(".atx-item"),
     ]);
 
-    const [started] = buildRowsAfter(transcript, ...startAnswer("answer"));
+    const [started] = buildNextRows(SESSION_ID, transcript, ...buildAnswerStartEvents("answer"));
     act(() => {
       live.pushStreamRows(SESSION_ID, [started!]);
     });
@@ -320,7 +304,8 @@ describe("an assistant's Conversation", () => {
 
     // The turn ends. In turn-end mode its last text is stored as the reply,
     // and the session goes idle.
-    const ended = buildRowsAfter(
+    const ended = buildNextRows(
+      SESSION_ID,
       [started!],
       {
         _tag: "content.delta",
@@ -329,7 +314,7 @@ describe("an assistant's Conversation", () => {
         streamKind: "assistant_text",
         delta: "It ran at 03:00 and took 4 minutes.",
       },
-      completeAnswer("answer"),
+      buildAnswerCompletedEvent("answer"),
       { _tag: "turn.completed", turnId: "turn-1", state: "completed" },
     );
     act(() => {
@@ -357,9 +342,9 @@ describe("an assistant's Conversation", () => {
     const messages = [QUESTION, buildReply(2, "First, the backup ran.")];
     const transcript = buildAdaTranscript(
       TURN_STARTED,
-      ...startAnswer("first", "First, the backup ran."),
-      completeAnswer("first"),
-      ...startAnswer("second", "Then it was "),
+      ...buildAnswerStartEvents("first", "First, the backup ran."),
+      buildAnswerCompletedEvent("first"),
+      ...buildAnswerStartEvents("second", "Then it was "),
     );
     const { live } = await openConversation({
       assistant,
@@ -381,7 +366,8 @@ describe("an assistant's Conversation", () => {
     act(() => {
       live.pushStreamRows(
         SESSION_ID,
-        buildRowsAfter(
+        buildNextRows(
+          SESSION_ID,
           transcript,
           {
             _tag: "content.delta",
@@ -390,7 +376,7 @@ describe("an assistant's Conversation", () => {
             streamKind: "assistant_text",
             delta: "checked.",
           },
-          completeAnswer("second"),
+          buildAnswerCompletedEvent("second"),
         ),
       );
     });
@@ -663,13 +649,57 @@ describe("the Conversation's pages", () => {
     await act(() => Promise.resolve());
     expect(findPageReads(calls)).toHaveLength(3);
   });
+
+  it("keeps the whole history when a send ends after the user left, and pages it again on return", async () => {
+    const user = userEvent.setup();
+    const thread = THREAD_FIXTURES.finished;
+    const messages = buildSixtyMessages();
+    const send = holdAnswer();
+    const { calls, router, context } = await openConversation({
+      messages,
+      handlers: { ...buildThreadHandlers(thread), [`POST ${MESSAGES_PATH}`]: send.handler },
+    });
+    const { queryClient } = context;
+    const messagesKey = queryKeys.conversationMessages(ADA.mainConversationId);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Message" }),
+      "Check it again tonight.{Enter}",
+    );
+    await act(() =>
+      router.navigate({ to: "/threads/$sessionId", params: { sessionId: thread.session.id } }),
+    );
+    await waitFor(() => {
+      expect(queryClient.getQueryCache().find({ queryKey: messagesKey })).toBeUndefined();
+    });
+    const sent = buildFixtureMessage(ADA, { position: 61, text: "Check it again tonight." });
+    messages.push(sent);
+    send.answer({ body: sent });
+    await act(() => Promise.resolve());
+    // Stored now, the sent message would make an entry that holds it alone,
+    // and the Conversation would open on it with no history before it.
+    expect(queryClient.getQueryCache().find({ queryKey: messagesKey })).toBeUndefined();
+
+    await act(() =>
+      router.navigate({ to: "/assistants/$assistantId", params: { assistantId: ADA.id } }),
+    );
+    await waitFor(() => {
+      expect(readBlocks().at(-1)).toBe("Check it again tonight.12:01");
+    });
+    expect(readHeldPositions(queryClient)).toEqual(range(12, 61));
+    sizeConversation(4000, 3200)(700);
+    await waitFor(() => {
+      expect(readHeldPositions(queryClient)).toEqual(range(1, 61));
+    });
+    expect(new URLSearchParams(findPageReads(calls).at(-1)!.search).get("cursor")).toBe("12");
+  });
 });
 
 describe("the Conversation's live topics", () => {
   it("follows a new current session to its own stream", async () => {
     const NEXT_ID = "01a06d02-a100-7000-8000-000000000004";
     let session: Session = buildAdaSession();
-    const { live } = await openConversation({
+    const { live, context } = await openConversation({
       readSession: () => session,
       messages: [QUESTION],
       transcript: buildAdaTranscript(TURN_STARTED),
@@ -687,6 +717,10 @@ describe("the Conversation's live topics", () => {
     expect(live.readTopics()).toContain(buildSessionTapTopic(NEXT_ID));
     expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
     expect(live.readTopics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+    // Only the current session's running turn is kept.
+    await waitFor(() => {
+      expect(context.queryClient.getQueryData(queryKeys.runningTurn(SESSION_ID))).toBe(undefined);
+    });
   });
 
   it("leaves the conversation topic, and drops the messages, when the user leaves the Conversation", async () => {
@@ -707,9 +741,11 @@ describe("the Conversation's live topics", () => {
     });
     expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
     const { queryClient } = context;
-    expect(queryClient.getQueryData(queryKeys.conversationMessages(ADA.mainConversationId))).toBe(
-      undefined,
-    );
+    await waitFor(() => {
+      expect(queryClient.getQueryData(queryKeys.conversationMessages(ADA.mainConversationId))).toBe(
+        undefined,
+      );
+    });
     expect(queryClient.getQueryData(queryKeys.runningTurn(SESSION_ID))).toBe(undefined);
   });
 });

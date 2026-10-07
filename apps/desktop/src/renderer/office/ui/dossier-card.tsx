@@ -23,7 +23,7 @@ import { Mark } from "../../marks";
 import { ProjectTile } from "../../screens/project-tile";
 import { RequestDock } from "../../screens/session/dock";
 import { useAgeLabel } from "../../app/age-clock";
-import { useKeepRequestDrafts } from "../../app/thread-drafts";
+import { useKeepRequestDrafts } from "../../app/request-drafts";
 import type { BuiltOffice } from "../engine/contracts";
 import {
   applyColleagueState,

@@ -1,7 +1,7 @@
 /* The assistant's page (assistant-screen.tsx). The header and the view under
-   it are the thread screen's `.top`, `.pill` and `.transcript`
-   (thread-header.css, thread.css); these rules are what the Bureau book's
-   desktop/assistant.html adds to them. */
+   it are a session's `.top`, `.pill` and `.transcript`
+   (../session/floating-header.css, ../session/transcript.css); these rules
+   are what the Bureau book's desktop/assistant.html adds to them. */
 
 /* The header's one pill: the assistant's face, name and pose word. */
 .pill--who {
@@ -64,20 +64,22 @@
   line-height: 1.5;
 }
 
-/* The Conversation (conversation.tsx): the thread's `.transcript`, `.column`
+/* The Conversation (conversation.tsx): a session's `.transcript`, `.column`
    and `.tx`, with the book's `.tx.atx`. The book's column is a flex column
-   with a 20px gap. Here each block is an item of the virtualizer, so the gap
-   is the item's own top padding, the first item's too: a block then keeps
-   its height when earlier messages are added above it. The column's top
-   padding is the header's clearance less that gap, so the first block still
-   starts where the book's does. */
+   with a 20px gap, `--block-gap` here, which conversation.tsx's `BLOCK_GAP`
+   must equal. Each block is an item of the virtualizer, so the gap is the
+   item's own top padding, the first item's too: a block then keeps its
+   height when earlier messages are added above it. The column's top padding
+   is the header's clearance less that gap, so the first block still starts
+   where the book's does. */
 .tx.atx {
-  padding-top: calc(var(--header-clearance) - 20px);
+  --block-gap: 20px;
+  padding-top: calc(var(--header-clearance) - var(--block-gap));
 }
 .atx-item {
   display: flex;
   flex-direction: column;
-  padding-top: 20px;
+  padding-top: var(--block-gap);
 }
 
 /* The day stamp above the first message of each day. */

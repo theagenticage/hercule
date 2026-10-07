@@ -12,9 +12,11 @@
  * without waiting for React to render.
  *
  * While the reader is at the bottom, the browser's scroll anchoring keeps the
- * view there, on `.transcript-end` below the column (see thread.css). A
- * scroll made by a script would show macOS's overlay scroll bar, and a
- * streaming turn would keep it on screen; a scroll made by anchoring does not.
+ * view there, on `.transcript-end` below the column (see
+ * ../session/transcript.css). A scroll made by a script would show macOS's
+ * overlay scroll bar, and a streaming turn would keep it on screen; a
+ * scroll made by anchoring does not. What the transcript shares with an
+ * assistant's Conversation is in ../session/message-list.
  *
  * The transcript is not a live region: the agent's streaming text would flood
  * a screen reader.
@@ -22,8 +24,6 @@
 import {
   useCallback,
   useImperativeHandle,
-  useLayoutEffect,
-  useRef,
   useState,
   type JSX,
   type ReactNode,
@@ -37,42 +37,17 @@ import {
   type ThreadItem,
 } from "@hercule/client-core";
 import { buildLook } from "../../faces";
-import { AgentMessage, UserMessage } from "../session/messages";
+import {
+  DEFAULT_END_PADDING,
+  HEADER_CLEARANCE,
+  measureBlock,
+  OVERSCAN,
+  useMessageList,
+} from "../session/message-list";
+import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
-import { LiveRow, TurnEnding, WaitingNote, WorkDivider } from "./blocks";
-import { useShowsClassicScrollbar } from "./classic-scrollbar";
-
-/**
- * The space above the first block, under the floating header: the book's
- * `--header-clearance`, which thread-header.css sets on `.transcript`. The
- * two must be equal, because the virtualizer places the first block here.
- */
-const HEADER_CLEARANCE = 108;
-
-/**
- * The space below the last block before the composer is measured: the book's
- * `.tx { padding-bottom: 360px }`, which thread.css also sets.
- */
-const DEFAULT_END_PADDING = 360;
-
-/** How far the composer's stack sits above the pane's bottom edge: `.composer-wrap`'s bottom padding. */
-const COMPOSER_BOTTOM_OFFSET = 18;
-
-/** The space between the last line of the transcript and the composer, when scrolled to the bottom, as the book draws it. */
-const LAST_LINE_CLEARANCE = 14;
-
-/**
- * How close to the bottom, in CSS pixels, the reader must be for the
- * transcript to follow new content: the book's `atBottom`.
- */
-const FOLLOW_THRESHOLD = 12;
-
-/**
- * How many blocks are mounted beyond each end of the visible part, so a short
- * scroll shows no empty space before React draws the new blocks.
- */
-const OVERSCAN = 6;
+import { AgentMessage, LiveRow, TurnEnding, WaitingNote, WorkDivider } from "./blocks";
 
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
@@ -124,14 +99,6 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
   }
 };
 
-/**
- * Returns a mounted block's height as laid out, unrounded. The virtualizer's
- * own measure rounds it, and the spacers, built from the measured heights,
- * would then drift from the blocks they stand in for.
- */
-const measureBlock = (element: Element, entry: ResizeObserverEntry | undefined): number =>
-  entry?.borderBoxSize[0]?.blockSize ?? element.getBoundingClientRect().height;
-
 /** What the thread screen can ask of the transcript. */
 export interface TranscriptHandle {
   /** Scrolls to the bottom at once, and follows new content from there. */
@@ -149,13 +116,8 @@ export interface TranscriptHandle {
  *   as "Claude Code · Opus 5.5", for the model slug the message ran on.
  * - `attachOpenParagraph` attaches the element an open message's paragraph
  *   being written is painted into.
- * - `composerStack` is the composer's stack, whose height sets the space
- *   below the last block, so the last line always clears the composer. It is
- *   `null` until the composer is mounted, and while the composer is shrunk:
- *   the space then stays as the expanded composer needs it, so shrinking
- *   changes nothing the reader can scroll to.
- * - `onBottomChange` is called when the reader reaches the bottom, or leaves
- *   it. The transcript opens at the bottom.
+ * - `composerStack` and `onBottomChange` are as `useMessageList` takes
+ *   them. The transcript opens at the bottom.
  * - `lead`, when set, is drawn above the first block, and scrolls with the
  *   blocks.
  * - `renderSpawnLines`, when set, returns what is drawn under a work
@@ -187,11 +149,6 @@ export function Transcript({
   readonly renderSpawnLines?: (items: readonly ThreadItem[], onScreen: boolean) => ReactNode;
   readonly ref?: Ref<TranscriptHandle>;
 }): JSX.Element {
-  const scrollRef = useRef<HTMLElement>(null);
-  const columnRef = useRef<HTMLDivElement>(null);
-  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
-  // True while the reader is at the bottom. The transcript opens there.
-  const followingRef = useRef(true);
   const [timezone] = useState(() => resolveBrowserTimezone());
   const today = useStartOfToday();
   // The keys of the work stretches the reader expanded. They are kept here
@@ -237,6 +194,11 @@ export function Transcript({
     return Math.max(0, height - window.innerHeight);
   };
 
+  const { scrollRef, columnRef, showsScrollbar, noteScroll, scrollToBottom } = useMessageList({
+    composerStack,
+    onBottomChange,
+  });
+
   // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above and the memoized blocks keep the renders cheap instead.
   const virtualizer = useVirtualizer({
     count: blocks.length + leadCount,
@@ -252,58 +214,7 @@ export function Transcript({
     initialOffset: estimateBottomOffset,
   });
 
-  // One observer for everything that moves the bottom:
-  // - the composer's stack, whose height sets the space under the last block;
-  // - the column, which grows as blocks grow, are added, or are measured;
-  // - the transcript itself, which changes height with the window.
-  // The callback runs after layout and before paint, so the new space and
-  // the scroll to the bottom show in the same frame as the change.
-  // Anchoring has usually kept the view at the bottom already, and then the
-  // scroll below changes nothing. It is needed where anchoring does not act:
-  // the first render, and a reader a few pixels above the bottom, where the
-  // end is out of view.
-  useLayoutEffect(() => {
-    const scroller = scrollRef.current!;
-    const column = columnRef.current!;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.target !== composerStack) continue;
-        // Rounded, so the bottom lands on a whole pixel as the book's 360px does.
-        const stackHeight = entry.borderBoxSize[0]?.blockSize ?? 0;
-        column.style.paddingBottom = `${Math.round(stackHeight + COMPOSER_BOTTOM_OFFSET + LAST_LINE_CLEARANCE)}px`;
-      }
-      // The browser clamps this to the bottom, which can be a fraction of a
-      // pixel below `scrollHeight - clientHeight`, a whole number. Setting
-      // that number would move the view by the fraction, and show the scroll
-      // bar, after every change anchoring has already followed.
-      if (followingRef.current) scroller.scrollTop = scroller.scrollHeight;
-    });
-    observer.observe(scroller);
-    observer.observe(column);
-    if (composerStack !== null) observer.observe(composerStack);
-    return () => {
-      observer.disconnect();
-    };
-  }, [composerStack]);
-
-  const noteScroll = (): void => {
-    const scroller = scrollRef.current!;
-    const following =
-      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < FOLLOW_THRESHOLD;
-    if (following === followingRef.current) return;
-    followingRef.current = following;
-    onBottomChange(following);
-  };
-
-  useImperativeHandle(ref, () => ({
-    scrollToBottom: () => {
-      const scroller = scrollRef.current!;
-      scroller.scrollTop = scroller.scrollHeight;
-      // Noted at once rather than on the scroll event, so the composer
-      // expands in the same frame.
-      noteScroll();
-    },
-  }));
+  useImperativeHandle(ref, () => ({ scrollToBottom }));
 
   /** Returns the element that draws `block`. */
   const renderBlock = (block: ThreadBlock, onScreen: boolean): JSX.Element => {

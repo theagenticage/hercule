@@ -19,11 +19,12 @@
  *   because nobody reads a hidden window (spec 17, rule 3), whichever agent's
  *   tap it is.
  *
- * The paragraph the agent is writing is painted outside React, into one text
- * node, at most once per animation frame however many deltas arrived. A React
- * render per token would render the whole transcript again for every token.
- * React draws a paragraph only once it has finished, as markdown, so the
- * message renders once per paragraph rather than once per token.
+ * The paragraph the agent is writing is painted outside React, into one
+ * text node, at most once per animation frame however many deltas arrived.
+ * A React render per token would render the whole transcript again for
+ * every token. React draws a paragraph only once it has finished, as
+ * markdown, so the message renders once per paragraph rather than once per
+ * token.
  */
 import {
   useCallback,
@@ -92,40 +93,63 @@ const subscribeToVisibility = (onChange: () => void): (() => void) => {
  */
 const isWindowVisible = (): boolean => document.visibilityState === "visible";
 
+/** What `useSessionLive` keeps current, and where. */
+export interface SessionLiveOptions {
+  /**
+   * The controller's live connection, or `null` to draw the session without
+   * live changes, as the specimens do.
+   */
+  readonly live: Live | null;
+  readonly queryClient: QueryClient;
+  /** The session whose agent is followed. */
+  readonly sessionId: string;
+  /** The subagent to follow, or undefined for the session's own agent. */
+  readonly subagentId: string | undefined;
+  /**
+   * The key the agent's rows are cached under. An agent page passes
+   * `queryKeys.transcript(sessionId, subagentId)`, the Conversation
+   * `queryKeys.runningTurn(sessionId)`. Stream rows are merged into the rows
+   * held there, and a stream `reset` reads them again through this key.
+   */
+  readonly rowsKey: QueryKey;
+  /**
+   * The rows cached under `rowsKey`, so that the tail is painted in the same
+   * commit as the rows that hold its text.
+   */
+  readonly rows: readonly TranscriptRow[];
+  /**
+   * Trims the rows held under `rowsKey` each time stream rows are merged
+   * into them, or is undefined to keep every row. The Conversation passes
+   * `trimToRunningTurn`, because it holds only its running turn's rows,
+   * and a long session would otherwise keep every earlier turn in memory.
+   */
+  readonly trimRows?: ((rows: readonly TranscriptRow[]) => readonly TranscriptRow[]) | undefined;
+}
+
 /**
- * Subscribes to the live topics of one agent of the session `sessionId`, and
- * returns the function that attaches the element an open message's paragraph
- * being written is painted into. The open message draws its finished paragraphs as markdown,
- * then that element, empty, such as
- * `<p ref={(element) => attachOpenParagraph(element, message)} />`: the hook
- * puts one text node inside it and writes there the rest of the message's
- * text, stored and streamed.
+ * Subscribes to the live topics of one agent of a session, and returns the
+ * function that attaches the element an open message's paragraph being
+ * written is painted into. The open message draws its finished paragraphs
+ * as markdown, then that element, empty, such as
+ * `<p ref={(element) => attachOpenParagraph(element, message)} />`: the
+ * hook puts one text node inside it and writes there the rest of the
+ * message's text, stored and streamed. `options` are described on
+ * `SessionLiveOptions`.
  *
- * - `live` is the controller's live connection, or `null` to draw the
- *   session without live changes, as the thread specimen does.
- * - `subagentId` names the subagent to follow, or is undefined for the
- *   session's own agent.
- * - `queryKey` is the key the agent's rows are cached under: an agent page
- *   passes `queryKeys.transcript(sessionId, subagentId)`, the Conversation
- *   the key of its running turn's rows. Stream rows are merged into the rows held there, and
- *   a stream `reset` reads them again through that key.
- * - `rows` are the rows cached under `queryKey`, so that the tail is painted
- *   in the same commit as the rows that hold its text.
- *
- * The hook keeps one tail buffer, and reads `queryKey` once, for the life of
- * the component, so the caller mounts the component again for another
- * agent: the thread's routes key the page by session id and subagent id. Reading the key
- * once also means a caller may build it inline on every render without the
- * subscriptions starting again.
+ * The hook keeps one tail buffer, and reads `rowsKey` and `trimRows` once,
+ * for the life of the component, so the caller mounts the component again
+ * for another agent: the thread's routes key the page by session id and
+ * subagent id. Reading them once also means a caller may build them inline
+ * on every render without the subscriptions starting again.
  *
  * What the hook does with each delivery, as `decideStreamDelivery` and
  * `decideTapDelivery` decide it:
  *
  * - Stream rows not held yet update the tail buffer first, and are then
- *   merged into the cached rows. The subscription starts after the
- *   last held row (`buildStreamCursor`).
- * - A stream `reset` means rows may have been missed, so the rows are
- *   read again, and the open items are skipped: their tails are cleared.
+ *   merged into the cached rows. The subscription starts after the last
+ *   held row (`buildStreamCursor`).
+ * - A stream `reset` means rows may have been missed, so the rows are read
+ *   again, and the open items are skipped: their tails are cleared.
  * - A `gone` on either topic ends that subscription: the session no longer
  *   exists.
  *
@@ -146,16 +170,18 @@ const isWindowVisible = (): boolean => document.visibilityState === "visible";
  * text with a gap until its next stored row. Token positions (#290) will
  * remove the need to guess.
  */
-export const useSessionLive = (
-  live: Live | null,
-  queryClient: QueryClient,
-  sessionId: string,
-  subagentId: string | undefined,
-  queryKey: QueryKey,
-  rows: readonly TranscriptRow[],
-): AttachOpenParagraph => {
+export const useSessionLive = ({
+  live,
+  queryClient,
+  sessionId,
+  subagentId,
+  rowsKey: rowsKeyAtMount,
+  rows,
+  trimRows: trimRowsAtMount,
+}: SessionLiveOptions): AttachOpenParagraph => {
   const [buffer] = useState(createTailBuffer);
-  const [rowsKey] = useState(() => queryKey);
+  const [rowsKey] = useState(() => rowsKeyAtMount);
+  const [trimRows] = useState(() => trimRowsAtMount);
   const visible = useSyncExternalStore(subscribeToVisibility, isWindowVisible);
   /** The open message attached last, and the text node its open paragraph is written into. */
   const targetRef = useRef<{ readonly node: Text; readonly message: OpenMessage } | null>(null);
@@ -240,14 +266,17 @@ export const useSessionLive = (
         } else if (delivery.kind === "rows") {
           buffer.applyRows(delivery.fresh);
           rowsLandingRef.current = true;
-          queryClient.setQueryData(rowsKey, delivery.transcript);
+          queryClient.setQueryData(
+            rowsKey,
+            trimRows === undefined ? delivery.transcript : trimRows(delivery.transcript),
+          );
           if (delivery.replay) skipOpenItems();
         }
       },
       buildStreamCursor(readHeldRows()),
     );
     return unsubscribe;
-  }, [live, queryClient, sessionId, subagentId, rowsKey, buffer, skipOpenItems]);
+  }, [live, queryClient, sessionId, subagentId, rowsKey, trimRows, buffer, skipOpenItems]);
 
   useEffect(() => {
     if (live === null || !visible) return;

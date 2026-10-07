@@ -23,42 +23,23 @@ import type { SidebarRecords } from "./shell-page";
 import {
   ADA,
   buildAssistantSession,
-  buildConversation,
-  buildRunningTurn,
+  ADA_MORNING_STEPS,
+  buildConversationMessages,
+  buildRunningTurnRows,
 } from "./assistant-states-fixture";
 
-/** The Conversation's messages, oldest first. "3‑D" holds the book's non-breaking hyphen. */
-export const CONVERSATION_MESSAGES: ReadonlyArray<ConversationMessage> = buildConversation(ADA, [
-  {
-    senderRole: "notice",
-    createdAt: "2026-09-28T22:14:00.000Z",
-    text: "Ada was interrupted: her turn failed: provider timeout after 120s. Your last message was kept.",
-  },
-  {
-    senderRole: "assistant",
-    createdAt: "2026-09-29T09:00:00.000Z",
-    text:
-      "Morning Rogier. Triage found one urgent thing: EU card payments that need 3‑D Secure " +
-      "have failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your " +
-      "OK to push. Also: Marta at Brightline wants her invoice in the company name - I can " +
-      "draft that.",
-  },
-  {
-    senderRole: "owner",
-    createdAt: "2026-09-29T09:20:00.000Z",
-    text: "Remind me Friday to renew the SSL cert for ops.",
-  },
-  {
-    senderRole: "assistant",
-    createdAt: "2026-09-29T09:20:00.000Z",
-    text: "Done. Reminder set for Friday 2 October, 09:00: renew the SSL cert for ops.",
-  },
-  {
-    senderRole: "owner",
-    createdAt: "2026-09-29T09:38:00.000Z",
-    text: "What's the status of the backup job?",
-  },
-]);
+/** The Conversation's messages, oldest first: yesterday's notice, then Ada's morning. */
+export const CONVERSATION_MESSAGES: ReadonlyArray<ConversationMessage> = buildConversationMessages(
+  ADA,
+  [
+    {
+      senderRole: "notice",
+      createdAt: "2026-09-28T22:14:00.000Z",
+      text: "Ada was interrupted: her turn failed: provider timeout after 120s. Your last message was kept.",
+    },
+    ...ADA_MORNING_STEPS,
+  ],
+);
 
 /**
  * The text Ada is writing, not finished yet. It is plain text, as the app
@@ -77,7 +58,7 @@ export const CONVERSATION_RECORDS: SidebarRecords = {
       assistant: ADA,
       currentSession: buildAssistantSession(ADA, { status: "busy", minutesAgo: 3 }),
       messages: CONVERSATION_MESSAGES,
-      runningTurn: buildRunningTurn(ADA, "2026-09-29T09:38:00.000Z", [
+      runningTurn: buildRunningTurnRows(ADA, "2026-09-29T09:38:00.000Z", [
         { _tag: "turn.started", turnId: "turn-ada-backup", model: CLAUDE_SONNET.slug },
         {
           _tag: "item.started",

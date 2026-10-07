@@ -20,8 +20,9 @@ export const isSendKey = (event: KeyboardEvent): boolean =>
 /**
  * Calls `send` when the user chooses Thread > Send in the menu, or presses
  * its ⌘↵ while the focus is outside the message field. In the field, ⌘↵ is a
- * send key, and the field's own handler sends. The thread's composer and a
- * Draft Thread's both use it; only one of them is on screen at a time.
+ * send key, and the field's own handler sends. The thread's composer, a
+ * Draft Thread's and an assistant's Conversation's all use it; only one of
+ * them is on screen at a time.
  */
 export const useSendOnMenuCommand = (send: () => void): void => {
   const { bridge } = useRouteContext({ from: "/_connected" });

@@ -23,6 +23,7 @@
  */
 import type { Input, OpenRequest, TranscriptRow, Workspace } from "@hercule/contract";
 import { buildCheckout, buildWorkspace } from "@hercule/client-core/threads/testing";
+import type { EventBody } from "../app/testing";
 import type { SidebarRecords, ThreadScreenRecords } from "./shell-page";
 import {
   buildSpecimenSession,
@@ -79,14 +80,6 @@ const TURN_START = Date.UTC(2026, 8, 29, 9, 2, 0);
 
 /** The one turn of the Fix thread. */
 const TURN_ID = "turn-1";
-
-/** Removes the fields every event has from each event type of `Event`. */
-type OmitEventBase<Event> = Event extends unknown
-  ? Omit<Event, "eventId" | "sessionId" | "at">
-  : never;
-
-/** A provider event without the fields every event has, which `buildTranscript` fills in. */
-type EventBody = OmitEventBase<TranscriptRow["event"]>;
 
 /** The row that starts an item, without the fields every event has. */
 type ItemStartedBody = Extract<EventBody, { _tag: "item.started" }>;

@@ -13,6 +13,7 @@
  */
 import {
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -33,86 +34,74 @@ import {
 import type { Assistant, Session, TranscriptRow } from "@hercule/contract";
 import { conversationMessagesQuery } from "../../app/queries";
 import { Face, type Look } from "../../faces";
+import {
+  DEFAULT_END_PADDING,
+  HEADER_CLEARANCE,
+  measureBlock,
+  OVERSCAN,
+  useMessageList,
+} from "../session/message-list";
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
-import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
 import { DayStamp, Notice, OpenReply, StoredReply } from "./conversation-messages";
 
 /**
- * The space above the first block, under the floating header: the book's
- * `--header-clearance`, which thread-header.css sets on `.transcript`.
- */
-const HEADER_CLEARANCE = 108;
-
-/**
- * The space between two blocks: the book's `.tx.atx { gap: 20px }`. Every
- * block, the first too, includes it as its top padding, so a block keeps its
- * height when earlier messages are added above it. The column's top padding
- * is the header's clearance less this gap (see assistant.css).
+ * The space between two blocks: the book's `.tx.atx { gap: 20px }`, which
+ * assistant.css sets as `--block-gap`. The two must be equal. Every block,
+ * the first too, includes it as its top padding, so a block keeps its
+ * height when earlier messages are added above it.
  */
 const BLOCK_GAP = 20;
 
-/** Where the first block starts in the column, for the virtualizer. */
+/** Where the first block starts in the column, for the virtualizer: the column's top padding. */
 const SCROLL_MARGIN = HEADER_CLEARANCE - BLOCK_GAP;
-
-/**
- * The space below the last block before the composer is measured: the
- * thread's `.tx { padding-bottom: 360px }`, which the Conversation's column
- * also has.
- */
-const DEFAULT_END_PADDING = 360;
-
-/** How far the composer's stack sits above the pane's bottom edge: `.composer-wrap`'s bottom padding. */
-const COMPOSER_BOTTOM_OFFSET = 18;
-
-/** The space between the last line and the composer, when scrolled to the bottom, as the book draws it. */
-const LAST_LINE_CLEARANCE = 14;
-
-/** How close to the bottom, in CSS pixels, the reader must be for the Conversation to follow new content. */
-const FOLLOW_THRESHOLD = 12;
-
-/** How many blocks are mounted beyond each end of the visible part. */
-const OVERSCAN = 6;
 
 /** Roughly how many characters fit on one line of a reply, and of the owner's bubble. */
 const REPLY_CHARS_PER_LINE = 100;
 const OWNER_CHARS_PER_LINE = 80;
 
-/** The height of one line of a reply, and of the owner's bubble, in CSS pixels. */
+/** The height of one line of a reply, in CSS pixels: 14px text at a line height of 1.6. */
 const REPLY_LINE_HEIGHT = 22.4;
+/** The height of one line of the owner's bubble, in CSS pixels: 14px text at a line height of 1.55. */
 const OWNER_LINE_HEIGHT = 21.7;
+
+/** The height of a day stamp: one line of 11px text, as the book lays it out. */
+const STAMP_HEIGHT = 15;
+/** The height of the owner's bubble without its lines: its padding and its time, as the thread's estimate. */
+const OWNER_FRAME_HEIGHT = 40;
+/** The height of a reply's name line with its 2px margin, above the text. */
+const REPLY_NAME_HEIGHT = 21.5;
+/** The height of a notice: the 28px failed face inside 8px of padding above and below. */
+const NOTICE_HEIGHT = 44;
+/** The height of the reply being written before any text: its name line and the caret's line. */
+const OPEN_REPLY_HEIGHT = 43.9;
 
 /**
  * Estimates a block's height, without the gap above it, before it is
- * measured: a stamp is one 11px line, a reply its name line and its text
- * lines, the owner's bubble its padding, time and lines, and a notice its
- * face and padding. Only blocks that were never mounted use the estimate.
+ * measured, from the heights above. Only blocks that were never mounted use
+ * the estimate.
  */
 const estimateBlockHeight = (block: ConversationBlock): number => {
   switch (block.kind) {
     case "stamp":
-      return 15;
+      return STAMP_HEIGHT;
     case "owner":
       return (
-        40 +
+        OWNER_FRAME_HEIGHT +
         OWNER_LINE_HEIGHT * Math.max(1, Math.ceil(block.message.text.length / OWNER_CHARS_PER_LINE))
       );
     case "reply":
       return (
-        21.5 +
+        REPLY_NAME_HEIGHT +
         REPLY_LINE_HEIGHT * Math.max(1, Math.ceil(block.message.text.length / REPLY_CHARS_PER_LINE))
       );
     case "notice":
-      return 44;
+      return NOTICE_HEIGHT;
     case "open-reply":
-      return 43.9;
+      return OPEN_REPLY_HEIGHT;
   }
 };
-
-/** Returns a mounted block's height as laid out, unrounded, as the thread's transcript measures it. */
-const measureBlock = (element: Element, entry: ResizeObserverEntry | undefined): number =>
-  entry?.borderBoxSize[0]?.blockSize ?? element.getBoundingClientRect().height;
 
 /** Returns the key of the first stored message among `blocks`, or `undefined` when there is none. */
 const findFirstMessageKey = (blocks: readonly ConversationBlock[]): string | undefined =>
@@ -133,8 +122,9 @@ export interface ConversationHandle {
  *   none has started. Its running turn is in `runningTurnRows`, oldest
  *   first, and `attachOpenParagraph` paints the text it is writing.
  * - `pose` is the assistant's pose, which the open reply's face shows.
- * - `composerStack`, `onBottomChange` and `ref` are as the thread's
- *   transcript takes them: see `Transcript`.
+ * - `composerStack` and `onBottomChange` are as `useMessageList` takes
+ *   them.
+ * - `ref` receives a `ConversationHandle`.
  */
 export function Conversation({
   assistant,
@@ -163,6 +153,9 @@ export function Conversation({
   );
   const [timezone] = useState(() => resolveBrowserTimezone());
   const today = useStartOfToday();
+  // The start of today, not the time now: the stamps change only when the
+  // day does, and `today` changes then, so the blocks are built again.
+  const startOfToday = new Date(today);
   const blocks = buildConversationBlocks({
     messages: flattenMessagePages(messages.data.pages),
     runningTurnRows,
@@ -170,7 +163,7 @@ export function Conversation({
     reply: assistant.reply,
     pose,
     timezone,
-    now: new Date(today),
+    now: startOfToday,
   });
 
   if (blocks.length === 0) {
@@ -236,13 +229,6 @@ function ConversationList({
   readonly onBottomChange: (atBottom: boolean) => void;
   readonly ref?: Ref<ConversationHandle> | undefined;
 }): JSX.Element {
-  const scrollRef = useRef<HTMLElement>(null);
-  const columnRef = useRef<HTMLDivElement>(null);
-  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
-  // True while the reader is at the bottom. The Conversation opens there.
-  const followingRef = useRef(true);
-  // Where the view was at the last scroll event, to tell a scroll up from a scroll down.
-  const lastScrollTopRef = useRef(0);
   /**
    * The first stored message drawn at the last commit, and where it started
    * in the column. When earlier messages are added above it, the view moves
@@ -268,6 +254,11 @@ function ConversationList({
         window.innerHeight,
     );
 
+  const { scrollRef, columnRef, showsScrollbar, noteScroll, scrollToBottom } = useMessageList({
+    composerStack,
+    onBottomChange,
+  });
+
   // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above keep the renders cheap instead.
   const virtualizer = useVirtualizer({
     count: blocks.length,
@@ -281,26 +272,14 @@ function ConversationList({
     initialOffset: estimateBottomOffset,
   });
 
-  // The space under the last block, and following the bottom, work as in
-  // the thread's transcript: see `Transcript`.
-  useLayoutEffect(() => {
-    const scroller = scrollRef.current!;
-    const column = columnRef.current!;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.target !== composerStack) continue;
-        const stackHeight = entry.borderBoxSize[0]?.blockSize ?? 0;
-        column.style.paddingBottom = `${Math.round(stackHeight + COMPOSER_BOTTOM_OFFSET + LAST_LINE_CLEARANCE)}px`;
-      }
-      if (followingRef.current) scroller.scrollTop = scroller.scrollHeight;
-    });
-    observer.observe(scroller);
-    observer.observe(column);
-    if (composerStack !== null) observer.observe(composerStack);
-    return () => {
-      observer.disconnect();
-    };
-  }, [composerStack]);
+  // A list mounted for a new current session opens at the bottom, while the
+  // screen may still hold the last list's place higher up; the greeting,
+  // which has no list, holds none. So the list says where it opens.
+  useEffect(() => {
+    onBottomChange(true);
+    // Only on mount: later changes are reported by `noteScroll`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Runs before the browser paints the blocks added above, so the reader
   // never sees the view jump. The added blocks start at their estimated
@@ -319,31 +298,14 @@ function ConversationList({
       key === undefined || first === undefined ? null : { key, start: first.start };
   });
 
-  const noteScroll = (): void => {
+  /** Notes where the reader is, and reads earlier messages within one screen of the top. */
+  const noteScrollAndReadEarlier = (): void => {
+    noteScroll();
     const scroller = scrollRef.current!;
-    const atBottom =
-      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < FOLLOW_THRESHOLD;
-    // Only the reader scrolling up leaves the bottom. A scroll down that
-    // stops short of it is the virtualizer's first scroll to its estimated
-    // bottom, whose event can arrive after the blocks were measured taller
-    // than estimated; counting it would shrink the composer of a
-    // Conversation that was never scrolled.
-    const following =
-      atBottom || (followingRef.current && scroller.scrollTop >= lastScrollTopRef.current);
-    lastScrollTopRef.current = scroller.scrollTop;
     if (scroller.scrollTop < scroller.clientHeight) readEarlierMessages();
-    if (following === followingRef.current) return;
-    followingRef.current = following;
-    onBottomChange(following);
   };
 
-  useImperativeHandle(ref, () => ({
-    scrollToBottom: () => {
-      const scroller = scrollRef.current!;
-      scroller.scrollTop = scroller.scrollHeight;
-      noteScroll();
-    },
-  }));
+  useImperativeHandle(ref, () => ({ scrollToBottom }));
 
   /** Returns the element that draws `block`. */
   const renderBlock = (block: ConversationBlock): JSX.Element => {
@@ -392,7 +354,7 @@ function ConversationList({
       ref={scrollRef}
       className={showsScrollbar ? "transcript has-scrollbar" : "transcript"}
       aria-label="Conversation"
-      onScroll={noteScroll}
+      onScroll={noteScrollAndReadEarlier}
     >
       <div ref={columnRef} className="column tx atx">
         {first === undefined || first.start <= SCROLL_MARGIN ? null : (

@@ -3,16 +3,9 @@ import { MicIcon } from "../../icons/mic";
 import { PlusIcon } from "../../icons/plus";
 import { SendIcon } from "../../icons/send";
 import { StopIcon } from "../../icons/stop";
+import { REQUEST_PAGER_CLASS } from "./request-pager";
 import { isSendKey } from "./send-key";
 import "./composer.css";
-
-/**
- * The class of the Request pager line, which a thread's agent page draws
- * above the dock (`AgentRequestDock`). The frame reads it too: a click or
- * focus on the line keeps the composer at its size, as `dock-mini`'s answers
- * do.
- */
-export const REQUEST_PAGER_CLASS = "request-pager";
 
 /**
  * Checks that `element` is on one of the two lines the shrunk composer keeps
@@ -30,6 +23,13 @@ const isOnRequestLines = (element: Element): boolean =>
 const keepsComposerShrunk = (target: EventTarget): boolean =>
   target instanceof Element &&
   target.closest(`.dock-mini button, .${REQUEST_PAGER_CLASS}`) !== null;
+
+/** Stop, drawn in Send's place while a turn runs. */
+export interface ComposerStop {
+  /** True while a Stop is on its way, which draws Stop as off. */
+  readonly stopping: boolean;
+  readonly onStop: () => void;
+}
 
 /**
  * Renders a composer's card, the Bureau book's `.composer-card`: the message
@@ -70,11 +70,8 @@ export function ComposerCard({
   readonly readOnly: boolean;
   readonly canSend: boolean;
   readonly onSend: () => void;
-  /**
-   * Given while a turn runs, which draws Stop in Send's place. `stopping`
-   * says a Stop is on its way, which draws Stop as off.
-   */
-  readonly stop?: { readonly stopping: boolean; readonly onStop: () => void } | undefined;
+  /** Given while a turn runs, which draws Stop in Send's place. */
+  readonly stop?: ComposerStop | undefined;
   readonly error: string | null;
   /** The controls after Attach. */
   readonly start?: ReactNode;
@@ -162,7 +159,7 @@ export function ComposerCard({
  *
  * - `above`, such as the tally pill, the queued inputs and the Request dock;
  * - the card, see `ComposerCard`, which takes the frame's props of the same
- *   names, and draws Stop in place of Send while `busy`;
+ *   names, and draws Stop in place of Send while `stop` is given;
  * - `below`, such as the thread's lip.
  *
  * The frame's own props:
@@ -173,7 +170,7 @@ export function ComposerCard({
  * - `onFocusChange` is called with whether the focus is in the composer,
  *   which keeps the composer expanded. Focus on `dock-mini` or the pager line
  *   keeps the size the composer has.
- * - `scrollTranscriptToBottom` is called when a click on the shrunk composer
+ * - `scrollMessagesToBottom` is called when a click on the shrunk composer
  *   expands it.
  * - `ref` receives the stack of `above`, the card and `below`, whose height
  *   is what the composer covers of the messages, less the 18px the stack
@@ -187,9 +184,7 @@ export function ComposerFrame({
   readOnly,
   canSend,
   onSend,
-  busy,
-  stopping,
-  onStop,
+  stop,
   error,
   start,
   note,
@@ -198,7 +193,7 @@ export function ComposerFrame({
   below,
   shrunk,
   onFocusChange,
-  scrollTranscriptToBottom,
+  scrollMessagesToBottom,
   ref,
 }: {
   readonly text: string;
@@ -207,10 +202,7 @@ export function ComposerFrame({
   readonly readOnly: boolean;
   readonly canSend: boolean;
   readonly onSend: () => void;
-  readonly busy: boolean;
-  /** Whether a Stop is on its way, which draws Stop as off. */
-  readonly stopping: boolean;
-  readonly onStop: () => void;
+  readonly stop?: ComposerStop | undefined;
   readonly error: string | null;
   /** The controls after Attach. */
   readonly start?: ReactNode;
@@ -222,7 +214,7 @@ export function ComposerFrame({
   readonly below?: ReactNode;
   readonly shrunk: boolean;
   readonly onFocusChange: (focused: boolean) => void;
-  readonly scrollTranscriptToBottom: () => void;
+  readonly scrollMessagesToBottom: () => void;
   readonly ref?: Ref<HTMLDivElement> | undefined;
 }): JSX.Element {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
@@ -264,7 +256,7 @@ export function ComposerFrame({
           if (!expandOnClickRef.current) return;
           expandOnClickRef.current = false;
           fieldRef.current?.focus();
-          scrollTranscriptToBottom();
+          scrollMessagesToBottom();
         }}
       >
         {above}
@@ -275,7 +267,7 @@ export function ComposerFrame({
           readOnly={readOnly}
           canSend={canSend}
           onSend={onSend}
-          stop={busy ? { stopping, onStop } : undefined}
+          stop={stop}
           error={error}
           start={start}
           note={note}

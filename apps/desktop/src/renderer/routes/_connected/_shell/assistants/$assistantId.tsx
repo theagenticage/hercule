@@ -1,6 +1,5 @@
 import type { JSX } from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { queryKeys } from "@hercule/client-core";
 import {
   assistantsQuery,
   conversationMessagesQuery,
@@ -21,9 +20,9 @@ import { AssistantNotFound, AssistantScreen } from "../../../../screens/assistan
  * When no assistant has the id, the route shows `AssistantNotFound`. Any
  * other failure shows `RenderFailure`, the router's default.
  *
- * Leaving the page drops the messages and the running turn's rows. Only the
- * open Conversation keeps them current, so the cache would otherwise hold
- * them out of date, and every page the user scrolled back through.
+ * The Conversation drops the messages and the running turn's rows when it
+ * unmounts (see `useConversationLive` and `SessionConversation`), so
+ * coming back to the page reads them again.
  */
 export const Route = createFileRoute("/_connected/_shell/assistants/$assistantId")({
   staticData: { title: "Assistant" },
@@ -44,19 +43,6 @@ export const Route = createFileRoute("/_connected/_shell/assistants/$assistantId
       queryClient.ensureInfiniteQueryData(conversationMessagesQuery(client, conversationId)),
     ]);
     if (session !== null) await queryClient.ensureQueryData(runningTurnQuery(client, session.id));
-  },
-  onLeave: ({ context: { controller, queryClient }, params: { assistantId } }) => {
-    const { client } = controller;
-    const assistant = queryClient
-      .getQueryData(assistantsQuery(client).queryKey)
-      ?.find((each) => each.id === assistantId);
-    if (assistant === undefined) return;
-    const conversationId = assistant.mainConversationId;
-    queryClient.removeQueries({ queryKey: queryKeys.conversationMessages(conversationId) });
-    const session = queryClient.getQueryData(
-      currentConversationSessionQuery(client, conversationId).queryKey,
-    );
-    if (session != null) queryClient.removeQueries({ queryKey: queryKeys.runningTurn(session.id) });
   },
   component: AssistantRoute,
   notFoundComponent: AssistantNotFound,

@@ -19,7 +19,8 @@ const THREAD = THREAD_FIXTURES.running;
 const ROWS = [
   ...THREAD.transcript,
   ...buildNextRows(
-    THREAD,
+    THREAD.session.id,
+    THREAD.transcript,
     {
       _tag: "item.completed",
       turnId: "turn-1",

@@ -12,6 +12,7 @@ import { MoreIcon } from "../../icons/more";
 import { Mark } from "../../marks";
 import { AgeLabel } from "../age-label";
 import { pickProjectTint, ProjectTile } from "../project-tile";
+import "../session/floating-header.css";
 import "./thread-header.css";
 
 /**

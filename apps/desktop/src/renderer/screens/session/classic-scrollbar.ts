@@ -7,8 +7,8 @@ import { useLayoutEffect, useState, type RefObject } from "react";
  * bar, which takes no room, and while the content fits. The element must
  * have no border, which would count as room taken.
  *
- * The thread header moves its rightmost pill clear of such a scroll bar, see
- * thread-header.css.
+ * The header that floats over a session's view moves its rightmost pill
+ * clear of such a scroll bar, see floating-header.css.
  *
  * Checks before the first paint, then again whenever the element's content
  * box changes size, which it does when a classic scroll bar comes or goes.
