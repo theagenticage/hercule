@@ -146,17 +146,28 @@ const composeAssistant = (
  * The contract bounds only the zone's length. A heartbeat beats, and a
  * rotation rotates, in its zone, so a zone the runtime does not know would
  * leave the schedule unable to run.
+ *
+ * On an update, `stored` holds the assistant's saved heartbeat and rotation,
+ * and a zone equal to the saved one is not checked. A zone saved before this
+ * check existed, or one a later runtime dropped, then stays editable: a
+ * client sends the whole heartbeat to change its prompt, and that change
+ * must not fail on a zone the user did not touch.
  */
-const validateScheduleTimezones = (fields: {
-  readonly heartbeat?: Heartbeat | undefined;
-  readonly rotation?: Rotation | undefined;
-}): Effect.Effect<void, Validation> =>
+const validateScheduleTimezones = (
+  fields: {
+    readonly heartbeat?: Heartbeat | undefined;
+    readonly rotation?: Rotation | undefined;
+  },
+  stored?: { readonly heartbeat: Heartbeat; readonly rotation: Rotation },
+): Effect.Effect<void, Validation> =>
   Effect.gen(function* () {
-    if (fields.heartbeat?.timezone !== undefined) {
-      yield* validateTimezone(fields.heartbeat.timezone, ["heartbeat", "timezone"]);
+    const heartbeatZone = fields.heartbeat?.timezone;
+    if (heartbeatZone !== undefined && heartbeatZone !== stored?.heartbeat.timezone) {
+      yield* validateTimezone(heartbeatZone, ["heartbeat", "timezone"]);
     }
-    if (fields.rotation?.timezone !== undefined) {
-      yield* validateTimezone(fields.rotation.timezone, ["rotation", "timezone"]);
+    const rotationZone = fields.rotation?.timezone;
+    if (rotationZone !== undefined && rotationZone !== stored?.rotation.timezone) {
+      yield* validateTimezone(rotationZone, ["rotation", "timezone"]);
     }
   });
 
@@ -407,7 +418,6 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           createDecodeValidationError,
         );
-        yield* validateScheduleTimezones({ heartbeat, rotation });
         const selection = yield* buildModelSelection(model, options);
         const agentEdit = { ...named, ...(selection === undefined ? {} : { model: selection }) };
         const fieldsEdit: AssistantFieldsEdit = {
@@ -428,7 +438,8 @@ const make = Effect.gen(function* () {
             // Read first, so that an unknown id fails with `not_found` before
             // its fields are checked, instead of an update that changes no
             // rows and reports success.
-            yield* readAssistantOrFail(id);
+            const { fields: stored } = yield* readAssistantOrFail(id);
+            yield* validateScheduleTimezones({ heartbeat, rotation }, stored);
             if (agentEdit.instanceId !== undefined) {
               yield* readProviderIdOrFail(agentEdit.instanceId);
             }

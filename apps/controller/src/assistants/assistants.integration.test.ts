@@ -409,6 +409,33 @@ describe("assistant.update", () => {
     });
   });
 
+  it("keeps a saved zone the runtime does not know editable, and refuses a new one", async () => {
+    await withAssistants(async (arranged) => {
+      const created = await createAssistant(arranged, { name: "Ada" });
+      // A zone saved before the controller checked zones.
+      const legacy = { ...HEARTBEAT, timezone: "Mars/Olympus" };
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`UPDATE assistants SET heartbeat = ${JSON.stringify(legacy)}
+                               WHERE agent_id = ${uuidFromString(created.id)}`,
+        ),
+      );
+
+      const kept = await requestUpdate(arranged, created.id, {
+        heartbeat: { ...legacy, prompt: "Only write when it matters." },
+      });
+      expect(kept.status, await kept.clone().text()).toBe(200);
+      expect(((await kept.json()) as Assistant).heartbeat.prompt).toBe(
+        "Only write when it matters.",
+      );
+
+      const moved = await requestUpdate(arranged, created.id, {
+        heartbeat: { ...legacy, timezone: "Venus/Maxwell" },
+      });
+      expect((await readErrorBody(moved)).code).toBe("validation");
+    });
+  });
+
   it("updates an id that names no assistant as not_found, before it checks the fields", async () => {
     await withAssistants(async (arranged) => {
       for (const fields of [{ name: "Bea" }, { instanceId: NOBODY }]) {
