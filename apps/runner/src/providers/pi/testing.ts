@@ -392,12 +392,18 @@ export const listSentCommands = (
 ): ReadonlyArray<Record<string, unknown>> =>
   sent.filter((one) => one.type === type).map((one) => one.command);
 
-/** Starts a session on a fake pi. Returns the adapter setup and the pi hosting the session. */
+/**
+ * Starts a session on a fake pi. `runnerEnv` holds variables added to the
+ * runner's own environment, which the adapter passes on to pi. Returns the
+ * adapter setup and the pi hosting the session.
+ */
 export const startTestSession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
+  runnerEnv: Readonly<Record<string, string>> = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
-  const run = createDriving(behaviour);
+  const driving = createDriving(behaviour);
+  const run = { ...driving, ctx: { ...driving.ctx, env: { ...driving.ctx.env, ...runnerEnv } } };
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
   await waitUntil("spawned a pi", () => run.spawns.length === 1);
   return { ...run, child: run.spawns[0]! };
@@ -407,8 +413,9 @@ export const startTestSession = async (
 export const startBusySession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
+  runnerEnv: Readonly<Record<string, string>> = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
-  const run = await startTestSession(behaviour, spec);
+  const run = await startTestSession(behaviour, spec, runnerEnv);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.child.push({ type: "agent_start" });
   await waitUntil(

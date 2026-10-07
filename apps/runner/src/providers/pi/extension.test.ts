@@ -214,8 +214,8 @@ describe("the subagent tool", () => {
   });
 
   it("is not registered at the deepest level, where the variable is left out", () => {
-    // An agent there that could still call the tool would start a subagent
-    // the runner has to refuse.
+    // An agent there is not offered the tool, and the runner refuses a
+    // subagent request from that level anyway.
     expect(listRegisteredTools({})).toEqual([]);
     expect(listRegisteredTools({ [SUBAGENTS_VARIABLE]: "0" })).toEqual([]);
   });

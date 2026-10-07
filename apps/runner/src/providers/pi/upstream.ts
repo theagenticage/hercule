@@ -92,7 +92,7 @@ export const PARKED_OUTPUT = "parked";
  * Returns the text of a message: the string itself, or its `text` parts
  * joined. Returns an empty string for a message with no text.
  */
-export const readMessageText = (message: FakeModelMessage): string => {
+export const readRequestMessageText = (message: FakeModelMessage): string => {
   if (typeof message.content === "string") return message.content;
   if (!Array.isArray(message.content)) return "";
   return message.content
@@ -111,7 +111,7 @@ export const readMessageText = (message: FakeModelMessage): string => {
  */
 export const readFirstUserText = (request: FakeModelRequest): string => {
   const first = request.messages.find((message) => message.role === "user");
-  return first === undefined ? "" : readMessageText(first);
+  return first === undefined ? "" : readRequestMessageText(first);
 };
 
 /** Checks whether the request's last message is a tool result, so the model has a tool's answer. */

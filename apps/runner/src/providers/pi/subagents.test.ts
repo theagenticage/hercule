@@ -13,10 +13,14 @@
  * `ctx.ui.confirm`. The reply goes back as an `extension_ui_response` with a
  * `value`, as `dist/modes/rpc/rpc-types.d.ts` declares for an input dialog.
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, ProviderEvent, SessionSpec, SubagentId } from "@hercule/protocol";
 import {
+  EXTENSION_FILE,
+  EXTENSION_SOURCE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
   SUBAGENT_TOOL,
@@ -65,12 +69,7 @@ const askForSubagent = async (
   const dialogId = crypto.randomUUID();
   const spawned = run.spawns.length;
   const started = filterByTag(run.seen, "subagent.started").length;
-  parent.push({
-    type: "tool_execution_start",
-    toolCallId,
-    toolName: SUBAGENT_TOOL,
-    args: { description, prompt: PROMPT },
-  });
+  pushSubagentCall(parent, toolCallId, description);
   parent.push(buildSubagentDialog(dialogId, toolCallId, description));
   await waitUntil(
     "started the subagent",
@@ -96,6 +95,33 @@ const buildSubagentDialog = (
   title: SUBAGENT_DIALOG,
   placeholder: JSON.stringify({ toolCallId, description, prompt: PROMPT }),
 });
+
+/** Pushes a `subagent` call to `agent`, as pi does when the model calls the tool. */
+const pushSubagentCall = (agent: Spawn, toolCallId: string, description: string): void => {
+  agent.push({
+    type: "tool_execution_start",
+    toolCallId,
+    toolName: SUBAGENT_TOOL,
+    args: { description, prompt: PROMPT },
+  });
+};
+
+/**
+ * Pushes the dialog asking for a subagent on the call `toolCallId` of
+ * `agent`, and waits for the adapter to refuse it. Returns the error of the
+ * refusal, or an empty string when the reply was not an error.
+ */
+const awaitRefusal = async (
+  agent: Spawn,
+  toolCallId: string,
+  description: string = DESCRIPTION,
+): Promise<string> => {
+  const dialogId = crypto.randomUUID();
+  agent.push(buildSubagentDialog(dialogId, toolCallId, description));
+  const answer = await awaitDialogAnswer(agent, dialogId);
+  const reply = JSON.parse(String(answer["value"])) as SubagentReply;
+  return "error" in reply ? reply.error : "";
+};
 
 /** Opens the subagent's turn the way pi does once it takes the prompt. */
 const openSubagentTurn = async (run: DrivenAdapter, subagent: StartedSubagent): Promise<void> => {
@@ -170,7 +196,7 @@ const awaitReply = async (parent: Spawn, subagent: StartedSubagent): Promise<Sub
 };
 
 /** Returns the events attributed to one agent: a subagent by id, or the session's own when undefined. */
-const listEventsOf = (
+const filterEventsByAgent = (
   run: DrivenAdapter,
   subagentId: SubagentId | undefined,
 ): ReadonlyArray<ProviderEvent> =>
@@ -237,6 +263,40 @@ describe("how a subagent's pi is started", () => {
     expect(child.child.env[SUBAGENTS_VARIABLE]).toBe("1");
     expect(grandchild.child.env[SUBAGENTS_VARIABLE]).toBeUndefined();
   });
+
+  it("passes on neither variable from the runner's own environment where it does not apply", async () => {
+    // A runner started from inside a pi session inherits that session's values.
+    const run = await startBusySession({}, SPEC, {
+      [SUBAGENTS_VARIABLE]: "1",
+      [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(OUTPUT_SCHEMA),
+    });
+    const child = await askForSubagent(run, run.child);
+    await openSubagentTurn(run, child);
+
+    const grandchild = await askForSubagent(run, child.child, "Read one failing test");
+
+    // This session has no output schema, so none of its agents gets one.
+    expect(run.child.env).not.toHaveProperty(OUTPUT_SCHEMA_VARIABLE);
+    expect(child.child.env).not.toHaveProperty(OUTPUT_SCHEMA_VARIABLE);
+    expect(grandchild.child.env).not.toHaveProperty(SUBAGENTS_VARIABLE);
+  });
+
+  it("loads a copy of the extension written for it alone, and deletes the copy once its pi exits", async () => {
+    const run = await startBusySession();
+    const subagent = await askForSubagent(run, run.child);
+    const copy = join(run.ctx.home, `subagent-extension-${subagent.subagentId}.ts`);
+
+    const readExtensionArg = (command: ReadonlyArray<string>) => command[command.indexOf("-e") + 1];
+    expect(readExtensionArg(subagent.child.command)).toBe(copy);
+    expect(readExtensionArg(run.child.command)).toBe(join(run.ctx.home, EXTENSION_FILE));
+    expect(readFileSync(copy, "utf8")).toBe(EXTENSION_SOURCE);
+
+    await openSubagentTurn(run, subagent);
+    pushFinishedTurn(subagent.child, "Two tests fail.", { input: 30, output: 3 });
+
+    await waitUntil("deleted the subagent's extension", () => !existsSync(copy));
+    expect(existsSync(join(run.ctx.home, EXTENSION_FILE))).toBe(true);
+  });
 });
 
 describe("what a running subagent reports", () => {
@@ -265,7 +325,7 @@ describe("what a running subagent reports", () => {
       PROMPT,
     );
 
-    const own = listEventsOf(run, subagent.subagentId).map((event) =>
+    const own = filterEventsByAgent(run, subagent.subagentId).map((event) =>
       event._tag === "item.started" || event._tag === "item.completed"
         ? `${event._tag}:${event.kind}`
         : event._tag,
@@ -285,7 +345,7 @@ describe("what a running subagent reports", () => {
     );
     expect(userMessage?.detail).toEqual({ text: PROMPT });
 
-    const parents = listEventsOf(run, undefined).map((event) => event._tag);
+    const parents = filterEventsByAgent(run, undefined).map((event) => event._tag);
     expect(parents).toEqual(expect.arrayContaining(["turn.started", "item.started"]));
     expect(
       filterByTag(run.seen, "turn.started").filter((event) => event.subagentId === undefined),
@@ -511,21 +571,137 @@ describe("the limits on subagents", () => {
     }
     const spawned = run.spawns.length;
 
-    const toolCallId = "call_fifth";
-    run.child.push({
-      type: "tool_execution_start",
-      toolCallId,
-      toolName: SUBAGENT_TOOL,
-      args: { description: "Task number 5", prompt: PROMPT },
-    });
-    run.child.push(buildSubagentDialog("dialog-fifth", toolCallId, "Task number 5"));
+    pushSubagentCall(run.child, "call_fifth", "Task number 5");
 
-    const answer = await awaitDialogAnswer(run.child, "dialog-fifth");
-    const reply = JSON.parse(String(answer["value"])) as SubagentReply;
-    expect("error" in reply ? reply.error : "").toContain("4 subagents");
+    expect(await awaitRefusal(run.child, "call_fifth", "Task number 5")).toContain("4 subagents");
     await settle();
     expect(run.spawns).toHaveLength(spawned);
     expect(filterByTag(run.seen, "subagent.started")).toHaveLength(4);
+  });
+
+  it("refuses a request about no running call, or about a call of another tool, and warns", async () => {
+    const run = await startBusySession();
+    run.child.push({
+      type: "tool_execution_start",
+      toolCallId: "call_bash",
+      toolName: "bash",
+      args: { command: "ls" },
+    });
+
+    expect(await awaitRefusal(run.child, "call_unknown")).toContain("no running subagent call");
+    expect(await awaitRefusal(run.child, "call_bash")).toContain("no running subagent call");
+    expect(
+      filterByTag(run.seen, "runtime.warning").filter((event) =>
+        event.message.includes("a call that is not running"),
+      ),
+    ).toHaveLength(2);
+    await settle();
+    expect(run.spawns).toHaveLength(1);
+    expect(filterByTag(run.seen, "subagent.started")).toEqual([]);
+  });
+
+  it("refuses a subagent's subagent that asks anyway, although its extension offers it no tool", async () => {
+    const run = await startBusySession();
+    const child = await askForSubagent(run, run.child);
+    await openSubagentTurn(run, child);
+    const grandchild = await askForSubagent(run, child.child, "Read one failing test");
+    await openSubagentTurn(run, grandchild);
+    pushSubagentCall(grandchild.child, "call_too_deep", "Read one line");
+
+    expect(await awaitRefusal(grandchild.child, "call_too_deep", "Read one line")).toContain(
+      "2 levels deep",
+    );
+    await settle();
+    expect(run.spawns).toHaveLength(3);
+  });
+
+  it("refuses a subagent while the asking agent's turn is being aborted", async () => {
+    const run = await startBusySession();
+    pushSubagentCall(run.child, "call_late", DESCRIPTION);
+
+    // pi has taken the abort, but has not ended the turn yet.
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
+
+    expect(await awaitRefusal(run.child, "call_late")).toContain("being stopped");
+    await settle();
+    expect(run.spawns).toHaveLength(1);
+  });
+
+  it("refuses a subagent while the session is being stopped", async () => {
+    // A pi that lingers after its stdin closes keeps the stop waiting.
+    const run = await startBusySession({ lingers: true });
+    pushSubagentCall(run.child, "call_late", DESCRIPTION);
+
+    const stopping = Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    expect(await awaitRefusal(run.child, "call_late")).toContain("being stopped");
+    expect(run.spawns).toHaveLength(1);
+    await stopping;
+  });
+});
+
+describe("a session that ends while a subagent runs", () => {
+  /**
+   * Starts a session with one subagent that has spent 30 input and 3 output
+   * tokens in a turn that has not ended, and returns both.
+   */
+  const startSpendingSubagent = async (): Promise<{
+    readonly run: DrivenAdapter;
+    readonly subagent: StartedSubagent;
+  }> => {
+    const run = await startBusySession();
+    const subagent = await askForSubagent(run, run.child);
+    await openSubagentTurn(run, subagent);
+    subagent.child.push({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [],
+        usage: { input: 30, output: 3, cacheRead: 0, cacheWrite: 0 },
+        stopReason: "toolUse",
+      },
+      toolResults: [],
+    });
+    await settle();
+    return { run, subagent };
+  };
+
+  /** Checks that the subagent's usage so far was reported, and that its turn got no event. */
+  const expectUsageWithoutTurn = (run: DrivenAdapter, subagent: StartedSubagent): void => {
+    const usages = filterByTag(run.seen, "session.usage.updated");
+    expect(usages.find((event) => event.subagentId === subagent.subagentId)?.usage).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 3,
+    });
+    expect(usages.find((event) => event.subagentId === undefined)?.usage).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 3,
+    });
+    expect(
+      filterByTag(run.seen, "turn.completed").filter(
+        (event) => event.subagentId === subagent.subagentId,
+      ),
+    ).toEqual([]);
+  };
+
+  it("reports the subagent's usage so far when the session is stopped", async () => {
+    const { run, subagent } = await startSpendingSubagent();
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    expectUsageWithoutTurn(run, subagent);
+    expect(subagent.child.stdinClosed()).toBe(true);
+  });
+
+  it("reports the subagent's usage so far when the session's pi exits by itself", async () => {
+    const { run, subagent } = await startSpendingSubagent();
+
+    run.child.crash("pi: out of memory");
+
+    await waitUntil("ended the session", () => filterByTag(run.seen, "session.exited").length > 0);
+    expectUsageWithoutTurn(run, subagent);
+    expect(subagent.child.stdinClosed()).toBe(true);
   });
 });
 
@@ -545,5 +721,24 @@ describe("a subagent whose pi exits by itself", () => {
     expect("error" in reply ? reply.error : "").toContain(complaint);
     // A subagent's crash is not the session's: the session keeps running.
     expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("replies with pi's stderr when it exits before it takes the task", async () => {
+    // The subagent's pi never responds to the subagent's prompt.
+    const run = await startBusySession({
+      answers: {
+        prompt: (command) => (command["message"] === PROMPT ? undefined : { success: true }),
+      },
+    });
+    const subagent = await askForSubagent(run, run.child);
+    const complaint = "pi: no API key for the zai provider";
+
+    subagent.child.crash(complaint);
+
+    const reply = await awaitReply(run.child, subagent);
+    expect("error" in reply ? reply.error : "").toContain(complaint);
+    expect((await awaitTurnCompleted(run, subagent.subagentId)).error).toContain(complaint);
+    await settle();
+    expect(listDialogAnswers(run.child, subagent.dialogId)).toHaveLength(1);
   });
 });

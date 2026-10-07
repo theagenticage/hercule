@@ -21,13 +21,14 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import { pi } from "./adapter";
+import { SUBAGENT_TOOL } from "./extension";
 import { cleanupHomes, buildContext, TEST_ZAI_KEY, SPEC, filterByTag, waitUntil } from "./testing";
 import { createScratchHome } from "../testing";
 import {
   endsWithToolResult,
   pointAtFakeModel,
   readFirstUserText,
-  readMessageText,
+  readRequestMessageText,
   startScriptedModelServer,
   type FakeModelReply,
   type FakeModelRequest,
@@ -56,10 +57,12 @@ const BUDGET_MS = 180_000;
 /** The budget for one wait, so a test that times out on one step still has time to report. */
 const STEP_MS = BUDGET_MS / 3;
 
-/** Long enough that a command that was going to run without an answer would have run. */
-const UNANSWERED_MS = 2_000;
-
-const SUBAGENT_TOOL = "subagent";
+/**
+ * Long enough that a command that was going to run without an answer would
+ * have run. Short, because once both requests are open each child's pi is
+ * already blocked in the approval hook, before the command.
+ */
+const UNANSWERED_MS = 300;
 
 const SPEC_UNDER_TEST: SessionSpec = {
   ...SPEC,
@@ -83,7 +86,7 @@ interface ScriptedAgent {
 }
 
 /** What the fake model saw: every request, with the agent it was for. */
-interface Transcript {
+interface ModelRequestLog {
   readonly requests: Array<{ readonly agent: string; readonly request: FakeModelRequest }>;
   /** Requests whose first user message matched no scripted agent. */
   readonly unscripted: Array<string>;
@@ -91,30 +94,30 @@ interface Transcript {
 
 /**
  * Builds a server script from the agents the test scripts. Returns the script
- * and the transcript it records into. A request from no scripted agent is
+ * and the log of model requests it records into. A request from no scripted agent is
  * answered with text, and recorded so the test can fail on it.
  */
 const buildScript = (
   agents: ReadonlyArray<ScriptedAgent>,
 ): {
   readonly script: (request: FakeModelRequest) => FakeModelReply;
-  readonly transcript: Transcript;
+  readonly requestLog: ModelRequestLog;
 } => {
-  const transcript: Transcript = { requests: [], unscripted: [] };
+  const requestLog: ModelRequestLog = { requests: [], unscripted: [] };
   const script = (request: FakeModelRequest): FakeModelReply => {
     const input = readFirstUserText(request);
     const agent = agents.find((candidate) => candidate.input === input);
     if (agent === undefined) {
-      transcript.unscripted.push(input);
+      requestLog.unscripted.push(input);
       return { text: "This conversation is not in the test's script." };
     }
-    transcript.requests.push({ agent: agent.input, request });
+    requestLog.requests.push({ agent: agent.input, request });
     const usage = { promptTokens: agent.promptTokens, completionTokens: 1 };
     return endsWithToolResult(request)
       ? { text: agent.finish, usage }
       : { toolCalls: agent.act, usage };
   };
-  return { script, transcript };
+  return { script, requestLog };
 };
 
 /** Builds the call that starts one subagent. */
@@ -132,7 +135,7 @@ const callBash = (marker: string): FakeToolCall => ({
 interface Live {
   readonly sessionId: string;
   readonly seen: Array<ProviderEvent>;
-  readonly transcript: Transcript;
+  readonly requestLog: ModelRequestLog;
   readonly upstream: FakeModelServer;
   readonly stop: () => Promise<void>;
 }
@@ -142,7 +145,7 @@ interface Live {
  * sends the main agent's input. The first agent is the main agent.
  */
 const startLiveSession = async (agents: ReadonlyArray<ScriptedAgent>): Promise<Live> => {
-  const { script, transcript } = buildScript(agents);
+  const { script, requestLog } = buildScript(agents);
   const upstream = startScriptedModelServer(script);
   upstreams.push(upstream);
   const home = createScratchDir();
@@ -168,7 +171,7 @@ const startLiveSession = async (agents: ReadonlyArray<ScriptedAgent>): Promise<L
   const live: Live = {
     sessionId,
     seen,
-    transcript,
+    requestLog,
     upstream,
     stop: async () => {
       running.delete(live);
@@ -190,9 +193,9 @@ const describeProgress = (live: Live): string => {
     )
     .join(", ");
   const unscripted =
-    live.transcript.unscripted.length === 0
+    live.requestLog.unscripted.length === 0
       ? ""
-      : `; unscripted model requests from ${live.transcript.unscripted.join(" | ")}`;
+      : `; unscripted model requests from ${live.requestLog.unscripted.join(" | ")}`;
   return `reported ${events}, after ${live.upstream.asked()} model requests${unscripted}`;
 };
 
@@ -203,14 +206,17 @@ const describeProgress = (live: Live): string => {
 const waitReportingEvents = (live: Live, what: string, ready: () => boolean): Promise<void> =>
   waitUntil(() => `${what}, having ${describeProgress(live)}`, ready, STEP_MS);
 
-type EventOf<Tag extends ProviderEvent["_tag"]> = Extract<ProviderEvent, { _tag: Tag }>;
+type EventWithTag<Tag extends ProviderEvent["_tag"]> = Extract<ProviderEvent, { _tag: Tag }>;
 
 /** Returns the subagent the parent started with the given description, once it has started. */
-const findSubagent = (live: Live, description: string): EventOf<"subagent.started"> | undefined =>
+const findSubagent = (
+  live: Live,
+  description: string,
+): EventWithTag<"subagent.started"> | undefined =>
   filterByTag(live.seen, "subagent.started").find((event) => event.description === description);
 
 /** Returns the events an agent caused: a subagent's, or the main agent's when `subagentId` is absent. */
-const listAgentEvents = (
+const filterEventsByAgent = (
   live: Live,
   subagentId: string | undefined,
 ): ReadonlyArray<ProviderEvent> =>
@@ -225,38 +231,41 @@ const listAgentEvents = (
 const listOpenedRequests = (
   live: Live,
   subagentId: string | undefined,
-): ReadonlyArray<EventOf<"request.opened">> =>
-  filterByTag(listAgentEvents(live, subagentId), "request.opened");
+): ReadonlyArray<EventWithTag<"request.opened">> =>
+  filterByTag(filterEventsByAgent(live, subagentId), "request.opened");
 
-const findResolution = (live: Live, requestId: string): EventOf<"request.resolved"> | undefined =>
+const findResolution = (
+  live: Live,
+  requestId: string,
+): EventWithTag<"request.resolved"> | undefined =>
   filterByTag(live.seen, "request.resolved").find((event) => event.requestId === requestId);
 
 const findTurnEnd = (
   live: Live,
   subagentId: string | undefined,
-): EventOf<"turn.completed"> | undefined =>
-  filterByTag(listAgentEvents(live, subagentId), "turn.completed")[0];
+): EventWithTag<"turn.completed"> | undefined =>
+  filterByTag(filterEventsByAgent(live, subagentId), "turn.completed")[0];
 
 /** Returns the `item.completed` of the main agent's call that started the given subagent. */
 const findSubagentCallEnd = (
   live: Live,
-  started: EventOf<"subagent.started">,
-): EventOf<"item.completed"> | undefined =>
+  started: EventWithTag<"subagent.started">,
+): EventWithTag<"item.completed"> | undefined =>
   filterByTag(live.seen, "item.completed").find((event) => event.itemId === started.itemId);
 
 /** Returns the latest token count an agent reported: a subagent's own, or the session's sum. */
 const readLatestUsage = (
   live: Live,
   subagentId: string | undefined,
-): EventOf<"session.usage.updated">["usage"] | undefined =>
-  filterByTag(listAgentEvents(live, subagentId), "session.usage.updated").at(-1)?.usage;
+): EventWithTag<"session.usage.updated">["usage"] | undefined =>
+  filterByTag(filterEventsByAgent(live, subagentId), "session.usage.updated").at(-1)?.usage;
 
 /** Returns the text of the tool results the agent with the given input was sent. */
 const readToolResults = (live: Live, input: string): ReadonlyArray<string> =>
-  live.transcript.requests
+  live.requestLog.requests
     .filter((entry) => entry.agent === input)
     .flatMap((entry) => entry.request.messages.filter((message) => message.role === "tool"))
-    .map(readMessageText);
+    .map(readRequestMessageText);
 
 const MAIN_TWO = "Start two subagents, one per half of the work.";
 
@@ -281,10 +290,10 @@ const startTwoParkedChildren = async (): Promise<{
   readonly live: Live;
   readonly markerA: string;
   readonly markerB: string;
-  readonly childA: EventOf<"subagent.started">;
-  readonly childB: EventOf<"subagent.started">;
-  readonly requestA: EventOf<"request.opened">;
-  readonly requestB: EventOf<"request.opened">;
+  readonly childA: EventWithTag<"subagent.started">;
+  readonly childB: EventWithTag<"subagent.started">;
+  readonly requestA: EventWithTag<"request.opened">;
+  readonly requestB: EventWithTag<"request.opened">;
 }> => {
   const markerA = join(createScratchDir(), "a-ran");
   const markerB = join(createScratchDir(), "b-ran");
@@ -328,7 +337,7 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
       // Each child is introduced by the main agent's `subagent` call.
       for (const child of [childA, childB]) {
         expect(child.parentSubagentId).toBeUndefined();
-        const call = filterByTag(listAgentEvents(live, undefined), "item.started").find(
+        const call = filterByTag(filterEventsByAgent(live, undefined), "item.started").find(
           (event) => event.itemId === child.itemId,
         );
         expect(call?.kind, "the subagent has no subagent item in the main transcript").toBe(
@@ -343,9 +352,10 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
         [childA, BRIEF_A],
         [childB, BRIEF_B],
       ] as const) {
-        const message = filterByTag(listAgentEvents(live, child.subagentId), "item.started").find(
-          (event) => event.kind === "user_message",
-        );
+        const message = filterByTag(
+          filterEventsByAgent(live, child.subagentId),
+          "item.started",
+        ).find((event) => event.kind === "user_message");
         expect((message?.detail as { readonly text?: string } | undefined)?.text).toBe(brief);
       }
 
@@ -426,7 +436,7 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
 
       // The main agent's own events hold none of the children's requests.
       expect(listOpenedRequests(live, undefined)).toEqual([]);
-      expect(filterByTag(listAgentEvents(live, undefined), "request.resolved")).toEqual([]);
+      expect(filterByTag(filterEventsByAgent(live, undefined), "request.resolved")).toEqual([]);
 
       // Each child counts its own tokens, and the session's count is the sum:
       // two model calls per agent, at 100, 10 and 1 prompt tokens a call.
@@ -437,7 +447,7 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
       );
       expect(readLatestUsage(live, childA.subagentId)?.inputTokens).toBe(20);
       expect(readLatestUsage(live, childB.subagentId)?.inputTokens).toBe(2);
-      expect(live.transcript.unscripted).toEqual([]);
+      expect(live.requestLog.unscripted).toEqual([]);
       await live.stop();
     },
     BUDGET_MS,
@@ -476,9 +486,10 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
       expect(middle.parentSubagentId).toBeUndefined();
       expect(leaf.parentSubagentId).toBe(middle.subagentId);
       // The leaf's `subagent` item is in the middle child's transcript.
-      const leafCall = filterByTag(listAgentEvents(live, middle.subagentId), "item.started").find(
-        (event) => event.itemId === leaf.itemId,
-      );
+      const leafCall = filterByTag(
+        filterEventsByAgent(live, middle.subagentId),
+        "item.started",
+      ).find((event) => event.itemId === leaf.itemId);
       expect(leafCall?.kind).toBe(SUBAGENT_TOOL);
 
       await waitReportingEvents(
@@ -514,7 +525,7 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
       expect(findTurnEnd(live, undefined)?.state).toBe("completed");
       expect(findSubagentCallEnd(live, middle)?.status).toBe("failed");
       expect(existsSync(marker), "the stopped leaf ran its command").toBe(false);
-      expect(live.transcript.unscripted).toEqual([]);
+      expect(live.requestLog.unscripted).toEqual([]);
       await live.stop();
     },
     BUDGET_MS,

@@ -1,7 +1,7 @@
 /**
  * The pi adapter. It runs one pi process per session, plus one per running
- * subagent, and talks to each in pi's RPC mode. Everything the process reads or writes lives under the instance's
- * own agent directory. If pi used the developer's own directory, Hercule's
+ * subagent, and talks to each in pi's RPC mode. Everything the processes read
+ * or write lives under the instance's own agent directory. If pi used the developer's own directory, Hercule's
  * sessions would mix with the user's login, skills and settings. The one
  * exception is a Thread on the controller's local runner, which also reads the
  * user's own skills, prompt templates and instructions, each named on its
@@ -42,6 +42,7 @@ import {
   EXTENSION_SOURCE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
+  SUBAGENT_TOOL,
   SUBAGENTS_VARIABLE,
   SUBMIT_RESULT_TOOL,
   type SubagentReply,
@@ -51,11 +52,12 @@ import {
   normalize,
   buildNormalizingState,
   buildSubagentState,
+  buildUsageEvents,
   type Normalizing,
   type RunningTool,
 } from "./normalize";
 import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI } from "./probe";
-import { makeRpc, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
+import { makeRpc, PI_GONE, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
 
 export const PI = "pi";
 
@@ -103,14 +105,14 @@ export interface PiSeam {
 interface Park {
   readonly request: OpenRequest;
   /** The agent whose pi holds the call, and which reads the answer. */
-  readonly agent: PiProcess;
+  readonly agent: RunningAgent;
   readonly dialogId: string;
   /** pi's id for the held tool call, used to recognise the call when it ends. */
   readonly toolCallId: string;
 }
 
 /** One pi process of a session: the session's own agent, or one of its subagents. */
-interface PiProcess {
+interface RunningAgent {
   readonly child: PiChild;
   readonly rpc: PiRpc;
   /** The normalizer's state for this process. Its `subagentId` names the agent. */
@@ -120,17 +122,17 @@ interface PiProcess {
 }
 
 /** A subagent: an agent that another agent of the session started with its `subagent` tool. */
-interface Subagent extends PiProcess {
+interface Subagent extends RunningAgent {
   readonly subagentId: SubagentId;
   /** The agent whose `subagent` call started this subagent, and waits for its reply. */
-  readonly parent: PiProcess;
+  readonly parent: RunningAgent;
   /** pi's id for that call's dialog, which the reply is sent under. */
   readonly dialogId: string;
   /** The item id of that call in the parent's transcript. */
-  readonly toolCallItemId: string | undefined;
+  readonly toolCallItemId: string;
 }
 
-const isSubagent = (agent: PiProcess): agent is Subagent => "parent" in agent;
+const isSubagent = (agent: RunningAgent): agent is Subagent => "parent" in agent;
 
 /**
  * The prompt the runner sends when a turn finishes without calling
@@ -181,8 +183,10 @@ interface Held {
   readonly binding: SessionBinding;
   readonly spec: SessionSpec;
   readonly ctx: ProviderRunnerContext;
+  /** The pi binary the session's own agent runs, which its subagents run too. */
+  readonly binary: string;
   /** The session's own agent, whose pi process is the session's. */
-  readonly root: PiProcess;
+  readonly root: RunningAgent;
   /** The subagents running now, by id. An ended subagent is removed. */
   readonly subagents: Map<SubagentId, Subagent>;
   /** The approvals the session's agents are parked on, by request id. */
@@ -281,9 +285,9 @@ const parseDialogJson = (message: unknown): Record<string, unknown> => {
     const parsed: unknown = JSON.parse(message);
     return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
-    // Only Hercule's approval hook opens dialogs in these sessions, so a
-    // message in any other shape names no call. The adapter denies a dialog
-    // about no call instead of showing it to the user.
+    // Only Hercule's extension opens dialogs in these sessions, so text in
+    // any other shape names no call. The adapter denies an approval about no
+    // call, and refuses a subagent for no call.
     return {};
   }
 };
@@ -380,6 +384,10 @@ const buildSessionsDir = (home: string): string => join(home, "sessions");
 
 const buildExtensionPath = (home: string): string => join(home, EXTENSION_FILE);
 
+/** Returns the path of the copy of the extension one subagent loads (see `startSubagent`). */
+const buildSubagentExtensionPath = (home: string, subagentId: SubagentId): string =>
+  join(home, `subagent-extension-${subagentId}.ts`);
+
 /**
  * Returns the path the Agent's instructions for one session are written to,
  * beside the extension. When the `--append-system-prompt` value names a file
@@ -448,17 +456,21 @@ const buildUserMaterialFlags = (material: UserMaterial | undefined): ReadonlyArr
       ];
 
 /**
- * The session's own pi process, as opposed to a subagent's: its id, and the
- * transcript it continues, if any.
+ * Which pi process `buildArgv` builds the arguments for: the session's own,
+ * with the transcript it continues, if any, or a subagent's, with the copy of
+ * the extension written for it alone.
  */
-interface SessionProcess {
-  readonly sessionId: string;
-  readonly transcript: string | undefined;
-}
+type AgentLaunch =
+  | {
+      readonly kind: "session";
+      readonly sessionId: string;
+      readonly transcript: string | undefined;
+    }
+  | { readonly kind: "subagent"; readonly extensionFile: string };
 
 /**
  * Builds pi's command-line arguments for a session's own pi process, or for a
- * subagent's when `session` is undefined.
+ * subagent's.
  *
  * - A new session gets Hercule's session id with `--session-id`. A resume
  *   passes the transcript with `--session` instead: pi rejects the two
@@ -472,8 +484,9 @@ const buildArgv = (
   spec: SessionSpec,
   ctx: ProviderRunnerContext,
   selection: ModelSelection,
-  session: SessionProcess | undefined,
+  launch: AgentLaunch,
 ): ReadonlyArray<string> => {
+  const session = launch.kind === "session" ? launch : undefined;
   const transcript = session?.transcript;
   const resuming = spec.continue?.mode === "resume" && transcript !== undefined;
   const excluded = (spec.disallowedTools ?? []).flatMap((family) => PI_TOOLS_BY_FAMILY[family]);
@@ -502,7 +515,7 @@ const buildArgv = (
     "--no-approve",
     "--offline",
     "-e",
-    buildExtensionPath(ctx.home),
+    launch.kind === "session" ? buildExtensionPath(ctx.home) : launch.extensionFile,
     ...(session === undefined
       ? ["--no-session"]
       : [
@@ -576,7 +589,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
 
   /** Writes one response to a dialog the extension opened in `agent`'s pi. */
   const answerDialog = (
-    agent: PiProcess,
+    agent: RunningAgent,
     dialogId: string,
     answer: Record<string, unknown>,
   ): void => {
@@ -587,9 +600,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     );
   };
 
-  /** Sends a subagent's reply to the `subagent` call in its parent that waits for it. */
-  const answerParent = (subagent: Subagent, reply: SubagentReply): void => {
-    answerDialog(subagent.parent, subagent.dialogId, { value: JSON.stringify(reply) });
+  /** Answers the dialog of a `subagent` call in `agent`'s pi with the subagent's reply, or a refusal. */
+  const answerSubagentDialog = (
+    agent: RunningAgent,
+    dialogId: string,
+    reply: SubagentReply,
+  ): void => {
+    answerDialog(agent, dialogId, { value: JSON.stringify(reply) });
   };
 
   /**
@@ -616,7 +633,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /** Cancels every open approval of `agent`. Nobody decided them; their agent stopped waiting. */
-  const cancelParksOf = (held: Held, agent: PiProcess): void => {
+  const cancelParksOf = (held: Held, agent: RunningAgent): void => {
     for (const park of [...held.parks.values()]) {
       if (park.agent === agent) resolvePark(held, park, "cancel");
     }
@@ -630,7 +647,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * system asked.
    */
   const abortTurn = (
-    agent: PiProcess,
+    agent: RunningAgent,
     reason: NonNullable<Normalizing["endedBySystem"]>,
   ): Effect.Effect<void> =>
     Effect.suspend(() => {
@@ -644,7 +661,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * may have several approvals open at once, because pi runs a message's tool
    * calls at the same time; each is answered on its own.
    */
-  const openPark = (held: Held, agent: PiProcess, dialog: Dialog): void => {
+  const openPark = (held: Held, agent: RunningAgent, dialog: Dialog): void => {
     const sessionId = held.binding.sessionId;
     const item = agent.state.tools.get(dialog.toolCallId);
     if (item === undefined) {
@@ -678,8 +695,18 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /** Returns the running subagents `agent` started itself. */
-  const listStartedBy = (held: Held, agent: PiProcess): ReadonlyArray<Subagent> =>
+  const listStartedBy = (held: Held, agent: RunningAgent): ReadonlyArray<Subagent> =>
     [...held.subagents.values()].filter((subagent) => subagent.parent === agent);
+
+  /**
+   * Ends every running subagent `agent` started, as interrupted and with no
+   * reply, because `agent` no longer waits for one.
+   */
+  const endSubagentsStartedBy = (held: Held, agent: RunningAgent): void => {
+    for (const subagent of listStartedBy(held, agent)) {
+      endSubagent(held, subagent, { state: "interrupted" }, undefined);
+    }
+  };
 
   /**
    * Closes a subagent's pi: aborts whatever it is running, closes its stdin,
@@ -724,59 +751,94 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   ): void => {
     if (held.subagents.get(subagent.subagentId) !== subagent) return;
     held.subagents.delete(subagent.subagentId);
-    // The parent of each of these is ending too, so none of them is answered.
-    for (const below of listStartedBy(held, subagent)) {
-      endSubagent(held, below, { state: "interrupted" }, undefined);
-    }
+    endSubagentsStartedBy(held, subagent);
     cancelParksOf(held, subagent);
     for (const event of endTurn(subagent.state, ended)) emit(event);
-    if (reply !== undefined) answerParent(subagent, reply);
+    if (reply !== undefined) answerSubagentDialog(subagent.parent, subagent.dialogId, reply);
     closeProcess(subagent.child);
+  };
+
+  /**
+   * Returns why the adapter refuses the subagent `parent`'s call asks for, or
+   * undefined when it may start. The runner checks the depth itself: the
+   * missing `subagent` tool at the deepest level only keeps the model from
+   * being offered it, and an extension file changed on disk could offer it
+   * anyway.
+   */
+  const findRefusal = (held: Held, parent: RunningAgent): string | undefined => {
+    if (parent.depth >= MAX_SUBAGENT_DEPTH) {
+      return `Subagents may only go ${String(MAX_SUBAGENT_DEPTH)} levels deep, and this agent is at the deepest level. Do the task yourself.`;
+    }
+    // A session being stopped, or a turn being aborted, would close the new
+    // subagent at once, after it had already started a model call.
+    if (held.stopping || parent.state.endedBySystem !== undefined) {
+      return "This agent is being stopped, so it cannot start a subagent.";
+    }
+    if (held.subagents.size >= MAX_RUNNING_SUBAGENTS) {
+      return `This session already runs ${String(MAX_RUNNING_SUBAGENTS)} subagents, the most it may run at once. Wait for one of them to finish, or do the task yourself.`;
+    }
+    return undefined;
   };
 
   /**
    * Starts the subagent an agent's `subagent` tool asked for: a pi process of
    * its own, on the session's current model, prompted with the call's task.
-   * The call fails at once, with the reason as its result, when the session
-   * already runs `MAX_RUNNING_SUBAGENTS` subagents or the process cannot start.
+   * The call fails at once, with the reason as its result, when `findRefusal`
+   * refuses it or the process cannot start.
+   *
+   * The subagent loads a copy of the extension written for it alone, under a
+   * name that includes its new id, and deleted when it exits. An agent that
+   * may write files without asking could otherwise rewrite the shared
+   * extension file before the subagent loads it, and so run the subagent
+   * without the approval hook.
    */
   const startSubagent = (
     held: Held,
-    parent: PiProcess,
+    parent: RunningAgent,
     dialog: Extract<Dialog, { kind: "subagent" }>,
   ): void => {
-    const refuse = (error: string): void => {
-      answerDialog(parent, dialog.id, { value: JSON.stringify({ error } satisfies SubagentReply) });
-    };
-    if (held.subagents.size >= MAX_RUNNING_SUBAGENTS) {
-      refuse(
-        `This session already runs ${String(MAX_RUNNING_SUBAGENTS)} subagents, the most it may run at once. Wait for one of them to finish, or do the task yourself.`,
-      );
+    const refuse = (error: string): void => answerSubagentDialog(parent, dialog.id, { error });
+    const item = parent.state.tools.get(dialog.toolCallId);
+    // The subagent's row is the call's item, so a request about no running
+    // call has nowhere to show, as for an approval about no call.
+    if (item === undefined || item.toolName !== SUBAGENT_TOOL) {
+      refuse("Hercule found no running subagent call for this request.");
+      warn(held.binding.sessionId, "pi asked for a subagent for a call that is not running");
       return;
     }
-    const binary = held.ctx.binary;
-    if (binary === undefined) {
-      refuse(`There is no ${PI_BINARY} on this machine to run the subagent.`);
+    const refusal = findRefusal(held, parent);
+    if (refusal !== undefined) {
+      refuse(refusal);
       return;
     }
     const subagentId = crypto.randomUUID();
     const depth = parent.depth + 1;
+    const extensionFile = buildSubagentExtensionPath(held.ctx.home, subagentId);
+    const removeExtension = (): void => attempt(() => rmSync(extensionFile, { force: true }));
     let child: PiChild;
     try {
+      writeFileAtomically(extensionFile, EXTENSION_SOURCE);
       child = seam.spawn(
-        [binary, ...buildArgv(held.spec, held.ctx, held.modelSelection, undefined)],
+        [
+          held.binary,
+          ...buildArgv(held.spec, held.ctx, held.modelSelection, {
+            kind: "subagent",
+            extensionFile,
+          }),
+        ],
         buildAgentEnv(held.ctx, held.spec, depth),
         held.ctx.cwd,
       );
     } catch (error) {
+      removeExtension();
       const message = error instanceof Error ? error.message : String(error);
       refuse(`The subagent could not start: ${message}`);
       warn(held.binding.sessionId, `could not start a pi subagent: ${message}`);
       return;
     }
+    void child.exited.then(removeExtension, removeExtension);
+    item.subagentId = subagentId;
     const state = buildSubagentState(held.root.state, subagentId);
-    const item = parent.state.tools.get(dialog.toolCallId);
-    if (item !== undefined) item.subagentId = subagentId;
     const subagent: Subagent = {
       child,
       rpc: makeRpc(child, (line, frame) => onLine(held, subagent, line, frame)),
@@ -785,7 +847,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       subagentId,
       parent,
       dialogId: dialog.id,
-      toolCallItemId: item?.itemId,
+      toolCallItemId: item.itemId,
     };
     held.subagents.set(subagentId, subagent);
     const parentSubagentId = parent.state.subagentId;
@@ -796,7 +858,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       at: now(),
       subagentId,
       ...(parentSubagentId === undefined ? {} : { parentSubagentId }),
-      ...(item === undefined ? {} : { itemId: item.itemId }),
+      itemId: item.itemId,
       ...(dialog.description === "" ? {} : { description: truncateMessage(dialog.description) }),
     });
     watchChild(held, subagent);
@@ -816,14 +878,17 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     }
     Effect.runFork(
       Effect.catch(subagent.rpc.send({ type: "prompt", message: dialog.prompt }), (error) =>
-        Effect.sync(() =>
+        Effect.sync(() => {
+          // A pi that exited is reported by `watchChild`, with its stderr as
+          // the reason, which says more than this error does.
+          if (error === PI_GONE) return;
           endSubagent(
             held,
             subagent,
             { state: "failed", error: `pi did not take the subagent's task: ${error}` },
             { error: `The subagent could not start: ${error}` },
-          ),
-        ),
+          );
+        }),
       ),
     );
   };
@@ -879,12 +944,16 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
 
   /**
    * Closes every subagent's pi without reporting anything about their turns,
-   * for a session that is ending. Their open approvals are cancelled, because
-   * those cards could never be answered.
+   * for a session that is ending, and reports each one's Token Usage so far.
+   * Their open approvals are cancelled, because those cards could never be
+   * answered.
    */
   const endAllSubagents = (held: Held): void => {
     for (const subagent of held.subagents.values()) {
       cancelParksOf(held, subagent);
+      // The subagent's record keeps what it spent so far. Its turn gets no
+      // event, but its Token Usage is known, not made up.
+      for (const event of buildUsageEvents(subagent.state)) emit(event);
       closeProcess(subagent.child);
     }
     held.subagents.clear();
@@ -895,11 +964,11 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * It sends pi's `prompt` command directly instead of a session input, because
    * an input would show up in the transcript as a message the user never wrote.
    */
-  const askAgain = (held: Held): void => {
-    const state = held.root.state;
+  const askAgain = (held: Held, agent: RunningAgent): void => {
+    const state = agent.state;
     state.reprompts += 1;
     Effect.runFork(
-      Effect.catch(held.root.rpc.send({ type: "prompt", message: REPROMPT }), (error) =>
+      Effect.catch(agent.rpc.send({ type: "prompt", message: REPROMPT }), (error) =>
         Effect.sync(() => {
           // Nothing will end this turn now, so end it here. A turn left open
           // would make the session look busy forever.
@@ -915,19 +984,19 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * answer, so it ends with a result that reports the schema failure instead
    * of looping on the validator forever.
    */
-  const stopAsking = (held: Held): void => {
+  const stopAsking = (held: Held, agent: RunningAgent): void => {
     warn(
       held.binding.sessionId,
       `pi rejected ${String(MAX_REFUSED_ANSWERS)} calls to ${SUBMIT_RESULT_TOOL} because their arguments do not match this session's output schema, so the turn was ended after the last one`,
     );
-    Effect.runFork(abortTurn(held.root, "schema"));
+    Effect.runFork(abortTurn(agent, "schema"));
   };
 
   /**
    * Checks whether `agent` is still one of `held`'s running agents. Lines from
    * a pi the adapter has already let go of are ignored.
    */
-  const isRunning = (held: Held, agent: PiProcess): boolean =>
+  const isRunning = (held: Held, agent: RunningAgent): boolean =>
     sessions.get(held.binding.sessionId) === held &&
     (!isSubagent(agent) || held.subagents.get(agent.subagentId) === agent);
 
@@ -941,13 +1010,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * subagent with nobody to work for. A subagent's own turn ending ends the
    * subagent, and its last message goes to its parent as the reply.
    */
-  const onLine = (held: Held, agent: PiProcess, line: string, frame: unknown): void => {
+  const onLine = (held: Held, agent: RunningAgent, line: string, frame: unknown): void => {
     if (!isRunning(held, agent)) return;
     // When the turn still owes an answer, pi settling does not end the turn.
     // The normalizer never sees this settle, so the turn stays open while the
     // runner re-prompts.
     if (announcesAgentSettled(frame) && owesAnswer(agent.state)) {
-      askAgain(held);
+      askAgain(held, agent);
       return;
     }
     const dialog = parseDialog(frame);
@@ -978,9 +1047,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // pi no longer holds the call once the turn ends, so an approval card
         // left open could never be answered.
         cancelParksOf(held, agent);
-        for (const subagent of listStartedBy(held, agent)) {
-          endSubagent(held, subagent, { state: "interrupted" }, undefined);
-        }
+        endSubagentsStartedBy(held, agent);
       }
       emit(event);
     }
@@ -997,7 +1064,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       agent.state.refusedAnswers >= MAX_REFUSED_ANSWERS &&
       agent.state.endedBySystem === undefined
     ) {
-      stopAsking(held);
+      stopAsking(held, agent);
     }
   };
 
@@ -1007,7 +1074,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * session; a subagent's pi exiting ends that subagent, and its parent gets
    * the error as the reply.
    */
-  const watchChild = (held: Held, agent: PiProcess): void => {
+  const watchChild = (held: Held, agent: RunningAgent): void => {
     const child = agent.child;
     const complaints: Array<string> = [];
     const drained = (async () => {
@@ -1082,7 +1149,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
 
   const buildEnv = (
     ctx: ProviderRunnerContext,
-    extra: Readonly<Record<string, string>> = {},
+    extra: Readonly<Record<string, string | undefined>> = {},
   ): Record<string, string | undefined> => {
     const key = ctx.secrets[ZAI_KEY.secret];
     const env: Record<string, string | undefined> = {
@@ -1093,6 +1160,9 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       PI_SKIP_VERSION_CHECK: "1",
       ...extra,
     };
+    // An extra variable given as undefined is removed, even when the
+    // runner's own environment sets it.
+    for (const [name, value] of Object.entries(extra)) if (value === undefined) delete env[name];
     // Use the instance's key or no key at all. The runner's own environment
     // may contain a key, and an instance with no key entered would then run on
     // that key and report itself as logged in.
@@ -1115,13 +1185,17 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   ): Record<string, string | undefined> =>
     buildEnv(ctx, {
       [ACCESS_MODE_VARIABLE]: spec.accessMode,
-      ...(depth < MAX_SUBAGENT_DEPTH ? { [SUBAGENTS_VARIABLE]: "1" } : {}),
+      // Both variables are given even when they do not apply, as undefined,
+      // so `buildEnv` removes them. A runner started from inside a pi session
+      // would otherwise pass that session's values on.
+      [SUBAGENTS_VARIABLE]: depth < MAX_SUBAGENT_DEPTH ? "1" : undefined,
       // The schema goes in the environment, not the command line, so the
       // arguments stay exactly as this adapter built them, whatever the schema
       // contains.
-      ...(spec.outputSchema === undefined || depth > 0
-        ? {}
-        : { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema) }),
+      [OUTPUT_SCHEMA_VARIABLE]:
+        spec.outputSchema === undefined || depth > 0
+          ? undefined
+          : JSON.stringify(spec.outputSchema),
     });
 
   const probe = makeProbe(seam.spawn, seam.run);
@@ -1205,7 +1279,14 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           try: () => {
             prepareHome(ctx, sessionId, spec);
             return seam.spawn(
-              [binary, ...buildArgv(spec, ctx, spec.modelSelection, { sessionId, transcript })],
+              [
+                binary,
+                ...buildArgv(spec, ctx, spec.modelSelection, {
+                  kind: "session",
+                  sessionId,
+                  transcript,
+                }),
+              ],
               buildAgentEnv(ctx, spec, 0),
               // The session's working directory. pi resolves every relative
               // path against the directory it starts in, so a child that
@@ -1228,7 +1309,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         const state = buildNormalizingState(sessionId, nativeSessionId, spec.outputSchema);
         state.model = spec.modelSelection.model;
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
-        const root: PiProcess = {
+        const root: RunningAgent = {
           child,
           rpc: makeRpc(child, (line, frame) => onLine(held, root, line, frame)),
           state,
@@ -1238,6 +1319,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           binding,
           spec,
           ctx,
+          binary,
           root,
           subagents: new Map(),
           parks: new Map(),
@@ -1323,9 +1405,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // Stop all work in the session: every subagent, then the session's
         // own turn. The subagents get no reply, because the abort below also
         // ends the calls waiting for them.
-        for (const subagent of listStartedBy(held, held.root)) {
-          endSubagent(held, subagent, { state: "interrupted" }, undefined);
-        }
+        endSubagentsStartedBy(held, held.root);
         // Cancel the open approvals first. Nobody denied the calls; their
         // turn was stopped. An approval hook still waiting for an answer would
         // keep the turn open through the abort meant to end it.

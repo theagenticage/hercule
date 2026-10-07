@@ -613,6 +613,30 @@ const judgeTurn = (state: Normalizing, ended: TurnState): StructuredResult | und
 };
 
 /**
+ * Builds the usage events an agent's state reports: the session's total, and
+ * before it, for a subagent, the subagent's own count. The session total
+ * includes every agent of the session, so it is reported whichever agent
+ * changed it. Exported because the adapter also reports a subagent's count
+ * when the session ends while the subagent runs.
+ */
+export const buildUsageEvents = (state: Normalizing): ReadonlyArray<ProviderEvent> => [
+  ...(state.subagentId === undefined
+    ? []
+    : [
+        {
+          _tag: "session.usage.updated" as const,
+          ...buildAgentEnvelope(state),
+          usage: buildUsage(state.agentTotals),
+        },
+      ]),
+  {
+    _tag: "session.usage.updated",
+    ...buildSessionEnvelope(state),
+    usage: buildUsage(state.sessionTotals),
+  },
+];
+
+/**
  * Ends the turn in flight and every item still running in it, and resets the
  * turn state. `ended` overrides how the turn ended. Returns the closing
  * events, or none when no turn is in flight. Exported because the adapter
@@ -639,26 +663,9 @@ export const endTurn = (
   state.answer = undefined;
   state.reprompts = 0;
   state.refusedAnswers = 0;
-  // A subagent's usage is reported twice: its own, attributed to it, and the
-  // session's total, which now includes it.
-  const subagentUsage: ReadonlyArray<ProviderEvent> =
-    state.subagentId === undefined
-      ? []
-      : [
-          {
-            _tag: "session.usage.updated",
-            ...buildAgentEnvelope(state),
-            usage: buildUsage(state.agentTotals),
-          },
-        ];
   return [
     ...closing,
-    ...subagentUsage,
-    {
-      _tag: "session.usage.updated",
-      ...buildSessionEnvelope(state),
-      usage: buildUsage(state.sessionTotals),
-    },
+    ...buildUsageEvents(state),
     {
       _tag: "turn.completed",
       ...buildAgentEnvelope(state),
@@ -721,7 +728,7 @@ export const normalize = (
         },
       ];
     }
-    case "turn_end":
+    case "turn_end": {
       // pi reports usage per assistant message and its tool calls, so both the
       // turn's cost and the session's are summed here.
       addUsage(state.turnTotals, event.message?.usage);
@@ -729,11 +736,11 @@ export const normalize = (
       addUsage(state.sessionTotals, event.message?.usage);
       // A message that only calls tools has no text, and the reply is the
       // last message that says something.
-      if (readMessageText(event.message) !== "") {
-        state.lastAssistantText = readMessageText(event.message);
-      }
+      const text = readMessageText(event.message);
+      if (text !== "") state.lastAssistantText = text;
       recordStop(state, event.message);
       return warnIfCutOff(state, event.message);
+    }
     case "agent_end":
       // pi is about to run again in the same turn, so ending the turn here
       // would report it as over while it is still going.
