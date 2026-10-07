@@ -40,8 +40,10 @@ import {
   createValidationError,
   type Assistant,
   type Forbidden,
+  type Heartbeat,
   type InvalidState,
   type NotFound,
+  type Rotation,
   type SortDirection,
   type Unauthenticated,
   type Validation,
@@ -67,6 +69,7 @@ import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository } from "../providers";
 import { SessionService, sessionRepository } from "../sessions";
+import { validateTimezone } from "../settings";
 import {
   DEFAULT_ACCESS_MODE,
   DEFAULT_DISALLOWED_TOOLS,
@@ -134,6 +137,39 @@ const composeAssistant = (
   reply: fields.reply,
   mainConversationId,
 });
+
+/**
+ * Checks that the time zones of `heartbeat` and `rotation`, where either is
+ * given and sets one, are zones this runtime knows. Fails with a
+ * `Validation` error at the zone's path otherwise.
+ *
+ * The contract bounds only the zone's length. A heartbeat beats, and a
+ * rotation rotates, in its zone, so a zone the runtime does not know would
+ * leave the schedule unable to run.
+ *
+ * On an update, `stored` holds the assistant's saved heartbeat and rotation,
+ * and a zone equal to the saved one is not checked. A zone saved before this
+ * check existed, or one a later runtime dropped, then stays editable: a
+ * client sends the whole heartbeat to change its prompt, and that change
+ * must not fail on a zone the user did not touch.
+ */
+const validateScheduleTimezones = (
+  fields: {
+    readonly heartbeat?: Heartbeat | undefined;
+    readonly rotation?: Rotation | undefined;
+  },
+  stored?: { readonly heartbeat: Heartbeat; readonly rotation: Rotation },
+): Effect.Effect<void, Validation> =>
+  Effect.gen(function* () {
+    const heartbeatZone = fields.heartbeat?.timezone;
+    if (heartbeatZone !== undefined && heartbeatZone !== stored?.heartbeat.timezone) {
+      yield* validateTimezone(heartbeatZone, ["heartbeat", "timezone"]);
+    }
+    const rotationZone = fields.rotation?.timezone;
+    if (rotationZone !== undefined && rotationZone !== stored?.rotation.timezone) {
+      yield* validateTimezone(rotationZone, ["rotation", "timezone"]);
+    }
+  });
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -304,6 +340,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("assistant.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
+        yield* validateScheduleTimezones(decoded);
         const selection = yield* buildModelSelection(decoded.model, decoded.options);
         const composeAgent = yield* buildAgentRecordComposer;
         return yield* withTransaction(
@@ -401,7 +438,8 @@ const make = Effect.gen(function* () {
             // Read first, so that an unknown id fails with `not_found` before
             // its fields are checked, instead of an update that changes no
             // rows and reports success.
-            yield* readAssistantOrFail(id);
+            const { fields: stored } = yield* readAssistantOrFail(id);
+            yield* validateScheduleTimezones({ heartbeat, rotation }, stored);
             if (agentEdit.instanceId !== undefined) {
               yield* readProviderIdOrFail(agentEdit.instanceId);
             }

@@ -219,6 +219,31 @@ describe("assistant.create", () => {
       what: "a profile that does not exist",
       fields: { name: "Ada", permissionProfileId: NOBODY },
     },
+    {
+      what: "a heartbeat timezone the runtime does not know",
+      fields: {
+        name: "Ada",
+        heartbeat: {
+          enabled: true,
+          schedule: "0 9 * * *",
+          timezone: "Mars/Olympus",
+          prompt: "Check in.",
+          target: "web",
+        },
+      },
+    },
+    {
+      what: "a rotation timezone the runtime does not know",
+      fields: {
+        name: "Ada",
+        rotation: {
+          contextFraction: 0.7,
+          maxContextTokens: 200000,
+          dailyAt: "04:00",
+          timezone: "Mars/Olympus",
+        },
+      },
+    },
   ])("rejects $what as a validation error", async ({ fields }) => {
     await withAssistants(async (arranged) => {
       const refused = await readErrorBody(await requestCreate(arranged, fields));
@@ -367,12 +392,47 @@ describe("assistant.update", () => {
       what: "a heartbeat schedule that is not a cron expression",
       fields: { heartbeat: { ...HEARTBEAT, schedule: "nope" } },
     },
+    {
+      what: "a heartbeat timezone the runtime does not know",
+      fields: { heartbeat: { ...HEARTBEAT, timezone: "Mars/Olympus" } },
+    },
+    {
+      what: "a rotation timezone the runtime does not know",
+      fields: { rotation: { ...ROTATION, timezone: "Mars/Olympus" } },
+    },
   ])("rejects $what as a validation error", async ({ fields }) => {
     await withAssistants(async (arranged) => {
       const created = await createAssistant(arranged, { name: "Ada" });
 
       const refused = await readErrorBody(await requestUpdate(arranged, created.id, fields));
       expect(refused.code, refused.text).toBe("validation");
+    });
+  });
+
+  it("keeps a saved zone the runtime does not know editable, and refuses a new one", async () => {
+    await withAssistants(async (arranged) => {
+      const created = await createAssistant(arranged, { name: "Ada" });
+      // A zone saved before the controller checked zones.
+      const legacy = { ...HEARTBEAT, timezone: "Mars/Olympus" };
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`UPDATE assistants SET heartbeat = ${JSON.stringify(legacy)}
+                               WHERE agent_id = ${uuidFromString(created.id)}`,
+        ),
+      );
+
+      const kept = await requestUpdate(arranged, created.id, {
+        heartbeat: { ...legacy, prompt: "Only write when it matters." },
+      });
+      expect(kept.status, await kept.clone().text()).toBe(200);
+      expect(((await kept.json()) as Assistant).heartbeat.prompt).toBe(
+        "Only write when it matters.",
+      );
+
+      const moved = await requestUpdate(arranged, created.id, {
+        heartbeat: { ...legacy, timezone: "Venus/Maxwell" },
+      });
+      expect((await readErrorBody(moved)).code).toBe("validation");
     });
   });
 

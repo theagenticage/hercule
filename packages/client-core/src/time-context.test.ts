@@ -1,5 +1,6 @@
 import { assert, describe, it } from "vitest";
 import {
+  computeMinutesOfDay,
   chooseStamps,
   formatDay,
   formatDayStamp,
@@ -264,5 +265,32 @@ describe("formatDayStamp", () => {
     assert.isUndefined(formatDayStamp(new Date("not a date"), "UTC", NOW));
     assert.isUndefined(formatDayStamp(NOW, "UTC", new Date(Number.NaN)));
     assert.isUndefined(formatDayStamp(NOW, "Not/A_Zone", NOW));
+  });
+});
+
+describe("computeMinutesOfDay", () => {
+  const AT = new Date("2026-10-07T21:10:00Z");
+
+  it.each([
+    ["UTC", 21 * 60 + 10],
+    ["Europe/Amsterdam", 23 * 60 + 10],
+    // Kolkata is UTC+05:30 and Kathmandu UTC+05:45; both are on the next day.
+    ["Asia/Kolkata", 2 * 60 + 40],
+    ["Asia/Kathmandu", 2 * 60 + 55],
+    ["America/Los_Angeles", 14 * 60 + 10],
+  ])("reads the time of day in %s", (timezone, minutes) => {
+    assert.strictEqual(computeMinutesOfDay(AT, timezone), minutes);
+  });
+
+  it("reads midnight as 0, not 1440, in UTC and in another zone", () => {
+    assert.strictEqual(computeMinutesOfDay(new Date("2026-10-07T00:00:00Z"), "UTC"), 0);
+    assert.strictEqual(
+      computeMinutesOfDay(new Date("2026-10-06T22:00:00Z"), "Europe/Amsterdam"),
+      0,
+    );
+  });
+
+  it("returns undefined for a zone this runtime does not know", () => {
+    assert.isUndefined(computeMinutesOfDay(AT, "Mars/Olympus"));
   });
 });

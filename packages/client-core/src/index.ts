@@ -30,15 +30,37 @@ export {
 export {
   buildAssistantDraft,
   buildAssistantUpdate,
+  describeWhenAssistantChangesApply,
   dropSavedEdits,
   mergeAssistantEdits,
+  NEW_ASSISTANT_NAME,
   type AssistantDraft,
 } from "./assistants/form";
+export { setDisallowedTool } from "./assistants/disallowed-tools";
+export {
+  buildHeartbeatDay,
+  buildHeartbeatSchedule,
+  changeHeartbeatInterval,
+  computeHeartbeatNow,
+  listHeartbeatIntervalChoices,
+  moveHeartbeatEnd,
+  moveHeartbeatStart,
+  parseHeartbeatWindow,
+  type HeartbeatWindow,
+  type HeartbeatWindowEdit,
+} from "./assistants/heartbeat";
 export {
   decideAssistantPresence,
   findNewestConversationSession,
   type AssistantPresence,
 } from "./assistants/presence";
+export {
+  formatContextFraction,
+  formatTokenLimit,
+  listContextFractionChoices,
+  listContextTokenChoices,
+} from "./assistants/rotation";
+export { buildAssistantProviderField } from "./assistants/provider-field";
 export { buildAssistantRows, decideAssistantPose, type AssistantRow } from "./assistants/rows";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
@@ -299,6 +321,7 @@ export {
   type SubagentNode,
 } from "./subagents/tree";
 export { resolveThreadRowsMode } from "./thread-rows";
+export { findTimeOfDayError, formatTimeOfDay } from "./time-of-day";
 export { countUsedTokens, describeTokenUsage } from "./token-usage";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";

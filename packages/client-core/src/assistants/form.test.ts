@@ -1,5 +1,5 @@
 /**
- * Tests the assistant form's four functions:
+ * Tests the assistant form's five functions:
  * - `buildAssistantDraft(assistant)` fills the form from the stored assistant.
  * - `mergeAssistantEdits(assistant, edits, fields)` records an edit, and
  *   forgets one that is back at the stored value.
@@ -7,12 +7,15 @@
  *   changed, so a save leaves every other field as it is on the controller.
  * - `dropSavedEdits(edits, sent)` keeps the edits a landed save did not
  *   store, such as text typed while the save ran.
+ * - `describeWhenAssistantChangesApply(name)` says when each kind of saved
+ *   change reaches the session of the assistant `name`.
  */
 import { describe, expect, it } from "vitest";
 import type { Assistant } from "@hercule/contract";
 import {
   buildAssistantDraft,
   buildAssistantUpdate,
+  describeWhenAssistantChangesApply,
   dropSavedEdits,
   mergeAssistantEdits,
 } from "./form";
@@ -46,7 +49,14 @@ describe("buildAssistantDraft", () => {
       permissionProfileId: ADA.permissionProfileId,
       accessMode: "auto-accept-edits",
       reply: "turn-end",
+      model: null,
     });
+  });
+
+  it("holds the model's slug, without its options", () => {
+    const assistant = { ...ADA, model: { model: "claude-sonnet-5", options: { effort: "high" } } };
+
+    expect(buildAssistantDraft(assistant).model).toBe("claude-sonnet-5");
   });
 });
 
@@ -62,6 +72,10 @@ describe("mergeAssistantEdits", () => {
     expect(mergeAssistantEdits(ADA, { name: "Ada L" }, { name: "Ada Lovelace" })).toEqual({
       name: "Ada Lovelace",
     });
+  });
+
+  it("forgets a model edit that is back at the stored model", () => {
+    expect(mergeAssistantEdits(ADA, { model: "claude-opus-5" }, { model: null })).toEqual({});
   });
 
   it("drops a field whose new value equals the stored value, and keeps the others", () => {
@@ -90,6 +104,7 @@ describe("buildAssistantUpdate", () => {
       permissionProfileId: "01a06d02-3000-7000-8000-000000000002",
       accessMode: "full-access" as const,
       reply: "segments" as const,
+      model: "claude-sonnet-5",
     };
 
     expect(buildAssistantUpdate(ADA, draft)).toEqual(draft);
@@ -99,6 +114,27 @@ describe("buildAssistantUpdate", () => {
     const draft = { ...buildAssistantDraft(ADA), name: "Ada " };
 
     expect(buildAssistantUpdate(ADA, draft)).toEqual({ name: "Ada " });
+  });
+
+  it("sends no model when the draft keeps the stored one", () => {
+    const assistant = { ...ADA, model: { model: "claude-sonnet-5", options: { effort: "high" } } };
+    const draft = { ...buildAssistantDraft(assistant), name: "Ada L" };
+
+    expect(buildAssistantUpdate(assistant, draft)).toEqual({ name: "Ada L" });
+  });
+
+  it("sends a changed model, and null to go back to the instance's default", () => {
+    const assistant = { ...ADA, model: { model: "claude-sonnet-5", options: {} } };
+
+    expect(
+      buildAssistantUpdate(assistant, {
+        ...buildAssistantDraft(assistant),
+        model: "claude-opus-5",
+      }),
+    ).toEqual({ model: "claude-opus-5" });
+    expect(
+      buildAssistantUpdate(assistant, { ...buildAssistantDraft(assistant), model: null }),
+    ).toEqual({ model: null });
   });
 
   it("leaves out a field changed and then changed back", () => {
@@ -124,9 +160,23 @@ describe("dropSavedEdits", () => {
     ).toEqual({ name: "Ada Lovelace" });
   });
 
+  it("drops a saved model edit, including one back to the default model", () => {
+    expect(dropSavedEdits({ model: null, name: "Ada L" }, { model: null })).toEqual({
+      name: "Ada L",
+    });
+  });
+
   it("keeps an edit the save did not send", () => {
     expect(dropSavedEdits({ name: "Ada L", accessMode: "auto" }, { name: "Ada L" })).toEqual({
       accessMode: "auto",
     });
+  });
+});
+
+describe("describeWhenAssistantChangesApply", () => {
+  it("names the assistant whose session a resume or a new session picks the change up in", () => {
+    expect(describeWhenAssistantChangesApply("Ada")).toBe(
+      "Reply applies at once. Access mode and permission profile apply when Ada's session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.",
+    );
   });
 });

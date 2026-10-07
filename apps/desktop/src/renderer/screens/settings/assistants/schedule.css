@@ -1,0 +1,118 @@
+/* The Heartbeat and Rotation sections, from the Bureau book's Assistants page
+   (desktop/settings-assistants.html). The book's short class names, such as
+   `.inline` and `.day`, would reach any element of the app that uses them,
+   so each rule here carries a name of its own and says which of the book's
+   rules it follows. */
+.set-sec h2 .toggle {
+  margin-left: auto;
+}
+
+/* A sentence with controls in it: "Every 1 h from 07:00 to 23:00 in Web
+   chat". It wraps in a narrow window, so no control is clipped. The book's
+   `.inline`. */
+.schedule-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+}
+.schedule-sentence .field {
+  height: 30px;
+  padding: 0 10px;
+  font-variant-numeric: tabular-nums;
+}
+/* Not in the book, whose fields are text that is exactly as wide as it. A
+   real input or select is as wide as the browser decides, so each one here
+   is sized to the text it shows. */
+.schedule-sentence input.field,
+.schedule-sentence .field--select > select {
+  field-sizing: content;
+}
+/* The select reaches the field's edges, as controls.css draws it, but this
+   field's padding is 10px rather than 11px. When an icon comes first, the
+   select reaches back over it too: the 13px icon and the 8px gap. */
+.schedule-sentence .field--select > select {
+  margin: 0 -25px 0 -10px;
+  padding: 0 25px 0 10px;
+}
+.schedule-sentence .field--select > .ic + select {
+  margin-left: -31px;
+  padding-left: 31px;
+}
+
+/* The heartbeat window drawn on a 24-hour day. Where the window starts and
+   how wide it is come from the schedule, so they are set on each element.
+   The book's `.day`, `.day-window`, `.day-now` and `.day-axis`. */
+.heartbeat-day {
+  position: relative;
+  height: 30px;
+  margin-top: 2px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.heartbeat-day-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: var(--r-sm);
+  background: var(--who-tint);
+}
+/* Not in the book, which draws the beats as a stripe pattern across the
+   window, one every 1/16 of it. A pattern only fits a window whose beats are
+   evenly spaced from its left edge, so each beat is its own tick here, the
+   same 2px by 10px, centred on the bar. A tick at the window's end is drawn
+   just inside it, which the book's pattern leaves out. */
+.heartbeat-day-beat {
+  position: absolute;
+  top: 10px;
+  width: 2px;
+  height: 10px;
+  background: var(--who);
+}
+.heartbeat-day-beat[data-end] {
+  transform: translateX(-100%);
+}
+.heartbeat-day-now {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+.heartbeat-day-axis {
+  position: relative;
+  height: 16px;
+  margin-top: 5px;
+  /* Not in the book, where the axis ends the section. Here the prompt row
+     follows it, so the axis keeps the same space below it as the schedule
+     sentence does. */
+  margin-bottom: 14px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.heartbeat-day-axis span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+/* The book sets this colour on the element itself. */
+.heartbeat-day-axis b {
+  color: var(--ink);
+}
+
+/* Not in the book: a short line under the lead, in a fainter colour, such
+   as the one that says the schedule is saved but not run yet. The lead's
+   12px below it and this line's -9px above it collapse to 3px, so the line
+   reads as part of the lead. Its line is 18px tall, a whole number of
+   pixels, so the rows below it keep sitting on whole pixels and their text
+   is drawn as sharply as without the line. */
+.set-sec > p.schedule-note {
+  margin-top: -9px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 18px;
+}

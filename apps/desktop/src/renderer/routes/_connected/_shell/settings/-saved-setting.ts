@@ -2,16 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import type { SettingsPatch } from "@hercule/contract";
 import { settingsQuery } from "../../../../app/queries";
-
-/** One setting that saves when its control changes. */
-export interface SavedSetting<Value> {
-  /** The value the control shows: the one being saved while a save runs, else `stored`. */
-  readonly value: Value;
-  /** Why the last save failed, or `null` when it did not. */
-  readonly error: string | null;
-  /** Saves `value` on the controller. */
-  readonly save: (value: Value) => void;
-}
+import type { SavedField } from "../../../../app/saved-field";
 
 /**
  * Returns one setting of the controller's settings, whose control saves on
@@ -45,7 +36,7 @@ export function useSavedSetting<Value>(
   client: HerculeClient,
   stored: Value,
   buildPatch: (value: Value) => SettingsPatch,
-): SavedSetting<Value> {
+): SavedField<Value> {
   const queryClient = useQueryClient();
   const { queryKey } = settingsQuery(client);
   const mutation = useMutation({

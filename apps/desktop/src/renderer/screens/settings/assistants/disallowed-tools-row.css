@@ -1,0 +1,47 @@
+/* The Disallowed tools row, from the Bureau book's Assistants page
+   (desktop/settings-assistants.html). The book's `.tools` and `.chip`
+   would reach the thread's tool blocks and every other chip of the app, so
+   the rules carry names of their own, and the chip rules hold only inside
+   this row. */
+.disallowed-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Not in the book, whose row holds one chip. With five chips the row would
+     clip in a narrow window, so the chips wrap onto a second line. */
+  flex-wrap: wrap;
+}
+.disallowed-tools .chip .ic {
+  margin-right: -3px;
+  opacity: 0.6;
+}
+
+/* The book draws the × as an icon. Here it is a button that removes the
+   chip, exactly the size of its icon. Not in the book: it turns to full
+   strength while hovered, so the pointer shows what it will remove. */
+.disallowed-tools .chip > button {
+  display: inline-flex;
+  color: inherit;
+}
+.disallowed-tools .chip > button:hover .ic {
+  opacity: 1;
+}
+
+/* Not in the book, which draws Add as a plain button. Here a native select
+   covers the button, invisible, so a click anywhere on it opens the macOS
+   menu of the families not chosen yet, and the button keeps the book's
+   look. The ring shows on the button while the select has keyboard focus. */
+.disallowed-tools-add {
+  position: relative;
+}
+.disallowed-tools-add > select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  appearance: none;
+  cursor: default;
+}
+.disallowed-tools-add:has(> select:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

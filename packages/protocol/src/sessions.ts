@@ -102,12 +102,12 @@ export const ModelSelection = Schema.Struct({
 export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
 
 /**
- * A family of harness tools a session may have taken away from it. This is
- * Hercule's own vocabulary, and it is coarse on purpose. Each adapter maps a
- * family onto the names its harness gives those tools. A harness that cannot
- * take a family away declares that, and does not pretend to enforce it.
+ * The families of harness tools a session may have taken away from it. This
+ * is Hercule's own vocabulary, and it is coarse on purpose. Each adapter maps
+ * a family onto the names its harness gives those tools. A harness that
+ * cannot take a family away declares that, and does not pretend to enforce it.
  */
-const TOOL_FAMILIES = ["edit", "write", "shell", "web-search", "web-fetch"] as const;
+export const TOOL_FAMILIES = ["edit", "write", "shell", "web-search", "web-fetch"] as const;
 
 export type DisallowedTool = (typeof TOOL_FAMILIES)[number];
 

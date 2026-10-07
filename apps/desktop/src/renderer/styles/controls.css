@@ -8,7 +8,8 @@
 /* One doctrine for every button:
    - .btn          a neutral tablet. The default for an answer that does something.
    - .btn--accent  the one suggested answer of a group. The only filled button anywhere.
-   - .btn--quiet   declines and dismissals: text until hovered. */
+   - .btn--quiet   declines and dismissals: text until hovered.
+   - .btn--danger  an answer that destroys or deletes: red ink on the neutral tablet. */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -54,6 +55,9 @@
 .btn--quiet:hover {
   background: var(--hover);
   color: var(--ink);
+}
+.btn--danger {
+  color: var(--fail-ink);
 }
 /* A smaller button, for answers inside a row or a card, such as a queued
    message's Steer and Cancel. */
@@ -257,6 +261,24 @@
   background: var(--you);
 }
 
+/* ---------- Chips ---------- */
+/* A small pill naming one thing in a list of a few, such as a tool family an
+   assistant may never use. The book also has tinted variants; the app draws
+   only the plain chip so far. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+
 /* ---------- Inputs ---------- */
 .field {
   display: flex;
@@ -363,11 +385,14 @@ input.field[type="password"]:not(:placeholder-shown) {
 .fl .field {
   height: 36px;
 }
+/* The padding is zeroed because the browser gives an input 2px of its own,
+   which would put its text 2px right of the book's text in a field. */
 .field > input,
 .field > select {
   flex: 1;
   min-width: 0;
   height: 100%;
+  padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
@@ -416,6 +441,38 @@ input.field[type="password"]:not(:placeholder-shown) {
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
   font-size: var(--t-12);
+}
+
+/* An on and off switch, such as whether an assistant's heartbeat runs. It is
+   a button with role="switch", and aria-checked holds its state. */
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  flex: none;
+  transition: background var(--dur-2);
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
+  transition: transform var(--dur-2) var(--ease-spring);
+}
+/* On is ink, not green: green is kept for passing tests and added lines. */
+.toggle[aria-checked="true"] {
+  background: var(--ink);
+}
+.toggle[aria-checked="true"]::after {
+  background: var(--raised);
+  transform: translateX(14px);
 }
 
 /* ---------- Text ---------- */

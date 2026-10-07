@@ -4,6 +4,7 @@ import {
   buildAssistantDraft,
   buildAssistantUpdate,
   buildIdOptions,
+  describeWhenAssistantChangesApply,
   dropSavedEdits,
   mergeAssistantEdits,
   type AssistantDraft,
@@ -217,9 +218,7 @@ export function AssistantForm({
         {/* A running harness keeps what it was started with, so the form says
             when each kind of change takes effect rather than letting a saved
             access mode look like it already applies. */}
-        <p className="text-fine text-faint">
-          {`Reply applies at once. Access mode and permission profile apply when ${assistant.name}'s session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.`}
-        </p>
+        <p className="text-fine text-faint">{describeWhenAssistantChangesApply(assistant.name)}</p>
 
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" variant="form" disabled={update.isPending || !hasChanges}>
