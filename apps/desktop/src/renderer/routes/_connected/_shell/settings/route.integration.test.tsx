@@ -154,8 +154,9 @@ describe("the Settings list", () => {
   });
 
   it("draws the rows of sections not built yet as buttons that do nothing", async () => {
-    const { calls, router } = await startApp({ path: "/settings/profile" });
+    const { calls, router, live } = await startApp({ path: "/settings/profile" });
     const list = await findSettingsList();
+    await live.waitForFirstPushes();
     const sent = calls.length;
 
     for (const name of INERT_ROWS) {

@@ -7,7 +7,7 @@ import { Effect, Fiber, Schema } from "effect";
 import type { LiveMessage } from "@hercule/contract";
 import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
 import {
-  collectMessages,
+  collectPushes,
   completeSetup,
   del,
   expectHeld,
@@ -352,7 +352,7 @@ describe("live messages about a provider instance", () => {
       await onSocket(harness.base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const providers = yield* collectMessages(client, { topic: "provider" });
+          const providers = yield* collectPushes(client, "provider");
           yield* Effect.promise(() => expectHeld(harness.live, 1, "provider"));
 
           // Changes are coalesced over a short window, so two writes back to

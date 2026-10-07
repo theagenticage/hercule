@@ -181,10 +181,11 @@ export const queryKeys = {
 
 /**
  * Returns the query keys to invalidate for a push on a mutable topic. A push
- * with no ids means every record of the topic may have changed (a reconnect
- * assumes this), so it returns the list and record prefixes rather than one
- * key per record. `conversationIds` is the push's map from each session to its
- * conversation, which only a `session` push carries.
+ * with no ids means every record of the topic may have changed (the
+ * controller sends one first on every subscription), so it returns the list
+ * and record prefixes rather than one key per record. `conversationIds` is
+ * the push's map from each session to its conversation, which only a
+ * `session` push carries.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,

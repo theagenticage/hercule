@@ -129,8 +129,8 @@ const openConversation = async ({
   await waitFor(() => {
     expect(app.live.readTopics()).toContain("conversation");
   });
-  // The live connection's first socket tells every subscriber that it may
-  // have missed pushes, so the page reads the newest messages a second time.
+  // The controller's first push on the subscription says every conversation
+  // may have changed, so the page reads the newest messages a second time.
   await waitFor(() => {
     expect(findPageReads(calls)).toHaveLength(2);
   });
@@ -618,8 +618,8 @@ describe("the Conversation's pages", () => {
     expect(afterPush.map((call) => new URLSearchParams(call.search).get("cursor"))).toEqual([null]);
     expect(readHeldPositions(context.queryClient)).toEqual(range(1, 61));
 
-    // The push after a reconnect names no conversation, so it reaches every
-    // one, this one too.
+    // The controller's first push on a subscription names no conversation,
+    // so it reaches every one, this one too.
     messages.push(buildReply(62, "Message 62"));
     act(() => {
       live.pushInvalidation("conversation");
@@ -696,6 +696,42 @@ describe("the Conversation's pages", () => {
 });
 
 describe("the Conversation's live topics", () => {
+  it("shows a reply that lands between its first read and its subscription, when opened while connected", async () => {
+    // The Conversation reads its messages over HTTP, then subscribes on the
+    // connection the shell already holds. A reply stored in between is
+    // pushed to nobody; the controller's first push on the subscription is
+    // what makes the page read it.
+    const messages = [QUESTION];
+    const reply = buildReply(2, "The backup finished at 03:12.");
+    const calls = stubApi({
+      ...buildSidebarHandlers({
+        ...NO_SIDEBAR_RECORDS,
+        assistants: [{ assistant: ADA, session: null }],
+      }),
+      ...buildConversationHandlers({ assistant: ADA, session: null, messages }),
+      // The reply is stored right after the first read is answered.
+      [`GET ${MESSAGES_PATH}`]: () => {
+        const answer = { body: { items: [...messages].reverse() } };
+        if (!messages.includes(reply)) messages.push(reply);
+        return answer;
+      },
+    });
+    const { router, live } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+    );
+    await live.waitForFirstPushes();
+    expect(findPageReads(calls)).toHaveLength(0);
+
+    await act(() =>
+      router.navigate({ to: "/assistants/$assistantId", params: { assistantId: ADA.id } }),
+    );
+
+    await waitFor(() => {
+      expect(readBlocks().at(-1)).toContain("The backup finished at 03:12.");
+    });
+    expect(findPageReads(calls)).toHaveLength(2);
+  });
+
   it("follows a new current session to its own stream", async () => {
     const NEXT_ID = "01a06d02-a100-7000-8000-000000000004";
     let session: Session = buildAdaSession();

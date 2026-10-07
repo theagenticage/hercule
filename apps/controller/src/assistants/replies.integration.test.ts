@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect, Fiber } from "effect";
 import type { Assistant } from "@hercule/contract";
 import {
-  collectMessages,
+  collectPushes,
   expectHeld,
   fetchTicket,
   onSocket,
@@ -166,7 +166,7 @@ describe("the live nudge of a reply", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const nudges = yield* collectMessages(client, { topic: "conversation" });
+          const nudges = yield* collectPushes(client, "conversation");
           yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, "conversation"));
 
           // One reply per turn, with the live window between them, so each

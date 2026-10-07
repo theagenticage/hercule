@@ -8,7 +8,9 @@
  * - opens immediately;
  * - records every frame the client sends;
  * - replies to the three messages the transport needs to work: its keepalive
- *   ping, `hello` and `ping`.
+ *   ping, `hello` and `ping`;
+ * - answers each subscription to a mutable topic with the push the
+ *   controller sends first, which says every record may have changed.
  *
  * The test drives everything else.
  *
@@ -16,6 +18,7 @@
  * package's unit tests and both apps' integration tests use it. It is
  * imported as `@hercule/client-core/testing`, which no app code imports.
  */
+import { isAppendOnlyLiveTopic, type LiveMessage, type LiveTopic } from "@hercule/contract";
 
 /** The server version the stub replies to `hello` with, so a test can assert on it. */
 export const STUB_SERVER_VERSION = "0.1.0";
@@ -177,6 +180,14 @@ export class StubSocket {
         requestId: frame.id,
         exit: { _tag: "Success", value: {} },
       });
+    } else if (frame.tag === "subscribe") {
+      const topic = (frame.payload as { readonly topic: LiveTopic }).topic;
+      if (isAppendOnlyLiveTopic(topic)) return;
+      const first: LiveMessage =
+        topic === "session"
+          ? { _tag: "invalidate", ids: [], kind: "updated", conversationIds: {} }
+          : { _tag: "invalidate", ids: [], kind: "updated" };
+      this.chunk(frame.id, [first]);
     }
   }
 

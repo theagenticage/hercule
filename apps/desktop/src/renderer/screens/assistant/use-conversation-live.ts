@@ -19,8 +19,8 @@ import { readMessagePage, removeQueryOnceUnobserved, storeNewestMessages } from 
  * it in the Conversation's screen: the shell does not subscribe to the
  * topic, so a push costs nothing while no Conversation is open.
  *
- * A push that names this conversation, or names none, as the push after a
- * reconnect does:
+ * A push that names this conversation, or names none, as the controller's
+ * first push on every subscription does:
  *
  * - reads the newest page of messages, and merges it into the pages held
  *   (see `storeNewestMessages`). The pages read earlier are never read
@@ -29,8 +29,8 @@ import { readMessagePage, removeQueryOnceUnobserved, storeNewestMessages } from 
  *   can come from a session that has just started.
  *
  * When the read of the newest page fails, the pages held stay as they are.
- * The next push reads the newest page again, and the live connection sends
- * one after every reconnect.
+ * The next push reads the newest page again, and the controller sends one
+ * each time the topic is subscribed again, after every reconnect.
  *
  * When the calling component unmounts, the pages of messages held are
  * dropped, after the topic is left (see `removeQueryOnceUnobserved`). Only

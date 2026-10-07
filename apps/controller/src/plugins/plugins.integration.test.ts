@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema";
 import type { LiveMessage } from "@hercule/contract";
 import { HOST_API, registerEventSource, type Plugin } from "@hercule/plugin-host";
 import {
-  collectMessages,
+  collectPushes,
   completeSetup,
   expectHeld,
   get,
@@ -382,7 +382,7 @@ describe("what a live subscriber receives about a plugin", () => {
       await onSocket(harness.base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const plugins = yield* collectMessages(client, { topic: "plugin" });
+          const plugins = yield* collectPushes(client, "plugin");
           yield* Effect.promise(() => expectHeld(harness.live, 1, "plugin"));
 
           // One subscription for all five changes, and each message is awaited

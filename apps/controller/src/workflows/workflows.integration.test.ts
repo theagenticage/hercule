@@ -29,7 +29,7 @@ import {
 } from "@hercule/contract";
 import { nestInLists } from "@hercule/protocol/testing";
 import {
-  collectMessages,
+  collectPushes,
   del,
   expectHeld,
   get,
@@ -1296,7 +1296,7 @@ describe("a workflow subscription", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const workflowPushes = yield* collectMessages(client, { topic: "workflow" });
+          const workflowPushes = yield* collectPushes(client, "workflow");
           yield* Effect.promise(() => expectHeld(harness.live, 1, "workflow"));
 
           /**

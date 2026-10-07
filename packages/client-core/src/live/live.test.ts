@@ -5,9 +5,11 @@
  * reconnect schedule, the keepalive, and what a subscription does after its
  * connection is gone. So the socket here is a stub that also plays the
  * server. It records what the client sends and replies only to what the
- * transport needs (its keepalive, `hello` and `ping`). The test triggers every
- * push and every failure, so the tests check only the supervisor's reaction,
- * never the controller's.
+ * transport needs (its keepalive, `hello` and `ping`), plus the push the
+ * controller sends first on every mutable subscription, which says every
+ * record may have changed. The test triggers every other push and every
+ * failure, so the tests check only the supervisor's reaction, never the
+ * controller's.
  *
  * All timers are fake. The reconnect schedule and the 30-second keepalive are
  * the behaviour under test, and waiting for them in real time would make the
@@ -352,7 +354,7 @@ describe("createLive", () => {
     assert.strictEqual(socket.closedWith, null);
   });
 
-  it("resubscribes from the last cursor and invalidates everything watched before any new push", async () => {
+  it("resubscribes from the last cursor after a reconnect, and adds no invalidation of its own", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -393,8 +395,9 @@ describe("createLive", () => {
     assert.deepStrictEqual(eventAgain?.payload, { topic: "event", cursor: "7" });
     assert.deepStrictEqual(taskAgain?.payload, { topic: "task" });
 
-    // Every key of the topic is invalidated once, before the connection
-    // delivered any push.
+    // The controller's first push on the new subscription invalidates every
+    // key of the topic. It is the only invalidation: the client sends none of
+    // its own, so a reconnect costs one refetch, not two.
     assert.strictEqual(invalidations.length, invalidatedBeforeDrop + 1);
     const onReconnect = invalidations[invalidatedBeforeDrop];
     assert.deepStrictEqual(sortKeys(onReconnect ?? []), sortKeys(buildQueryKeys("task", [])));
@@ -402,17 +405,17 @@ describe("createLive", () => {
     reopened.chunk(taskAgain?.id, [{ _tag: "invalidate", ids: ["task-9"], kind: "updated" }]);
     await settleTimers();
 
-    assert.strictEqual(invalidations.length, 2);
+    assert.strictEqual(invalidations.length, invalidatedBeforeDrop + 2);
     assert.deepStrictEqual(
-      sortKeys(invalidations[1] ?? []),
+      sortKeys(invalidations.at(-1) ?? []),
       sortKeys(buildQueryKeys("task", ["task-9"])),
     );
   });
 
-  it("invalidates everything for a subscriber that subscribed before the first connection", async () => {
+  it("invalidates everything once for a subscriber that subscribed before the first connection", async () => {
     // A screen that mounted before the socket was open fetched over HTTP and
-    // then subscribed. It cannot know what was pushed in between, so the first
-    // connection must tell it to refetch, as a reconnect does.
+    // then subscribed. It cannot know what was pushed in between, so the
+    // controller's first push on the subscription tells it to refetch.
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);
 
@@ -425,7 +428,7 @@ describe("createLive", () => {
     assert.strictEqual(invalidations.length, 1);
     assert.deepStrictEqual(sortKeys(invalidations[0] ?? []), sortKeys(buildQueryKeys("task", [])));
 
-    // And the invalidation came before the connection delivered anything.
+    // A push made after that one is passed on as it comes.
     const socket = readLastSocket();
     const call = socket.calls("subscribe")[0];
     assert.isDefined(call);
@@ -478,7 +481,8 @@ describe("createLive", () => {
     await settleTimers();
     started.subscribe("task", (keys) => invalidations.push(keys));
 
-    // No invalidation yet: it happens when the next connection opens.
+    // No invalidation yet: the controller sends it once the next connection
+    // has made the subscription.
     assert.strictEqual(invalidations.length, 0);
 
     await vi.advanceTimersByTimeAsync(1000);
@@ -486,6 +490,29 @@ describe("createLive", () => {
 
     assert.strictEqual(invalidations.length, 1);
     assert.deepStrictEqual(sortKeys(invalidations[0] ?? []), sortKeys(buildQueryKeys("task", [])));
+  });
+
+  it("invalidates everything once for a subscriber that subscribed while the connection was open", async () => {
+    // A screen opened while connected reads over HTTP and then subscribes. A
+    // change made between that read and the subscription is pushed to nobody,
+    // so the controller's first push on the subscription makes the screen
+    // read again. An assistant's Conversation, opened from the sidebar, is
+    // such a screen.
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("conversation", (keys) => invalidations.push(keys));
+    await settleTimers();
+
+    assert.strictEqual(invalidations.length, 1);
+    assert.deepStrictEqual(
+      sortKeys(invalidations[0] ?? []),
+      sortKeys(buildQueryKeys("conversation", [])),
+    );
+    // The subscription was made on the open connection, not on a new one.
+    assert.strictEqual(opened.length, 1);
+    assert.strictEqual(socket.calls("subscribe").length, 1);
   });
 
   it("drops a rejected cursor, resubscribes from the head and tells the handler", async () => {
@@ -593,7 +620,7 @@ describe("createLive", () => {
     assert.isTrue(invalidations.length > 0, "the unrelated subscription stopped receiving pushes");
   });
 
-  it("waits before resubscribing a subscriber that hit a cap, and then invalidates everything", async () => {
+  it("waits before resubscribing a subscriber that hit a cap, and then invalidates everything once", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -614,9 +641,10 @@ describe("createLive", () => {
     await settleTimers();
     assert.strictEqual(socket.calls("subscribe").length, 2);
 
-    // There is no way to know what was dropped, so every key of the topic is
-    // invalidated, as after a reconnect. It happens after the wait, so the
-    // refetch also sees what changed during it.
+    // There is no way to know what was dropped. The controller's first push
+    // on the new subscription invalidates every key of the topic, as after a
+    // reconnect. It comes after the wait, so the refetch also sees what
+    // changed during it.
     assert.strictEqual(invalidations.length, beforeCap + 1);
     assert.deepStrictEqual(
       sortKeys(invalidations[beforeCap] ?? []),
@@ -774,6 +802,7 @@ describe("createLive", () => {
     const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
     const off = started.subscribe("task", (keys) => invalidations.push(keys));
     await settleTimers();
+    const beforeOff = invalidations.length;
 
     const call = socket.calls("subscribe")[0];
     off();
@@ -783,7 +812,7 @@ describe("createLive", () => {
 
     socket.chunk(call?.id, [{ _tag: "invalidate", ids: ["task-1"], kind: "created" }]);
     await settleTimers();
-    assert.strictEqual(invalidations.length, 0);
+    assert.strictEqual(invalidations.length, beforeOff);
   });
 });
 

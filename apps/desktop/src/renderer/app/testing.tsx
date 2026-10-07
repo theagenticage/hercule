@@ -9,7 +9,7 @@
  * tests.
  */
 import { afterEach, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { Live } from "@hercule/client-core";
 import {
@@ -1227,6 +1227,13 @@ export interface LiveStub {
   readonly resetStream: (sessionId: string) => void;
   /** Closes the app's current socket from the controller's end, as a restart or a sleep does. */
   readonly drop: () => void;
+  /**
+   * Waits until the app's socket is open with the shell's subscriptions, the
+   * controller's first push on each has arrived, and the reads those pushes
+   * started have finished. A test that counts the app's requests calls it
+   * first, so the reads the first pushes cause are not counted as its own.
+   */
+  readonly waitForFirstPushes: () => Promise<void>;
 }
 
 /**
@@ -1312,6 +1319,19 @@ const buildTestContext = async (
     },
     drop: () => {
       readSocket().drop();
+    },
+    waitForFirstPushes: async () => {
+      await waitFor(() => {
+        if (!live.isConnected() || !live.readTopics().includes("session")) {
+          throw new Error("the shell has not subscribed yet");
+        }
+      });
+      // The stub answers a subscription in a microtask, and the reads the
+      // answer starts begin after it is decoded, so let those run first.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitFor(() => {
+        if (context.queryClient.isFetching() > 0) throw new Error("reads are still running");
+      });
     },
   };
   return { context, live };

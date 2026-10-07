@@ -22,7 +22,7 @@
  * Projects, workspaces and resources have no live topic yet (#279 adds
  * them). After a reconnect, pushes may have been lost while the connection
  * was down, so they are read again then (the topics' own reads are read again
- * by the live connection itself). A change made elsewhere, such as a project
+ * on the controller's first push on each subscription). A change made elsewhere, such as a project
  * renamed from the CLI, shows at the next reconnect, or when the thread list
  * names a record the cache does not hold (see `useRelatedReads`).
  */
@@ -47,10 +47,10 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
  * Subscribes to the shell's topics, then starts the live connection, and
  * stops it when the calling component unmounts. Call it once, in the shell.
  *
- * The subscriptions are made before the connection starts. Right after it
- * connects, the live connection reads again every read a subscription covers,
- * because pushes sent between the loader's reads and the connection were
- * lost. A subscription made after that moment would miss that read.
+ * Pushes sent between the loader's reads and a subscription are lost. The
+ * controller covers that gap: its first push on every subscription, on every
+ * new connection, says that every record of the topic may have changed, so
+ * every read the subscription covers is read again.
  *
  * It also reacts to the connection's status:
  *
@@ -103,16 +103,16 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
 /**
  * Keeps the subagents of the thread `sessionId` current while the calling
  * component is mounted: subscribes to the `subagent` topic, whose pushes
- * invalidate the subagent lists they name, and reads the thread's list again
- * once subscribed. Does nothing while `sessionId` is null.
+ * invalidate the subagent lists they name. Does nothing while `sessionId` is
+ * null.
  *
  * The topic is held only while a thread is open, because only a thread shows
- * subagents (spec 17 §What subagents cost). The list is read again because
- * pushes sent while the topic was not held were lost, and a subscription
- * made after the live connection connected gets no read of its own from it
- * (see `useLiveConnection`). A list cached by an earlier visit would
- * otherwise stay as it was. The cost is one more read each time a thread
- * opens, right after its loader read the list.
+ * subagents (spec 17 §What subagents cost). Pushes sent while the topic was
+ * not held were lost, so a list cached by an earlier visit may be out of
+ * date. The controller's first push on the subscription names no session,
+ * which invalidates every subagent list, so the open thread's list is read
+ * again then. The cost is one more read each time a thread opens, right
+ * after its loader read the list.
  */
 export const useSubagentsLive = (
   live: Live,
@@ -121,10 +121,8 @@ export const useSubagentsLive = (
 ): void => {
   useEffect(() => {
     if (sessionId === null) return;
-    const unsubscribe = live.subscribe("subagent", (keys) => {
+    return live.subscribe("subagent", (keys) => {
       for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
     });
-    invalidateWithoutCancelling(queryClient, queryKeys.subagents(sessionId));
-    return unsubscribe;
   }, [live, queryClient, sessionId]);
 };

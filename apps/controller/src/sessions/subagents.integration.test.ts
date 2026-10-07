@@ -25,7 +25,7 @@ import type {
 } from "@hercule/protocol";
 import type { Session, Subagent } from "@hercule/contract";
 import {
-  collectMessages,
+  collectPushes,
   fetchTicket,
   get,
   onSocket,
@@ -463,7 +463,7 @@ describe("the open Requests of several agents", () => {
       await onSocket(arranged.harness.base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const announced = yield* collectMessages(client, { topic: "session" });
+          const announced = yield* collectPushes(client, "session");
           yield* Effect.promise(() => waitForLiveToSettle());
 
           // Out of the usual order, the introduction comes after the Request.
