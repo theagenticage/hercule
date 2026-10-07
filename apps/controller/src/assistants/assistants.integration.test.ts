@@ -219,6 +219,31 @@ describe("assistant.create", () => {
       what: "a profile that does not exist",
       fields: { name: "Ada", permissionProfileId: NOBODY },
     },
+    {
+      what: "a heartbeat timezone the runtime does not know",
+      fields: {
+        name: "Ada",
+        heartbeat: {
+          enabled: true,
+          schedule: "0 9 * * *",
+          timezone: "Mars/Olympus",
+          prompt: "Check in.",
+          target: "web",
+        },
+      },
+    },
+    {
+      what: "a rotation timezone the runtime does not know",
+      fields: {
+        name: "Ada",
+        rotation: {
+          contextFraction: 0.7,
+          maxContextTokens: 200000,
+          dailyAt: "04:00",
+          timezone: "Mars/Olympus",
+        },
+      },
+    },
   ])("rejects $what as a validation error", async ({ fields }) => {
     await withAssistants(async (arranged) => {
       const refused = await readErrorBody(await requestCreate(arranged, fields));
@@ -366,6 +391,14 @@ describe("assistant.update", () => {
     {
       what: "a heartbeat schedule that is not a cron expression",
       fields: { heartbeat: { ...HEARTBEAT, schedule: "nope" } },
+    },
+    {
+      what: "a heartbeat timezone the runtime does not know",
+      fields: { heartbeat: { ...HEARTBEAT, timezone: "Mars/Olympus" } },
+    },
+    {
+      what: "a rotation timezone the runtime does not know",
+      fields: { rotation: { ...ROTATION, timezone: "Mars/Olympus" } },
     },
   ])("rejects $what as a validation error", async ({ fields }) => {
     await withAssistants(async (arranged) => {

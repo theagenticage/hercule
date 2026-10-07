@@ -40,8 +40,10 @@ import {
   createValidationError,
   type Assistant,
   type Forbidden,
+  type Heartbeat,
   type InvalidState,
   type NotFound,
+  type Rotation,
   type SortDirection,
   type Unauthenticated,
   type Validation,
@@ -67,6 +69,7 @@ import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository } from "../providers";
 import { SessionService, sessionRepository } from "../sessions";
+import { validateTimezone } from "../settings";
 import {
   DEFAULT_ACCESS_MODE,
   DEFAULT_DISALLOWED_TOOLS,
@@ -134,6 +137,28 @@ const composeAssistant = (
   reply: fields.reply,
   mainConversationId,
 });
+
+/**
+ * Checks that the time zones of `heartbeat` and `rotation`, where either is
+ * given and sets one, are zones this runtime knows. Fails with a
+ * `Validation` error at the zone's path otherwise.
+ *
+ * The contract bounds only the zone's length. A heartbeat beats, and a
+ * rotation rotates, in its zone, so a zone the runtime does not know would
+ * leave the schedule unable to run.
+ */
+const validateScheduleTimezones = (fields: {
+  readonly heartbeat?: Heartbeat | undefined;
+  readonly rotation?: Rotation | undefined;
+}): Effect.Effect<void, Validation> =>
+  Effect.gen(function* () {
+    if (fields.heartbeat?.timezone !== undefined) {
+      yield* validateTimezone(fields.heartbeat.timezone, ["heartbeat", "timezone"]);
+    }
+    if (fields.rotation?.timezone !== undefined) {
+      yield* validateTimezone(fields.rotation.timezone, ["rotation", "timezone"]);
+    }
+  });
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -304,6 +329,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("assistant.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
+        yield* validateScheduleTimezones(decoded);
         const selection = yield* buildModelSelection(decoded.model, decoded.options);
         const composeAgent = yield* buildAgentRecordComposer;
         return yield* withTransaction(
@@ -381,6 +407,7 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           createDecodeValidationError,
         );
+        yield* validateScheduleTimezones({ heartbeat, rotation });
         const selection = yield* buildModelSelection(model, options);
         const agentEdit = { ...named, ...(selection === undefined ? {} : { model: selection }) };
         const fieldsEdit: AssistantFieldsEdit = {
