@@ -870,13 +870,13 @@ Each section lists what it reads and writes through the contract, its live topic
 
 **Assistants.** The book's `settings-assistants.html`.
 
-- Reads `assistant.query`, `provider.query` and `profile.query`. Writes `assistant.create`, `assistant.update` and `assistant.delete`. Live topics: `assistant` and `provider`.
+- Reads `assistant.query`, `provider.query` and `profile.query`, and *(amended 2026-10-07, [#414](https://github.com/theagenticage/hercule/issues/414)/[#415](https://github.com/theagenticage/hercule/issues/415))* `settings.read`: the user's time zone places the heartbeat timeline's "now" line when the heartbeat sets no time zone of its own. The profiles and the settings have no live topic, so the loader reads them each time the section opens. Writes `assistant.create`, `assistant.update` and `assistant.delete`. Live topics: `assistant` and `provider`.
 - The book's tabs, one per assistant, with its face and name, and New assistant in the header.
 - The book's profile block: the large face and the name.
 - How it works:
   - the web form's fields: name, persona (`systemPrompt`), provider instance and model, permission profile, access mode, and reply mode (Turn end or Segments);
   - disallowed tools, as the book's chips with Add, and an × on each chip;
-  - the delete move, at the foot of the section, with a confirmation.
+  - ~~the delete move, at the foot of the section, with a confirmation.~~ *(Amended 2026-10-07, [#414](https://github.com/theagenticage/hercule/issues/414).)* The delete move is its own section, "Delete `<name>`", at the foot of the page after Rotation, with a confirmation. At the foot of How it works it would sit between the fields and the Heartbeat, where a destructive move is easy to hit while editing.
 - **Heartbeat,** as the book draws it: the toggle, the lead, "Every `<n>` h from `<hh:mm>` to `<hh:mm>` in Web chat", and the day's timeline with a tick at each beat and a "now" line. Under it, the prompt the heartbeat sends.
   - The contract stores the schedule as a five-field cron expression. Two `client-core` functions, each with its own tests, convert between the two:
     - one that reads a cron expression as an interval and a window of hours, or answers that it is not one;
@@ -884,6 +884,7 @@ Each section lists what it reads and writes through the contract, its live topic
   - A schedule that is not an interval and a window, set from the CLI for one, shows as its cron expression, with the line "Set outside the app. Choosing an interval here replaces it."
   - The target is always Web chat, because `target` has no other value yet. The select is drawn with one choice.
 - **Rotation,** as the book draws it: "At `<n>`% of the context or `<n>`k tokens, and daily at `<hh:mm>`", from `contextFraction`, `maxContextTokens` and `dailyAt`.
+- *(Amended 2026-10-07, [#414](https://github.com/theagenticage/hercule/issues/414)/[#415](https://github.com/theagenticage/hercule/issues/415).)* Until the controller runs heartbeats and rotations ([#94](https://github.com/theagenticage/hercule/issues/94)), each of the two sections says so in one muted line under its lead, so the user is never told a schedule runs when it does not. The lines go when #94 lands.
 - Differs from the web screen: disallowed tools, heartbeat and rotation are new, because the web screen has no fields for them.
 - **Left out of the book's page,** because no operation reads or writes them, or the desktop has no screen for them:
   - the role beside each name ("personal", "ops"), because an assistant has no role;
@@ -1594,6 +1595,21 @@ The earlier sizes come from that commit's CI build; the final sizes come from th
 - The one-minute load average was 5.5 to 18.2 at the Before launches and 5.7 to 16.4 at the After launches, and 4.1 to 5.3 during the streaming traces, which waited for it to fall to about 4 before each run. Other worktrees' test runs were on the machine.
 
 **The assistant, slice 21: The Conversation** *(added 2026-10-07, [#454](https://github.com/theagenticage/hercule/issues/454))* shipped without being measured. Its rows in [What the assistant costs](#what-the-assistant-costs) stay open: live topics with a Conversation open while its assistant replies, work per streamed token while a reply streams, memory with a Conversation of 2,000 messages open, and idle with a Conversation open. They are measured in a later performance pass, together with slice 22's rows. The budgets guide the first milestone and do not gate it ([Performance](#performance)), so the slice does not wait for them.
+
+**Settings › Assistants,** measured 2026-10-07 on the reference machine with `pnpm build:desktop`'s size checks and one run of `apps/desktop/scripts/perf.ts`, on the working tree of branch `t3/desktop-settings-414-415`, for [#414](https://github.com/theagenticage/hercule/issues/414) and [#415](https://github.com/theagenticage/hercule/issues/415). The perf script now opens Settings › Assistants as well as Settings › Profile, so the row with Profile open is from the same run. The section adds no process, no timer, no polling and no live topic of its own: its loader reads the profiles and the settings each time it opens, and the assistants and the providers only when the cache does not hold them yet, and the heartbeat timeline's "now" line moves only when the section is opened again.
+
+| Measure | Budget | Profile open | Assistants open |
+|---|---|---|---|
+| Processes | none added | 4 | 4 |
+| The Assistants chunk, gzipped, not on the first screen | its own chunk | - | 11.3 kB of JavaScript and 0.6 kB of CSS, and the chunks it shares with the other sections |
+| Memory, 40 threads | summed 220 MB, renderer 100 MB | 226.3 MB summed: browser 54.0, GPU 110.3, network utility 7.8, renderer 54.2 | **267.3 MB** summed: browser 54.1, GPU 147.2, network utility 7.7, renderer 58.2 |
+| Idle, window visible | the idle row | renderer 0.9% of a core and 1 wakeup a second, GPU process 0% and 0; hidden, renderer 0 | renderer 0.4% of a core and 1 wakeup a second, GPU process 0% and 0; hidden, renderer 1 a second |
+| Launch, spawn to window shown | 500 ms | 379 ms | 363 ms; Settings is not on the launch path |
+
+- **Summed memory is over its budget with either section open,** by 6 MB with Profile and by 47 MB with Assistants. The renderer holds 4 MB more with Assistants open, for the section's reads and its longer page. The GPU process holds 37 MB more, and the cause is not found: the GPU process wakes 0 times a second with the section open, so no caret or animation is drawing. The budget is a guide during the first milestone ([Performance](#performance)), so the slice does not stop here.
+- **Accepted** (decided 2026-10-07, [#414](https://github.com/theagenticage/hercule/issues/414)/[#415](https://github.com/theagenticage/hercule/issues/415)): the section ships drawn as the book draws it, and the summed footprint stays over its budget while it is open. The budget is not raised. A later performance pass finds what the GPU process holds, together with the other GPU overages recorded here ([#301](https://github.com/theagenticage/hercule/issues/301), [#330](https://github.com/theagenticage/hercule/issues/330)).
+- **One run, not the median of three.** The numbers move by a few MB between runs; the slice 20 rows above read 220.4 to 221.9 MB summed for Profile across three runs.
+- **The one-minute load average was 2.1** at the Profile launch and **4.2** at the Assistants launch, from other programs on the machine.
 
 ## Slices
 
