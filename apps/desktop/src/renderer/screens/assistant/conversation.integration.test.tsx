@@ -216,14 +216,18 @@ const buildAnswerCompletedEvent = (itemId: string): EventBody => ({
 const buildTaps = (itemId: string, ...deltas: readonly string[]): TapItem[] =>
   deltas.map((delta) => ({ turnId: "turn-1", itemId, streamKind: "assistant_text", delta }));
 
-/** Returns Ada's reply at `position`, which the turn `turn-1` of her session wrote. */
-const buildReply = (position: number, text: string): ConversationMessage =>
+/**
+ * Returns Ada's reply at `position`, which the turn `turn-1` of her session
+ * wrote, holding the assistant message `itemId`.
+ */
+const buildReply = (position: number, itemId: string, text: string): ConversationMessage =>
   buildFixtureMessage(ADA, {
     position,
     text,
     senderRole: "assistant",
     sessionId: SESSION_ID,
     turnId: "turn-1",
+    itemId,
     actor: `session:${SESSION_ID}`,
   });
 
@@ -237,7 +241,7 @@ describe("an assistant's Conversation", () => {
           createdAt: "2026-09-09T16:00:00.000Z",
         }),
         {
-          ...buildReply(2, "Done. It runs at **03:00**."),
+          ...buildReply(2, "done", "Done. It runs at **03:00**."),
           createdAt: "2026-09-09T16:02:00.000Z",
         },
         buildFixtureMessage(ADA, { position: 3, text: "How did last night's backup go?" }),
@@ -320,7 +324,7 @@ describe("an assistant's Conversation", () => {
     act(() => {
       live.pushStreamRows(SESSION_ID, ended);
     });
-    messages.push(buildReply(2, "It ran at 03:00 and took 4 minutes."));
+    messages.push(buildReply(2, "answer", "It ran at 03:00 and took 4 minutes."));
     session = buildAdaSession({ status: "idle" });
     act(() => {
       live.pushInvalidation("conversation", [ADA.mainConversationId]);
@@ -339,7 +343,7 @@ describe("an assistant's Conversation", () => {
 
   it("shows only the text not stored yet while a reply in segments is written", async () => {
     const assistant: Assistant = { ...ADA, reply: "segments" };
-    const messages = [QUESTION, buildReply(2, "First, the backup ran.")];
+    const messages = [QUESTION, buildReply(2, "first", "First, the backup ran.")];
     const transcript = buildAdaTranscript(
       TURN_STARTED,
       ...buildAnswerStartEvents("first", "First, the backup ran."),
@@ -380,7 +384,7 @@ describe("an assistant's Conversation", () => {
         ),
       );
     });
-    messages.push(buildReply(3, "Then it was checked."));
+    messages.push(buildReply(3, "second", "Then it was checked."));
     act(() => {
       live.pushInvalidation("conversation", [ADA.mainConversationId]);
     });
@@ -606,7 +610,7 @@ describe("the Conversation's pages", () => {
     });
     const before = findPageReads(calls).length;
 
-    messages.push(buildReply(61, "Message 61"));
+    messages.push(buildReply(61, "m61", "Message 61"));
     act(() => {
       live.pushInvalidation("conversation", [ADA.mainConversationId]);
     });
@@ -620,7 +624,7 @@ describe("the Conversation's pages", () => {
 
     // The controller's first push on a subscription names no conversation,
     // so it reaches every one, this one too.
-    messages.push(buildReply(62, "Message 62"));
+    messages.push(buildReply(62, "m62", "Message 62"));
     act(() => {
       live.pushInvalidation("conversation");
     });

@@ -126,9 +126,12 @@ const buildMessage = (
   };
 };
 
-/** Builds the reply the controller stores for `turnId`. */
-const buildReply = (turnId: string, text = "stored"): ConversationMessage =>
-  buildMessage("assistant", { turnId, text });
+/**
+ * Builds a reply the controller stores for `turnId` that holds the assistant
+ * text `itemId`, or, with `itemId` null, the turn's texts joined.
+ */
+const buildReply = (turnId: string, itemId: string | null, text = "stored"): ConversationMessage =>
+  buildMessage("assistant", { turnId, itemId, text });
 
 /** Returns the open reply's shown items as "<itemId>:<rowText>". */
 const describeItems = (items: readonly { itemId: string; rowText: string }[]) =>
@@ -292,22 +295,46 @@ describe("decideOpenReply in turn-end mode", () => {
     expect(waiting?.openItemId).toBeNull();
 
     expect(
-      decide({ runningTurnRows: rows, session: IDLE, messages: [buildReply("t1")] }),
+      decide({ runningTurnRows: rows, session: IDLE, messages: [buildReply("t1", "a1")] }),
     ).toBeNull();
   });
 
-  it("shows nothing once the reply is stored, even before the turn's end arrives", () => {
-    // The controller stores a turn-end reply only when the turn ends, so the
-    // session still reading busy shows no caret either.
+  it("hides the stored text before the turn's end arrives, and shows the caret until it does", () => {
+    // A stored reply that holds one text does not end the turn: it may be a
+    // segment stored before the reply mode changed to turn-end, while the
+    // turn still runs. Only the turn's end row ends it.
     const rows = [buildTurnStarted("t1"), ...buildAssistantText("t1", "a1", "Done.")];
+    const messages = [buildReply("t1", "a1")];
 
-    expect(decide({ runningTurnRows: rows, messages: [buildReply("t1")] })).toBeNull();
+    expect(decide({ runningTurnRows: rows, messages })).toMatchObject({
+      turnId: "t1",
+      items: [],
+      openItemId: null,
+    });
+    const ended = [...rows, buildTurnCompleted("t1")];
+    expect(decide({ runningTurnRows: ended, messages })).toBeNull();
+  });
+
+  it("shows the text being written after segments stored before the mode changed", () => {
+    const rows = [
+      buildTurnStarted("t1"),
+      ...buildAssistantText("t1", "a1", "First."),
+      ...buildAssistantText("t1", "a2", "Second."),
+      buildItemStarted("t1", "a3"),
+      buildText("t1", "a3", "Thi"),
+    ];
+    const messages = [buildReply("t1", "a1", "First."), buildReply("t1", "a2", "Second.")];
+
+    const reply = decide({ runningTurnRows: rows, messages });
+
+    expect(describeItems(reply?.items ?? [])).toEqual(["a3:Thi"]);
+    expect(reply?.openItemId).toBe("a3");
   });
 
   it("ignores a stored reply of another turn", () => {
     const rows = [buildTurnStarted("t2"), ...buildAssistantText("t2", "a2", "Again.")];
 
-    const reply = decide({ runningTurnRows: rows, messages: [buildReply("t1")] });
+    const reply = decide({ runningTurnRows: rows, messages: [buildReply("t1", "a2")] });
 
     expect(describeItems(reply?.items ?? [])).toEqual(["a2:Again."]);
   });
@@ -394,6 +421,32 @@ describe("decideOpenReply in turn-end mode", () => {
     expect(reply?.openItemId).toBeNull();
   });
 
+  it("shows nothing once the joined reply of a stopped turn is stored", () => {
+    const rows = [
+      buildTurnStarted("t1"),
+      ...buildAssistantText("t1", "a1", "First."),
+      buildItemStarted("t1", "a2"),
+      buildText("t1", "a2", "Half"),
+      buildTurnCompleted("t1", "interrupted"),
+    ];
+    const messages = [buildReply("t1", null, "First.\n\nHalf")];
+
+    expect(decide({ runningTurnRows: rows, messages })).toBeNull();
+    expect(decide({ runningTurnRows: rows, messages, session: IDLE })).toBeNull();
+  });
+
+  it("ends the turn at its joined reply, even before the turn's end arrives", () => {
+    const rows = [
+      buildTurnStarted("t1"),
+      buildItemStarted("t1", "a1"),
+      buildText("t1", "a1", "Half"),
+    ];
+
+    expect(
+      decide({ runningTurnRows: rows, messages: [buildReply("t1", null, "Half")] }),
+    ).toBeNull();
+  });
+
   it("shows nothing under the notice when the session exited mid-turn", () => {
     const rows = [
       buildTurnStarted("t1"),
@@ -427,7 +480,11 @@ describe("decideOpenReply in segments mode", () => {
       ...buildAssistantText("t1", "a2", "Second."),
     ];
 
-    const reply = decide({ ...segments, runningTurnRows: rows, messages: [buildReply("t1")] });
+    const reply = decide({
+      ...segments,
+      runningTurnRows: rows,
+      messages: [buildReply("t1", "a1")],
+    });
 
     expect(describeItems(reply?.items ?? [])).toEqual(["a2:Second."]);
   });
@@ -446,7 +503,7 @@ describe("decideOpenReply in segments mode", () => {
     expect(reply?.openItemId).toBe("a2");
   });
 
-  it("matches stored replies to texts in the order the texts completed", () => {
+  it("hides the texts that completed before a stored one, as the controller stored them first", () => {
     const rows = [
       buildTurnStarted("t1"),
       buildItemStarted("t1", "a1"),
@@ -457,9 +514,31 @@ describe("decideOpenReply in segments mode", () => {
       buildItemCompleted("t1", "a1"),
     ];
 
-    const reply = decide({ ...segments, runningTurnRows: rows, messages: [buildReply("t1")] });
+    const first = decide({
+      ...segments,
+      runningTurnRows: rows,
+      messages: [buildReply("t1", "a2")],
+    });
+    expect(describeItems(first?.items ?? [])).toEqual(["a1:First."]);
 
-    expect(describeItems(reply?.items ?? [])).toEqual(["a1:First."]);
+    // a1 completed after a2, so a stored a1 means a2 was stored before it.
+    const both = decide({ ...segments, runningTurnRows: rows, messages: [buildReply("t1", "a1")] });
+    expect(both).toMatchObject({ items: [] });
+  });
+
+  it("shows no text of a turn whose first replies are on a page not read yet", () => {
+    // The newest page holds 50 messages: the replies for a2 to a51. The reply
+    // for a1 is on the page before it.
+    const texts = Array.from({ length: 51 }, (_, index) => `a${String(index + 1)}`);
+    const rows = [
+      buildTurnStarted("t1"),
+      ...texts.flatMap((itemId) => buildAssistantText("t1", itemId, `Text ${itemId}.`)),
+    ];
+    const messages = texts.slice(1).map((itemId) => buildReply("t1", itemId, `Text ${itemId}.`));
+
+    expect(decide({ ...segments, runningTurnRows: rows, messages })).toMatchObject({ items: [] });
+    const ended = [...rows, buildTurnCompleted("t1")];
+    expect(decide({ ...segments, runningTurnRows: ended, messages, session: IDLE })).toBeNull();
   });
 
   it("never shows a text the controller will not store", () => {
@@ -487,7 +566,12 @@ describe("decideOpenReply in segments mode", () => {
     ];
 
     expect(
-      decide({ ...segments, runningTurnRows: rows, session: IDLE, messages: [buildReply("t1")] }),
+      decide({
+        ...segments,
+        runningTurnRows: rows,
+        session: IDLE,
+        messages: [buildReply("t1", "a1")],
+      }),
     ).toBeNull();
   });
 
@@ -525,7 +609,7 @@ describe("decideOpenReply in segments mode", () => {
     ];
 
     expect(
-      decide({ ...segments, runningTurnRows: rows, messages: [buildReply("t1", "Stored.")] }),
+      decide({ ...segments, runningTurnRows: rows, messages: [buildReply("t1", "a1", "Stored.")] }),
     ).toBeNull();
   });
 
@@ -536,7 +620,11 @@ describe("decideOpenReply in segments mode", () => {
       buildRunningTool("t1", "tool1"),
     ];
 
-    const reply = decide({ ...segments, runningTurnRows: rows, messages: [buildReply("t1")] });
+    const reply = decide({
+      ...segments,
+      runningTurnRows: rows,
+      messages: [buildReply("t1", "a1")],
+    });
 
     expect(reply).toMatchObject({ key: "open-reply", items: [], openItemId: null });
   });
@@ -597,18 +685,38 @@ describe("decideOpenReply after the owner sends the next message", () => {
     ];
     const messages = [
       buildMessage("owner"),
-      buildReply("t1", "Done."),
+      buildReply("t1", "a1", "Done."),
       buildMessage("owner", { createdAt: LATER }),
     ];
 
     expect(decide({ runningTurnRows: rows, messages })).toEqual(NEXT_TURN_CARET);
   });
 
-  it("shows the caret alone when the stored reply ended the turn before its end row (turn-end)", () => {
-    const rows = [buildTurnStarted("t1"), ...buildAssistantText("t1", "a1", "Done.")];
-    const messages = [buildMessage("owner"), buildReply("t1", "Done."), buildMessage("owner")];
+  it("shows the caret alone when the joined reply ended the turn before its end row", () => {
+    const rows = [
+      buildTurnStarted("t1"),
+      buildItemStarted("t1", "a1"),
+      buildText("t1", "a1", "Half"),
+    ];
+    const messages = [buildMessage("owner"), buildReply("t1", null, "Half"), buildMessage("owner")];
 
     expect(decide({ runningTurnRows: rows, messages })).toEqual(NEXT_TURN_CARET);
+  });
+
+  it("shows the running turn's caret when a single-text reply arrived before the end row", () => {
+    // The stored reply does not end the turn, so the caret still stands for
+    // it until the turn's end row arrives.
+    const rows = [buildTurnStarted("t1"), ...buildAssistantText("t1", "a1", "Done.")];
+    const messages = [
+      buildMessage("owner"),
+      buildReply("t1", "a1", "Done."),
+      buildMessage("owner"),
+    ];
+
+    expect(decide({ runningTurnRows: rows, messages })).toEqual({
+      ...NEXT_TURN_CARET,
+      turnId: "t1",
+    });
   });
 
   it("shows the caret alone for the next turn once the last turn completed (segments)", () => {
@@ -617,7 +725,7 @@ describe("decideOpenReply after the owner sends the next message", () => {
       ...buildAssistantText("t1", "a1", "Done."),
       buildTurnCompleted("t1"),
     ];
-    const messages = [buildReply("t1", "Done."), buildMessage("owner", { createdAt: LATER })];
+    const messages = [buildReply("t1", "a1", "Done."), buildMessage("owner", { createdAt: LATER })];
 
     expect(decide({ reply: "segments", runningTurnRows: rows, messages })).toEqual(NEXT_TURN_CARET);
   });
@@ -639,7 +747,7 @@ describe("decideOpenReply after the owner sends the next message", () => {
       ...buildAssistantText("t1", "a1", "Done."),
       buildTurnCompleted("t1"),
     ];
-    const messages = [buildMessage("owner"), buildReply("t1", "Done.")];
+    const messages = [buildMessage("owner"), buildReply("t1", "a1", "Done.")];
 
     expect(decide({ runningTurnRows: rows, messages })).toBeNull();
     expect(decide({ reply: "segments", runningTurnRows: rows, messages })).toBeNull();
@@ -660,7 +768,7 @@ describe("buildConversationBlocks", () => {
 
   it("returns a block per stored message, by its sender, with its time", () => {
     const owner = buildMessage("owner");
-    const reply = buildReply("t1");
+    const reply = buildReply("t1", "a1");
     const notice = buildMessage("notice", { createdAt: "2026-10-07T09:05:00.000Z" });
 
     expect(build({ messages: [owner, reply, notice] })).toEqual([
@@ -751,7 +859,7 @@ describe("buildConversationBlocks", () => {
     ];
     const messages = [
       buildMessage("owner"),
-      buildReply("t1", "Half an ans"),
+      buildReply("t1", null, "Half an ans"),
       buildMessage("notice", { turnId: null, text: "Ada was interrupted: its turn was stopped" }),
     ];
 

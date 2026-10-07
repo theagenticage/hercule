@@ -15,7 +15,9 @@
  * text not stored yet, so no text is drawn twice. Which text the controller
  * stores depends on the assistant's reply mode, so the open reply follows the
  * same rules (see `decideOpenReply`). Text is never compared: a stored reply
- * is matched to the turn's text by `turnId` and by count.
+ * names the assistant text it holds by its `itemId`, the id the text's
+ * transcript rows carry, or holds every text of its turn when its `itemId` is
+ * null.
  */
 import type { Assistant, ConversationMessage, Session, TranscriptRow } from "@hercule/contract";
 import { formatMessageTime } from "../threads/message-time";
@@ -110,7 +112,10 @@ interface RunningTurn {
   readonly turnId: string;
   /** In the order the items were placed. */
   readonly texts: readonly AssistantText[];
-  /** The ids of the texts that completed, in the order they completed. */
+  /**
+   * The ids of the texts that completed, in the order they completed. In
+   * `segments` mode the controller stores texts in this order.
+   */
   readonly completedIds: readonly string[];
   /** The text whose first text row came last, or `null` when no text has a row. */
   readonly lastText: AssistantText | null;
@@ -231,9 +236,9 @@ const readRunningTurn = (
 };
 
 /**
- * Returns the running turn's texts that no stored reply holds yet, when the
- * controller stores one reply per turn (`turn-end`). Returns none once the
- * turn has a stored reply. Otherwise:
+ * Returns the running turn's texts that the controller stores, or has stored,
+ * when it stores one reply per turn (`turn-end`). The caller hides those a
+ * stored reply holds already. The texts are:
  *
  * - While the turn runs, the text the assistant is still writing, when it is
  *   the last one placed. Its words are in the tail until it completes, so its
@@ -245,8 +250,7 @@ const readRunningTurn = (
  *   the controller then stores them all, joined.
  * - None when the turn was cut short: the controller stores no reply then.
  */
-const listTurnEndTexts = (turn: RunningTurn, storedCount: number): readonly AssistantText[] => {
-  if (storedCount > 0) return [];
+const listTurnEndTexts = (turn: RunningTurn): readonly AssistantText[] => {
   if (turn.end !== null && turn.end.state !== "completed") {
     return turn.end.state === null ? [] : turn.texts.filter((text) => text.rowText !== "");
   }
@@ -257,47 +261,53 @@ const listTurnEndTexts = (turn: RunningTurn, storedCount: number): readonly Assi
 
 /**
  * Returns the running turn's texts that no stored reply holds yet, when the
- * controller stores a reply per text (`segments`). The controller stores a
- * text when it completes with status `completed` and holds text, in the order
- * texts complete. So the first `storedCount` such texts are stored, and the
- * texts shown are:
+ * controller stores a reply per text (`segments`). `storedItemIds` are the
+ * texts the turn's stored replies hold.
  *
- * - the other texts that the controller will store;
+ * The controller stores a text when it completes with status `completed` and
+ * holds text, so texts are stored in the order they complete. A stored text
+ * therefore means every text that completed before it is stored too. That
+ * holds even when the messages read so far do not reach those earlier
+ * replies, as when the turn stored more replies than one page of messages
+ * holds. The texts shown are:
+ *
+ * - the texts that completed after the last stored one and that the
+ *   controller will store;
  * - the texts the assistant is still writing, while the turn runs.
  *
  * A text that failed, was declined, or holds no text is never stored, and a
  * text cut off by the turn's end is never completed, so neither shows.
  */
-const listSegmentTexts = (turn: RunningTurn, storedCount: number): readonly AssistantText[] => {
-  const willBeStored = (text: AssistantText): boolean =>
-    text.status === "completed" && text.rowText !== "";
-  const storedIds = new Set(
-    turn.completedIds
-      .filter((itemId) => turn.texts.some((text) => text.itemId === itemId && willBeStored(text)))
-      .slice(0, storedCount),
-  );
+const listSegmentTexts = (
+  turn: RunningTurn,
+  storedItemIds: ReadonlySet<string>,
+): readonly AssistantText[] => {
+  const lastStored = turn.completedIds.findLastIndex((itemId) => storedItemIds.has(itemId));
   return turn.texts.filter((text) =>
-    text.status === null ? turn.end === null : willBeStored(text) && !storedIds.has(text.itemId),
+    text.status === null
+      ? turn.end === null
+      : text.status === "completed" &&
+        text.rowText !== "" &&
+        turn.completedIds.indexOf(text.itemId) > lastStored,
   );
 };
 
 /**
  * Checks whether the owner sent a message after the running turn ended, so
  * the session, while busy, is about to start the turn that answers it. The
- * end is the row that ended the turn, compared by time, or, in `turn-end`
- * mode before that row has arrived, the turn's stored reply, compared by
- * position. Returns false while the turn has not ended.
+ * end is the row that ended the turn, compared by time, or, before that row
+ * has arrived, the turn's joined reply (`joinedReply`), compared by position.
+ * Returns false while the turn has not ended.
  */
 const isOwnerMessageAfterTurnEnd = (
   messages: readonly ConversationMessage[],
   turn: RunningTurn,
-  storedReplies: readonly ConversationMessage[],
+  joinedReply: ConversationMessage | undefined,
 ): boolean => {
   const ownerMessage = messages.findLast((message) => message.senderRole === "owner");
   if (ownerMessage === undefined) return false;
   if (turn.end !== null) return Date.parse(ownerMessage.createdAt) > Date.parse(turn.end.at);
-  const storedReply = storedReplies.at(-1);
-  return storedReply !== undefined && ownerMessage.position > storedReply.position;
+  return joinedReply !== undefined && ownerMessage.position > joinedReply.position;
 };
 
 /**
@@ -311,23 +321,31 @@ const isOwnerMessageAfterTurnEnd = (
  *   `trimToRunningTurn`).
  * - `session` is the current session, or `null` when there is none.
  * - `reply` is the assistant's reply mode, which decides what is shown:
- *   - `turn-end`: the turn's newest text, until a reply with the turn's id
- *     is stored;
- *   - `segments`: the turn's texts after the first k, where k is the number
- *     of replies with the turn's id stored.
+ *   - `turn-end`: the turn's newest text, or every text when the turn
+ *     failed or was stopped (see `listTurnEndTexts`);
+ *   - `segments`: the turn's texts that completed after the last stored one,
+ *     and the texts being written (see `listSegmentTexts`).
  * - `pose` is the assistant's pose, from `decideAssistantPose`, which the
  *   open reply's face shows.
  *
  * The texts follow the rules the controller stores replies by, so the open
  * reply never shows text that will not be stored (see `readRunningTurn`).
+ * A text is hidden once a stored reply of the turn holds it: a reply with the
+ * turn's `turnId` and the text's `itemId`. A reply with the turn's `turnId`
+ * and a null `itemId` is a joined reply: it holds every text of the turn, so
+ * nothing of the turn is shown once it is stored. Both rules apply in either
+ * mode, because a change of mode applies at once, also to a running turn.
  *
  * While the session is `busy`, an open reply with no text, the caret alone,
  * is returned:
  *
  * - while the turn has not ended: its rows hold no `turn.completed`, no
- *   later `session.exited` or `session.started`, and, in `turn-end` mode, no
- *   reply with its id is stored. That covers a turn that is only using tools
- *   and a turn waiting on a Request;
+ *   later `session.exited` or `session.started`, and no joined reply of the
+ *   turn is stored. That covers a turn that is only using tools and a turn
+ *   waiting on a Request. A stored reply that holds one text does not end
+ *   the turn, because it may be a segment stored before the mode changed to
+ *   `turn-end`. So in `turn-end` mode the caret alone shows from the moment
+ *   the turn's reply is stored until its `turn.completed` row arrives;
  * - when the rows hold no turn yet;
  * - when the turn has ended and the owner sent a message after its end. That
  *   covers the moment between the owner's message and the next turn's first
@@ -358,16 +376,22 @@ export const decideOpenReply = (input: {
   const storedReplies = input.messages.filter(
     (message) => message.senderRole === "assistant" && message.turnId === turn.turnId,
   );
-  // In `turn-end` mode a reply is stored only when its turn ends, so a stored
-  // reply ends the turn even while its `turn.completed` row is on its way.
-  const ended = turn.end !== null || (input.reply === "turn-end" && storedReplies.length > 0);
-  if (ended && busy && isOwnerMessageAfterTurnEnd(input.messages, turn, storedReplies)) {
+  // A joined reply is stored only when its turn ends, so it ends the turn
+  // even while the turn's `turn.completed` row is on its way.
+  const joinedReply = storedReplies.find((message) => message.itemId === null);
+  const storedItemIds = new Set(
+    storedReplies.flatMap(({ itemId }) => (itemId === null ? [] : [itemId])),
+  );
+  const ended = turn.end !== null || joinedReply !== undefined;
+  if (ended && busy && isOwnerMessageAfterTurnEnd(input.messages, turn, joinedReply)) {
     return caret;
   }
   const shown =
-    input.reply === "turn-end"
-      ? listTurnEndTexts(turn, storedReplies.length)
-      : listSegmentTexts(turn, storedReplies.length);
+    joinedReply !== undefined
+      ? []
+      : input.reply === "turn-end"
+        ? listTurnEndTexts(turn).filter((text) => !storedItemIds.has(text.itemId))
+        : listSegmentTexts(turn, storedItemIds);
   if (shown.length === 0 && (ended || !busy)) return null;
 
   const openItemId = ended ? null : findOpenItem(input.runningTurnRows);
