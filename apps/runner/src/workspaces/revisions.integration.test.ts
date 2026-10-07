@@ -590,6 +590,7 @@ describe("revision and coordination recovery boundaries", () => {
       const remote = makeRemote();
       const storageDir = createTemporaryDir("hercule-cold-local-home-");
       const trace = join(storageDir, "git-trace");
+      writeFileSync(trace, "");
       const manager = makeWorkspaces({ storageDir, gitEnv: { GIT_TRACE: trace } });
       const resourceId = createId();
       const frame = buildProvisionFrame({
