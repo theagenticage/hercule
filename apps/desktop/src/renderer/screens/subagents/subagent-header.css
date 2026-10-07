@@ -1,8 +1,8 @@
 /* A subagent's page: a crumb from the thread down to the subagent. The
    rules are the subagents prototype's `.proto-crumbs`, `.proto-crumb-here`
    and `.proto-tag` (commit 6253a529, variant D, the tinted crumb). The
-   pills, the tabs and how a tab that is not open gives way are the thread
-   header's (thread-header.css). */
+   header, the tabs and how a tab that is not open gives way are the thread
+   header's (../session/floating-header.css, ../thread/thread-header.css). */
 .subagent-crumb {
   display: inline-flex;
   align-items: center;

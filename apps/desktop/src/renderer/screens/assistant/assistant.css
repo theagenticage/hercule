@@ -1,7 +1,7 @@
 /* The assistant's page (assistant-screen.tsx). The header and the view under
-   it are the thread screen's `.top`, `.pill` and `.transcript`
-   (thread-header.css, thread.css); these rules are what the Bureau book's
-   desktop/assistant.html adds to them. */
+   it are a session's `.top`, `.pill` and `.transcript`
+   (../session/floating-header.css, ../session/transcript.css); these rules
+   are what the Bureau book's desktop/assistant.html adds to them. */
 
 /* The header's one pill: the assistant's face, name and pose word. */
 .pill--who {
@@ -62,4 +62,86 @@
   margin: 0;
   color: var(--muted);
   line-height: 1.5;
+}
+
+/* The Conversation (conversation.tsx): a session's `.transcript`, `.column`
+   and `.tx`, with the book's `.tx.atx`. The book's column is a flex column
+   with a 20px gap, `--block-gap` here, which conversation.tsx's `BLOCK_GAP`
+   must equal. Each block is an item of the virtualizer, so the gap is the
+   item's own top padding, the first item's too: a block then keeps its
+   height when earlier messages are added above it. The column's top padding
+   is the header's clearance less that gap, so the first block still starts
+   where the book's does. */
+.tx.atx {
+  --block-gap: 20px;
+  padding-top: calc(var(--header-clearance) - var(--block-gap));
+}
+.atx-item {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--block-gap);
+}
+
+/* The day stamp above the first message of each day. */
+.stamp {
+  display: flex;
+  justify-content: center;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A reply's name line: the assistant's name in its hue, then the time, or
+   what the reply being written is doing. */
+.msg-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+  color: var(--who-ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  user-select: none;
+}
+.msg-name small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+/* A notice: a line the controller stored, such as a turn that failed,
+   beside the assistant's face in the failed pose. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  align-self: center;
+  max-width: 560px;
+  padding: 8px 14px 8px 8px;
+  border-radius: var(--r-lg);
+  background: var(--fail-tint);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.notice .time {
+  margin-left: 6px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+/* The caret after the paragraph the assistant is writing, alone while the
+   reply has no text yet. It is drawn after the paragraph rather than inside
+   it, because the live hook replaces the paragraph's children as text
+   streams. Unlike the book's, it does not blink: an animation keeps the
+   window drawing frames for as long as a reply is open (spec 17, rule 2). */
+.atx .streaming::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: var(--who-ink);
+  vertical-align: -3px;
 }

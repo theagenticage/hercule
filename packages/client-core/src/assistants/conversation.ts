@@ -1,6 +1,7 @@
 /**
  * The reads behind an assistant's conversation screen: which conversation it
- * shows, the messages it draws and the time separators above them, which
+ * shows, the messages it draws and the time separators above them, how a
+ * fresh read of the newest messages joins the pages already held, which
  * assistant a session answered, and whether a session's queued inputs may be
  * steered or cancelled.
  */
@@ -17,13 +18,117 @@ export const findWebConversation = (items: readonly Conversation[]): Conversatio
 /**
  * Flattens the pages of `conversation.queryMessages` into one list of
  * messages, oldest first. The screen reads its pages newest first, so the
- * latest messages load first and "Show earlier messages" adds a page of older
- * ones.
+ * latest messages load first and each page read after them adds older ones.
  */
 export const flattenMessagePages = (
   pages: ReadonlyArray<{ readonly items: readonly ConversationMessage[] }>,
 ): readonly ConversationMessage[] =>
   pages.flatMap((page) => page.items).sort((a, b) => a.position - b.position);
+
+/** One page of `conversation.queryMessages`, newest first. `nextCursor` reads the page before it. */
+export interface MessagePage {
+  readonly items: readonly ConversationMessage[];
+  readonly nextCursor?: string;
+}
+
+/**
+ * The pages of a conversation's messages a screen holds, newest page first,
+ * with the cursor each page was read with: `undefined` for the newest page.
+ * It has the shape of TanStack Query's `InfiniteData`, so a screen can store
+ * the result of `mergeNewestMessagePage` in its query cache as it is.
+ */
+export interface MessagePages {
+  pages: MessagePage[];
+  pageParams: (string | undefined)[];
+}
+
+/**
+ * Checks whether a message (`fresh`) joins the held pages without a gap: it
+ * is the newest held message (`heldNewest`), an older one, or the one right
+ * after it. Positions count up by one, so anything later means messages were
+ * stored in between that the held pages do not hold. Returns false when
+ * either message is missing.
+ */
+const joinsHeldMessages = (
+  heldNewest: ConversationMessage | undefined,
+  fresh: ConversationMessage | undefined,
+): boolean =>
+  heldNewest !== undefined && fresh !== undefined && fresh.position <= heldNewest.position + 1;
+
+/**
+ * Joins a fresh read of the newest page of messages (`newest`) into the pages
+ * a screen holds (`held`), and returns the new pages. The screen calls it when
+ * a message may have been stored, so it reads one page rather than every page
+ * it holds again.
+ *
+ * Messages are matched by `position`, never by text: a held message with the
+ * same position as a fresh one is the same message, and the fresh copy
+ * replaces it. The result is:
+ *
+ * - `newest` alone, read with no cursor, when nothing is held, when the held
+ *   pages hold no message, or when the oldest message of `newest` comes later
+ *   than the one right after the newest held message. In the last case more
+ *   messages were stored than one page holds, so a gap would sit between
+ *   `newest` and the held pages.
+ * - Otherwise the held pages, with each message `newest` holds replaced by
+ *   its fresh copy and the messages newer than the held ones added to the
+ *   newest page. The held cursors are kept, so the screen reads earlier
+ *   messages from where it left off. A held page whose messages all moved to
+ *   the newest page stays, empty, so every cursor still reads the page after
+ *   the one before it.
+ */
+export const mergeNewestMessagePage = (
+  held: MessagePages | undefined,
+  newest: MessagePage,
+): MessagePages => {
+  if (held === undefined || !joinsHeldMessages(held.pages[0]?.items[0], newest.items.at(-1))) {
+    return { pages: [newest], pageParams: [undefined] };
+  }
+
+  const freshPositions = new Set(newest.items.map((message) => message.position));
+  const pages = held.pages.map((page, index): MessagePage => {
+    const kept = page.items.filter((message) => !freshPositions.has(message.position));
+    return {
+      items:
+        index === 0 ? [...newest.items, ...kept].sort((a, b) => b.position - a.position) : kept,
+      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+    };
+  });
+  return { pages, pageParams: [...held.pageParams] };
+};
+
+/**
+ * What `mergeSentMessage` found to do with a message the owner just sent:
+ *
+ * - `nothing-held`: no pages are held, because the screen has closed. Store
+ *   nothing, so no cache entry is created for a closed screen.
+ * - `merged`: `pages` are the held pages with the message added. Store them.
+ * - `needs-newest-page`: the message does not join the held pages, because
+ *   other messages were stored since they were read, or the held pages hold
+ *   no message to join it to. Read the newest page and join it with
+ *   `mergeNewestMessagePage` instead.
+ */
+export type SentMessageMerge =
+  | { readonly kind: "nothing-held" }
+  | { readonly kind: "merged"; readonly pages: MessagePages }
+  | { readonly kind: "needs-newest-page" };
+
+/**
+ * Joins a message the owner just sent, as `conversation.send` returns it,
+ * into the pages a screen holds (`held`). Returns `merged` with the new pages
+ * when the message joins the held newest message without a gap, by the same
+ * rule as `mergeNewestMessagePage`. Otherwise returns what the screen should
+ * do instead (see `SentMessageMerge`), so it never stores pages with a gap
+ * and never creates pages for a screen that has closed.
+ */
+export const mergeSentMessage = (
+  held: MessagePages | undefined,
+  message: ConversationMessage,
+): SentMessageMerge => {
+  if (held === undefined) return { kind: "nothing-held" };
+  if (!joinsHeldMessages(held.pages[0]?.items[0], message)) return { kind: "needs-newest-page" };
+  return { kind: "merged", pages: mergeNewestMessagePage(held, { items: [message] }) };
+};
 
 /**
  * Returns the time separator to show above each message, by position, or

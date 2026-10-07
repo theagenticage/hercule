@@ -9,7 +9,7 @@ import {
 } from "../../../../../app/last-thread";
 import { useSubagentsLive } from "../../../../../app/live";
 import { ensureThreadData } from "../../../../../app/queries";
-import { useKeepRequestDrafts } from "../../../../../app/thread-drafts";
+import { useKeepRequestDrafts } from "../../../../../app/request-drafts";
 import { useSidePaneLayout } from "../../../../../screens/subagents/use-side-pane";
 import { ThreadNotFound } from "../../../../../screens/thread/not-found";
 import "../../../../../screens/subagents/side-pane-split.css";

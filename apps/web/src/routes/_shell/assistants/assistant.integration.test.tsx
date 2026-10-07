@@ -115,6 +115,7 @@ const buildMessage = (
   text: `message ${String(position)}`,
   sessionId: null,
   turnId: null,
+  itemId: null,
   actor: "user",
   createdAt: new Date(Date.parse("2026-09-25T10:00:00.000Z") + position * 1000).toISOString(),
   ...overrides,

@@ -9,14 +9,11 @@ import {
 } from "@hercule/client-core";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
-import { MicIcon } from "../../icons/mic";
-import { PlusIcon } from "../../icons/plus";
-import { SendIcon } from "../../icons/send";
 import { ShieldIcon } from "../../icons/shield";
 import { WorkspaceIcon } from "../../icons/workspace";
+import { ComposerCard } from "../session/composer-frame";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
-import { isSendKey } from "../thread/send-key";
 import { AccessModeMenu } from "./access-mode-menu";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
@@ -81,10 +78,10 @@ function DraftPick({
 
 /**
  * Renders a Draft Thread's composer, as the Bureau book's `session-empty`
- * page draws it: the card, with the message field and a row with Attach,
- * the access mode, the model options when the model has any, the model,
- * Dictate and Send; then the lip under it, with the workspace, the branch
- * when there is one to pick, and the machine.
+ * page draws it: the card, see `ComposerCard`, with the message field and a
+ * row with Attach, the access mode, the model options when the model has
+ * any, the model, Dictate and Send; then the lip under it, with the
+ * workspace, the branch when there is one to pick, and the machine.
  *
  * Every pick is passed to `onPick`, which the caller applies to the draft.
  * Picking a workspace that exists also picks the machine it is on, and
@@ -126,61 +123,48 @@ export function DraftComposer({
 
   return (
     <div className="composer">
-      <div className="composer-card">
-        <textarea
-          ref={fieldRef}
-          id={DRAFT_MESSAGE_ID}
-          className="composer-input"
-          rows={2}
-          aria-label="Message"
-          placeholder={placeholder}
-          value={text}
-          // The book's draft field has the focus when the page opens, so the
-          // user can type the moment the draft shows.
-          autoFocus
-          onChange={(event) => {
-            onTextChange(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (!isSendKey(event)) return;
-            event.preventDefault();
-            onSubmit();
-          }}
-        />
-        <div className="composer-row">
-          <button type="button" className="icon-btn" title="Attach" aria-disabled="true">
-            <PlusIcon />
-          </button>
-          <DraftPick
-            className="pick"
-            label={formatAccessMode(fields.accessMode.value)}
-            glyph={<ShieldIcon size={14} />}
-            locked={fields.accessMode.locked}
-            menuLabel="Access mode"
-            align="start"
-            width="narrow"
-          >
-            {(close) => (
-              <AccessModeMenu
-                value={fields.accessMode.value}
-                rows={fields.accessMode.rows}
-                onPick={(mode) => {
-                  onPick([{ kind: "accessMode", value: mode }]);
-                  close();
-                }}
+      <ComposerCard
+        text={text}
+        onTextChange={onTextChange}
+        placeholder={placeholder}
+        readOnly={false}
+        canSend={canSend}
+        onSend={onSubmit}
+        error={error}
+        start={
+          <>
+            <DraftPick
+              className="pick"
+              label={formatAccessMode(fields.accessMode.value)}
+              glyph={<ShieldIcon size={14} />}
+              locked={fields.accessMode.locked}
+              menuLabel="Access mode"
+              align="start"
+              width="narrow"
+            >
+              {(close) => (
+                <AccessModeMenu
+                  value={fields.accessMode.value}
+                  rows={fields.accessMode.rows}
+                  onPick={(mode) => {
+                    onPick([{ kind: "accessMode", value: mode }]);
+                    close();
+                  }}
+                />
+              )}
+            </DraftPick>
+            {descriptors === null ? null : (
+              <OptionsPick
+                descriptors={descriptors}
+                selected={config.options}
+                modelName={pill.name}
+                disabled={false}
+                onPick={onPick}
               />
             )}
-          </DraftPick>
-          {descriptors === null ? null : (
-            <OptionsPick
-              descriptors={descriptors}
-              selected={config.options}
-              modelName={pill.name}
-              disabled={false}
-              onPick={onPick}
-            />
-          )}
-          <span className="spacer" />
+          </>
+        }
+        end={
           <ModelPick
             pill={pill}
             catalogs={catalogs}
@@ -190,25 +174,14 @@ export function DraftComposer({
             readRecent={readRecent}
             onPick={onPick}
           />
-          <button type="button" className="icon-btn" title="Dictate" aria-disabled="true">
-            <MicIcon />
-          </button>
-          <button
-            type="button"
-            className={canSend ? "send" : "send send--off"}
-            title="Start thread"
-            aria-disabled={!canSend || undefined}
-            onClick={onSubmit}
-          >
-            <SendIcon />
-          </button>
-        </div>
-        {error === null ? null : (
-          <p className="composer-error" role="alert">
-            {error}
-          </p>
-        )}
-      </div>
+        }
+        fieldRef={fieldRef}
+        fieldId={DRAFT_MESSAGE_ID}
+        // The book's draft field has the focus when the page opens, so the
+        // user can type the moment the draft shows.
+        autoFocus
+        sendTitle="Start thread"
+      />
       <div className="lip">
         <DraftPick
           className="lip-pick"

@@ -66,8 +66,25 @@ export const ConversationMessage = Schema.Struct({
   text: Schema.String,
   /** The session that produced a reply or a notice; null on an owner message. */
   sessionId: Schema.NullOr(Id),
-  /** The turn that produced a reply or a notice; null on an owner message, and on a notice about a session that ended between turns. */
+  /**
+   * The turn that produced a reply. Null on an owner message and on every
+   * notice. In `segments` reply mode, every reply a turn produces carries
+   * that turn's id; `itemId` tells those replies apart.
+   */
   turnId: Schema.NullOr(Schema.String),
+  /**
+   * The assistant text a reply holds: the id of its item in the session's
+   * transcript, the same id the transcript rows of that text carry. A client
+   * uses it to tell which of a running turn's texts are already stored.
+   *
+   * Null on an owner message, on a notice, and on a reply that joins several
+   * texts: the reply a `turn-end` turn stores when it fails or is stopped,
+   * which holds every text of the turn that no reply held before it, such as
+   * texts stored one by one before the reply mode changed to `turn-end`.
+   * Replies stored before the field
+   * existed are null too, and so read as holding every text of their turn.
+   */
+  itemId: Schema.NullOr(Schema.String),
   /** Who wrote the message: `user`, `session:<id>`, or the system's stamp. */
   actor: Schema.String,
   createdAt: Timestamp,

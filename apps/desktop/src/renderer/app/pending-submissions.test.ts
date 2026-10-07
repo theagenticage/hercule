@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildDraftKey, createPendingSubmissions } from "./pending-submissions";
+import {
+  buildAssistantDraftKey,
+  buildDraftKey,
+  createPendingSubmissions,
+} from "./pending-submissions";
 
 const THREAD = "0199a3c2-7b41-7e2a-9c3d-5f1e2a8b4c60";
 const OTHER = "0199a3c2-7b41-7e2a-9c3d-5f1e2a8b4c61";
@@ -104,5 +108,18 @@ describe("buildDraftKey", () => {
     ];
     expect(new Set(keys).size).toBe(4);
     expect(keys).not.toContain(THREAD);
+  });
+});
+
+describe("buildAssistantDraftKey", () => {
+  it("gives each assistant its own key, apart from every session id and every Draft Thread's key", () => {
+    const assistantKey = buildAssistantDraftKey(THREAD);
+    expect(assistantKey).not.toBe(buildAssistantDraftKey(OTHER));
+    expect([
+      THREAD,
+      buildDraftKey(null, null),
+      buildDraftKey(THREAD, null),
+      buildDraftKey(THREAD, OTHER),
+    ]).not.toContain(assistantKey);
   });
 });

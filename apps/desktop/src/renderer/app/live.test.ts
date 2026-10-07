@@ -1,12 +1,13 @@
 /**
  * Tests `useSubagentsLive`: it holds the `subagent` topic only while it has a
- * thread, and reads that thread's subagent list again once subscribed, so a
- * list cached before the topic was held does not stay out of date.
+ * thread, and its pushes read the thread's subagent list again. The
+ * controller's first push on the subscription names no session, so a list
+ * cached before the topic was held does not stay out of date.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { queryKeys, type Live } from "@hercule/client-core";
+import { buildQueryKeys, queryKeys, type Live } from "@hercule/client-core";
 import { useSubagentsLive } from "./live";
 
 /** What a subscription to a topic like `subagent` is called with on each push. */
@@ -57,7 +58,7 @@ const buildCachedSubagents = () => {
 };
 
 describe("useSubagentsLive", () => {
-  it("subscribes to the subagent topic and reads the thread's cached list again", async () => {
+  it("subscribes to the subagent topic, and reads the thread's cached list again on each push", async () => {
     const { live, handlers } = buildFakeLive();
     const { queryClient, reads } = buildCachedSubagents();
 
@@ -66,6 +67,10 @@ describe("useSubagentsLive", () => {
     });
 
     expect([...handlers.keys()]).toEqual(["subagent"]);
+    expect(reads.count).toBe(0);
+
+    // The controller's first push names no session, and reads the list again.
+    handlers.get("subagent")?.(buildQueryKeys("subagent", []));
     await waitFor(() => {
       expect(reads.count).toBe(1);
     });

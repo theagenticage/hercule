@@ -8,6 +8,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import type { OpenRequest, Session } from "@hercule/contract";
 import {
   buildFixtureAssistant,
+  buildConversationHandlers,
   buildFixtureAssistantSession,
   buildSidebarHandlers,
   CONTROLLER_URL,
@@ -40,8 +41,8 @@ const buildAdaSession = (over: Partial<Session> = {}): Session =>
 
 /**
  * Starts the app signed in at Ada's page, or at `path`, while the current
- * session of Ada's main conversation is `session`. `handlers` replace the
- * stubbed controller's answers.
+ * session of Ada's main conversation is `session` and her Conversation holds
+ * no message. `handlers` replace the stubbed controller's answers.
  */
 const openApp = (
   session: Session | null,
@@ -49,6 +50,7 @@ const openApp = (
 ) => {
   stubApi({
     ...buildSidebarHandlers({ ...NO_SIDEBAR_RECORDS, assistants: [{ assistant: ADA, session }] }),
+    ...buildConversationHandlers({ assistant: ADA, session, messages: [] }),
     ...handlers,
   });
   return renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), { path });
@@ -93,14 +95,15 @@ describe("the assistant route", () => {
     expect(word.classList.contains("you-ink")).toBe(true);
   });
 
-  it("animates the header's face only while the assistant works", async () => {
+  it("animates the header's face while the assistant works", async () => {
     await openApp(buildAdaSession({ status: "busy" }));
 
     const pill = readHeaderPill();
     expect(within(pill).getByText("working")).toBeTruthy();
     expect(pill.querySelector(".cr--animated")).not.toBeNull();
-    // The face of the empty Conversation stays still and idle.
-    expect(document.querySelector(".hello-who .cr")?.getAttribute("class")).toBe("cr cr--idle");
+    // The Conversation shows the reply being written in place of the
+    // greeting, even before it has any text.
+    expect(document.querySelector(".hello-who")).toBeNull();
   });
 
   it("follows the pose when a push on the session topic reports a change", async () => {

@@ -21,7 +21,7 @@ import {
 import { buildRouterContext } from "../../app/context";
 import type { PendingSubmissions } from "../../app/pending-submissions";
 import { ensureShellData, ensureThreadData } from "../../app/queries";
-import { useKeepRequestDrafts } from "../../app/thread-drafts";
+import { useKeepRequestDrafts } from "../../app/request-drafts";
 import {
   buildSidebarHandlers,
   buildThreadHandlers,

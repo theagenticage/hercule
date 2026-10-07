@@ -7,7 +7,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { EMPTY_REQUEST_DRAFT } from "@hercule/client-core";
-import { useKeepRequestDrafts, useRequestDraft, useShownRequestId } from "./thread-drafts";
+import { useKeepRequestDrafts, useRequestDraft, useShownRequestId } from "./request-drafts";
 
 /** Mounts a keeper of the thread `sessionId`'s drafts. */
 const keepThread = (sessionId = "ses_1") =>

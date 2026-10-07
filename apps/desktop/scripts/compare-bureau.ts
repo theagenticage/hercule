@@ -7,8 +7,9 @@
  *
  * It also compares regions of the book's pages with the app's: the sidebar
  * of session-active.html; its main pane with the thread screen, once as it
- * rests and once scrolled, with the composer shrunk; and the main pane of
- * session-empty.html with the draft screen.
+ * rests and once scrolled, with the composer shrunk; the main pane of
+ * session-empty.html with the draft screen; and the Conversation of
+ * assistant.html with an assistant's Conversation.
  *
  * It runs in two processes. This script, on Node:
  * - checks that the book's tokens.css and font files are byte-identical to

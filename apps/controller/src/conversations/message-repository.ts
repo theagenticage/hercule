@@ -33,6 +33,7 @@ export interface NewMessageRow {
   readonly text: string;
   readonly sessionId: string | null;
   readonly turnId: string | null;
+  readonly itemId: string | null;
   readonly actor: string;
   readonly at: string;
 }
@@ -54,13 +55,14 @@ interface MessageRow {
   readonly text: string;
   readonly session_id: Uint8Array | null;
   readonly turn_id: string | null;
+  readonly item_id: string | null;
   readonly actor: string;
   readonly created_at: string;
 }
 
 const COLUMNS =
   "id, conversation_id, container_key, position, sender_role, sender_label, text, " +
-  "session_id, turn_id, actor, created_at";
+  "session_id, turn_id, item_id, actor, created_at";
 
 const toMessage = (row: MessageRow): ConversationMessage => ({
   id: uuidToString(row.id),
@@ -72,6 +74,7 @@ const toMessage = (row: MessageRow): ConversationMessage => ({
   text: row.text,
   sessionId: row.session_id === null ? null : uuidToString(row.session_id),
   turnId: row.turn_id,
+  itemId: row.item_id,
   actor: row.actor,
   createdAt: row.created_at,
 });
@@ -103,12 +106,12 @@ const make = Effect.gen(function* () {
         const rows = yield* sql<{ readonly position: number }>`
           INSERT INTO conversation_messages
             (id, conversation_id, container_key, position, sender_role, sender_label, text,
-             session_id, turn_id, actor, created_at)
+             session_id, turn_id, item_id, actor, created_at)
           SELECT ${id}, ${conversationId}, ${message.containerKey},
                  COALESCE(MAX(position), 0) + 1, ${message.senderRole}, ${message.senderLabel},
                  ${message.text},
                  ${message.sessionId === null ? null : uuidFromString(message.sessionId)},
-                 ${message.turnId}, ${message.actor}, ${message.at}
+                 ${message.turnId}, ${message.itemId}, ${message.actor}, ${message.at}
           FROM conversation_messages WHERE conversation_id = ${conversationId}
           RETURNING position
         `;
@@ -122,6 +125,7 @@ const make = Effect.gen(function* () {
           text: message.text,
           sessionId: message.sessionId,
           turnId: message.turnId,
+          itemId: message.itemId,
           actor: message.actor,
           createdAt: message.at,
         };
@@ -155,6 +159,27 @@ const make = Effect.gen(function* () {
           (last) => encodeIntegerKeyCursor(scope, last.position),
         );
       }),
+
+    /**
+     * Returns the item ids of the replies one session's turn has stored in the
+     * conversation, read in one query. A reply with no item id is left out.
+     */
+    listReplyItemIds: (turn: {
+      readonly conversationId: string;
+      readonly sessionId: string;
+      readonly turnId: string;
+    }): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly item_id: string }>`
+          SELECT item_id FROM conversation_messages
+          WHERE conversation_id = ${uuidFromString(turn.conversationId)}
+            AND session_id = ${uuidFromString(turn.sessionId)}
+            AND turn_id = ${turn.turnId}
+            AND sender_role = 'assistant'
+            AND item_id IS NOT NULL
+        `,
+        (rows) => rows.map((row) => row.item_id),
+      ),
 
     /** Deletes every message of the conversation. */
     deleteForConversation: (conversationId: string): Effect.Effect<void, SqlError> =>

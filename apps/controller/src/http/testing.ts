@@ -32,6 +32,7 @@ import {
   live,
   type LiveMessage,
   type LiveTopic,
+  type MutableLiveTopic,
   type Runner,
   type RunnerConnectivity,
   type RunnerLifecycle,
@@ -701,11 +702,29 @@ export interface Collected {
 export const collectMessages = (
   client: LiveClient,
   payload: { readonly topic: string; readonly cursor?: string },
+): Effect.Effect<Collected, never, Scope.Scope> => collectStream(client.subscribe(payload));
+
+/**
+ * Holds a subscription to a mutable topic open and keeps every push after
+ * the first one, in order. The controller opens every mutable subscription
+ * with a push that says every record may have changed. That push is the
+ * same whatever the test does, so it is left out here, and a test about it
+ * uses `collectMessages`.
+ */
+export const collectPushes = (
+  client: LiveClient,
+  topic: MutableLiveTopic,
+): Effect.Effect<Collected, never, Scope.Scope> =>
+  collectStream(Stream.drop(client.subscribe({ topic }), 1));
+
+/** Runs a subscription's stream in the background and keeps every message it receives, in order. */
+const collectStream = <E>(
+  stream: Stream.Stream<LiveMessage, E>,
 ): Effect.Effect<Collected, never, Scope.Scope> =>
   Effect.gen(function* () {
     const received: Array<LiveMessage> = [];
     const fiber = yield* Effect.forkChild(
-      Stream.runForEach(client.subscribe(payload), (message) =>
+      Stream.runForEach(stream, (message) =>
         Effect.sync(() => {
           received.push(message);
         }),

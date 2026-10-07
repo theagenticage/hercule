@@ -1,5 +1,6 @@
 import { assert, describe, it } from "vitest";
-import { buildQueryKeys, queryKeys } from "./keys";
+import { MUTABLE_LIVE_TOPICS } from "@hercule/contract";
+import { buildQueryKeys, queryKeys, type LiveQueryKey } from "./keys";
 
 /**
  * Returns only the keys of conversations' current sessions among the keys a
@@ -54,5 +55,30 @@ describe("the current sessions a session push makes stale", () => {
 
   it("keeps the keys out of the `sessions` prefix, so a session push reaches them only through this rule", () => {
     assert.notStrictEqual(queryKeys.conversationSession("c1")[0], queryKeys.sessions()[0]);
+  });
+});
+
+describe("the running turn's key", () => {
+  /** Checks whether `prefix` matches `key` as TanStack Query matches a prefix: element by element. */
+  const isPrefixOf = (prefix: LiveQueryKey, key: LiveQueryKey): boolean =>
+    prefix.length <= key.length && prefix.every((part, index) => part === key[index]);
+
+  it("is never invalidated by a push on any topic, with or without ids", () => {
+    // The running turn is kept current by the session's `:stream` topic, so
+    // an invalidation would only read it again for nothing.
+    const runningTurn = queryKeys.runningTurn("s1");
+    for (const topic of MUTABLE_LIVE_TOPICS) {
+      for (const ids of [[], ["s1"]]) {
+        const reached = buildQueryKeys(topic, ids, { s1: "c1" }).filter((key) =>
+          isPrefixOf(key, runningTurn),
+        );
+        assert.deepStrictEqual(reached, [], `a ${topic} push naming ${ids.join() || "no ids"}`);
+      }
+    }
+  });
+
+  it("is apart from the session's transcript, so neither entry overwrites the other", () => {
+    assert.isFalse(isPrefixOf(queryKeys.transcript("s1"), queryKeys.runningTurn("s1")));
+    assert.isFalse(isPrefixOf(queryKeys.runningTurn("s1"), queryKeys.transcript("s1")));
   });
 });

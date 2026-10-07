@@ -1,12 +1,13 @@
 /**
- * Prose in the thread's transcript, rendered as markdown: an agent's message
- * and the user's bubble.
+ * Prose in a session's messages, rendered as markdown: an agent's message and
+ * the user's bubble, in the thread's transcript and in an assistant's
+ * Conversation.
  *
  * `react-markdown` builds React elements rather than an HTML string, so a
  * `<script>` from an agent shows as plain text. No plugin that parses raw
  * HTML is used, because one would remove that safety.
  *
- * The elements carry no classes. `thread.css` styles them through their
+ * The elements carry no classes. `messages.css` styles them through their
  * container, `.msg-body` or `.bubble`, as the Bureau book does, so only the
  * elements that need more than a style are replaced below.
  */
@@ -66,9 +67,9 @@ const components: Components = {
  * Deeply nested markdown, such as a few thousand `>` in a row, overflows the
  * stack inside the parser, and the error is thrown while React renders.
  * Without this boundary, the router's failure screen would replace the whole
- * thread. The message stays in the transcript, so the thread would fail again
- * on every visit. Showing the raw text keeps the message readable and the
- * rest of the thread intact.
+ * screen. The message is kept, so the screen would fail again on every
+ * visit. Showing the raw text keeps the message readable and the rest of the
+ * screen intact.
  */
 class PlainTextOnError extends Component<
   { readonly text: string; readonly children: ReactNode },

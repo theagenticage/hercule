@@ -46,6 +46,7 @@ import {
 import type {
   Assistant,
   Connection,
+  ConversationMessage,
   Input,
   Project,
   ProviderInstance,
@@ -67,6 +68,7 @@ import type { Bridge } from "../../ipc/bridge";
 import {
   assistantsQuery,
   connectionsQuery,
+  conversationMessagesQuery,
   currentConversationSessionQuery,
   localRunnerQuery,
   profilesQuery,
@@ -75,6 +77,7 @@ import {
   queuedInputsQuery,
   resourcesQuery,
   runnersQuery,
+  runningTurnQuery,
   sessionQuery,
   settingsQuery,
   startTasksQuery,
@@ -96,10 +99,17 @@ import { AgentPage } from "../screens/thread/agent-page";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 
-/** An assistant, and the current session of its main conversation, or `null` before its first. */
+/**
+ * An assistant, the current session of its main conversation, or `null`
+ * before its first, and what its Conversation shows.
+ */
 export interface SpecimenAssistant {
   readonly assistant: Assistant;
   readonly currentSession: Session | null;
+  /** The messages of its main conversation, oldest first. None when left out. */
+  readonly messages?: ReadonlyArray<ConversationMessage>;
+  /** The rows of the current session's running turn, oldest first. None when left out. */
+  readonly runningTurn?: ReadonlyArray<TranscriptRow>;
 }
 
 /** Every list the sidebar reads, as the controller would return it. */
@@ -248,11 +258,19 @@ const seedQueryCache = (
     assistantsQuery(client).queryKey,
     records.assistants.map(({ assistant }) => assistant),
   );
-  for (const { assistant, currentSession } of records.assistants) {
+  for (const { assistant, currentSession, messages = [], runningTurn = [] } of records.assistants) {
     queryClient.setQueryData(
       currentConversationSessionQuery(client, assistant.mainConversationId).queryKey,
       currentSession,
     );
+    // One page holds every message, newest first, as the controller returns them.
+    queryClient.setQueryData(
+      conversationMessagesQuery(client, assistant.mainConversationId).queryKey,
+      { pages: [{ items: messages.toReversed() }], pageParams: [undefined] },
+    );
+    if (currentSession !== null) {
+      queryClient.setQueryData(runningTurnQuery(client, currentSession.id).queryKey, runningTurn);
+    }
   }
   queryClient.setQueryData(settingsQuery(client).queryKey, { controller: {}, user: {} });
   queryClient.setQueryData(profilesQuery(client).queryKey, []);

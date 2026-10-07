@@ -15,6 +15,7 @@ import {
   decideThreadPose,
   describeAgent,
   isSubagentWaiting,
+  queryKeys,
   splitSubagentBrief,
 } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
@@ -30,7 +31,8 @@ import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
 import { SpawnLines } from "../subagents/spawn-lines";
 import { buildAgentFaceSeed } from "../subagents/subagent-face";
-import { useAgentLive } from "./use-agent-live";
+import { useSessionLive } from "../session/use-session-live";
+import "../session/transcript.css";
 import "./thread.css";
 
 /** What a subagent's page draws of its own, from the records the page reads. */
@@ -115,7 +117,14 @@ export function AgentPage({
   // than an Error.
   // eslint-disable-next-line @typescript-eslint/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
-  const attachOpenParagraph = useAgentLive(live, queryClient, sessionId, subagentId, rows);
+  const attachOpenParagraph = useSessionLive({
+    live,
+    queryClient,
+    sessionId,
+    subagentId,
+    rowsKey: queryKeys.transcript(sessionId, subagentId),
+    rows,
+  });
   // The transcript sizes its bottom padding from the composer's stack. The
   // stack is held as state, not a ref, because the composer mounts after the
   // transcript: its element exists only once the transcript's effects ran,

@@ -14,8 +14,8 @@ import {
   type QuestionDraft,
 } from "@hercule/client-core";
 import type { ApprovalDecision, QuestionAnswers, SessionRequest } from "@hercule/contract";
-import { useRequestDraft } from "../../app/thread-drafts";
-import { buildLook, Face } from "../../faces";
+import { useRequestDraft } from "../../app/request-drafts";
+import { buildLook, Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { buildAgentFaceSeed } from "../subagents/subagent-face";
 import { isSendKey } from "./send-key";
@@ -74,14 +74,16 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
 };
 
 /**
- * Renders one Request the thread's session is waiting on, docked on top of
- * the composer, as the Bureau book's `.dock` draws it. On an agent's page,
- * `AgentRequestDock` decides which Request and pages between them; the
- * Office's dossier shows the oldest.
+ * Renders one Request the session `sessionId` is waiting on, docked on top
+ * of the composer, as the Bureau book's `.dock` draws it. On a thread's
+ * agent page `AgentRequestDock`, and in an assistant's Conversation
+ * `ConversationRequestDock`, decides which Request and pages between them;
+ * the Office's dossier shows the oldest.
  *
  * - the question: the face of the agent that asked, in the waiting pose,
  *   then the card's title with what it asks about in `code`. A subagent's
- *   Request shows the subagent's face, else the thread's;
+ *   Request shows the subagent's face, else `look`, the face of the
+ *   session's own agent (the thread's or the assistant's);
  * - for a `question` request, one question at a time: its header, its place
  *   among the questions when there are several, its options as choices, a
  *   field for the user's own answer, and Next, or Send answers on the last
@@ -116,27 +118,32 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
  * id, so an answer given to one request never disables the next.
  *
  * What the user has typed, the shown question and whether an answer was
- * sent are kept in the thread's Request draft (`useRequestDraft`), so they
+ * sent are kept in the session's Request draft (`useRequestDraft`), so they
  * survive paging to another Request, and a move to a subagent's page and
- * back. Something that shows the thread must keep its drafts
+ * back. Something that shows the session must keep its drafts
  * (`useKeepRequestDrafts`).
  */
 export function RequestDock({
   sessionId,
+  look,
   request,
 }: {
   readonly sessionId: string;
+  readonly look: Look;
   readonly request: SessionRequest;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const titleId = useId();
   const card = buildApprovalCard(request);
-  const faceLook = buildLook(buildAgentFaceSeed(sessionId, request.subagentId));
+  const faceLook =
+    request.subagentId === undefined
+      ? look
+      : buildLook(buildAgentFaceSeed(sessionId, request.subagentId));
   const [requestDraft, changeRequestDraft] = useRequestDraft(sessionId, request.requestId);
   // A failed send unlocks the Request, so the user can answer again. The
   // mutation's own callbacks run even after the dock has unmounted, and the
-  // draft is changed through the thread's drafts, so the unlock lands
+  // draft is changed through the session's Request drafts, so the unlock lands
   // whether or not the dock is still shown.
   const markAnswered = (answered: boolean): void => {
     changeRequestDraft((current) => ({ ...current, answered }));

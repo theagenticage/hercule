@@ -19,7 +19,8 @@
  *   controller.
  *
  * They also check what a subscription receives: a mutable topic's
- * invalidations, which name the changed records and nothing else, and the
+ * invalidations, the first of which says every record may have changed and
+ * the rest of which name the changed records and nothing else, and the
  * `event` log's deltas, which carry the records themselves, with the cursor a
  * reconnecting client replays from. Both are triggered by ordinary HTTP calls
  * to the same controller, because a push that disagrees with `GET /tasks` or
@@ -65,6 +66,7 @@ import { readEvent } from "../events/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   collectMessages,
+  collectPushes,
   completeSetup,
   del,
   expectHeld,
@@ -453,6 +455,42 @@ describe("closing a subscription", () => {
 });
 
 describe("what a task subscription receives", () => {
+  it("first says every task may have changed, then names a task created right after", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const ticket = await fetchTicket(base, token);
+      await waitForLiveToSettle();
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          // A client reads the tasks over HTTP, then subscribes. A task
+          // created between the two is covered by the first push: the
+          // controller sends it once the subscription is registered, so the
+          // client's re-read sees that task.
+          const tasks = yield* collectMessages(client, { topic: "task" });
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => tasks.received.length >= 1)),
+          ).toBe(true);
+          expect(tasks.received).toEqual([{ _tag: "invalidate", ids: [], kind: "updated" }]);
+
+          // A task created as soon as the first push arrived is pushed too.
+          const task = yield* Effect.promise(() => createTask(base, token, "right after"));
+          expect(
+            yield* Effect.promise(() => waitWithin(1000, () => tasks.received.length >= 2)),
+          ).toBe(true);
+          expect(tasks.received[1]).toEqual({
+            _tag: "invalidate",
+            ids: [task.id],
+            kind: "created",
+          });
+
+          yield* Fiber.interrupt(tasks.fiber);
+        }),
+      );
+    });
+  });
+
   it("names the task on a create, an update and a delete, and notifies no other topic", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
@@ -461,8 +499,8 @@ describe("what a task subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const tasks = yield* collectMessages(client, { topic: "task" });
-          const runs = yield* collectMessages(client, { topic: "run" });
+          const tasks = yield* collectPushes(client, "task");
+          const runs = yield* collectPushes(client, "run");
           yield* Effect.promise(() => expectHeld(reader, 1, "task"));
           yield* Effect.promise(() => expectHeld(reader, 1, "run"));
 
@@ -515,7 +553,7 @@ describe("what a task subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const tasks = yield* collectMessages(client, { topic: "task" });
+          const tasks = yield* collectPushes(client, "task");
           yield* Effect.promise(() => expectHeld(reader, 1, "task"));
 
           const created = yield* Effect.promise(() =>
@@ -594,7 +632,7 @@ describe("what an assistant subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const assistants = yield* collectMessages(client, { topic: "assistant" });
+          const assistants = yield* collectPushes(client, "assistant");
           yield* Effect.promise(() => expectHeld(reader, 1, "assistant"));
 
           const assistant = yield* Effect.promise(() => createAssistant(base, token, "Ada"));
@@ -647,7 +685,7 @@ describe("what a conversation subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const conversations = yield* collectMessages(client, { topic: "conversation" });
+          const conversations = yield* collectPushes(client, "conversation");
           yield* Effect.promise(() => expectHeld(reader, 1, "conversation"));
 
           const assistant = yield* Effect.promise(() => createAssistant(base, token, "Ada"));
@@ -692,7 +730,7 @@ describe("what a conversation subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const conversations = yield* collectMessages(client, { topic: "conversation" });
+          const conversations = yield* collectPushes(client, "conversation");
           yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, "conversation"));
 
           const sent = yield* Effect.promise(() =>
@@ -733,7 +771,7 @@ describe("what a session subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const sessions = yield* collectMessages(client, { topic: "session" });
+          const sessions = yield* collectPushes(client, "session");
           yield* Effect.promise(() => expectHeld(arranged.harness.live, 1, "session"));
 
           // A message to the assistant starts a session in its conversation.
@@ -972,7 +1010,7 @@ describe("a connection whose credential is gone", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const tasks = yield* collectMessages(client, { topic: "task" });
+          const tasks = yield* collectPushes(client, "task");
           yield* Effect.promise(() => expectHeld(reader, 1, "task"));
 
           const loggedOut = yield* Effect.promise(() =>
@@ -1085,7 +1123,7 @@ describe("saying hello twice on one connection", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const tasks = yield* collectMessages(client, { topic: "task" });
+          const tasks = yield* collectPushes(client, "task");
           yield* Effect.promise(() => expectHeld(reader, 1, "task"));
 
           const refused = yield* awaitOutcome(client.hello({ v: 1, ticket: second }));
@@ -1176,8 +1214,8 @@ describe("what a runner subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const fleet = yield* collectMessages(client, { topic: "runner" });
-          const tasks = yield* collectMessages(client, { topic: "task" });
+          const fleet = yield* collectPushes(client, "runner");
+          const tasks = yield* collectPushes(client, "task");
           yield* Effect.promise(() => expectHeld(harness.live, 1, "runner"));
           yield* Effect.promise(() => expectHeld(harness.live, 1, "task"));
 
@@ -1260,7 +1298,7 @@ describe("what a runner subscription receives", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const fleet = yield* collectMessages(client, { topic: "runner" });
+          const fleet = yield* collectPushes(client, "runner");
           yield* Effect.promise(() => expectHeld(harness.live, 1, "runner"));
 
           const joined = yield* Effect.promise(() => enlist(harness));

@@ -1,101 +1,53 @@
 /**
- * The blocks of the thread's transcript, one component per kind of
- * `ThreadBlock`, drawn as the Bureau book's session page draws them.
+ * The blocks of the thread's transcript that only a thread draws, one
+ * component per kind of `ThreadBlock`, drawn as the Bureau book's session
+ * page draws them. The pieces a message is made of, which an assistant's
+ * Conversation draws too, are in `../session/messages`.
  *
- * Every block is presentational, apart from the shared age clock that
- * `WorkDivider` and `WaitingNote` read, and the finished paragraphs an open
- * message keeps. Every block is `memo`: the transcript draws again each time
- * its visible range changes, and a block whose props did not change is
+ * Every block is presentational, apart from the finished paragraphs an open
+ * message keeps and the shared age clock that `WorkDivider` and
+ * `WaitingNote` read. Every block is `memo`: the transcript draws again each
+ * time its visible range changes, and a block whose props did not change is
  * skipped. The props are the block from `buildThreadBlocks`, whose identity
- * changes only when the transcript does, and plain values.
+ * changes only when the transcript does, `Look`s from `buildLook`, which
+ * returns the same object for the same seed, and plain values.
  *
  * Times are drawn by `formatMessageTime` against `today`, the start of the
  * current day, so every block draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { memo, useState, type JSX } from "react";
+import { memo, type JSX } from "react";
 import {
   describeMessageMeta,
   describeTurnEnding,
   describeWaitingNote,
   describeWorkStretch,
-  formatMessageTime,
-  splitStreamingText,
   summarizeWork,
   type EndingBlock,
   type Pose,
   type WorkBlock,
 } from "@hercule/client-core";
 import { useAgeLabel, useDurationText } from "../../app/age-clock";
-import { buildLook, Face } from "../../faces";
+import type { Look } from "../../faces";
 import { Mark } from "../../marks";
-import { Markdown } from "./markdown";
-import type { AttachOpenParagraph } from "./use-agent-live";
-
-/** The size of a face in the transcript, in CSS pixels: the book's `data-size="34"`. */
-const FACE_SIZE = 34;
-
-/**
- * Formats the time of `at` for the transcript: "09:04" when it falls on the
- * day that starts at `today` (milliseconds since the epoch), else
- * "4 Sep 09:04". Returns `undefined` when `at` is not a valid time.
- */
-const formatBlockTime = (at: string, timezone: string, today: number): string | undefined =>
-  formatMessageTime(new Date(at), timezone, new Date(today));
-
-/**
- * Renders the agent's face beside an agent message: seeded by `faceSeed`, in
- * `pose`, moving only while working. The face is decorative, because the
- * meta line beside it names the agent.
- */
-function AgentFace({
-  faceSeed,
-  pose,
-}: {
-  readonly faceSeed: string;
-  readonly pose: Pose;
-}): JSX.Element {
-  return (
-    <Face look={buildLook(faceSeed)} pose={pose} size={FACE_SIZE} animated={pose === "working"} />
-  );
-}
-
-/** Renders a message the user sent: the bubble, as markdown with its line breaks kept, and its time under it. */
-export const UserMessage = memo(function UserMessage({
-  text,
-  at,
-  timezone,
-  today,
-}: {
-  readonly text: string;
-  readonly at: string;
-  readonly timezone: string;
-  readonly today: number;
-}): JSX.Element {
-  return (
-    <div className="msg--me">
-      <div>
-        <div className="bubble">
-          <Markdown text={text} breaks />
-        </div>
-        <div className="bubble-meta">{formatBlockTime(at, timezone, today)}</div>
-      </div>
-    </div>
-  );
-});
+import { Markdown } from "../session/markdown";
+import { AgentFace, formatBlockTime, OpenMessageText } from "../session/messages";
+import type { AttachOpenParagraph } from "../session/use-session-live";
 
 /**
  * Renders a message the agent wrote: the face, then the meta line "Claude
  * Code · Opus 5.5 · 09:04", then the text as markdown.
  *
- * - `agent` is the first part of the meta line: the provider and the model.
- * - `pose` is the face's pose: the thread's pose while this message holds the
- *   working face, else `idle`.
+ * - `look` is the face's look, from `buildLook`.
+ * - `agent` is the first part of the meta line, before the time: the
+ *   provider and the model.
+ * - `pose` is the face's pose: the session's pose while this message holds
+ *   the working face, else `idle`.
  * - `text` is the text the transcript's rows hold. While the message is
  *   `open`, the agent is still writing it: see `OpenMessageText`.
  */
 export const AgentMessage = memo(function AgentMessage({
-  faceSeed,
+  look,
   itemId,
   agent,
   text,
@@ -106,8 +58,7 @@ export const AgentMessage = memo(function AgentMessage({
   open,
   attachOpenParagraph,
 }: {
-  /** The seed of the agent's face: the session id, or `<sessionId>:<subagentId>` for a subagent. */
-  readonly faceSeed: string;
+  readonly look: Look;
   readonly itemId: string;
   readonly agent: string;
   readonly text: string;
@@ -121,7 +72,7 @@ export const AgentMessage = memo(function AgentMessage({
   const meta = describeMessageMeta(agent, formatBlockTime(startedAt, timezone, today));
   return (
     <div className="msg">
-      <AgentFace faceSeed={faceSeed} pose={pose} />
+      <AgentFace look={look} pose={pose} />
       <div className="msg-body">
         <div className="msg-meta">{meta}</div>
         {open ? (
@@ -139,65 +90,24 @@ export const AgentMessage = memo(function AgentMessage({
 });
 
 /**
- * Renders the text of a message the agent is still writing: its finished
- * paragraphs as markdown, then the paragraph being written as plain text.
- * `storedText` is the text the transcript's rows hold.
- *
- * The live hook paints the paragraph being written, from the stored text and
- * the tail that streamed in after it, and hands the message each paragraph
- * that finishes. A paragraph is drawn as markdown only once it has finished,
- * because the text arrives cut anywhere: rows every 4 KB, even inside a word,
- * and tokens even inside a code block. Markdown drawn from a cut would end
- * its paragraph at the cut.
- */
-function OpenMessageText({
-  itemId,
-  storedText,
-  attachOpenParagraph,
-}: {
-  readonly itemId: string;
-  readonly storedText: string;
-  readonly attachOpenParagraph: AttachOpenParagraph;
-}): JSX.Element {
-  const [settledText, setSettledText] = useState(() => splitStreamingText(storedText).settled);
-  return (
-    <>
-      <Markdown text={settledText} />
-      {/* The live hook writes this paragraph's text; React keeps the element empty. */}
-      <p
-        className="streaming"
-        ref={(element) =>
-          attachOpenParagraph(element, {
-            itemId,
-            storedText,
-            settledText,
-            onSettle: setSettledText,
-          })
-        }
-      />
-    </>
-  );
-}
-
-/**
  * Renders the working row at the bottom of a running turn while no message
  * holds the working face: the face in the thread's `pose`, and the meta line
  * without a time. Once the agent starts a message, the message takes the
  * face, and the row goes.
  */
 export const LiveRow = memo(function LiveRow({
-  faceSeed,
+  look,
   agent,
   pose,
 }: {
-  /** The seed of the agent's face: the session id, or `<sessionId>:<subagentId>` for a subagent. */
-  readonly faceSeed: string;
+  /** The agent's look, from `buildLook`: the session's own agent's, or a subagent's. */
+  readonly look: Look;
   readonly agent: string;
   readonly pose: Pose;
 }): JSX.Element {
   return (
     <div className="msg">
-      <AgentFace faceSeed={faceSeed} pose={pose} />
+      <AgentFace look={look} pose={pose} />
       <div className="msg-body">
         <div className="msg-meta">{agent}</div>
       </div>

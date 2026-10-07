@@ -30,9 +30,11 @@ import { createClient, type HerculeClient } from "../../packages/client-core/src
 import {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,
+  type Assistant,
   type Session,
 } from "../../packages/contract/src/index";
 import { connectFleet, type Fleet } from "../../apps/desktop/scripts/fleet";
+import type { MessagePause, ScriptStep } from "../../apps/desktop/scripts/scripted-runner";
 import {
   assertExitedCleanly,
   buildAppArgs,
@@ -699,4 +701,264 @@ export async function startServerForTest(
 export function answerWithEmptyPage(_request: IncomingMessage, response: ServerResponse): void {
   response.setHeader("content-type", "text/html; charset=utf-8");
   response.end("<!doctype html><title>another origin</title>");
+}
+
+/** The page's global object, with the frames `recordFrames` keeps on it. */
+type FrameRecordingGlobal = typeof globalThis & {
+  sentFrames?: string[];
+  receivedFrames?: string[];
+};
+
+/**
+ * Starts recording the frames the page sends and receives on its WebSockets,
+ * as text: every frame sent, in `sentFrames`, and every frame received from
+ * then on, in `receivedFrames`, both on the page's global object.
+ *
+ * It runs in the page, handed over as a function to `page.evaluate` or as
+ * source text, so it closes over nothing in this file.
+ *
+ * The live connection's socket already exists. It sends through the
+ * prototype's `send`, so its frames are recorded too, and its first send adds
+ * the listener that records what it receives. A reply never arrives before
+ * its request is sent, so every reply to a recorded request is recorded.
+ */
+export function recordFrames(): void {
+  const sent: string[] = [];
+  const received: string[] = [];
+  (globalThis as FrameRecordingGlobal).sentFrames = sent;
+  (globalThis as FrameRecordingGlobal).receivedFrames = received;
+  const listened = new WeakSet<WebSocket>();
+  // The original `send` is kept apart from any socket, and called below with
+  // each socket as `this`.
+  const send = Reflect.get(WebSocket.prototype, "send");
+  WebSocket.prototype.send = function (this: WebSocket, data) {
+    if (!listened.has(this)) {
+      listened.add(this);
+      this.addEventListener("message", (event: MessageEvent<unknown>) => {
+        received.push(typeof event.data === "string" ? event.data : "");
+      });
+    }
+    sent.push(typeof data === "string" ? data : new TextDecoder().decode(data as ArrayBuffer));
+    send.call(this, data);
+  };
+}
+
+/**
+ * The source of a page function that parses frames `recordFrames` recorded:
+ * it takes a list of frames, or `undefined` before any were recorded, and
+ * returns every message they carry, in order. A frame that holds a batch
+ * gives each of its messages, and a frame that is not JSON gives none.
+ */
+const PARSE_FRAMES = `(frames) => (frames ?? []).flatMap((frame) => {
+  try { return [JSON.parse(frame)].flat(); } catch { return []; }
+})`;
+
+/**
+ * Returns a page expression that checks, from the frames `recordFrames`
+ * recorded, whether the two live subscriptions of the session `sessionId` are in
+ * place: an open thread's, or an assistant's current session's. A test waits
+ * for both before a message streams:
+ *
+ * - The page has sent the frame that subscribes to the session's tap. The
+ *   controller does not acknowledge a tap subscription, so the frame being
+ *   sent is the closest a test can get to knowing it is live. A delta sent
+ *   before the controller has the subscription reaches no one.
+ * - The page has received the replay of the session's stream: the first reply
+ *   to the frame that subscribes to it, which the controller sends even when
+ *   there is nothing to replay. A message that starts before the replay
+ *   arrives is in the replay, so the page treats it as one that may have
+ *   missed deltas: it skips the message's tail, and paints none of its text
+ *   until the message's rows land.
+ */
+export function buildLiveCheck(sessionId: string): string {
+  const tap = JSON.stringify(`session:${sessionId}:tap`);
+  const stream = JSON.stringify(`session:${sessionId}:stream`);
+  return `(() => {
+    const parse = ${PARSE_FRAMES};
+    const requests = parse(globalThis.sentFrames).filter((message) => message?._tag === "Request");
+    const findSubscription = (topic) => requests.findLast((request) => request.payload?.topic === topic);
+    const streamRequest = findSubscription(${stream});
+    return findSubscription(${tap}) !== undefined && streamRequest !== undefined &&
+      parse(globalThis.receivedFrames).some(
+        (message) => message?._tag === "Chunk" && message.requestId === streamRequest.id,
+      );
+  })()`;
+}
+
+/** The tap subscriptions of one session the page has made, as `buildTapCheck` reads them. */
+export interface TapSubscriptions {
+  /** How many frames the page has sent that subscribe to the tap. */
+  readonly made: number;
+  /** How many of them the page has ended, with a frame that interrupts the subscription. */
+  readonly ended: number;
+}
+
+/**
+ * Returns a page expression that reads, from the frames `recordFrames`
+ * recorded, the subscriptions the page has made to the tap of the session
+ * `sessionId`: a `TapSubscriptions`. The tap is subscribed while `made` is
+ * more than `ended`.
+ */
+export function buildTapCheck(sessionId: string): string {
+  const tap = JSON.stringify(`session:${sessionId}:tap`);
+  return `(() => {
+    const sent = (${PARSE_FRAMES})(globalThis.sentFrames);
+    const ids = new Set(
+      sent.filter((message) => message?._tag === "Request" && message.payload?.topic === ${tap})
+        .map((request) => request.id),
+    );
+    const ended = sent.filter((message) => message?._tag === "Interrupt" && ids.has(message.requestId));
+    return { made: ids.size, ended: ended.length };
+  })()`;
+}
+
+/** Returns the assistant named `name`, read through the API. Fails when there is none. */
+export async function readAssistant(client: HerculeClient, name: string): Promise<Assistant> {
+  const { items } = await client.assistant.query({ query: { limit: 50 } });
+  const assistant = items.find((each) => each.name === name);
+  if (assistant === undefined) throw new Error(`the controller has no assistant named ${name}`);
+  return assistant;
+}
+
+/** Returns the newest session of the conversation, or null when it has none yet. */
+export async function readNewestSession(
+  client: HerculeClient,
+  conversationId: string,
+): Promise<Session | null> {
+  const { items } = await client.session.query({
+    query: { conversationId, sort: [{ field: "createdAt", direction: "desc" }], limit: 1 },
+  });
+  return items[0] ?? null;
+}
+
+/** What the last agent message on the page showed at one moment, as `recordLastAgentText` records it. */
+export interface AgentTextSnapshot {
+  /**
+   * The text the message draws as markdown, as rendered: everything but its
+   * header line and the paragraph being written. While the message streams,
+   * that is its finished paragraphs; once it is complete, all of its text.
+   */
+  readonly text: string;
+  /** The paragraph being written, as plain text, or `null` once the message is complete. */
+  readonly openParagraph: string | null;
+}
+
+/** The page's global object, with the snapshots `recordLastAgentText` keeps on it. */
+type AgentTextRecordingGlobal = typeof globalThis & {
+  agentTextSnapshots?: AgentTextSnapshot[];
+};
+
+/** A page expression that reads the newest snapshot `recordLastAgentText` took, or `undefined` before the first. */
+export const READ_LAST_AGENT_TEXT = "globalThis.agentTextSnapshots.at(-1)";
+
+/** A page expression that reads every snapshot `recordLastAgentText` took, oldest first. */
+export const READ_AGENT_TEXTS = "globalThis.agentTextSnapshots";
+
+/**
+ * Starts recording what the last agent message inside the element
+ * `containerSelector` finds shows, each time the page changes it. An agent
+ * message is a `.msg` with a `.msg-body`, as a thread's transcript and an
+ * assistant's Conversation both draw one. Its header line, the thread's
+ * `.msg-meta` or the Conversation's `.msg-name`, is left out of the text.
+ *
+ * The snapshots collect, oldest first, in `agentTextSnapshots` on the page's
+ * global object; a change that leaves the text and the paragraph being
+ * written as they were adds none.
+ *
+ * It runs in the page, handed over as a function to `page.evaluate` or as
+ * source text, so it closes over nothing in this file. A `MutationObserver`
+ * calls it after each change, once the change's task is done, so it sees the
+ * page as a frame would draw it.
+ */
+export function recordLastAgentText(containerSelector: string): void {
+  const snapshots: AgentTextSnapshot[] = [];
+  (globalThis as AgentTextRecordingGlobal).agentTextSnapshots = snapshots;
+  const container = document.querySelector(containerSelector)!;
+  const takeSnapshot = () => {
+    const body = [...container.querySelectorAll(".msg > .msg-body")].at(-1);
+    if (body === undefined) return;
+    const openParagraph = body.querySelector(".streaming")?.textContent ?? null;
+    const text = [...body.children]
+      .filter((part) => !part.matches(".msg-meta, .msg-name, .streaming"))
+      .map((part) => part.textContent)
+      .join("");
+    const last = snapshots.at(-1);
+    if (last?.text === text && last.openParagraph === openParagraph) return;
+    snapshots.push({ text, openParagraph });
+  };
+  new MutationObserver(takeSnapshot).observe(container, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+  });
+  takeSnapshot();
+}
+
+/** Returns the text a snapshot shows: its markdown's text, then the paragraph being written. */
+export function joinShownText({ text, openParagraph }: AgentTextSnapshot): string {
+  return `${text}${openParagraph ?? ""}`;
+}
+
+/**
+ * Returns the numbers of the words a snapshot shows, in order, for a message
+ * whose words are numbered `w1 w2 w3 …`. A row can end inside a word, and the
+ * paragraph being written then holds the word's end, so the snapshot's text
+ * is read as it shows, not word by word per part.
+ */
+export function readWordNumbers(snapshot: AgentTextSnapshot): number[] {
+  return [...joinShownText(snapshot).matchAll(/w(\d+)/g)].map((match) => Number(match[1]));
+}
+
+/** A scripted message of numbered words that pauses twice, built by `buildCountedMessage`. */
+export interface CountedMessage {
+  /** The `message` step that streams the words `w1 w2 w3 …`, one every 2 ms. */
+  readonly step: ScriptStep;
+  /** How many words the message has. */
+  readonly wordCount: number;
+  /** Lets the message go on from its first pause, which it reaches early on. */
+  readonly resumeAfterHide: () => void;
+  /** Lets the message go on from its second pause, its last stretch. */
+  readonly resumeAfterShow: () => void;
+}
+
+/**
+ * Builds a message for a test that hides the window while a message streams
+ * and shows it again. The message has 3,000 numbered words, about 17 KiB,
+ * which the controller writes as rows of 4 KiB and a last one. It pauses
+ * twice, so the test's steps never race the stream, however slow the
+ * machine:
+ *
+ * - after 400 words (about 1.8 KiB, before the first row), until the window
+ *   is hidden: the paragraph being written shows text and no row has landed;
+ * - after 1,800 words (about 9.5 KiB), until the window is shown again: two
+ *   rows have landed while the window was hidden, and the message still
+ *   streams when it is shown.
+ */
+export function buildCountedMessage(): CountedMessage {
+  const wordCount = 3_000;
+  const text = Array.from({ length: wordCount }, (_, index) => `w${index + 1}`).join(" ");
+  const hidden = createMessagePause(400);
+  const shown = createMessagePause(1_800);
+  return {
+    step: { kind: "message", text, deltaMs: 2, pauses: [hidden.pause, shown.pause] },
+    wordCount,
+    resumeAfterHide: hidden.resume,
+    resumeAfterShow: shown.resume,
+  };
+}
+
+/**
+ * Creates a pause for a scripted message after `afterWords` of its words,
+ * and the function that ends it. The message stops streaming there until
+ * `resume` is called.
+ */
+export function createMessagePause(afterWords: number): {
+  readonly pause: MessagePause;
+  readonly resume: () => void;
+} {
+  let resume = () => {};
+  const until = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  return { pause: { afterWords, until }, resume };
 }

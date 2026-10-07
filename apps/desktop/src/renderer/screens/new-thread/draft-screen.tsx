@@ -30,12 +30,12 @@ import { buildDraftKey } from "../../app/pending-submissions";
 import { threadsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
-import { useShowsClassicScrollbar } from "../thread/classic-scrollbar";
-import { useSendOnMenuCommand } from "../thread/send-key";
+import { useSendOnMenuCommand } from "../session/send-key";
+import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { DraftComposer } from "./draft-composer";
 import { DraftHeader } from "./draft-header";
 import { StartCards } from "./start-cards";
-import "../thread/composer.css";
+import "../session/composer.css";
 import "./new-thread.css";
 
 // The login dialog is loaded the first time Log in opens it, so its code is
@@ -139,7 +139,7 @@ export function DraftScreen({
     },
   });
   // Whether the column is scrolled away from its top, so part of it is under
-  // the header. Only then does it fade under the header (thread-header.css).
+  // the header. Only then does it fade under the header (../session/floating-header.css).
   const [scrolled, setScrolled] = useState(false);
   // The login the Log in button opened, while its dialog is open.
   const [login, setLogin] = useState<LoginTarget | null>(null);

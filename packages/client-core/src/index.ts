@@ -13,7 +13,20 @@ export {
   findAnsweredAssistantId,
   findWebConversation,
   flattenMessagePages,
+  mergeNewestMessagePage,
+  mergeSentMessage,
+  type MessagePage,
+  type MessagePages,
+  type SentMessageMerge,
 } from "./assistants/conversation";
+export {
+  buildConversationBlocks,
+  collectRunningTurnRows,
+  describeOpenReply,
+  trimToRunningTurn,
+  type ConversationBlock,
+  type OpenReplyBlock,
+} from "./assistants/conversation-blocks";
 export {
   buildAssistantDraft,
   buildAssistantUpdate,
@@ -232,6 +245,7 @@ export {
 } from "./onboarding";
 export {
   chooseStamps,
+  formatDayStamp,
   formatPreciseStamp,
   formatSince,
   formatStamp,

@@ -42,7 +42,7 @@ import type {
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { Profile, Runner, Session } from "@hercule/contract";
 import {
-  collectMessages,
+  collectPushes,
   get,
   onSocket,
   post,
@@ -1691,7 +1691,7 @@ describe("a session's inputs", () => {
       await onSocket(arranged.harness.base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const announced = yield* collectMessages(client, { topic: "session" });
+          const announced = yield* collectPushes(client, "session");
           yield* Effect.promise(() => waitForLiveToSettle());
 
           const edited = yield* Effect.promise(() =>
@@ -2675,7 +2675,7 @@ describe("session.update", () => {
       await onSocket(arranged.harness.base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const announced = yield* collectMessages(client, { topic: "session" });
+          const announced = yield* collectPushes(client, "session");
           yield* Effect.promise(() => waitForLiveToSettle());
 
           const patched = yield* Effect.promise(() =>
@@ -3782,7 +3782,7 @@ describe("sessions a runner's report leaves out", () => {
       await onSocket(arranged.harness.base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const announced = yield* collectMessages(client, { topic: "session" });
+          const announced = yield* collectPushes(client, "session");
           // Messages caused by the spawns and the binding are collected and
           // counted first, so the checks below count only what the report
           // caused.

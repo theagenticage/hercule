@@ -6,6 +6,7 @@
  * uses.
  */
 import {
+  infiniteQueryOptions,
   keepPreviousData,
   queryOptions,
   type EnsureQueryDataOptions,
@@ -14,17 +15,25 @@ import {
 } from "@tanstack/react-query";
 import {
   ApiError,
+  collectRunningTurnRows,
   detectLocalRunner,
+  mergeNewestMessagePage,
+  mergeSentMessage,
   queryKeys,
   readEveryPage,
   type HerculeClient,
+  type MessagePage,
+  type MessagePages,
 } from "@hercule/client-core";
 import {
+  DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
+  type ConversationMessage,
   type Input,
   type Runner,
   type Session,
   type Task,
+  type TranscriptRow,
 } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
 
@@ -372,6 +381,193 @@ export const currentConversationSessionQuery = (client: HerculeClient, conversat
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
+/**
+ * Reads one page of a conversation's messages, newest first: the newest page
+ * when `cursor` is `undefined`, else the page the cursor points to, which
+ * holds older messages.
+ */
+export const readMessagePage = (
+  client: HerculeClient,
+  conversationId: string,
+  cursor: string | undefined,
+) =>
+  client.conversation.queryMessages({
+    params: { id: conversationId },
+    query: {
+      sort: [{ field: "position", direction: "desc" }],
+      limit: DEFAULT_PAGE_LIMIT,
+      ...(cursor === undefined ? {} : { cursor }),
+    },
+  });
+
+/**
+ * Removes the query `queryKey` from `queryClient` once nothing observes it.
+ * A screen that alone keeps a query current calls it from its effect
+ * cleanup, so the cache does not hold the query out of date after the
+ * screen unmounts.
+ *
+ * The check runs after the current commit, not at once. In development
+ * React's StrictMode runs every effect's cleanup and then the effect again
+ * when a component mounts, and the query's observers subscribe again in
+ * between. Removed at once, the query would leave them reading an entry the
+ * cache no longer holds, and the screen would read it again without end.
+ */
+export const removeQueryOnceUnobserved = (queryClient: QueryClient, queryKey: QueryKey): void => {
+  setTimeout(() => {
+    const query = queryClient.getQueryCache().find({ queryKey, exact: true });
+    if (query !== undefined && query.getObserversCount() === 0) {
+      queryClient.getQueryCache().remove(query);
+    }
+  }, 0);
+};
+
+/**
+ * Reads a conversation's messages a page at a time, newest page first, for an
+ * assistant's Conversation. The first read holds the newest page only; each
+ * `fetchNextPage` adds the page of older messages before it, as the user
+ * scrolls up.
+ *
+ * Nothing reads the pages again on its own. While the Conversation is open,
+ * a push on the `conversation` topic reads the newest page and merges it into
+ * the held pages (see `useConversationLive`), so the pages read earlier are
+ * never read twice. The pages are dropped when the Conversation unmounts,
+ * so opening it again reads the newest page afresh.
+ */
+export const conversationMessagesQuery = (client: HerculeClient, conversationId: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.conversationMessages(conversationId),
+    queryFn: ({ pageParam }) => readMessagePage(client, conversationId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Replaces the pages of the conversation `conversationId` held in
+ * `queryClient` with `update` applied to them. Resolves once the change is
+ * in the cache. Does nothing while no pages are held: the user has left the
+ * Conversation, and an entry created now would hold a newest page with no
+ * history before it, which nothing would read again.
+ *
+ * While an earlier page is being read, the change is made twice: at once,
+ * and again when that read ends. A read of a page writes back the pages it
+ * found when it started, with the new page added, so it would undo a change
+ * made in between. `update` must give the same pages when applied twice.
+ */
+const updateHeldMessages = async (
+  queryClient: QueryClient,
+  conversationId: string,
+  update: (held: MessagePages) => MessagePages,
+): Promise<void> => {
+  const queryKey = queryKeys.conversationMessages(conversationId);
+  const apply = (): void => {
+    // An updater that returns undefined leaves the cache as it is, and
+    // creates no entry.
+    queryClient.setQueryData<MessagePages>(queryKey, (held) =>
+      held === undefined ? undefined : update(held),
+    );
+  };
+  apply();
+  const query = queryClient.getQueryCache().find({ queryKey, exact: true });
+  const reading = query?.state.fetchStatus === "fetching" ? query.promise : undefined;
+  if (reading === undefined) return;
+  await reading.catch(() => undefined);
+  apply();
+};
+
+/**
+ * Merges `newest`, a fresh read of the newest messages, into the pages of the
+ * conversation `conversationId` held in `queryClient`, by
+ * `mergeNewestMessagePage`. Resolves once the merge is in the cache. Does
+ * nothing while no pages are held (see `updateHeldMessages`).
+ */
+export const storeNewestMessages = (
+  queryClient: QueryClient,
+  conversationId: string,
+  newest: MessagePage,
+): Promise<void> =>
+  updateHeldMessages(queryClient, conversationId, (held) => mergeNewestMessagePage(held, newest));
+
+/**
+ * Stores `message`, which the user has just sent, in the pages of the
+ * conversation `conversationId` held in `queryClient`, as
+ * `mergeSentMessage` decides:
+ *
+ * - when it comes right after the newest message held, it is merged into
+ *   the newest page;
+ * - when more messages were stored since, the newest page is read and
+ *   merged instead, because the message alone would leave a gap before it.
+ *   When that read fails, nothing is stored: the `conversation` push that
+ *   follows every stored message reads the newest page again;
+ * - while no pages are held, because the user has left the Conversation,
+ *   nothing is stored.
+ *
+ * Resolves once the message is in the cache, or nothing will be stored.
+ */
+export const storeSentMessage = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  conversationId: string,
+  message: ConversationMessage,
+): Promise<void> => {
+  const held = queryClient.getQueryData<MessagePages>(
+    queryKeys.conversationMessages(conversationId),
+  );
+  const merge = mergeSentMessage(held, message);
+  if (merge.kind === "nothing-held") return;
+  if (merge.kind === "merged") {
+    await updateHeldMessages(queryClient, conversationId, (pages) => {
+      const again = mergeSentMessage(pages, message);
+      return again.kind === "merged" ? again.pages : pages;
+    });
+    return;
+  }
+  const newest = await readMessagePage(client, conversationId, undefined).catch(() => null);
+  if (newest !== null) await storeNewestMessages(queryClient, conversationId, newest);
+};
+
+/**
+ * Reads the rows of a session's running turn, oldest first: the rows from its
+ * newest `turn.started` on, or every row when the session has none. An
+ * assistant's Conversation draws the reply being written from them.
+ *
+ * The transcript is read newest first, a page at a time, and the read stops
+ * at the page that holds the newest `turn.started`. A long conversation then
+ * costs one or two pages, not its whole history.
+ *
+ * After this read, only the live connection changes the cached rows:
+ * `useSessionLive` merges each row the session's stream delivers, trimmed by
+ * `trimToRunningTurn` so the entry keeps holding the running turn alone
+ * when the next turn starts, and reads the rows again when the stream
+ * reports a reset. The rows are dropped when the Conversation showing the
+ * session unmounts.
+ */
+export const runningTurnQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.runningTurn(sessionId),
+    queryFn: async (): Promise<readonly TranscriptRow[]> => {
+      const rowsNewestFirst: TranscriptRow[] = [];
+      let cursor: string | undefined;
+      for (;;) {
+        const page = await client.transcript.read({
+          params: { id: sessionId },
+          query: {
+            sort: [{ field: "position", direction: "desc" }],
+            limit: MAX_PAGE_LIMIT,
+            ...(cursor === undefined ? {} : { cursor }),
+          },
+        });
+        rowsNewestFirst.push(...page.items);
+        const collected = collectRunningTurnRows(rowsNewestFirst);
+        if (collected.reachedTurnStart || page.nextCursor === undefined) return collected.rows;
+        cursor = page.nextCursor;
+      }
+    },
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
 /** Reads the signed-in user's name, for the sidebar's foot and Settings > Profile. */
 export const userQuery = (client: HerculeClient) =>
   queryOptions({
@@ -399,7 +595,7 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
  * it reads the session's own agent; with it, that subagent's transcript.
  *
  * After this read, only the live connection changes the cached transcript:
- * the live hook merges each row the agent's `:stream` topic delivers, and
+ * `useSessionLive` merges each row the agent's `:stream` topic delivers, and
  * reads the transcript again when the stream reports a reset. The `session`
  * topic never invalidates it, and it is never read again in the background: a
  * read that raced a merge could replace the cache with rows older than the

@@ -92,6 +92,19 @@ export const queryKeys = {
     sessionId,
     subagentId ?? null,
   ],
+  /**
+   * The rows of one session's running turn, oldest first, which an
+   * assistant's Conversation reads to draw the reply being written. A delta
+   * on the session's `:stream` topic is appended directly to this entry, so,
+   * like `transcript`, it is never invalidated: no push maps to it in
+   * `buildQueryKeys`. The entry is read from the newest `turn.started` on,
+   * and the Conversation trims it with `trimToRunningTurn` as rows are
+   * appended, so a later `turn.started` drops the rows before it. Its prefix
+   * `running-turn` is its own, so an invalidation of another key never
+   * reaches it, and it is never the thread's `transcript` entry, which holds
+   * the whole transcript. The Conversation removes it when it closes.
+   */
+  runningTurn: (sessionId: string): LiveQueryKey => ["running-turn", sessionId],
   /** Every page of one session's subagents, whatever the sort; without it, the prefix of all of them. */
   subagents: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["subagents"] : ["subagents", sessionId],
@@ -168,10 +181,11 @@ export const queryKeys = {
 
 /**
  * Returns the query keys to invalidate for a push on a mutable topic. A push
- * with no ids means every record of the topic may have changed (a reconnect
- * assumes this), so it returns the list and record prefixes rather than one
- * key per record. `conversationIds` is the push's map from each session to its
- * conversation, which only a `session` push carries.
+ * with no ids means every record of the topic may have changed (the
+ * controller sends one first on every subscription), so it returns the list
+ * and record prefixes rather than one key per record. `conversationIds` is
+ * the push's map from each session to its conversation, which only a
+ * `session` push carries.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,

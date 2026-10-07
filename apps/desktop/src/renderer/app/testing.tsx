@@ -9,7 +9,7 @@
  * tests.
  */
 import { afterEach, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { Live } from "@hercule/client-core";
 import {
@@ -29,6 +29,7 @@ import {
   GITHUB_CONNECTION_TYPE,
   type Assistant,
   type Connection,
+  type ConversationMessage,
   type Input,
   type ModelOption,
   type MutableLiveTopic,
@@ -648,18 +649,19 @@ type OmitEventBase<Event> = Event extends unknown
 
 /**
  * A provider event without the fields every event has, which `buildTranscript`
- * and `buildNextRows` fill in.
+ * and `buildNextRows` fill in. The specimens' fixtures import it too, as a
+ * type only, because this module imports vitest.
  */
 export type EventBody = OmitEventBase<ProviderEvent>;
 
 /** One event of a fixture transcript, and how many seconds after the transcript's start it happened. */
-type TranscriptStep = readonly [seconds: number, event: EventBody];
+export type TranscriptStep = readonly [seconds: number, event: EventBody];
 
 /**
  * Returns the transcript rows of `steps` for the session `sessionId`, with
  * positions from 1 and times counted from `startAt`.
  */
-const buildTranscript = (
+export const buildTranscript = (
   sessionId: string,
   startAt: string,
   steps: readonly TranscriptStep[],
@@ -674,14 +676,17 @@ const buildTranscript = (
   });
 
 /**
- * Returns the rows that follow `thread`'s transcript, one per body, as the
- * thread's stream delivers them. Positions continue from the last row, and
- * every row has the last row's time. Throws when the thread has no rows.
+ * Returns the rows that follow `rows`, one per body, as the stream of the
+ * session `sessionId` delivers them. Positions continue from the last row,
+ * and every row has the last row's time. Throws when `rows` is empty.
  */
-export const buildNextRows = (thread: ThreadRecords, ...bodies: EventBody[]): TranscriptRow[] => {
-  const last = thread.transcript.at(-1);
-  if (last === undefined) throw new Error("buildNextRows needs a thread with at least one row.");
-  const sessionId = thread.session.id;
+export const buildNextRows = (
+  sessionId: string,
+  rows: readonly TranscriptRow[],
+  ...bodies: readonly EventBody[]
+): TranscriptRow[] => {
+  const last = rows.at(-1);
+  if (last === undefined) throw new Error("buildNextRows needs at least one row to follow.");
   return bodies.map((body, index) => {
     const position = last.position + index + 1;
     return {
@@ -1047,6 +1052,103 @@ export const buildThreadHandlers = (thread: ThreadRecords): Readonly<Record<stri
   };
 };
 
+/** An assistant's Conversation as the stubbed controller holds it. */
+export interface ConversationRecords {
+  readonly assistant: Assistant;
+  /** The current session of the assistant's main conversation, or `null` when none has started. */
+  readonly session: Session | null;
+  /**
+   * The Conversation's messages, oldest first. The stubbed send adds the
+   * message it stores to the end, and a test may add messages too, as the
+   * controller does when a reply is stored.
+   */
+  readonly messages: ConversationMessage[];
+  /** The current session's transcript, oldest first. None when absent. */
+  readonly transcript?: readonly TranscriptRow[];
+}
+
+/** The time of the first fixture message; each later one is a minute after the one before. */
+const FIRST_MESSAGE_AT = Date.parse("2026-09-10T09:00:00.000Z");
+
+/**
+ * Returns the message at `position` of `assistant`'s main conversation, with
+ * every field the contract requires. It is the owner's unless `over` says
+ * otherwise; a reply or a notice is signed with the assistant's name. Its time
+ * is `position` minutes after 09:00 on 10 September 2026, unless `over` sets
+ * `createdAt`.
+ */
+export const buildFixtureMessage = (
+  assistant: Assistant,
+  over: Partial<ConversationMessage> & Pick<ConversationMessage, "position" | "text">,
+): ConversationMessage => {
+  const senderRole = over.senderRole ?? "owner";
+  return {
+    id: `01a06d02-d000-7000-8000-${over.position.toString().padStart(12, "0")}`,
+    conversationId: assistant.mainConversationId,
+    containerKey: null,
+    senderRole,
+    senderLabel: senderRole === "owner" ? "rogier" : assistant.name,
+    sessionId: null,
+    turnId: null,
+    itemId: null,
+    actor: senderRole === "owner" ? "user" : "system",
+    createdAt: new Date(FIRST_MESSAGE_AT + over.position * 60_000).toISOString(),
+    ...over,
+  };
+};
+
+/**
+ * Answers a read of a page of `messages`, newest first, as the controller
+ * does: `limit` messages at most, starting below the position the cursor
+ * holds, with a cursor to the next page while older messages remain.
+ */
+const answerMessagePage = (messages: readonly ConversationMessage[], call: Call): Answer => {
+  const search = new URLSearchParams(call.search);
+  const limit = Number(search.get("limit") ?? "50");
+  const before = Number(search.get("cursor") ?? Infinity);
+  const older = messages.filter((message) => message.position < before).reverse();
+  const items = older.slice(0, limit);
+  const last = items.at(-1);
+  return {
+    body: {
+      items,
+      ...(older.length > limit && last !== undefined ? { nextCursor: String(last.position) } : {}),
+    },
+  };
+};
+
+/**
+ * Returns the handlers that answer an assistant's Conversation from
+ * `records`: its messages a page at a time, newest first; the send, which
+ * stores the owner's message after the last one and returns it; and, when a
+ * session has started, its transcript as one page, newest first, as the
+ * Conversation reads its running turn.
+ */
+export const buildConversationHandlers = (
+  records: ConversationRecords,
+): Readonly<Record<string, Handler>> => {
+  const { assistant, session, messages, transcript = [] } = records;
+  const path = `/api/v1/conversations/${assistant.mainConversationId}/messages`;
+  return {
+    [`GET ${path}`]: (call) => answerMessagePage(messages, call),
+    [`POST ${path}`]: (call) => {
+      const message = buildFixtureMessage(assistant, {
+        position: (messages.at(-1)?.position ?? 0) + 1,
+        text: (call.body as { readonly text: string }).text,
+      });
+      messages.push(message);
+      return { body: message };
+    },
+    ...(session === null
+      ? {}
+      : {
+          [`GET /api/v1/sessions/${session.id}/transcript`]: {
+            body: { items: [...transcript].reverse() },
+          },
+        }),
+  };
+};
+
 /**
  * Stubs the global `fetch` for this test with one that responds from
  * `handlers`, keyed `METHOD /path`, and returns the calls it receives.
@@ -1126,6 +1228,13 @@ export interface LiveStub {
   readonly resetStream: (sessionId: string) => void;
   /** Closes the app's current socket from the controller's end, as a restart or a sleep does. */
   readonly drop: () => void;
+  /**
+   * Waits until the app's socket is open with the shell's subscriptions, the
+   * controller's first push on each has arrived, and the reads those pushes
+   * started have finished. A test that counts the app's requests calls it
+   * first, so the reads the first pushes cause are not counted as its own.
+   */
+  readonly waitForFirstPushes: () => Promise<void>;
 }
 
 /**
@@ -1211,6 +1320,19 @@ const buildTestContext = async (
     },
     drop: () => {
       readSocket().drop();
+    },
+    waitForFirstPushes: async () => {
+      await waitFor(() => {
+        if (!live.isConnected() || !live.readTopics().includes("session")) {
+          throw new Error("the shell has not subscribed yet");
+        }
+      });
+      // The stub answers a subscription in a microtask, and the reads the
+      // answer starts begin after it is decoded, so let those run first.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitFor(() => {
+        if (context.queryClient.isFetching() > 0) throw new Error("reads are still running");
+      });
     },
   };
   return { context, live };

@@ -14,6 +14,7 @@ import { PlusIcon } from "../../icons/plus";
 import { SidebarIcon } from "../../icons/sidebar";
 import { useHasSidePane, useSidePaneLayout } from "../subagents/use-side-pane";
 import { MorePill, ThreadTabsPill } from "./header-pills";
+import "../session/floating-header.css";
 import "./thread-header.css";
 
 /**

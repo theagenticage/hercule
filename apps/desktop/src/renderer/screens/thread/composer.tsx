@@ -1,4 +1,4 @@
-import { useRef, useSyncExternalStore, type FocusEvent, type JSX, type Ref } from "react";
+import { useSyncExternalStore, type JSX, type Ref } from "react";
 import {
   useIsMutating,
   useMutation,
@@ -38,19 +38,15 @@ import {
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
-import { MicIcon } from "../../icons/mic";
-import { PlusIcon } from "../../icons/plus";
-import { SendIcon } from "../../icons/send";
 import { ShieldIcon } from "../../icons/shield";
-import { StopIcon } from "../../icons/stop";
 import { WorkspaceIcon } from "../../icons/workspace";
+import { ComposerFrame } from "../session/composer-frame";
+import { useSendOnMenuCommand } from "../session/send-key";
 import { TallyPill } from "../subagents/tally-pill";
 import { useStopAgent } from "../use-stop-agent";
-import { AgentRequestDock, REQUEST_PAGER_CLASS } from "./agent-request-dock";
+import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
 import { QueuedInputs } from "./queued-inputs";
-import { isSendKey, useSendOnMenuCommand } from "./send-key";
-import "./composer.css";
 
 /** What one send carried: the request, and the picks it was built from. */
 interface SentSubmission {
@@ -61,25 +57,8 @@ interface SentSubmission {
 }
 
 /**
- * Checks that `element` is on one of the two lines the shrunk composer keeps
- * of a Request: `dock-mini` or the Request pager line.
- */
-const isOnRequestLines = (element: Element): boolean =>
-  element.closest(`.dock-mini, .${REQUEST_PAGER_CLASS}`) !== null;
-
-/**
- * Checks that a click on `target` leaves the shrunk composer shrunk: it is
- * on one of `dock-mini`'s answers, or anywhere on the Request pager line. A
- * click on the rest of `dock-mini`, such as its question, expands the
- * composer like a click anywhere else.
- */
-const keepsComposerShrunk = (target: EventTarget): boolean =>
-  target instanceof Element &&
-  target.closest(`.dock-mini button, .${REQUEST_PAGER_CLASS}`) !== null;
-
-/**
- * Renders the thread's composer, floating over the bottom of the transcript,
- * as the Bureau book's `.composer-wrap` draws it. From top to bottom:
+ * Renders the thread's composer in a `ComposerFrame`, floating over the
+ * bottom of the transcript. From top to bottom:
  *
  * - the tally pill, while the thread has subagents, see `TallyPill`;
  * - the queued inputs, see `QueuedInputs`;
@@ -107,20 +86,9 @@ const keepsComposerShrunk = (target: EventTarget): boolean =>
  * per thread in the controller's `pendingSubmissions` rather than here, so
  * it is still there when the user comes back to the thread.
  *
- * Attach and Dictate are drawn but do nothing yet, and carry
- * `aria-disabled`.
- *
- * - `shrunk` draws the composer as the book's `.is-scrolled`: narrower, one
- *   line high, with only the field, the Request's pager line and its
- *   one-line `dock-mini` left. The thread screen decides it.
- * - `onFocusChange` is called with whether the focus is in the composer,
- *   which keeps the composer expanded. Focus on `dock-mini` or the pager line
- *   keeps the size the composer has.
- * - `scrollTranscriptToBottom` is called when a message is sent, and when a
- *   click on the shrunk composer expands it.
- * - `ref` receives the stack of the rows above, the card and the lip, whose
- *   height is what the composer covers of the transcript, less the 18px the
- *   stack sits above the pane's bottom edge.
+ * `shrunk`, `onFocusChange`, `scrollTranscriptToBottom` and `ref` are the
+ * frame's: see `ComposerFrame`. The thread screen decides `shrunk`.
+ * `scrollTranscriptToBottom` is also called when a message is sent.
  */
 export function ThreadComposer({
   sessionId,
@@ -148,16 +116,11 @@ export function ThreadComposer({
   const pending = useSyncExternalStore(pendingSubmissions.subscribe, () =>
     pendingSubmissions.read(sessionId),
   );
-  const fieldRef = useRef<HTMLTextAreaElement>(null);
   // The send is keyed by the thread, so a composer mounted again while its
   // send is still on the way, after the user left and came back, finds it
   // running and does not send the message twice.
   const sendKey = ["thread-input", sessionId];
   const sending = useIsMutating({ mutationKey: sendKey }) > 0;
-  // Whether the pointer went down on the shrunk composer, anywhere but on
-  // `dock-mini`'s answers or the pager line. By the time the click arrives,
-  // the focus it moved has already expanded the composer.
-  const expandOnClickRef = useRef(false);
 
   // No runner is local to the desktop app. A started thread names its own
   // runner, which is the one every field reads.
@@ -243,129 +206,59 @@ export function ThreadComposer({
     stopAgent.stop();
   };
 
-  // Focus inside the composer keeps it expanded. Focus on the Request lines
-  // keeps the size the composer has instead, so a user who answers or pages a
-  // Request from the shrunk composer keeps reading the transcript.
-  const reportFocus = (event: FocusEvent<HTMLDivElement>, element: EventTarget | null): void => {
-    onFocusChange(
-      element instanceof Element &&
-        event.currentTarget.contains(element) &&
-        !(shrunk && isOnRequestLines(element)),
-    );
-  };
-
   return (
-    <div className="composer-wrap">
-      <div
-        className={shrunk ? "composer is-scrolled" : "composer"}
-        ref={ref}
-        onFocus={(event) => {
-          reportFocus(event, event.target);
-        }}
-        onBlur={(event) => {
-          // The focused element also loses the focus when the window does,
-          // and gets it back when the window returns. The composer keeps its
-          // size in between.
-          if (!document.hasFocus()) return;
-          reportFocus(event, event.relatedTarget);
-        }}
-        onPointerDown={(event) => {
-          expandOnClickRef.current = shrunk && !keepsComposerShrunk(event.target);
-        }}
-        onClick={() => {
-          if (!expandOnClickRef.current) return;
-          expandOnClickRef.current = false;
-          fieldRef.current?.focus();
-          scrollTranscriptToBottom();
-        }}
-      >
-        <div className="fold tally-fold">
-          <TallyPill sessionId={sessionId} />
-        </div>
-        <div className="fold">
-          <QueuedInputs sessionId={sessionId} />
-        </div>
-        <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} />
-        <div className="composer-card">
-          <textarea
-            ref={fieldRef}
-            className="composer-input"
-            rows={1}
-            readOnly={readOnly !== null}
-            aria-disabled={readOnly !== null || undefined}
-            aria-label="Message"
-            placeholder={placeholder}
-            value={pending.message.text}
-            onChange={(event) => {
-              pendingSubmissions.writeText(sessionId, event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (!isSendKey(event)) return;
-              event.preventDefault();
-              submit();
-            }}
-          />
-          <div className="fold">
-            <div className="composer-row">
-              <button type="button" className="icon-btn" title="Attach" aria-disabled="true">
-                <PlusIcon />
-              </button>
-              <span className="pick" title={fields.accessMode.locked ?? undefined}>
-                <ShieldIcon size={14} />
-                {formatAccessMode(fields.accessMode.value)}
-              </span>
-              {descriptors === null ? null : (
-                <OptionsPick
-                  descriptors={descriptors}
-                  selected={config.options}
-                  modelName={pill.name}
-                  disabled={readOnly !== null}
-                  onPick={pick}
-                />
-              )}
-              {/* The note fills the spacer, so no control moves when it shows. */}
-              <span className="spacer composer-note">{note}</span>
-              <ModelPick
-                pill={pill}
-                catalogs={catalogs}
-                config={config}
-                kind="active"
-                disabled={readOnly !== null}
-                readRecent={() => readRecentModels(controller.url)}
-                onPick={pick}
-              />
-              <button type="button" className="icon-btn" title="Dictate" aria-disabled="true">
-                <MicIcon />
-              </button>
-              {busy ? (
-                <button
-                  type="button"
-                  className="stop"
-                  title="Stop"
-                  aria-disabled={stopAgent.isPending || undefined}
-                  onClick={stop}
-                >
-                  <StopIcon size={14} />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={canSend ? "send" : "send send--off"}
-                  title="Send"
-                  aria-disabled={!canSend || undefined}
-                  onClick={submit}
-                >
-                  <SendIcon />
-                </button>
-              )}
-            </div>
-            {error === null ? null : (
-              <p className="composer-error" role="alert">
-                {error}
-              </p>
-            )}
+    <ComposerFrame
+      text={pending.message.text}
+      onTextChange={(text) => {
+        pendingSubmissions.writeText(sessionId, text);
+      }}
+      placeholder={placeholder}
+      readOnly={readOnly !== null}
+      canSend={canSend}
+      onSend={submit}
+      stop={busy ? { stopping: stopAgent.isPending, onStop: stop } : undefined}
+      error={error}
+      start={
+        <>
+          <span className="pick" title={fields.accessMode.locked ?? undefined}>
+            <ShieldIcon size={14} />
+            {formatAccessMode(fields.accessMode.value)}
+          </span>
+          {descriptors === null ? null : (
+            <OptionsPick
+              descriptors={descriptors}
+              selected={config.options}
+              modelName={pill.name}
+              disabled={readOnly !== null}
+              onPick={pick}
+            />
+          )}
+        </>
+      }
+      note={note}
+      end={
+        <ModelPick
+          pill={pill}
+          catalogs={catalogs}
+          config={config}
+          kind="active"
+          disabled={readOnly !== null}
+          readRecent={() => readRecentModels(controller.url)}
+          onPick={pick}
+        />
+      }
+      above={
+        <>
+          <div className="fold tally-fold">
+            <TallyPill sessionId={sessionId} />
           </div>
-        </div>
+          <div className="fold">
+            <QueuedInputs sessionId={sessionId} />
+          </div>
+          <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} />
+        </>
+      }
+      below={
         <div className="fold">
           <div className="lip">
             {workspaceLabel.map((piece) => (
@@ -397,7 +290,11 @@ export function ThreadComposer({
             </span>
           </div>
         </div>
-      </div>
-    </div>
+      }
+      shrunk={shrunk}
+      onFocusChange={onFocusChange}
+      scrollMessagesToBottom={scrollTranscriptToBottom}
+      ref={ref}
+    />
   );
 }

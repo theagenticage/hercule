@@ -52,7 +52,7 @@ Two push modes, chosen by data shape:
 | Data shape | Examples | Push mode | Reconnect |
 |---|---|---|---|
 | Append-only streams | session transcripts, the event feed | Payload-carrying deltas | Client sends its last cursor; the controller replays from the store's durable cursors ([./04-state-store.md](./04-state-store.md)) |
-| Mutable records | tasks, runs, fleet, workflows, connections, notifications | Invalidation nudge naming the record or collection; the client refetches over HTTP through TanStack Query | Client invalidates every subscribed query on reconnect |
+| Mutable records | tasks, runs, fleet, workflows, connections, notifications | Invalidation nudge naming the record or collection; the client refetches over HTTP through TanStack Query | ~~Client invalidates every subscribed query on reconnect~~ The controller's first push on every subscription names no record, so the client refetches every query the subscription covers; a client subscribes again on every connection *(amended 2026-10-07, [#454](https://github.com/theagenticage/hercule/issues/454))* |
 
 **Watched sessions.** A session the user is actively viewing additionally gets **ephemeral token-delta passthrough**: a live tap beside the durable path. The store keeps coalescing at message/turn boundaries ([./04-state-store.md](./04-state-store.md)); deltas stream only to subscribed watchers and are never persisted per token. On reconnect the client falls back to the coalesced records and resumes the tap from there.
 
@@ -81,8 +81,10 @@ The first delta of a subscription carries the replay start as its cursor. *(Amen
 
 | Family | Topics | Message |
 |---|---|---|
-| Mutable records (invalidation nudges) | `task`, `run`, `session`, `workflow`, `connection`, `notification`, `runner`, `plugin` | `invalidate` naming the changed record ids; the client maps ids to TanStack Query keys and refetches over HTTP. The controller coalesces ids per topic for about 50 ms so a burst is one nudge. |
+| Mutable records (invalidation nudges) | `task`, `run`, `session`, `workflow`, `connection`, `notification`, `runner`, `plugin` | `invalidate` naming the changed record ids; the client maps ids to TanStack Query keys and refetches over HTTP. The controller coalesces ids per topic for about 50 ms so a burst is one nudge. The first message of every subscription is an `invalidate` with no ids and `kind: "updated"`, sent at once rather than coalesced *(amended 2026-10-07, [#454](https://github.com/theagenticage/hercule/issues/454))*. |
 | Append-only streams (payload deltas) | `event` (the event log), `session:<id>:stream` (the durable coalesced transcript), `session:<id>:tap` (ephemeral token deltas, watched sessions only) | `delta` carrying the items and the new cursor |
+
+*(Amended 2026-10-07, [#454](https://github.com/theagenticage/hercule/issues/454).)* **The first push of a mutable subscription.** A screen reads its records over HTTP and then subscribes, so a change committed between the read and the moment the controller registers the subscription is pushed to nobody. Until this amendment the client invalidated everything it watched when a connection opened, which closed the gap only for subscriptions made before the connection opened, not for one made while connected, such as a Conversation opened from the sidebar. Instead, the controller answers every mutable subscription with an `invalidate` that names no ids, meaning every record of the topic may have changed, as soon as the subscription is registered and before any change it coalesces. The client refetches everything the topic covers, and every change after that is pushed. The same push covers a reconnect, because a client subscribes again on every new connection, and a subscription the controller ended because its subscriber fell behind. The client adds no invalidation of its own. The live protocol version stays 1: an older client treats the push as one more nudge and refetches once more, and a newer client connected to an older controller gets no refetch when it subscribes until that controller is upgraded. The web app ships inside the controller, so it never meets a controller of another version.
 
 There are no per-record topics. A changed task never travels over the socket: the record has one shape, the HTTP one, and permissions are checked once, on the HTTP path; the cost is one LAN round trip per coalesced nudge.
 
@@ -110,7 +112,7 @@ runner ──ws──▶ controller  session.reported
 |---|---|---|---|
 | `session:<id>:tap` | one message per token | never stored, never replays | nothing lost: the stream row carries the same text |
 | `session:<id>:stream` | one row per 4 KB or per item | written to the store first, announced from inside that transaction; has a cursor | replayed from the cursor on reconnect |
-| `session` | one nudge per status move, coalesced ~50 ms | the record itself is read over HTTP | the client rereads everything it watches on reconnect |
+| `session` | one nudge per status move, coalesced ~50 ms | the record itself is read over HTTP | ~~the client rereads everything it watches on reconnect~~ the controller's first push on the new subscription makes the client read everything it watches again *(amended 2026-10-07, [#454](https://github.com/theagenticage/hercule/issues/454))* |
 
 **The stream wins over the tap.** A tap delta is the head of an item's text as far as the browser has seen it; a stream row is that same text as the store holds it. When both describe one open item, the row replaces whatever the tap had painted and later taps for that item resume after it. A consumer of the tap that is not the web app (a CLI following a thread) applies the same rule: the tap is a preview, the stream is the record.
 

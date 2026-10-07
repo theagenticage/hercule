@@ -211,6 +211,15 @@ export type InvalidateKind = Schema.Schema.Type<typeof InvalidateKind>;
 /**
  * A mutable topic's push: which records changed, and how.
  *
+ * A push with empty `ids` means that every record of the topic may have
+ * changed, and its `kind` is `updated`. The controller sends one as the
+ * first message of every mutable subscription, once the subscription is
+ * registered. A client usually reads the records over HTTP before it
+ * subscribes, so a change committed between that read and the subscription
+ * would otherwise be lost; after the re-read this push causes, every later
+ * change is pushed. It also covers what a client missed while it had no
+ * connection, because a client subscribes again on every new connection.
+ *
  * A `session` push also carries `conversationIds`: for each session in
  * `ids`, the id of the conversation it answers, or `null` for a session in
  * no conversation, such as a thread or a workflow run's session. A client

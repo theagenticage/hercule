@@ -27,6 +27,7 @@ import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { TaskService, TaskServiceLayer } from "../tasks";
+import { subscribeSkippingFirstPush } from "./testing";
 import { LiveTopics, LiveTopicsLayer, type LiveQueue } from "./topics";
 
 type Deps = TaskService | AuditLog | LiveTopics | SqlClient.SqlClient;
@@ -73,10 +74,9 @@ describe("publishing after a commit", () => {
   it("publishes nothing for a transaction that rolled back after its audit row was written", async () => {
     const held = await run(
       Effect.gen(function* () {
-        const topics = yield* LiveTopics;
         const tasks = yield* TaskService;
         const sql = yield* SqlClient.SqlClient;
-        const queue = yield* topics.subscribe("task");
+        const queue = yield* subscribeSkippingFirstPush("task");
 
         yield* Effect.ignore(
           withTransaction(
@@ -98,10 +98,9 @@ describe("publishing after a commit", () => {
   it("publishes nothing for an inner transaction that rolled back inside one that committed", async () => {
     const [held, kept] = await run(
       Effect.gen(function* () {
-        const topics = yield* LiveTopics;
         const tasks = yield* TaskService;
         const sql = yield* SqlClient.SqlClient;
-        const queue = yield* topics.subscribe("task");
+        const queue = yield* subscribeSkippingFirstPush("task");
 
         const task = yield* withTransaction(
           sql,
@@ -131,10 +130,9 @@ describe("publishing after a commit", () => {
   it("publishes the same mutation when its transaction commits", async () => {
     const [held, id] = await run(
       Effect.gen(function* () {
-        const topics = yield* LiveTopics;
         const tasks = yield* TaskService;
         const sql = yield* SqlClient.SqlClient;
-        const queue = yield* topics.subscribe("task");
+        const queue = yield* subscribeSkippingFirstPush("task");
 
         const task = yield* withTransaction(
           sql,

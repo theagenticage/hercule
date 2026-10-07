@@ -114,7 +114,7 @@ What a thread runs with: provider instance, model and its options, access mode, 
 _Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup
 
 **Message Draft**:
-The unsent content the composer holds for one thread: text today, attachments and context later. One per thread, draft or active.
+The unsent content the composer holds for one thread or one assistant's Conversation: text today, attachments and context later. One per thread, draft or active, and one per assistant.
 _Avoid_: prompt (the first message as the spawn carries it), composer state
 
 **Submission**:
@@ -174,7 +174,7 @@ One continuous exchange with an assistant inside one platform container: a Disco
 _Avoid_: chat, thread (reserved for provider-native objects)
 
 **Conversation Message**:
-One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
+One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it, and a reply names the turn that wrote it and the assistant text it holds. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
 _Avoid_: chat message, event, input (bare; a Queued Input is the session-side delivery of an owner's message)
 
 **Notice**:

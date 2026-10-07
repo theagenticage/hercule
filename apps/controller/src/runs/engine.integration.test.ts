@@ -26,7 +26,7 @@ import { Effect, Redacted } from "effect";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import type { Task } from "@hercule/contract";
 import {
-  collectMessages,
+  collectPushes,
   expectHeld,
   fetchTicket,
   get,
@@ -138,7 +138,7 @@ describe("a run subscription", () => {
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const pushes = yield* collectMessages(client, { topic: "run" });
+          const pushes = yield* collectPushes(client, "run");
           yield* Effect.promise(() => expectHeld(harness.live, 1, "run"));
 
           const runId = yield* Effect.promise(() =>

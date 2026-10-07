@@ -16,7 +16,8 @@
  *   to notice. Changes that come in a steady stream while an agent works, a
  *   subagent's progress and a session's Token Usage, are collected for a
  *   longer window instead, so a busy session costs each client at most one
- *   refetch per record per second.
+ *   refetch per record per second. A subscription's first message is sent
+ *   at once, with no window: it says that every record may have changed.
  * - A log topic carries the records themselves. A commit only signals that
  *   the log grew, never which rows. Each follower then reads forward from its
  *   own position, so records arrive in log order, never twice, and the replay
@@ -138,6 +139,16 @@ const buildAgentTapTopic = (sessionId: string, subagentId: SubagentId | undefine
   subagentId === undefined
     ? buildSessionTapTopic(sessionId)
     : buildSubagentTapTopic(sessionId, subagentId);
+
+/**
+ * Builds the push that says every record of a mutable topic may have changed:
+ * an invalidate with no ids. A `session` push always carries
+ * `conversationIds`, so this one carries an empty map.
+ */
+const buildEverythingChanged = (topic: MutableLiveTopic): LiveMessage =>
+  topic === "session"
+    ? { _tag: "invalidate", ids: [], kind: "updated", conversationIds: {} }
+    : { _tag: "invalidate", ids: [], kind: "updated" };
 
 /** A change to one record of a mutable topic. */
 type RecordChange = Extract<Change, { readonly _tag: "record" }>;
@@ -386,11 +397,16 @@ const make = Effect.gen(function* () {
       return watcher.queue;
     });
 
-  /** Registers a subscription for the life of the current scope, and returns it. */
+  /**
+   * Registers a subscription for the life of the current scope, and returns
+   * it. `first`, when given, is queued as the subscription's first message in
+   * the same step that registers it, so no other message can come before it.
+   */
   const registerWatcher = (
     topic: LiveTopic,
     cursor: number,
     doorbell: Queue.Queue<void> | undefined,
+    first?: LiveMessage,
   ): Effect.Effect<Watcher, never, Scope.Scope> =>
     Effect.acquireRelease(
       Effect.map(Queue.make<LiveMessage, LiveFailure>(), (queue) => {
@@ -398,6 +414,7 @@ const make = Effect.gen(function* () {
         const set = watchers.get(topic) ?? new Set<Watcher>();
         watchers.set(topic, set);
         set.add(watcher);
+        if (first !== undefined) Queue.offerUnsafe(queue, first);
         return watcher;
       }),
       (watcher) =>
@@ -431,9 +448,22 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** Opens a subscription to a mutable topic, which carries news of changes and no records. */
+    /**
+     * Opens a subscription to a mutable topic, which carries news of changes
+     * and no records.
+     *
+     * The subscription's first message says that every record of the topic
+     * may have changed. The client usually read the records over HTTP before
+     * it subscribed, and a change committed between that read and this
+     * registration would otherwise never reach it. The first message is
+     * queued only once the subscription is registered, so a re-read it causes
+     * sees every change made before, and every change made after is pushed.
+     */
     subscribe: (topic: MutableLiveTopic): Effect.Effect<LiveQueue, never, Scope.Scope> =>
-      Effect.map(registerWatcher(topic, 0, undefined), (watcher) => watcher.queue),
+      Effect.map(
+        registerWatcher(topic, 0, undefined, buildEverythingChanged(topic)),
+        (watcher) => watcher.queue,
+      ),
 
     /** Opens a subscription to the event log, replayed from `after` and then followed. */
     follow: (
