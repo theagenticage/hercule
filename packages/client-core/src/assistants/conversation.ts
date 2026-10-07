@@ -18,8 +18,7 @@ export const findWebConversation = (items: readonly Conversation[]): Conversatio
 /**
  * Flattens the pages of `conversation.queryMessages` into one list of
  * messages, oldest first. The screen reads its pages newest first, so the
- * latest messages load first and "Show earlier messages" adds a page of older
- * ones.
+ * latest messages load first and each page read after them adds older ones.
  */
 export const flattenMessagePages = (
   pages: ReadonlyArray<{ readonly items: readonly ConversationMessage[] }>,
@@ -44,6 +43,19 @@ export interface MessagePages {
 }
 
 /**
+ * Checks whether a message (`fresh`) joins the held pages without a gap: it
+ * is the newest held message (`heldNewest`), an older one, or the one right
+ * after it. Positions count up by one, so anything later means messages were
+ * stored in between that the held pages do not hold. Returns false when
+ * either message is missing.
+ */
+const joinsHeldMessages = (
+  heldNewest: ConversationMessage | undefined,
+  fresh: ConversationMessage | undefined,
+): boolean =>
+  heldNewest !== undefined && fresh !== undefined && fresh.position <= heldNewest.position + 1;
+
+/**
  * Joins a fresh read of the newest page of messages (`newest`) into the pages
  * a screen holds (`held`), and returns the new pages. The screen calls it when
  * a message may have been stored, so it reads one page rather than every page
@@ -54,10 +66,10 @@ export interface MessagePages {
  * replaces it. The result is:
  *
  * - `newest` alone, read with no cursor, when nothing is held, when the held
- *   pages hold no message, or when `newest` neither holds the newest held
- *   message nor the one right after it. In the last case more messages were
- *   stored than one page holds, so a gap would sit between `newest` and the
- *   held pages.
+ *   pages hold no message, or when the oldest message of `newest` comes later
+ *   than the one right after the newest held message. In the last case more
+ *   messages were stored than one page holds, so a gap would sit between
+ *   `newest` and the held pages.
  * - Otherwise the held pages, with each message `newest` holds replaced by
  *   its fresh copy and the messages newer than the held ones added to the
  *   newest page. The held cursors are kept, so the screen reads earlier
@@ -69,14 +81,7 @@ export const mergeNewestMessagePage = (
   held: MessagePages | undefined,
   newest: MessagePage,
 ): MessagePages => {
-  const heldNewest = held?.pages[0]?.items[0];
-  const freshOldest = newest.items.at(-1);
-  if (held === undefined || heldNewest === undefined || freshOldest === undefined) {
-    return { pages: [newest], pageParams: [undefined] };
-  }
-  // Positions count up by one, so a fresh page whose oldest message comes
-  // right after the newest held one leaves no gap.
-  if (freshOldest.position > heldNewest.position + 1) {
+  if (held === undefined || !joinsHeldMessages(held.pages[0]?.items[0], newest.items.at(-1))) {
     return { pages: [newest], pageParams: [undefined] };
   }
 
@@ -90,6 +95,39 @@ export const mergeNewestMessagePage = (
     };
   });
   return { pages, pageParams: [...held.pageParams] };
+};
+
+/**
+ * What `mergeSentMessage` found to do with a message the owner just sent:
+ *
+ * - `nothing-held`: no pages are held, because the screen has closed. Store
+ *   nothing, so no cache entry is created for a closed screen.
+ * - `merged`: `pages` are the held pages with the message added. Store them.
+ * - `needs-newest-page`: the message does not join the held pages, because
+ *   other messages were stored since they were read, or the held pages hold
+ *   no message to join it to. Read the newest page and join it with
+ *   `mergeNewestMessagePage` instead.
+ */
+export type SentMessageMerge =
+  | { readonly kind: "nothing-held" }
+  | { readonly kind: "merged"; readonly pages: MessagePages }
+  | { readonly kind: "needs-newest-page" };
+
+/**
+ * Joins a message the owner just sent, as `conversation.send` returns it,
+ * into the pages a screen holds (`held`). Returns `merged` with the new pages
+ * when the message joins the held newest message without a gap, by the same
+ * rule as `mergeNewestMessagePage`. Otherwise returns what the screen should
+ * do instead (see `SentMessageMerge`), so it never stores pages with a gap
+ * and never creates pages for a screen that has closed.
+ */
+export const mergeSentMessage = (
+  held: MessagePages | undefined,
+  message: ConversationMessage,
+): SentMessageMerge => {
+  if (held === undefined) return { kind: "nothing-held" };
+  if (!joinsHeldMessages(held.pages[0]?.items[0], message)) return { kind: "needs-newest-page" };
+  return { kind: "merged", pages: mergeNewestMessagePage(held, { items: [message] }) };
 };
 
 /**

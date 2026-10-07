@@ -25,6 +25,7 @@ import { formatDayStamp } from "../time-context";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
+type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
 /** The day stamp above the first message of each day: "Today", "Yesterday", "4 Sep" or "4 Sep 2025". */
 export interface DayStampBlock {
@@ -49,8 +50,11 @@ export interface StoredMessageBlock {
 /** One assistant text of the running turn that is not stored as a message yet. */
 export interface OpenReplyItem {
   readonly itemId: string;
-  /** The text the transcript rows hold. The text still streaming is in the tail, not here. */
-  readonly storedText: string;
+  /**
+   * The text the transcript rows hold, not a stored message's text. The text
+   * still streaming is in the tail, not here.
+   */
+  readonly rowText: string;
 }
 
 /**
@@ -65,7 +69,10 @@ export interface OpenReplyBlock {
    * first rows arrive.
    */
   readonly key: string;
-  /** The running turn, or `null` before its first row has arrived. */
+  /**
+   * The running turn, or `null` while only the caret shows for a turn whose
+   * first row has not arrived yet.
+   */
   readonly turnId: string | null;
   /** In the order the assistant started writing them. Empty when only the caret shows. */
   readonly items: readonly OpenReplyItem[];
@@ -84,21 +91,46 @@ export type ConversationBlock = DayStampBlock | StoredMessageBlock | OpenReplyBl
 /** An assistant text of the running turn, as its transcript rows hold it. */
 interface AssistantText {
   readonly itemId: string;
-  text: string;
+  /** The text of its rows that the controller reads for a reply. */
+  rowText: string;
   /** How the item completed, or `null` while it has not. */
   status: ItemStatus | null;
+}
+
+/** How the running turn ended, as its rows record it. */
+interface TurnEnd {
+  /** The time of the row that ended it. */
+  readonly at: string;
+  /** The turn's end state, or `null` when the session exited or started again before it. */
+  readonly state: TurnEndState | null;
 }
 
 /** The running turn as its transcript rows hold it. */
 interface RunningTurn {
   readonly turnId: string;
-  /** In the order the items started. */
+  /** In the order the items were placed. */
   readonly texts: readonly AssistantText[];
   /** The ids of the texts that completed, in the order they completed. */
   readonly completedIds: readonly string[];
-  /** Whether the rows hold the turn's `turn.completed`. */
-  readonly ended: boolean;
+  /** The text whose first text row came last, or `null` when no text has a row. */
+  readonly lastText: AssistantText | null;
+  /** `null` while the rows hold no end of the turn. */
+  readonly end: TurnEnd | null;
 }
+
+/**
+ * Returns the rows of a session's running turn: the rows from the newest
+ * `turn.started` in `rows` on, oldest first, as `rows` are. Returns `rows`
+ * itself when they hold no `turn.started` or already start with the newest
+ * one.
+ *
+ * The screen applies it as rows stream in, so the rows it holds for a session
+ * never grow past the running turn, however many turns the session runs.
+ */
+export const trimToRunningTurn = (rows: readonly TranscriptRow[]): readonly TranscriptRow[] => {
+  const start = rows.findLastIndex((row) => row.event._tag === "turn.started");
+  return start <= 0 ? rows : rows.slice(start);
+};
 
 /**
  * Returns the rows of a session's running turn from the rows read so far,
@@ -106,47 +138,67 @@ interface RunningTurn {
  *
  * - `reachedTurnStart` is true once the rows hold a `turn.started`. The
  *   screen stops reading pages then.
- * - `rows` holds the rows from the newest `turn.started` on, oldest first.
- *   Before one is reached, it holds every row read so far, oldest first, so
- *   the screen still knows the newest row it holds.
+ * - `rows` holds the rows from the newest `turn.started` on, oldest first,
+ *   by `trimToRunningTurn`. Before one is reached, it holds every row read so
+ *   far, oldest first, so the screen still knows the newest row it holds.
  */
 export const collectRunningTurnRows = (
   rowsNewestFirst: readonly TranscriptRow[],
 ): { readonly reachedTurnStart: boolean; readonly rows: readonly TranscriptRow[] } => {
-  const start = rowsNewestFirst.findIndex((row) => row.event._tag === "turn.started");
-  const kept = start === -1 ? rowsNewestFirst : rowsNewestFirst.slice(0, start + 1);
-  return { reachedTurnStart: start !== -1, rows: [...kept].reverse() };
+  const rows = trimToRunningTurn([...rowsNewestFirst].reverse());
+  return { reachedTurnStart: rows[0]?.event._tag === "turn.started", rows };
 };
 
 /**
  * Reads the running turn from `rows`, or returns `null` when they hold no
- * `turn.started`. The turn is the one the newest `turn.started` names.
+ * `turn.started`. The turn is the one the newest `turn.started` names, and
+ * only the rows from it on are read.
  *
- * Its assistant texts are read the way `buildThreadBlocks` reads a thread's
- * agent messages: a text is placed by its `item.started`, or by its first
- * text row when that comes first, and its text is its `assistant_text` rows
- * joined. An item is completed by its `item.completed`, found by item id,
- * because a harness can complete an item under a later turn.
+ * The texts are read the way the controller reads them when it stores a
+ * reply, which depends on the reply mode (`reply`):
+ *
+ * - Only `assistant_text` rows that name the running turn count.
+ * - In `turn-end` mode, the controller reads the turn's text rows from its
+ *   start, so a text is placed by its `item.started`, or by its first text
+ *   row when that comes first.
+ * - In `segments` mode, the controller reads an item's text rows from its
+ *   `item.started` on, and stores nothing for an item with no
+ *   `item.started`. So a text is placed only by its `item.started`, and text
+ *   rows before it are skipped.
+ *
+ * The turn ends at its `turn.completed`, or, cut short, at a later
+ * `session.exited` or `session.started`: a harness that exited, or a new one
+ * that started, runs no turn of the one before. An item is completed by its
+ * `item.completed`, found by item id, because a harness can complete an item
+ * under a later turn.
  */
-const readRunningTurn = (rows: readonly TranscriptRow[]): RunningTurn | null => {
-  const started = rows.findLast((row) => row.event._tag === "turn.started")?.event;
+const readRunningTurn = (
+  rows: readonly TranscriptRow[],
+  reply: Assistant["reply"],
+): RunningTurn | null => {
+  const start = rows.findLastIndex((row) => row.event._tag === "turn.started");
+  const started = rows[start]?.event;
   if (started?._tag !== "turn.started") return null;
   const turnId = started.turnId;
 
   const texts: AssistantText[] = [];
   const byId = new Map<string, AssistantText>();
+  const withTextRow = new Set<string>();
   const completedIds: string[] = [];
-  let ended = false;
+  let lastText: AssistantText | null = null;
+  let end: TurnEnd | null = null;
   const placeText = (itemId: string): AssistantText => {
-    const text: AssistantText = { itemId, text: "", status: null };
+    const text: AssistantText = { itemId, rowText: "", status: null };
     texts.push(text);
     byId.set(itemId, text);
     return text;
   };
 
-  for (const { event } of rows) {
+  for (const { event } of rows.slice(start + 1)) {
     if (event._tag === "turn.completed" && event.turnId === turnId) {
-      ended = true;
+      end ??= { at: event.at, state: event.state };
+    } else if (event._tag === "session.exited" || event._tag === "session.started") {
+      end ??= { at: event.at, state: null };
     } else if (
       event._tag === "item.started" &&
       event.kind === "assistant_message" &&
@@ -154,10 +206,19 @@ const readRunningTurn = (rows: readonly TranscriptRow[]): RunningTurn | null => 
       !byId.has(event.itemId)
     ) {
       placeText(event.itemId);
-    } else if (event._tag === "content.delta" && event.streamKind === "assistant_text") {
+    } else if (
+      event._tag === "content.delta" &&
+      event.streamKind === "assistant_text" &&
+      event.turnId === turnId
+    ) {
       const text =
-        byId.get(event.itemId) ?? (event.turnId === turnId ? placeText(event.itemId) : undefined);
-      if (text !== undefined) text.text += event.delta;
+        byId.get(event.itemId) ?? (reply === "turn-end" ? placeText(event.itemId) : undefined);
+      if (text === undefined) continue;
+      text.rowText += event.delta;
+      if (!withTextRow.has(text.itemId)) {
+        withTextRow.add(text.itemId);
+        lastText = text;
+      }
     } else if (event._tag === "item.completed") {
       const text = byId.get(event.itemId);
       if (text !== undefined && text.status === null) {
@@ -166,23 +227,32 @@ const readRunningTurn = (rows: readonly TranscriptRow[]): RunningTurn | null => 
       }
     }
   }
-  return { turnId, texts, completedIds, ended };
+  return { turnId, texts, completedIds, lastText, end };
 };
 
 /**
  * Returns the running turn's texts that no stored reply holds yet, when the
- * controller stores one reply per turn (`turn-end`): the turn's last text,
- * when the turn has stored no reply. Earlier texts show only until the next
- * one starts, because the controller never stores them on their own.
+ * controller stores one reply per turn (`turn-end`). Returns none once the
+ * turn has a stored reply. Otherwise:
  *
- * A last text with no text is not shown, unless the assistant is still
- * writing it: the controller stores no empty reply.
+ * - While the turn runs, the text the assistant is still writing, when it is
+ *   the last one placed. Its words are in the tail until it completes, so its
+ *   rows may hold no text yet.
+ * - Else the text whose first text row came last, when it holds text. The
+ *   controller stores that one when the turn completes. A later text that
+ *   completed empty has no text row, so it never hides the one before it.
+ * - When the turn failed or was stopped, every text that holds text, because
+ *   the controller then stores them all, joined.
+ * - None when the turn was cut short: the controller stores no reply then.
  */
 const listTurnEndTexts = (turn: RunningTurn, storedCount: number): readonly AssistantText[] => {
+  if (storedCount > 0) return [];
+  if (turn.end !== null && turn.end.state !== "completed") {
+    return turn.end.state === null ? [] : turn.texts.filter((text) => text.rowText !== "");
+  }
   const last = turn.texts.at(-1);
-  if (storedCount > 0 || last === undefined) return [];
-  const writing = last.status === null && !turn.ended;
-  return writing || last.text !== "" ? [last] : [];
+  if (last !== undefined && last.status === null && turn.end === null) return [last];
+  return turn.lastText !== null && turn.lastText.rowText !== "" ? [turn.lastText] : [];
 };
 
 /**
@@ -200,15 +270,34 @@ const listTurnEndTexts = (turn: RunningTurn, storedCount: number): readonly Assi
  */
 const listSegmentTexts = (turn: RunningTurn, storedCount: number): readonly AssistantText[] => {
   const willBeStored = (text: AssistantText): boolean =>
-    text.status === "completed" && text.text !== "";
+    text.status === "completed" && text.rowText !== "";
   const storedIds = new Set(
     turn.completedIds
       .filter((itemId) => turn.texts.some((text) => text.itemId === itemId && willBeStored(text)))
       .slice(0, storedCount),
   );
   return turn.texts.filter((text) =>
-    text.status === null ? !turn.ended : willBeStored(text) && !storedIds.has(text.itemId),
+    text.status === null ? turn.end === null : willBeStored(text) && !storedIds.has(text.itemId),
   );
+};
+
+/**
+ * Checks whether the owner sent a message after the running turn ended, so
+ * the session, while busy, is about to start the turn that answers it. The
+ * end is the row that ended the turn, compared by time, or, in `turn-end`
+ * mode before that row has arrived, the turn's stored reply, compared by
+ * position. Returns false while the turn has not ended.
+ */
+const isOwnerMessageAfterTurnEnd = (
+  messages: readonly ConversationMessage[],
+  turn: RunningTurn,
+  storedReplies: readonly ConversationMessage[],
+): boolean => {
+  const ownerMessage = messages.findLast((message) => message.senderRole === "owner");
+  if (ownerMessage === undefined) return false;
+  if (turn.end !== null) return Date.parse(ownerMessage.createdAt) > Date.parse(turn.end.at);
+  const storedReply = storedReplies.at(-1);
+  return storedReply !== undefined && ownerMessage.position > storedReply.position;
 };
 
 /**
@@ -217,24 +306,35 @@ const listSegmentTexts = (turn: RunningTurn, storedCount: number): readonly Assi
  * none.
  *
  * - `messages` are the Conversation's messages held so far, oldest first.
- * - `runningTurnRows` are the current session's rows from its newest
- *   `turn.started` on, oldest first (see `collectRunningTurnRows`). Rows
- *   before that `turn.started` are ignored.
+ * - `runningTurnRows` are the current session's rows, oldest first. Only the
+ *   rows from the newest `turn.started` on are read (see
+ *   `trimToRunningTurn`).
  * - `session` is the current session, or `null` when there is none.
  * - `reply` is the assistant's reply mode, which decides what is shown:
- *   - `turn-end`: the turn's newest text, until a reply with the turn's id is
- *     stored;
+ *   - `turn-end`: the turn's newest text, until a reply with the turn's id
+ *     is stored;
  *   - `segments`: the turn's texts after the first k, where k is the number
  *     of replies with the turn's id stored.
- * - `pose` is the assistant's pose, from `decideAssistantPose`, which the open
- *   reply's face shows.
+ * - `pose` is the assistant's pose, from `decideAssistantPose`, which the
+ *   open reply's face shows.
  *
- * An open reply with no text, the caret alone, is returned while the session
- * is `busy` and the turn has not ended: the rows hold no `turn.completed`
- * for it and, in `turn-end` mode, no reply with its id is stored. That covers the moment
- * between the owner's message and the turn's first row, a turn that is only
- * using tools, and a turn waiting on a Request. A turn that ended with no text
- * to store leaves no open reply.
+ * The texts follow the rules the controller stores replies by, so the open
+ * reply never shows text that will not be stored (see `readRunningTurn`).
+ *
+ * While the session is `busy`, an open reply with no text, the caret alone,
+ * is returned:
+ *
+ * - while the turn has not ended: its rows hold no `turn.completed`, no
+ *   later `session.exited` or `session.started`, and, in `turn-end` mode, no
+ *   reply with its id is stored. That covers a turn that is only using tools
+ *   and a turn waiting on a Request;
+ * - when the rows hold no turn yet;
+ * - when the turn has ended and the owner sent a message after its end. That
+ *   covers the moment between the owner's message and the next turn's first
+ *   row. The caret then stands for the next turn, so its `turnId` is `null`.
+ *
+ * A turn that ended with no text to store, and no owner message after it,
+ * leaves no open reply, even while the session still reads as `busy`.
  */
 export const decideOpenReply = (input: {
   readonly messages: readonly ConversationMessage[];
@@ -243,33 +343,39 @@ export const decideOpenReply = (input: {
   readonly reply: Assistant["reply"];
   readonly pose: Pose;
 }): OpenReplyBlock | null => {
-  const turn = readRunningTurn(input.runningTurnRows);
-  const storedCount =
-    turn === null
-      ? 0
-      : input.messages.filter(
-          (message) => message.senderRole === "assistant" && message.turnId === turn.turnId,
-        ).length;
-  const shown =
-    turn === null
-      ? []
-      : input.reply === "turn-end"
-        ? listTurnEndTexts(turn, storedCount)
-        : listSegmentTexts(turn, storedCount);
-  // In `turn-end` mode a reply is stored only when its turn ends, so a stored
-  // reply ends the turn even while its `turn.completed` row is on its way.
-  const ended = turn?.ended === true || (input.reply === "turn-end" && storedCount > 0);
-  const busy = input.session?.status === "busy" && !ended;
-  if (shown.length === 0 && !busy) return null;
-
-  const openItemId = turn !== null && !ended ? findOpenItem(input.runningTurnRows) : null;
-  return {
+  const busy = input.session?.status === "busy";
+  const caret: OpenReplyBlock = {
     kind: "open-reply",
     key: "open-reply",
-    turnId: turn?.turnId ?? null,
-    items: shown.map(({ itemId, text }) => ({ itemId, storedText: text })),
-    openItemId: shown.some((text) => text.itemId === openItemId) ? openItemId : null,
+    turnId: null,
+    items: [],
+    openItemId: null,
     pose: input.pose,
+  };
+  const turn = readRunningTurn(input.runningTurnRows, input.reply);
+  if (turn === null) return busy ? caret : null;
+
+  const storedReplies = input.messages.filter(
+    (message) => message.senderRole === "assistant" && message.turnId === turn.turnId,
+  );
+  // In `turn-end` mode a reply is stored only when its turn ends, so a stored
+  // reply ends the turn even while its `turn.completed` row is on its way.
+  const ended = turn.end !== null || (input.reply === "turn-end" && storedReplies.length > 0);
+  if (ended && busy && isOwnerMessageAfterTurnEnd(input.messages, turn, storedReplies)) {
+    return caret;
+  }
+  const shown =
+    input.reply === "turn-end"
+      ? listTurnEndTexts(turn, storedReplies.length)
+      : listSegmentTexts(turn, storedReplies.length);
+  if (shown.length === 0 && (ended || !busy)) return null;
+
+  const openItemId = ended ? null : findOpenItem(input.runningTurnRows);
+  return {
+    ...caret,
+    turnId: turn.turnId,
+    items: shown.map(({ itemId, rowText }) => ({ itemId, rowText })),
+    openItemId: shown.some((text) => text.itemId === openItemId) ? openItemId : null,
   };
 };
 

@@ -14,19 +14,18 @@ export {
   findWebConversation,
   flattenMessagePages,
   mergeNewestMessagePage,
+  mergeSentMessage,
   type MessagePage,
   type MessagePages,
+  type SentMessageMerge,
 } from "./assistants/conversation";
 export {
   buildConversationBlocks,
   collectRunningTurnRows,
-  decideOpenReply,
   describeOpenReply,
+  trimToRunningTurn,
   type ConversationBlock,
-  type DayStampBlock,
   type OpenReplyBlock,
-  type OpenReplyItem,
-  type StoredMessageBlock,
 } from "./assistants/conversation-blocks";
 export {
   buildAssistantDraft,

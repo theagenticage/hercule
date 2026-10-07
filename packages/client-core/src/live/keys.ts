@@ -93,11 +93,13 @@ export const queryKeys = {
     subagentId ?? null,
   ],
   /**
-   * The rows of one session's running turn, oldest first: the rows from its
-   * newest `turn.started` on, which an assistant's Conversation reads to
-   * draw the reply being written. A delta on the session's `:stream` topic is
-   * appended directly to this entry, so, like `transcript`, it is never
-   * invalidated: no push maps to it in `buildQueryKeys`. Its prefix
+   * The rows of one session's running turn, oldest first, which an
+   * assistant's Conversation reads to draw the reply being written. A delta
+   * on the session's `:stream` topic is appended directly to this entry, so,
+   * like `transcript`, it is never invalidated: no push maps to it in
+   * `buildQueryKeys`. The entry is read from the newest `turn.started` on,
+   * and the Conversation trims it with `trimToRunningTurn` as rows are
+   * appended, so a later `turn.started` drops the rows before it. Its prefix
    * `running-turn` is its own, so an invalidation of another key never
    * reaches it, and it is never the thread's `transcript` entry, which holds
    * the whole transcript. The Conversation removes it when it closes.
