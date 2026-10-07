@@ -85,7 +85,7 @@ describe("disposing a primary", () => {
         checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
-    const directory = join(storageDir, "primaries", resourceId);
+    const directory = join(storageDir, "primaries", workspaceId);
     const before = hashContents(directory);
 
     const report = await workspaces.dispose(buildDisposeFrame(workspaceId));

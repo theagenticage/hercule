@@ -9,8 +9,10 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { WorkspaceProvision } from "@hercule/protocol";
 import type {
   CheckoutForm,
   SortDirection,
@@ -260,6 +262,36 @@ const make = Effect.gen(function* () {
   return {
     one,
     listCheckouts,
+
+    /** Records the first creation instruction and returns the instruction that won the write. */
+    freezeProvisionFrame: (
+      id: string,
+      frame: WorkspaceProvision,
+    ): Effect.Effect<WorkspaceProvision, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly provision_frame: string }>`
+          UPDATE workspaces SET provision_frame = COALESCE(provision_frame, ${JSON.stringify(frame)})
+          WHERE id = ${uuidFromString(id)} RETURNING provision_frame
+        `;
+        return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceProvision))(
+          rows[0]?.provision_frame,
+        ).pipe(Effect.orDie);
+      }),
+
+    /** Returns the frozen creation instruction, or none for a legacy workspace. */
+    readProvisionFrame: (id: string): Effect.Effect<Option.Option<WorkspaceProvision>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly provision_frame: string | null }>`
+          SELECT provision_frame FROM workspaces WHERE id = ${uuidFromString(id)}
+        `;
+        const frame = rows[0]?.provision_frame;
+        if (frame === undefined || frame === null) return Option.none();
+        return Option.some(
+          yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceProvision))(frame).pipe(
+            Effect.orDie,
+          ),
+        );
+      }),
 
     insert: (workspace: {
       readonly runnerId: string;

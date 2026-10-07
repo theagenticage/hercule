@@ -1,19 +1,14 @@
 /**
- * `workspaces.json`: the record of where this runner's workspaces are on disk.
- *
- * The controller stores no paths, so this file is the only record of where a
- * workspace lives. A runner that lost it would strand the user's work. The
- * file is read again on every use instead of being cached, so a restart needs
- * no warm-up and two readers never disagree. Each entry is decoded with a
- * schema, not cast: an entry that a hand edit or an older build made
- * unreadable is dropped, and the runner's other workspaces are kept.
+ * Records runner-local workspace paths and durable preparation outcomes.
+ * Legacy entries retain their paths without repeating setup. Invalid registry
+ * state requires recovery rather than permitting recreation of existing files.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join as joinPath } from "node:path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { StorageId, WorkspaceKind } from "@hercule/protocol";
+import { StorageId, WorkspaceKind, WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
 
 const RegisteredCheckout = Schema.Struct({
   checkoutId: StorageId,
@@ -25,12 +20,25 @@ const RegisteredCheckout = Schema.Struct({
 /** One checkout, as the registry records it. */
 export type RegisteredCheckout = Schema.Schema.Type<typeof RegisteredCheckout>;
 
+const Preparation = Schema.Union([
+  Schema.Struct({
+    phase: Schema.Literals(["creating", "preparing"]),
+    instruction: WorkspaceProvision,
+  }),
+  Schema.Struct({
+    phase: Schema.Literal("terminal"),
+    instruction: WorkspaceProvision,
+    report: WorkspaceReport,
+  }),
+]);
+
 const RegisteredWorkspace = Schema.Struct({
   workspaceId: StorageId,
   kind: WorkspaceKind,
   /** The workspace's directory. For a primary this is the checkout's own directory. */
   root: Schema.String,
   checkouts: Schema.Array(RegisteredCheckout),
+  preparation: Schema.optionalKey(Preparation),
 });
 
 export type RegisteredWorkspace = Schema.Schema.Type<typeof RegisteredWorkspace>;
@@ -49,23 +57,43 @@ export const isStillOnDisk = (entry: RegisteredWorkspace): boolean =>
 const buildRegistryPath = (storageDir: string): string => joinPath(storageDir, "workspaces.json");
 
 /**
- * Reads the registry and returns its valid entries. A missing file, or one that
- * something outside Hercule made unreadable, reads as an empty registry. A
- * runner with no workspaces is a state the controller already handles: it
- * provisions the workspaces again.
+ * Reads valid registry entries. Only a missing file represents an empty
+ * registry. Fails on unreadable content so no existing files can be recreated
+ * from an incomplete account of the runner's workspaces.
  */
 const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> => {
+  let content: string;
+  try {
+    content = readFileSync(buildRegistryPath(storageDir), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error(
+      "Cannot read the workspace registry. Restore its readable contents before provisioning.",
+      { cause: error },
+    );
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(buildRegistryPath(storageDir), "utf8"));
-  } catch {
-    return [];
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throw new Error(
+      "The workspace registry is invalid. Restore a valid registry before provisioning.",
+      { cause: error },
+    );
   }
-  if (!Array.isArray(parsed)) return [];
-  return parsed
-    .map((entry) => decodeEntry(entry))
-    .filter((decoded) => Result.isSuccess(decoded))
-    .map((decoded) => decoded.success);
+  if (!Array.isArray(parsed))
+    throw new Error(
+      "The workspace registry must be a list. Restore a valid registry before provisioning.",
+    );
+  return parsed.map((entry) => {
+    const decoded = decodeEntry(entry);
+    if (Result.isFailure(decoded))
+      throw new Error(
+        "The workspace registry contains an invalid entry. Restore a valid registry before provisioning.",
+        { cause: decoded.failure },
+      );
+    return decoded.success;
+  });
 };
 
 /**
@@ -113,7 +141,12 @@ export const makeRegistry = (storageDir: string): Registry => {
     primaryOf: (resourceId) =>
       readRegistry(storageDir).find(
         (entry) =>
-          entry.kind === "primary" && entry.checkouts.some((one) => one.resourceId === resourceId),
+          entry.kind === "primary" &&
+          (entry.preparation === undefined ||
+            (entry.preparation.phase === "terminal" &&
+              entry.preparation.report.status === "ready")) &&
+          isStillOnDisk(entry) &&
+          entry.checkouts.some((one) => one.resourceId === resourceId),
       ),
     update: (change) => {
       const done = pending.then(() => {

@@ -53,16 +53,18 @@ describe("a primary cloned fresh", () => {
     const head = runGitOrThrow(remote.work, "rev-parse", "HEAD");
     const storageDir = createStorageDir();
     const resourceId = createId();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
       buildProvisionFrame({
+        workspaceId,
         kind: "primary",
         checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
 
     expect(report.status).toBe("ready");
-    const directory = join(storageDir, "primaries", resourceId);
+    const directory = join(storageDir, "primaries", workspaceId);
     expect(runGitOrThrow(directory, "rev-parse", "HEAD")).toBe(head);
     expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
     // Fetching and pushing must reach the real remote, not the local cache.
@@ -91,9 +93,11 @@ describe("a primary cloned fresh", () => {
     const head = runGitOrThrow(mine, "rev-parse", "HEAD");
     const storageDir = createStorageDir();
     const resourceId = createId();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
       buildProvisionFrame({
+        workspaceId,
         kind: "primary",
         checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
@@ -102,7 +106,7 @@ describe("a primary cloned fresh", () => {
     expect(report.status).toBe("ready");
     // Hercule's own clone, somewhere else entirely.
     expect(report.checkouts?.[0]?.branch).toBe("main");
-    expect(existsSync(join(storageDir, "primaries", resourceId))).toBe(true);
+    expect(existsSync(join(storageDir, "primaries", workspaceId))).toBe(true);
     expect(hashContents(mine)).toBe(before);
     expect(runGitOrThrow(mine, "rev-parse", "HEAD")).toBe(head);
     expect(runGitOrThrow(mine, "rev-parse", "--abbrev-ref", "HEAD")).toBe("local-only");
@@ -410,6 +414,42 @@ describe("a setup command that will not finish", () => {
 });
 
 describe("a workspace whose setup command failed", () => {
+  it("leaves a failed main attempt's files unchanged when a fresh main is created", async () => {
+    const remote = makeRemote();
+    const storageDir = createStorageDir();
+    const resourceId = createId();
+    const failedId = createId();
+    const failed = await makeWorkspaces({ storageDir }).provision(
+      buildProvisionFrame({
+        workspaceId: failedId,
+        kind: "primary",
+        checkouts: [
+          buildCheckout({
+            resourceId,
+            remote: remote.url,
+            setupCommand: "echo partial-install > unfinished.txt; exit 7",
+          }),
+        ],
+      }),
+    );
+    expect(failed.status).toBe("failed");
+    const failedRoot = join(storageDir, "primaries", failedId);
+    const before = hashContents(failedRoot);
+    const freshId = createId();
+    const manager = makeWorkspaces({ storageDir });
+    const ready = await manager.provision(
+      buildProvisionFrame({
+        workspaceId: freshId,
+        kind: "primary",
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+      }),
+    );
+    expect(ready.status, ready.message).toBe("ready");
+    expect(manager.resolve(freshId)?.root).not.toBe(failedRoot);
+    expect(hashContents(failedRoot)).toBe(before);
+    expect(manager.resolve(failedId)).toBeUndefined();
+  });
+
   it("is reported again when the frame is resent, instead of created a second time", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
@@ -437,8 +477,7 @@ describe("a workspace whose setup command failed", () => {
 
     // Creating it again would fail on the branch that already exists, and would
     // remove the directory the user was told they could inspect.
-    expect(again.status).toBe("ready");
-    expect(again.checkouts?.[0]?.branch).toBe("hercule/run-7c7c7c7c");
+    expect(again).toEqual(first);
     expect(readFileSync(join(directory, "half-done.txt"), "utf8")).toBe(
       "what the install got through\n",
     );
@@ -486,15 +525,17 @@ describe(".workspaceinclude", () => {
     const storageDir = createStorageDir();
     const resourceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
+    const primaryId = createId();
     await workspaces.provision(
       buildProvisionFrame({
+        workspaceId: primaryId,
         kind: "primary",
         checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
     // The primary is Hercule's own clone, so the test writes the list and files there.
     writeWorkspaceInclude(
-      join(storageDir, "primaries", resourceId),
+      join(storageDir, "primaries", primaryId),
       "# what the agent needs\n\n.env\nconfig/local.json\n",
     );
     const workspaceId = createId();

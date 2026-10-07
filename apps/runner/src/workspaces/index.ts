@@ -8,9 +8,14 @@
  */
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
-import type { WorkspaceDispose, WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
+import {
+  MAX_MESSAGE_LENGTH,
+  type WorkspaceDispose,
+  type WorkspaceProvision,
+  type WorkspaceReport,
+} from "@hercule/protocol";
 import { disposeWorkspace } from "./dispose";
-import { provisionWorkspace, reprovision } from "./provision";
+import { observeWorkspace, provisionWorkspace, reprovision } from "./provision";
 import {
   makeRegistry,
   isStillOnDisk,
@@ -46,8 +51,8 @@ export interface Workspaces {
   readonly waitForProvisioning: (workspaceId: string) => Promise<void>;
   /**
    * Checks whether the latest provisioning of this workspace on this runner
-   * failed. The failure is forgotten when a later provisioning succeeds, when
-   * the workspace is disposed, and when the runner restarts.
+   * failed. The recorded failure survives runner restarts and is forgotten only
+   * when the workspace is disposed.
    */
   readonly hasFailedProvisioning: (workspaceId: string) => boolean;
   /**
@@ -93,22 +98,11 @@ export const makeWorkspaces = (options: {
   };
 
   /**
-   * The provisioning in progress, per workspace id. The controller resends a
-   * provisioning frame to a runner that reconnects, and the resent frame can
-   * arrive while the first provisioning is still cloning. The registry is
-   * written only near the end, so both would find no entry and both would
-   * provision: the second would fail on the branch the first had just created,
-   * and then tear down what it found. So a second call waits for the one in
-   * progress and returns the same report, which is what the controller would
-   * have got if the frame had been sent only once.
+   * Coalesces duplicate delivery while preparation is active. A second request
+   * must wait for the original result rather than treating its recorded
+   * in-progress phase as an interrupted preparation.
    */
   const inFlight = new Map<string, Promise<WorkspaceReport>>();
-  /**
-   * The workspaces whose latest provisioning failed. A workspace step for one
-   * of them sends no result: the failed report already ends the run, with
-   * the provisioning's own error message.
-   */
-  const failedProvisionings = new Set<string>();
   /**
    * The lock of each workspace that has work running or waiting in
    * `runExclusively`, with the number of callers holding or waiting for it.
@@ -124,26 +118,46 @@ export const makeWorkspaces = (options: {
    * a directory that no longer exists, so such a workspace counts as unknown.
    */
   const findStandingWorkspace = (workspaceId: string): RegisteredWorkspace | undefined => {
-    const entry = substrate.registry.held(workspaceId);
-    return entry !== undefined && isStillOnDisk(entry) ? entry : undefined;
+    let entry: RegisteredWorkspace | undefined;
+    try {
+      entry = substrate.registry.held(workspaceId);
+    } catch {
+      // Corrupt registry state cannot authorize a session to use a directory.
+      return undefined;
+    }
+    return entry !== undefined &&
+      (entry.preparation === undefined ||
+        (entry.preparation.phase === "terminal" && entry.preparation.report.status === "ready")) &&
+      isStillOnDisk(entry)
+      ? entry
+      : undefined;
   };
 
   return {
     provision: async (frame) => {
       const running = inFlight.get(frame.workspaceId);
       if (running !== undefined) return running;
-      // The controller resends a provisioning frame to a runner that reconnects.
-      // A workspace that already exists is reported again, not created again,
-      // so the work in it survives the resend.
-      const entry = substrate.registry.held(frame.workspaceId);
-      const started =
-        entry === undefined ? provisionWorkspace(substrate, frame) : reprovision(substrate, entry);
+      const started = (async (): Promise<WorkspaceReport> => {
+        try {
+          const entry = substrate.registry.held(frame.workspaceId);
+          return await (entry === undefined
+            ? provisionWorkspace(substrate, frame)
+            : reprovision(substrate, entry));
+        } catch (error) {
+          return {
+            _tag: "workspaceReport",
+            workspaceId: frame.workspaceId,
+            status: "failed",
+            message: (error instanceof Error ? error.message : String(error)).slice(
+              0,
+              MAX_MESSAGE_LENGTH,
+            ),
+          };
+        }
+      })();
       inFlight.set(frame.workspaceId, started);
       try {
-        const report = await started;
-        if (report.status === "failed") failedProvisionings.add(frame.workspaceId);
-        else failedProvisionings.delete(frame.workspaceId);
-        return report;
+        return await started;
       } finally {
         inFlight.delete(frame.workspaceId);
       }
@@ -155,7 +169,6 @@ export const makeWorkspaces = (options: {
       // just removed. The provisioning's result is ignored: this call reports
       // the result of the teardown.
       await inFlight.get(frame.workspaceId)?.catch(() => undefined);
-      failedProvisionings.delete(frame.workspaceId);
       return disposeWorkspace(substrate, frame);
     },
     resolve: (workspaceId) => {
@@ -167,12 +180,25 @@ export const makeWorkspaces = (options: {
     waitForProvisioning: async (workspaceId) => {
       await inFlight.get(workspaceId)?.catch(() => undefined);
     },
-    hasFailedProvisioning: (workspaceId) => failedProvisionings.has(workspaceId),
+    hasFailedProvisioning: (workspaceId) => {
+      try {
+        const preparation = substrate.registry.held(workspaceId)?.preparation;
+        return (
+          preparation !== undefined &&
+          !inFlight.has(workspaceId) &&
+          (preparation.phase !== "terminal" || preparation.report.status === "failed")
+        );
+      } catch {
+        // Without a readable receipt there is no recorded failure to replay.
+        // Resolution still refuses the directory, so a step returns an error.
+        return false;
+      }
+    },
     reportAfterSession: async (workspaceId) => {
       const entry = findStandingWorkspace(workspaceId);
       return entry === undefined || entry.kind !== "primary"
         ? undefined
-        : reprovision(substrate, entry);
+        : observeWorkspace(entry, substrate.gitEnv);
     },
     runExclusively: (workspaceId, work) =>
       Effect.suspend(() => {

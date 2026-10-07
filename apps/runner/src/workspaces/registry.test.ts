@@ -5,7 +5,7 @@
  * workspace's directory. A runner that lost it would strand the user's work on
  * its own disk.
  */
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
@@ -109,7 +109,7 @@ describe("resolving a workspace", () => {
 
     const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
 
-    const directory = join(storageDir, "primaries", resourceId);
+    const directory = join(storageDir, "primaries", workspaceId);
     expect(resolved?.cwd).toBe(directory);
     expect(resolved?.root).toBe(directory);
   });
@@ -120,6 +120,35 @@ describe("resolving a workspace", () => {
 });
 
 describe("provisioning a workspace this runner already has", () => {
+  it("keeps a legacy ready working copy without running a new setup instruction", async () => {
+    const remote = makeRemote();
+    const storageDir = createStorageDir();
+    const frame = buildProvisionFrame({
+      kind: "primary",
+      checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+    });
+    const manager = makeWorkspaces({ storageDir });
+    await manager.provision(frame);
+    const root = manager.resolve(frame.workspaceId)!.root;
+    writeFileSync(join(root, "unfinished.txt"), "keep my work");
+    const registryPath = join(storageDir, "workspaces.json");
+    const entries = JSON.parse(readFileSync(registryPath, "utf8")) as Array<{
+      preparation?: unknown;
+    }>;
+    for (const entry of entries) delete entry.preparation;
+    writeFileSync(registryPath, JSON.stringify(entries));
+    const report = await makeWorkspaces({ storageDir }).provision({
+      ...frame,
+      checkouts: frame.checkouts.map((checkout) => ({
+        ...checkout,
+        setupCommand: "echo should-not-run > setup-reran; exit 7",
+      })),
+    });
+    expect(report.status, report.message).toBe("ready");
+    expect(readFileSync(join(root, "unfinished.txt"), "utf8")).toBe("keep my work");
+    expect(runGitOrThrow(root, "status", "--porcelain")).toBe("?? unfinished.txt");
+  });
+
   it("reports it again instead of creating it again", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
@@ -230,7 +259,7 @@ describe("reporting a primary after a session ran in it", () => {
         checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
-    const folder = join(storageDir, "primaries", resourceId);
+    const folder = join(storageDir, "primaries", workspaceId);
     // What a session does: it works on a branch of its own.
     runGitOrThrow(folder, "checkout", "-b", "feature/what-the-agent-did");
 

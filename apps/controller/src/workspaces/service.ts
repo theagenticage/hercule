@@ -423,15 +423,16 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Rebuilds the provision frame of a workspace from its rows and the repos
-   * behind its checkouts. The rows hold everything provisioning needs, so the
-   * rebuilt frame is the same as the frame that was first sent, and asks for
-   * the same clone or worktree.
+   * Returns the workspace's frozen creation instruction. Legacy workspaces
+   * lack that snapshot, so their first resend records the instruction rebuilt
+   * from their existing rows and Resources.
    */
   const rebuildProvisionFrame = (
     workspace: StoredWorkspace,
   ): Effect.Effect<WorkspaceProvision, SqlError> =>
     Effect.gen(function* () {
+      const frozen = yield* workspaces.readProvisionFrame(workspace.id);
+      if (Option.isSome(frozen)) return frozen.value;
       const checkouts = (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
       const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
       const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
@@ -442,7 +443,8 @@ const make = Effect.gen(function* () {
         if (resource === undefined || resource.kind !== "repo") continue;
         plans.push({ checkout, resource });
       }
-      return buildProvisionFrame(workspace, plans);
+      const frame = buildProvisionFrame(workspace, plans);
+      return yield* workspaces.freezeProvisionFrame(workspace.id, frame);
     });
 
   /**

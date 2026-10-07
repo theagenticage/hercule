@@ -29,9 +29,9 @@ interface CheckoutPlan {
 }
 
 /**
- * Builds the frame that asks a runner to provision a workspace, from its rows
- * and the repos behind its checkouts. The frame is built only from stored
- * values, so a frame rebuilt later to be sent again is the same as the first.
+ * Builds a workspace's creation instruction from its initial checkouts and
+ * Resources. The caller records the frame before sending it, so later Resource
+ * edits cannot change a pending instruction.
  */
 export const buildProvisionFrame = (
   workspace: StoredWorkspace,
@@ -112,16 +112,15 @@ export const openWorkspace = (
       },
       at: input.at,
     });
-    return {
+    const frame = buildProvisionFrame(
       workspace,
-      frame: buildProvisionFrame(
-        workspace,
-        input.checkouts.map((checkout, index) => ({
-          checkout: rows[index]!,
-          resource: checkout.resource,
-        })),
-      ),
-    };
+      input.checkouts.map((checkout, index) => ({
+        checkout: rows[index]!,
+        resource: checkout.resource,
+      })),
+    );
+    yield* writers.workspaces.freezeProvisionFrame(workspace.id, frame);
+    return { workspace, frame };
   });
 
 /**

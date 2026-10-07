@@ -58,6 +58,7 @@ import inputSentStatus from "./0047-input-sent-status";
 import subagents from "./0048-subagents";
 import subagentUsageReports from "./0049-subagent-usage-reports";
 import replyItemId from "./0050-reply-item-id";
+import workspacePreparationInstructions from "./0051-workspace-preparation-instructions";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -110,6 +111,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [48, "subagents", Effect.succeed(subagents)],
   [49, "subagent-usage-reports", Effect.succeed(subagentUsageReports)],
   [50, "reply-item-id", Effect.succeed(replyItemId)],
+  [51, "workspace-preparation-instructions", Effect.succeed(workspacePreparationInstructions)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

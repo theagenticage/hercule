@@ -7,7 +7,7 @@
  * Hercule's own clone, in a directory Hercule created, so nothing outside the
  * storage directory is read or written.
  */
-import { cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join as joinPath, resolve as resolvePath, sep } from "node:path";
 import {
   MAX_MESSAGE_LENGTH,
@@ -49,7 +49,7 @@ const buildCheckoutReport = async (
   defaultBranch: await readDefaultBranch(dir, env),
 });
 
-const buildReadyReport = async (
+export const observeWorkspace = async (
   entry: RegisteredWorkspace,
   env: GitEnv,
 ): Promise<WorkspaceReport> => ({
@@ -74,10 +74,11 @@ const registerWorkspace = (substrate: Substrate, entry: RegisteredWorkspace): Pr
  */
 const cloneFresh = async (
   substrate: Substrate,
-  workspaceId: string,
+  entry: RegisteredWorkspace,
   one: ProvisionCheckout,
   env: GitEnv,
 ): Promise<WorkspaceReport> => {
+  const workspaceId = entry.workspaceId;
   const cache = await ensureCache({
     storageDir: substrate.storageDir,
     resourceId: one.resourceId,
@@ -85,11 +86,8 @@ const cloneFresh = async (
     env,
   });
   if (cache.failure !== undefined) return buildFailedReport(workspaceId, cache.failure);
-  const dir = joinPath(substrate.storageDir, "primaries", one.resourceId);
+  const dir = entry.root;
   mkdirSync(dirname(dir), { recursive: true, mode: 0o700 });
-  // This workspace is not registered, so anything already in that directory was
-  // left by an earlier attempt, and git will not clone into it.
-  rmSync(dir, { recursive: true, force: true });
   const cloned = await runGit(["clone", "--local", "--", cache.path, dir], { env });
   if (!cloned.ok) return buildFailedReport(workspaceId, cloned.stderr);
   // Fetching and pushing have to reach the real remote, not this runner's cache.
@@ -103,16 +101,15 @@ const cloneFresh = async (
   if (branch !== null && (await runGit(["-C", dir, "fetch", "--no-tags", "origin"], { env })).ok) {
     await runGit(["-C", dir, "reset", "--hard", `refs/remotes/origin/${branch}`], { env });
   }
-  const entry: RegisteredWorkspace = {
-    workspaceId,
-    kind: "primary",
-    root: dir,
-    checkouts: [
-      { checkoutId: one.checkoutId, resourceId: one.resourceId, remote: one.remote, path: dir },
-    ],
-  };
-  await registerWorkspace(substrate, entry);
-  return buildReadyReport(entry, env);
+  await registerWorkspace(substrate, {
+    ...entry,
+    preparation: { phase: "preparing", instruction: entry.preparation!.instruction },
+  });
+  if (one.setupCommand !== null) {
+    const wrong = await runSetup(one.setupCommand, dir, substrate);
+    if (wrong !== undefined) return buildFailedReport(workspaceId, wrong);
+  }
+  return observeWorkspace(entry, env);
 };
 
 /**
@@ -219,10 +216,11 @@ const runSetup = async (
 const makeEphemeral = async (
   substrate: Substrate,
   frame: WorkspaceProvision,
+  entry: RegisteredWorkspace,
   env: GitEnv,
 ): Promise<WorkspaceReport> => {
   const workspaceId = frame.workspaceId;
-  const root = joinPath(substrate.storageDir, "workspaces", workspaceId);
+  const root = entry.root;
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const held: Array<RegisteredCheckout> = [];
   const checkouts: Array<CheckoutReport> = [];
@@ -271,12 +269,10 @@ const makeEphemeral = async (
       path: dir,
     });
   }
-  // Register the workspace before any setup command runs and before the report
-  // is sent. The branches now exist, so a frame the controller resends (to a
-  // runner that reconnected, or because the report was lost) must find this
-  // entry and report it again. Creating the workspace a second time would fail
-  // on the existing branch and throw away what is in the directory.
-  await registerWorkspace(substrate, { workspaceId, kind: "ephemeral", root, checkouts: held });
+  await registerWorkspace(substrate, {
+    ...entry,
+    preparation: { phase: "preparing", instruction: frame },
+  });
 
   for (const [at, one] of frame.checkouts.entries()) {
     const dir = held[at]!.path;
@@ -293,7 +289,11 @@ const makeEphemeral = async (
       const wrong = await runSetup(one.setupCommand, dir, substrate);
       // The workspace and its worktrees are left in place: the user decides
       // whether to throw away a half-finished install.
-      if (wrong !== undefined) return buildFailedReport(workspaceId, wrong);
+      if (wrong !== undefined)
+        return {
+          ...buildFailedReport(workspaceId, wrong),
+          ...(warnings.length === 0 ? {} : { warnings }),
+        };
     }
     checkouts.push(await buildCheckoutReport(one.checkoutId, dir, env));
   }
@@ -307,36 +307,87 @@ const makeEphemeral = async (
 };
 
 /**
- * Reports again on a workspace this runner already has. Returns a ready
- * report, or a failed report if its directory is gone. In that case the entry
- * is also removed from the registry, because no session can be placed there.
+ * Returns the recorded preparation outcome without repeating setup. A legacy
+ * entry is observed without changing its files. An unfinished preparation is
+ * recorded as interrupted; a missing ready directory is reported unavailable.
  */
 export const reprovision = async (
   substrate: Substrate,
   entry: RegisteredWorkspace,
 ): Promise<WorkspaceReport> => {
-  if (isStillOnDisk(entry)) return buildReadyReport(entry, substrate.gitEnv);
-  await substrate.registry.update((entries) =>
-    entries.filter((held) => held.workspaceId !== entry.workspaceId),
-  );
+  const preparation = entry.preparation;
+  if (preparation !== undefined) {
+    if (preparation.phase !== "terminal") {
+      const report = buildFailedReport(
+        entry.workspaceId,
+        "Workspace preparation was interrupted. Create a fresh workspace to prepare it again.",
+      );
+      await registerWorkspace(substrate, {
+        ...entry,
+        preparation: { phase: "terminal", instruction: preparation.instruction, report },
+      });
+      return report;
+    }
+    if (preparation.report.status === "failed") return preparation.report;
+    if (isStillOnDisk(entry)) return preparation.report;
+  } else if (isStillOnDisk(entry)) {
+    return observeWorkspace(entry, substrate.gitEnv);
+  }
   return buildFailedReport(entry.workspaceId, `the workspace directory is gone: ${entry.root}`);
 };
 
+/**
+ * Records a creation instruction before filesystem work and its terminal
+ * result before reporting it. Fails without removing files from older attempts.
+ */
 export const provisionWorkspace = async (
   substrate: Substrate,
   frame: WorkspaceProvision,
 ): Promise<WorkspaceReport> => {
-  // While provisioning, the runner's git carries the workspace id, so the
-  // credential helper can prove to the controller which workspace it is
-  // creating and get a credential for it.
-  const env = { ...substrate.gitEnv, [RUNNER_WORKSPACE_VARIABLE]: frame.workspaceId };
-  if (frame.kind === "ephemeral") return makeEphemeral(substrate, frame, env);
   const one = frame.checkouts[0];
-  if (one === undefined) {
-    return buildFailedReport(
+  if (frame.kind === "primary" && frame.checkouts.length !== 1) {
+    return buildFailedReport(frame.workspaceId, "a main workspace needs exactly one checkout");
+  }
+  const root =
+    frame.kind === "primary"
+      ? joinPath(substrate.storageDir, "primaries", frame.workspaceId)
+      : joinPath(substrate.storageDir, "workspaces", frame.workspaceId);
+  const entry: RegisteredWorkspace = {
+    workspaceId: frame.workspaceId,
+    kind: frame.kind,
+    root,
+    checkouts: frame.checkouts.map((checkout) => ({
+      checkoutId: checkout.checkoutId,
+      resourceId: checkout.resourceId,
+      remote: checkout.remote,
+      path: checkout.subdirectory === null ? root : joinPath(root, checkout.subdirectory),
+    })),
+    preparation: { phase: "creating", instruction: frame },
+  };
+  await registerWorkspace(substrate, entry);
+  const env = { ...substrate.gitEnv, [RUNNER_WORKSPACE_VARIABLE]: frame.workspaceId };
+  let report: WorkspaceReport;
+  try {
+    if (existsSync(root)) {
+      report = buildFailedReport(
+        frame.workspaceId,
+        "The workspace directory already exists without a completed preparation record. Preserve its files and create a fresh workspace.",
+      );
+    } else {
+      report =
+        frame.kind === "ephemeral"
+          ? await makeEphemeral(substrate, frame, entry, env)
+          : await cloneFresh(substrate, entry, one!, env);
+    }
+  } catch (error) {
+    report = buildFailedReport(
       frame.workspaceId,
-      "a main workspace needs exactly one checkout, but none was given",
+      error instanceof Error ? error.message : String(error),
     );
   }
-  return cloneFresh(substrate, frame.workspaceId, one, env);
+  await registerWorkspace(substrate, {
+    ...entry,
+    preparation: { phase: "terminal", instruction: frame, report },
+  });
+  return report;
 };
