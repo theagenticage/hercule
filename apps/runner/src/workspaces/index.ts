@@ -315,12 +315,11 @@ export const makeWorkspaces = (options: {
             throw new Error(
               "This workspace already has an existing checkout selected. Repeat the original attachment request.",
             );
+          if (entry !== undefined) return await reprovision(substrate, entry);
           await coordinateRepositorySelection(resources, () =>
             reserveManagedRepositories(substrate, frame),
           );
-          return await (entry === undefined
-            ? provisionWorkspace(substrate, frame)
-            : reprovision(substrate, entry));
+          return await provisionWorkspace(substrate, frame);
         } catch (error) {
           let held: RegisteredWorkspace | undefined;
           try {

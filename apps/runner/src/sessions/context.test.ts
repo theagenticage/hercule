@@ -401,6 +401,7 @@ describe("a session that has a workspace", () => {
       }),
     );
     const folder = machine.workspaces.resolve(workspaceId)!.cwd;
+    const branchBefore = runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD");
 
     const outcome = await resolveAsync(
       buildSessionStart({
@@ -414,7 +415,7 @@ describe("a session that has a workspace", () => {
     // failure the user reads, not something the runner works around.
     expect(outcome._tag).toBe("Failure");
     expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("no-such-branch");
-    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe(branchBefore);
   });
 });
 

@@ -1,7 +1,11 @@
 /** Resolves the selected runner-local repository before any generated checkout is created. */
 import { realpathSync, statSync } from "node:fs";
-import type { ProvisionCheckout, StartingRevision } from "@hercule/protocol";
-import { hasExpectedCheckoutIdentity } from "./identity";
+import {
+  canonicalizeRemote,
+  type ProvisionCheckout,
+  type StartingRevision,
+} from "@hercule/protocol";
+import { hasExpectedCheckoutIdentity, inspectCheckoutIdentity } from "./identity";
 import { buildCacheDir, ensureCache, fetchRemote, resolveCommit, runGit, type GitEnv } from "./git";
 import { isStillOnDisk } from "./registry";
 import type { Substrate } from "./substrate";
@@ -80,6 +84,46 @@ export const ensureSelectedRepository = (
       throw new Error(
         "The selected Git repository was replaced. Restore its original repository before continuing.",
       );
+    const bare = await runGit(["-C", sourceRoot, "rev-parse", "--is-bare-repository"], { env });
+    if (!bare.ok)
+      throw new Error(
+        "The selected Git repository is unavailable. Restore its recorded source before continuing.",
+      );
+    if (bare.stdout === "false") {
+      const identity = await inspectCheckoutIdentity(
+        sourceRoot,
+        selected.remoteName,
+        checkout.remote,
+        env,
+      );
+      if (
+        identity.root !== sourceRoot ||
+        identity.commonDirectory !== commonDirectory ||
+        identity.commonDirectoryIdentity !== selected.commonDirectoryIdentity
+      )
+        throw new Error(
+          "The selected source checkout now uses another Git repository. Restore its original root and Git binding before continuing.",
+        );
+    } else {
+      const configured = await runGit(
+        ["-C", sourceRoot, "config", "--get", `remote.${selected.remoteName}.url`],
+        { env },
+      );
+      const common = await runGit(
+        ["-C", sourceRoot, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        { env },
+      );
+      if (
+        !configured.ok ||
+        canonicalizeRemote(configured.stdout) !== canonicalizeRemote(checkout.remote) ||
+        canonicalizeRemote(checkout.remote) === undefined ||
+        !common.ok ||
+        realpathSync(common.stdout) !== commonDirectory
+      )
+        throw new Error(
+          "The selected Git repository or configured remote no longer matches this resource. Restore its original source and remote before continuing.",
+        );
+    }
     let workingRoot: string | undefined;
     if (selected.mode === "existing") {
       const source =
@@ -96,11 +140,6 @@ export const ensureSelectedRepository = (
         );
       workingRoot = source.root;
     } else {
-      const bare = await runGit(["-C", sourceRoot, "rev-parse", "--is-bare-repository"], { env });
-      if (!bare.ok)
-        throw new Error(
-          "The selected Git repository is unavailable. Restore its recorded source before continuing.",
-        );
       if (bare.stdout === "false") workingRoot = sourceRoot;
       else {
         const main =

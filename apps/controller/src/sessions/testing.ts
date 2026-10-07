@@ -236,7 +236,9 @@ export interface Arranged {
    * Connects the same runner again, like one that restarted or lost its
    * connection: a second socket with the credential from the join.
    */
-  readonly reconnect: () => Promise<Wire>;
+  readonly reconnect: (options?: {
+    readonly capabilities?: ReadonlyArray<string>;
+  }) => Promise<Wire>;
   /**
    * Adds a second runner to the same controller: joined with its own token,
    * connected, and probed, so a session can be placed on it by name. It is for
@@ -308,8 +310,16 @@ export const withFleet = (
     // one.
     wire.send({ _tag: "sessionsReport", sessions: [] });
     const wires: Array<Wire> = [wire];
-    const reconnect = async (): Promise<Wire> => {
-      const again = await dial(harness.base, answer.credential, facts, models);
+    const reconnect = async (
+      options: { readonly capabilities?: ReadonlyArray<string> } = {},
+    ): Promise<Wire> => {
+      const again = await dial(
+        harness.base,
+        answer.credential,
+        facts,
+        models,
+        options.capabilities,
+      );
       wires.push(again);
       return again;
     };

@@ -1,8 +1,9 @@
 /**
  * Resolves what one session needs on this machine from its start frame. The
  * frame holds ids, and this file turns them into paths and an environment.
- * Only this file knows where an instance's home or a workspace lives on the
- * runner. The controller never sees a path (spec 06 section 4).
+ * Only this file resolves the runner's provider homes and working directories.
+ * Managed workspace paths stay on the runner; an attached checkout's path is
+ * explicitly registered on the controller.
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";

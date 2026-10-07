@@ -158,6 +158,27 @@ export const reserveManagedRepositories = async (
         throw new Error(
           "A managed main workspace cannot use an existing repository workspace as a substitute.",
         );
+      if (selected === undefined) {
+        const sourceCheckout = source.checkouts.find(
+          (copy) => copy.resourceId === checkout.resourceId,
+        )!;
+        const remoteName = sourceCheckout.remoteName ?? "origin";
+        const identity = await inspectCheckoutIdentity(
+          sourceCheckout.path,
+          remoteName,
+          checkout.remote,
+          substrate.gitEnv,
+        );
+        await substrate.registry.selectRepository({
+          resourceId: checkout.resourceId,
+          mode: source.ownership === "existing" ? "existing" : "managed",
+          commonDirectory: identity.commonDirectory,
+          commonDirectoryIdentity: identity.commonDirectoryIdentity,
+          sourceRoot: identity.root,
+          primaryWorkspaceId: source.workspaceId,
+          remoteName,
+        });
+      }
       continue;
     }
     if (selected?.mode === "existing" && frame.kind === "primary")
@@ -187,7 +208,6 @@ export const reserveManagedRepositories = async (
       .find(
         (workspace) =>
           workspace.kind === "primary" &&
-          isStillOnDisk(workspace) &&
           (workspace.preparation === undefined ||
             (workspace.preparation.phase === "terminal" &&
               workspace.preparation.report.status === "ready")) &&
