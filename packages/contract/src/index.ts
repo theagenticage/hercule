@@ -126,6 +126,7 @@ export {
   SettingsState,
   ThreadRows,
   ThreadWorkspace,
+  TimeOfDay,
   UserSettings,
 } from "./groups/settings";
 export {
@@ -162,6 +163,7 @@ export {
   AgentFilter,
   AgentUpdateInput,
   DisallowedTool,
+  TOOL_FAMILIES,
   UnenforcedSpecField,
 } from "./groups/agent";
 export {

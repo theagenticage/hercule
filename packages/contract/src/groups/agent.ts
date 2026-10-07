@@ -13,7 +13,7 @@
  * have to discover it from the harness's behaviour.
  */
 import { Schema } from "effect";
-import { AccessMode, DisallowedTool, ModelSelection } from "@hercule/protocol";
+import { AccessMode, DisallowedTool, ModelSelection, TOOL_FAMILIES } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
@@ -30,7 +30,7 @@ import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
 /** The tool vocabulary comes from the runner protocol; the API returns it unchanged. */
-export { DisallowedTool };
+export { DisallowedTool, TOOL_FAMILIES };
 
 /** The longest agent name. */
 const MAX_AGENT_NAME_LENGTH = 128;
