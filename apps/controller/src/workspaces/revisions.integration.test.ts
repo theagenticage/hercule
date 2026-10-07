@@ -4,8 +4,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { Workspace, Session } from "@hercule/contract";
 import type { WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
-import { makeWorkspaces } from "../../../runner/src/workspaces";
 import {
+  makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
   makeRemote,
@@ -46,7 +46,7 @@ describe("workspace revisions through the public API and runner socket", () => {
   it("starts automation without main, then provisions main in the same runner-local Git repository", async () => {
     const remote = makeRemote();
     const remoteUrl = `https://fixture.invalid/acme/${crypto.randomUUID()}`;
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: createTemporaryDir("hercule-public-workflow-first-home-"),
       gitEnv: {
         GIT_CONFIG_COUNT: "1",
@@ -65,7 +65,7 @@ describe("workspace revisions through the public API and runner socket", () => {
         "workspaceProvision",
         1,
       );
-      arranged.wire.send(await manager.provision(first!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(first!)));
       const firstWorkspace = await waitReady(arranged, session.workspaceId!);
       const listed = await get(
         arranged.harness.base,
@@ -83,12 +83,12 @@ describe("workspace revisions through the public API and runner socket", () => {
         "workspaceProvision",
         2,
       );
-      arranged.wire.send(await manager.provision(frames[1]!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(frames[1]!)));
       const main = await waitReady(arranged, primary.id);
       expect(main.checkouts[0]!.form).toBe("worktree");
       expect(firstWorkspace.checkouts[0]!.form).toBe("worktree");
-      const workPath = manager.resolve(first!.workspaceId)!.cwd;
-      const mainPath = manager.resolve(primary.id)!.cwd;
+      const workPath = Effect.runSync(manager.resolve(first!.workspaceId))!.cwd;
+      const mainPath = Effect.runSync(manager.resolve(primary.id))!.cwd;
       expect(
         runGitOrThrow(workPath, "rev-parse", "--path-format=absolute", "--git-common-dir"),
       ).toBe(runGitOrThrow(mainPath, "rev-parse", "--path-format=absolute", "--git-common-dir"));
@@ -137,7 +137,7 @@ describe("workspace revisions through the public API and runner socket", () => {
       writeFileSync(join(source, "README.md"), "dirty tracked source\n");
       const remoteUrl = `https://fixture.invalid/acme/${crypto.randomUUID()}`;
       runGitOrThrow(source, "remote", "set-url", "origin", remoteUrl);
-      const manager = makeWorkspaces({
+      const manager = makeTestWorkspaces({
         storageDir: createTemporaryDir("hercule-public-local-home-"),
         gitEnv: {
           GIT_CONFIG_COUNT: "1",
@@ -160,7 +160,7 @@ describe("workspace revisions through the public API and runner socket", () => {
           "workspaceProvision",
           1,
         );
-        arranged.wire.send(await manager.provision(attachmentFrame!));
+        arranged.wire.send(await Effect.runPromise(manager.provision(attachmentFrame!)));
         await waitReady(arranged, primary.id);
         renameSync(remote.path, `${remote.path}.unavailable`);
 
@@ -175,7 +175,7 @@ describe("workspace revisions through the public API and runner socket", () => {
           2,
         );
         const generated = frames[1]!;
-        arranged.wire.send(await manager.provision(generated));
+        arranged.wire.send(await Effect.runPromise(manager.provision(generated)));
         const workspace = await waitReady(arranged, session.workspaceId!);
 
         expect(workspace.checkouts[0]).toMatchObject({
@@ -183,7 +183,7 @@ describe("workspace revisions through the public API and runner socket", () => {
           headCommit: localCommit,
           startingRevision,
         });
-        const cwd = manager.resolve(generated.workspaceId)!.cwd;
+        const cwd = Effect.runSync(manager.resolve(generated.workspaceId))!.cwd;
         expect(runGitOrThrow(cwd, "rev-parse", "HEAD")).toBe(localCommit);
         expect(readFileSync(join(cwd, "README.md"), "utf8")).toBe("the repository\n");
         expect(readFileSync(join(source, "README.md"), "utf8")).toBe("dirty tracked source\n");
@@ -226,7 +226,7 @@ describe("workspace revisions through the public API and runner socket", () => {
   it("correlates explicit inspection with the real runner observation and persists actual branch, HEAD and time", async () => {
     const remote = makeRemote();
     const remoteUrl = `https://fixture.invalid/acme/${crypto.randomUUID()}`;
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: createTemporaryDir("hercule-explicit-inspection-home-"),
       gitEnv: {
         GIT_CONFIG_COUNT: "1",
@@ -245,9 +245,9 @@ describe("workspace revisions through the public API and runner socket", () => {
         "workspaceProvision",
         1,
       );
-      arranged.wire.send(await manager.provision(frame!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(frame!)));
       await waitReady(arranged, primary.id);
-      const cwd = manager.resolve(primary.id)!.cwd;
+      const cwd = Effect.runSync(manager.resolve(primary.id))!.cwd;
       const branch = "renamed-from-outside";
       runGitOrThrow(cwd, "branch", "-m", branch);
       writeFileSync(join(cwd, "inspection.txt"), "new external commit\n");
@@ -271,7 +271,7 @@ describe("workspace revisions through the public API and runner socket", () => {
           { _tag: "workspaceInspect"; requestId: string; workspaceId: string } | undefined;
       });
       expect(inspection.workspaceId).toBe(primary.id);
-      const report: WorkspaceReport = await manager.inspect(primary.id);
+      const report: WorkspaceReport = await Effect.runPromise(manager.inspect(primary.id));
       arranged.wire.send({ _tag: "workspaceInspection", requestId: inspection.requestId, report });
 
       const response = await pending;
@@ -287,7 +287,7 @@ describe("workspace revisions through the public API and runner socket", () => {
   it("does not label a persisted report fresh when explicit inspection cannot reach the runner", async () => {
     const remote = makeRemote();
     const remoteUrl = `https://fixture.invalid/acme/${crypto.randomUUID()}`;
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: createTemporaryDir("hercule-offline-inspection-home-"),
       gitEnv: {
         GIT_CONFIG_COUNT: "1",
@@ -306,7 +306,7 @@ describe("workspace revisions through the public API and runner socket", () => {
         "workspaceProvision",
         1,
       );
-      arranged.wire.send(await manager.provision(frame!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(frame!)));
       const before = await waitReady(arranged, primary.id);
       arranged.wire.close();
       await waitForRunnerGone(arranged);
@@ -332,7 +332,7 @@ describe("workspace revisions through the public API and runner socket", () => {
     const remote = makeRemote();
     const remoteUrl = `https://fixture.invalid/acme/${crypto.randomUUID()}`;
     const storageDir = createTemporaryDir("hercule-workspace-live-home-");
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir,
       gitEnv: {
         GIT_CONFIG_COUNT: "1",
@@ -351,7 +351,7 @@ describe("workspace revisions through the public API and runner socket", () => {
         "workspaceProvision",
         1,
       );
-      arranged.wire.send(await manager.provision(primaryFrame!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(primaryFrame!)));
       await waitReady(arranged, primary.id);
       const session = await spawnSessionOrFail(arranged, {
         prompt: "Observe generated work",
@@ -362,7 +362,7 @@ describe("workspace revisions through the public API and runner socket", () => {
         "workspaceProvision",
         2,
       );
-      arranged.wire.send(await manager.provision(frames[1]!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(frames[1]!)));
       await waitReady(arranged, session.workspaceId!);
       const ticket = await fetchTicket(arranged.harness.base, arranged.token);
       await onSocket(arranged.harness.base, (client) =>
@@ -373,7 +373,7 @@ describe("workspace revisions through the public API and runner socket", () => {
             yield* Effect.promise(() => waitWithin(1000, () => messages.received.length > 0)),
           ).toBe(true);
           for (const id of [primary.id, session.workspaceId!]) {
-            const cwd = manager.resolve(id)!.cwd;
+            const cwd = Effect.runSync(manager.resolve(id))!.cwd;
             const branch = `renamed-${crypto.randomUUID()}`;
             runGitOrThrow(cwd, "branch", "-m", branch);
             writeFileSync(
@@ -383,7 +383,7 @@ describe("workspace revisions through the public API and runner socket", () => {
             runGitOrThrow(cwd, "add", "external-change.txt");
             runGitOrThrow(cwd, "commit", "-m", "External update");
             const head = runGitOrThrow(cwd, "rev-parse", "HEAD");
-            const observation = yield* Effect.promise(() => manager.reportAfterSession(id));
+            const observation = yield* manager.reportAfterSession(id);
             expect(observation).toBeDefined();
             arranged.wire.send(observation!);
             const updated = yield* Effect.promise(() =>

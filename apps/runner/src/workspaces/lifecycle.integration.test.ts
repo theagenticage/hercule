@@ -1,3 +1,5 @@
+import { makeTestWorkspaces } from "./testing";
+import * as Effect from "effect/Effect";
 import {
   existsSync,
   mkdirSync,
@@ -9,7 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeWorkspaces } from "./index";
+
 import { makeRegistry } from "./registry";
 import {
   buildCheckout,
@@ -31,16 +33,16 @@ const createManaged = async () => {
   runGitOrThrow(remote.work, "commit", "-m", "Ignore private cache");
   runGitOrThrow(remote.work, "push", remote.path, "main");
   const storageDir = createTemporaryDir("hercule-lifecycle-managed-home-");
-  const manager = makeWorkspaces({ storageDir });
+  const manager = makeTestWorkspaces({ storageDir });
   const frame = buildProvisionFrame({
     kind: "ephemeral",
     checkouts: [
       buildCheckout({ resourceId: createId(), remote: remote.url, branch: `work-${createId()}` }),
     ],
   });
-  const report = await manager.provision(frame);
+  const report = await Effect.runPromise(manager.provision(frame));
   expect(report.status, report.message).toBe("ready");
-  const cwd = manager.resolve(frame.workspaceId)!.cwd;
+  const cwd = Effect.runSync(manager.resolve(frame.workspaceId))!.cwd;
   const common = realpathSync(
     runGitOrThrow(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"),
   );
@@ -64,7 +66,7 @@ describe("safe managed disposal", () => {
     const fixture = await createManaged();
     writeFileSync(join(fixture.cwd, "human-notes.txt"), "preserve this workspace\n");
     const registry = makeRegistry(fixture.storageDir);
-    const victim = registry.held(fixture.frame.workspaceId)!;
+    const victim = Effect.runSync(registry.held(fixture.frame.workspaceId))!;
     const before = hashContents(victim.root);
     const sourceBefore = hashContents(fixture.common);
     const instruction = {
@@ -72,21 +74,23 @@ describe("safe managed disposal", () => {
       workspaceId: createId(),
       discardChanges: true,
     };
-    await registry.recordRemoval({
-      workspaceId: instruction.workspaceId,
-      instruction,
-      phase: "pending",
-      workspace: victim,
-    });
+    await Effect.runPromise(
+      registry.recordRemoval({
+        workspaceId: instruction.workspaceId,
+        instruction,
+        phase: "pending",
+        workspace: victim,
+      }),
+    );
 
-    const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
-    const report = await restarted.dispose(instruction);
+    const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir });
+    const report = await Effect.runPromise(restarted.dispose(instruction));
     expect(report.workspaceId).toBe(instruction.workspaceId);
     expect(report.status, report.message).toBe("failed");
     expect(report.message).toMatch(/record|registry|workspace|match|preserve/i);
     expect(hashContents(victim.root)).toBe(before);
     expect(hashContents(fixture.common)).toBe(sourceBefore);
-    expect(restarted.resolve(victim.workspaceId)?.cwd).toBe(fixture.cwd);
+    expect(Effect.runSync(restarted.resolve(victim.workspaceId))?.cwd).toBe(fixture.cwd);
   });
 
   it("refuses a legacy workspace record that points at a source cache instead of its own root", async () => {
@@ -101,11 +105,13 @@ describe("safe managed disposal", () => {
       JSON.stringify([{ workspaceId, kind: "ephemeral", root: cache, checkouts: [] }]),
     );
 
-    const report = await makeWorkspaces({ storageDir }).dispose({
-      _tag: "workspaceDispose",
-      workspaceId,
-      discardChanges: true,
-    });
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).dispose({
+        _tag: "workspaceDispose",
+        workspaceId,
+        discardChanges: true,
+      }),
+    );
     expect(report.status, report.message).toBe("failed");
     expect(report.message).toMatch(/record|registry|root|ownership|managed|preserve/i);
     expect(hashContents(cache)).toBe(before);
@@ -115,29 +121,31 @@ describe("safe managed disposal", () => {
   it("refuses a workspace record that points at another managed workspace's root", async () => {
     const fixture = await createManaged();
     writeFileSync(join(fixture.cwd, "human-notes.txt"), "the other workspace owns these files\n");
-    const root = fixture.manager.resolve(fixture.frame.workspaceId)!.root;
+    const root = Effect.runSync(fixture.manager.resolve(fixture.frame.workspaceId))!.root;
     const before = hashContents(root);
     const sourceBefore = hashContents(fixture.common);
     const workspaceId = createId();
     writeFileSync(
       join(fixture.storageDir, "workspaces.json"),
       JSON.stringify([
-        ...makeRegistry(fixture.storageDir).all(),
+        ...Effect.runSync(makeRegistry(fixture.storageDir).all()),
         { workspaceId, kind: "ephemeral", root, checkouts: [] },
       ]),
     );
 
-    const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
-    const report = await restarted.dispose({
-      _tag: "workspaceDispose",
-      workspaceId,
-      discardChanges: true,
-    });
+    const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir });
+    const report = await Effect.runPromise(
+      restarted.dispose({
+        _tag: "workspaceDispose",
+        workspaceId,
+        discardChanges: true,
+      }),
+    );
     expect(report.status, report.message).toBe("failed");
     expect(report.message).toMatch(/record|registry|root|ownership|managed|preserve/i);
     expect(hashContents(root)).toBe(before);
     expect(hashContents(fixture.common)).toBe(sourceBefore);
-    expect(restarted.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.cwd);
+    expect(Effect.runSync(restarted.resolve(fixture.frame.workspaceId))?.cwd).toBe(fixture.cwd);
   });
 
   it.each(["tracked", "untracked", "ignored"] as const)(
@@ -148,21 +156,27 @@ describe("safe managed disposal", () => {
       const before = hashContents(fixture.cwd);
       const branch = runGitOrThrow(fixture.cwd, "branch", "--show-current");
       const commit = runGitOrThrow(fixture.cwd, "rev-parse", "HEAD");
-      const refusal = await fixture.manager.dispose({
-        _tag: "workspaceDispose",
-        workspaceId: fixture.frame.workspaceId,
-      });
+      const refusal = await Effect.runPromise(
+        fixture.manager.dispose({
+          _tag: "workspaceDispose",
+          workspaceId: fixture.frame.workspaceId,
+        }),
+      );
       expect(refusal.status).toBe("failed");
       expect(refusal.message).toMatch(/changes|files|dirty|preserve|discard|ignored/i);
       expect(hashContents(fixture.cwd)).toBe(before);
       expect(readFileSync(path, "utf8")).toBe(`unfinished ${kind} work\n`);
-      expect(fixture.manager.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.cwd);
+      expect(Effect.runSync(fixture.manager.resolve(fixture.frame.workspaceId))?.cwd).toBe(
+        fixture.cwd,
+      );
 
-      const discarded = await fixture.manager.dispose({
-        _tag: "workspaceDispose",
-        workspaceId: fixture.frame.workspaceId,
-        discardChanges: true,
-      });
+      const discarded = await Effect.runPromise(
+        fixture.manager.dispose({
+          _tag: "workspaceDispose",
+          workspaceId: fixture.frame.workspaceId,
+          discardChanges: true,
+        }),
+      );
       expect(discarded.status, discarded.message).toBe("deleted");
       expect(existsSync(fixture.cwd)).toBe(false);
       expect(existsSync(fixture.common)).toBe(true);
@@ -171,11 +185,13 @@ describe("safe managed disposal", () => {
         `worktree ${fixture.cwd}`,
       );
       expect(
-        await fixture.manager.dispose({
-          _tag: "workspaceDispose",
-          workspaceId: fixture.frame.workspaceId,
-          discardChanges: true,
-        }),
+        await Effect.runPromise(
+          fixture.manager.dispose({
+            _tag: "workspaceDispose",
+            workspaceId: fixture.frame.workspaceId,
+            discardChanges: true,
+          }),
+        ),
       ).toMatchObject({ status: "deleted" });
     },
   );
@@ -185,7 +201,7 @@ describe("safe managed disposal", () => {
     async (kind) => {
       const remotes = [makeRemote(), makeRemote()];
       const storageDir = createTemporaryDir("hercule-lifecycle-multi-home-");
-      const manager = makeWorkspaces({ storageDir });
+      const manager = makeTestWorkspaces({ storageDir });
       const frame = buildProvisionFrame({
         kind: "ephemeral",
         checkouts: remotes.map((remote, index) => ({
@@ -197,29 +213,31 @@ describe("safe managed disposal", () => {
           subdirectory: `repo-${index}`,
         })),
       });
-      expect((await manager.provision(frame)).status).toBe("ready");
-      const root = manager.resolve(frame.workspaceId)!.root;
+      expect((await Effect.runPromise(manager.provision(frame))).status).toBe("ready");
+      const root = Effect.runSync(manager.resolve(frame.workspaceId))!.root;
       const path =
         kind === "root file" ? join(root, "human-notes.txt") : join(root, "repo-1", "README.md");
       writeFileSync(path, "unfinished human work\n");
       const before = hashContents(root);
-      const refused = await manager.dispose({
-        _tag: "workspaceDispose",
-        workspaceId: frame.workspaceId,
-      });
+      const refused = await Effect.runPromise(
+        manager.dispose({
+          _tag: "workspaceDispose",
+          workspaceId: frame.workspaceId,
+        }),
+      );
       expect(refused.status).toBe("failed");
       expect(refused.message).toMatch(/changes|files|root|dirty|preserve|discard/i);
       expect(hashContents(root)).toBe(before);
       expect(existsSync(join(root, "repo-0", ".git"))).toBe(true);
       expect(existsSync(join(root, "repo-1", ".git"))).toBe(true);
-      expect(manager.resolve(frame.workspaceId)).toBeDefined();
+      expect(Effect.runSync(manager.resolve(frame.workspaceId))).toBeDefined();
     },
   );
 
   it("reports a partial removal honestly when a later checkout changes after clean preflight", async () => {
     const remotes = [makeRemote(), makeRemote()];
     const storageDir = createTemporaryDir("hercule-removal-race-home-");
-    const original = makeWorkspaces({ storageDir });
+    const original = makeTestWorkspaces({ storageDir });
     const frame = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: remotes.map((remote, index) => ({
@@ -231,8 +249,8 @@ describe("safe managed disposal", () => {
         subdirectory: `repo-${index}`,
       })),
     });
-    expect((await original.provision(frame)).status).toBe("ready");
-    const root = original.resolve(frame.workspaceId)!.root;
+    expect((await Effect.runPromise(original.provision(frame))).status).toBe("ready");
+    const root = Effect.runSync(original.resolve(frame.workspaceId))!.root;
     const first = join(root, "repo-0");
     const second = join(root, "repo-1");
     const firstCommon = runGitOrThrow(
@@ -254,11 +272,13 @@ describe("safe managed disposal", () => {
       `#!/bin/sh\ncase " $* " in\n*' worktree remove '*${quote(second)}*)\nprintf '%s\\n' "$$" > ${quote(entered)}\nwhile [ ! -f ${quote(release)} ]; do sleep 0.01; done\n;;\nesac\nexec ${quote(git)} "$@"\n`,
       { mode: 0o700 },
     );
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir,
       gitEnv: { PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
     });
-    const pending = manager.dispose({ _tag: "workspaceDispose", workspaceId: frame.workspaceId });
+    const pending = Effect.runPromise(
+      manager.dispose({ _tag: "workspaceDispose", workspaceId: frame.workspaceId }),
+    );
     let completed: Awaited<typeof pending> | undefined;
     void pending.then((report) => {
       completed = report;
@@ -283,8 +303,8 @@ describe("safe managed disposal", () => {
     expect(existsSync(first)).toBe(false);
     expect(readFileSync(join(second, "README.md"), "utf8")).toBe("changed during removal\n");
     expect(runGitOrThrow(firstCommon, "rev-parse", `refs/heads/${firstBranch}`)).toBe(firstCommit);
-    expect(manager.resolve(frame.workspaceId)).toBeUndefined();
-    expect((await manager.inspect(frame.workspaceId)).status).toBe("failed");
+    expect(Effect.runSync(manager.resolve(frame.workspaceId))).toBeUndefined();
+    expect((await Effect.runPromise(manager.inspect(frame.workspaceId))).status).toBe("failed");
   });
 
   it("refuses forced deletion when the runner lost the registry that proves ownership", async () => {
@@ -292,12 +312,14 @@ describe("safe managed disposal", () => {
     writeFileSync(join(fixture.cwd, "human-notes.txt"), "preserve without ownership record\n");
     const before = hashContents(fixture.cwd);
     rmSync(join(fixture.storageDir, "workspaces.json"));
-    const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
-    const refused = await restarted.dispose({
-      _tag: "workspaceDispose",
-      workspaceId: fixture.frame.workspaceId,
-      discardChanges: true,
-    });
+    const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir });
+    const refused = await Effect.runPromise(
+      restarted.dispose({
+        _tag: "workspaceDispose",
+        workspaceId: fixture.frame.workspaceId,
+        discardChanges: true,
+      }),
+    );
     expect(refused.status).toBe("failed");
     expect(refused.message).toMatch(/record|registry|known|ownership|preserve|files/i);
     expect(hashContents(fixture.cwd)).toBe(before);
@@ -316,10 +338,12 @@ describe("safe managed disposal", () => {
     runGitOrThrow(fixture.cwd, "commit", "-m", "Keep the committed branch");
     const branch = runGitOrThrow(fixture.cwd, "branch", "--show-current");
     const commit = runGitOrThrow(fixture.cwd, "rev-parse", "HEAD");
-    const removed = await fixture.manager.dispose({
-      _tag: "workspaceDispose",
-      workspaceId: fixture.frame.workspaceId,
-    });
+    const removed = await Effect.runPromise(
+      fixture.manager.dispose({
+        _tag: "workspaceDispose",
+        workspaceId: fixture.frame.workspaceId,
+      }),
+    );
     expect(removed.status, removed.message).toBe("deleted");
     expect(existsSync(fixture.cwd)).toBe(false);
     expect(runGitOrThrow(fixture.common, "rev-parse", `refs/heads/${branch}`)).toBe(commit);
@@ -339,7 +363,7 @@ describe("attached sources and detachment", () => {
     for (const path of [source, unrelatedSource])
       runGitOrThrow(path, "remote", "set-url", "origin", remoteUrl);
     const storageDir = createTemporaryDir("hercule-derived-observation-home-");
-    const manager = makeWorkspaces({ storageDir });
+    const manager = makeTestWorkspaces({ storageDir });
     const derivedIds: Array<string> = [];
     const primaries: Array<string> = [];
     for (const path of [source, unrelatedSource]) {
@@ -351,7 +375,7 @@ describe("attached sources and detachment", () => {
         }),
         attachment: { path, remoteName: "origin" },
       };
-      expect((await manager.provision(primary)).status).toBe("ready");
+      expect((await Effect.runPromise(manager.provision(primary))).status).toBe("ready");
       primaries.push(primary.workspaceId);
       const derived = buildProvisionFrame({
         kind: "ephemeral",
@@ -363,26 +387,28 @@ describe("attached sources and detachment", () => {
           },
         ],
       });
-      expect((await manager.provision(derived)).status).toBe("ready");
+      expect((await Effect.runPromise(manager.provision(derived))).status).toBe("ready");
       derivedIds.push(derived.workspaceId);
     }
-    expect(await manager.inspect(primaries[0]!)).toMatchObject({
+    expect(await Effect.runPromise(manager.inspect(primaries[0]!))).toMatchObject({
       status: "ready",
       derivedWorkspaceIds: [derivedIds[0]],
     });
-    expect(await manager.inspect(primaries[1]!)).toMatchObject({
+    expect(await Effect.runPromise(manager.inspect(primaries[1]!))).toMatchObject({
       status: "ready",
       derivedWorkspaceIds: [derivedIds[1]],
     });
     expect(
       (
-        await manager.dispose({
-          _tag: "workspaceDispose",
-          workspaceId: derivedIds[0]!,
-        })
+        await Effect.runPromise(
+          manager.dispose({
+            _tag: "workspaceDispose",
+            workspaceId: derivedIds[0]!,
+          }),
+        )
       ).status,
     ).toBe("deleted");
-    expect(await manager.inspect(primaries[0]!)).toMatchObject({
+    expect(await Effect.runPromise(manager.inspect(primaries[0]!))).toMatchObject({
       status: "ready",
       derivedWorkspaceIds: [],
     });
@@ -406,7 +432,7 @@ describe("attached sources and detachment", () => {
       GIT_CONFIG_KEY_0: `url.${remote.url}.insteadOf`,
       GIT_CONFIG_VALUE_0: remoteUrl,
     };
-    const manager = makeWorkspaces({ storageDir, gitEnv });
+    const manager = makeTestWorkspaces({ storageDir, gitEnv });
     const resourceId = createId();
     const primary = {
       ...buildProvisionFrame({
@@ -415,7 +441,7 @@ describe("attached sources and detachment", () => {
       }),
       attachment: { path: source, remoteName: "origin" },
     };
-    expect((await manager.provision(primary)).status).toBe("ready");
+    expect((await Effect.runPromise(manager.provision(primary))).status).toBe("ready");
     const derived = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: [
@@ -426,31 +452,35 @@ describe("attached sources and detachment", () => {
         },
       ],
     });
-    expect((await manager.provision(derived)).status).toBe("ready");
-    const derivedRoot = manager.resolve(derived.workspaceId)!.cwd;
+    expect((await Effect.runPromise(manager.provision(derived))).status).toBe("ready");
+    const derivedRoot = Effect.runSync(manager.resolve(derived.workspaceId))!.cwd;
     const sourceBefore = hashContents(source);
     for (const discardChanges of [false, true]) {
-      const refused = await manager.dispose({
-        _tag: "workspaceDispose",
-        workspaceId: primary.workspaceId,
-        discardChanges,
-      });
+      const refused = await Effect.runPromise(
+        manager.dispose({
+          _tag: "workspaceDispose",
+          workspaceId: primary.workspaceId,
+          discardChanges,
+        }),
+      );
       expect(refused.status).toBe("failed");
       expect(refused.message).toMatch(/attach|existing|detach|user-owned/i);
       expect(hashContents(source)).toBe(sourceBefore);
     }
-    const detached = await manager.detach({
-      _tag: "workspaceDetach",
-      workspaceId: primary.workspaceId,
-    });
+    const detached = await Effect.runPromise(
+      manager.detach({
+        _tag: "workspaceDetach",
+        workspaceId: primary.workspaceId,
+      }),
+    );
     expect(detached.status, detached.message).toBe("deleted");
     expect(hashContents(source)).toBe(sourceBefore);
-    expect(manager.resolve(primary.workspaceId)).toBeUndefined();
-    expect(manager.resolve(derived.workspaceId)?.cwd).toBe(derivedRoot);
-    expect((await manager.inspect(derived.workspaceId)).status).toBe("ready");
-    const restarted = makeWorkspaces({ storageDir, gitEnv });
-    expect(restarted.resolve(primary.workspaceId)).toBeUndefined();
-    expect(restarted.resolve(derived.workspaceId)?.cwd).toBe(derivedRoot);
+    expect(Effect.runSync(manager.resolve(primary.workspaceId))).toBeUndefined();
+    expect(Effect.runSync(manager.resolve(derived.workspaceId))?.cwd).toBe(derivedRoot);
+    expect((await Effect.runPromise(manager.inspect(derived.workspaceId))).status).toBe("ready");
+    const restarted = makeTestWorkspaces({ storageDir, gitEnv });
+    expect(Effect.runSync(restarted.resolve(primary.workspaceId))).toBeUndefined();
+    expect(Effect.runSync(restarted.resolve(derived.workspaceId))?.cwd).toBe(derivedRoot);
     const fresh = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: [
@@ -460,18 +490,20 @@ describe("attached sources and detachment", () => {
         },
       ],
     });
-    const blocked = await restarted.provision(fresh);
+    const blocked = await Effect.runPromise(restarted.provision(fresh));
     expect(blocked.status).toBe("failed");
     expect(blocked.message).toMatch(/reattach|registration|selected.*unavailable|restore/i);
     expect(hashContents(source)).toBe(sourceBefore);
     const derivedBranch = runGitOrThrow(derivedRoot, "branch", "--show-current");
     const derivedCommit = runGitOrThrow(derivedRoot, "rev-parse", "HEAD");
     writeFileSync(join(derivedRoot, "README.md"), "explicitly discarded derived changes\n");
-    const removed = await restarted.dispose({
-      _tag: "workspaceDispose",
-      workspaceId: derived.workspaceId,
-      discardChanges: true,
-    });
+    const removed = await Effect.runPromise(
+      restarted.dispose({
+        _tag: "workspaceDispose",
+        workspaceId: derived.workspaceId,
+        discardChanges: true,
+      }),
+    );
     expect(removed.status, removed.message).toBe("deleted");
     expect(existsSync(source)).toBe(true);
     expect(existsSync(join(source, ".git", "objects"))).toBe(true);
@@ -495,10 +527,12 @@ it("keeps an absent neighboring worktree registered when removing its own worktr
     `worktree ${canonicalNeighbor}`,
   );
 
-  const report = await fixture.manager.dispose({
-    _tag: "workspaceDispose",
-    workspaceId: fixture.frame.workspaceId,
-  });
+  const report = await Effect.runPromise(
+    fixture.manager.dispose({
+      _tag: "workspaceDispose",
+      workspaceId: fixture.frame.workspaceId,
+    }),
+  );
 
   expect(report.status, report.message).toBe("deleted");
   expect(runGitOrThrow(fixture.common, "worktree", "list", "--porcelain")).toContain(
@@ -514,21 +548,25 @@ it("explicitly discards a generated managed main while preserving shared storage
     kind: "primary",
     checkouts: [buildCheckout({ resourceId, remote: fixture.remote.url })],
   });
-  expect((await fixture.manager.provision(main)).status).toBe("ready");
-  const root = fixture.manager.resolve(main.workspaceId)!.root;
+  expect((await Effect.runPromise(fixture.manager.provision(main))).status).toBe("ready");
+  const root = Effect.runSync(fixture.manager.resolve(main.workspaceId))!.root;
   writeFileSync(join(root, "README.md"), "main changes explicitly discarded\n");
 
-  const report = await fixture.manager.dispose({
-    _tag: "workspaceDispose",
-    workspaceId: main.workspaceId,
-    discardChanges: true,
-  });
+  const report = await Effect.runPromise(
+    fixture.manager.dispose({
+      _tag: "workspaceDispose",
+      workspaceId: main.workspaceId,
+      discardChanges: true,
+    }),
+  );
 
   expect(report.status, report.message).toBe("deleted");
   expect(existsSync(root)).toBe(false);
   expect(existsSync(fixture.common)).toBe(true);
-  expect(fixture.manager.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.cwd);
-  expect((await fixture.manager.inspect(fixture.frame.workspaceId)).status).toBe("ready");
+  expect(Effect.runSync(fixture.manager.resolve(fixture.frame.workspaceId))?.cwd).toBe(fixture.cwd);
+  expect((await Effect.runPromise(fixture.manager.inspect(fixture.frame.workspaceId))).status).toBe(
+    "ready",
+  );
 });
 
 it("persists successful removal before acknowledgement and never deletes a recreated path on replay", async () => {
@@ -539,53 +577,59 @@ it("persists successful removal before acknowledgement and never deletes a recre
     requestId: "disposal-ack-loss",
     discardChanges: true,
   } as const;
-  const removed = await fixture.manager.dispose(instruction);
+  const removed = await Effect.runPromise(fixture.manager.dispose(instruction));
   expect(removed).toMatchObject({ status: "deleted", requestId: instruction.requestId });
-  const receipt = makeRegistry(fixture.storageDir).readRemoval(fixture.frame.workspaceId);
+  const receipt = Effect.runSync(
+    makeRegistry(fixture.storageDir).readRemoval(fixture.frame.workspaceId),
+  );
   expect(receipt).toMatchObject({ phase: "terminal", instruction, report: removed });
   mkdirSync(fixture.cwd);
   writeFileSync(join(fixture.cwd, "human.txt"), "new files after old removal\n");
   const before = hashContents(fixture.cwd);
-  const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
+  const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir });
 
-  const replayed = await restarted.dispose(instruction);
+  const replayed = await Effect.runPromise(restarted.dispose(instruction));
 
   expect(replayed).toMatchObject({ status: "failed", requestId: instruction.requestId });
   expect(replayed.message).toMatch(/reappear|new files|receipt|preserve/i);
-  expect((await restarted.provision(fixture.frame)).status).toBe("failed");
+  expect((await Effect.runPromise(restarted.provision(fixture.frame))).status).toBe("failed");
   expect(hashContents(fixture.cwd)).toBe(before);
 });
 
 it("refuses a different removal intent while the original persisted request is pending", async () => {
   const fixture = await createManaged();
   const registry = makeRegistry(fixture.storageDir);
-  const workspace = registry.held(fixture.frame.workspaceId)!;
+  const workspace = Effect.runSync(registry.held(fixture.frame.workspaceId))!;
   const instruction = {
     _tag: "workspaceDispose",
     workspaceId: fixture.frame.workspaceId,
     requestId: "original-pending-disposal",
   } as const;
-  await registry.recordRemoval({
-    workspaceId: fixture.frame.workspaceId,
-    phase: "pending",
-    instruction,
-    workspace,
-  });
+  await Effect.runPromise(
+    registry.recordRemoval({
+      workspaceId: fixture.frame.workspaceId,
+      phase: "pending",
+      instruction,
+      workspace,
+    }),
+  );
   const before = hashContents(fixture.storageDir);
-  const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
-  expect(restarted.resolve(fixture.frame.workspaceId)).toBeUndefined();
+  const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir });
+  expect(Effect.runSync(restarted.resolve(fixture.frame.workspaceId))).toBeUndefined();
 
-  const conflict = await restarted.dispose({
-    ...instruction,
-    requestId: "conflicting-disposal",
-    discardChanges: true,
-  });
+  const conflict = await Effect.runPromise(
+    restarted.dispose({
+      ...instruction,
+      requestId: "conflicting-disposal",
+      discardChanges: true,
+    }),
+  );
 
   expect(conflict).toMatchObject({ status: "failed", requestId: "conflicting-disposal" });
   expect(conflict.message).toMatch(/pending|original/i);
   expect(hashContents(fixture.storageDir)).toBe(before);
-  expect((await restarted.provision(fixture.frame)).status).toBe("failed");
-  expect((await restarted.dispose(instruction)).status).toBe("deleted");
+  expect((await Effect.runPromise(restarted.provision(fixture.frame))).status).toBe("failed");
+  expect((await Effect.runPromise(restarted.dispose(instruction))).status).toBe("deleted");
 });
 
 it("preflights a redirected step-results parent before removing any managed checkout", async () => {
@@ -598,22 +642,24 @@ it("preflights a redirected step-results parent before removing any managed chec
   const checkoutBefore = hashContents(fixture.cwd);
   const externalBefore = hashContents(external);
 
-  const report = await fixture.manager.dispose({
-    _tag: "workspaceDispose",
-    workspaceId: fixture.frame.workspaceId,
-  });
+  const report = await Effect.runPromise(
+    fixture.manager.dispose({
+      _tag: "workspaceDispose",
+      workspaceId: fixture.frame.workspaceId,
+    }),
+  );
 
   expect(report.status).toBe("failed");
   expect(report.message).toMatch(/redirect|parent|managed|preserve/i);
   expect(hashContents(external)).toBe(externalBefore);
   expect(hashContents(fixture.cwd)).toBe(checkoutBefore);
-  expect(fixture.manager.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.cwd);
+  expect(Effect.runSync(fixture.manager.resolve(fixture.frame.workspaceId))?.cwd).toBe(fixture.cwd);
 });
 
 it("reserves an active removal before late provisioning of the same new workspace can create files", async () => {
   const remote = makeRemote();
   const storageDir = createTemporaryDir("hercule-cold-removal-provision-race-");
-  const manager = makeWorkspaces({ storageDir });
+  const manager = makeTestWorkspaces({ storageDir });
   const frame = buildProvisionFrame({
     kind: "ephemeral",
     checkouts: [
@@ -622,12 +668,14 @@ it("reserves an active removal before late provisioning of the same new workspac
   });
 
   const [removed, provisioned] = await Promise.all([
-    manager.dispose({
-      _tag: "workspaceDispose",
-      workspaceId: frame.workspaceId,
-      requestId: "cold-removal-first",
-    }),
-    manager.provision(frame),
+    Effect.runPromise(
+      manager.dispose({
+        _tag: "workspaceDispose",
+        workspaceId: frame.workspaceId,
+        requestId: "cold-removal-first",
+      }),
+    ),
+    Effect.runPromise(manager.provision(frame)),
   ]);
 
   expect(removed).toMatchObject({ status: "deleted", requestId: "cold-removal-first" });
@@ -635,19 +683,21 @@ it("reserves an active removal before late provisioning of the same new workspac
   expect(provisioned.message).toMatch(/remov|progress|fresh/i);
   expect(existsSync(join(storageDir, "workspaces", frame.workspaceId))).toBe(false);
   expect(existsSync(join(storageDir, "cache"))).toBe(false);
-  expect(manager.resolve(frame.workspaceId)).toBeUndefined();
+  expect(Effect.runSync(manager.resolve(frame.workspaceId))).toBeUndefined();
 });
 
 it("refuses buffered session resolution immediately when removal is requested before its checkpoint", async () => {
   const fixture = await createManaged();
 
-  const pending = fixture.manager.dispose({
-    _tag: "workspaceDispose",
-    workspaceId: fixture.frame.workspaceId,
-    requestId: "resolve-after-removal",
-  });
+  const pending = Effect.runPromise(
+    fixture.manager.dispose({
+      _tag: "workspaceDispose",
+      workspaceId: fixture.frame.workspaceId,
+      requestId: "resolve-after-removal",
+    }),
+  );
 
-  expect(fixture.manager.resolve(fixture.frame.workspaceId)).toBeUndefined();
+  expect(Effect.runSync(fixture.manager.resolve(fixture.frame.workspaceId))).toBeUndefined();
   expect((await pending).status).toBe("deleted");
 });
 
@@ -672,19 +722,21 @@ it("preserves a legacy standalone main because its source Git repository is insi
     ]),
   );
   const before = hashContents(root);
-  const manager = makeWorkspaces({ storageDir });
+  const manager = makeTestWorkspaces({ storageDir });
 
-  const refused = await manager.dispose({
-    _tag: "workspaceDispose",
-    workspaceId,
-    requestId: "legacy-main-refusal",
-    discardChanges: true,
-  });
+  const refused = await Effect.runPromise(
+    manager.dispose({
+      _tag: "workspaceDispose",
+      workspaceId,
+      requestId: "legacy-main-refusal",
+      discardChanges: true,
+    }),
+  );
 
   expect(refused.status).toBe("failed");
   expect(refused.message).toMatch(/source Git repository|standalone|preserve/i);
   expect(hashContents(root)).toBe(before);
-  expect(manager.resolve(workspaceId)?.cwd).toBe(root);
+  expect(Effect.runSync(manager.resolve(workspaceId))?.cwd).toBe(root);
 });
 
 it("reattaches the same reserved source under a new logical workspace without changing Git or setup", async () => {
@@ -693,7 +745,7 @@ it("reattaches the same reserved source under a new logical workspace without ch
   const source = join(world, "user source");
   runGitOrThrow(world, "clone", remote.url, source);
   const storageDir = createTemporaryDir("hercule-reattach-home-");
-  const manager = makeWorkspaces({ storageDir });
+  const manager = makeTestWorkspaces({ storageDir });
   const primary = {
     ...buildProvisionFrame({
       kind: "primary",
@@ -701,14 +753,16 @@ it("reattaches the same reserved source under a new logical workspace without ch
     }),
     attachment: { path: source, remoteName: "origin" },
   };
-  expect((await manager.provision(primary)).status).toBe("ready");
+  expect((await Effect.runPromise(manager.provision(primary))).status).toBe("ready");
   expect(
     (
-      await manager.detach({
-        _tag: "workspaceDetach",
-        workspaceId: primary.workspaceId,
-        requestId: "detach-before-reattach",
-      })
+      await Effect.runPromise(
+        manager.detach({
+          _tag: "workspaceDetach",
+          workspaceId: primary.workspaceId,
+          requestId: "detach-before-reattach",
+        }),
+      )
     ).status,
   ).toBe("deleted");
   const before = hashContents(source);
@@ -718,11 +772,11 @@ it("reattaches the same reserved source under a new logical workspace without ch
     checkouts: primary.checkouts.map((checkout) => ({ ...checkout, checkoutId: createId() })),
   };
 
-  const report = await manager.provision(replacement);
+  const report = await Effect.runPromise(manager.provision(replacement));
 
   expect(report.status, report.message).toBe("ready");
-  expect(manager.resolve(primary.workspaceId)).toBeUndefined();
-  expect(manager.resolve(replacement.workspaceId)?.cwd).toBe(realpathSync(source));
+  expect(Effect.runSync(manager.resolve(primary.workspaceId))).toBeUndefined();
+  expect(Effect.runSync(manager.resolve(replacement.workspaceId))?.cwd).toBe(realpathSync(source));
   expect(hashContents(source)).toBe(before);
 });
 
@@ -734,22 +788,26 @@ it("keeps an explicit request identifier bound to its original non-forced refusa
     workspaceId: fixture.frame.workspaceId,
     requestId: "fixed-refusal-intent",
   } as const;
-  const refused = await fixture.manager.dispose(original);
+  const refused = await Effect.runPromise(fixture.manager.dispose(original));
   expect(refused.status).toBe("failed");
   const before = hashContents(fixture.cwd);
 
-  const changed = await fixture.manager.dispose({ ...original, discardChanges: true });
+  const changed = await Effect.runPromise(
+    fixture.manager.dispose({ ...original, discardChanges: true }),
+  );
 
   expect(changed.status).toBe("failed");
   expect(changed.message).toMatch(/request ID|frozen|different.*instruction/i);
   expect(hashContents(fixture.cwd)).toBe(before);
   expect(
     (
-      await fixture.manager.dispose({
-        ...original,
-        requestId: "fresh-explicit-discard",
-        discardChanges: true,
-      })
+      await Effect.runPromise(
+        fixture.manager.dispose({
+          ...original,
+          requestId: "fresh-explicit-discard",
+          discardChanges: true,
+        }),
+      )
     ).status,
   ).toBe("deleted");
 });

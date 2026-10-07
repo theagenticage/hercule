@@ -1162,7 +1162,7 @@ const make = Effect.gen(function* () {
      * may still dispose of it now. Returns `undefined` if its files are gone,
      * if a lease on it is active again, if a lease keeps it for longer now,
      * or if its runner cannot remove it safely. Runs in the caller's
-     * transaction, which also disposes of it.
+     * transaction, which also reserves its disposal.
      *
      * A sweep lists its candidates up front, and the leases can change before
      * a candidate's turn comes: a session can be resumed in it, or a released

@@ -1,55 +1,73 @@
 /** Reads checkout identity without mutating Git or the working files. */
 import { realpathSync, statSync } from "node:fs";
 import * as Schema from "effect/Schema";
+import * as Effect from "effect/Effect";
 import { canonicalizeRemote, GitRemoteName } from "@hercule/protocol";
 import { runGit, type GitEnv } from "./git";
 import type { RegisteredWorkspace } from "./registry";
 
 /** Returns the normalized checkout root and common Git directory, or fails with a recovery action. */
-export const inspectCheckoutIdentity = async (
+export const inspectCheckoutIdentity = (
   path: string,
   remoteName: string,
   remote: string,
   env: GitEnv,
-): Promise<{ root: string; commonDirectory: string; commonDirectoryIdentity: string }> => {
-  if (!Schema.is(GitRemoteName)(remoteName))
-    throw new Error("The selected remote name is invalid. Choose an existing Git remote.");
-  let chosen: string;
-  try {
-    chosen = realpathSync(path);
-  } catch {
-    throw new Error(
-      "The selected checkout path is unavailable. Restore it and attach the same path again.",
+): Effect.Effect<
+  { root: string; commonDirectory: string; commonDirectoryIdentity: string },
+  Error
+> =>
+  Effect.gen(function* () {
+    if (!Schema.is(GitRemoteName)(remoteName))
+      return yield* Effect.fail(
+        new Error("The selected remote name is invalid. Choose an existing Git remote."),
+      );
+    const chosen = yield* Effect.try({
+      try: () => realpathSync(path),
+      catch: () =>
+        new Error(
+          "The selected checkout path is unavailable. Restore it and attach the same path again.",
+        ),
+    });
+    const root = yield* runGit(["-C", chosen, "rev-parse", "--show-toplevel"], { env });
+    const common = yield* runGit(
+      ["-C", chosen, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { env },
     );
-  }
-  const root = await runGit(["-C", chosen, "rev-parse", "--show-toplevel"], { env });
-  const common = await runGit(
-    ["-C", chosen, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-    { env },
-  );
-  const configured = await runGit(["-C", chosen, "config", "--get", `remote.${remoteName}.url`], {
-    env,
+    const configured = yield* runGit(
+      ["-C", chosen, "config", "--get", `remote.${remoteName}.url`],
+      {
+        env,
+      },
+    );
+    if (!root.ok || !common.ok)
+      return yield* Effect.fail(
+        new Error(
+          "The selected path is not an available Git checkout. Restore the repository before attaching it.",
+        ),
+      );
+    if (
+      !configured.ok ||
+      canonicalizeRemote(configured.stdout) !== canonicalizeRemote(remote) ||
+      canonicalizeRemote(remote) === undefined
+    )
+      return yield* Effect.fail(
+        new Error(
+          "The selected checkout remote does not match the resource repository. Choose the correct path and remote.",
+        ),
+      );
+    return yield* Effect.try({
+      try: () => {
+        const commonDirectory = realpathSync(common.stdout);
+        const physical = statSync(commonDirectory);
+        return {
+          root: realpathSync(root.stdout),
+          commonDirectory,
+          commonDirectoryIdentity: `${String(physical.dev)}:${String(physical.ino)}`,
+        };
+      },
+      catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+    });
   });
-  if (!root.ok || !common.ok)
-    throw new Error(
-      "The selected path is not an available Git checkout. Restore the repository before attaching it.",
-    );
-  if (
-    !configured.ok ||
-    canonicalizeRemote(configured.stdout) !== canonicalizeRemote(remote) ||
-    canonicalizeRemote(remote) === undefined
-  )
-    throw new Error(
-      "The selected checkout remote does not match the resource repository. Choose the correct path and remote.",
-    );
-  const commonDirectory = realpathSync(common.stdout);
-  const physical = statSync(commonDirectory);
-  return {
-    root: realpathSync(root.stdout),
-    commonDirectory,
-    commonDirectoryIdentity: `${String(physical.dev)}:${String(physical.ino)}`,
-  };
-};
 
 /** Checks every recorded checkout's current Git binding before admitting work to its files. */
 export const hasExpectedCheckoutIdentity = (entry: RegisteredWorkspace, env: GitEnv): boolean => {

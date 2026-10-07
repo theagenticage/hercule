@@ -6,6 +6,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join as joinPath } from "node:path";
+import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import {
@@ -164,100 +166,91 @@ const writeRegistry = (storageDir: string, state: RegistryState): void => {
 };
 
 export interface Registry {
-  readonly all: () => ReadonlyArray<RegisteredWorkspace>;
-  readonly readRemoval: (workspaceId: string) => Removal | undefined;
+  readonly all: () => Effect.Effect<ReadonlyArray<RegisteredWorkspace>, Error>;
+  readonly readRemoval: (workspaceId: string) => Effect.Effect<Removal | undefined, Error>;
   /** Records removal intent or its terminal result before acknowledging it. */
-  readonly recordRemoval: (removal: Removal) => Promise<void>;
-  readonly selectedRepository: (resourceId: string) => RepositorySelection | undefined;
-  readonly selectRepository: (selection: RepositorySelection) => Promise<void>;
-  readonly held: (workspaceId: string) => RegisteredWorkspace | undefined;
-  /**
-   * Returns this runner's primary for a resource, or undefined if it has none.
-   * `.workspaceinclude` and the files it lists are read from the primary.
-   */
-  readonly primaryOf: (resourceId: string) => RegisteredWorkspace | undefined;
+  readonly recordRemoval: (removal: Removal) => Effect.Effect<void, Error>;
+  readonly selectedRepository: (
+    resourceId: string,
+  ) => Effect.Effect<RepositorySelection | undefined, Error>;
+  readonly selectRepository: (selection: RepositorySelection) => Effect.Effect<void, Error>;
+  readonly held: (workspaceId: string) => Effect.Effect<RegisteredWorkspace | undefined, Error>;
+  /** Returns this runner's primary for a resource, used as the .workspaceinclude source. */
+  readonly primaryOf: (resourceId: string) => Effect.Effect<RegisteredWorkspace | undefined, Error>;
   readonly update: (
     change: (entries: ReadonlyArray<RegisteredWorkspace>) => ReadonlyArray<RegisteredWorkspace>,
-  ) => Promise<void>;
+  ) => Effect.Effect<void, Error>;
 }
 
 export const makeRegistry = (storageDir: string): Registry => {
-  /**
-   * Runs updates one at a time, so each read, change and write finishes before
-   * the next starts. Otherwise two workspaces provisioned at once could each
-   * write back the registry they had read, and one change would be lost.
-   */
-  let pending: Promise<void> = Promise.resolve();
+  // The read, change and atomic write finish under one permit, so concurrent updates cannot lose receipts.
+  const writes = Semaphore.makeUnsafe(1);
+  const readState = Effect.try({
+    try: () => readRegistry(storageDir),
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+  });
+  const updateState = (
+    change: (state: RegistryState) => RegistryState,
+  ): Effect.Effect<void, Error> =>
+    writes.withPermits(1)(
+      Effect.try({
+        try: () => writeRegistry(storageDir, change(readRegistry(storageDir))),
+        catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+      }),
+    );
   return {
-    all: () => readRegistry(storageDir).workspaces,
+    all: () => Effect.map(readState, (state) => state.workspaces),
     readRemoval: (workspaceId) =>
-      readRegistry(storageDir).removals?.find((held) => held.workspaceId === workspaceId),
-    recordRemoval: (removal) => {
-      const done = pending.then(() => {
-        const state = readRegistry(storageDir);
-        writeRegistry(storageDir, {
-          ...state,
-          removals: [
-            ...(state.removals ?? []).filter((held) => held.workspaceId !== removal.workspaceId),
-            removal,
-          ],
-          workspaces:
-            removal.report?.status === "deleted"
-              ? state.workspaces.filter((held) => held.workspaceId !== removal.workspaceId)
-              : state.workspaces,
-        });
-      });
-      pending = done.catch(() => undefined);
-      return done;
-    },
-    selectedRepository: (resourceId) =>
-      readRegistry(storageDir).repositories.find(
-        (selection) => selection.resourceId === resourceId,
+      Effect.map(readState, (state) =>
+        state.removals?.find((held) => held.workspaceId === workspaceId),
       ),
-    selectRepository: (selection) => {
-      const done = pending.then(() => {
-        const state = readRegistry(storageDir);
-        writeRegistry(storageDir, {
-          ...state,
-          repositories: [
-            ...state.repositories.filter((held) => held.resourceId !== selection.resourceId),
-            selection,
-          ],
-        });
-      });
-      pending = done.catch(() => undefined);
-      return done;
-    },
-    held: (workspaceId) => {
-      const state = readRegistry(storageDir);
-      const removal = state.removals?.find((held) => held.workspaceId === workspaceId);
-      return removal?.phase === "pending" || removal?.report?.status === "deleted"
-        ? undefined
-        : state.workspaces.find((entry) => entry.workspaceId === workspaceId);
-    },
-    primaryOf: (resourceId) => {
-      const state = readRegistry(storageDir);
-      return state.workspaces.find(
-        (entry) =>
-          entry.kind === "primary" &&
-          !state.removals?.some(
-            (removal) => removal.workspaceId === entry.workspaceId && removal.phase === "pending",
-          ) &&
-          (entry.preparation === undefined ||
-            (entry.preparation.phase === "terminal" &&
-              entry.preparation.report.status === "ready")) &&
-          isStillOnDisk(entry) &&
-          entry.checkouts.some((checkout) => checkout.resourceId === resourceId),
-      );
-    },
-    update: (change) => {
-      const done = pending.then(() => {
-        const state = readRegistry(storageDir);
-        writeRegistry(storageDir, { ...state, workspaces: change(state.workspaces) });
-      });
-      // Even a failed write leaves the queue usable for the next caller.
-      pending = done.catch(() => undefined);
-      return done;
-    },
+    recordRemoval: (removal) =>
+      updateState((state) => ({
+        ...state,
+        removals: [
+          ...(state.removals ?? []).filter((held) => held.workspaceId !== removal.workspaceId),
+          removal,
+        ],
+        workspaces:
+          removal.report?.status === "deleted"
+            ? state.workspaces.filter((held) => held.workspaceId !== removal.workspaceId)
+            : state.workspaces,
+      })),
+    selectedRepository: (resourceId) =>
+      Effect.map(readState, (state) =>
+        state.repositories.find((selection) => selection.resourceId === resourceId),
+      ),
+    selectRepository: (selection) =>
+      updateState((state) => ({
+        ...state,
+        repositories: [
+          ...state.repositories.filter((held) => held.resourceId !== selection.resourceId),
+          selection,
+        ],
+      })),
+    held: (workspaceId) =>
+      Effect.map(readState, (state) => {
+        const removal = state.removals?.find((held) => held.workspaceId === workspaceId);
+        return removal?.phase === "pending" || removal?.report?.status === "deleted"
+          ? undefined
+          : state.workspaces.find((entry) => entry.workspaceId === workspaceId);
+      }),
+    primaryOf: (resourceId) =>
+      Effect.map(readState, (state) =>
+        state.workspaces.find(
+          (entry) =>
+            entry.kind === "primary" &&
+            !state.removals?.some(
+              (removal) => removal.workspaceId === entry.workspaceId && removal.phase === "pending",
+            ) &&
+            (entry.preparation === undefined ||
+              (entry.preparation.phase === "terminal" &&
+                entry.preparation.report.status === "ready")) &&
+            isStillOnDisk(entry) &&
+            entry.checkouts.some((checkout) => checkout.resourceId === resourceId),
+        ),
+      ),
+    update: (change) =>
+      updateState((state) => ({ ...state, workspaces: change(state.workspaces) })),
   };
 };

@@ -16,9 +16,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { afterAll, describe, expect, it } from "vitest";
 import { ALL_GRANTS, type Session, type Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
-import { makeWorkspaces } from "../../../../runner/src/workspaces";
 import { resolveSessionContext } from "../../../../runner/src/sessions/context";
 import {
+  makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
   hashContents,
@@ -274,7 +274,7 @@ const withLegacyController = async (
     }
     controller = await startControllerProcess(fixture.home, port);
     const token = fixture.token;
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
     wire = await connectProofRunner(
       controller.base,
       { credential: fixture.credential },
@@ -349,7 +349,10 @@ describe("pre-change controller and provider-state upgrade", () => {
           workspaceId: original.workspaceId,
           continue: { nativeSessionId: original.nativeSessionId, mode: "resume" },
         });
-        const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+        const manager = makeTestWorkspaces({
+          storageDir: fixture.storageDir,
+          gitEnv: fixture.gitEnv,
+        });
         const context = await Effect.runPromise(
           resolveSessionContext(
             start,
@@ -428,11 +431,14 @@ describe("pre-change controller and provider-state upgrade", () => {
           ),
       );
       expect(instruction.checkouts[0]!.repositoryWorkspaceId).toBe(fixture.primaryId);
-      const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-      const prepared = await manager.provision(instruction);
+      const manager = makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      });
+      const prepared = await Effect.runPromise(manager.provision(instruction));
       expect(prepared.status, prepared.message).toBe("ready");
       wire.write(prepared);
-      const cwd = manager.resolve(instruction.workspaceId)!.cwd;
+      const cwd = Effect.runSync(manager.resolve(instruction.workspaceId))!.cwd;
       expect(runGitOrThrow(cwd, "rev-parse", "HEAD")).toBe(fixture.before.primaryHead);
       expect(runGitOrThrow(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")).toBe(
         runGitOrThrow(fixture.primary, "rev-parse", "--path-format=absolute", "--git-common-dir"),

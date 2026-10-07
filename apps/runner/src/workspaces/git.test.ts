@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 /**
  * Tests the git helpers against real repositories.
  *
@@ -26,7 +27,7 @@ describe("switching a checkout to a branch", () => {
     addBranch(remote, "release");
     const folder = cloneUserCheckout(remote);
 
-    const outcome = await switchBranch(folder, "release", ENV);
+    const outcome = await Effect.runPromise(switchBranch(folder, "release", ENV));
 
     expect(outcome.ok).toBe(true);
     expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
@@ -39,7 +40,7 @@ describe("switching a checkout to a branch", () => {
     // branch: `git checkout README.md` would silently restore it from HEAD.
     writeFileSync(join(folder, "README.md"), "what the user was in the middle of\n");
 
-    const outcome = await switchBranch(folder, "README.md", ENV);
+    const outcome = await Effect.runPromise(switchBranch(folder, "README.md", ENV));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.stderr).toContain("README.md");

@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "./testing";
 import {
   existsSync,
   mkdirSync,
@@ -12,7 +13,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
 import type { SessionStart, WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "../sessions/context";
-import { makeWorkspaces } from "./index";
+
 import { makeRegistry } from "./registry";
 import {
   buildCheckout,
@@ -103,15 +104,18 @@ describe("registering an existing checkout", () => {
       const before = hashContents(fixture.world);
       const head = runGitOrThrow(fixture.path, "rev-parse", "HEAD");
       const branch = runGitOrThrow(fixture.path, "branch", "--show-current");
-      const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+      const manager = makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      });
 
-      const report: WorkspaceReport & { readonly path?: string } = await manager.provision(
-        fixture.frame,
+      const report: WorkspaceReport & { readonly path?: string } = await Effect.runPromise(
+        manager.provision(fixture.frame),
       );
 
       expect(report.status, report.message).toBe("ready");
       expect(report.path).toBe(fixture.path);
-      expect(manager.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.path);
+      expect(Effect.runSync(manager.resolve(fixture.frame.workspaceId))?.cwd).toBe(fixture.path);
       expect(report.checkouts?.[0]?.branch).toBe(branch);
       expect(runGitOrThrow(fixture.path, "rev-parse", "HEAD")).toBe(head);
       expect(hashContents(fixture.world)).toBe(before);
@@ -127,10 +131,12 @@ describe("registering an existing checkout", () => {
     const fixture = createAttachment(false, "upstream");
     const before = hashContents(fixture.world);
 
-    const report = await makeWorkspaces({
-      storageDir: fixture.storageDir,
-      gitEnv: fixture.gitEnv,
-    }).provision(fixture.frame);
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      }).provision(fixture.frame),
+    );
 
     expect(report.status, report.message).toBe("ready");
     expect(hashContents(fixture.world)).toBe(before);
@@ -140,20 +146,24 @@ describe("registering an existing checkout", () => {
   it("repeats the same attachment in place after a manager restart", async () => {
     const fixture = createAttachment();
     const before = hashContents(fixture.world);
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-    const first = await manager.provision(fixture.frame);
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    const first = await Effect.runPromise(manager.provision(fixture.frame));
     expect(first.status, first.message).toBe("ready");
 
-    const duplicate = await manager.provision(fixture.frame);
-    const restarted = await makeWorkspaces({
-      storageDir: fixture.storageDir,
-      gitEnv: fixture.gitEnv,
-    }).provision(fixture.frame);
+    const duplicate = await Effect.runPromise(manager.provision(fixture.frame));
+    const restarted = await Effect.runPromise(
+      makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      }).provision(fixture.frame),
+    );
 
     expect(duplicate).toEqual(first);
     expect(restarted).toEqual(first);
     expect(
-      makeWorkspaces({ storageDir: fixture.storageDir }).resolve(fixture.frame.workspaceId)?.cwd,
+      Effect.runSync(
+        makeTestWorkspaces({ storageDir: fixture.storageDir }).resolve(fixture.frame.workspaceId),
+      )?.cwd,
     ).toBe(fixture.path);
     expect(hashContents(fixture.world)).toBe(before);
   });
@@ -181,16 +191,21 @@ describe("registering an existing checkout", () => {
             ? plain
             : fixture.path;
       const before = hashContents(fixture.world);
-      const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-
-      const report = await manager.provision({
-        ...fixture.frame,
-        attachment: { ...fixture.frame.attachment, path },
+      const manager = makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
       });
+
+      const report = await Effect.runPromise(
+        manager.provision({
+          ...fixture.frame,
+          attachment: { ...fixture.frame.attachment, path },
+        }),
+      );
 
       expect(report.status).toBe("failed");
       expect(report.message).toMatch(/remote|repository|checkout|path|directory/i);
-      expect(manager.resolve(fixture.frame.workspaceId)).toBeUndefined();
+      expect(Effect.runSync(manager.resolve(fixture.frame.workspaceId))).toBeUndefined();
       expect(hashContents(fixture.world)).toBe(before);
       expect(existsSync(fixture.setupMarker)).toBe(false);
       expect(existsSync(join(fixture.storageDir, "cache"))).toBe(false);
@@ -203,7 +218,7 @@ describe("registering an existing checkout", () => {
     runGitOrThrow(first.world, "clone", first.original, secondPath);
     runGitOrThrow(secondPath, "remote", "set-url", "origin", first.frame.checkouts[0]!.remote);
     const before = hashContents(first.world);
-    const manager = makeWorkspaces({ storageDir: first.storageDir, gitEnv: first.gitEnv });
+    const manager = makeTestWorkspaces({ storageDir: first.storageDir, gitEnv: first.gitEnv });
     const competing: AttachmentFrame = {
       ...first.frame,
       workspaceId: createId(),
@@ -211,8 +226,8 @@ describe("registering an existing checkout", () => {
     };
 
     const reports = await Promise.all([
-      manager.provision(first.frame),
-      manager.provision(competing),
+      Effect.runPromise(manager.provision(first.frame)),
+      Effect.runPromise(manager.provision(competing)),
     ]);
 
     expect(reports.map((report) => report.status).sort()).toEqual(["failed", "ready"]);
@@ -225,19 +240,23 @@ describe("registering an existing checkout", () => {
 
   it("refuses to reinterpret an existing selection as managed mode or another path", async () => {
     const fixture = createAttachment();
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-    expect((await manager.provision(fixture.frame)).status).toBe("ready");
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    expect((await Effect.runPromise(manager.provision(fixture.frame))).status).toBe("ready");
     const before = hashContents(fixture.world);
     const managed = buildProvisionFrame({
       kind: "primary",
       checkouts: fixture.frame.checkouts,
     });
 
-    const changedMode = await manager.provision({ ...managed, workspaceId: createId() });
-    const changedPath = await manager.provision({
-      ...fixture.frame,
-      attachment: { path: fixture.original, remoteName: "different" },
-    });
+    const changedMode = await Effect.runPromise(
+      manager.provision({ ...managed, workspaceId: createId() }),
+    );
+    const changedPath = await Effect.runPromise(
+      manager.provision({
+        ...fixture.frame,
+        attachment: { path: fixture.original, remoteName: "different" },
+      }),
+    );
 
     expect(changedMode.status).toBe("failed");
     expect(changedPath.status).toBe("failed");
@@ -248,8 +267,8 @@ describe("registering an existing checkout", () => {
 describe("recovering attachment availability", () => {
   it("refuses a replacement repository at the recorded path during resolution, start and resume", async () => {
     const fixture = createAttachment();
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-    expect((await manager.provision(fixture.frame)).status).toBe("ready");
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    expect((await Effect.runPromise(manager.provision(fixture.frame))).status).toBe("ready");
     renameSync(fixture.path, `${fixture.path}.original`);
     const replacement = makeRemote();
     runGitOrThrow(fixture.world, "clone", replacement.url, fixture.path);
@@ -257,7 +276,7 @@ describe("recovering attachment availability", () => {
     writeFileSync(join(fixture.path, "replacement-work.txt"), "replacement files must stay\n");
     const before = hashContents(fixture.world);
 
-    expect(manager.resolve(fixture.frame.workspaceId)).toBeUndefined();
+    expect(Effect.runSync(manager.resolve(fixture.frame.workspaceId))).toBeUndefined();
     const machine: Machine = {
       providersDir: join(fixture.storageDir, "providers"),
       scratchDir: join(fixture.storageDir, "scratch"),
@@ -306,27 +325,33 @@ describe("recovering attachment availability", () => {
 
   it("does not replace a disappeared checkout and validates the same restored path on explicit attachment", async () => {
     const fixture = createAttachment();
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-    expect((await manager.provision(fixture.frame)).status).toBe("ready");
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    expect((await Effect.runPromise(manager.provision(fixture.frame))).status).toBe("ready");
     const before = hashContents(fixture.world);
     const missing = `${fixture.path}.saved`;
     renameSync(fixture.path, missing);
 
-    const unavailable = await makeWorkspaces({
-      storageDir: fixture.storageDir,
-      gitEnv: fixture.gitEnv,
-    }).provision(fixture.frame);
+    const unavailable = await Effect.runPromise(
+      makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      }).provision(fixture.frame),
+    );
 
     expect(unavailable.status).toBe("failed");
     expect(
-      makeWorkspaces({ storageDir: fixture.storageDir }).resolve(fixture.frame.workspaceId),
+      Effect.runSync(
+        makeTestWorkspaces({ storageDir: fixture.storageDir }).resolve(fixture.frame.workspaceId),
+      ),
     ).toBeUndefined();
     expect(existsSync(fixture.path)).toBe(false);
     renameSync(missing, fixture.path);
-    const recovered = await makeWorkspaces({
-      storageDir: fixture.storageDir,
-      gitEnv: fixture.gitEnv,
-    }).provision(fixture.frame);
+    const recovered = await Effect.runPromise(
+      makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      }).provision(fixture.frame),
+    );
     expect(recovered.status, recovered.message).toBe("ready");
     expect(hashContents(fixture.world)).toBe(before);
     expect(existsSync(fixture.setupMarker)).toBe(false);
@@ -336,8 +361,10 @@ describe("recovering attachment availability", () => {
     const fixture = createAttachment();
     expect(
       (
-        await makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv }).provision(
-          fixture.frame,
+        await Effect.runPromise(
+          makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv }).provision(
+            fixture.frame,
+          ),
         )
       ).status,
     ).toBe("ready");
@@ -347,11 +374,11 @@ describe("recovering attachment availability", () => {
       join(fixture.storageDir, "saved-registry.json"),
     );
 
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-    const rebuilt = await manager.provision(fixture.frame);
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    const rebuilt = await Effect.runPromise(manager.provision(fixture.frame));
 
     expect(rebuilt.status, rebuilt.message).toBe("ready");
-    expect(manager.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.path);
+    expect(Effect.runSync(manager.resolve(fixture.frame.workspaceId))?.cwd).toBe(fixture.path);
     expect(hashContents(fixture.world)).toBe(before);
     expect(existsSync(fixture.setupMarker)).toBe(false);
   });
@@ -366,10 +393,12 @@ describe("recovering attachment availability", () => {
     const before = hashContents(fixture.world);
     const storageBefore = hashContents(fixture.storageDir);
 
-    const report = await makeWorkspaces({
-      storageDir: fixture.storageDir,
-      gitEnv: fixture.gitEnv,
-    }).provision(fixture.frame);
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      }).provision(fixture.frame),
+    );
 
     expect(report.status).toBe("failed");
     expect(report.message).toMatch(/registry.*(?:recover|corrupt|unreadable|valid)/i);
@@ -383,43 +412,51 @@ describe("recovering attachment availability", () => {
 describe("normalized attachment recovery", () => {
   it("replays the canonical root after the originally selected subdirectory disappears", async () => {
     const fixture = createAttachment();
-    const initial = await makeWorkspaces({
-      storageDir: fixture.storageDir,
-      gitEnv: fixture.gitEnv,
-    }).provision(fixture.frame);
+    const initial = await Effect.runPromise(
+      makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      }).provision(fixture.frame),
+    );
     expect(initial.status, initial.message).toBe("ready");
     rmSync(fixture.frame.attachment.path, { recursive: true });
     const before = hashContents(fixture.world);
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
 
-    const recovered = await manager.provision({
-      ...fixture.frame,
-      attachment: { ...fixture.frame.attachment, path: fixture.path },
-    });
+    const recovered = await Effect.runPromise(
+      manager.provision({
+        ...fixture.frame,
+        attachment: { ...fixture.frame.attachment, path: fixture.path },
+      }),
+    );
 
     expect(recovered).toEqual(initial);
-    expect(manager.resolve(fixture.frame.workspaceId)?.cwd).toBe(fixture.path);
+    expect(Effect.runSync(manager.resolve(fixture.frame.workspaceId))?.cwd).toBe(fixture.path);
     expect(hashContents(fixture.world)).toBe(before);
     expect(existsSync(fixture.setupMarker)).toBe(false);
   });
 
   it("accepts a delayed original subdirectory instruction after a canonical-root replay", async () => {
     const fixture = createAttachment();
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-    const initial = await manager.provision(fixture.frame);
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+    const initial = await Effect.runPromise(manager.provision(fixture.frame));
     expect(initial.status, initial.message).toBe("ready");
     expect(
-      await manager.provision({
-        ...fixture.frame,
-        attachment: { ...fixture.frame.attachment, path: fixture.path },
-      }),
+      await Effect.runPromise(
+        manager.provision({
+          ...fixture.frame,
+          attachment: { ...fixture.frame.attachment, path: fixture.path },
+        }),
+      ),
     ).toEqual(initial);
     const before = hashContents(fixture.world);
 
-    const delayed = await makeWorkspaces({
-      storageDir: fixture.storageDir,
-      gitEnv: fixture.gitEnv,
-    }).provision(fixture.frame);
+    const delayed = await Effect.runPromise(
+      makeTestWorkspaces({
+        storageDir: fixture.storageDir,
+        gitEnv: fixture.gitEnv,
+      }).provision(fixture.frame),
+    );
 
     expect(delayed).toEqual(initial);
     expect(hashContents(fixture.world)).toBe(before);
@@ -429,55 +466,61 @@ describe("normalized attachment recovery", () => {
 
 it("recovers an inspected unavailable attachment after restart while preserving its original preparation receipt", async () => {
   const fixture = createAttachment();
-  const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-  const prepared = await manager.provision(fixture.frame);
+  const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+  const prepared = await Effect.runPromise(manager.provision(fixture.frame));
   expect(prepared.status).toBe("ready");
   const saved = `${fixture.path}.saved`;
   renameSync(fixture.path, saved);
-  const unavailable = await manager.inspect(fixture.frame.workspaceId);
+  const unavailable = await Effect.runPromise(manager.inspect(fixture.frame.workspaceId));
   expect(unavailable.status).toBe("failed");
   renameSync(saved, fixture.path);
   await Bun.sleep(2);
-  const restarted = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+  const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
 
-  const restored = await restarted.provision(fixture.frame);
+  const restored = await Effect.runPromise(restarted.provision(fixture.frame));
 
   expect(restored.status, restored.message).toBe("ready");
   expect(Date.parse(restored.observedAt!)).toBeGreaterThan(Date.parse(unavailable.observedAt!));
   expect(restored.checkouts).toEqual(prepared.checkouts);
   expect(existsSync(fixture.setupMarker)).toBe(false);
-  const receipt = makeRegistry(fixture.storageDir).held(fixture.frame.workspaceId)?.preparation;
+  const receipt = Effect.runSync(
+    makeRegistry(fixture.storageDir).held(fixture.frame.workspaceId),
+  )?.preparation;
   expect(receipt?.phase).toBe("terminal");
   if (receipt?.phase === "terminal") expect(receipt.report).toEqual(prepared);
-  expect(await restarted.provision(fixture.frame)).toEqual(prepared);
+  expect(await Effect.runPromise(restarted.provision(fixture.frame))).toEqual(prepared);
 });
 
 it("timestamps genuine attachment loss while refusing wrong intent without an availability observation", async () => {
   const fixture = createAttachment();
-  const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-  const prepared = await manager.provision(fixture.frame);
+  const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+  const prepared = await Effect.runPromise(manager.provision(fixture.frame));
   expect(prepared.status).toBe("ready");
-  const wrong = await manager.provision({
-    ...fixture.frame,
-    attachment: { path: join(fixture.world, "wrong missing path"), remoteName: "origin" },
-  });
+  const wrong = await Effect.runPromise(
+    manager.provision({
+      ...fixture.frame,
+      attachment: { path: join(fixture.world, "wrong missing path"), remoteName: "origin" },
+    }),
+  );
   expect(wrong.status).toBe("failed");
   expect(wrong.observedAt).toBeUndefined();
-  expect(await manager.provision(fixture.frame)).toEqual(prepared);
+  expect(await Effect.runPromise(manager.provision(fixture.frame))).toEqual(prepared);
   const saved = `${fixture.path}.saved`;
   renameSync(fixture.path, saved);
   await Bun.sleep(2);
 
-  const unavailable = await manager.provision(fixture.frame);
+  const unavailable = await Effect.runPromise(manager.provision(fixture.frame));
 
   expect(unavailable.status).toBe("failed");
   expect(Date.parse(unavailable.observedAt!)).toBeGreaterThan(Date.parse(prepared.observedAt!));
   renameSync(saved, fixture.path);
   await Bun.sleep(2);
-  const restored = await makeWorkspaces({
-    storageDir: fixture.storageDir,
-    gitEnv: fixture.gitEnv,
-  }).provision(fixture.frame);
+  const restored = await Effect.runPromise(
+    makeTestWorkspaces({
+      storageDir: fixture.storageDir,
+      gitEnv: fixture.gitEnv,
+    }).provision(fixture.frame),
+  );
   expect(restored.status, restored.message).toBe("ready");
   expect(Date.parse(restored.observedAt!)).toBeGreaterThan(Date.parse(unavailable.observedAt!));
   expect(existsSync(fixture.setupMarker)).toBe(false);

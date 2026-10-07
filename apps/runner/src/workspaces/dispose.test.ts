@@ -1,3 +1,5 @@
+import { makeTestWorkspaces } from "./testing";
+import * as Effect from "effect/Effect";
 /**
  * Tests for disposing a workspace:
  *
@@ -8,7 +10,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeWorkspaces } from "./index";
+
 import {
   buildCheckout,
   cleanTemporaries,
@@ -33,15 +35,17 @@ describe("disposing an ephemeral workspace", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
     const resourceId = createId();
-    const workspaces = makeWorkspaces({ storageDir });
-    await workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-4d4d4d4d" }),
-        ],
-      }),
+    const workspaces = makeTestWorkspaces({ storageDir });
+    await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-4d4d4d4d" }),
+          ],
+        }),
+      ),
     );
     const directory = join(storageDir, "workspaces", workspaceId);
     const cache = join(storageDir, "cache", `${resourceId}.git`);
@@ -51,7 +55,7 @@ describe("disposing an ephemeral workspace", () => {
     mkdirSync(stepResults, { recursive: true });
     writeFileSync(join(stepResults, "run-commit-1.json"), "{}");
 
-    const report = await workspaces.dispose(buildDisposeFrame(workspaceId));
+    const report = await Effect.runPromise(workspaces.dispose(buildDisposeFrame(workspaceId)));
 
     expect(report.status).toBe("deleted");
     expect(report.workspaceId).toBe(workspaceId);
@@ -65,7 +69,7 @@ describe("disposing an ephemeral workspace", () => {
     // And git no longer lists a worktree there.
     expect(runGitOrThrow(cache, "worktree", "list")).not.toContain(directory);
     // A restart must not resurrect it.
-    expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
+    expect(Effect.runSync(makeTestWorkspaces({ storageDir }).resolve(workspaceId))).toBeUndefined();
   });
 });
 
@@ -77,25 +81,27 @@ describe("disposing a primary", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
     const resourceId = createId();
-    const workspaces = makeWorkspaces({ storageDir });
-    await workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    const workspaces = makeTestWorkspaces({ storageDir });
+    await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
     const directory = join(storageDir, "primaries", workspaceId);
     const before = hashContents(directory);
 
-    const report = await workspaces.dispose(buildDisposeFrame(workspaceId));
+    const report = await Effect.runPromise(workspaces.dispose(buildDisposeFrame(workspaceId)));
 
     expect(report.status).toBe("failed");
     expect(report.message).toMatch(/explicit discard changes/i);
     expect(existsSync(directory)).toBe(true);
     expect(hashContents(directory)).toBe(before);
     // Still registered, so a session can still be placed in it.
-    expect(workspaces.resolve(workspaceId)?.cwd).toBe(directory);
+    expect(Effect.runSync(workspaces.resolve(workspaceId))?.cwd).toBe(directory);
   });
 });
 
@@ -103,8 +109,10 @@ describe("disposing something this runner never had", () => {
   it("reports deleted rather than failing", async () => {
     const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir: createStorageDir() }).dispose(
-      buildDisposeFrame(workspaceId),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir: createStorageDir() }).dispose(
+        buildDisposeFrame(workspaceId),
+      ),
     );
 
     // The controller must be able to retry a dispose it did not see answered.
@@ -124,7 +132,7 @@ describe("disposing a workspace that is still being provisioned", () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
-    const workspaces = makeWorkspaces({ storageDir });
+    const workspaces = makeTestWorkspaces({ storageDir });
     const frame = buildProvisionFrame({
       workspaceId,
       kind: "ephemeral",
@@ -138,13 +146,13 @@ describe("disposing a workspace that is still being provisioned", () => {
     });
 
     const [, disposed] = await Promise.all([
-      workspaces.provision(frame),
-      workspaces.dispose(buildDisposeFrame(workspaceId)),
+      Effect.runPromise(workspaces.provision(frame)),
+      Effect.runPromise(workspaces.dispose(buildDisposeFrame(workspaceId))),
     ]);
 
     expect(disposed.status).toBe("deleted");
     expect(existsSync(join(storageDir, "workspaces", workspaceId))).toBe(false);
     // And nothing of it is still registered, so no session can be placed there.
-    expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
+    expect(Effect.runSync(makeTestWorkspaces({ storageDir }).resolve(workspaceId))).toBeUndefined();
   });
 });

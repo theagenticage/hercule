@@ -1,3 +1,5 @@
+import { makeTestWorkspaces } from "./testing";
+import * as Effect from "effect/Effect";
 import {
   existsSync,
   mkdirSync,
@@ -8,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeWorkspaces } from "./index";
+
 import {
   buildCheckout,
   buildProvisionFrame,
@@ -105,7 +107,7 @@ describe("upgrading a legacy array registry", () => {
       ephemeral: hashContents(fixture.ephemeralRoot),
       cache: hashContents(fixture.cache),
     };
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir });
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir });
     for (const [workspaceId, checkoutId, form, head, root] of [
       [fixture.mainId, fixture.mainCheckoutId, "clone", fixture.mainHead, fixture.mainRoot],
       [
@@ -116,23 +118,25 @@ describe("upgrading a legacy array registry", () => {
         fixture.ephemeralRoot,
       ],
     ] as const) {
-      const observed = await manager.inspect(workspaceId);
+      const observed = await Effect.runPromise(manager.inspect(workspaceId));
       expect(observed.status, observed.message).toBe("ready");
       expect(observed.checkouts?.[0]).toMatchObject({ checkoutId, form, headCommit: head });
-      expect(manager.resolve(workspaceId)?.cwd).toBe(root);
-      const replay = await manager.provision(
-        buildProvisionFrame({
-          workspaceId,
-          kind: form === "clone" ? "primary" : "ephemeral",
-          checkouts: [
-            buildCheckout({
-              checkoutId,
-              resourceId: fixture.resourceId,
-              remote: fixture.remote.url,
-              setupCommand: "echo unsafe-repeat > setup-repeated; exit 1",
-            }),
-          ],
-        }),
+      expect(Effect.runSync(manager.resolve(workspaceId))?.cwd).toBe(root);
+      const replay = await Effect.runPromise(
+        manager.provision(
+          buildProvisionFrame({
+            workspaceId,
+            kind: form === "clone" ? "primary" : "ephemeral",
+            checkouts: [
+              buildCheckout({
+                checkoutId,
+                resourceId: fixture.resourceId,
+                remote: fixture.remote.url,
+                setupCommand: "echo unsafe-repeat > setup-repeated; exit 1",
+              }),
+            ],
+          }),
+        ),
       );
       expect(replay.status, replay.message).toBe("ready");
       expect(existsSync(join(root, "setup-repeated"))).toBe(false);
@@ -148,7 +152,7 @@ describe("upgrading a legacy array registry", () => {
   it("creates new local work in the standalone main while preserving the old ephemeral cache binding across restart and removal", async () => {
     const fixture = createLegacyInstallation();
     const trace = join(fixture.storageDir, "git-trace");
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: fixture.storageDir,
       gitEnv: { GIT_TRACE: trace },
     });
@@ -163,42 +167,48 @@ describe("upgrading a legacy array registry", () => {
         }),
       ],
     });
-    const report = await manager.provision(fresh);
+    const report = await Effect.runPromise(manager.provision(fresh));
     expect(report.status, report.message).toBe("ready");
     expect(report.checkouts?.[0]?.baseCommit).toBe(fixture.mainHead);
-    const freshRoot = manager.resolve(fresh.workspaceId)!.cwd;
+    const freshRoot = Effect.runSync(manager.resolve(fresh.workspaceId))!.cwd;
     expect(readCommonDirectory(freshRoot)).toBe(readCommonDirectory(fixture.mainRoot));
     expect(readCommonDirectory(fixture.ephemeralRoot)).toBe(realpathSync(fixture.cache));
     expect(readFileSync(trace, "utf8")).not.toMatch(/built-in: git (?:fetch|clone)/);
     const mainAfterCreation = hashContents(fixture.mainRoot);
-    const restarted = makeWorkspaces({ storageDir: fixture.storageDir });
-    expect(restarted.resolve(fixture.ephemeralId)?.checkouts[0]?.checkoutId).toBe(
+    const restarted = makeTestWorkspaces({ storageDir: fixture.storageDir });
+    expect(Effect.runSync(restarted.resolve(fixture.ephemeralId))?.checkouts[0]?.checkoutId).toBe(
       fixture.ephemeralCheckoutId,
     );
     expect(runGitOrThrow(fixture.ephemeralRoot, "rev-parse", "HEAD")).toBe(fixture.ephemeralHead);
-    const ordinary = await restarted.dispose({
-      _tag: "workspaceDispose",
-      workspaceId: fixture.ephemeralId,
-      requestId: createId(),
-    });
+    const ordinary = await Effect.runPromise(
+      restarted.dispose({
+        _tag: "workspaceDispose",
+        workspaceId: fixture.ephemeralId,
+        requestId: createId(),
+      }),
+    );
     expect(ordinary.status).toBe("failed");
     expect(readFileSync(join(fixture.ephemeralRoot, "unfinished.txt"), "utf8")).toBe(
       "unfinished old cache work\n",
     );
-    const removed = await restarted.dispose({
-      _tag: "workspaceDispose",
-      workspaceId: fixture.ephemeralId,
-      requestId: createId(),
-      discardChanges: true,
-    });
+    const removed = await Effect.runPromise(
+      restarted.dispose({
+        _tag: "workspaceDispose",
+        workspaceId: fixture.ephemeralId,
+        requestId: createId(),
+        discardChanges: true,
+      }),
+    );
     expect(removed.status, removed.message).toBe("deleted");
     expect(existsSync(fixture.ephemeralRoot)).toBe(false);
     expect(runGitOrThrow(fixture.cache, "rev-parse", "old-cache-work")).toBe(fixture.ephemeralHead);
     expect(runGitOrThrow(freshRoot, "rev-parse", "HEAD")).toBe(fixture.mainHead);
     expect(hashContents(fixture.mainRoot)).toBe(mainAfterCreation);
-    expect(makeWorkspaces({ storageDir: fixture.storageDir }).resolve(fresh.workspaceId)?.cwd).toBe(
-      freshRoot,
-    );
+    expect(
+      Effect.runSync(
+        makeTestWorkspaces({ storageDir: fixture.storageDir }).resolve(fresh.workspaceId),
+      )?.cwd,
+    ).toBe(freshRoot);
   });
 });
 
@@ -213,28 +223,30 @@ it.each([
     const fixture = createLegacyInstallation();
     const trace = join(fixture.storageDir, "bound-git-trace");
     const marker = join(fixture.mainRoot, "setup-repeated");
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: fixture.storageDir,
       gitEnv: { GIT_TRACE: trace },
     });
     if (replayed) {
-      const report = await manager.provision(
-        buildProvisionFrame({
-          workspaceId: fixture.mainId,
-          kind: "primary",
-          checkouts: [
-            buildCheckout({
-              checkoutId: fixture.mainCheckoutId,
-              resourceId: fixture.resourceId,
-              remote: fixture.remote.url,
-              setupCommand: "echo unsafe > setup-repeated",
-            }),
-          ],
-        }),
+      const report = await Effect.runPromise(
+        manager.provision(
+          buildProvisionFrame({
+            workspaceId: fixture.mainId,
+            kind: "primary",
+            checkouts: [
+              buildCheckout({
+                checkoutId: fixture.mainCheckoutId,
+                resourceId: fixture.resourceId,
+                remote: fixture.remote.url,
+                setupCommand: "echo unsafe > setup-repeated",
+              }),
+            ],
+          }),
+        ),
       );
       expect(report.status, report.message).toBe("ready");
     } else {
-      expect((await manager.inspect(fixture.mainId)).status).toBe("ready");
+      expect((await Effect.runPromise(manager.inspect(fixture.mainId))).status).toBe("ready");
     }
     expect(existsSync(marker)).toBe(false);
     const oldBefore = hashContents(fixture.ephemeralRoot);
@@ -251,14 +263,14 @@ it.each([
         }),
       ],
     });
-    const report = await manager.provision(frame);
+    const report = await Effect.runPromise(manager.provision(frame));
     expect(report.status, report.message).toBe("ready");
     expect(report.checkouts?.[0]).toMatchObject({
       baseCommit: fixture.mainHead,
       headCommit: fixture.mainHead,
       startingRevision,
     });
-    expect(readCommonDirectory(manager.resolve(frame.workspaceId)!.cwd)).toBe(
+    expect(readCommonDirectory(Effect.runSync(manager.resolve(frame.workspaceId))!.cwd)).toBe(
       readCommonDirectory(fixture.mainRoot),
     );
     expect(readCommonDirectory(fixture.ephemeralRoot)).toBe(realpathSync(fixture.cache));
@@ -278,19 +290,21 @@ it.each([{ kind: "current" as const }, { kind: "local" as const, branch: "unpubl
   "refuses a legacy pending %j instruction before creating work or running setup when the selected remote changed",
   async (startingRevision) => {
     const fixture = createLegacyInstallation();
-    const manager = makeWorkspaces({ storageDir: fixture.storageDir });
-    const replay = await manager.provision(
-      buildProvisionFrame({
-        workspaceId: fixture.mainId,
-        kind: "primary",
-        checkouts: [
-          buildCheckout({
-            checkoutId: fixture.mainCheckoutId,
-            resourceId: fixture.resourceId,
-            remote: fixture.remote.url,
-          }),
-        ],
-      }),
+    const manager = makeTestWorkspaces({ storageDir: fixture.storageDir });
+    const replay = await Effect.runPromise(
+      manager.provision(
+        buildProvisionFrame({
+          workspaceId: fixture.mainId,
+          kind: "primary",
+          checkouts: [
+            buildCheckout({
+              checkoutId: fixture.mainCheckoutId,
+              resourceId: fixture.resourceId,
+              remote: fixture.remote.url,
+            }),
+          ],
+        }),
+      ),
     );
     expect(replay.status, replay.message).toBe("ready");
     runGitOrThrow(
@@ -314,7 +328,7 @@ it.each([{ kind: "current" as const }, { kind: "local" as const, branch: "unpubl
         }),
       ],
     });
-    const report = await manager.provision(frame);
+    const report = await Effect.runPromise(manager.provision(frame));
     expect(report.status).toBe("failed");
     expect(report.message).toMatch(/remote|repository|selected|restore/i);
     expect(existsSync(counter)).toBe(false);
@@ -334,7 +348,10 @@ it("keeps the historical bare cache as the source when the legacy array has only
   );
   const trace = join(fixture.storageDir, "cache-only-trace");
   renameSync(fixture.remote.path, `${fixture.remote.path}.offline`);
-  const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: { GIT_TRACE: trace } });
+  const manager = makeTestWorkspaces({
+    storageDir: fixture.storageDir,
+    gitEnv: { GIT_TRACE: trace },
+  });
   const frame = buildProvisionFrame({
     kind: "ephemeral",
     checkouts: [
@@ -346,10 +363,10 @@ it("keeps the historical bare cache as the source when the legacy array has only
       }),
     ],
   });
-  const report = await manager.provision(frame);
+  const report = await Effect.runPromise(manager.provision(frame));
   expect(report.status, report.message).toBe("ready");
   expect(report.checkouts?.[0]?.baseCommit).toBe(fixture.ephemeralHead);
-  expect(readCommonDirectory(manager.resolve(frame.workspaceId)!.cwd)).toBe(
+  expect(readCommonDirectory(Effect.runSync(manager.resolve(frame.workspaceId))!.cwd)).toBe(
     realpathSync(fixture.cache),
   );
   expect(runGitOrThrow(fixture.mainRoot, "rev-parse", "HEAD")).toBe(fixture.mainHead);
@@ -363,13 +380,13 @@ it("refuses a changed managed-cache remote before creating a new local worktree 
   const remote = makeRemote();
   const storageDir = createTemporaryDir("hercule-cache-remote-identity-home-");
   const resourceId = createId();
-  const manager = makeWorkspaces({ storageDir });
+  const manager = makeTestWorkspaces({ storageDir });
   const initial = buildProvisionFrame({
     kind: "ephemeral",
     checkouts: [buildCheckout({ resourceId, remote: remote.url, branch: "warm-cache" })],
   });
-  expect((await manager.provision(initial)).status).toBe("ready");
-  const cache = readCommonDirectory(manager.resolve(initial.workspaceId)!.cwd);
+  expect((await Effect.runPromise(manager.provision(initial))).status).toBe("ready");
+  const cache = readCommonDirectory(Effect.runSync(manager.resolve(initial.workspaceId))!.cwd);
   runGitOrThrow(
     cache,
     "remote",
@@ -391,7 +408,7 @@ it("refuses a changed managed-cache remote before creating a new local worktree 
       }),
     ],
   });
-  const report = await manager.provision(frame);
+  const report = await Effect.runPromise(manager.provision(frame));
   expect(report.status).toBe("failed");
   expect(report.message).toMatch(/remote|repository|selected|restore/i);
   expect(existsSync(counter)).toBe(false);
@@ -410,7 +427,7 @@ it("refuses unavailable recorded standalone main storage instead of silently sel
     ephemeral: hashContents(fixture.ephemeralRoot),
   };
   const counter = join(fixture.storageDir, "must-not-run-fallback-setup");
-  const manager = makeWorkspaces({ storageDir: fixture.storageDir });
+  const manager = makeTestWorkspaces({ storageDir: fixture.storageDir });
   const frame = buildProvisionFrame({
     kind: "ephemeral",
     checkouts: [
@@ -424,7 +441,7 @@ it("refuses unavailable recorded standalone main storage instead of silently sel
     ],
   });
 
-  const report = await manager.provision(frame);
+  const report = await Effect.runPromise(manager.provision(frame));
 
   expect(report.status).toBe("failed");
   expect(report.message).toMatch(/unavailable|restore|selected|source|checkout/i);
@@ -433,7 +450,7 @@ it("refuses unavailable recorded standalone main storage instead of silently sel
   expect(hashContents(savedMain)).toBe(before.main);
   expect(hashContents(fixture.cache)).toBe(before.cache);
   expect(hashContents(fixture.ephemeralRoot)).toBe(before.ephemeral);
-  expect(manager.resolve(fixture.ephemeralId)?.cwd).toBe(fixture.ephemeralRoot);
+  expect(Effect.runSync(manager.resolve(fixture.ephemeralId))?.cwd).toBe(fixture.ephemeralRoot);
 });
 
 it("replays a healthy old cache workspace through its own topology when the separate main is unavailable", async () => {
@@ -443,8 +460,8 @@ it("replays a healthy old cache workspace through its own topology when the sepa
     cache: hashContents(fixture.cache),
     workspace: hashContents(fixture.ephemeralRoot),
   };
-  const manager = makeWorkspaces({ storageDir: fixture.storageDir });
-  expect((await manager.inspect(fixture.ephemeralId)).status).toBe("ready");
+  const manager = makeTestWorkspaces({ storageDir: fixture.storageDir });
+  expect((await Effect.runPromise(manager.inspect(fixture.ephemeralId))).status).toBe("ready");
   const replay = buildProvisionFrame({
     workspaceId: fixture.ephemeralId,
     kind: "ephemeral",
@@ -459,7 +476,7 @@ it("replays a healthy old cache workspace through its own topology when the sepa
     ],
   });
 
-  const report = await manager.provision(replay);
+  const report = await Effect.runPromise(manager.provision(replay));
 
   expect(report.status, report.message).toBe("ready");
   expect(report.checkouts?.[0]).toMatchObject({
@@ -467,7 +484,7 @@ it("replays a healthy old cache workspace through its own topology when the sepa
     headCommit: fixture.ephemeralHead,
     form: "worktree",
   });
-  expect(manager.resolve(fixture.ephemeralId)?.cwd).toBe(fixture.ephemeralRoot);
+  expect(Effect.runSync(manager.resolve(fixture.ephemeralId))?.cwd).toBe(fixture.ephemeralRoot);
   expect(existsSync(join(fixture.ephemeralRoot, "setup-repeated"))).toBe(false);
   expect(hashContents(fixture.cache)).toBe(before.cache);
   expect(hashContents(fixture.ephemeralRoot)).toBe(before.workspace);

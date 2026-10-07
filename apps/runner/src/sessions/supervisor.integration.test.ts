@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "../workspaces/testing";
 /**
  * Tests the supervisor the way a connection uses it: the controller's frames go
  * in, and the runner's frames come out. The adapter is a fake, because the
@@ -29,7 +30,7 @@ import type {
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
-import { makeWorkspaces } from "../workspaces";
+
 import { makeWorkspaceSteps } from "../workspace-steps";
 import {
   addBranch,
@@ -48,8 +49,8 @@ const attachments: Array<Scope.Closeable> = [];
 
 afterAll(async () => {
   for (const scope of attachments.splice(0)) await Effect.runPromise(Scope.close(scope, Exit.void));
+  await cleanTemporaries();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  cleanTemporaries();
 });
 
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
@@ -264,7 +265,7 @@ const buildConnection = (fake: Fake) => {
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin" },
     findBinary: (name) => `/usr/local/bin/${name}`,
-    workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
+    workspaces: makeTestWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
   };
   const send = (frame: RunnerToController) => Effect.sync(() => void sent.push(frame));
@@ -2142,14 +2143,16 @@ describe("a stop that arrives while a session is still starting", () => {
     const remote = makeRemote();
     addBranch(remote, "release");
     const workspaceId = createId();
-    await machine.workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
-      }),
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+        }),
+      ),
     );
-    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
+    const folder = Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd;
 
     // Other git work holds the workspace, so the start's branch switch waits
     // for it. `switchAsked` is set once the start asks for the workspace,
@@ -3085,8 +3088,8 @@ it("reports current checkout facts after start and resume before any turn ends, 
       }),
     ],
   });
-  expect((await machine.workspaces.provision(frame)).status).toBe("ready");
-  const cwd = machine.workspaces.resolve(frame.workspaceId)!.cwd;
+  expect((await Effect.runPromise(machine.workspaces.provision(frame))).status).toBe("ready");
+  const cwd = Effect.runSync(machine.workspaces.resolve(frame.workspaceId))!.cwd;
   const reports = (): ReadonlyArray<WorkspaceReport> =>
     sent.filter((message): message is WorkspaceReport => message._tag === "workspaceReport");
 

@@ -1,10 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import * as Effect from "effect/Effect";
 import type { RunnerDetail, Session, Workspace } from "@hercule/contract";
 import type { WorkspaceDispose, WorkspaceProvision } from "@hercule/protocol";
-import { makeWorkspaces } from "../../../runner/src/workspaces";
 import {
+  makeTestWorkspaces,
   cleanTemporaries,
   cloneUserCheckout,
   createTemporaryDir,
@@ -64,7 +65,7 @@ const createWorld = async (arranged: Arranged, attached = false) => {
   const remoteUrl = `https://fixture.invalid/acme/${crypto.randomUUID()}`;
   const resourceId = await createRepo(arranged, remoteUrl);
   const storageDir = createTemporaryDir("hercule-older-runner-home-");
-  const manager = makeWorkspaces({
+  const manager = makeTestWorkspaces({
     storageDir,
     gitEnv: {
       GIT_CONFIG_COUNT: "1",
@@ -92,7 +93,7 @@ const createWorld = async (arranged: Arranged, attached = false) => {
     ? ((await response.json()) as Workspace)
     : await provisionWorkspaceOrFail(arranged, { resourceId, runnerId: arranged.runnerId });
   const frames = await waitForFrames<WorkspaceProvision>(arranged.wire, "workspaceProvision", 1);
-  const report = await manager.provision(frames[0]!);
+  const report = await Effect.runPromise(manager.provision(frames[0]!));
   expect(report.status, report.message).toBe("ready");
   arranged.wire.send(report);
   await waitUntil("prepared real files on the supported runner", async () =>
@@ -104,7 +105,7 @@ const createWorld = async (arranged: Arranged, attached = false) => {
     source,
     manager,
     workspace,
-    root: manager.resolve(workspace.id)!.cwd,
+    root: Effect.runSync(manager.resolve(workspace.id))!.cwd,
   };
 };
 
@@ -309,8 +310,10 @@ it("preserves ordinary scratch workspace placement and public reads on an older 
     });
     const [frame] = await waitForFrames<WorkspaceProvision>(older, "workspaceProvision", 1);
     expect(frame?.checkouts).toEqual([]);
-    const manager = makeWorkspaces({ storageDir: createTemporaryDir("hercule-old-scratch-home-") });
-    const report = await manager.provision(frame!);
+    const manager = makeTestWorkspaces({
+      storageDir: createTemporaryDir("hercule-old-scratch-home-"),
+    });
+    const report = await Effect.runPromise(manager.provision(frame!));
     expect(report.status, report.message).toBe("ready");
     older.send(report);
     await waitUntil("legacy scratch session has its ordinary start", () =>

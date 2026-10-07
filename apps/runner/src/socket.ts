@@ -385,10 +385,10 @@ export const connect = (
      */
     const answerWorkspace = (
       workspaceId: string,
-      making: () => Promise<WorkspaceReport>,
+      making: Effect.Effect<WorkspaceReport>,
       requestId?: string,
     ): Effect.Effect<void> =>
-      Effect.promise(making).pipe(
+      making.pipe(
         Effect.flatMap((report) => write(encodeFrameText(report))),
         Effect.catchCause((cause) =>
           Effect.ignore(
@@ -682,22 +682,20 @@ export const connect = (
             // Acks are for replayable events, which nothing sends yet.
             return;
           case "workspaceProvision": {
-            // Started here, before the next frame is handled, and not in the
-            // forked fiber: a workspace step sent right after this frame must
-            // find the provisioning in progress and wait for it, instead of
-            // finding no workspace at all.
+            // Start the fiber immediately so preparation is registered before
+            // the next frame. A workspace step sent right after this frame must
+            // wait for that preparation before looking for the working files.
             const provisioning = options.workspaces.provision(message);
             return yield* Effect.asVoid(
-              Effect.forkIn(
-                answerWorkspace(message.workspaceId, () => provisioning),
-                connection,
-              ),
+              Effect.forkIn(answerWorkspace(message.workspaceId, provisioning), connection, {
+                startImmediately: true,
+              }),
             );
           }
           case "workspaceInspect":
             return yield* Effect.asVoid(
               Effect.forkIn(
-                Effect.promise(() => options.workspaces.inspect(message.workspaceId)).pipe(
+                options.workspaces.inspect(message.workspaceId).pipe(
                   Effect.flatMap((report) =>
                     write(
                       encodeFrameText({
@@ -731,7 +729,7 @@ export const connect = (
               Effect.forkIn(
                 answerWorkspace(
                   message.workspaceId,
-                  () => options.workspaces.dispose(message),
+                  options.workspaces.dispose(message),
                   message.requestId,
                 ),
                 connection,
@@ -742,7 +740,7 @@ export const connect = (
               Effect.forkIn(
                 answerWorkspace(
                   message.workspaceId,
-                  () => options.workspaces.detach(message),
+                  options.workspaces.detach(message),
                   message.requestId,
                 ),
                 connection,

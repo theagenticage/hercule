@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "./testing";
 import {
   existsSync,
   readFileSync,
@@ -12,7 +13,7 @@ import { Effect, Result } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import type { SessionStart, WorkspaceKind } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "../sessions/context";
-import { makeWorkspaces, type Workspaces } from "./index";
+import type { Workspaces } from "../workspaces";
 import {
   buildCheckout,
   buildProvisionFrame,
@@ -81,7 +82,7 @@ describe("managed checkout availability", () => {
     async (kind) => {
       const remote = makeRemote();
       const storageDir = createTemporaryDir("hercule-managed-availability-home-");
-      const manager = makeWorkspaces({ storageDir });
+      const manager = makeTestWorkspaces({ storageDir });
       const frame = buildProvisionFrame({
         kind,
         checkouts: [
@@ -92,15 +93,15 @@ describe("managed checkout availability", () => {
           }),
         ],
       });
-      expect((await manager.provision(frame)).status).toBe("ready");
-      const cwd = manager.resolve(frame.workspaceId)!.cwd;
+      expect((await Effect.runPromise(manager.provision(frame))).status).toBe("ready");
+      const cwd = Effect.runSync(manager.resolve(frame.workspaceId))!.cwd;
       writeFileSync(join(cwd, "human-sentinel"), "unfinished human work\n");
       rmSync(join(cwd, ".git"));
       const before = hashContents(cwd);
-      const restarted = makeWorkspaces({ storageDir });
+      const restarted = makeTestWorkspaces({ storageDir });
 
-      expect(restarted.resolve(frame.workspaceId)).toBeUndefined();
-      const observed = await restarted.inspect(frame.workspaceId);
+      expect(Effect.runSync(restarted.resolve(frame.workspaceId))).toBeUndefined();
+      const observed = await Effect.runPromise(restarted.inspect(frame.workspaceId));
       expect(observed.status).toBe("failed");
       expect(observed.message).toMatch(/Git|repository|checkout|unavailable/i);
       await refuseSessionPlacement(restarted, storageDir, frame.workspaceId);
@@ -112,13 +113,13 @@ describe("managed checkout availability", () => {
   it("refuses a replaced managed common directory without changing the surviving checkout", async () => {
     const remote = makeRemote();
     const storageDir = createTemporaryDir("hercule-managed-replacement-home-");
-    const manager = makeWorkspaces({ storageDir });
+    const manager = makeTestWorkspaces({ storageDir });
     const frame = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url, branch: "work" })],
     });
-    expect((await manager.provision(frame)).status).toBe("ready");
-    const cwd = manager.resolve(frame.workspaceId)!.cwd;
+    expect((await Effect.runPromise(manager.provision(frame))).status).toBe("ready");
+    const cwd = Effect.runSync(manager.resolve(frame.workspaceId))!.cwd;
     const commonDirectory = realpathSync(
       runGitOrThrow(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"),
     );
@@ -126,10 +127,10 @@ describe("managed checkout availability", () => {
     runGitOrThrow(storageDir, "clone", "--bare", remote.url, commonDirectory);
     writeFileSync(join(cwd, "human-sentinel"), "surviving checkout\n");
     const before = hashContents(storageDir);
-    const restarted = makeWorkspaces({ storageDir });
+    const restarted = makeTestWorkspaces({ storageDir });
 
-    expect(restarted.resolve(frame.workspaceId)).toBeUndefined();
-    expect((await restarted.inspect(frame.workspaceId)).status).toBe("failed");
+    expect(Effect.runSync(restarted.resolve(frame.workspaceId))).toBeUndefined();
+    expect((await Effect.runPromise(restarted.inspect(frame.workspaceId))).status).toBe("failed");
     await refuseSessionPlacement(restarted, storageDir, frame.workspaceId);
     expect(hashContents(storageDir)).toBe(before);
   });
@@ -137,7 +138,7 @@ describe("managed checkout availability", () => {
   it("refuses a generated root replaced by a symlink to another worktree in the same repository", async () => {
     const remote = makeRemote();
     const storageDir = createTemporaryDir("hercule-managed-alias-home-");
-    const manager = makeWorkspaces({ storageDir });
+    const manager = makeTestWorkspaces({ storageDir });
     const resourceId = createId();
     const first = buildProvisionFrame({
       kind: "ephemeral",
@@ -147,19 +148,19 @@ describe("managed checkout availability", () => {
       kind: "ephemeral",
       checkouts: [buildCheckout({ resourceId, remote: remote.url, branch: "second-work" })],
     });
-    expect((await manager.provision(first)).status).toBe("ready");
-    expect((await manager.provision(second)).status).toBe("ready");
-    const cwd = manager.resolve(first.workspaceId)!.cwd;
-    const other = manager.resolve(second.workspaceId)!.cwd;
+    expect((await Effect.runPromise(manager.provision(first))).status).toBe("ready");
+    expect((await Effect.runPromise(manager.provision(second))).status).toBe("ready");
+    const cwd = Effect.runSync(manager.resolve(first.workspaceId))!.cwd;
+    const other = Effect.runSync(manager.resolve(second.workspaceId))!.cwd;
     writeFileSync(join(cwd, "human-sentinel"), "first original work\n");
     renameSync(cwd, `${cwd}.original`);
     symlinkSync(other, cwd);
     const before = hashContents(storageDir);
-    const restarted = makeWorkspaces({ storageDir });
+    const restarted = makeTestWorkspaces({ storageDir });
 
-    expect(restarted.resolve(first.workspaceId)).toBeUndefined();
-    expect((await restarted.inspect(first.workspaceId)).status).toBe("failed");
-    expect(restarted.resolve(second.workspaceId)?.cwd).toBe(other);
+    expect(Effect.runSync(restarted.resolve(first.workspaceId))).toBeUndefined();
+    expect((await Effect.runPromise(restarted.inspect(first.workspaceId))).status).toBe("failed");
+    expect(Effect.runSync(restarted.resolve(second.workspaceId))?.cwd).toBe(other);
     await refuseSessionPlacement(restarted, storageDir, first.workspaceId);
     expect(hashContents(storageDir)).toBe(before);
   });

@@ -1,6 +1,7 @@
 /** Runs the production controller and a protocol fixture over real sockets in throwaway Homes. */
 import { resolve, join } from "node:path";
 import { expect } from "vitest";
+import * as Effect from "effect/Effect";
 import { buildCleanEnv } from "../../../../../scripts/controller-process";
 import {
   AGENT_STEPS_CAPABILITY,
@@ -111,11 +112,9 @@ export const connectProofRunner = async (
         break;
       case "workspaceInspect":
         if (options.workspaces !== undefined)
-          void options.workspaces
-            .inspect(frame.workspaceId)
-            .then((report) =>
-              write({ _tag: "workspaceInspection", requestId: frame.requestId, report }),
-            );
+          void Effect.runPromise(options.workspaces.inspect(frame.workspaceId)).then((report) =>
+            write({ _tag: "workspaceInspection", requestId: frame.requestId, report }),
+          );
         break;
       case "sessionStart":
         if (options.finishSessions === false) break;

@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "./workspaces/testing";
 /**
  * Tests the runner's end of the socket, mainly which controller it accepts.
  *
@@ -13,7 +14,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
 import {
   AGENT_STEPS_CAPABILITY,
@@ -54,7 +55,7 @@ import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
 import { makeSupervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
-import { makeWorkspaces } from "./workspaces";
+
 import * as workspaceFixtures from "./workspaces/testing";
 
 /** This machine's facts. These tests are not about the probe. */
@@ -291,7 +292,7 @@ const HERCULE_TOOL = {
   claudePluginDir: "/nonexistent/hercule-runner-claude-plugin",
 };
 
-const workspaces = makeWorkspaces({ storageDir: STORAGE_DIR });
+const workspaces = makeTestWorkspaces({ storageDir: STORAGE_DIR });
 
 /** The workspace steps of a runner that holds none. */
 const IDLE_STEPS = makeWorkspaceSteps({
@@ -1555,7 +1556,7 @@ describe("concurrent real-Git workspace requests on the runner socket", () => {
       `#!/bin/sh\ncase " $* " in\n*' clone '*)\nprintf 'clone\\n' >> ${quote(calls)}\nprintf '%s\\n' "$$" > ${quote(entered)}\nwhile [ ! -f ${quote(release)} ]; do sleep 0.01; done\n;;\nesac\nexec ${quote(git)} "$@"\n`,
       { mode: 0o700 },
     );
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir,
       gitEnv: { PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
     });
@@ -1606,7 +1607,7 @@ describe("concurrent real-Git workspace requests on the runner socket", () => {
         [first.workspaceId, first.workspaceId, second.workspaceId].sort(),
       );
       expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(1);
-      const path = manager.resolve(first.workspaceId)!.cwd;
+      const path = Effect.runSync(manager.resolve(first.workspaceId))!.cwd;
       expect(
         workspaceFixtures
           .runGitOrThrow(path, "worktree", "list", "--porcelain")
@@ -1615,8 +1616,8 @@ describe("concurrent real-Git workspace requests on the runner socket", () => {
     } finally {
       writeFileSync(release, "release\n");
       await Promise.all([
-        manager.waitForProvisioning(first.workspaceId),
-        manager.waitForProvisioning(second.workspaceId),
+        Effect.runPromise(manager.waitForProvisioning(first.workspaceId)),
+        Effect.runPromise(manager.waitForProvisioning(second.workspaceId)),
       ]);
       stub.hangUp();
       await pending;
@@ -1645,7 +1646,7 @@ it("echoes durable disposal and detach receipts through the socket while preserv
   const source = joinPath(world, "user checkout");
   workspaceFixtures.runGitOrThrow(world, "clone", remote.url, source);
   const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-removal-home-");
-  const manager = makeWorkspaces({ storageDir });
+  const manager = makeTestWorkspaces({ storageDir });
   const resourceId = workspaceFixtures.createId();
   const attached = {
     ...workspaceFixtures.buildProvisionFrame({
@@ -1654,7 +1655,7 @@ it("echoes durable disposal and detach receipts through the socket while preserv
     }),
     attachment: { path: source, remoteName: "origin" },
   };
-  expect((await manager.provision(attached)).status).toBe("ready");
+  expect((await Effect.runPromise(manager.provision(attached))).status).toBe("ready");
   const derived = workspaceFixtures.buildProvisionFrame({
     kind: "ephemeral",
     checkouts: [
@@ -1669,8 +1670,8 @@ it("echoes durable disposal and detach receipts through the socket while preserv
       },
     ],
   });
-  expect((await manager.provision(derived)).status).toBe("ready");
-  const cwd = manager.resolve(derived.workspaceId)!.cwd;
+  expect((await Effect.runPromise(manager.provision(derived))).status).toBe("ready");
+  const cwd = Effect.runSync(manager.resolve(derived.workspaceId))!.cwd;
   const sourceBefore = workspaceFixtures.hashContents(source);
   const stub = await stubController((hello) => ({
     ...hello,
@@ -1695,7 +1696,7 @@ it("echoes durable disposal and detach receipts through the socket while preserv
       ),
     ).toMatchObject({ status: "deleted", workspaceId: attached.workspaceId });
     expect(workspaceFixtures.hashContents(source)).toBe(sourceBefore);
-    expect(manager.resolve(derived.workspaceId)?.cwd).toBe(cwd);
+    expect(Effect.runSync(manager.resolve(derived.workspaceId))?.cwd).toBe(cwd);
     writeFileSync(joinPath(cwd, "README.md"), "remaining derived changes\n");
     stub.say({
       _tag: "workspaceDispose",
@@ -1721,6 +1722,8 @@ it("echoes durable disposal and detach receipts through the socket while preserv
   } finally {
     stub.hangUp();
     await pending;
-    workspaceFixtures.cleanTemporaries();
+    await workspaceFixtures.cleanTemporaries();
   }
 });
+
+afterAll(workspaceFixtures.cleanTemporaries);

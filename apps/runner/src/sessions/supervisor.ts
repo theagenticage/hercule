@@ -535,9 +535,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      */
     const reportWorkspace = (workspaceId: string): Effect.Effect<void> =>
       Effect.ignoreCause(
-        Effect.flatMap(
-          Effect.promise(() => connection.machine.workspaces.reportAfterSession(workspaceId)),
-          (report) => (report === undefined ? Effect.void : sendFrame(report)),
+        Effect.flatMap(connection.machine.workspaces.reportAfterSession(workspaceId), (report) =>
+          report === undefined ? Effect.void : sendFrame(report),
         ),
       );
 

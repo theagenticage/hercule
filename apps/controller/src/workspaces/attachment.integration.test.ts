@@ -9,10 +9,11 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
 import type { Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
-import { makeWorkspaces } from "../../../runner/src/workspaces";
 import {
+  makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
   hashContents,
@@ -158,16 +159,16 @@ describe("workspace.attach", () => {
         "workspaceProvision",
         1,
       );
-      const manager = makeWorkspaces({
+      const manager = makeTestWorkspaces({
         storageDir: createTemporaryDir("hercule-attachment-retry-"),
         gitEnv: fixture.gitEnv,
       });
-      arranged.wire.send(await manager.provision(frame!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(frame!)));
       await waitUntil("made the attachment ready", async () =>
         (await readWorkspace(arranged, workspace.id)).status === "ready" ? true : undefined,
       );
       renameSync(fixture.path, `${fixture.path}.saved`);
-      arranged.wire.send(await manager.provision(frame!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(frame!)));
       await waitUntil("recorded attachment unavailability", async () =>
         (await readWorkspace(arranged, workspace.id)).status === "failed" ? true : undefined,
       );
@@ -184,7 +185,7 @@ describe("workspace.attach", () => {
       );
       const retry = retries[retries.length - 1]!;
       expect(retry.workspaceId).toBe(workspace.id);
-      arranged.wire.send(await manager.provision(retry));
+      arranged.wire.send(await Effect.runPromise(manager.provision(retry)));
       await waitUntil("recovered the same attachment", async () =>
         (await readWorkspace(arranged, workspace.id)).status === "ready" ? true : undefined,
       );
@@ -257,11 +258,11 @@ describe("workspace.attach", () => {
             if (mode === "existing")
               expect(frame!.attachment).toEqual({ path, remoteName: "origin" });
             else expect(frame!.attachment).toBeUndefined();
-            const manager = makeWorkspaces({
+            const manager = makeTestWorkspaces({
               storageDir: createTemporaryDir("hercule-parity-storage-"),
               gitEnv: fixture.gitEnv,
             });
-            const report = await manager.provision(frame!);
+            const report = await Effect.runPromise(manager.provision(frame!));
             expect(report.status, report.message).toBe("ready");
             wire.send(report);
             const ready = await waitUntil("recorded parity readiness", async () => {
@@ -271,8 +272,9 @@ describe("workspace.attach", () => {
             expect(ready.runnerId).toBe(runnerId);
             expect(ready.checkouts[0]!.resourceId).toBe(resourceId);
             expect(ready.ownership).toBe(mode === "existing" ? "adopted" : "managed");
-            if (mode === "existing") expect(manager.resolve(workspace.id)?.cwd).toBe(path);
-            else expect(manager.resolve(workspace.id)?.cwd).not.toBe(path);
+            if (mode === "existing")
+              expect(Effect.runSync(manager.resolve(workspace.id))?.cwd).toBe(path);
+            else expect(Effect.runSync(manager.resolve(workspace.id))?.cwd).not.toBe(path);
           }
           expect(hashContents(fixture.world)).toBe(before);
         },
@@ -312,11 +314,11 @@ describe("workspace.attach", () => {
         path: join(fixture.path, "nested"),
         remoteName: "origin",
       });
-      const manager = makeWorkspaces({
+      const manager = makeTestWorkspaces({
         storageDir: createTemporaryDir("hercule-runner-storage-"),
         gitEnv: fixture.gitEnv,
       });
-      arranged.wire.send(await manager.provision(frame!));
+      arranged.wire.send(await Effect.runPromise(manager.provision(frame!)));
 
       const ready = await waitUntil("validated the existing checkout", async () => {
         const current = await readWorkspace(arranged, workspace.id);
@@ -325,7 +327,7 @@ describe("workspace.attach", () => {
       expect(ready.path).toBe(fixture.path);
       expect(ready.ownership).toBe("adopted");
       expect(ready.runnerId).toBe(arranged.runnerId);
-      expect(manager.resolve(workspace.id)?.cwd).toBe(fixture.path);
+      expect(Effect.runSync(manager.resolve(workspace.id))?.cwd).toBe(fixture.path);
       expect(hashContents(fixture.world)).toBe(before);
       expect(existsSync(join(fixture.path, "attachment-setup-ran"))).toBe(false);
     });
@@ -353,15 +355,19 @@ describe("workspace.attach", () => {
       expect(frame!.workspaceId).toBe(first.id);
       expect(frame!.attachment).toEqual({ path: fixture.path, remoteName: "origin" });
       const storageDir = createTemporaryDir("hercule-runner-storage-");
-      const report = await makeWorkspaces({ storageDir, gitEnv: fixture.gitEnv }).provision(frame!);
+      const report = await Effect.runPromise(
+        makeTestWorkspaces({ storageDir, gitEnv: fixture.gitEnv }).provision(frame!),
+      );
       reconnected.send(report);
       await waitUntil("recorded attached readiness", async () =>
         (await readWorkspace(arranged, first.id)).status === "ready" ? true : undefined,
       );
-      const restartedReport = await makeWorkspaces({
-        storageDir,
-        gitEnv: fixture.gitEnv,
-      }).provision(frame!);
+      const restartedReport = await Effect.runPromise(
+        makeTestWorkspaces({
+          storageDir,
+          gitEnv: fixture.gitEnv,
+        }).provision(frame!),
+      );
       expect(restartedReport).toEqual(report);
       const repeated = await attachOrFail(arranged, body);
       expect(repeated.id).toBe(first.id);
@@ -466,15 +472,15 @@ describe("workspace.attach", () => {
         1,
       );
       const storageDir = createTemporaryDir("hercule-runner-storage-");
-      const manager = makeWorkspaces({ storageDir, gitEnv: fixture.gitEnv });
-      arranged.wire.send(await manager.provision(frame!));
+      const manager = makeTestWorkspaces({ storageDir, gitEnv: fixture.gitEnv });
+      arranged.wire.send(await Effect.runPromise(manager.provision(frame!)));
 
       const failed = await waitUntil("recorded the attachment failure", async () => {
         const current = await readWorkspace(arranged, workspace.id);
         return current.status === "failed" ? current : undefined;
       });
       expect(failed.message).toMatch(/remote|repository/i);
-      expect(manager.resolve(workspace.id)).toBeUndefined();
+      expect(Effect.runSync(manager.resolve(workspace.id))).toBeUndefined();
       expect(existsSync(join(storageDir, "cache"))).toBe(false);
       expect(hashContents(fixture.world)).toBe(before);
     });
@@ -496,11 +502,11 @@ describe("workspace.attach", () => {
         "workspaceProvision",
         1,
       );
-      const managerA = makeWorkspaces({
+      const managerA = makeTestWorkspaces({
         storageDir: createTemporaryDir("hercule-runner-A-"),
         gitEnv: fixture.gitEnv,
       });
-      arranged.wire.send(await managerA.provision(attachment!));
+      arranged.wire.send(await Effect.runPromise(managerA.provision(attachment!)));
       await waitUntil("attached on runner A", async () =>
         (await readWorkspace(arranged, attached.id)).status === "ready" ? true : undefined,
       );
@@ -517,16 +523,16 @@ describe("workspace.attach", () => {
       expect(instructionB!.attachment).toBeUndefined();
       expect(JSON.stringify(second.wire.frames)).not.toContain(fixture.path);
       const storageB = createTemporaryDir("hercule-runner-B-");
-      const managerB = makeWorkspaces({ storageDir: storageB, gitEnv: fixture.gitEnv });
-      const reportB = await managerB.provision(instructionB!);
+      const managerB = makeTestWorkspaces({ storageDir: storageB, gitEnv: fixture.gitEnv });
+      const reportB = await Effect.runPromise(managerB.provision(instructionB!));
       second.wire.send(reportB);
       expect(reportB.status, reportB.message).toBe("ready");
-      expect(managerB.resolve(managed.id)?.cwd).not.toBe(fixture.path);
+      expect(Effect.runSync(managerB.resolve(managed.id))?.cwd).not.toBe(fixture.path);
       expect(reportB.checkouts?.[0]?.branches).not.toContain("local-only");
-      expect(runGitOrThrow(managerB.resolve(managed.id)!.cwd, "rev-parse", "HEAD")).toBe(
-        runGitOrThrow(fixture.remote.work, "rev-parse", "HEAD"),
-      );
-      expect(managerA.resolve(attached.id)?.cwd).toBe(fixture.path);
+      expect(
+        runGitOrThrow(Effect.runSync(managerB.resolve(managed.id))!.cwd, "rev-parse", "HEAD"),
+      ).toBe(runGitOrThrow(fixture.remote.work, "rev-parse", "HEAD"));
+      expect(Effect.runSync(managerA.resolve(attached.id))?.cwd).toBe(fixture.path);
       expect(hashContents(fixture.world)).toBe(before);
       expect(readFileSync(join(fixture.path, "README.md"), "utf8")).toBe("dirty tracked\n");
     });
@@ -549,8 +555,8 @@ describe("reattaching a normalized checkout root", () => {
         1,
       );
       const storageDir = createTemporaryDir("hercule-normalized-attachment-");
-      const manager = makeWorkspaces({ storageDir, gitEnv: fixture.gitEnv });
-      arranged.wire.send(await manager.provision(original!));
+      const manager = makeTestWorkspaces({ storageDir, gitEnv: fixture.gitEnv });
+      arranged.wire.send(await Effect.runPromise(manager.provision(original!)));
       await waitUntil("recorded normalized checkout root", async () => {
         const current = await readWorkspace(arranged, workspace.id);
         return current.status === "ready" && current.path === fixture.path ? true : undefined;
@@ -582,7 +588,9 @@ describe("reattaching a normalized checkout root", () => {
       const replay = frames[1]!;
       expect(replay.attachment).toEqual({ path: fixture.path, remoteName: "origin" });
       expect(replay.checkouts).toEqual(original!.checkouts);
-      const report = await makeWorkspaces({ storageDir, gitEnv: fixture.gitEnv }).provision(replay);
+      const report = await Effect.runPromise(
+        makeTestWorkspaces({ storageDir, gitEnv: fixture.gitEnv }).provision(replay),
+      );
       expect(report.status, report.message).toBe("ready");
       expect(report.path).toBe(fixture.path);
       arranged.wire.send(report);

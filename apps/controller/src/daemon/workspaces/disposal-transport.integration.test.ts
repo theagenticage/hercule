@@ -3,10 +3,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
 import type { Session, Workspace } from "@hercule/contract";
 import type { JoinAnswer, WorkspaceDispose, WorkspaceProvision } from "@hercule/protocol";
-import { makeWorkspaces, type Workspaces } from "../../../../runner/src/workspaces";
+import type { Workspaces } from "../../../../runner/src/workspaces";
 import {
+  makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
   makeRemote,
@@ -60,13 +62,16 @@ const openProofWorkspace = async (
   const instruction = await waitUntil("provisioned the proof workspace", () =>
     wire.frames.find((frame): frame is WorkspaceProvision => frame._tag === "workspaceProvision"),
   );
-  wire.write(await manager.provision(instruction));
+  wire.write(await Effect.runPromise(manager.provision(instruction)));
   await waitUntil("finished the synthetic workspace holder", async () => {
     const response = await get(base, `/api/v1/sessions/${session.id}`, token);
     return ((await response.json()) as Session).status === "exited" ? true : undefined;
   });
   expect((await readWorkspace(base, token, session.workspaceId!)).status).toBe("ready");
-  return { workspaceId: session.workspaceId!, cwd: manager.resolve(session.workspaceId!)!.cwd };
+  return {
+    workspaceId: session.workspaceId!,
+    cwd: Effect.runSync(manager.resolve(session.workspaceId!))!.cwd,
+  };
 };
 
 describe("disposal intent after a complete controller process restart", () => {
@@ -83,7 +88,7 @@ describe("disposal intent after a complete controller process restart", () => {
         GIT_CONFIG_KEY_0: `url.${remote.url}.insteadOf`,
         GIT_CONFIG_VALUE_0: remoteUrl,
       };
-      let manager = makeWorkspaces({ storageDir: runnerHome, gitEnv });
+      let manager = makeTestWorkspaces({ storageDir: runnerHome, gitEnv });
       const port = 20_000 + Math.floor(Math.random() * 40_000);
       let controller = await startControllerProcess(home, port);
       const wires: Array<ProofRunner> = [];
@@ -165,7 +170,7 @@ describe("disposal intent after a complete controller process restart", () => {
         wires.push(wire);
         const replay = await waitForDisposal(wire);
         expect(replay).toEqual(originalIntent);
-        const removed = await manager.dispose(replay);
+        const removed = await Effect.runPromise(manager.dispose(replay));
         if (scenario === "dirty refusal") {
           expect(removed.status).toBe("failed");
           expect(removed.message).toMatch(/changes|files|dirty|discard/i);
@@ -182,7 +187,7 @@ describe("disposal intent after a complete controller process restart", () => {
           );
           expect(retained.message).toMatch(/changes|files|dirty|discard/i);
           expect(readFileSync(join(cwd, "unfinished.txt"), "utf8")).toBe("human work to discard\n");
-          expect(manager.resolve(workspaceId)?.cwd).toBe(cwd);
+          expect(Effect.runSync(manager.resolve(workspaceId))?.cwd).toBe(cwd);
           const joinedSession = await post(
             controller.base,
             "/api/v1/sessions",
@@ -202,14 +207,14 @@ describe("disposal intent after a complete controller process restart", () => {
         expect((await readWorkspace(controller.base, token, workspaceId)).status).toBe("disposing");
         await controller.stop();
         wire.close();
-        manager = makeWorkspaces({ storageDir: runnerHome, gitEnv });
+        manager = makeTestWorkspaces({ storageDir: runnerHome, gitEnv });
         controller = await startControllerProcess(home, port);
         expect((await readWorkspace(controller.base, token, workspaceId)).status).toBe("disposing");
         wire = await connectProofRunner(controller.base, joined);
         wires.push(wire);
         const afterLostRemovalAck = await waitForDisposal(wire);
         expect(afterLostRemovalAck).toEqual(originalIntent);
-        wire.write(await manager.dispose(afterLostRemovalAck));
+        wire.write(await Effect.runPromise(manager.dispose(afterLostRemovalAck)));
         await waitUntil("recorded confirmed deletion", async () =>
           (await readWorkspace(controller.base, token, workspaceId)).status === "deleted"
             ? true

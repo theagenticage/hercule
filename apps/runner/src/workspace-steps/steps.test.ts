@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "../workspaces/testing";
 /**
  * Tests for running workspace steps.
  *
@@ -22,7 +23,7 @@ import type {
   WorkspaceStepResult,
   WorkspaceStepStart,
 } from "@hercule/protocol";
-import { makeWorkspaces, type Workspaces } from "../workspaces";
+import type { Workspaces } from "../workspaces";
 import {
   addBranch,
   buildCheckout,
@@ -105,7 +106,7 @@ const makeRunner = (
 ): Runner => {
   const storageDir = createTemporaryDir("hercule-storage-");
   const socketPath = join(storageDir, "daemon.sock");
-  const workspaces = makeWorkspaces({ storageDir });
+  const workspaces = makeTestWorkspaces({ storageDir });
   const steps = makeWorkspaceSteps({
     storageDir,
     workspaces,
@@ -135,19 +136,21 @@ const makeRunner = (
     const workspaceId = createId();
     const resourceId = createId();
     const remote = makeRemote();
-    const report = await workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind,
-        checkouts: [
-          kind === "ephemeral"
-            ? buildCheckout({ resourceId, remote: remote.url, branch: BRANCH })
-            : buildCheckout({ resourceId, remote: remote.url }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind,
+          checkouts: [
+            kind === "ephemeral"
+              ? buildCheckout({ resourceId, remote: remote.url, branch: BRANCH })
+              : buildCheckout({ resourceId, remote: remote.url }),
+          ],
+        }),
+      ),
     );
     expect(report.status).toBe("ready");
-    const dir = workspaces.resolve(workspaceId)!.cwd;
+    const dir = Effect.runSync(workspaces.resolve(workspaceId))!.cwd;
     const writePreCommitHook = (script: string) => {
       const hooksPath = runGitOrThrow(dir, "rev-parse", "--git-path", "hooks");
       const hooks = isAbsolute(hooksPath) ? hooksPath : join(dir, hooksPath);
@@ -525,7 +528,7 @@ describe("a workspace step", { timeout: TEST_TIMEOUT_MS }, () => {
       workspaceId: failing.workspaceId,
     };
     const [report] = await Promise.all([
-      runner.workspaces.provision(failing),
+      Effect.runPromise(runner.workspaces.provision(failing)),
       startStep(runner, inFailed),
     ]);
     await waitUntil(() => runner.steps.listInFlight().length === 0, "the step to be dropped");

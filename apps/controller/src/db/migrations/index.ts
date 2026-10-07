@@ -60,9 +60,7 @@ import subagentUsageReports from "./0049-subagent-usage-reports";
 import replyItemId from "./0050-reply-item-id";
 import workspacePreparationInstructions from "./0051-workspace-preparation-instructions";
 import workspaceRepositorySelection from "./0052-workspace-repository-selection";
-
 import workspaceObservations from "./0053-workspace-observations";
-
 import workspaceDisposalAndRetention from "./0054-workspace-disposal-and-retention";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [

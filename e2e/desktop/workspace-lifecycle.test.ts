@@ -44,12 +44,14 @@ const RUNNER_SOURCE = String.raw`
 import { randomBytes, randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Scope, Exit } from "effect";
 import { makeWorkspaces } from "./apps/runner/src/workspaces/index.ts";
 import { resolveSessionContext } from "./apps/runner/src/sessions/context.ts";
 import { PROTOCOL_VERSION, WORKSPACE_LIFECYCLE_CAPABILITY } from "./packages/protocol/src/index.ts";
 const options = JSON.parse(process.env.WORKSPACE_JOURNEY_RUNNER);
-const workspaces = makeWorkspaces({ storageDir: options.home, gitEnv: options.gitEnv });
+const scope = Effect.runSync(Scope.make());
+const workspaces = Effect.runSync(makeWorkspaces({ storageDir: options.home, gitEnv: options.gitEnv }).pipe(Scope.provide(scope)));
+process.once("SIGTERM", async () => { await Effect.runPromise(Scope.close(scope, Exit.void)); process.exit(0); });
 const machine = {
   providersDir: join(options.home, "providers"), scratchDir: join(options.home, "scratch"),
   binDir: join(options.home, "bin"), herculeTool: { skill: "# fixture", claudePluginDir: join(options.home, "plugin") },
@@ -64,7 +66,7 @@ const reportEvent = (session, event) => send({ _tag: "sessionEvent", seq: ++sess
   eventId: randomUUID(), sessionId: session.id, at: new Date().toISOString(), ...event,
 } });
 const observe = async (session) => {
-  if (session.workspaceId !== null) send(await workspaces.inspect(session.workspaceId));
+  if (session.workspaceId !== null) send(await Effect.runPromise(workspaces.inspect(session.workspaceId)));
 };
 const input = (session, frame) => {
   send({ _tag: "sessionInputResult", requestId: frame.requestId, ok: true, delivery: session.turn ? "steered" : "opened" });
@@ -82,13 +84,13 @@ const handle = async (frame) => {
     case "probeRequest": return send({ _tag: "probeReport", requestId: frame.requestId, instanceId: frame.instanceId,
       result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", isDefault: true, options: [] }] } });
     case "workspaceProvision": {
-      const report = await workspaces.provision(frame);
-      log({ kind: "workspace", id: frame.workspaceId, cwd: workspaces.resolve(frame.workspaceId)?.cwd });
+      const report = await Effect.runPromise(workspaces.provision(frame));
+      log({ kind: "workspace", id: frame.workspaceId, cwd: Effect.runSync(workspaces.resolve(frame.workspaceId))?.cwd });
       return send(report);
     }
-    case "workspaceInspect": return send({ _tag: "workspaceInspection", requestId: frame.requestId, report: await workspaces.inspect(frame.workspaceId) });
-    case "workspaceDispose": return send(await workspaces.dispose(frame));
-    case "workspaceDetach": return send(await workspaces.detach(frame));
+    case "workspaceInspect": return send({ _tag: "workspaceInspection", requestId: frame.requestId, report: await Effect.runPromise(workspaces.inspect(frame.workspaceId)) });
+    case "workspaceDispose": return send(await Effect.runPromise(workspaces.dispose(frame)));
+    case "workspaceDetach": return send(await Effect.runPromise(workspaces.detach(frame)));
     case "sessionStart": {
       const resolved = await Effect.runPromise(resolveSessionContext(frame, machine, "fixture"));
       const session = { id: frame.sessionId, instanceId: frame.spec.instanceId, workspaceId: frame.spec.workspaceId, seq: 0, turn: null };
@@ -421,9 +423,23 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     .getByRole("button", { name: "New project" })
     .click();
   const onboarding = page.getByRole("dialog", { name: "New project" });
+  await onboarding.getByRole("textbox", { name: "Project name" }).waitFor({ state: "visible" });
+  expect(await onboarding.getByRole("textbox", { name: "Project name" }).isVisible()).toBe(true);
+  expect(await onboarding.getByRole("textbox", { name: "Remote URL" }).isVisible()).toBe(true);
+  await capture("manual-project");
   await onboarding.getByRole("button", { name: "Choose a folder…" }).click();
   await expect.poll(() => onboarding.textContent()).toContain(source);
   await expect.poll(() => onboarding.textContent()).toContain("studio");
+  expect(await onboarding.getByRole("radio", { name: /^Use this checkout/ }).isChecked()).toBe(
+    false,
+  );
+  expect(
+    await onboarding.getByRole("radio", { name: /^Create a separate checkout/ }).isChecked(),
+  ).toBe(false);
+  expect(
+    await onboarding.getByRole("button", { name: "Add project", exact: true }).isDisabled(),
+  ).toBe(true);
+  await capture("checkout-choice");
   await onboarding.getByRole("radio", { name: /^Use this checkout/ }).click();
   expect(await onboarding.getByRole("radio", { name: /^Create a separate checkout/ }).count()).toBe(
     1,

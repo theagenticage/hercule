@@ -153,16 +153,18 @@ describe("preparation after a real runner process dies", () => {
         import { makeWorkspaceSteps } from ${JSON.stringify(join(moduleRoot, "workspace-steps/index.ts"))};
         import { makeWorkspaces } from ${JSON.stringify(join(moduleRoot, "workspaces/index.ts"))};
         const { pin, facts, storageDir, gitEnv } = await Bun.file(${JSON.stringify(optionsPath)}).json();
-        const workspaces = makeWorkspaces({ storageDir, gitEnv });
         const socketPath = storageDir + "/credential.sock";
-        await Effect.runPromise(connect({
+        await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+        const workspaces = yield* makeWorkspaces({ storageDir, gitEnv });
+        yield* connect({
           pin, facts, probe: Effect.succeed(facts),
           headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
           providersDir: storageDir + "/providers", scratchDir: storageDir + "/scratch",
           workspaces, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
           socketPath, credentials: makeCredentialRelay(), providerLogins, sessions,
           binDir: storageDir + "/bin", herculeTool: { skill: "# fixture", claudePluginDir: storageDir + "/claude-plugin" }
-        }));
+        });
+        })));
       `;
       const children: Array<ReturnType<typeof Bun.spawn>> = [];
       let capturedBarrierPid: number | undefined;

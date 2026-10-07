@@ -400,6 +400,7 @@ describe("the workspace of a run that failed or has not finished", () => {
 
       const disposed = await runLoggedInCli(["workspace", "dispose", workspaceId]);
       expect(disposed.code, `${disposed.stdout}\n${disposed.stderr}`).toBe(0);
+      await expect.poll(async () => (await readWorkspace(workspaceId)).status).toBe("deleted");
       const deleted = await readWorkspace(workspaceId);
       expect(deleted.status).toBe("deleted");
       expect(deleted.disposedAt).not.toBeNull();

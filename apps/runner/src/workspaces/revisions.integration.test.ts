@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "./testing";
 import {
   existsSync,
   mkdirSync,
@@ -12,7 +13,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import type { ProvisionCheckout, StartingRevision, WorkspaceReport } from "@hercule/protocol";
-import { makeWorkspaces } from "./index";
+
 import {
   addBranch,
   buildCheckout,
@@ -67,7 +68,7 @@ const createExisting = async () => {
     GIT_CONFIG_VALUE_0: remoteUrl,
     GIT_TRACE: trace,
   };
-  const manager = makeWorkspaces({ storageDir, gitEnv });
+  const manager = makeTestWorkspaces({ storageDir, gitEnv });
   const attachment = {
     ...buildProvisionFrame({
       kind: "primary",
@@ -75,7 +76,7 @@ const createExisting = async () => {
     }),
     attachment: { path: source, remoteName: "origin" },
   };
-  expect((await manager.provision(attachment)).status).toBe("ready");
+  expect((await Effect.runPromise(manager.provision(attachment))).status).toBe("ready");
   return {
     remote,
     source,
@@ -112,25 +113,25 @@ describe("worktrees in the selected repository", () => {
     const remote = makeRemote();
     const storageDir = createTemporaryDir("hercule-workflow-first-home-");
     const resourceId = createId();
-    const manager = makeWorkspaces({ storageDir });
+    const manager = makeTestWorkspaces({ storageDir });
     const first = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: [revisionCheckout(resourceId, remote.url)],
     });
-    expect((await manager.provision(first)).status).toBe("ready");
+    expect((await Effect.runPromise(manager.provision(first))).status).toBe("ready");
     expect(existsSync(join(storageDir, "primaries"))).toBe(false);
-    const workPath = manager.resolve(first.workspaceId)!.cwd;
+    const workPath = Effect.runSync(manager.resolve(first.workspaceId))!.cwd;
     const primary = buildProvisionFrame({
       kind: "primary",
       checkouts: [buildCheckout({ resourceId, remote: remote.url })],
     });
 
-    const mainReport = await manager.provision(primary);
+    const mainReport = await Effect.runPromise(manager.provision(primary));
     expect(checkoutReport(mainReport).baseCommit).toBe(
       runGitOrThrow(remote.work, "rev-parse", "HEAD"),
     );
 
-    const mainPath = manager.resolve(primary.workspaceId)!.cwd;
+    const mainPath = Effect.runSync(manager.resolve(primary.workspaceId))!.cwd;
     expect(commonDirectory(mainPath)).toBe(commonDirectory(workPath));
     expect(runGitOrThrow(mainPath, "branch", "--show-current")).not.toBe("main");
     expect(runGitOrThrow(mainPath, "branch", "--show-current")).not.toBe(
@@ -165,14 +166,14 @@ describe("worktrees in the selected repository", () => {
         ],
       });
 
-      const report = await fixture.manager.provision(frame);
+      const report = await Effect.runPromise(fixture.manager.provision(frame));
 
       expect(checkoutReport(report)).toMatchObject({
         baseCommit: fixture.localCommit,
         headCommit: fixture.localCommit,
         startingRevision,
       });
-      const cwd = fixture.manager.resolve(frame.workspaceId)!.cwd;
+      const cwd = Effect.runSync(fixture.manager.resolve(frame.workspaceId))!.cwd;
       expect(commonDirectory(cwd)).toBe(commonDirectory(fixture.source));
       expect(runGitOrThrow(cwd, "rev-parse", "HEAD")).toBe(fixture.localCommit);
       expect(readFileSync(join(cwd, "README.md"), "utf8")).toBe("the repository\n");
@@ -213,7 +214,7 @@ describe("worktrees in the selected repository", () => {
       ]),
     );
     const trace = join(storageDir, "git-trace");
-    const manager = makeWorkspaces({ storageDir, gitEnv: { GIT_TRACE: trace } });
+    const manager = makeTestWorkspaces({ storageDir, gitEnv: { GIT_TRACE: trace } });
     renameSync(remote.path, `${remote.path}.unavailable`);
     const frame = buildProvisionFrame({
       kind: "ephemeral",
@@ -222,13 +223,15 @@ describe("worktrees in the selected repository", () => {
       ],
     });
 
-    const report = await manager.provision(frame);
+    const report = await Effect.runPromise(manager.provision(frame));
 
     expect(checkoutReport(report)).toMatchObject({
       baseCommit: localCommit,
       headCommit: localCommit,
     });
-    expect(commonDirectory(manager.resolve(frame.workspaceId)!.cwd)).toBe(commonDirectory(source));
+    expect(commonDirectory(Effect.runSync(manager.resolve(frame.workspaceId))!.cwd)).toBe(
+      commonDirectory(source),
+    );
     expect(existsSync(join(source, ".git", "objects"))).toBe(true);
     expect(readFileSync(join(source, "README.md"), "utf8")).toBe("unfinished legacy work\n");
     expect(readFileSync(trace, "utf8")).not.toMatch(/built-in: git (?:fetch|clone)/);
@@ -248,10 +251,14 @@ describe("worktrees in the selected repository", () => {
         ),
       ],
     });
-    const report = await fixture.manager.provision(frame);
+    const report = await Effect.runPromise(fixture.manager.provision(frame));
     expect(checkoutReport(report).baseCommit).toBe(fixture.localCommit);
     expect(
-      runGitOrThrow(fixture.manager.resolve(frame.workspaceId)!.cwd, "rev-parse", "HEAD"),
+      runGitOrThrow(
+        Effect.runSync(fixture.manager.resolve(frame.workspaceId))!.cwd,
+        "rev-parse",
+        "HEAD",
+      ),
     ).toBe(fixture.localCommit);
   });
 
@@ -269,17 +276,20 @@ describe("worktrees in the selected repository", () => {
         ),
       ],
     });
-    const first = await fixture.manager.provision(frame);
+    const first = await Effect.runPromise(fixture.manager.provision(frame));
     expect(checkoutReport(first).baseCommit).toBe(fixture.localCommit);
     writeFileSync(join(fixture.source, "next.txt"), "new local commit\n");
     runGitOrThrow(fixture.source, "add", ".");
     runGitOrThrow(fixture.source, "commit", "-m", "Advance source");
-    const restarted = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
-    const replay = await restarted.provision(frame);
+    const restarted = makeTestWorkspaces({
+      storageDir: fixture.storageDir,
+      gitEnv: fixture.gitEnv,
+    });
+    const replay = await Effect.runPromise(restarted.provision(frame));
     expect(replay).toEqual(first);
-    expect(runGitOrThrow(restarted.resolve(frame.workspaceId)!.cwd, "rev-parse", "HEAD")).toBe(
-      fixture.localCommit,
-    );
+    expect(
+      runGitOrThrow(Effect.runSync(restarted.resolve(frame.workspaceId))!.cwd, "rev-parse", "HEAD"),
+    ).toBe(fixture.localCommit);
   });
 
   it("resolves remote and local names separately and fetches the actual remote commit", async () => {
@@ -298,7 +308,7 @@ describe("worktrees in the selected repository", () => {
         ),
       ],
     });
-    const report = await fixture.manager.provision(frame);
+    const report = await Effect.runPromise(fixture.manager.provision(frame));
     expect(checkoutReport(report)).toMatchObject({
       baseCommit: remoteCommit,
       headCommit: remoteCommit,
@@ -306,7 +316,11 @@ describe("worktrees in the selected repository", () => {
     });
     expect(remoteCommit).not.toBe(fixture.localCommit);
     expect(
-      runGitOrThrow(fixture.manager.resolve(frame.workspaceId)!.cwd, "rev-parse", "HEAD"),
+      runGitOrThrow(
+        Effect.runSync(fixture.manager.resolve(frame.workspaceId))!.cwd,
+        "rev-parse",
+        "HEAD",
+      ),
     ).toBe(remoteCommit);
     expect(readFileSync(fixture.trace, "utf8")).toMatch(/built-in: git fetch/);
     expect(runGitOrThrow(fixture.source, "rev-parse", "refs/heads/local-work")).toBe(
@@ -331,10 +345,10 @@ describe("worktrees in the selected repository", () => {
           ),
         ],
       });
-      const report = await fixture.manager.provision(frame);
+      const report = await Effect.runPromise(fixture.manager.provision(frame));
       expect(report.status).toBe("failed");
       expect(report.message).toMatch(/fetch|remote|branch|revision/i);
-      expect(fixture.manager.resolve(frame.workspaceId)).toBeUndefined();
+      expect(Effect.runSync(fixture.manager.resolve(frame.workspaceId))).toBeUndefined();
       expect(runGitOrThrow(fixture.source, "rev-parse", "HEAD")).toBe(fixture.localCommit);
     },
   );
@@ -342,28 +356,28 @@ describe("worktrees in the selected repository", () => {
   it("refreshes a changed remote default rather than retaining origin/HEAD from an earlier fetch", async () => {
     const remote = makeRemote();
     const resourceId = createId();
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: createTemporaryDir("hercule-remote-default-home-"),
     });
     const first = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: [revisionCheckout(resourceId, remote.url, { kind: "remote" })],
     });
-    expect((await manager.provision(first)).status).toBe("ready");
+    expect((await Effect.runPromise(manager.provision(first))).status).toBe("ready");
     const newDefault = addBranch(remote, "next-default");
     runGitOrThrow(remote.path, "symbolic-ref", "HEAD", "refs/heads/next-default");
     const second = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: [revisionCheckout(resourceId, remote.url, { kind: "remote" })],
     });
-    const report = await manager.provision(second);
+    const report = await Effect.runPromise(manager.provision(second));
     expect(checkoutReport(report)).toMatchObject({
       baseCommit: newDefault,
       defaultBranch: "next-default",
     });
-    expect(runGitOrThrow(manager.resolve(second.workspaceId)!.cwd, "rev-parse", "HEAD")).toBe(
-      newDefault,
-    );
+    expect(
+      runGitOrThrow(Effect.runSync(manager.resolve(second.workspaceId))!.cwd, "rev-parse", "HEAD"),
+    ).toBe(newDefault);
   });
 
   it("observes external branch renames and HEAD changes after turns in primary and ephemeral workspaces", async () => {
@@ -379,20 +393,20 @@ describe("worktrees in the selected repository", () => {
         ),
       ],
     });
-    expect((await fixture.manager.provision(generated)).status).toBe("ready");
+    expect((await Effect.runPromise(fixture.manager.provision(generated))).status).toBe("ready");
     for (const id of [fixture.attachment.workspaceId, generated.workspaceId]) {
-      const cwd = fixture.manager.resolve(id)!.cwd;
+      const cwd = Effect.runSync(fixture.manager.resolve(id))!.cwd;
       const renamed = `external-${createId()}`;
       runGitOrThrow(cwd, "branch", "-m", renamed);
       writeFileSync(join(cwd, "external.txt"), "committed outside the runner\n");
       runGitOrThrow(cwd, "add", "external.txt");
       runGitOrThrow(cwd, "commit", "-m", "External commit");
       const headCommit = runGitOrThrow(cwd, "rev-parse", "HEAD");
-      const observation = await fixture.manager.reportAfterSession(id);
+      const observation = await Effect.runPromise(fixture.manager.reportAfterSession(id));
       expect(observation).toBeDefined();
       expect(checkoutReport(observation!)).toMatchObject({ branch: renamed, headCommit });
       expect(checkoutReport(observation!).branches).toContain(renamed);
-      expect(fixture.manager.resolve(id)?.cwd).toBe(cwd);
+      expect(Effect.runSync(fixture.manager.resolve(id))?.cwd).toBe(cwd);
     }
   });
 
@@ -409,15 +423,15 @@ describe("worktrees in the selected repository", () => {
         ),
       ],
     });
-    expect((await fixture.manager.provision(generated)).status).toBe("ready");
+    expect((await Effect.runPromise(fixture.manager.provision(generated))).status).toBe("ready");
     renameSync(fixture.remote.path, `${fixture.remote.path}.unavailable`);
     writeFileSync(fixture.trace, "");
     for (const id of [fixture.attachment.workspaceId, generated.workspaceId]) {
-      const cwd = fixture.manager.resolve(id)!.cwd;
+      const cwd = Effect.runSync(fixture.manager.resolve(id))!.cwd;
       const renamed = `inspection-${createId()}`;
       runGitOrThrow(cwd, "branch", "-m", renamed);
       const headCommit = runGitOrThrow(cwd, "rev-parse", "HEAD");
-      const report = await fixture.manager.inspect(id);
+      const report = await Effect.runPromise(fixture.manager.inspect(id));
       expect(checkoutReport(report)).toMatchObject({ branch: renamed, headCommit });
       expect(checkoutReport(report).branches).toContain(renamed);
     }
@@ -428,19 +442,19 @@ describe("worktrees in the selected repository", () => {
 
   it("keeps missing-source include warnings visible when the worktree succeeds", async () => {
     const remote = makeRemote();
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: createTemporaryDir("hercule-include-warning-home-"),
     });
     const frame = buildProvisionFrame({
       kind: "ephemeral",
       checkouts: [{ ...revisionCheckout(createId(), remote.url), workspaceInclude: true }],
     });
-    const report = await manager.provision(frame);
+    const report = await Effect.runPromise(manager.provision(frame));
     expect(report.status, report.message).toBe("ready");
     expect(report.warnings?.join(" ")).toMatch(
       /(?:main|primary|source).*(?:missing|absent|unavailable|not.*(?:found|exist))/i,
     );
-    expect(await manager.provision(frame)).toEqual(report);
+    expect(await Effect.runPromise(manager.provision(frame))).toEqual(report);
   });
 });
 
@@ -461,7 +475,7 @@ describe("repository coordination", () => {
         `#!/bin/sh\ncase " $* " in\n*' clone '*)\nprintf 'clone\\n' >> ${quoteShell(log)}\nprintf '%s\\n' "$$" > ${quoteShell(entered)}\nwhile [ ! -f ${quoteShell(release)} ]; do sleep 0.01; done\n;;\nesac\nexec ${quoteShell(git)} "$@"\n`,
         { mode: 0o700 },
       );
-      const manager = makeWorkspaces({
+      const manager = makeTestWorkspaces({
         storageDir,
         gitEnv: { PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
       });
@@ -474,13 +488,13 @@ describe("repository coordination", () => {
         kind: "ephemeral",
         checkouts: [revisionCheckout(resourceId, remote.url)],
       });
-      const pendingFirst = manager.provision(first);
+      const pendingFirst = Effect.runPromise(manager.provision(first));
       let pendingSecond: Promise<WorkspaceReport> | undefined;
       let pendingDuplicate: Promise<WorkspaceReport> | undefined;
       try {
         await waitForMarker(entered);
-        pendingSecond = manager.provision(second);
-        pendingDuplicate = manager.provision(first);
+        pendingSecond = Effect.runPromise(manager.provision(second));
+        pendingDuplicate = Effect.runPromise(manager.provision(first));
       } finally {
         writeFileSync(release, "release\n");
       }
@@ -488,8 +502,8 @@ describe("repository coordination", () => {
       expect(reports.map((report) => report.status)).toEqual(["ready", "ready", "ready"]);
       expect(reports[2]).toEqual(reports[0]);
       expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(1);
-      const firstPath = manager.resolve(first.workspaceId)!.cwd;
-      const secondPath = manager.resolve(second.workspaceId)!.cwd;
+      const firstPath = Effect.runSync(manager.resolve(first.workspaceId))!.cwd;
+      const secondPath = Effect.runSync(manager.resolve(second.workspaceId))!.cwd;
       expect(commonDirectory(firstPath)).toBe(commonDirectory(secondPath));
       expect(
         runGitOrThrow(firstPath, "worktree", "list", "--porcelain").match(/^worktree /gm),
@@ -512,7 +526,9 @@ describe("repository coordination", () => {
       }),
       attachment: { path: alias, remoteName: "origin" },
     };
-    expect((await first.manager.provision(aliasAttachment)).status).toBe("ready");
+    expect((await Effect.runPromise(first.manager.provision(aliasAttachment))).status).toBe(
+      "ready",
+    );
     const bin = join(first.storageDir, "bin");
     mkdirSync(bin);
     const entered = join(first.storageDir, "worktree-entered");
@@ -525,7 +541,7 @@ describe("repository coordination", () => {
       `#!/bin/bash\nprefix=()\nfor arg in "$@"; do\n  if [ "$arg" = worktree ]; then break; fi\n  prefix+=("$arg")\ndone\ncase " $* " in\n*' worktree add '*)\ncommon=$(${quoteShell(git)} "\${prefix[@]}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\ncommon=$(cd "$common" 2>/dev/null && pwd -P)\nif [ "$common" = ${quoteShell(shared)} ]; then\nprintf 'shared\\n' >> ${quoteShell(calls)}\nif [ ! -f ${quoteShell(entered)} ]; then\nprintf '%s\\n' "$$" > ${quoteShell(entered)}\nwhile [ ! -f ${quoteShell(release)} ]; do sleep 0.01; done\nfi\nfi\n;;\nesac\nexec ${quoteShell(git)} "$@"\n`,
       { mode: 0o700 },
     );
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir: first.storageDir,
       gitEnv: { ...first.gitEnv, PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
     });
@@ -555,7 +571,7 @@ describe("repository coordination", () => {
       kind: "ephemeral",
       checkouts: [revisionCheckout(createId(), independent.url)],
     });
-    const pendingA = manager.provision(a);
+    const pendingA = Effect.runPromise(manager.provision(a));
     let completedA: WorkspaceReport | undefined;
     void pendingA.then((report) => {
       completedA = report;
@@ -563,8 +579,8 @@ describe("repository coordination", () => {
     let pendingAlias: Promise<WorkspaceReport> | undefined;
     try {
       await waitForMarker(entered, () => completedA);
-      pendingAlias = manager.provision(aliasA);
-      const reportB = await manager.provision(b);
+      pendingAlias = Effect.runPromise(manager.provision(aliasA));
+      const reportB = await Effect.runPromise(manager.provision(b));
       expect(reportB.status, reportB.message).toBe("ready");
       expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(1);
     } finally {
@@ -574,8 +590,8 @@ describe("repository coordination", () => {
     expect((await pendingA).status).toBe("ready");
     expect((await pendingAlias).status).toBe("ready");
     expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(2);
-    expect(commonDirectory(manager.resolve(a.workspaceId)!.cwd)).toBe(
-      commonDirectory(manager.resolve(aliasA.workspaceId)!.cwd),
+    expect(commonDirectory(Effect.runSync(manager.resolve(a.workspaceId))!.cwd)).toBe(
+      commonDirectory(Effect.runSync(manager.resolve(aliasA.workspaceId))!.cwd),
     );
   }, 15_000);
 });
@@ -591,21 +607,21 @@ describe("revision and coordination recovery boundaries", () => {
       const storageDir = createTemporaryDir("hercule-cold-local-home-");
       const trace = join(storageDir, "git-trace");
       writeFileSync(trace, "");
-      const manager = makeWorkspaces({ storageDir, gitEnv: { GIT_TRACE: trace } });
+      const manager = makeTestWorkspaces({ storageDir, gitEnv: { GIT_TRACE: trace } });
       const resourceId = createId();
       const frame = buildProvisionFrame({
         kind: "ephemeral",
         checkouts: [revisionCheckout(resourceId, remote.url, startingRevision)],
       });
-      const report = await manager.provision(frame);
+      const report = await Effect.runPromise(manager.provision(frame));
       expect(report.status).toBe("failed");
       expect(report.message).toMatch(/local.*repository|remote.*establish/i);
       expect(existsSync(join(storageDir, "cache", `${resourceId}.git`))).toBe(false);
       expect(existsSync(join(storageDir, "workspaces", frame.workspaceId))).toBe(false);
-      expect(manager.resolve(frame.workspaceId)).toBeUndefined();
+      expect(Effect.runSync(manager.resolve(frame.workspaceId))).toBeUndefined();
       expect(readFileSync(trace, "utf8")).not.toMatch(/built-in: git (?:clone|fetch|init)/);
-      const restarted = makeWorkspaces({ storageDir, gitEnv: { GIT_TRACE: trace } });
-      expect(await restarted.provision(frame)).toEqual(report);
+      const restarted = makeTestWorkspaces({ storageDir, gitEnv: { GIT_TRACE: trace } });
+      expect(await Effect.runPromise(restarted.provision(frame))).toEqual(report);
     },
   );
 
@@ -624,7 +640,7 @@ describe("revision and coordination recovery boundaries", () => {
       `#!/bin/sh\ncase " $* " in\n*' clone '*${quoteShell(second.url)}*)\nprintf '%s\\n' "$$" > ${quoteShell(entered)}\nwhile [ ! -f ${quoteShell(release)} ]; do sleep 0.01; done\n;;\nesac\nexec ${quoteShell(git)} "$@"\n`,
       { mode: 0o700 },
     );
-    const manager = makeWorkspaces({
+    const manager = makeTestWorkspaces({
       storageDir,
       gitEnv: { PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
     });
@@ -637,7 +653,7 @@ describe("revision and coordination recovery boundaries", () => {
     });
     const root = join(storageDir, "workspaces", frame.workspaceId);
     const humanFile = join(root, "human-notes.txt");
-    const pending = manager.provision(frame);
+    const pending = Effect.runPromise(manager.provision(frame));
     let completed: WorkspaceReport | undefined;
     void pending.then((report) => {
       completed = report;
@@ -655,8 +671,8 @@ describe("revision and coordination recovery boundaries", () => {
     expect(readFileSync(humanFile, "utf8")).toBe("unfinished human notes\n");
     expect(report.message).toMatch(/retained|clean removal.*refused/i);
     expect(existsSync(join(root, "first"))).toBe(false);
-    expect(manager.resolve(frame.workspaceId)).toBeUndefined();
-    expect(await manager.provision(frame)).toEqual(report);
+    expect(Effect.runSync(manager.resolve(frame.workspaceId))).toBeUndefined();
+    expect(await Effect.runPromise(manager.provision(frame))).toEqual(report);
     expect(readFileSync(humanFile, "utf8")).toBe("unfinished human notes\n");
   });
 
@@ -675,7 +691,7 @@ describe("revision and coordination recovery boundaries", () => {
         }),
         attachment: { path, remoteName: "origin" },
       };
-      expect((await fixture.manager.provision(frame)).status).toBe("ready");
+      expect((await Effect.runPromise(fixture.manager.provision(frame))).status).toBe("ready");
       aliases.push(frame.workspaceId);
     }
     expect(commonDirectory(linked)).toBe(commonDirectory(fixture.source));
@@ -684,8 +700,8 @@ describe("revision and coordination recovery boundaries", () => {
       kind: "primary",
       checkouts: [buildCheckout({ resourceId: createId(), remote: independentRemote.url })],
     });
-    expect((await fixture.manager.provision(independent)).status).toBe("ready");
-    const independentRoot = fixture.manager.resolve(independent.workspaceId)!.cwd;
+    expect((await Effect.runPromise(fixture.manager.provision(independent))).status).toBe("ready");
+    const independentRoot = Effect.runSync(fixture.manager.resolve(independent.workspaceId))!.cwd;
     const lockFile = join(fixture.source, ".git", "index.lock");
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -720,7 +736,7 @@ describe("revision and coordination recovery boundaries", () => {
           fixture.manager.runExclusively(
             workspaceId,
             Effect.sync(() => {
-              const path = fixture.manager.resolve(workspaceId)!.cwd;
+              const path = Effect.runSync(fixture.manager.resolve(workspaceId))!.cwd;
               sharedEntries.push(workspaceId);
               writeFileSync(join(path, `alias-index-${index}.txt`), "alias index write\n");
               runGitOrThrow(path, "add", `alias-index-${index}.txt`);
@@ -774,10 +790,12 @@ describe(".workspaceinclude preserves tracked files", () => {
         },
       ],
     });
-    const report = await manager.provision(frame);
+    const report = await Effect.runPromise(manager.provision(frame));
     expect(report.status, report.message).toBe("ready");
     expect(report.warnings?.join(" ")).toContain("skipped tracked files");
-    expect(existsSync(join(manager.resolve(frame.workspaceId)!.cwd, "local-settings"))).toBe(false);
+    expect(
+      existsSync(join(Effect.runSync(manager.resolve(frame.workspaceId))!.cwd, "local-settings")),
+    ).toBe(false);
     expect(readFileSync(join(source, "README.md"), "utf8")).toBe("dirty tracked source\n");
   });
 
@@ -795,15 +813,16 @@ describe(".workspaceinclude preserves tracked files", () => {
       const remoteUrl = attached?.remoteUrl ?? remote.url;
       const manager =
         attached?.manager ??
-        makeWorkspaces({ storageDir: createTemporaryDir("hercule-include-home-") });
+        makeTestWorkspaces({ storageDir: createTemporaryDir("hercule-include-home-") });
       const primary =
         attached?.attachment ??
         buildProvisionFrame({
           kind: "primary",
           checkouts: [buildCheckout({ resourceId, remote: remoteUrl })],
         });
-      if (attached === undefined) expect((await manager.provision(primary)).status).toBe("ready");
-      const source = manager.resolve(primary.workspaceId)!.cwd;
+      if (attached === undefined)
+        expect((await Effect.runPromise(manager.provision(primary))).status).toBe("ready");
+      const source = Effect.runSync(manager.resolve(primary.workspaceId))!.cwd;
       const sourceBranch = `include-source-${createId()}`;
       runGitOrThrow(source, "checkout", "-b", sourceBranch);
       mkdirSync(join(source, "mixed"));
@@ -848,8 +867,8 @@ describe(".workspaceinclude preserves tracked files", () => {
         ],
       });
 
-      const report = checkoutReport(await manager.provision(work));
-      const destination = manager.resolve(work.workspaceId)!.cwd;
+      const report = checkoutReport(await Effect.runPromise(manager.provision(work)));
+      const destination = Effect.runSync(manager.resolve(work.workspaceId))!.cwd;
       expect.soft(report.baseCommit).toBe(baseCommit);
       expect.soft(report.headCommit).toBe(baseCommit);
       expect.soft(readFileSync(join(destination, "README.md"), "utf8")).toBe(committedReadme);

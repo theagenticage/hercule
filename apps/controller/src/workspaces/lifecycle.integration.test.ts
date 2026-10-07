@@ -11,8 +11,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Layer } from "effect";
 import type { Session, Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceDispose, WorkspaceProvision } from "@hercule/protocol";
-import { makeWorkspaces } from "../../../runner/src/workspaces";
 import {
+  makeTestWorkspaces,
   cleanTemporaries,
   createTemporaryDir,
   hashContents,
@@ -84,7 +84,7 @@ const makeWorld = async (arranged: Arranged, count = 1) => {
     repositories.push({ remote, remoteUrl, resourceId });
   }
   const storageDir = createTemporaryDir("hercule-controller-lifecycle-runner-home-");
-  return { repositories, storageDir, gitEnv, manager: makeWorkspaces({ storageDir, gitEnv }) };
+  return { repositories, storageDir, gitEnv, manager: makeTestWorkspaces({ storageDir, gitEnv }) };
 };
 type World = Awaited<ReturnType<typeof makeWorld>>;
 const prepare = async (arranged: Arranged, world: World, workspaceId: string) => {
@@ -95,7 +95,7 @@ const prepare = async (arranged: Arranged, world: World, workspaceId: string) =>
         (frame) => frame["workspaceId"] === workspaceId,
       ) as WorkspaceProvision | undefined,
   );
-  const report = await world.manager.provision(frame);
+  const report = await Effect.runPromise(world.manager.provision(frame));
   expect(report.status, report.message).toBe("ready");
   arranged.wire.send(report);
   await waitStatus(arranged, workspaceId, "ready");
@@ -160,7 +160,7 @@ const startAutomatic = async (arranged: Arranged, world: World) => {
   return { runId, workspaceId };
 };
 const finishAutomatic = (arranged: Arranged, world: World, runId: string, workspaceId: string) => {
-  const checkout = world.manager.resolve(workspaceId)!.checkouts[0]!;
+  const checkout = Effect.runSync(world.manager.resolve(workspaceId))!.checkouts[0]!;
   writeFileSync(join(checkout.path, "workflow-work.txt"), "committed workflow work\n");
   runGitOrThrow(checkout.path, "add", "workflow-work.txt");
   runGitOrThrow(checkout.path, "commit", "-m", "Save workflow work");
@@ -221,7 +221,7 @@ describe("human and automatic workspace retention", () => {
         expect((await askCredential(arranged.wire, token, canonicalRemote))["error"]).toBe(
           "no_connection",
         );
-        const cwd = world.manager.resolve(thread.workspaceId)!.cwd;
+        const cwd = Effect.runSync(world.manager.resolve(thread.workspaceId))!.cwd;
         writeFileSync(join(cwd, "human-notes.txt"), "unfinished human work\n");
         await endResumable(arranged, thread.session);
         await ageLeases(arranged, thread.workspaceId, 24 * 365);
@@ -232,7 +232,7 @@ describe("human and automatic workspace retention", () => {
         const done = finishAutomatic(arranged, world, automatic.runId, automatic.workspaceId);
         await done.complete();
         const cleanup = await waitDisposal(arranged.wire, automatic.workspaceId);
-        arranged.wire.send(await world.manager.dispose(cleanup));
+        arranged.wire.send(await Effect.runPromise(world.manager.dispose(cleanup)));
         await waitStatus(arranged, automatic.workspaceId, "deleted");
         const retained = await readWorkspace(arranged, thread.workspaceId);
         expect(retained).toMatchObject({
@@ -280,14 +280,14 @@ describe("human and automatic workspace retention", () => {
         const decoyDone = finishAutomatic(arranged, world, decoy.runId, decoy.workspaceId);
         await decoyDone.complete();
         const cleanup = await waitDisposal(arranged.wire, decoy.workspaceId);
-        arranged.wire.send(await world.manager.dispose(cleanup));
+        arranged.wire.send(await Effect.runPromise(world.manager.dispose(cleanup)));
         await waitStatus(arranged, decoy.workspaceId, "deleted");
         expect(await readWorkspace(arranged, automatic.workspaceId)).toMatchObject({
           status: "ready",
           retentionPolicy: "manual",
           sessionIds: [],
         });
-        expect(world.manager.resolve(automatic.workspaceId)).toBeDefined();
+        expect(Effect.runSync(world.manager.resolve(automatic.workspaceId))).toBeDefined();
         expect(
           listFramesTagged(arranged.wire, "workspaceDispose").some(
             (frame) => frame["workspaceId"] === automatic.workspaceId,
@@ -306,7 +306,7 @@ describe("human and automatic workspace retention", () => {
           const world = await makeWorld(arranged, kind === "multi-root" ? 2 : 1);
           const automatic = await startAutomatic(arranged, world);
           const done = finishAutomatic(arranged, world, automatic.runId, automatic.workspaceId);
-          const resolved = world.manager.resolve(automatic.workspaceId)!;
+          const resolved = Effect.runSync(world.manager.resolve(automatic.workspaceId))!;
           const cwd = resolved.checkouts[0]!.path;
           const common = runGitOrThrow(
             cwd,
@@ -329,7 +329,7 @@ describe("human and automatic workspace retention", () => {
           const cleanup = await waitDisposal(arranged.wire, automatic.workspaceId);
           expect(cleanup.discardChanges ?? false).toBe(false);
           expect((await readWorkspace(arranged, automatic.workspaceId)).status).toBe("disposing");
-          const outcome = await world.manager.dispose(cleanup);
+          const outcome = await Effect.runPromise(world.manager.dispose(cleanup));
           arranged.wire.send(outcome);
           if (kind === "clean") {
             expect(outcome.status, outcome.message).toBe("deleted");
@@ -341,7 +341,7 @@ describe("human and automatic workspace retention", () => {
             const retained = await waitStatus(arranged, automatic.workspaceId, "ready");
             expect(retained.message).toMatch(/files|changes|ignored|root|preserve|discard/i);
             expect(hashContents(resolved.root)).toBe(before);
-            expect(world.manager.resolve(automatic.workspaceId)).toBeDefined();
+            expect(Effect.runSync(world.manager.resolve(automatic.workspaceId))).toBeDefined();
           }
         },
         { workspaceSweepInterval: SWEEP },
@@ -359,7 +359,7 @@ describe("explicit disposal and admission", () => {
         checkouts: [{ resourceId: world.repositories[0]!.resourceId }],
       });
       await endResumable(arranged, thread.session);
-      const cwd = world.manager.resolve(thread.workspaceId)!.cwd;
+      const cwd = Effect.runSync(world.manager.resolve(thread.workspaceId))!.cwd;
       const common = runGitOrThrow(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir");
       const branch = runGitOrThrow(cwd, "branch", "--show-current");
       const commit = runGitOrThrow(cwd, "rev-parse", "HEAD");
@@ -370,7 +370,7 @@ describe("explicit disposal and admission", () => {
       expect((await dispose(arranged, thread.workspaceId)).status).toBe(200);
       const ordinary = await waitDisposal(arranged.wire, thread.workspaceId);
       expect((await readWorkspace(arranged, thread.workspaceId)).status).toBe("disposing");
-      const refusal = await world.manager.dispose(ordinary);
+      const refusal = await Effect.runPromise(world.manager.dispose(ordinary));
       arranged.wire.send(refusal);
       expect(refusal.status).toBe("failed");
       expect((await waitStatus(arranged, thread.workspaceId, "ready")).message).toMatch(
@@ -385,7 +385,7 @@ describe("explicit disposal and admission", () => {
         await waitForFrames<WorkspaceDispose>(arranged.wire, "workspaceDispose", before + 1)
       )[before]!;
       expect(forced.discardChanges).toBe(true);
-      arranged.wire.send(await world.manager.dispose(forced));
+      arranged.wire.send(await Effect.runPromise(world.manager.dispose(forced)));
       await waitStatus(arranged, thread.workspaceId, "deleted");
       expect(existsSync(cwd)).toBe(false);
       expect(runGitOrThrow(common, "rev-parse", `refs/heads/${branch}`)).toBe(commit);
@@ -416,7 +416,7 @@ describe("explicit disposal and admission", () => {
         profile.id,
       );
       const token = String((caller.start as unknown as Record<string, unknown>)["token"]);
-      const cwd = world.manager.resolve(target.workspaceId)!.cwd;
+      const cwd = Effect.runSync(world.manager.resolve(target.workspaceId))!.cwd;
       writeFileSync(join(cwd, "README.md"), "user must authorize discard\n");
       const before = hashContents(cwd);
       const forced = await send(
@@ -442,7 +442,7 @@ describe("explicit disposal and admission", () => {
       expect(ordinary.status, await ordinary.clone().text()).toBe(200);
       const instruction = await waitDisposal(arranged.wire, target.workspaceId);
       expect(instruction.discardChanges ?? false).toBe(false);
-      arranged.wire.send(await world.manager.dispose(instruction));
+      arranged.wire.send(await Effect.runPromise(world.manager.dispose(instruction)));
       await waitStatus(arranged, target.workspaceId, "deleted");
       const audit = await Effect.runPromise(
         arranged.harness.sql<{
@@ -466,7 +466,7 @@ describe("explicit disposal and admission", () => {
         expect(refused.status).toBe(409);
         expect(await refused.text()).toContain(thread.session.id);
         expect(listFramesTagged(arranged.wire, "workspaceDispose")).toHaveLength(0);
-        expect(world.manager.resolve(thread.workspaceId)).toBeDefined();
+        expect(Effect.runSync(world.manager.resolve(thread.workspaceId))).toBeDefined();
       });
     },
   );
@@ -479,7 +479,7 @@ describe("explicit disposal and admission", () => {
         checkouts: [{ resourceId: world.repositories[0]!.resourceId }],
       });
       await endResumable(arranged, thread.session);
-      const cwd = world.manager.resolve(thread.workspaceId)!.cwd;
+      const cwd = Effect.runSync(world.manager.resolve(thread.workspaceId))!.cwd;
       writeFileSync(join(cwd, "human-notes.txt"), "retained while deleting\n");
       expect((await dispose(arranged, thread.workspaceId)).status).toBe(200);
       const instruction = await waitDisposal(arranged.wire, thread.workspaceId);
@@ -509,7 +509,7 @@ describe("explicit disposal and admission", () => {
         }>`SELECT count(*) AS total FROM workspace_leases WHERE workspace_id = unhex(replace(${thread.workspaceId}, '-', '')) AND released_at IS NULL`,
       );
       expect(active[0]!.total).toBe(0);
-      arranged.wire.send(await world.manager.dispose(instruction));
+      arranged.wire.send(await Effect.runPromise(world.manager.dispose(instruction)));
       await waitStatus(arranged, thread.workspaceId, "ready");
       const recovered = await post(
         arranged.harness.base,
@@ -535,7 +535,7 @@ describe("explicit disposal and admission", () => {
           checkouts: [{ resourceId: world.repositories[0]!.resourceId }],
         });
         await endResumable(arranged, thread.session);
-        const root = world.manager.resolve(thread.workspaceId)!.root;
+        const root = Effect.runSync(world.manager.resolve(thread.workspaceId))!.root;
         const requestAdmission = () =>
           admission === "join"
             ? post(
@@ -568,7 +568,7 @@ describe("explicit disposal and admission", () => {
           );
           expect(active[0]!.total).toBe(0);
           const instruction = await waitDisposal(arranged.wire, thread.workspaceId);
-          arranged.wire.send(await world.manager.dispose(instruction));
+          arranged.wire.send(await Effect.runPromise(world.manager.dispose(instruction)));
           await waitStatus(arranged, thread.workspaceId, "deleted");
         } else {
           expect(removal.status, await removal.clone().text()).toBe(409);
@@ -594,7 +594,7 @@ describe("explicit disposal and admission", () => {
         checkouts: [{ resourceId: world.repositories[0]!.resourceId }],
       });
       await endResumable(arranged, thread.session);
-      const root = world.manager.resolve(thread.workspaceId)!.root;
+      const root = Effect.runSync(world.manager.resolve(thread.workspaceId))!.root;
       writeFileSync(join(root, "human-notes.txt"), "explicitly discarded\n");
       expect((await dispose(arranged, thread.workspaceId, { discardChanges: true })).status).toBe(
         200,
@@ -613,7 +613,7 @@ describe("explicit disposal and admission", () => {
         }).pipe(Effect.provide(reopenWorkspaceDomain(database, recoveryHome)), Effect.orDie),
       );
       expect(owed).toContainEqual(instruction);
-      const removed = await world.manager.dispose(instruction);
+      const removed = await Effect.runPromise(world.manager.dispose(instruction));
       expect(removed.status).toBe("deleted");
       expect(existsSync(root)).toBe(false);
       // The filesystem outcome is withheld, so the controller still owes the instruction.
@@ -623,8 +623,8 @@ describe("explicit disposal and admission", () => {
       const reconnected = await arranged.reconnect();
       const replay = await waitDisposal(reconnected, thread.workspaceId);
       expect(replay).toEqual(instruction);
-      const restarted = makeWorkspaces({ storageDir: world.storageDir, gitEnv: world.gitEnv });
-      reconnected.send(await restarted.dispose(replay));
+      const restarted = makeTestWorkspaces({ storageDir: world.storageDir, gitEnv: world.gitEnv });
+      reconnected.send(await Effect.runPromise(restarted.dispose(replay)));
       await waitStatus(arranged, thread.workspaceId, "deleted");
       expect(existsSync(root)).toBe(false);
     });
@@ -673,7 +673,7 @@ describe("public attachment detachment", () => {
         checkouts: [{ resourceId: repository.resourceId, startingRevision: { kind: "current" } }],
       });
       await endResumable(arranged, derived.session);
-      const derivedRoot = world.manager.resolve(derived.workspaceId)!.cwd;
+      const derivedRoot = Effect.runSync(world.manager.resolve(derived.workspaceId))!.cwd;
       const sourceBefore = hashContents(source);
       const discarded = await dispose(arranged, primary.id, { discardChanges: true });
       expect(discarded.status).toBe(409);
@@ -692,10 +692,10 @@ describe("public attachment detachment", () => {
             (frame) => frame["workspaceId"] === primary.id,
           ) as { _tag: "workspaceDetach"; workspaceId: string } | undefined,
       );
-      arranged.wire.send(await world.manager.detach(instruction));
+      arranged.wire.send(await Effect.runPromise(world.manager.detach(instruction)));
       await waitStatus(arranged, primary.id, "deleted");
       expect(hashContents(source)).toBe(sourceBefore);
-      expect(world.manager.resolve(primary.id)).toBeUndefined();
+      expect(Effect.runSync(world.manager.resolve(primary.id))).toBeUndefined();
       const newWork = await post(
         arranged.harness.base,
         "/api/v1/sessions",
@@ -728,8 +728,10 @@ describe("public attachment detachment", () => {
       expect(resumed.status, await resumed.clone().text()).toBe(200);
       const starts = await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 3);
       expect(starts[2]!.spec.workspaceId).toBe(derived.workspaceId);
-      expect(world.manager.resolve(derived.workspaceId)?.cwd).toBe(derivedRoot);
-      expect((await world.manager.inspect(derived.workspaceId)).status).toBe("ready");
+      expect(Effect.runSync(world.manager.resolve(derived.workspaceId))?.cwd).toBe(derivedRoot);
+      expect((await Effect.runPromise(world.manager.inspect(derived.workspaceId))).status).toBe(
+        "ready",
+      );
       expect(readFileSync(join(source, "README.md"), "utf8")).toBe("unfinished source work\n");
       expect(runGitOrThrow(source, "config", "user.preservation")).toBe("keep source config");
     });
@@ -760,7 +762,7 @@ describe("preparation during pending disposal", () => {
       );
       expect((await dispose(arranged, workspace.id)).status).toBe(200);
       const removal = await waitDisposal(arranged.wire, workspace.id);
-      const ready = await world.manager.provision(preparation);
+      const ready = await Effect.runPromise(world.manager.provision(preparation));
       expect(ready.status, ready.message).toBe("ready");
       arranged.wire.send(ready);
       await waitUntil("recorded preparation facts while removal remains pending", async () => {
@@ -769,10 +771,10 @@ describe("preparation during pending disposal", () => {
       });
       expect((await readWorkspace(arranged, workspace.id)).status).toBe("disposing");
       writeFileSync(
-        join(world.manager.resolve(workspace.id)!.root, "human-notes.txt"),
+        join(Effect.runSync(world.manager.resolve(workspace.id))!.root, "human-notes.txt"),
         "retain this file\n",
       );
-      const refusal = await world.manager.dispose(removal);
+      const refusal = await Effect.runPromise(world.manager.dispose(removal));
       expect(refusal.status, refusal.message).toBe("failed");
       arranged.wire.send(refusal);
       await waitUntil("recorded the correlated refusal", async () =>
@@ -783,9 +785,11 @@ describe("preparation during pending disposal", () => {
           : undefined,
       );
       expect((await readWorkspace(arranged, workspace.id)).status).toBe("ready");
-      expect(existsSync(join(world.manager.resolve(workspace.id)!.root, "human-notes.txt"))).toBe(
-        true,
-      );
+      expect(
+        existsSync(
+          join(Effect.runSync(world.manager.resolve(workspace.id))!.root, "human-notes.txt"),
+        ),
+      ).toBe(true);
     });
   });
 });
@@ -799,11 +803,11 @@ describe("retained removal diagnostics", () => {
         checkouts: [{ resourceId: world.repositories[0]!.resourceId }],
       });
       await endResumable(arranged, thread.session);
-      const root = world.manager.resolve(thread.workspaceId)!.root;
+      const root = Effect.runSync(world.manager.resolve(thread.workspaceId))!.root;
       writeFileSync(join(root, "human-notes.txt"), "preserve these notes\n");
       expect((await dispose(arranged, thread.workspaceId)).status).toBe(200);
       const instruction = await waitDisposal(arranged.wire, thread.workspaceId);
-      arranged.wire.send(await world.manager.dispose(instruction));
+      arranged.wire.send(await Effect.runPromise(world.manager.dispose(instruction)));
       const retained = await waitStatus(arranged, thread.workspaceId, "ready");
       expect(retained.message).toMatch(/tracked|untracked|ignored|files/i);
       expect(retained.keptUntil).toBeNull();
@@ -822,7 +826,7 @@ describe("retained removal diagnostics", () => {
         arranged.wire.send({
           _tag: "workspaceInspection",
           requestId: String(request["requestId"]),
-          report: await world.manager.inspect(thread.workspaceId),
+          report: await Effect.runPromise(world.manager.inspect(thread.workspaceId)),
         });
         const answered = await response;
         expect(answered.status, await answered.clone().text()).toBe(200);
@@ -885,7 +889,7 @@ describe("failed managed preparation attempts", () => {
         return { workspace, frame };
       };
       const first = await open();
-      const failed = await world.manager.provision(first.frame);
+      const failed = await Effect.runPromise(world.manager.provision(first.frame));
       expect(failed.status, failed.message).toBe("failed");
       arranged.wire.send(failed);
       const recorded = await waitStatus(arranged, first.workspace.id, "failed");
@@ -901,18 +905,18 @@ describe("failed managed preparation attempts", () => {
       expect(changed.status, await changed.clone().text()).toBe(200);
       const second = await open();
       expect(second.workspace.id).not.toBe(first.workspace.id);
-      const ready = await world.manager.provision(second.frame);
+      const ready = await Effect.runPromise(world.manager.provision(second.frame));
       expect(ready.status, ready.message).toBe("ready");
       arranged.wire.send(ready);
       await waitStatus(arranged, second.workspace.id, "ready");
-      expect(world.manager.resolve(second.workspace.id)!.root).not.toBe(firstRoot);
+      expect(Effect.runSync(world.manager.resolve(second.workspace.id))!.root).not.toBe(firstRoot);
       const preserved = await readWorkspace(arranged, first.workspace.id);
       expect(preserved.status).toBe("failed");
       expect(preserved.message).toBe(recorded.message);
       expect(preserved.disposedAt).toBeNull();
       expect(preserved.provisionedAt).toBeNull();
       expect(hashContents(firstRoot)).toBe(before);
-      expect(await world.manager.provision(first.frame)).toEqual(failed);
+      expect(await Effect.runPromise(world.manager.provision(first.frame))).toEqual(failed);
       expect(readFileSync(join(firstRoot, "setup-count.txt"), "utf8")).toBe("setup ran\n");
       expect(hashContents(firstRoot)).toBe(before);
     });

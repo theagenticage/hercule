@@ -153,7 +153,7 @@ const placeSession = (
         return { cwd: scratch, scratch };
       });
     }
-    const workspace = machine.workspaces.resolve(workspaceId);
+    const workspace = yield* machine.workspaces.resolve(workspaceId);
     if (workspace === undefined) {
       // Never a silent fallback to a scratch directory: the session would run
       // somewhere the user did not choose.
@@ -166,12 +166,12 @@ const placeSession = (
       // session. The switch waits for any other git work in this workspace:
       // two sessions that start in one primary at once, or a workspace step
       // running there, would otherwise collide on git's `index.lock`.
-      const switched = yield* machine.workspaces.runExclusively(
-        workspaceId,
-        Effect.promise(() =>
+      const switched = yield* machine.workspaces
+        .runExclusively(
+          workspaceId,
           switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
-        ),
-      );
+        )
+        .pipe(Effect.mapError((error) => error.message));
       if (!switched.ok) return yield* Effect.fail(switched.stderr);
     }
     return { cwd: workspace.cwd, scratch: undefined };
